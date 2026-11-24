@@ -1,143 +1,767 @@
-import { globalStyle, type CSSProperties } from "@vanilla-extract/css";
-globalStyle(".mobile-shell", { "colorScheme": "light", "background": "var(--mobile-stage)", vars: { "--mobile-ink": "#30352f", "--mobile-muted": "var(--muted)", "--mobile-paper": "#fbfaf6", "--mobile-stage": "#f1f0e9", "--mobile-line": "#deded4", "--mobile-accent": "var(--accent)", "--page-bg": "var(--mobile-stage)", "--paper": "var(--mobile-paper)", "--ink": "var(--mobile-ink)", "--line": "var(--mobile-line)", "--surface-hover": "#eceee6", "--surface-selected": "#e5e9de", "--ion-background-color": "var(--mobile-stage)", "--ion-text-color": "var(--mobile-ink)", "--ion-border-color": "var(--mobile-line)", "--ion-font-family": "var(--manuscript-sans)", "--ion-toolbar-background": "var(--mobile-paper)", "--ion-tab-bar-background": "var(--mobile-paper)", "--ion-tab-bar-color": "var(--mobile-muted)", "--ion-tab-bar-color-selected": "var(--accent)" } });
-globalStyle(":root[data-zp-theme=\"dark\"] .mobile-shell", { "colorScheme": "dark", vars: { "--mobile-ink": "#e4e7df", "--mobile-paper": "#1a201d", "--mobile-stage": "#121714", "--mobile-line": "#343b35", "--surface-hover": "#262e28", "--surface-selected": "#29362b", "--ion-color-primary-rgb": "125, 175, 159", "--ion-color-primary-contrast-rgb": "8, 18, 15" } });
-globalStyle(":root[data-zp-theme=\"paper\"] .mobile-shell", { "colorScheme": "light", vars: { "--mobile-ink": "#38352e", "--mobile-paper": "#f8f3e8", "--mobile-stage": "#ebe4d6", "--mobile-line": "#d8cfbf", "--surface-hover": "#eee6d7", "--surface-selected": "#e8ddca" } });
-globalStyle(".mobile-shell .mobile-shell-page", { "minWidth": "320px", "background": "var(--mobile-stage)" });
-globalStyle(".mobile-shell .mobile-shell-ion-header", { "paddingTop": "env(safe-area-inset-top, 0px)", "borderBottom": "1px solid var(--mobile-line)", "background": "var(--mobile-paper)", "boxShadow": "none" });
-globalStyle(".mobile-shell-identity-bar", { "display": "flex", "alignItems": "center", "minHeight": "56px", "gap": "8px", "paddingBlock": "3px", "paddingInlineStart": "max(12px, env(safe-area-inset-left, 0px))", "paddingInlineEnd": "max(12px, env(safe-area-inset-right, 0px))", "border": "0", "background": "var(--mobile-paper)" });
-globalStyle(".mobile-shell .mobile-shell-back", { "minWidth": "44px", "width": "44px", "minHeight": "44px", "flexBasis": "44px", "color": "var(--mobile-muted)", "fontSize": "27px" });
-globalStyle(".mobile-shell-current-title", { "display": "block", "minWidth": "0", "color": "var(--mobile-ink)", "font": "550 15px/1.35 var(--manuscript-serif)", "overflow": "visible", "overflowWrap": "anywhere", "textOverflow": "clip", "textWrap": "pretty", "whiteSpace": "normal" });
-globalStyle(".mobile-shell-context", { "color": "var(--mobile-muted)", "fontSize": "10px", "lineHeight": "1.3" });
-globalStyle(".mobile-shell .mobile-shell-settings-entry", { "minWidth": "44px", "width": "44px", "minHeight": "44px", "justifyContent": "center", "padding": "0", "color": "var(--mobile-muted)", vars: { "--background": "transparent", "--background-hover": "transparent", "--background-activated": "transparent", "--background-focused": "transparent", "--padding-start": "0", "--padding-end": "0" } });
-globalStyle(".mobile-shell .mobile-shell-settings-entry::part(native)", { "minWidth": "44px", "minHeight": "44px", "justifyContent": "center", "padding": "0", "fontSize": "19px", "background": "transparent" });
-globalStyle(".mobile-shell-settings-symbol svg", { "display": "block", "width": "19px", "height": "19px" });
-globalStyle(".mobile-shell-settings-label", { "position": "absolute", "width": "1px", "height": "1px", "overflow": "hidden", "clipPath": "inset(50%)", "whiteSpace": "nowrap" });
-globalStyle(".mobile-shell-protection", { "display": "inline-flex", "flex": "0 0 auto", "alignItems": "center", "gap": "5px", "color": "var(--mobile-muted)", "fontSize": "10px", "whiteSpace": "nowrap" });
-globalStyle(".mobile-shell-protection > span", { "width": "6px", "height": "6px", "borderRadius": "50%", "background": "currentColor" });
-globalStyle(".mobile-shell-protection[data-state=\"saved\"]", { "color": "var(--success)" });
-globalStyle(".mobile-shell-protection[data-state=\"uncertain\"]", { "color": "var(--error-text)" });
-globalStyle(".mobile-shell-protection[data-state=\"saving\"]", { "color": "var(--accent-strong)" });
-globalStyle(".mobile-shell .mobile-shell-shared-header:not([data-active-view=\"settings\"])", { "position": "absolute", "zIndex": "-1", "width": "1px", "height": "1px", "margin": "-1px", "padding": "0", "overflow": "hidden", "clipPath": "inset(50%)", "whiteSpace": "nowrap" });
-globalStyle(".mobile-shell .mobile-shell-shared-header:not([data-active-view=\"settings\"]) > :not(h1)", { "display": "none" });
-globalStyle(".mobile-shell .mobile-shell-shared-header:not([data-active-view=\"settings\"]) > h1", { "position": "absolute", "width": "1px", "height": "1px", "margin": "-1px", "padding": "0", "overflow": "hidden", "clipPath": "inset(50%)", "whiteSpace": "nowrap" });
-globalStyle(".mobile-shell .mobile-shell-shared-header[data-active-view=\"settings\"]", { "display": "flex", "minHeight": "48px", "padding": "2px max(12px, env(safe-area-inset-right, 0px)) 2px max(12px, env(safe-area-inset-left, 0px))", "borderTop": "1px solid var(--mobile-line)", "background": "var(--mobile-paper)" });
-globalStyle(".mobile-shell .mobile-shell-shared-header[data-active-view=\"settings\"] .topbar", { "minHeight": "44px", "flexWrap": "nowrap", "gap": "8px" });
-globalStyle(".mobile-shell .mobile-shell-shared-header[data-active-view=\"settings\"] .topbar .brand", { "display": "none" });
-globalStyle(".mobile-shell .mobile-shell-shared-header[data-active-view=\"settings\"] .topbar-status", { "display": "none" });
-globalStyle(".mobile-shell .mobile-shell-shared-header[data-active-view=\"settings\"] .theme-control", { "margin": "0", "fontSize": "11px" });
-globalStyle(".mobile-shell .mobile-shell-shared-header[data-active-view=\"settings\"] .theme-control select", { "minHeight": "44px" });
-globalStyle(".mobile-shell .mobile-shell-shared-header[data-active-view=\"settings\"] .topbar button", { "minHeight": "44px" });
-globalStyle(".mobile-shell-content", { "background": "var(--mobile-stage)", "overscrollBehaviorY": "contain", vars: { "--background": "var(--mobile-stage)", "--padding-bottom": "0" } });
-globalStyle(".mobile-shell-content::part(scroll)", { "scrollbarGutter": "auto" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view", { "width": "100%", "maxWidth": "none", "minHeight": "100%", "margin": "0", "background": "var(--mobile-stage)" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view .st-workspace", { "height": "auto", "minHeight": "100%", "overflow": "visible", "background": "transparent" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"settings\"]) .st-workspace-configuration,\n.mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"settings\"]) .st-workspace-mobile-tabs,\n.mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"settings\"]) .st-workspace-message,\n.mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"settings\"]) .st-workspace-storage-state", { "display": "none !important" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view .st-workspace-mobile-layout,\n.mobile-shell .mobile-shell-workspace-view .st-workspace-mobile-pane", { "display": "block", "width": "100%", "height": "auto", "minHeight": "0", "overflow": "visible" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view .st-workspace-mobile-pane > .st-workspace-panel", { "height": "auto", "minHeight": "0", "overflow": "visible", "background": "transparent" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view .st-workspace-panel-heading", { "display": "none" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view .st-workspace-panel-body", { "minHeight": "0", "overflow": "visible", "background": "transparent" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-column", { "display": "block", "minHeight": "100%", "padding": "2px clamp(14px, 4.2vw, 22px) 24px", "background": "var(--mobile-paper)" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor", { "container": "manuscript / inline-size", "display": "grid", "width": "100%", "maxWidth": "48rem", "gap": "4px", "marginInline": "auto", "padding": "0", "border": "0", "borderRadius": "0", "background": "transparent", "boxShadow": "none" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor[data-reader=\"true\"]", { "gridTemplateColumns": "minmax(0, 1fr)" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor[data-reader=\"true\"] > .scene-reading", { "minInlineSize": "0", "width": "100%" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-heading", { "display": "grid", "gridTemplateColumns": "minmax(0, 1fr)", "alignItems": "start", "gap": "0", "margin": "0", "padding": "0", "border": "0" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-heading > div:first-child", { "position": "absolute", "width": "1px", "height": "1px", "padding": "0", "margin": "-1px", "overflow": "hidden", "clip": "rect(0, 0, 0, 0)", "whiteSpace": "nowrap", "border": "0" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-heading > div:first-child > .eyebrow", { "display": "block", "margin": "0 0 2px", "color": "var(--mobile-muted)", "fontSize": "10px", "lineHeight": "1.4" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-heading h2", { "margin": "0", "color": "var(--mobile-ink)", "font": "500 clamp(20px, 5vw, 25px)/1.4 var(--manuscript-serif)", "letterSpacing": "0", "overflowWrap": "anywhere" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-save-state", { "position": "relative", "display": "block", "justifySelf": "start", "color": "var(--mobile-muted)", "fontSize": "11px", "lineHeight": "1.35", "textAlign": "start" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-save-state summary", { "minWidth": "44px", "minHeight": "36px", "display": "flex", "alignItems": "center", "padding": "0 8px", "border": "1px solid var(--mobile-line)", "borderRadius": "7px", "cursor": "pointer" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-save-state-detail", { "position": "static", "minWidth": "0", "padding": "8px 10px", "border": "1px solid var(--mobile-line)", "borderRadius": "8px", "background": "var(--mobile-paper)" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-save-state-detail p", { "margin": "3px 0", "fontSize": "12px", "lineHeight": "1.4" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-actions", { "display": "flex", "alignItems": "center", "flexWrap": "wrap", "gap": "4px", "margin": "0", "padding": "0 0 2px", "minWidth": "0", "overflow": "visible" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-actions > *", { "flex": "0 1 auto", "minWidth": "0" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-actions > details[open]", { "flex": "1 0 100%", "maxWidth": "100%", "whiteSpace": "normal" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-actions button", { "minWidth": "44px", "minHeight": "44px", "padding": "7px 10px", "borderColor": "transparent", "borderRadius": "7px", "color": "var(--mobile-muted)", "background": "transparent", "fontSize": "12px" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-actions[aria-label=\"原稿の操作\"] > button:first-child", { "borderColor": "var(--mobile-accent)", "color": "var(--mobile-paper)", "background": "var(--mobile-accent)", "fontWeight": "650" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-actions summary", { "display": "flex", "minHeight": "44px", "alignItems": "center", "padding": "0 4px", "color": "var(--mobile-muted)", "fontSize": "11px", "cursor": "pointer" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-actions summary::after", { "content": "\"⌄\"", "marginInlineStart": "0.45rem", "color": "var(--mobile-muted)", "transition": "transform 140ms ease" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-actions details[open] > summary::after", { "transform": "rotate(180deg)" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-command-menu,\n.mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-display-menu,\n.mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-symbol-menu", { "position": "relative" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-actions details[open] > div", { "position": "static", "display": "flex", "minWidth": "0", "maxWidth": "100%", "flexDirection": "column", "alignItems": "stretch", "gap": "4px", "padding": "8px", "border": "1px solid var(--mobile-line)", "borderRadius": "9px", "background": "var(--mobile-paper)" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-symbol-menu[open] > div", { "flexFlow": "row wrap" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-symbol-menu", { "display": "flex", "flexWrap": "wrap", "gap": "4px" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-display-menu[open] > div", { "display": "grid", "gridTemplateColumns": "repeat(2, minmax(0, 1fr))", "minWidth": "0" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-display-menu label", { "display": "grid", "gap": "4px", "color": "var(--mobile-muted)", "fontSize": "11px" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-display-menu select,\n.mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-display-menu input", { "minHeight": "44px", "minWidth": "0", "padding": "5px 8px", "border": "1px solid var(--mobile-line)", "borderRadius": "6px", "color": "var(--mobile-ink)", "background": "var(--mobile-paper)" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-display-menu label:first-child", { "gridColumn": "1 / -1" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .manuscript-column", { "minHeight": "max(54vh, 26rem)", "padding": "8px 0 16px", "border": "0", "borderRadius": "0", "background": "transparent", "boxShadow": "none" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .manuscript-column > label,\n.mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-hint", { "display": "none" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .manuscript-input,\n.mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .cm-editor,\n.mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .cm-scroller,\n.mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .cm-content", { "minHeight": "max(54vh, 26rem)", "border": "0", "background": "transparent" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .cm-editor", { "fontFamily": "var(--editor-font-family, var(--manuscript-serif))" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .cm-scroller", { "fontFamily": "var(--editor-font-family, var(--manuscript-serif))", "fontSize": "var(--editor-font-size, 16px)", "lineHeight": "var(--editor-line-height, 1.8)", "letterSpacing": "var(--editor-letter-spacing, normal)" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .cm-content", { "maxWidth": "min(100%, var(--reader-max-width, 960px))", "marginInline": "auto", "padding": "12px 2px 8rem", "lineHeight": "var(--editor-line-height, 1.8)", "textWrap": "pretty" });
-globalStyle(".mobile-shell .mobile-shell-footer", { "position": "relative", "padding": "0 0 env(safe-area-inset-bottom, 0px)", "borderTop": "1px solid var(--mobile-line)", "background": "var(--mobile-paper)", "boxShadow": "0 -5px 20px rgb(26 31 25 / 5%)" });
-globalStyle(".mobile-shell .mobile-shell-status", { "position": "absolute", "zIndex": "20", "insetInline": "8px", "bottom": "calc(100% + 6px)", "width": "auto", "height": "auto", "maxBlockSize": "min(30dvh, 10rem)", "padding": "8px 10px", "overflow": "auto", "border": "1px solid var(--mobile-line)", "borderRadius": "9px", "background": "var(--mobile-paper)", "boxShadow": "0 5px 18px rgb(0 0 0 / 12%)" });
-globalStyle(".mobile-shell .mobile-shell-status:empty", { "display": "none !important" });
-globalStyle(".mobile-shell .mobile-shell-status > p", { "margin": "0", "fontSize": "10px", "lineHeight": "1.5" });
-globalStyle(".mobile-shell .mobile-shell-status .application-status > summary", { "minHeight": "28px", "height": "28px", "justifyContent": "flex-start", "gap": "8px", "padding": "0 2px", "color": "var(--mobile-muted)", "fontSize": "10px" });
-globalStyle(".mobile-shell .mobile-shell-status .application-status[data-attention] > summary", { "color": "var(--error-text)", "background": "transparent" });
-globalStyle(".mobile-shell .mobile-shell-status .application-status-content", { "position": "absolute", "zIndex": "40", "right": "8px", "bottom": "calc(100% + 4px)", "left": "8px", "maxHeight": "min(38dvh, 18rem)", "padding": "12px", "border": "1px solid var(--mobile-line)", "borderRadius": "10px", "background": "var(--mobile-paper)", "boxShadow": "0 8px 28px rgb(0 0 0 / 17%)" });
-globalStyle(".mobile-shell .mobile-shell-writing-accessories", { "gap": "7px", "padding": "6px max(12px, env(safe-area-inset-right, 0px)) 7px max(12px, env(safe-area-inset-left, 0px))", "borderTop": "1px solid var(--mobile-line)", "borderBottom": "1px solid var(--mobile-line)", "background": "var(--mobile-paper)" });
-globalStyle(".mobile-shell .mobile-shell-accessory-button", { "minHeight": "44px", "border": "1px solid var(--mobile-line)", "borderRadius": "7px", "color": "var(--mobile-ink)", "background": "var(--mobile-stage)", "fontSize": "12px", "fontWeight": "600" });
-globalStyle(".mobile-shell .mobile-shell-accessory-button > span", { "fontSize": "16px" });
-globalStyle(".mobile-shell .mobile-shell-navigation", { "gridTemplateColumns": "repeat(4, minmax(0, 1fr))", "minHeight": "54px", "maxWidth": "none", "gap": "2px", "padding": "2px max(10px, env(safe-area-inset-right, 0px)) 2px max(10px, env(safe-area-inset-left, 0px))" });
-globalStyle(".mobile-shell .mobile-shell-navigation ion-button", { "minHeight": "48px", vars: { "--color": "var(--mobile-muted)", "--background": "transparent", "--border-radius": "8px" } });
-globalStyle(".mobile-shell .mobile-shell-navigation ion-button[aria-current=\"page\"]", { vars: { "--color": "var(--mobile-accent)", "--background": "var(--surface-selected)" } });
-globalStyle(".mobile-shell .mobile-shell-nav-content", { "gap": "0", "fontSize": "10px", "fontWeight": "550" });
-globalStyle(".mobile-shell .mobile-shell-nav-mark", { "fontSize": "17px" });
-globalStyle(".mobile-shell .mobile-shell-view-settings .mobile-shell-workspace-view", { "maxWidth": "48rem", "marginInline": "auto" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"settings\"] .st-workspace-configuration", { "display": "block", "margin": "12px", "border": "1px solid var(--mobile-line)", "borderRadius": "9px", "background": "var(--mobile-paper)" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"settings\"] .st-workspace-configuration > summary", { "minHeight": "44px", "padding": "11px 14px", "color": "var(--mobile-ink)", "fontSize": "13px" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"settings\"] .st-workspace-toolbar", { "display": "grid", "padding": "10px 12px", "borderTop": "1px solid var(--mobile-line)", "background": "transparent" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"settings\"] .st-workspace-presets", { "display": "grid", "gridTemplateColumns": "repeat(3, minmax(0, 1fr))" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"settings\"] .st-workspace-presets button,\n.mobile-shell .mobile-shell-workspace-view[data-active-view=\"settings\"] .st-workspace-panel-menu summary,\n.mobile-shell .mobile-shell-workspace-view[data-active-view=\"settings\"] .st-workspace-save", { "minHeight": "44px" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"settings\"] .st-workspace-mobile-tabs", { "display": "flex", "overflowX": "auto" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"settings\"] .st-workspace-mobile-tabs button", { "minHeight": "44px" });
-globalStyle(".mobile-shell .mobile-shell-keyboard-open .mobile-shell-shared-header,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-shared-header,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-settings-entry,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-protection,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-navigation,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-status", { "display": "none !important" });
-globalStyle(".mobile-shell.mobile-shell-keyboard-open .mobile-shell-identity-bar", { "minHeight": "48px" });
-globalStyle(".mobile-shell.mobile-shell-keyboard-open .mobile-shell-writing-accessories", { "paddingTop": "3px", "paddingBottom": "3px", "borderTop": "1px solid var(--mobile-line)" });
-globalStyle(".mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-configuration,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-mobile-tabs,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-message,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-storage-state", { "display": "none !important" });
-globalStyle(".mobile-shell .mobile-shell-reference-modal", { vars: { "--height": "100dvh", "--border-radius": "18px 18px 0 0", "--background": "var(--mobile-paper)" } });
-globalStyle(".mobile-shell .mobile-shell-reference-content", { vars: { "--background": "var(--mobile-paper)" } });
-globalStyle(".mobile-shell .mobile-shell-reference-header", { "position": "sticky", "insetBlockStart": "0", "zIndex": "3", "borderBlockEnd": "1px solid var(--mobile-line)", "background": "var(--mobile-paper)" });
-globalStyle(".mobile-shell .mobile-shell-reference-top", { "paddingBlockStart": "max(12px, env(safe-area-inset-top, 0px))", "paddingBlockEnd": "8px", "paddingInlineStart": "max(16px, env(safe-area-inset-left, 0px))", "paddingInlineEnd": "max(16px, env(safe-area-inset-right, 0px))", "borderBottom": "0" });
-globalStyle(".mobile-shell .mobile-shell-reference-switch", { "paddingBlock": "4px 8px", "paddingInlineStart": "max(16px, env(safe-area-inset-left, 0px))", "paddingInlineEnd": "max(16px, env(safe-area-inset-right, 0px))" });
-globalStyle(".mobile-shell .mobile-shell-reference-switch button", { "position": "relative" });
-globalStyle(".mobile-shell .mobile-shell-reference-switch button[aria-selected=\"true\"]::after", { "position": "absolute", "insetInline": "10px", "insetBlockEnd": "3px", "borderBlockEnd": "3px solid var(--button-foreground)", "content": "\"\"" });
-globalStyle(".mobile-shell .mobile-shell-reference-switch button", { "minHeight": "44px" });
-globalStyle(".mobile-shell .mobile-shell-reference-pane", { "paddingBlock": "12px max(24px, env(safe-area-inset-bottom, 0px))", "paddingInlineStart": "max(16px, env(safe-area-inset-left, 0px))", "paddingInlineEnd": "max(16px, env(safe-area-inset-right, 0px))" });
-globalStyle(".mobile-shell .mobile-shell-reference-hint", { "paddingInlineStart": "max(16px, env(safe-area-inset-left, 0px))", "paddingInlineEnd": "max(16px, env(safe-area-inset-right, 0px))", "paddingBlockEnd": "max(25px, env(safe-area-inset-bottom, 0px))" });
-globalStyle(".mobile-shell .mobile-shell-reference-pane > .mobile-shell-status", { "position": "static", "inset": "auto", "zIndex": "auto", "width": "auto", "height": "auto", "maxHeight": "none", "margin": "0 0 12px", "padding": "8px 10px", "overflow": "visible" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"writing\"]) .pg-document-list,\n.mobile-shell .mobile-shell-reference-pane .pg-document-list", { "display": "grid", "gap": "4px", "margin": "12px 0 20px", "padding": "0", "listStyle": "none" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"writing\"]) .pg-outline-row,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-row", { "display": "grid", "gridTemplateColumns": "44px minmax(0, 1fr) auto 44px", "alignItems": "stretch", "gap": "2px" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"writing\"]) .pg-outline-row.is-heading,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-row.is-heading", { "gridTemplateColumns": "44px minmax(0, 1fr)" });
-globalStyle(".mobile-shell .pg-outline-zoom", { "minHeight": "44px", "padding": "6px", "color": "var(--mobile-muted)", "fontSize": "10px" });
-globalStyle(".mobile-shell .pg-outline-drag", { "width": "44px", "minHeight": "44px", "padding": "4px", "border": "0", "color": "var(--mobile-muted)", "background": "transparent", "cursor": "grab", "touchAction": "none", "userSelect": "none" });
-globalStyle(".mobile-shell .pg-outline-drag:active", { "cursor": "grabbing" });
-globalStyle(".mobile-shell .pg-outline-rename", { "minWidth": "0", "width": "100%", "minHeight": "44px", "padding": "6px 10px" });
-globalStyle(".mobile-shell .pg-outline-item[data-drop-target=\"true\"] > .pg-outline-row", { "outline": "2px solid var(--mobile-accent)", "outlineOffset": "1px" });
-globalStyle(".mobile-shell .pg-outline-search", { "display": "block", "marginBlockStart": "10px", "color": "var(--mobile-muted)", "fontSize": "12px" });
-globalStyle(".mobile-shell #pg-outline-search", { "width": "100%", "minHeight": "44px", "marginBlockStart": "4px" });
-globalStyle(".mobile-shell .pg-outline-breadcrumb", { "display": "flex", "flexWrap": "wrap", "gap": "4px", "marginBlock": "8px", "color": "var(--mobile-muted)", "fontSize": "12px" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"writing\"]) .pg-outline-toggle,\n.mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"writing\"]) .pg-outline-spacer,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-toggle,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-spacer", { "display": "grid", "minWidth": "44px", "minHeight": "44px", "placeItems": "center", "padding": "0", "border": "0", "color": "var(--mobile-muted)", "background": "transparent", "fontSize": "18px" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"writing\"]) .pg-outline-document,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-document", { "minWidth": "0", "minHeight": "44px", "gap": "0", "padding": "6px 10px", "border": "1px solid transparent", "borderRadius": "4px", "color": "var(--mobile-ink)", "background": "transparent", "textAlign": "start", "fontSize": "13px" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"writing\"]) .pg-outline-document.is-selected,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-document.is-selected", { "borderColor": "var(--surface-selected-border)", "background": "var(--surface-selected)", "fontWeight": "650" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"writing\"]) .pg-outline-document small,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-document small", { "margin": "2px 0 0", "color": "var(--mobile-muted)", "fontSize": "10px" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view:not([data-active-view=\"writing\"]) .pg-document-children,\n.mobile-shell .mobile-shell-reference-pane .pg-document-children", { "display": "grid", "gap": "3px", "margin": "2px 0 2px 20px", "padding": "0 0 0 8px", "borderInlineStart": "1px solid var(--mobile-line)", "listStyle": "none" });
-globalStyle(".mobile-shell .mobile-shell-reference-durability", { "borderColor": "var(--mobile-line)", "borderRadius": "8px", "background": "var(--mobile-stage)" });
-globalStyle(".mobile-shell .mobile-shell-reference-durability strong", { "color": "var(--mobile-accent)" });
-globalStyle(".mobile-shell .mobile-shell-view", { "padding": "14px 14px 28px" });
-globalStyle(".mobile-shell .mobile-shell-page-title", { "font": "500 23px/1.45 var(--manuscript-serif)" });
-globalStyle(".mobile-shell .mobile-shell-settings-card", { "margin": "12px", "padding": "16px", "border": "1px solid var(--mobile-line)", "borderRadius": "9px", "background": "var(--mobile-paper)" });
-globalStyle(".mobile-shell .mobile-shell-settings-card h2", { "font": "500 18px/1.4 var(--manuscript-serif)" });
-globalStyle(".mobile-shell .mobile-shell-settings-card p", { "color": "var(--mobile-muted)", "lineHeight": "1.65" });
-globalStyle(".mobile-shell :is(button, ion-button, a, [role=\"tab\"], select, input, summary):focus-visible,\n.mobile-shell ion-button::part(native):focus-visible", { "outline": "3px solid var(--focus-ring)", "outlineOffset": "2px" });
-globalStyle(".mobile-shell .st-workspace-panel[tabindex=\"-1\"]:focus", { "outline": "3px solid var(--focus-ring)", "outlineOffset": "-3px" });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-column", { "@media": { "(min-width: 640px)": { "paddingInline": "clamp(24px, 7vw, 64px)" } } });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor", { "@media": { "(min-width: 640px)": { "maxWidth": "44rem" } } });
-globalStyle(".mobile-shell .mobile-shell-writing-accessories", { "@media": { "(min-width: 640px)": { "maxWidth": "54rem", "marginInline": "auto" } } });
-globalStyle(".mobile-shell .mobile-shell-navigation", { "@media": { "(min-width: 640px)": { "maxWidth": "54rem", "marginInline": "auto" } } });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-editor-heading", { "@media": { "(max-width: 360px)": { "gridTemplateColumns": "minmax(0, 1fr)" } } });
-globalStyle(".mobile-shell .mobile-shell-workspace-view[data-active-view=\"writing\"] .pg-save-state", { "@media": { "(max-width: 360px)": { "justifySelf": "start", "textAlign": "start" } } });
-globalStyle(".mobile-shell-protection", { "@media": { "(max-width: 360px)": { "fontSize": "9px" } } });
-globalStyle(".mobile-shell *, .mobile-shell *::before, .mobile-shell *::after", { "@media": { "(prefers-reduced-motion: reduce)": { "scrollBehavior": "auto !important" as unknown as CSSProperties["scrollBehavior"], "animationDuration": ".01ms !important", "animationIterationCount": "1 !important", "transitionDuration": ".01ms !important" } } });
+import { type CSSProperties, globalStyle } from '@vanilla-extract/css';
+
+globalStyle('.mobile-shell', {
+  colorScheme: 'light',
+  background: 'var(--mobile-stage)',
+  vars: {
+    '--mobile-ink': '#30352f',
+    '--mobile-muted': 'var(--muted)',
+    '--mobile-paper': '#fbfaf6',
+    '--mobile-stage': '#f1f0e9',
+    '--mobile-line': '#deded4',
+    '--mobile-accent': 'var(--accent)',
+    '--page-bg': 'var(--mobile-stage)',
+    '--paper': 'var(--mobile-paper)',
+    '--ink': 'var(--mobile-ink)',
+    '--line': 'var(--mobile-line)',
+    '--surface-hover': '#eceee6',
+    '--surface-selected': '#e5e9de',
+    '--ion-background-color': 'var(--mobile-stage)',
+    '--ion-text-color': 'var(--mobile-ink)',
+    '--ion-border-color': 'var(--mobile-line)',
+    '--ion-font-family': 'var(--manuscript-sans)',
+    '--ion-toolbar-background': 'var(--mobile-paper)',
+    '--ion-tab-bar-background': 'var(--mobile-paper)',
+    '--ion-tab-bar-color': 'var(--mobile-muted)',
+    '--ion-tab-bar-color-selected': 'var(--accent)',
+  },
+});
+globalStyle(':root[data-zp-theme="dark"] .mobile-shell', {
+  colorScheme: 'dark',
+  vars: {
+    '--mobile-ink': '#e4e7df',
+    '--mobile-paper': '#1a201d',
+    '--mobile-stage': '#121714',
+    '--mobile-line': '#343b35',
+    '--surface-hover': '#262e28',
+    '--surface-selected': '#29362b',
+    '--ion-color-primary-rgb': '125, 175, 159',
+    '--ion-color-primary-contrast-rgb': '8, 18, 15',
+  },
+});
+globalStyle(':root[data-zp-theme="paper"] .mobile-shell', {
+  colorScheme: 'light',
+  vars: {
+    '--mobile-ink': '#38352e',
+    '--mobile-paper': '#f8f3e8',
+    '--mobile-stage': '#ebe4d6',
+    '--mobile-line': '#d8cfbf',
+    '--surface-hover': '#eee6d7',
+    '--surface-selected': '#e8ddca',
+  },
+});
+globalStyle('.mobile-shell .mobile-shell-page', { minWidth: '320px', background: 'var(--mobile-stage)' });
+globalStyle('.mobile-shell .mobile-shell-ion-header', {
+  paddingTop: 'env(safe-area-inset-top, 0px)',
+  borderBottom: '1px solid var(--mobile-line)',
+  background: 'var(--mobile-paper)',
+  boxShadow: 'none',
+});
+globalStyle('.mobile-shell-identity-bar', {
+  display: 'flex',
+  alignItems: 'center',
+  minHeight: '56px',
+  gap: '8px',
+  paddingBlock: '3px',
+  paddingInlineStart: 'max(12px, env(safe-area-inset-left, 0px))',
+  paddingInlineEnd: 'max(12px, env(safe-area-inset-right, 0px))',
+  border: '0',
+  background: 'var(--mobile-paper)',
+});
+globalStyle('.mobile-shell .mobile-shell-back', {
+  minWidth: '44px',
+  width: '44px',
+  minHeight: '44px',
+  flexBasis: '44px',
+  color: 'var(--mobile-muted)',
+  fontSize: '27px',
+});
+globalStyle('.mobile-shell-current-title', {
+  display: 'block',
+  minWidth: '0',
+  color: 'var(--mobile-ink)',
+  font: '550 15px/1.35 var(--manuscript-serif)',
+  overflow: 'visible',
+  overflowWrap: 'anywhere',
+  textOverflow: 'clip',
+  textWrap: 'pretty',
+  whiteSpace: 'normal',
+});
+globalStyle('.mobile-shell-context', { color: 'var(--mobile-muted)', fontSize: '10px', lineHeight: '1.3' });
+globalStyle('.mobile-shell .mobile-shell-settings-entry', {
+  minWidth: '44px',
+  width: '44px',
+  minHeight: '44px',
+  justifyContent: 'center',
+  padding: '0',
+  color: 'var(--mobile-muted)',
+  vars: {
+    '--background': 'transparent',
+    '--background-hover': 'transparent',
+    '--background-activated': 'transparent',
+    '--background-focused': 'transparent',
+    '--padding-start': '0',
+    '--padding-end': '0',
+  },
+});
+globalStyle('.mobile-shell .mobile-shell-settings-entry::part(native)', {
+  minWidth: '44px',
+  minHeight: '44px',
+  justifyContent: 'center',
+  padding: '0',
+  fontSize: '19px',
+  background: 'transparent',
+});
+globalStyle('.mobile-shell-settings-symbol svg', { display: 'block', width: '19px', height: '19px' });
+globalStyle('.mobile-shell-settings-label', {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
+  whiteSpace: 'nowrap',
+});
+globalStyle('.mobile-shell-protection', {
+  display: 'inline-flex',
+  flex: '0 0 auto',
+  alignItems: 'center',
+  gap: '5px',
+  color: 'var(--mobile-muted)',
+  fontSize: '10px',
+  whiteSpace: 'nowrap',
+});
+globalStyle('.mobile-shell-protection > span', { width: '6px', height: '6px', borderRadius: '50%', background: 'currentColor' });
+globalStyle('.mobile-shell-protection[data-state="saved"]', { color: 'var(--success)' });
+globalStyle('.mobile-shell-protection[data-state="uncertain"]', { color: 'var(--error-text)' });
+globalStyle('.mobile-shell-protection[data-state="saving"]', { color: 'var(--accent-strong)' });
+globalStyle('.mobile-shell .mobile-shell-shared-header:not([data-active-view="settings"])', {
+  position: 'absolute',
+  zIndex: '-1',
+  width: '1px',
+  height: '1px',
+  margin: '-1px',
+  padding: '0',
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
+  whiteSpace: 'nowrap',
+});
+globalStyle('.mobile-shell .mobile-shell-shared-header:not([data-active-view="settings"]) > :not(h1)', { display: 'none' });
+globalStyle('.mobile-shell .mobile-shell-shared-header:not([data-active-view="settings"]) > h1', {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  margin: '-1px',
+  padding: '0',
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
+  whiteSpace: 'nowrap',
+});
+globalStyle('.mobile-shell .mobile-shell-shared-header[data-active-view="settings"]', {
+  display: 'flex',
+  minHeight: '48px',
+  padding: '2px max(12px, env(safe-area-inset-right, 0px)) 2px max(12px, env(safe-area-inset-left, 0px))',
+  borderTop: '1px solid var(--mobile-line)',
+  background: 'var(--mobile-paper)',
+});
+globalStyle('.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] .topbar', {
+  minHeight: '44px',
+  flexWrap: 'nowrap',
+  gap: '8px',
+});
+globalStyle('.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] .topbar .brand', { display: 'none' });
+globalStyle('.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] .topbar-status', { display: 'none' });
+globalStyle('.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] .theme-control', { margin: '0', fontSize: '11px' });
+globalStyle('.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] .theme-control select', { minHeight: '44px' });
+globalStyle('.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] .topbar button', { minHeight: '44px' });
+globalStyle('.mobile-shell-content', {
+  background: 'var(--mobile-stage)',
+  overscrollBehaviorY: 'contain',
+  vars: { '--background': 'var(--mobile-stage)', '--padding-bottom': '0' },
+});
+globalStyle('.mobile-shell-content::part(scroll)', { scrollbarGutter: 'auto' });
+globalStyle('.mobile-shell .mobile-shell-workspace-view', {
+  width: '100%',
+  maxWidth: 'none',
+  minHeight: '100%',
+  margin: '0',
+  background: 'var(--mobile-stage)',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view .st-workspace', {
+  height: 'auto',
+  minHeight: '100%',
+  overflow: 'visible',
+  background: 'transparent',
+});
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view:not([data-active-view="settings"]) .st-workspace-configuration,\n.mobile-shell .mobile-shell-workspace-view:not([data-active-view="settings"]) .st-workspace-mobile-tabs,\n.mobile-shell .mobile-shell-workspace-view:not([data-active-view="settings"]) .st-workspace-message,\n.mobile-shell .mobile-shell-workspace-view:not([data-active-view="settings"]) .st-workspace-storage-state',
+  { display: 'none !important' },
+);
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view .st-workspace-mobile-layout,\n.mobile-shell .mobile-shell-workspace-view .st-workspace-mobile-pane',
+  { display: 'block', width: '100%', height: 'auto', minHeight: '0', overflow: 'visible' },
+);
+globalStyle('.mobile-shell .mobile-shell-workspace-view .st-workspace-mobile-pane > .st-workspace-panel', {
+  height: 'auto',
+  minHeight: '0',
+  overflow: 'visible',
+  background: 'transparent',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view .st-workspace-panel-heading', { display: 'none' });
+globalStyle('.mobile-shell .mobile-shell-workspace-view .st-workspace-panel-body', {
+  minHeight: '0',
+  overflow: 'visible',
+  background: 'transparent',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-column', {
+  display: 'block',
+  minHeight: '100%',
+  padding: '2px clamp(14px, 4.2vw, 22px) 24px',
+  background: 'var(--mobile-paper)',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor', {
+  container: 'manuscript / inline-size',
+  display: 'grid',
+  width: '100%',
+  maxWidth: '48rem',
+  gap: '4px',
+  marginInline: 'auto',
+  padding: '0',
+  border: '0',
+  borderRadius: '0',
+  background: 'transparent',
+  boxShadow: 'none',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor[data-reader="true"]', {
+  gridTemplateColumns: 'minmax(0, 1fr)',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor[data-reader="true"] > .scene-reading', {
+  minInlineSize: '0',
+  width: '100%',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-heading', {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(0, 1fr)',
+  alignItems: 'start',
+  gap: '0',
+  margin: '0',
+  padding: '0',
+  border: '0',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-heading > div:first-child', {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  padding: '0',
+  margin: '-1px',
+  overflow: 'hidden',
+  clip: 'rect(0, 0, 0, 0)',
+  whiteSpace: 'nowrap',
+  border: '0',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-heading > div:first-child > .eyebrow', {
+  display: 'block',
+  margin: '0 0 2px',
+  color: 'var(--mobile-muted)',
+  fontSize: '10px',
+  lineHeight: '1.4',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-heading h2', {
+  margin: '0',
+  color: 'var(--mobile-ink)',
+  font: '500 clamp(20px, 5vw, 25px)/1.4 var(--manuscript-serif)',
+  letterSpacing: '0',
+  overflowWrap: 'anywhere',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state', {
+  position: 'relative',
+  display: 'block',
+  justifySelf: 'start',
+  color: 'var(--mobile-muted)',
+  fontSize: '11px',
+  lineHeight: '1.35',
+  textAlign: 'start',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state summary', {
+  minWidth: '44px',
+  minHeight: '36px',
+  display: 'flex',
+  alignItems: 'center',
+  padding: '0 8px',
+  border: '1px solid var(--mobile-line)',
+  borderRadius: '7px',
+  cursor: 'pointer',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state-detail', {
+  position: 'static',
+  minWidth: '0',
+  padding: '8px 10px',
+  border: '1px solid var(--mobile-line)',
+  borderRadius: '8px',
+  background: 'var(--mobile-paper)',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state-detail p', {
+  margin: '3px 0',
+  fontSize: '12px',
+  lineHeight: '1.4',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions', {
+  display: 'flex',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: '4px',
+  margin: '0',
+  padding: '0 0 2px',
+  minWidth: '0',
+  overflow: 'visible',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions > *', {
+  flex: '0 1 auto',
+  minWidth: '0',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions > details[open]', {
+  flex: '1 0 100%',
+  maxWidth: '100%',
+  whiteSpace: 'normal',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions button', {
+  minWidth: '44px',
+  minHeight: '44px',
+  padding: '7px 10px',
+  borderColor: 'transparent',
+  borderRadius: '7px',
+  color: 'var(--mobile-muted)',
+  background: 'transparent',
+  fontSize: '12px',
+});
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions[aria-label="原稿の操作"] > button:first-child',
+  { borderColor: 'var(--mobile-accent)', color: 'var(--mobile-paper)', background: 'var(--mobile-accent)', fontWeight: '650' },
+);
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions summary', {
+  display: 'flex',
+  minHeight: '44px',
+  alignItems: 'center',
+  padding: '0 4px',
+  color: 'var(--mobile-muted)',
+  fontSize: '11px',
+  cursor: 'pointer',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions summary::after', {
+  content: '"⌄"',
+  marginInlineStart: '0.45rem',
+  color: 'var(--mobile-muted)',
+  transition: 'transform 140ms ease',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions details[open] > summary::after', {
+  transform: 'rotate(180deg)',
+});
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-command-menu,\n.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu,\n.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-symbol-menu',
+  { position: 'relative' },
+);
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions details[open] > div', {
+  position: 'static',
+  display: 'flex',
+  minWidth: '0',
+  maxWidth: '100%',
+  flexDirection: 'column',
+  alignItems: 'stretch',
+  gap: '4px',
+  padding: '8px',
+  border: '1px solid var(--mobile-line)',
+  borderRadius: '9px',
+  background: 'var(--mobile-paper)',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-symbol-menu[open] > div', {
+  flexFlow: 'row wrap',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-symbol-menu', {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: '4px',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu[open] > div', {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  minWidth: '0',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu label', {
+  display: 'grid',
+  gap: '4px',
+  color: 'var(--mobile-muted)',
+  fontSize: '11px',
+});
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu select,\n.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu input',
+  {
+    minHeight: '44px',
+    minWidth: '0',
+    padding: '5px 8px',
+    border: '1px solid var(--mobile-line)',
+    borderRadius: '6px',
+    color: 'var(--mobile-ink)',
+    background: 'var(--mobile-paper)',
+  },
+);
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu label:first-child', {
+  gridColumn: '1 / -1',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .manuscript-column', {
+  minHeight: 'max(54vh, 26rem)',
+  padding: '8px 0 16px',
+  border: '0',
+  borderRadius: '0',
+  background: 'transparent',
+  boxShadow: 'none',
+});
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .manuscript-column > label,\n.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-hint',
+  { display: 'none' },
+);
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .manuscript-input,\n.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-editor,\n.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-scroller,\n.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-content',
+  { minHeight: 'max(54vh, 26rem)', border: '0', background: 'transparent' },
+);
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-editor', {
+  fontFamily: 'var(--editor-font-family, var(--manuscript-serif))',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-scroller', {
+  fontFamily: 'var(--editor-font-family, var(--manuscript-serif))',
+  fontSize: 'var(--editor-font-size, 16px)',
+  lineHeight: 'var(--editor-line-height, 1.8)',
+  letterSpacing: 'var(--editor-letter-spacing, normal)',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-content', {
+  maxWidth: 'min(100%, var(--reader-max-width, 960px))',
+  marginInline: 'auto',
+  padding: '12px 2px 8rem',
+  lineHeight: 'var(--editor-line-height, 1.8)',
+  textWrap: 'pretty',
+});
+globalStyle('.mobile-shell .mobile-shell-footer', {
+  position: 'relative',
+  padding: '0 0 env(safe-area-inset-bottom, 0px)',
+  borderTop: '1px solid var(--mobile-line)',
+  background: 'var(--mobile-paper)',
+  boxShadow: '0 -5px 20px rgb(26 31 25 / 5%)',
+});
+globalStyle('.mobile-shell .mobile-shell-status', {
+  position: 'absolute',
+  zIndex: '20',
+  insetInline: '8px',
+  bottom: 'calc(100% + 6px)',
+  width: 'auto',
+  height: 'auto',
+  maxBlockSize: 'min(30dvh, 10rem)',
+  padding: '8px 10px',
+  overflow: 'auto',
+  border: '1px solid var(--mobile-line)',
+  borderRadius: '9px',
+  background: 'var(--mobile-paper)',
+  boxShadow: '0 5px 18px rgb(0 0 0 / 12%)',
+});
+globalStyle('.mobile-shell .mobile-shell-status:empty', { display: 'none !important' });
+globalStyle('.mobile-shell .mobile-shell-status > p', { margin: '0', fontSize: '10px', lineHeight: '1.5' });
+globalStyle('.mobile-shell .mobile-shell-status .application-status > summary', {
+  minHeight: '28px',
+  height: '28px',
+  justifyContent: 'flex-start',
+  gap: '8px',
+  padding: '0 2px',
+  color: 'var(--mobile-muted)',
+  fontSize: '10px',
+});
+globalStyle('.mobile-shell .mobile-shell-status .application-status[data-attention] > summary', {
+  color: 'var(--error-text)',
+  background: 'transparent',
+});
+globalStyle('.mobile-shell .mobile-shell-status .application-status-content', {
+  position: 'absolute',
+  zIndex: '40',
+  right: '8px',
+  bottom: 'calc(100% + 4px)',
+  left: '8px',
+  maxHeight: 'min(38dvh, 18rem)',
+  padding: '12px',
+  border: '1px solid var(--mobile-line)',
+  borderRadius: '10px',
+  background: 'var(--mobile-paper)',
+  boxShadow: '0 8px 28px rgb(0 0 0 / 17%)',
+});
+globalStyle('.mobile-shell .mobile-shell-writing-accessories', {
+  gap: '7px',
+  padding: '6px max(12px, env(safe-area-inset-right, 0px)) 7px max(12px, env(safe-area-inset-left, 0px))',
+  borderTop: '1px solid var(--mobile-line)',
+  borderBottom: '1px solid var(--mobile-line)',
+  background: 'var(--mobile-paper)',
+});
+globalStyle('.mobile-shell .mobile-shell-accessory-button', {
+  minHeight: '44px',
+  border: '1px solid var(--mobile-line)',
+  borderRadius: '7px',
+  color: 'var(--mobile-ink)',
+  background: 'var(--mobile-stage)',
+  fontSize: '12px',
+  fontWeight: '600',
+});
+globalStyle('.mobile-shell .mobile-shell-accessory-button > span', { fontSize: '16px' });
+globalStyle('.mobile-shell .mobile-shell-navigation', {
+  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+  minHeight: '54px',
+  maxWidth: 'none',
+  gap: '2px',
+  padding: '2px max(10px, env(safe-area-inset-right, 0px)) 2px max(10px, env(safe-area-inset-left, 0px))',
+});
+globalStyle('.mobile-shell .mobile-shell-navigation ion-button', {
+  minHeight: '48px',
+  vars: { '--color': 'var(--mobile-muted)', '--background': 'transparent', '--border-radius': '8px' },
+});
+globalStyle('.mobile-shell .mobile-shell-navigation ion-button[aria-current="page"]', {
+  vars: { '--color': 'var(--mobile-accent)', '--background': 'var(--surface-selected)' },
+});
+globalStyle('.mobile-shell .mobile-shell-nav-content', { gap: '0', fontSize: '10px', fontWeight: '550' });
+globalStyle('.mobile-shell .mobile-shell-nav-mark', { fontSize: '17px' });
+globalStyle('.mobile-shell .mobile-shell-view-settings .mobile-shell-workspace-view', { maxWidth: '48rem', marginInline: 'auto' });
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-configuration', {
+  display: 'block',
+  margin: '12px',
+  border: '1px solid var(--mobile-line)',
+  borderRadius: '9px',
+  background: 'var(--mobile-paper)',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-configuration > summary', {
+  minHeight: '44px',
+  padding: '11px 14px',
+  color: 'var(--mobile-ink)',
+  fontSize: '13px',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-toolbar', {
+  display: 'grid',
+  padding: '10px 12px',
+  borderTop: '1px solid var(--mobile-line)',
+  background: 'transparent',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-presets', {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+});
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-presets button,\n.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-panel-menu summary,\n.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-save',
+  { minHeight: '44px' },
+);
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-mobile-tabs', {
+  display: 'flex',
+  overflowX: 'auto',
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-mobile-tabs button', {
+  minHeight: '44px',
+});
+globalStyle(
+  '.mobile-shell .mobile-shell-keyboard-open .mobile-shell-shared-header,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-shared-header,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-settings-entry,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-protection,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-navigation,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-status',
+  { display: 'none !important' },
+);
+globalStyle('.mobile-shell.mobile-shell-keyboard-open .mobile-shell-identity-bar', { minHeight: '48px' });
+globalStyle('.mobile-shell.mobile-shell-keyboard-open .mobile-shell-writing-accessories', {
+  paddingTop: '3px',
+  paddingBottom: '3px',
+  borderTop: '1px solid var(--mobile-line)',
+});
+globalStyle(
+  '.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-configuration,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-mobile-tabs,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-message,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-storage-state',
+  { display: 'none !important' },
+);
+globalStyle('.mobile-shell .mobile-shell-reference-modal', {
+  vars: { '--height': '100dvh', '--border-radius': '18px 18px 0 0', '--background': 'var(--mobile-paper)' },
+});
+globalStyle('.mobile-shell .mobile-shell-reference-content', { vars: { '--background': 'var(--mobile-paper)' } });
+globalStyle('.mobile-shell .mobile-shell-reference-header', {
+  position: 'sticky',
+  insetBlockStart: '0',
+  zIndex: '3',
+  borderBlockEnd: '1px solid var(--mobile-line)',
+  background: 'var(--mobile-paper)',
+});
+globalStyle('.mobile-shell .mobile-shell-reference-top', {
+  paddingBlockStart: 'max(12px, env(safe-area-inset-top, 0px))',
+  paddingBlockEnd: '8px',
+  paddingInlineStart: 'max(16px, env(safe-area-inset-left, 0px))',
+  paddingInlineEnd: 'max(16px, env(safe-area-inset-right, 0px))',
+  borderBottom: '0',
+});
+globalStyle('.mobile-shell .mobile-shell-reference-switch', {
+  paddingBlock: '4px 8px',
+  paddingInlineStart: 'max(16px, env(safe-area-inset-left, 0px))',
+  paddingInlineEnd: 'max(16px, env(safe-area-inset-right, 0px))',
+});
+globalStyle('.mobile-shell .mobile-shell-reference-switch button', { position: 'relative' });
+globalStyle('.mobile-shell .mobile-shell-reference-switch button[aria-selected="true"]::after', {
+  position: 'absolute',
+  insetInline: '10px',
+  insetBlockEnd: '3px',
+  borderBlockEnd: '3px solid var(--button-foreground)',
+  content: '""',
+});
+globalStyle('.mobile-shell .mobile-shell-reference-switch button', { minHeight: '44px' });
+globalStyle('.mobile-shell .mobile-shell-reference-pane', {
+  paddingBlock: '12px max(24px, env(safe-area-inset-bottom, 0px))',
+  paddingInlineStart: 'max(16px, env(safe-area-inset-left, 0px))',
+  paddingInlineEnd: 'max(16px, env(safe-area-inset-right, 0px))',
+});
+globalStyle('.mobile-shell .mobile-shell-reference-hint', {
+  paddingInlineStart: 'max(16px, env(safe-area-inset-left, 0px))',
+  paddingInlineEnd: 'max(16px, env(safe-area-inset-right, 0px))',
+  paddingBlockEnd: 'max(25px, env(safe-area-inset-bottom, 0px))',
+});
+globalStyle('.mobile-shell .mobile-shell-reference-pane > .mobile-shell-status', {
+  position: 'static',
+  inset: 'auto',
+  zIndex: 'auto',
+  width: 'auto',
+  height: 'auto',
+  maxHeight: 'none',
+  margin: '0 0 12px',
+  padding: '8px 10px',
+  overflow: 'visible',
+});
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-document-list,\n.mobile-shell .mobile-shell-reference-pane .pg-document-list',
+  { display: 'grid', gap: '4px', margin: '12px 0 20px', padding: '0', listStyle: 'none' },
+);
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-row,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-row',
+  { display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) auto 44px', alignItems: 'stretch', gap: '2px' },
+);
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-row.is-heading,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-row.is-heading',
+  { gridTemplateColumns: '44px minmax(0, 1fr)' },
+);
+globalStyle('.mobile-shell .pg-outline-zoom', { minHeight: '44px', padding: '6px', color: 'var(--mobile-muted)', fontSize: '10px' });
+globalStyle('.mobile-shell .pg-outline-drag', {
+  width: '44px',
+  minHeight: '44px',
+  padding: '4px',
+  border: '0',
+  color: 'var(--mobile-muted)',
+  background: 'transparent',
+  cursor: 'grab',
+  touchAction: 'none',
+  userSelect: 'none',
+});
+globalStyle('.mobile-shell .pg-outline-drag:active', { cursor: 'grabbing' });
+globalStyle('.mobile-shell .pg-outline-rename', { minWidth: '0', width: '100%', minHeight: '44px', padding: '6px 10px' });
+globalStyle('.mobile-shell .pg-outline-item[data-drop-target="true"] > .pg-outline-row', {
+  outline: '2px solid var(--mobile-accent)',
+  outlineOffset: '1px',
+});
+globalStyle('.mobile-shell .pg-outline-search', {
+  display: 'block',
+  marginBlockStart: '10px',
+  color: 'var(--mobile-muted)',
+  fontSize: '12px',
+});
+globalStyle('.mobile-shell #pg-outline-search', { width: '100%', minHeight: '44px', marginBlockStart: '4px' });
+globalStyle('.mobile-shell .pg-outline-breadcrumb', {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: '4px',
+  marginBlock: '8px',
+  color: 'var(--mobile-muted)',
+  fontSize: '12px',
+});
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-toggle,\n.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-spacer,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-toggle,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-spacer',
+  {
+    display: 'grid',
+    minWidth: '44px',
+    minHeight: '44px',
+    placeItems: 'center',
+    padding: '0',
+    border: '0',
+    color: 'var(--mobile-muted)',
+    background: 'transparent',
+    fontSize: '18px',
+  },
+);
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-document,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-document',
+  {
+    minWidth: '0',
+    minHeight: '44px',
+    gap: '0',
+    padding: '6px 10px',
+    border: '1px solid transparent',
+    borderRadius: '4px',
+    color: 'var(--mobile-ink)',
+    background: 'transparent',
+    textAlign: 'start',
+    fontSize: '13px',
+  },
+);
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-document.is-selected,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-document.is-selected',
+  { borderColor: 'var(--surface-selected-border)', background: 'var(--surface-selected)', fontWeight: '650' },
+);
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-document small,\n.mobile-shell .mobile-shell-reference-pane .pg-outline-document small',
+  { margin: '2px 0 0', color: 'var(--mobile-muted)', fontSize: '10px' },
+);
+globalStyle(
+  '.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-document-children,\n.mobile-shell .mobile-shell-reference-pane .pg-document-children',
+  {
+    display: 'grid',
+    gap: '3px',
+    margin: '2px 0 2px 20px',
+    padding: '0 0 0 8px',
+    borderInlineStart: '1px solid var(--mobile-line)',
+    listStyle: 'none',
+  },
+);
+globalStyle('.mobile-shell .mobile-shell-reference-durability', {
+  borderColor: 'var(--mobile-line)',
+  borderRadius: '8px',
+  background: 'var(--mobile-stage)',
+});
+globalStyle('.mobile-shell .mobile-shell-reference-durability strong', { color: 'var(--mobile-accent)' });
+globalStyle('.mobile-shell .mobile-shell-view', { padding: '14px 14px 28px' });
+globalStyle('.mobile-shell .mobile-shell-page-title', { font: '500 23px/1.45 var(--manuscript-serif)' });
+globalStyle('.mobile-shell .mobile-shell-settings-card', {
+  margin: '12px',
+  padding: '16px',
+  border: '1px solid var(--mobile-line)',
+  borderRadius: '9px',
+  background: 'var(--mobile-paper)',
+});
+globalStyle('.mobile-shell .mobile-shell-settings-card h2', { font: '500 18px/1.4 var(--manuscript-serif)' });
+globalStyle('.mobile-shell .mobile-shell-settings-card p', { color: 'var(--mobile-muted)', lineHeight: '1.65' });
+globalStyle(
+  '.mobile-shell :is(button, ion-button, a, [role="tab"], select, input, summary):focus-visible,\n.mobile-shell ion-button::part(native):focus-visible',
+  { outline: '3px solid var(--focus-ring)', outlineOffset: '2px' },
+);
+globalStyle('.mobile-shell .st-workspace-panel[tabindex="-1"]:focus', { outline: '3px solid var(--focus-ring)', outlineOffset: '-3px' });
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-column', {
+  '@media': { '(min-width: 640px)': { paddingInline: 'clamp(24px, 7vw, 64px)' } },
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor', {
+  '@media': { '(min-width: 640px)': { maxWidth: '44rem' } },
+});
+globalStyle('.mobile-shell .mobile-shell-writing-accessories', {
+  '@media': { '(min-width: 640px)': { maxWidth: '54rem', marginInline: 'auto' } },
+});
+globalStyle('.mobile-shell .mobile-shell-navigation', { '@media': { '(min-width: 640px)': { maxWidth: '54rem', marginInline: 'auto' } } });
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-heading', {
+  '@media': { '(max-width: 360px)': { gridTemplateColumns: 'minmax(0, 1fr)' } },
+});
+globalStyle('.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state', {
+  '@media': { '(max-width: 360px)': { justifySelf: 'start', textAlign: 'start' } },
+});
+globalStyle('.mobile-shell-protection', { '@media': { '(max-width: 360px)': { fontSize: '9px' } } });
+globalStyle('.mobile-shell *, .mobile-shell *::before, .mobile-shell *::after', {
+  '@media': {
+    '(prefers-reduced-motion: reduce)': {
+      scrollBehavior: 'auto !important' as unknown as CSSProperties['scrollBehavior'],
+      animationDuration: '.01ms !important',
+      animationIterationCount: '1 !important',
+      transitionDuration: '.01ms !important',
+    },
+  },
+});

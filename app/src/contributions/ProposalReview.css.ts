@@ -1,72 +1,277 @@
-import { globalStyle } from "@vanilla-extract/css";
-globalStyle(".proposal-review.module-proposal-review", { "container": "module-review / inline-size", "minWidth": "0", "marginTop": "1.35rem", "padding": "clamp(0.75rem, 2.2cqi, 1.4rem)", "border": "0", "borderTop": "2px solid var(--accent)", "borderRadius": "0", "color": "var(--ink)", "background": "transparent" });
-globalStyle(".module-review-masthead", { "display": "flex", "alignItems": "flex-end", "justifyContent": "space-between", "gap": "1rem", "padding": "0.25rem 0 0.85rem", "borderBottom": "1px solid var(--line)" });
-globalStyle(".module-proposal-origin,\n.module-operation-number", { "margin": "0 0 0.35rem", "color": "var(--muted)", "fontSize": "0.7rem", "fontWeight": "700" });
-globalStyle(".module-review-masthead h2", { "margin": "0", "color": "var(--ink)", "fontSize": "1.15rem", "lineHeight": "1.35" });
-globalStyle(".module-review-masthead > div:first-child > p:last-child", { "maxWidth": "46rem", "margin": "0.35rem 0 0", "color": "var(--muted)", "fontSize": "0.84rem", "lineHeight": "1.55" });
-globalStyle(".module-review-count", { "flex": "0 0 auto", "margin": "0", "color": "var(--muted)", "fontSize": "0.78rem", "fontVariantNumeric": "tabular-nums" });
-globalStyle(".module-review-authority-note", { "margin": "0.65rem 0", "padding": "0.65rem 0.75rem", "border": "1px solid var(--line)", "borderRadius": "0.3rem", "color": "var(--muted)", "background": "var(--paper-dark)", "fontSize": "0.8rem", "lineHeight": "1.55" });
-globalStyle(".module-review-error,\n.module-proposal-warning", { "padding": "0.65rem 0.75rem", "border": "1px solid var(--error-border)", "borderRadius": "0.35rem", "color": "var(--error-text)", "background": "var(--error-bg)", "lineHeight": "1.55" });
-globalStyle(".module-proposal-list", { "display": "grid", "gap": "0.8rem", "margin": "0", "padding": "0", "listStyle": "none" });
-globalStyle(".module-proposal-list > li", { "minWidth": "0" });
-globalStyle(".module-proposal-card", { "minWidth": "0", "margin": "0", "padding": "0.8rem", "border": "1px solid var(--line)", "borderRadius": "0.35rem", "color": "var(--ink)", "background": "var(--paper)" });
-globalStyle(".module-proposal-heading", { "display": "flex", "alignItems": "flex-start", "justifyContent": "space-between", "gap": "0.8rem" });
-globalStyle(".module-proposal-origin", { "marginTop": "0.25rem", "marginBottom": "0", "color": "var(--muted)" });
-globalStyle(".module-proposal-heading h3", { "margin": "0", "overflowWrap": "anywhere", "fontSize": "1rem", "lineHeight": "1.45" });
-globalStyle(".module-proposal-heading time", { "flex": "0 0 auto", "maxWidth": "10rem", "color": "var(--muted)", "fontSize": "0.72rem", "fontVariantNumeric": "tabular-nums", "textAlign": "right" });
-globalStyle(".module-proposal-summary", { "display": "flex", "alignItems": "center", "flexWrap": "wrap", "gap": "0.4rem 0.8rem", "margin": "0.65rem 0", "color": "var(--muted)", "fontSize": "0.76rem" });
-globalStyle(".module-proposal-summary > span:not(.module-proposal-state)::before", { "marginRight": "0.45rem", "color": "var(--line)", "content": "\"·\"" });
-globalStyle(".module-proposal-state", { "display": "inline-flex", "alignItems": "center", "gap": "0.35rem", "color": "var(--accent-strong)", "fontWeight": "700" });
-globalStyle(".module-proposal-state::before", { "width": "0.42rem", "height": "0.42rem", "borderRadius": "50%", "background": "currentColor", "content": "\"\"" });
-globalStyle(".module-proposal-state.is-complete", { "color": "var(--success)" });
-globalStyle(".module-proposal-state.is-attention", { "color": "var(--error-text)" });
-globalStyle(".module-proposal-warning", { "margin": "0.65rem 0", "fontSize": "0.82rem" });
-globalStyle(".module-proposal-operations", { "minWidth": "0" });
-globalStyle(".module-proposal-operation", { "minWidth": "0", "margin": "0", "padding": "0.8rem 0", "border": "0", "borderTop": "1px solid var(--line)", "borderRadius": "0", "background": "transparent" });
-globalStyle(".module-operation-heading", { "display": "grid", "gridTemplateColumns": "auto minmax(0, 1fr) auto", "alignItems": "start", "gap": "0.6rem" });
-globalStyle(".module-operation-number", { "paddingTop": "0.2rem", "color": "var(--accent-strong)", "fontVariantNumeric": "tabular-nums" });
-globalStyle(".module-operation-heading h4", { "margin": "0", "overflowWrap": "anywhere", "fontSize": "0.9rem", "lineHeight": "1.45" });
-globalStyle(".module-operation-heading p", { "margin": "0.18rem 0 0", "color": "var(--muted)", "fontSize": "0.76rem" });
-globalStyle(".module-operation-state", { "maxWidth": "12rem", "color": "var(--muted)", "fontSize": "0.72rem", "lineHeight": "1.4", "textAlign": "right" });
-globalStyle(".module-change-list", { "display": "grid", "gap": "0.45rem", "margin": "0.65rem 0 0", "padding": "0", "listStyle": "none" });
-globalStyle(".module-change-entry", { "minWidth": "0", "padding": "0.65rem", "border": "1px solid var(--line)", "borderRadius": "0.3rem", "background": "var(--page-bg)" });
-globalStyle(".module-change-heading", { "display": "flex", "alignItems": "flex-start", "gap": "0.55rem", "minWidth": "0" });
-globalStyle(".module-change-heading code", { "minWidth": "0", "overflowWrap": "anywhere", "color": "var(--ink)", "fontSize": "0.78rem", "lineHeight": "1.45" });
-globalStyle(".module-change-kind", { "flex": "0 0 auto", "padding": "0.08rem 0.35rem", "border": "1px solid var(--surface-selected-border)", "borderRadius": "0.25rem", "color": "var(--accent-strong)", "fontSize": "0.68rem", "fontWeight": "700" });
-globalStyle(".module-change-kind.is-delete", { "borderColor": "var(--error-border)", "color": "var(--error-text)" });
-globalStyle(".module-change-before", { "marginTop": "0.45rem", "padding": "0.5rem 0.55rem", "border": "1px solid var(--line)", "borderRadius": "0.25rem", "background": "var(--surface-subtle)" });
-globalStyle(".module-change-before > span", { "color": "var(--muted)", "fontSize": "0.69rem", "fontWeight": "700" });
-globalStyle(".module-change-before p", { "margin": "0.15rem 0 0", "overflowWrap": "anywhere", "color": "var(--muted)", "fontSize": "0.76rem", "lineHeight": "1.5" });
-globalStyle(".module-change-after-label", { "margin": "0.4rem 0 0", "padding": "0.5rem 0.55rem", "border": "1px solid var(--error-border)", "borderRadius": "0.25rem", "color": "var(--error-text)", "background": "var(--error-bg)", "fontSize": "0.78rem" });
-globalStyle(".module-change-after", { "marginTop": "0.45rem", "padding": "0 0.55rem 0.5rem", "border": "1px solid var(--surface-selected-border)", "borderRadius": "0.25rem", "background": "var(--surface-selected)" });
-globalStyle(".module-change-after summary,\n.module-operation-technical summary,\n.module-proposal-evidence summary,\n.module-proposal-technical summary", { "minHeight": "2.45rem", "padding": "0.6rem 0", "color": "var(--accent-strong)", "cursor": "pointer", "fontSize": "0.78rem", "fontWeight": "650" });
-globalStyle(".module-proposal-preview", { "boxSizing": "border-box", "width": "100%", "maxWidth": "100%", "maxHeight": "18rem", "margin": "0.2rem 0 0", "border": "0", "padding": "0", "background": "transparent", "fieldSizing": "content", "overflow": "auto", "overflowWrap": "anywhere", "whiteSpace": "pre-wrap", "color": "var(--ink)", "fontFamily": "ui-monospace, SFMono-Regular, Menlo, monospace", "fontSize": "0.73rem", "lineHeight": "1.5" });
-globalStyle(".module-proposal-preview:focus-visible", { "outline": "3px solid var(--focus-ring)", "outlineOffset": "2px" });
-globalStyle(".module-operation-technical,\n.module-proposal-evidence,\n.module-proposal-technical", { "borderTop": "1px solid var(--line)" });
-globalStyle(".module-operation-technical dl,\n.module-proposal-technical dl", { "display": "grid", "gap": "0.4rem", "margin": "0 0 0.6rem" });
-globalStyle(".module-operation-technical dl > div,\n.module-proposal-technical dl > div", { "display": "grid", "gridTemplateColumns": "minmax(7rem, 0.35fr) minmax(0, 1fr)", "gap": "0.6rem" });
-globalStyle(".module-operation-technical dt,\n.module-proposal-technical dt", { "color": "var(--muted)", "fontSize": "0.73rem" });
-globalStyle(".module-operation-technical dd,\n.module-proposal-technical dd", { "minWidth": "0", "margin": "0", "overflowWrap": "anywhere", "fontSize": "0.75rem" });
-globalStyle(".module-operation-technical dd .module-proposal-preview", { "margin": "0" });
-globalStyle(".module-proposal-evidence > ul", { "display": "grid", "gap": "0.55rem", "margin": "0 0 0.65rem", "padding": "0", "listStyle": "none" });
-globalStyle(".module-proposal-evidence > ul > li", { "padding": "0.65rem", "border": "1px solid var(--line)", "borderRadius": "0.3rem" });
-globalStyle(".module-proposal-evidence p", { "margin": "0 0 0.35rem", "fontSize": "0.78rem" });
-globalStyle(".module-proposal-evidence ul", { "display": "grid", "gap": "0.25rem", "margin": "0.4rem 0", "paddingLeft": "1.1rem" });
-globalStyle(".module-proposal-evidence li li", { "display": "flex", "alignItems": "baseline", "flexWrap": "wrap", "gap": "0.4rem", "color": "var(--muted)", "fontSize": "0.73rem" });
-globalStyle(".module-proposal-evidence code,\n.module-operation-technical code,\n.module-proposal-technical code", { "overflowWrap": "anywhere" });
-globalStyle(".module-proposal-no-evidence", { "margin": "0.65rem 0", "color": "var(--muted)", "fontSize": "0.78rem" });
-globalStyle(".module-proposal-technical", { "marginTop": "0.65rem" });
-globalStyle(".module-proposal-action-note", { "marginTop": "0.7rem", "padding": "0.7rem 0", "borderTop": "1px solid var(--line)" });
-globalStyle(".module-proposal-action-note strong", { "fontSize": "0.8rem" });
-globalStyle(".module-proposal-action-note p", { "margin": "0.22rem 0 0", "color": "var(--muted)", "fontSize": "0.76rem", "lineHeight": "1.5" });
-globalStyle(".module-proposal-actions", { "display": "flex", "alignItems": "center", "flexWrap": "wrap", "gap": "0.55rem", "margin": "0.3rem 0 0" });
-globalStyle(".module-proposal-actions button", { "minHeight": "2.75rem" });
-globalStyle(".module-proposal-actions .quiet-button", { "borderColor": "var(--line)", "color": "var(--muted)", "background": "transparent" });
-globalStyle(".module-proposal-actions .quiet-button:hover:not(:disabled)", { "borderColor": "var(--accent)", "color": "var(--accent-strong)", "background": "var(--surface-selected)" });
-globalStyle(".module-proposal-actions button:disabled", { "cursor": "not-allowed" });
-globalStyle(".module-proposal-card", { "@container": { "module-review (max-width: 34rem)": { "padding": "0.75rem" } } });
-globalStyle(".module-proposal-heading", { "@container": { "module-review (max-width: 34rem)": { "display": "grid" } } });
-globalStyle(".module-proposal-heading time", { "@container": { "module-review (max-width: 34rem)": { "maxWidth": "none", "textAlign": "left" } } });
-globalStyle(".module-operation-heading", { "@container": { "module-review (max-width: 34rem)": { "gridTemplateColumns": "auto minmax(0, 1fr)" } } });
-globalStyle(".module-operation-state", { "@container": { "module-review (max-width: 34rem)": { "gridColumn": "2", "maxWidth": "none", "textAlign": "left" } } });
-globalStyle(".module-operation-technical dl > div,\n  .module-proposal-technical dl > div", { "@container": { "module-review (max-width: 34rem)": { "gridTemplateColumns": "minmax(0, 1fr)", "gap": "0.15rem" } } });
+import { globalStyle } from '@vanilla-extract/css';
+
+globalStyle('.proposal-review.module-proposal-review', {
+  container: 'module-review / inline-size',
+  minWidth: '0',
+  marginTop: '1.35rem',
+  padding: 'clamp(0.75rem, 2.2cqi, 1.4rem)',
+  border: '0',
+  borderTop: '2px solid var(--accent)',
+  borderRadius: '0',
+  color: 'var(--ink)',
+  background: 'transparent',
+});
+globalStyle('.module-review-masthead', {
+  display: 'flex',
+  alignItems: 'flex-end',
+  justifyContent: 'space-between',
+  gap: '1rem',
+  padding: '0.25rem 0 0.85rem',
+  borderBottom: '1px solid var(--line)',
+});
+globalStyle('.module-proposal-origin,\n.module-operation-number', {
+  margin: '0 0 0.35rem',
+  color: 'var(--muted)',
+  fontSize: '0.7rem',
+  fontWeight: '700',
+});
+globalStyle('.module-review-masthead h2', { margin: '0', color: 'var(--ink)', fontSize: '1.15rem', lineHeight: '1.35' });
+globalStyle('.module-review-masthead > div:first-child > p:last-child', {
+  maxWidth: '46rem',
+  margin: '0.35rem 0 0',
+  color: 'var(--muted)',
+  fontSize: '0.84rem',
+  lineHeight: '1.55',
+});
+globalStyle('.module-review-count', {
+  flex: '0 0 auto',
+  margin: '0',
+  color: 'var(--muted)',
+  fontSize: '0.78rem',
+  fontVariantNumeric: 'tabular-nums',
+});
+globalStyle('.module-review-authority-note', {
+  margin: '0.65rem 0',
+  padding: '0.65rem 0.75rem',
+  border: '1px solid var(--line)',
+  borderRadius: '0.3rem',
+  color: 'var(--muted)',
+  background: 'var(--paper-dark)',
+  fontSize: '0.8rem',
+  lineHeight: '1.55',
+});
+globalStyle('.module-review-error,\n.module-proposal-warning', {
+  padding: '0.65rem 0.75rem',
+  border: '1px solid var(--error-border)',
+  borderRadius: '0.35rem',
+  color: 'var(--error-text)',
+  background: 'var(--error-bg)',
+  lineHeight: '1.55',
+});
+globalStyle('.module-proposal-list', { display: 'grid', gap: '0.8rem', margin: '0', padding: '0', listStyle: 'none' });
+globalStyle('.module-proposal-list > li', { minWidth: '0' });
+globalStyle('.module-proposal-card', {
+  minWidth: '0',
+  margin: '0',
+  padding: '0.8rem',
+  border: '1px solid var(--line)',
+  borderRadius: '0.35rem',
+  color: 'var(--ink)',
+  background: 'var(--paper)',
+});
+globalStyle('.module-proposal-heading', { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.8rem' });
+globalStyle('.module-proposal-origin', { marginTop: '0.25rem', marginBottom: '0', color: 'var(--muted)' });
+globalStyle('.module-proposal-heading h3', { margin: '0', overflowWrap: 'anywhere', fontSize: '1rem', lineHeight: '1.45' });
+globalStyle('.module-proposal-heading time', {
+  flex: '0 0 auto',
+  maxWidth: '10rem',
+  color: 'var(--muted)',
+  fontSize: '0.72rem',
+  fontVariantNumeric: 'tabular-nums',
+  textAlign: 'right',
+});
+globalStyle('.module-proposal-summary', {
+  display: 'flex',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: '0.4rem 0.8rem',
+  margin: '0.65rem 0',
+  color: 'var(--muted)',
+  fontSize: '0.76rem',
+});
+globalStyle('.module-proposal-summary > span:not(.module-proposal-state)::before', {
+  marginRight: '0.45rem',
+  color: 'var(--line)',
+  content: '"·"',
+});
+globalStyle('.module-proposal-state', {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.35rem',
+  color: 'var(--accent-strong)',
+  fontWeight: '700',
+});
+globalStyle('.module-proposal-state::before', {
+  width: '0.42rem',
+  height: '0.42rem',
+  borderRadius: '50%',
+  background: 'currentColor',
+  content: '""',
+});
+globalStyle('.module-proposal-state.is-complete', { color: 'var(--success)' });
+globalStyle('.module-proposal-state.is-attention', { color: 'var(--error-text)' });
+globalStyle('.module-proposal-warning', { margin: '0.65rem 0', fontSize: '0.82rem' });
+globalStyle('.module-proposal-operations', { minWidth: '0' });
+globalStyle('.module-proposal-operation', {
+  minWidth: '0',
+  margin: '0',
+  padding: '0.8rem 0',
+  border: '0',
+  borderTop: '1px solid var(--line)',
+  borderRadius: '0',
+  background: 'transparent',
+});
+globalStyle('.module-operation-heading', {
+  display: 'grid',
+  gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+  alignItems: 'start',
+  gap: '0.6rem',
+});
+globalStyle('.module-operation-number', { paddingTop: '0.2rem', color: 'var(--accent-strong)', fontVariantNumeric: 'tabular-nums' });
+globalStyle('.module-operation-heading h4', { margin: '0', overflowWrap: 'anywhere', fontSize: '0.9rem', lineHeight: '1.45' });
+globalStyle('.module-operation-heading p', { margin: '0.18rem 0 0', color: 'var(--muted)', fontSize: '0.76rem' });
+globalStyle('.module-operation-state', {
+  maxWidth: '12rem',
+  color: 'var(--muted)',
+  fontSize: '0.72rem',
+  lineHeight: '1.4',
+  textAlign: 'right',
+});
+globalStyle('.module-change-list', { display: 'grid', gap: '0.45rem', margin: '0.65rem 0 0', padding: '0', listStyle: 'none' });
+globalStyle('.module-change-entry', {
+  minWidth: '0',
+  padding: '0.65rem',
+  border: '1px solid var(--line)',
+  borderRadius: '0.3rem',
+  background: 'var(--page-bg)',
+});
+globalStyle('.module-change-heading', { display: 'flex', alignItems: 'flex-start', gap: '0.55rem', minWidth: '0' });
+globalStyle('.module-change-heading code', {
+  minWidth: '0',
+  overflowWrap: 'anywhere',
+  color: 'var(--ink)',
+  fontSize: '0.78rem',
+  lineHeight: '1.45',
+});
+globalStyle('.module-change-kind', {
+  flex: '0 0 auto',
+  padding: '0.08rem 0.35rem',
+  border: '1px solid var(--surface-selected-border)',
+  borderRadius: '0.25rem',
+  color: 'var(--accent-strong)',
+  fontSize: '0.68rem',
+  fontWeight: '700',
+});
+globalStyle('.module-change-kind.is-delete', { borderColor: 'var(--error-border)', color: 'var(--error-text)' });
+globalStyle('.module-change-before', {
+  marginTop: '0.45rem',
+  padding: '0.5rem 0.55rem',
+  border: '1px solid var(--line)',
+  borderRadius: '0.25rem',
+  background: 'var(--surface-subtle)',
+});
+globalStyle('.module-change-before > span', { color: 'var(--muted)', fontSize: '0.69rem', fontWeight: '700' });
+globalStyle('.module-change-before p', {
+  margin: '0.15rem 0 0',
+  overflowWrap: 'anywhere',
+  color: 'var(--muted)',
+  fontSize: '0.76rem',
+  lineHeight: '1.5',
+});
+globalStyle('.module-change-after-label', {
+  margin: '0.4rem 0 0',
+  padding: '0.5rem 0.55rem',
+  border: '1px solid var(--error-border)',
+  borderRadius: '0.25rem',
+  color: 'var(--error-text)',
+  background: 'var(--error-bg)',
+  fontSize: '0.78rem',
+});
+globalStyle('.module-change-after', {
+  marginTop: '0.45rem',
+  padding: '0 0.55rem 0.5rem',
+  border: '1px solid var(--surface-selected-border)',
+  borderRadius: '0.25rem',
+  background: 'var(--surface-selected)',
+});
+globalStyle(
+  '.module-change-after summary,\n.module-operation-technical summary,\n.module-proposal-evidence summary,\n.module-proposal-technical summary',
+  { minHeight: '2.45rem', padding: '0.6rem 0', color: 'var(--accent-strong)', cursor: 'pointer', fontSize: '0.78rem', fontWeight: '650' },
+);
+globalStyle('.module-proposal-preview', {
+  boxSizing: 'border-box',
+  width: '100%',
+  maxWidth: '100%',
+  maxHeight: '18rem',
+  margin: '0.2rem 0 0',
+  border: '0',
+  padding: '0',
+  background: 'transparent',
+  fieldSizing: 'content',
+  overflow: 'auto',
+  overflowWrap: 'anywhere',
+  whiteSpace: 'pre-wrap',
+  color: 'var(--ink)',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: '0.73rem',
+  lineHeight: '1.5',
+});
+globalStyle('.module-proposal-preview:focus-visible', { outline: '3px solid var(--focus-ring)', outlineOffset: '2px' });
+globalStyle('.module-operation-technical,\n.module-proposal-evidence,\n.module-proposal-technical', { borderTop: '1px solid var(--line)' });
+globalStyle('.module-operation-technical dl,\n.module-proposal-technical dl', { display: 'grid', gap: '0.4rem', margin: '0 0 0.6rem' });
+globalStyle('.module-operation-technical dl > div,\n.module-proposal-technical dl > div', {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(7rem, 0.35fr) minmax(0, 1fr)',
+  gap: '0.6rem',
+});
+globalStyle('.module-operation-technical dt,\n.module-proposal-technical dt', { color: 'var(--muted)', fontSize: '0.73rem' });
+globalStyle('.module-operation-technical dd,\n.module-proposal-technical dd', {
+  minWidth: '0',
+  margin: '0',
+  overflowWrap: 'anywhere',
+  fontSize: '0.75rem',
+});
+globalStyle('.module-operation-technical dd .module-proposal-preview', { margin: '0' });
+globalStyle('.module-proposal-evidence > ul', { display: 'grid', gap: '0.55rem', margin: '0 0 0.65rem', padding: '0', listStyle: 'none' });
+globalStyle('.module-proposal-evidence > ul > li', { padding: '0.65rem', border: '1px solid var(--line)', borderRadius: '0.3rem' });
+globalStyle('.module-proposal-evidence p', { margin: '0 0 0.35rem', fontSize: '0.78rem' });
+globalStyle('.module-proposal-evidence ul', { display: 'grid', gap: '0.25rem', margin: '0.4rem 0', paddingLeft: '1.1rem' });
+globalStyle('.module-proposal-evidence li li', {
+  display: 'flex',
+  alignItems: 'baseline',
+  flexWrap: 'wrap',
+  gap: '0.4rem',
+  color: 'var(--muted)',
+  fontSize: '0.73rem',
+});
+globalStyle('.module-proposal-evidence code,\n.module-operation-technical code,\n.module-proposal-technical code', {
+  overflowWrap: 'anywhere',
+});
+globalStyle('.module-proposal-no-evidence', { margin: '0.65rem 0', color: 'var(--muted)', fontSize: '0.78rem' });
+globalStyle('.module-proposal-technical', { marginTop: '0.65rem' });
+globalStyle('.module-proposal-action-note', { marginTop: '0.7rem', padding: '0.7rem 0', borderTop: '1px solid var(--line)' });
+globalStyle('.module-proposal-action-note strong', { fontSize: '0.8rem' });
+globalStyle('.module-proposal-action-note p', { margin: '0.22rem 0 0', color: 'var(--muted)', fontSize: '0.76rem', lineHeight: '1.5' });
+globalStyle('.module-proposal-actions', { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.55rem', margin: '0.3rem 0 0' });
+globalStyle('.module-proposal-actions button', { minHeight: '2.75rem' });
+globalStyle('.module-proposal-actions .quiet-button', { borderColor: 'var(--line)', color: 'var(--muted)', background: 'transparent' });
+globalStyle('.module-proposal-actions .quiet-button:hover:not(:disabled)', {
+  borderColor: 'var(--accent)',
+  color: 'var(--accent-strong)',
+  background: 'var(--surface-selected)',
+});
+globalStyle('.module-proposal-actions button:disabled', { cursor: 'not-allowed' });
+globalStyle('.module-proposal-card', { '@container': { 'module-review (max-width: 34rem)': { padding: '0.75rem' } } });
+globalStyle('.module-proposal-heading', { '@container': { 'module-review (max-width: 34rem)': { display: 'grid' } } });
+globalStyle('.module-proposal-heading time', {
+  '@container': { 'module-review (max-width: 34rem)': { maxWidth: 'none', textAlign: 'left' } },
+});
+globalStyle('.module-operation-heading', {
+  '@container': { 'module-review (max-width: 34rem)': { gridTemplateColumns: 'auto minmax(0, 1fr)' } },
+});
+globalStyle('.module-operation-state', {
+  '@container': { 'module-review (max-width: 34rem)': { gridColumn: '2', maxWidth: 'none', textAlign: 'left' } },
+});
+globalStyle('.module-operation-technical dl > div,\n  .module-proposal-technical dl > div', {
+  '@container': { 'module-review (max-width: 34rem)': { gridTemplateColumns: 'minmax(0, 1fr)', gap: '0.15rem' } },
+});
