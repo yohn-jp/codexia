@@ -68,10 +68,10 @@ StrictDocが直接扱えるsource-file/range relationを優先し、正本内に
 | TRC-01 | 登録済み全REQ-IDを一度だけ変換 | **LOCAL_PASS**: main baselineの33 IDをStrictDoc requirement nodeと照合し、欠落・重複・余分なIDを検査 |
 | TRC-02 | Markdown parse→HTML/JSON→同一入力から再生成 | **LOCAL_PASS**: StrictDoc 0.32.1のHTML/JSONを2回生成し比較。HTML検索timestamp、確認済みMarkdown document MID、検索index key順とunordered membership順のみを正規化し、membership値と他の出力を保持 |
 | TRC-03 | REQ→TS/TSX/SQL source | **PARTIAL**: File relationの存在と範囲を検査。symbol AST coverageと全obligationへの網羅は未証明 |
-| TRC-04 | 逆引きroute/tool/DB inventory | **PARTIAL**: verifierが独立して、登録済みソース範囲のliteral route/method dispatch、`server.tool`名、初期migrationの名前付きDDL objectを検出し、分類の欠落・stale entriesを検査する。dynamic route families、他の登録module、追加migrationとinline constraint等は未走査で、完全inventoryはIssue #671に残す |
+| TRC-04 | 実装側の逆引き | **PARTIAL**: 既存の限定走査に加え、HTTPの許可済みmethod/pathと一部dispatcher、MCPのliteral登録、migrationの名前付きDDLとDBカタログ契約、UI control識別子、配備・バックアップの入口を `reverseTrace` に記録する。動的登録、live DB、UIの操作結果、hostと隔離復元の証拠は #671 の対象。 |
 | TRC-05 | TEST→CI exact source evidence | Node fault-injectionとPlaywright static-page testはローカル実測済み。GitHub run/source SHA/task/artifact identityをreportに記録し、hosted resultは当該PRの実際のVerify runで判定 |
 | TRC-06 | 重複UID・切れた参照・inventory欠落・不正MIDへの故障注入 | **LOCAL_PASS**: `verify.test.mjs`の負例を実行。legacy product behaviorの適合試験とは区別 |
-| TRC-07 | Repository Audit Pagesに静的サイトを公開 | **PENDING**: HTML/JSONをCI artifact pathへstageし、生成dashboardの絶対checkout pathをREPOSITORY_ROOTへ置換してからcredential/path検査し、Playwrightで要求ページを表示検査。公開経路の変更と公開SHA確認は依存Issue #669が所有 |
+| TRC-07 | Repository Audit Pagesに静的サイトを公開 | [#713](https://github.com/yohn-jp/codexia/pull/713) が既存publisherにStrictDoc HTMLとJSONを統合済み。PRは公開用の出力をChromiumで検査してプレビューに格納し、mainの公開ジョブが配信する。今回の義務ノードの公開先での確認と、API契約・全域追跡の残件は #669 で扱う。 |
 
 StrictDoc導入の範囲は、要求nodeと局所的な自動trace verifier、正直な残件表示まで。部分的なFile relationやsource-scoped inventoryを要求適合と読み替えない。symbol coverageと完全runtime inventoryはIssue #671の残件である。hosted green resultはexact source SHAごとにreportへ記録し、公開証跡はIssue #669のpublisherが確認する。
 
