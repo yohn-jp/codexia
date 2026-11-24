@@ -1,5 +1,6 @@
 """Exercise the owner setup host checkpoints without production credentials."""
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -45,7 +46,11 @@ case "$1" in
             echo probe >>"$TRACE"
             exit "${PROBE_STATUS:-0}"
         fi
-        case "${*: -1}" in *pg_database*) printf '%s\n' '123:456' ;; *) printf '%s\n' "${GRANT_LIVE:-t}" ;; esac
+        case "${*: -1}" in
+            *pg_database*) printf '%s\n' '123:456' ;;
+            *json_build_array*) printf '%s\n' "${GRANT_BINDING:-}" ;;
+            *) printf '%s\n' "${GRANT_LIVE:-t}" ;;
+        esac
         ;;
     run)
         case "${*: -1}" in
@@ -143,6 +148,46 @@ esac
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("start", self.trace.read_text())
         self.assertFalse(self.unit.exists())
+
+    def test_replaced_grant_requires_a_fresh_r5_approval_before_tunnel_start(self):
+        self.environment["DESCRIPTION"] = json.dumps({"state": "SETUP_PENDING", "grantId": OWNER})
+        self.environment["GRANT_BINDING"] = "b" * 64
+        self.private_file(self.state / "owner-setup.age", "encrypted-fixture")
+        expected = {
+            "setupMarkerPresent": True, "grantBindingSha256": "a" * 64,
+            "pendingHandoff": False, "encryptedHandoffPresent": True, "settingsSha256": None,
+        }
+        self.environment["CODEXIA_OWNER_SETUP_EXPECTED_CHECKPOINT"] = json.dumps(expected)
+        result = self.run_setup("--converge", "NEW_APPROVED", "age1fixture")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checkpoint changed", result.stderr)
+        self.assertFalse(self.unit.exists())
+        self.assertFalse(self.trace.exists())
+
+        expected["grantBindingSha256"] = "b" * 64
+        self.environment["CODEXIA_OWNER_SETUP_EXPECTED_CHECKPOINT"] = json.dumps(expected)
+        result = self.run_setup("--converge", "NEW_APPROVED", "age1fixture")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--user start codexia-tunnel.service", self.trace.read_text())
+
+    def test_prepare_requires_reapproval_if_subject_settings_committed_after_preflight(self):
+        self.environment["GRANT_BINDING"] = "a" * 64
+        self.private_file(self.runtime, f"CODEXIA_OAUTH_OWNER_SUBJECT={OWNER}\n")
+        expected = {
+            "setupMarkerPresent": True, "grantBindingSha256": "a" * 64,
+            "pendingHandoff": False, "encryptedHandoffPresent": False, "settingsSha256": None,
+        }
+        self.environment["CODEXIA_OWNER_SETUP_EXPECTED_CHECKPOINT"] = json.dumps(expected)
+        result = self.run_setup("--prepare-activation")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checkpoint changed", result.stderr)
+        self.assertFalse(self.trace.exists())
+
+        expected["settingsSha256"] = hashlib.sha256(self.runtime.read_bytes()).hexdigest()
+        self.environment["CODEXIA_OWNER_SETUP_EXPECTED_CHECKPOINT"] = json.dumps(expected)
+        result = self.run_setup("--prepare-activation")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("verified", self.trace.read_text())
 
     def test_setup_readiness_verification_precedes_tunnel_start(self):
         self.environment["DESCRIPTION"] = json.dumps({"state": "SETUP_PENDING", "grantId": OWNER})

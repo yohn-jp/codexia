@@ -24,6 +24,7 @@
           - codexia_owner_setup_expected_web_client_id is match('^[a-zA-Z0-9._:/|+-]+$')
           - codexia_owner_setup_expected_web_redirect_uris is sequence and codexia_owner_setup_expected_web_redirect_uris is not string
           - codexia_owner_setup_expected_web_redirect_uris | length > 0
+          - codexia_expected_owner_setup_checkpoint is mapping
           - codexia_owner_setup_operation != 'owner-setup' or codexia_owner_setup_edge_approved | default(false) is sameas true
           - codexia_owner_setup_operation != 'owner-setup' or codexia_owner_setup_age_recipient is match('^age1[0-9a-z]+$')
         fail_msg: Owner handoff requires the pinned rootless account, certified Full image and protected enrollment approval.
@@ -41,6 +42,7 @@
         CODEXIA_OWNER_SETUP_EXPECTED_ORIGIN: "{{ codexia_owner_setup_expected_origin }}"
         CODEXIA_OWNER_SETUP_EXPECTED_WEB_CLIENT_ID: "{{ codexia_owner_setup_expected_web_client_id }}"
         CODEXIA_OWNER_SETUP_EXPECTED_WEB_REDIRECT_URIS: "{{ codexia_owner_setup_expected_web_redirect_uris | join(',') }}"
+        CODEXIA_OWNER_SETUP_EXPECTED_CHECKPOINT: "{{ codexia_expected_owner_setup_checkpoint | to_json }}"
       ansible.builtin.command:
         argv: "{{ [owner_setup_home + '/.local/bin/codexia-owner-setup'] + owner_setup_operations[codexia_owner_setup_operation] }}"
         expand_argument_vars: false

@@ -258,6 +258,7 @@ class BootstrapControllerTests(unittest.TestCase):
             ("vars", "codexia_recreate_missing_app_database_approved", True),
             ("vars", "codexia_bootstrap_stages", ["base", "auth-runtime"]),
             ("vars", "codexia_expected_bootstrap_resume", {"clusterId": "123"}),
+            ("vars", "codexia_expected_owner_setup_checkpoint", {"setupMarkerPresent": True}),
             ("vars", "codexia_owner_setup_install_intent", True),
             ("vars", "codexia_owner_setup_operation", "open"),
         ):

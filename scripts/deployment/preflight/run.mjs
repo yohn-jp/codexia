@@ -211,7 +211,13 @@ async function planObservation({ bootstrapMode } = {}) {
         ...(plan.observation.bootstrapResume ? {
           codexia_expected_bootstrap_resume: plan.observation.bootstrapResume,
         } : {}),
-      } : { codexia_owner_setup_operation: bootstrapMode };
+      } : {
+        codexia_owner_setup_operation: bootstrapMode,
+        codexia_expected_owner_setup_checkpoint: {
+          ...host.database.ownerSetupCheckpoint,
+          settingsSha256: host.database.settingsSha256 ?? null,
+        },
+      };
       if (admission.installIntent || admission.route === 'R5') {
         Object.assign(overrides, ownerSetupFrontendBindings(candidateFrontend.identity.oauthConfigIdentity, edge.origin));
       }

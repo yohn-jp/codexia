@@ -82,6 +82,34 @@ assert_installation() {
   if present "$intent"; then assert_intent; fi
 }
 
+assert_approved_checkpoint() {
+  [[ -v CODEXIA_OWNER_SETUP_EXPECTED_CHECKPOINT ]] || return 0
+  ! present "$promoted" || die 'The owner setup checkpoint changed after approval'
+
+  local setup_marker=false pending=false encrypted=false grant settings='' observed
+  if present "$marker"; then setup_marker=true; fi
+  if present "$pending_handoff"; then pending=true; fi
+  if private_file "$handoff" && [[ -s "$handoff" ]]; then encrypted=true; fi
+  # Match Preflight's grant identity without reading the key or the grant digest.
+  grant="$(read_database "SELECT CASE WHEN grant_id IS NOT NULL
+    THEN encode(sha256(convert_to(json_build_array(grant_id, extract(epoch FROM expires_at))::text,'UTF8')),'hex') END
+    FROM (SELECT 1) seed LEFT JOIN codexia_auth.owner_setup ON id='first-owner'")"
+  if grep -q '^CODEXIA_OAUTH_OWNER_SUBJECT=' "$runtime"; then
+    settings="$(sha256sum -- "$runtime")"
+    settings="${settings%% *}"
+  fi
+  observed="$(jq -cn --argjson marker "$setup_marker" --argjson pending "$pending" --argjson encrypted "$encrypted" \
+    --arg grant "$grant" --arg settings "$settings" '{
+      setupMarkerPresent: $marker,
+      grantBindingSha256: (if $grant == "" then null else $grant end),
+      pendingHandoff: $pending,
+      encryptedHandoffPresent: $encrypted,
+      settingsSha256: (if $settings == "" then null else $settings end)
+    }')"
+  jq -e --argjson observed "$observed" '. == $observed' <<<"$CODEXIA_OWNER_SETUP_EXPECTED_CHECKPOINT" >/dev/null 2>&1 ||
+    die 'The owner setup checkpoint changed after approval'
+}
+
 assert_setup_unit_or_clean() {
   if present "$unit"; then
     private_file "$unit" && cmp -s "$setup_unit" "$unit" || die 'The active API unit differs from the approved setup unit'
@@ -164,6 +192,7 @@ case "$operation" in
   --converge)
     [[ $# == 4 && ( "$3" == NEW_APPROVED || "$3" == OBSERVE_ONLY ) ]] && ! present "$promoted" ||
       die 'Owner setup convergence requires an approved fresh or existing setup installation'
+    assert_approved_checkpoint
     assert_setup_unit_or_clean
     if present "$marker"; then
       assert_installation
@@ -221,6 +250,7 @@ case "$operation" in
   --prepare-activation)
     [[ $# == 2 ]] || die 'Activation preparation requires the reviewed Full image'
     assert_installation
+    assert_approved_checkpoint
     if present "$promoted"; then
       private_file "$promoted" || die 'Owner activation preparation evidence is not a private regular file'
       "$HOME/.local/bin/codexia-require-clean-api-target"
