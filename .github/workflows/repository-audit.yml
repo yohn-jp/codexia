@@ -26,6 +26,8 @@ on:
       - 'pnpm-lock.yaml'
       - 'scripts/code-scanning-pages/**'
       - 'scripts/verification/artifacts/pages-smoke.mjs'
+      - 'scripts/verification/artifacts/pages-live-ux.mjs'
+      - 'scripts/verification/artifacts/pages-live-ux.test.mjs'
       - 'docs/architecture/SYSTEM-DESIGN.md'
       - 'docs/architecture/DATA-MODEL.md'
       - 'docs/design/USER-SCREEN-FLOW.md'
@@ -423,3 +425,13 @@ jobs:
       - name: Deploy development portal
         id: deployment
         uses: actions/deploy-pages@v5.0.1
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/verification/artifacts/pages-live-ux.mjs
+          sparse-checkout-cone-mode: false
+      - name: Verify the published UX projection
+        env:
+          PAGES_URL: ${{ steps.deployment.outputs.page_url }}
+        run: node scripts/verification/artifacts/pages-live-ux.mjs "$PAGES_URL" "$GITHUB_SHA"

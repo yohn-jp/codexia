@@ -181,6 +181,8 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/pages-api/package.json',
   'scripts/pages-api/reference-entry.js',
   'scripts/verification/artifacts/pages-smoke.mjs',
+  'scripts/verification/artifacts/pages-live-ux.mjs',
+  'scripts/verification/artifacts/pages-live-ux.test.mjs',
   'scripts/pages-ui/navigation.mjs',
   'scripts/audit/repomix.config.json',
   '.github/workflows/production-preflight.yml',
