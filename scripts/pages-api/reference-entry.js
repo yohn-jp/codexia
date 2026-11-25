@@ -26,5 +26,25 @@ createApiReference('#scalar-api-reference', {
       --scalar-sidebar-search-color: #a0a0a0;
       --scalar-color-red: #ff7373;
     }
+    /* Keep long operation paths and code examples inside the Pages viewport. */
+    #scalar-api-reference,
+    #scalar-api-reference .references-layout,
+    #scalar-api-reference .references-content,
+    #scalar-api-reference .scalar-api-reference,
+    #scalar-api-reference .t-doc,
+    #scalar-api-reference .t-doc__header,
+    #scalar-api-reference .t-doc__content {
+      min-inline-size: 0;
+      max-inline-size: 100%;
+    }
+    #scalar-api-reference .t-doc__header > header > .flex-1.whitespace-nowrap {
+      min-inline-size: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #scalar-api-reference pre {
+      max-inline-size: 100%;
+      overflow-x: auto;
+    }
   `,
 });
