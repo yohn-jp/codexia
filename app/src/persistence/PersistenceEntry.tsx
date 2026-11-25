@@ -8,10 +8,6 @@ import { createConsoleReturnLocation } from "../console/console-return";
 import { CONSOLE_NAVIGATION_REQUEST } from "../console/console-navigation";
 import { attemptNativeLogout } from "./nativeLogout";
 import type { NativeSignOutResult } from "../../native/plugins/codexia-auth/src/index.mjs";
-import { sessionContent } from "./PersistenceEntry.css";
-import { buttonRecipe } from "../components/button.css";
-
-const quietButtonClass = `quiet-button ${buttonRecipe({ tone: "quiet" })}`;
 
 type EntryState = "checking" | "signed-out" | "database" | "failed";
 
@@ -230,7 +226,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
   }
 
   if (state === "database") return <>
-    <div className={sessionContent({ state: sessionBlocked ? "blocked" : "active" })} inert={sessionBlocked} hidden={sessionBlocked}>
+    <div inert={sessionBlocked} hidden={sessionBlocked} style={{ display: sessionBlocked ? "none" : "contents" }}>
       <PersistenceWorkspace mode={mode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
         if (nativeShell) { void completeNativeLogout(); return; }
         if (oauthConfig) void completeWebOAuthLogout();
@@ -238,7 +234,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     </div>
     {consoleNavigationError && <div className="codexia-console-nav-error" role="alert">
       <p>{consoleNavigationError}</p>
-      <button type="button" className={quietButtonClass} onClick={() => setConsoleNavigationError("")}>閉じる</button>
+      <button type="button" className="quiet-button" onClick={() => setConsoleNavigationError("")}>閉じる</button>
     </div>}
     {sessionBlocked && <main className={`pg-entry pg-${mode}`}><section className="pg-login" aria-labelledby="pg-recheck-title">
       <h1 id="pg-recheck-title">認証・接続を再確認してください</h1>

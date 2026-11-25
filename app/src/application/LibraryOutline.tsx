@@ -94,19 +94,11 @@ function ContinuePanel({
               <li key={candidate.sceneId}>
                 <strong>{sceneTitleInTree(tree, candidate.sceneId)}</strong>
                 {handoff && <small>{handoff}</small>}
-                <button
-                  type="button"
-                  className={`quiet-button ${buttonRecipe({ size: 'compact', tone: 'quiet' })}`}
-                  onClick={() => onContinue(candidate)}
-                >
+                <button type="button" className={`quiet-button ${buttonRecipe({ size: 'compact' })}`} onClick={() => onContinue(candidate)}>
                   {index === 0 ? '続きを書く' : 'こちらを開く'}
                 </button>
                 {candidate.pageIndex !== null && (
-                  <button
-                    type="button"
-                    className={`quiet-button ${buttonRecipe({ size: 'compact', tone: 'quiet' })}`}
-                    onClick={() => onRead(candidate)}
-                  >
+                  <button type="button" className={`quiet-button ${buttonRecipe({ size: 'compact' })}`} onClick={() => onRead(candidate)}>
                     読書位置を開く
                   </button>
                 )}

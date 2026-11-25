@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { passkeyClient } from "@better-auth/passkey/client";
 import { createAuthClient } from "better-auth/react";
-import { buttonRecipe } from "../components/button.css";
-
-const quietButtonClass = `quiet-button ${buttonRecipe({ tone: "quiet" })}`;
 
 const API = "/api/auth/codexia/setup";
 const FETCH_OPTIONS = { credentials: "same-origin", cache: "no-store", redirect: "error" } as const;
@@ -252,7 +249,7 @@ export function ConsoleSetup({ consoleUrl }: { readonly consoleUrl: string }) {
           value={email} onChange={(event) => setEmail(event.target.value)}/>
         <div className="codexia-console__actions">
           <button type="submit" className="primary-button" disabled={busy}>次へ</button>
-          <button type="button" className={quietButtonClass} disabled={busy} onClick={clearTransaction}>キー入力へ戻る</button>
+          <button type="button" className="quiet-button" disabled={busy} onClick={clearTransaction}>キー入力へ戻る</button>
         </div>
       </form>
     </>}
@@ -260,12 +257,12 @@ export function ConsoleSetup({ consoleUrl }: { readonly consoleUrl: string }) {
       <p>{name} さんのPasskeyを登録します。ボタンを押し、ブラウザーの案内に沿って本人確認を行ってください。</p>
       <div className="codexia-console__actions">
         <button type="button" className="primary-button" disabled={busy} onClick={createPasskey}>Passkeyを作成</button>
-        <button type="button" className={quietButtonClass} disabled={busy} onClick={clearTransaction}>キー入力へ戻る</button>
+        <button type="button" className="quiet-button" disabled={busy} onClick={clearTransaction}>キー入力へ戻る</button>
       </div>
     </>}
     {message && <p className="codexia-setup__error" role="alert">{message}</p>}
     {current !== "setup-pending" && current !== "checking" && <div className="codexia-console__actions">
-      {current !== "active" && <button type="button" className={quietButtonClass} disabled={busy}
+      {current !== "active" && <button type="button" className="quiet-button" disabled={busy}
         onClick={() => { void run(async () => { await refresh(); }); }}>登録状況を更新</button>}
       {(current === "active" || current === "blocked") && <a href={consoleUrl} className="codexia-console__link">管理コンソールへ</a>}
     </div>}

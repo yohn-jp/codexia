@@ -15,18 +15,8 @@ try {
   endFileScope();
 }
 const buttonStyles = (await import('../components/button.css')) as unknown as {
-  buttonRecipe?: (options: { size?: 'compact'; tone?: 'quiet' }) => string;
+  buttonRecipe?: (options: { size?: 'compact' }) => string;
 };
-let sessionContent: ((options: { state: 'active' | 'blocked' }) => string) | undefined;
-setFileScope('src/persistence/PersistenceEntry.css.ts', '@codexia/app');
-try {
-  const persistenceStyles = (await import('../persistence/PersistenceEntry.css')) as unknown as { sessionContent?: typeof sessionContent };
-  sessionContent = persistenceStyles.sessionContent;
-} catch {
-  // Keep the red test assertion focused on the missing state recipe.
-} finally {
-  endFileScope();
-}
 let scopeGlobalSelector: ((selector: string) => string) | undefined;
 setFileScope('src/styles/scoped-global-style.css.ts', '@codexia/app');
 try {
@@ -55,14 +45,9 @@ const tree = {
   ],
 };
 
-test('shared button recipe exposes distinct compact and quiet variants', () => {
+test('shared button recipe exposes a distinct compact size variant', () => {
   assert.equal(typeof buttonStyles.buttonRecipe, 'function');
-  assert.notEqual(buttonStyles.buttonRecipe?.({ size: 'compact' }), buttonStyles.buttonRecipe?.({ size: 'compact', tone: 'quiet' }));
-});
-
-test('session visibility uses distinct active and blocked recipe variants', () => {
-  assert.equal(typeof sessionContent, 'function');
-  assert.notEqual(sessionContent?.({ state: 'active' }), sessionContent?.({ state: 'blocked' }));
+  assert.notEqual(buttonStyles.buttonRecipe?.({}), buttonStyles.buttonRecipe?.({ size: 'compact' }));
 });
 
 test('global component selectors stay inside the React root while document and theme roots remain global', () => {

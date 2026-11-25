@@ -1,6 +1,6 @@
 import './theme.css';
 import './shell-theme.css';
-import { type CSSProperties } from '@vanilla-extract/css';
+import type { CSSProperties } from '@vanilla-extract/css';
 import { scopedGlobalStyle as globalStyle } from './styles/scoped-global-style.css';
 
 globalStyle(':root', {
@@ -59,6 +59,8 @@ globalStyle('select', {
   background: 'var(--paper)',
   font: 'inherit',
 });
+globalStyle('.quiet-button', { borderColor: 'var(--input-border)', color: 'var(--accent-strong)', background: 'transparent' });
+globalStyle('.quiet-button:hover:not(:disabled)', { color: 'var(--button-foreground)' });
 globalStyle('.loading', { margin: '3rem auto', color: 'var(--muted)', textAlign: 'center' });
 globalStyle('.eyebrow', { margin: '0', color: 'var(--muted)', fontSize: '0.84rem', overflowWrap: 'anywhere' });
 globalStyle('.status', { minHeight: '1.5rem', margin: '0.25rem 0', color: 'var(--muted)', lineHeight: '1.5' });

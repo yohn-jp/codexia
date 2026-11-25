@@ -354,7 +354,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
     <>
       <button
         type="button"
-        className={`quiet-button ${buttonRecipe({ size: 'compact', tone: 'quiet' })}`}
+        className={`quiet-button ${buttonRecipe({ size: 'compact' })}`}
         onClick={() => {
           setOpen(true);
           void refresh();
@@ -373,7 +373,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
           <button
             type="button"
             data-ux-control="JOB-01.A"
-            className={`quiet-button ${buttonRecipe({ size: 'compact', tone: 'quiet' })}`}
+            className={`quiet-button ${buttonRecipe({ size: 'compact' })}`}
             onClick={() => void refresh()}
             disabled={loading}
           >
@@ -439,7 +439,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
                     {!item.read ? (
                       <button
                         type="button"
-                        className={`quiet-button ${buttonRecipe({ size: 'compact', tone: 'quiet' })}`}
+                        className={`quiet-button ${buttonRecipe({ size: 'compact' })}`}
                         onClick={() => void markRead(item.id)}
                         disabled={!canWrite || busyInboxAction !== null}
                       >
@@ -456,7 +456,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
         <div className={footer}>
           <button
             type="button"
-            className={`quiet-button ${buttonRecipe({ size: 'compact', tone: 'quiet' })}`}
+            className={`quiet-button ${buttonRecipe({ size: 'compact' })}`}
             onClick={() => void markAllRead()}
             disabled={!canWrite || unreadCount === 0 || busyInboxAction !== null}
           >

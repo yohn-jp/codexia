@@ -9,17 +9,5 @@ export const buttonRecipe = recipe({
         paddingInline: '0.55rem',
       },
     },
-    tone: {
-      quiet: {
-        borderColor: 'var(--input-border)',
-        color: 'var(--accent-strong)',
-        background: 'transparent',
-        selectors: {
-          '&:hover:not(:disabled)': {
-            color: 'var(--button-foreground)',
-          },
-        },
-      },
-    },
   },
 });

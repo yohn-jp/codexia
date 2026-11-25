@@ -98,7 +98,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | --- | --- | --- | --- |
 | `@vanilla-extract/css` | `1.21.3` (`app` build-only) | Desktop Web・型付きテーマ／静的CSS | **採用済み**: Light/Dark/Paper semantic token contractを生成時にCSSへ展開 |
 | `@vanilla-extract/vite-plugin` | `5.2.6` (`app` build-only) | Vite 8・CSSビルド統合 | **採用済み**: Vite 8をpeer dependencyとして許可し、OAuth source boundaryを維持 |
-| `@vanilla-extract/recipes` | `0.5.7` (`app` build-only) | Desktop UI・型付きsize/tone/state variants | **採用済み**: 共有buttonと認証／通知表示の離散variantを静的CSSとして生成 |
+| `@vanilla-extract/recipes` | `0.5.7` (`app` build-only) | Desktop UI・型付きsize/state variants | **採用済み**: 共有button sizeと通知read stateの離散variantを静的CSSとして生成 |
 
 既存のVanilla CSSは移行元であり、恒久的な第二のデザインシステムにしない。CodeMirror等の外部スタイルは責務を分離して維持可能。iOS SwiftUIは対象外。
 
