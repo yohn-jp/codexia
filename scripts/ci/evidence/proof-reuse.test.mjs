@@ -64,6 +64,9 @@ test('task proof Octokit client accepts only the canonical read-only API paths',
   const runs = await client.paginate('actions/workflows/7/runs', { head_sha: sourceSha, event: 'push' }, 'workflow_runs');
   assert.deepEqual(runs, []);
   assert.deepEqual(await client.paginate('commits/' + sourceSha + '/pulls', {}, null), []);
+  assert.equal(client.get.paginate, client.paginate);
+  assert.deepEqual(await client.get.paginate('commits/' + sourceSha + '/pulls', {}, null), []);
+  await assert.rejects(client.get.paginate('https://evil.example/upload', {}, null), /Unexpected GitHub task proof API endpoint/);
   assert.deepEqual(await client.paginate('/repos/yohn-jp/codexia/actions/workflows/7/runs',
     { head_sha: sourceSha, event: 'push' }, 'workflow_runs'), []);
   assert.ok(seen.every(item => item.url.startsWith('https://api.github.com/repos/yohn-jp/codexia/')));
