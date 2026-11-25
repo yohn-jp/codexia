@@ -40,8 +40,8 @@
 | REQ-AUTH-005 | [Admin flow](../design/ADMIN-SCREEN-FLOW.md) | /console、/console/security、/console/identity は現行未実装 | 受入テスト未特定 | UNMAPPED |
 | REQ-API-001 | [API contract](../architecture/API-CONTRACT.md) | packages/api/src/server.ts、persistence-routes.ts、各moduleのHTTP contribution | persistence-routes.test.ts。全DTO未収録 | PARTIAL |
 | REQ-API-002 | [Interaction](../design/INTERACTION-CONTRACT.md) | persistence-routes.ts、postgres-store.ts、app/src/api.ts | tests/e2e/core.acceptance.spec.ts | MAPPED_UNVERIFIED |
-| REQ-MCP-001 | [Modules](../architecture/MODULES.md) | modules/mcp/src/http.ts、stdio.ts、tools.ts | tests/integration/mcp-acceptance.test.mjs | MAPPED_UNVERIFIED |
-| REQ-MCP-002 | [MCP-first](../architecture/MCP-FIRST.md) | modules/mcp/src/tools.ts、tools/shared.ts | tests/integration/mcp-acceptance.test.mjs | MAPPED_UNVERIFIED |
+| REQ-MCP-001 | [Modules](../architecture/MODULES.md)、[MCP v2 migration](../architecture/MCP-V2-MIGRATION.md) | modules/mcp/src/http.ts、stdio.ts、tools.ts、tools/shared.ts、tools/project.ts、tools/knowledge.ts | MCPV-001..008; tests/integration/mcp-acceptance.test.mjs; modules/mcp/src/tools.test.ts | MAPPED_UNVERIFIED |
+| REQ-MCP-002 | [MCP-first](../architecture/MCP-FIRST.md)、[MCP v2 migration](../architecture/MCP-V2-MIGRATION.md) | modules/mcp/src/tools.ts、tools/shared.ts、tools/project.ts、tools/knowledge.ts | MCPV-001..008; tests/integration/mcp-acceptance.test.mjs | MAPPED_UNVERIFIED |
 | REQ-UI-001 | [User flow](../design/USER-SCREEN-FLOW.md) | app/src/launcher.tsx、app/src/shells/ | tests/e2e/modular-workspace.acceptance.spec.ts | MAPPED_UNVERIFIED |
 | REQ-UI-002 | [Interaction](../design/INTERACTION-CONTRACT.md) | app/src/storage/、app/src/api.ts、app/src/journal.test.ts | auth-recovery.acceptance.spec.ts、core.acceptance.spec.ts | MAPPED_UNVERIFIED |
 | REQ-UI-003 | [Screen catalog](../design/SCREEN-CONTROL-CATALOG.md) | app/src/App.tsx、app/src/components/、app/src/shells/ | ui-v1.acceptance.spec.ts。全CTRL ID未照合 | PARTIAL |
@@ -59,6 +59,25 @@
 | REQ-QUAL-002 | [CI/CD](CI-CD.md) | .github/workflows/verify.yml、scripts/ci/impact/plan.mjs | exact-sourceのrun/artifact未結合 | MAPPED_UNVERIFIED |
 | REQ-QUAL-003 | [UX](../design/UX-CONTRACT.md) | scripts/performance/ | 条件固定の計測証拠未取得 | UNMAPPED |
 | REQ-TRACE-001 | [Requirements](../requirements/README.md) | この台帳とAPI・DB・外部IFの初期契約 | 全件逆走査・自動gate未実施 | PARTIAL |
+
+## MCP v2 migration verification crosswalk
+
+The accepted MCP requirements remain the conformance authorities; `MCPV-001..008` are verification-plan IDs from [MCP-V2-MIGRATION](../architecture/MCP-V2-MIGRATION.md), not product conformance statuses. Source locations and test case names below are trace candidates. `NOT_RUN` means no exact-source run/artifact was verified for this change. No MCPV item is marked PASS or VERIFIED here.
+
+MCP-specific source mapping was refreshed against current main `af9a7115` (Fastify HTTP platform migration) plus the local SDK v2 tool source changes. The repository requirement-trace gate checks deterministic UIDs/MIDs, source-path and line-range validity, each declared TEST-ID against its case name/source file, explicit requirement parents, and reverse-surface mappings; these checks do not replace protocol, Inspector, OAuth-client, PostgreSQL, or hosted exact-source evidence.
+
+| Plan ID | Requirement link | Source/test candidate | Trace state and remaining evidence |
+| --- | --- | --- | --- |
+| MCPV-001 | REQ-MCP-001, REQ-MCP-002 | `modules/mcp/src/tools.test.ts`: “native MCP schemas bound UUID reads and accept only the seven ordinary native ChangeSet operations” (`TEST-MCPV-001-001`); package TypeScript check | MAPPED_UNVERIFIED; verify all registered tools compile and input/output schemas validate at runtime; exact run NOT_RUN |
+| MCPV-002 | REQ-MCP-001 | `npx @modelcontextprotocol/conformance server --url <isolated-url>/mcp --requirements 2026-07-28` per migration design | UNMAPPED; no isolated protocol-conformance run or required-scenario report is attached; exact run NOT_RUN |
+| MCPV-003 | REQ-MCP-001 | MCP Inspector CLI/Web per migration design | UNMAPPED; no interop/reconnect/version-negotiation record is attached; exact run NOT_RUN |
+| MCPV-004 | REQ-MCP-001, REQ-MCP-002 | `tests/integration/mcp-acceptance.test.mjs`: “native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, review and receipt over both transports” (`TEST-MCPV-004-001`); `packages/api/src/server.test.ts`: “admits registered MCP OAuth clients by exact operation scope without owner rights” (`TEST-MCPV-004-002`) | PARTIAL; current candidates do not by themselves prove revoked clients, every scope boundary, owner separation, or all cross-project denials; exact run NOT_RUN |
+| MCPV-005 | REQ-MCP-001 | same native Knowledge PostgreSQL scenario (`TEST-MCPV-004-001`) | PARTIAL; source includes project scope, replay, author review/application, and receipt checks; the PostgreSQL restart dimension and exact execution evidence remain outstanding; exact run NOT_RUN |
+| MCPV-006 | REQ-MCP-001 | `tests/integration/mcp-acceptance.test.mjs`: “MCP cancellation stops real NLP worker jobs through stdio and Streamable HTTP” (`TEST-MCPV-006-001`) | PARTIAL; cancellation is a candidate slice; invalid headers, oversized inputs, shutdown/drain, and cross-request/client isolation remain separate obligations; exact run NOT_RUN |
+| MCPV-007 | REQ-MCP-001 | isolated 2026-only and explicitly bounded 2025 fallback scenarios per migration design | UNMAPPED; no protocol-era execution result is attached; exact run NOT_RUN |
+| MCPV-008 | REQ-MCP-001, REQ-MCP-002 | external MCP client OAuth PKCE, token refresh, project selection, and Tool/Result interaction per migration design | UNMAPPED; owner OAuth tests or local signed-token fixtures do not establish external MCP client interop; exact run NOT_RUN |
+
+`TEST-MCP-CORE-001-001` links the existing external Assistant admission/no-provider-call case to REQ-MCP-002; it is not a substitute for MCPV-002 protocol conformance. The case names are declared in StrictDoc nodes, and their source file relations use line coordinates. The Better Auth integration case for real MCP OAuth PKCE issuance remains pending and is not mapped until its exact test title and source range are available. Keep these mappings at MAPPED_UNVERIFIED/PARTIAL until the named cases are reviewed and exact-source evidence is captured.
 
 ## E2E追跡例 — 保存・競合・復旧
 

@@ -296,10 +296,10 @@ function discoverGeneratedContractRoutes(source) {
 function discoverMcpToolNames(source) {
   const code = stripSourceComments(source);
   const names = [];
-  for (const match of code.matchAll(/\bserver\.tool\s*\(/gu)) {
+  for (const match of code.matchAll(/\bserver\.(?:tool|registerTool)\s*\(/gu)) {
     const argument = code.slice(match.index + match[0].length);
     const nameMatch = /^\s*(["'])([A-Za-z][A-Za-z0-9_.-]*)\1/u.exec(argument);
-    if (!nameMatch) throw new Error('MCP server.tool registration must use a literal tool name in the supported inventory scope');
+    if (!nameMatch) throw new Error('MCP tool registration must use a literal tool name in the supported inventory scope');
     names.push(nameMatch[2]);
   }
   return names;

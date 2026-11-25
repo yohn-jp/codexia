@@ -63,8 +63,8 @@ OpenAPIのpatch番号は明確化や訂正に使用され、同じminor系列の
 | --- | --- | --- |
 | TypeSpec から生成した OpenAPI と Fastify スキーマで通常 API と setup API を登録。SSE と外部プロトコルは明示的なアダプターを経由 | TypeSpec→OpenAPI→Fastifyの明示的route/JSON SchemaとOrval client | 全method/path、CSP/nonce、CORS/CSRF、body limit、HTTP 401/403/404/405/409、stream/drainを追跡して移管。動的module route等は明示的adapter |
 | packages/api/src/persistence-routes.tsがbody/headersを手動検証しCore/DBへ委譲 | TypeSpec/OpenAPI由来のFastify JSON Schema/Ajvを入口に使用 | 既存のsemantic precondition、transaction/owner判定をvalidatorへ誤移管しない。Zodは業務/MCP/clientで維持 |
-| modules/mcp/src/http.tsはv1のstateful session map、Mcp-Session-Id、GET/POST/DELETE、idle timerを使う | SDK v2と2026 specのStateless HTTPをFastifyへ公式Web標準handler adapter経由で接続。必要な移行期間だけ正式に承認されたversionを扱う | owner/project/scopeの毎request再検証、CORS/headers、切断、stream、retry、旧session削除を実証 |
-| modules/mcp/src/stdio.tsはv1のStdioServerTransportへconnect、tool registrarはZod互換モード | v2のserveStdioとZod v4 | 入出力schema、同じaction/effect、STDOUT汚染なし、旧protocol拒否/許可の方針を明記 |
+| `modules/mcp/src/http.ts` は Fastify の中央認可を経た Web Request を公式 SDK v2 の `createMcpHandler` へ渡す | 2026-07-28 の stateless HTTP。旧世代は [MCP 移行設計](MCP-V2-MIGRATION.md) の期限付き互換を適用 | 各リクエストの owner、project、scope の再検証と、CORS、切断、stream、retry を実証 |
+| `modules/mcp/src/stdio.ts` は公式 SDK v2 の `serveStdio` と HTTP 共通のツール登録を使用 | 入出力スキーマは Zod v4 | Core の action と effect が共通であること、および標準出力の JSON-RPC、切断とプロトコル交渉を検証 |
 | public schemaは3つのSQL migrationとchecksum ledger、認証schemaはBetter Auth専用 | SQLを物理詳細契約として維持しpgTAPで検証 | schema/checksum/trigger/roleと隔離restoreを維持。既存migrationを改変しない |
 | 要件はMarkdown表30件と関連コードの候補パス | StrictDoc requirement relationとsource/TEST/evidence trace | 既存REQ-IDを保存し、一つの要求を二重編集可能な正本にしない |
 | 既存Architecture AtlasはMermaidを抽出し単一のRepository Audit Pagesへ公開 | LikeC4の構成ビューとStrictDoc/Scalarを同一公開者に統合 | 状態遷移は元Markdownが正本。LikeC4のコンテキスト図とMermaidの状態図を別責務で維持 |

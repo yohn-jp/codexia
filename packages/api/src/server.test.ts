@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, randomUUID, sign as signJwt } from 'node:crypto';
 import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
-import { get as httpGet } from 'node:http';
+import { get as httpGet, request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
@@ -37,6 +37,47 @@ import { type ApiServerOptions, createServer, start } from './server.js';
 
 const ACCESS_TOKEN = 'test-access-token-which-is-longer-than-32-characters';
 const SNAPSHOT: SnapshotId = { projectId: 'project-1', projectVersion: 1 };
+async function fetchWithHost(input: string, init: RequestInit, host: string): Promise<Response> {
+  const url = new URL(input);
+  const headers = new Headers(init.headers);
+  headers.set('host', host);
+  headers.set('connection', 'close');
+  const body = typeof init.body === 'string' ? init.body : init.body instanceof URLSearchParams ? init.body.toString() : undefined;
+  return new Promise((resolveResponse, reject) => {
+    const request = httpRequest(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port,
+        method: init.method ?? 'GET',
+        path: `${url.pathname}${url.search}`,
+        headers: Object.fromEntries(headers.entries()),
+      },
+      response => {
+        const responseHeaders = new Headers();
+        for (const [name, value] of Object.entries(response.headers)) {
+          if (Array.isArray(value)) for (const item of value) responseHeaders.append(name, item);
+          else if (value !== undefined) responseHeaders.set(name, value);
+        }
+        const status = response.statusCode ?? 500;
+        const bodyStream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            response.on('data', (chunk: Buffer | string) => controller.enqueue(Buffer.from(chunk)));
+            response.on('error', error => controller.error(error));
+            response.on('end', () => controller.close());
+          },
+          cancel() {
+            response.destroy();
+          },
+        });
+        resolveResponse(new Response([204, 205, 304].includes(status) ? null : bodyStream, { status, headers: responseHeaders }));
+      },
+    );
+    request.on('error', reject);
+    if (body !== undefined) request.write(body);
+    request.end();
+  });
+}
 async function nativePersistence(t: { after(callback: () => Promise<void>): void }) {
   const url = process.env.CODEXIA_TEST_DATABASE_URL;
   if (!url) throw new Error('CODEXIA_TEST_DATABASE_URL must name a disposable PostgreSQL test database for native Core API recovery tests');
@@ -233,7 +274,6 @@ interface PublishingObservations {
     authorization: string | null;
     cookie: string | null;
     proxyAuthorization: string | null;
-    mcpSessionId: string | null;
   };
   publicCoreActions?: ActionResult;
   publicActionIds?: string[];
@@ -286,7 +326,6 @@ function publishingRuntime(cacheDirectory: string, observed: PublishingObservati
             authorization: request.headers.get('authorization'),
             cookie: request.headers.get('cookie'),
             proxyAuthorization: request.headers.get('proxy-authorization'),
-            mcpSessionId: request.headers.get('mcp-session-id'),
           };
           observed.publicCoreActions = await context.invoke('core.proposals.list', {});
           observed.publicActionIds = (await context.listActions()).map(({ id }) => id);
@@ -389,7 +428,6 @@ function actionBoundaryRuntime(cacheDirectory: string): ModuleRuntime {
               headers: {
                 'Content-Type': 'text/event-stream',
                 'X-Test-MCP-Project': context.projectId,
-                ...(context.mcpSessionIdentity ? { 'X-Test-MCP-Identity': context.mcpSessionIdentity } : {}),
               },
             },
           );
@@ -2188,11 +2226,16 @@ describe('Codexia HTTP boundary', () => {
       oauthMcp,
     });
     t.after(api.close);
-    const send = (path: string, tokenValue: string, init: RequestInit = {}) =>
-      fetch(`${api.base}${path}`, {
-        ...init,
-        headers: { ...(init.body ? { 'Content-Type': 'application/json' } : {}), Authorization: `Bearer ${tokenValue}`, ...init.headers },
-      });
+    const send = (path: string, tokenValue: string, init: RequestInit = {}) => {
+      const headers = {
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        Authorization: `Bearer ${tokenValue}`,
+        ...init.headers,
+      };
+      return path.startsWith('/mcp')
+        ? fetchWithHost(`${api.base}${path}`, { ...init, headers }, new URL(audience).host)
+        : fetch(`${api.base}${path}`, { ...init, headers });
+    };
     const protectedMetadata = await fetch(`${api.base}/.well-known/oauth-protected-resource/api`);
     assert.equal(protectedMetadata.status, 200);
     assert.equal(protectedMetadata.headers.get('content-type'), 'application/json; charset=utf-8');
@@ -2214,28 +2257,45 @@ describe('Codexia HTTP boundary', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }),
     };
-    const standaloneChallenge = await fetch(api.base + '/mcp', initialize);
+    const standaloneChallenge = await fetchWithHost(api.base + '/mcp', initialize, new URL(audience).host);
     assert.equal(standaloneChallenge.status, 401);
     assert.equal(
       standaloneChallenge.headers.get('www-authenticate'),
       'Bearer resource_metadata="https://api.codexia.example/.well-known/oauth-protected-resource/api", scope="mcp:read mcp:compute mcp:propose"',
     );
-    const preflight = await fetch(api.base + '/mcp', {
-      method: 'OPTIONS',
-      headers: {
-        Origin: 'https://mcp-client.example.test',
-        'Access-Control-Request-Method': 'POST',
-        'Access-Control-Request-Headers': 'authorization, mcp-session-id, mcp-protocol-version',
+    const preflight = await fetchWithHost(
+      api.base + '/mcp',
+      {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://mcp-client.example.test',
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'authorization, mcp-protocol-version, mcp-method, mcp-name',
+        },
       },
-    });
+      new URL(audience).host,
+    );
     assert.equal(preflight.status, 204);
-    assert.equal(preflight.headers.get('access-control-allow-headers'), 'Authorization, Mcp-Session-Id, MCP-Protocol-Version');
-    const corsChallenge = await fetch(api.base + '/mcp', {
-      ...initialize,
-      headers: { ...initialize.headers, Origin: 'https://mcp-client.example.test' },
-    });
+    assert.equal(preflight.headers.get('access-control-allow-headers'), 'Authorization, MCP-Protocol-Version, Mcp-Method, Mcp-Name');
+    const corsChallenge = await fetchWithHost(
+      api.base + '/mcp',
+      {
+        ...initialize,
+        headers: { ...initialize.headers, Origin: 'https://mcp-client.example.test' },
+      },
+      new URL(audience).host,
+    );
     assert.equal(corsChallenge.status, 401);
-    assert.equal(corsChallenge.headers.get('access-control-expose-headers'), 'Mcp-Session-Id, WWW-Authenticate');
+    assert.equal(corsChallenge.headers.get('access-control-expose-headers'), 'MCP-Protocol-Version, WWW-Authenticate');
+    const spoofedHost = await fetchWithHost(api.base + '/mcp', initialize, 'attacker.example');
+    assert.equal(spoofedHost.status, 403, 'DNS-rebinding requests with an unconfigured Host are denied');
+    assert.equal(((await spoofedHost.json()) as { code: string }).code, 'MCP_HOST_DENIED');
+    const mismatchedOrigin = await fetchWithHost(
+      api.base + '/mcp',
+      { ...initialize, headers: { ...initialize.headers, Origin: 'https://attacker.example' } },
+      new URL(audience).host,
+    );
+    assert.equal(mismatchedOrigin.status, 403);
     assert.equal((await send('/mcp', ACCESS_TOKEN, initialize)).status, 401);
     const cookie = 'scriptorium_session=retired-fixture-value';
     assert.equal(
@@ -2250,19 +2310,18 @@ describe('Codexia HTTP boundary', () => {
     assert.equal((await send('/mcp?projectId=project-1&projectId=project-1', readToken)).status, 400);
     assert.equal((await send(`/mcp?projectId=${unassignedId}`, readToken)).status, 404);
     assert.equal((await send(`/mcp?projectId=${missingAssignedId}`, readToken)).status, 404);
-    const sessionIdentity = async (path: string, token: string): Promise<string> => {
+    const selectedProject = async (path: string, token: string): Promise<string> => {
       const response = await send(path, token);
       assert.equal(response.status, 200);
       assert.equal(response.headers.get('x-test-mcp-project'), firstAssignedId);
-      const identity = response.headers.get('x-test-mcp-identity');
-      assert.ok(identity);
+      assert.equal(response.headers.get('x-test-mcp-identity'), null);
       await response.body?.cancel();
-      return identity;
+      return response.headers.get('x-test-mcp-project')!;
     };
     const explicitProject = `/mcp?projectId=${firstAssignedId}`;
-    const multiClientIdentity = await sessionIdentity(explicitProject, readToken);
-    assert.equal(await sessionIdentity(explicitProject, makeToken('mcp:read')), multiClientIdentity);
-    assert.notEqual(await sessionIdentity('/mcp', singleProjectToken), multiClientIdentity);
+    const selectedMultiProject = await selectedProject(explicitProject, readToken);
+    assert.equal(await selectedProject(explicitProject, makeToken('mcp:read')), selectedMultiProject);
+    assert.equal(await selectedProject('/mcp', singleProjectToken), firstAssignedId);
 
     const projects = await send('/api/projects', readToken);
     assert.equal(projects.status, 200);
@@ -3430,7 +3489,6 @@ describe('Codexia HTTP boundary', () => {
         Authorization: signedRequests.mcpHeaders().Authorization,
         Cookie: 'ambient-browser-cookie=fixture-value',
         'Proxy-Authorization': 'Basic ambient-proxy-secret',
-        'Mcp-Session-Id': 'mcp-session-123',
       },
     });
     assert.equal(publicResponse.status, 200);
@@ -3446,7 +3504,6 @@ describe('Codexia HTTP boundary', () => {
       authorization: null,
       cookie: null,
       proxyAuthorization: null,
-      mcpSessionId: 'mcp-session-123',
     });
     assert.equal(observed.publicCoreActions?.ok, false);
     assert.equal(observed.publicCoreActions?.ok === false && observed.publicCoreActions.error.code, 'public_action_unavailable');

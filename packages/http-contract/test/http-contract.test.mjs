@@ -109,7 +109,8 @@ test('TypeSpec emits deterministic OpenAPI 3.1 and explicit operation IDs', t =>
   assert.equal(openapi['x-codexia-cors'].preflight.deniedStatus, 403);
   assert.deepEqual(openapi['x-codexia-cors'].preflight.allowMethods, ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
   assert.match(openapi['x-codexia-cors'].originPolicy, /wildcard origins are forbidden/u);
-  assert.ok(openapi['x-codexia-cors'].mcpExposeHeaders.includes('Mcp-Session-Id'));
+  assert.deepEqual(openapi['x-codexia-cors'].mcpExposeHeaders, ['MCP-Protocol-Version', 'WWW-Authenticate']);
+  assert.deepEqual(openapi['x-codexia-cors'].mcpRequestHeaders, ['MCP-Protocol-Version', 'Mcp-Method', 'Mcp-Name']);
   assert.equal(openapi['x-codexia-external-contracts'].betterAuth.libraryOperationsIncludedHere, false);
   assert.equal(openapi.paths['/api/auth/codexia/auth-methods'].get.operationId, 'auth_methods_get');
   assert.equal(openapi.paths['/api/auth/codexia/owner-session'].post.operationId, 'owner_session_confirm_post');

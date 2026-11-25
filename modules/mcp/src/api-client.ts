@@ -1,10 +1,4 @@
-import type {
-  ActionDescriptor,
-  ActionResult,
-  ChangeProposal,
-  ProposalEvidence,
-  ProjectObservation,
-} from "@codexia/contracts";
+import type { ActionDescriptor, ActionResult, ChangeProposal, ProjectObservation, ProposalEvidence } from '@codexia/contracts';
 
 export interface McpActionClient {
   readonly projectId?: string;
@@ -13,7 +7,7 @@ export interface McpActionClient {
   listActions(signal?: AbortSignal): Promise<ActionDescriptor[]>;
   invoke(actionId: string, input: unknown, signal?: AbortSignal): Promise<ActionResult>;
   propose(
-    operations: ChangeProposal["operations"],
+    operations: ChangeProposal['operations'],
     evidence?: ProposalEvidence[],
     proposalId?: string,
     signal?: AbortSignal,
@@ -45,7 +39,7 @@ export class McpApiError extends Error {
     message: string,
   ) {
     super(message.slice(0, 512));
-    this.name = "McpApiError";
+    this.name = 'McpApiError';
   }
 }
 
@@ -53,25 +47,25 @@ function statusCode(status: number): string {
   switch (status) {
     case 400:
     case 422:
-      return "INVALID_INPUT";
+      return 'INVALID_INPUT';
     case 401:
     case 403:
-      return "UNAUTHORIZED";
+      return 'UNAUTHORIZED';
     case 404:
-      return "NOT_FOUND";
+      return 'NOT_FOUND';
     case 409:
     case 412:
     case 428:
-      return "STALE_PRECONDITION";
+      return 'STALE_PRECONDITION';
     case 423:
-      return "PROJECT_WRITE_LOCKED";
+      return 'PROJECT_WRITE_LOCKED';
     default:
-      return "INTERNAL_ERROR";
+      return 'INTERNAL_ERROR';
   }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /** Bearer client for the compiled stdio entry. The API enforces its scopes and project assignments. */
@@ -81,10 +75,10 @@ export class ApiClient implements McpActionClient {
 
   constructor(private readonly options: ApiClientOptions) {
     const parsed = new URL(options.baseUrl);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throw new TypeError("MCP API URL must use HTTP or HTTPS");
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new TypeError('MCP API URL must use HTTP or HTTPS');
     }
-    this.baseUrl = parsed.toString().replace(/\/+$/, "");
+    this.baseUrl = parsed.toString().replace(/\/+$/, '');
     this.fetcher = options.fetch ?? fetch;
   }
 
@@ -98,18 +92,18 @@ export class ApiClient implements McpActionClient {
 
   private projectPath(path: string): string {
     if (!this.options.projectId) {
-      throw new McpApiError(400, "INVALID_PROJECT", "Set CODEXIA_PROJECT_ID or pass project_id");
+      throw new McpApiError(400, 'INVALID_PROJECT', 'Set CODEXIA_PROJECT_ID or pass project_id');
     }
     return `/api/projects/${encodeURIComponent(this.options.projectId)}${path}`;
   }
 
-  private async requestPath<T>(method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  private async requestPath<T>(method: 'GET' | 'POST', path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     const hasBody = body !== undefined;
     const response = await this.fetcher(`${this.baseUrl}${path}`, {
       method,
       headers: {
         Authorization: `Bearer ${this.options.token}`,
-        ...(hasBody ? { "Content-Type": "application/json" } : {}),
+        ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       },
       ...(hasBody ? { body: JSON.stringify(body) } : {}),
       ...(signal ? { signal } : {}),
@@ -117,17 +111,15 @@ export class ApiClient implements McpActionClient {
     if (!response.ok) {
       const payload: unknown = await response.json().catch(() => undefined);
       const error = isRecord(payload) ? payload.error : undefined;
-      const nestedCode = isRecord(error) && typeof error.code === "string" ? error.code : undefined;
+      const nestedCode = isRecord(error) && typeof error.code === 'string' ? error.code : undefined;
       const code =
-        (isRecord(payload) && typeof payload.code === "string" ? payload.code : undefined) ??
-        nestedCode ??
-        statusCode(response.status);
+        (isRecord(payload) && typeof payload.code === 'string' ? payload.code : undefined) ?? nestedCode ?? statusCode(response.status);
       throw new McpApiError(
         response.status,
         code,
-        typeof error === "string"
+        typeof error === 'string'
           ? error
-          : isRecord(error) && typeof error.message === "string"
+          : isRecord(error) && typeof error.message === 'string'
             ? error.message
             : `API request failed: ${method} ${path}`,
       );
@@ -136,60 +128,61 @@ export class ApiClient implements McpActionClient {
     return (await response.json()) as T;
   }
 
-  private request<T>(method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  private request<T>(method: 'GET' | 'POST', path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     return this.requestPath(method, this.projectPath(path), body, signal);
   }
 
   async listProjectPage(limit = 200, cursor?: string, signal?: AbortSignal): Promise<ProjectInfoPage> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200 || (cursor !== undefined && (cursor.length < 1 || cursor.length > 512))) {
-      throw new McpApiError(400, "INVALID_INPUT", "Project page limit or cursor is invalid");
+      throw new McpApiError(400, 'INVALID_INPUT', 'Project page limit or cursor is invalid');
     }
     const query = new URLSearchParams({ limit: String(limit) });
-    if (cursor !== undefined) query.set("cursor", cursor);
-    const value = await this.requestPath<unknown>("GET", `/api/projects?${query}`, undefined, signal);
-    const validProjects = (projects: unknown): projects is ProjectInfo[] => Array.isArray(projects) && projects.every(
-      (project) => isRecord(project) && typeof project.id === "string" && typeof project.title === "string",
-    );
-    if (!isRecord(value) || !validProjects(value.projects) ||
-        !(value.nextCursor === null || (typeof value.nextCursor === "string" && value.nextCursor.length >= 1 && value.nextCursor.length <= 512))) {
-      throw new McpApiError(502, "INVALID_RESPONSE", "Project page response is invalid");
+    if (cursor !== undefined) query.set('cursor', cursor);
+    const value = await this.requestPath<unknown>('GET', `/api/projects?${query}`, undefined, signal);
+    const validProjects = (projects: unknown): projects is ProjectInfo[] =>
+      Array.isArray(projects) &&
+      projects.every(project => isRecord(project) && typeof project.id === 'string' && typeof project.title === 'string');
+    if (
+      !isRecord(value) ||
+      !validProjects(value.projects) ||
+      !(
+        value.nextCursor === null ||
+        (typeof value.nextCursor === 'string' && value.nextCursor.length >= 1 && value.nextCursor.length <= 512)
+      )
+    ) {
+      throw new McpApiError(502, 'INVALID_RESPONSE', 'Project page response is invalid');
     }
     return { projects: value.projects, nextCursor: value.nextCursor };
   }
 
   async listActions(signal?: AbortSignal): Promise<ActionDescriptor[]> {
-    const result = await this.request<{ actions: ActionDescriptor[] }>(
-      "GET",
-      "/actions",
-      undefined,
-      signal,
-    );
-    if (!Array.isArray(result.actions)) throw new McpApiError(502, "INVALID_RESPONSE", "Action catalog response is invalid");
+    const result = await this.request<{ actions: ActionDescriptor[] }>('GET', '/actions', undefined, signal);
+    if (!Array.isArray(result.actions)) throw new McpApiError(502, 'INVALID_RESPONSE', 'Action catalog response is invalid');
     return result.actions;
   }
 
   async invoke(actionId: string, input: unknown, signal?: AbortSignal): Promise<ActionResult> {
-    return this.request<ActionResult>(
-      "POST",
-      `/actions/${encodeURIComponent(actionId)}`,
-      { input },
-      signal,
-    );
+    return this.request<ActionResult>('POST', `/actions/${encodeURIComponent(actionId)}`, { input }, signal);
   }
 
   async propose(
-    operations: ChangeProposal["operations"],
+    operations: ChangeProposal['operations'],
     evidence?: ProposalEvidence[],
     proposalId?: string,
     signal?: AbortSignal,
   ): Promise<ChangeProposal> {
-    const observation = await this.request<ProjectObservation>("GET", "/observation", undefined, signal);
-    return this.request<ChangeProposal>("POST", "/proposals", {
-      ...(proposalId ? { id: proposalId } : {}),
-      snapshot: observation.snapshot,
-      operations,
-      ...(evidence ? { evidence } : {}),
-    }, signal);
+    const observation = await this.request<ProjectObservation>('GET', '/observation', undefined, signal);
+    return this.request<ChangeProposal>(
+      'POST',
+      '/proposals',
+      {
+        ...(proposalId ? { id: proposalId } : {}),
+        snapshot: observation.snapshot,
+        operations,
+        ...(evidence ? { evidence } : {}),
+      },
+      signal,
+    );
   }
 }
 
@@ -198,7 +191,7 @@ export function actionClientFromContext(context: {
   invoke(actionId: string, input: unknown, signal?: AbortSignal): Promise<ActionResult>;
   listActions(signal?: AbortSignal): Promise<ActionDescriptor[]>;
   propose(
-    operations: ChangeProposal["operations"],
+    operations: ChangeProposal['operations'],
     evidence?: ProposalEvidence[],
     proposalId?: string,
     signal?: AbortSignal,
@@ -207,11 +200,11 @@ export function actionClientFromContext(context: {
   return {
     projectId: context.projectId,
     invoke: (actionId, input, signal) => context.invoke(actionId, input, signal),
-    listActions: () => context.listActions(),
+    listActions: signal => context.listActions(signal),
     propose: (operations, evidence, proposalId, signal) => context.propose(operations, evidence, proposalId, signal),
     forProject(projectId) {
       if (projectId !== context.projectId) {
-        throw new McpApiError(403, "PROJECT_SCOPE_MISMATCH", "The requested project does not match this MCP session");
+        throw new McpApiError(403, 'PROJECT_SCOPE_MISMATCH', 'The requested project does not match this MCP session');
       }
       return this;
     },

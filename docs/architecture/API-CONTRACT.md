@@ -9,7 +9,9 @@ Codexiaが所有するHTTPのmethodとpath、DTO、header、ステータス、�
 [ルート照合用の一覧](../../packages/http-contract/test/fixtures/admitted-routes.json) は、現行の公開・登録範囲104操作と、未実装のバックアップ管理11操作を区別する。
 `x-codexia-security-deviation` と `x-codexia-runtime-response-deviation` は、承認済みの互換基準と設計または実装の差を示す。
 現行のジョブ一覧とOAuth同意一覧は配列を返し、互換基準ではオブジェクトとして定義されている。
-MCPの6操作のJSON-RPCペイロードはMCPのプロトコル契約で管理する。
+MCP の HTTP 入口は TypeSpec で定義し、JSON-RPC のペイロードは [MCP プロトコル契約](MCP-V2-MIGRATION.md) に従う。
+`POST /mcp` と作品別の POST 入口を公式 SDK に委譲する。
+同じ二つの URL に対する GET と DELETE は、認可されたリクエストにも 405 を返す。
 `x-codexia-validation-status` を付けた入力モデルは、互換基準の範囲で記述できる形状を収録している。
 実行時の必須項目や未知のキーの拒否は、各モデルの注記と対応する実装・試験で確認する。
 

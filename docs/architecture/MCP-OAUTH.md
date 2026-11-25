@@ -31,4 +31,9 @@ The [API authentication contract](API-AUTHN-AUTHZ.md#accepted-target-passkey-fir
 
 The existing allowlists `CODEXIA_OAUTH_MCP_CLIENT_IDS` and `CODEXIA_OAUTH_MCP_PROJECT_ASSIGNMENTS` continue as the sole MCP client authorization configuration until a separately verified atomic policy-source migration. A settings screen must not appear to edit effective MCP project scope if it changes only Better Auth's client registry. Unauthenticated Dynamic Client Registration remains disabled; prefer existing explicitly approved client registration for the initial acceptance. A later switch from `oauthProvider()` to `@better-auth/mcp` is not part of this work and must not register both plugins together.
 
-Use `/mcp` for a client with one assigned project. A client with several assignments must choose one with `/mcp?projectId=<assigned-id>` and use that URL throughout the session. The OAuth audience stays the configured API resource for both forms. Each request revalidates the access token and the project assignment. The transport session remains bound to the selected project and the verified issuer, client ID, and subject, so a new token for the same identity can continue the session.
+Use `/mcp` for a client with one assigned project.
+A client with several assignments must choose one with `/mcp?projectId=<assigned-id>` on each request.
+The OAuth audience stays the configured API resource for both forms.
+For each request, Fastify verifies the access token, including the issuer, client ID, subject and active status, and checks the selected project against the current assignment.
+The SDK receives an action context bound to that request. A refreshed token must pass the same checks.
+The [MCP migration contract](MCP-V2-MIGRATION.md) defines the supported protocol revisions and the compatibility deadline.

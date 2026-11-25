@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createServer as createNodeServer } from "node:http";
+import { spawn } from "node:child_process";
 import test from "node:test";
 
 import { CoreStore } from "../../packages/core/dist/index.js";
@@ -17,10 +18,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const moduleRequire = createRequire(resolve(root, "modules/mcp/package.json"));
 const apiRequire = createRequire(resolve(root, "packages/api/package.json"));
 const { SignJWT, exportJWK, generateKeyPair } = await import(apiRequire.resolve("jose"));
-const [{ Client }, { StdioClientTransport }, { StreamableHTTPClientTransport }] = await Promise.all([
-  import(moduleRequire.resolve("@modelcontextprotocol/sdk/client/index.js")),
-  import(moduleRequire.resolve("@modelcontextprotocol/sdk/client/stdio.js")),
-  import(moduleRequire.resolve("@modelcontextprotocol/sdk/client/streamableHttp.js")),
+const [{ Client, StreamableHTTPClientTransport }, { StdioClientTransport }] = await Promise.all([
+  import(moduleRequire.resolve("@modelcontextprotocol/client")),
+  import(moduleRequire.resolve("@modelcontextprotocol/client/stdio")),
 ]);
 
 const NATIVE_TOOL_NAMES = [
@@ -44,20 +44,25 @@ async function createSignedRequests() {
   const { privateKey, publicKey } = await generateKeyPair("ES256");
   const jwk = { ...await exportJWK(publicKey), kid: "acceptance-signing-key", alg: "ES256", use: "sig" };
   const active = new Set();
-  const issue = async (clientId, scope) => {
-    const token = await new SignJWT({ client_id: clientId, azp: clientId, scope })
+  const issue = async (clientId, scope, { expired = false } = {}) => {
+    const jwt = new SignJWT({ client_id: clientId, azp: clientId, scope })
       .setProtectedHeader({ alg: "ES256", typ: "at+jwt", kid: jwk.kid })
       .setIssuer(FIXTURE_ISSUER)
       .setAudience(FIXTURE_RESOURCE)
       .setSubject(FIXTURE_SUBJECT)
       .setIssuedAt()
-      .setExpirationTime("5m")
-      .setJti(randomUUID())
-      .sign(privateKey);
+      .setExpirationTime(expired ? Math.floor(Date.now() / 1000) - 30 : "5m")
+      .setJti(randomUUID());
+    const token = await jwt.sign(privateKey);
     active.add(token);
     return token;
   };
-  return { publicJwks: { keys: [jwk] }, isActive: async token => active.has(token), issue };
+  return {
+    publicJwks: { keys: [jwk] },
+    isActive: async token => active.has(token),
+    issue,
+    revoke: token => active.delete(token),
+  };
 }
 
 function clientAdmission(projectIds, publicJwks, isActive) {
@@ -117,6 +122,8 @@ async function startAdmissionHost({ cacheDirectory, usageDirectory, assignedProj
     owner: await signer.issue(WEB_CLIENT, "codexia:api"),
     mcp: await signer.issue(MCP_CLIENT, "mcp:read mcp:compute mcp:propose"),
     reader: await signer.issue(MCP_CLIENT, "mcp:read"),
+    expired: await signer.issue(MCP_CLIENT, "mcp:read", { expired: true }),
+    revocable: await signer.issue(MCP_CLIENT, "mcp:read"),
   };
   const server = createServer({
     store, persistence, ...admission,
@@ -132,6 +139,7 @@ async function startAdmissionHost({ cacheDirectory, usageDirectory, assignedProj
   let closePromise;
   return {
     base: `http://127.0.0.1:${address.port}`, runtime, store, credentials,
+    revokeToken: signer.revoke,
     close() {
       closePromise ??= new Promise((resolveClose, rejectClose) => {
         server.close(async (error) => {
@@ -207,7 +215,9 @@ async function startStdioClient(host, projectId, token = host.credentials.mcp) {
     cwd: root,
     stderr: "inherit",
   });
-  const client = new Client({ name: "codexia-mcp-acceptance-stdio", version: "1.0.0" });
+  const client = new Client({ name: "codexia-mcp-acceptance-stdio", version: "1.0.0" }, {
+    versionNegotiation: { mode: { pin: "2026-07-28" } },
+  });
   await client.connect(transport);
   return { client, transport };
 }
@@ -215,21 +225,41 @@ async function startStdioClient(host, projectId, token = host.credentials.mcp) {
 async function startHttpClient(host, projectId, token = host.credentials.mcp) {
   const path = `/mcp?projectId=${encodeURIComponent(projectId)}`;
   const transport = new StreamableHTTPClientTransport(new URL(path, host.base), {
-    fetch: (input, init) => {
-      const headers = new Headers(init?.headers);
-      headers.set("Authorization", `Bearer ${token}`);
-      return fetch(input, { ...init, headers });
-    },
+    authProvider: { token: async () => token },
     reconnectionOptions: { maxReconnectionDelay: 100, initialReconnectionDelay: 10, reconnectionDelayGrowFactor: 1, maxRetries: 0 },
   });
-  const client = new Client({ name: "codexia-mcp-acceptance-http", version: "1.0.0" });
+  const client = new Client({ name: "codexia-mcp-acceptance-http", version: "1.0.0" }, {
+    versionNegotiation: { mode: { pin: "2026-07-28" } },
+  });
   await client.connect(transport);
   return { client, transport };
 }
 
-async function closeMcpClient(connection, http = false) {
+function runExternalMcpClient(host, projectId) {
+  const executable = process.env.CODEXIA_MCP_EXTERNAL_CLIENT_TEST;
+  if (!executable) return Promise.resolve();
+  assert.ok(executable.startsWith("/"), "CODEXIA_MCP_EXTERNAL_CLIENT_TEST must be an absolute executable path");
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn(executable, [], {
+      cwd: root,
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        CODEXIA_MCP_EXTERNAL_URL: `${host.base}/mcp?projectId=${encodeURIComponent(projectId)}`,
+        CODEXIA_MCP_EXTERNAL_TOKEN: host.credentials.mcp,
+        CODEXIA_MCP_EXTERNAL_PROJECT: projectId,
+      },
+      stdio: "inherit",
+    });
+    child.once("error", rejectRun);
+    child.once("exit", (code, signal) => {
+      if (code === 0) resolveRun();
+      else rejectRun(new Error(`External MCP client exited with ${signal ? `signal ${signal}` : `status ${code}`}`));
+    });
+  });
+}
+
+async function closeMcpClient(connection) {
   if (!connection) return;
-  if (http) await connection.transport.terminateSession().catch(() => undefined);
   await connection.client.close().catch(() => undefined);
   await connection.transport.close().catch(() => undefined);
 }
@@ -247,7 +277,7 @@ test("direct-root Story scenes keep PostgreSQL positions and context through Act
   let stdio;
   let http;
   t.after(async () => {
-    await closeMcpClient(http, true);
+    await closeMcpClient(http);
     await closeMcpClient(stdio);
     await host?.close().catch(() => undefined);
     await persistence.close();
@@ -397,7 +427,7 @@ test("direct-root Story scenes keep PostgreSQL positions and context through Act
         assert.equal(character.snapshot.projectId, fixture.projectId);
       }
     } finally {
-      await closeMcpClient(http, true);
+      await closeMcpClient(http);
       await closeMcpClient(stdio);
       http = undefined;
       stdio = undefined;
@@ -422,7 +452,7 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
   let http;
   const persistence = createPostgresPersistence(databaseUrl);
   t.after(async () => {
-    await closeMcpClient(http, true);
+    await closeMcpClient(http);
     await closeMcpClient(stdio);
     await host?.close().catch(() => undefined);
     await persistence.close();
@@ -440,6 +470,33 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
     cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory,
     assignedProjects: [{ id: projectId, title: `Native MCP ${randomUUID()}` }, ...paginationRows],
   });
+  await runExternalMcpClient(host, projectId);
+  const expiredTransport = new StreamableHTTPClientTransport(new URL(`/mcp?projectId=${projectId}`, host.base), {
+    authProvider: { token: async () => host.credentials.expired },
+  });
+  const expiredClient = new Client({ name: "codexia-expiry-acceptance", version: "1.0.0" }, {
+    versionNegotiation: { mode: { pin: "2026-07-28" } },
+  });
+  try {
+    await assert.rejects(expiredClient.connect(expiredTransport), undefined, "expired MCP access tokens must not establish a connection");
+  } finally {
+    await expiredClient.close().catch(() => undefined);
+    await expiredTransport.close().catch(() => undefined);
+  }
+
+  const revoked = await startHttpClient(host, projectId, host.credentials.revocable);
+  try {
+    await revoked.client.listTools(undefined, { cacheMode: "bypass" });
+    host.revokeToken(host.credentials.revocable);
+    await assert.rejects(
+      revoked.client.listTools(undefined, { cacheMode: "bypass" }),
+      undefined,
+      "a bearer token revoked after connection must be rejected on the next stateless request",
+    );
+  } finally {
+    await closeMcpClient(revoked);
+  }
+
   const sourceId = randomUUID();
   const targetId = randomUUID();
   await persistence.transaction(async tx => {
@@ -629,8 +686,8 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
         action_id: "core.knowledge.merge.propose", input: { sourceId, targetId, projectVersion, previewDigest: digest, idempotencyKey: "read-only-merge-generic" },
       }, `${label} read-only generic merge`);
     } finally {
-      await closeMcpClient(reader, isHttp);
-      await closeMcpClient(writer, isHttp);
+      await closeMcpClient(reader);
+      await closeMcpClient(writer);
     }
   }
   for (const id of [projectId, otherProjectId]) {
@@ -787,7 +844,7 @@ test("MCP cancellation stops real NLP worker jobs through stdio and Streamable H
   let stdio;
   let http;
   t.after(async () => {
-    await closeMcpClient(http, true);
+    await closeMcpClient(http);
     await closeMcpClient(stdio);
     await host?.close().catch(() => undefined);
     await rm(rootDir, { recursive: true, force: true });
@@ -822,7 +879,7 @@ test("stdio and Streamable HTTP enforce external Assistant admission with a conf
   let stdio;
   let http;
   t.after(async () => {
-    await closeMcpClient(http, true);
+    await closeMcpClient(http);
     await closeMcpClient(stdio);
     await host?.close().catch(() => undefined);
     await providerProbe.close();

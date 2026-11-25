@@ -21,8 +21,8 @@ using TypeSpec.OpenAPI;
   vary: #["Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers"],
   methods: #["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
   requestHeaders: #["Authorization", "Content-Type", "Idempotency-Key", "X-Client-Id", "X-Codexia-Recent-Activity-Order", "Prefer"],
-  mcpRequestHeaders: #["Mcp-Session-Id", "MCP-Protocol-Version", "Last-Event-ID"],
-  mcpExposeHeaders: #["Mcp-Session-Id", "WWW-Authenticate"],
+  mcpRequestHeaders: #["MCP-Protocol-Version", "Mcp-Method", "Mcp-Name"],
+  mcpExposeHeaders: #["MCP-Protocol-Version", "WWW-Authenticate"],
   preflight: #{
     route: "explicit OPTIONS for registered API and MCP paths; requested method must match the path",
     successStatus: 204,

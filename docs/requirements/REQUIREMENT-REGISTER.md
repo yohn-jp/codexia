@@ -704,10 +704,10 @@ APIの入口、body/query、レスポンス、エラー、認可、競合、冪�
 **Decision status**: ACCEPTED
 **Conformance status**: MAPPED_UNVERIFIED
 **Applicability**: CURRENT
-**Design owner**: [MCP-first](../architecture/MCP-FIRST.md)、[Modules](../architecture/MODULES.md)
-**Implementation identifiers**: modules/mcp/src/http.ts; stdio.ts; tools.ts
-**Verification identifiers**: tests/integration/mcp-acceptance.test.mjs
-**Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+**Design owner**: [MCP-first](../architecture/MCP-FIRST.md)、[Modules](../architecture/MODULES.md)、[MCP v2 migration](../architecture/MCP-V2-MIGRATION.md)
+**Implementation identifiers**: modules/mcp/src/http.ts; modules/mcp/src/stdio.ts; modules/mcp/src/tools.ts; modules/mcp/src/tools/shared.ts; modules/mcp/src/tools/project.ts; modules/mcp/src/tools/knowledge.ts
+**Verification identifiers**: MCPV-001..008; tests/integration/mcp-acceptance.test.mjs; modules/mcp/src/tools.test.ts
+**Test IDs**: TEST-MCPV-001-001, TEST-MCPV-004-001, TEST-MCPV-004-002, TEST-MCPV-006-001
 **Exact-run reference**: NOT_RUN
 **Comment**: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
@@ -723,6 +723,10 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **Path**: modules/mcp/src/http.ts
 - **Type**: File
   **Path**: tests/integration/mcp-acceptance.test.mjs
+  **Lines**: 408, 780
+- **Type**: File
+  **Path**: docs/architecture/MCP-V2-MIGRATION.md
+  **Lines**: 78, 85
 
 ## OBL-REQ-MCP-001-O01
 
@@ -730,8 +734,8 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **MID**: e32620abf2dfe0ecf7a094cafd8f3e17
 **UID**: OBL-REQ-MCP-001-O01
 **Design reference**: [MCP-first](../architecture/MCP-FIRST.md)、[Modules](../architecture/MODULES.md)
-**Implementation identifiers**: modules/mcp/src/http.ts
-**Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+**Implementation identifiers**: modules/mcp/src/http.ts; modules/mcp/src/stdio.ts; modules/mcp/src/tools.ts
+**Test IDs**: TEST-MCPV-004-001; TEST-MCPV-004-002; TEST-MCPV-006-001
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
 
@@ -744,6 +748,14 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 
 - **Type**: File
   **Path**: modules/mcp/src/http.ts
+- **Type**: File
+  **Path**: modules/mcp/src/stdio.ts
+- **Type**: File
+  **Path**: modules/mcp/src/tools.ts
+  **Lines**: 1, 25
+- **Type**: File
+  **Path**: docs/architecture/MCP-V2-MIGRATION.md
+  **Lines**: 78, 85
 
 ## REQ-MCP-002
 
@@ -752,10 +764,10 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **Decision status**: ACCEPTED
 **Conformance status**: MAPPED_UNVERIFIED
 **Applicability**: CURRENT
-**Design owner**: [MCP-first](../architecture/MCP-FIRST.md)
-**Implementation identifiers**: modules/mcp/src/tools.ts; tools/shared.ts
-**Verification identifiers**: tests/integration/mcp-acceptance.test.mjs
-**Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+**Design owner**: [MCP-first](../architecture/MCP-FIRST.md)、[MCP v2 migration](../architecture/MCP-V2-MIGRATION.md)
+**Implementation identifiers**: modules/mcp/src/tools.ts; modules/mcp/src/tools/shared.ts; modules/mcp/src/tools/project.ts; modules/mcp/src/tools/knowledge.ts
+**Verification identifiers**: tests/integration/mcp-acceptance.test.mjs; MCPV-001..008
+**Test IDs**: TEST-MCP-CORE-001-001
 **Exact-run reference**: NOT_RUN
 **Comment**: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
@@ -769,6 +781,10 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **Path**: modules/mcp/src/tools.ts
 - **Type**: File
   **Path**: tests/integration/mcp-acceptance.test.mjs
+  **Lines**: 808, 886
+- **Type**: File
+  **Path**: docs/architecture/MCP-V2-MIGRATION.md
+  **Lines**: 78, 85
 
 ## OBL-REQ-MCP-002-O01
 
@@ -776,8 +792,8 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **MID**: d226d181f7a78354bf16607e64ed06e6
 **UID**: OBL-REQ-MCP-002-O01
 **Design reference**: [MCP-first](../architecture/MCP-FIRST.md)
-**Implementation identifiers**: modules/mcp/src/tools.ts
-**Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+**Implementation identifiers**: modules/mcp/src/tools.ts; modules/mcp/src/tools/shared.ts
+**Test IDs**: TEST-MCP-CORE-001-001
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
 
@@ -790,6 +806,15 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 
 - **Type**: File
   **Path**: modules/mcp/src/tools.ts
+- **Type**: File
+  **Path**: modules/mcp/src/tools/shared.ts
+  **Lines**: 12, 80
+- **Type**: File
+  **Path**: tests/integration/mcp-acceptance.test.mjs
+  **Lines**: 808, 886
+- **Type**: File
+  **Path**: docs/architecture/MCP-V2-MIGRATION.md
+  **Lines**: 78, 85
 
 ## REQ-UI-001
 
@@ -2048,3 +2073,93 @@ Canonicalize StrictDoc search-index keys and unordered set membership while pres
   **ID**: REQ-TRACE-001
 - **Type**: File
   **Path**: scripts/strictdoc/verify.test.mjs
+
+## TEST-MCPV-001-001
+
+**Type**: TEST
+**MID**: 553a90f344c0743e6be1b613946071da
+**UID**: TEST-MCPV-001-001
+**Case name**: native MCP schemas bound UUID reads and accept only the seven ordinary native ChangeSet operations
+**Exact-run reference**: NOT_RUN
+
+Verify the registered native Knowledge schemas reject invalid UUIDs and out-of-contract operations. This is a runtime-schema test candidate; it does not establish full SDK protocol conformance or a hosted exact-source result.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/tools.test.ts
+  **Lines**: 161, 190
+
+## TEST-MCP-CORE-001-001
+
+**Type**: TEST
+**MID**: b304ab460592f7f49cbda0cd9d4c39ac
+**UID**: TEST-MCP-CORE-001-001
+**Case name**: stdio and Streamable HTTP enforce external Assistant admission with a configured provider
+**Exact-run reference**: NOT_RUN
+
+Verify the configured external Assistant admission boundary and that MCP dispatch does not call the configured model provider. This is an REQ-MCP-002 scenario, not the MCP SDK protocol conformance CLI run required by MCPV-002.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-002
+- **Type**: File
+  **Path**: tests/integration/mcp-acceptance.test.mjs
+  **Lines**: 808, 886
+
+## TEST-MCPV-004-001
+
+**Type**: TEST
+**MID**: 9d036a15f7de684bfe7ee1f6093eb235
+**UID**: TEST-MCPV-004-001
+**Case name**: native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, review and receipt over both transports
+**Exact-run reference**: NOT_RUN
+
+Exercise selected-project scope, proposal-only MCP writes, replay handling, author review, receipt, and both stdio and Streamable HTTP transports against PostgreSQL. It is a candidate for MCPV-004 and MCPV-005; each protocol authorization dimension remains separately unverified until its specific case evidence exists.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: tests/integration/mcp-acceptance.test.mjs
+  **Lines**: 408, 779
+
+## TEST-MCPV-006-001
+
+**Type**: TEST
+**MID**: 4a482103850c55bc7b177207fc5182d8
+**UID**: TEST-MCPV-006-001
+**Case name**: MCP cancellation stops real NLP worker jobs through stdio and Streamable HTTP
+**Exact-run reference**: NOT_RUN
+
+Exercise cancellation through both transports. This case covers only the cancellation slice of MCPV-006; invalid headers, oversized inputs, shutdown/drain, and cross-request isolation require separate evidence.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: tests/integration/mcp-acceptance.test.mjs
+  **Lines**: 780, 807
+
+## TEST-MCPV-004-002
+
+**Type**: TEST
+**MID**: 9a4e2608082648f649f3e4d15808ce37
+**UID**: TEST-MCPV-004-002
+**Case name**: admits registered MCP OAuth clients by exact operation scope without owner rights
+**Exact-run reference**: NOT_RUN
+
+Exercise signed MCP bearer admission for exact client, scope, assigned-project, owner-rights, and effect boundaries. This server fixture uses manually constructed tokens; it does not establish OAuth PKCE issuance or external client interop.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: packages/api/src/server.test.ts
+  **Lines**: 2115, 2448

@@ -35,7 +35,7 @@ For a local preview of the Full composition, pass `--profile full` to `pnpm ui:p
 
 ## MCP access
 
-The optional MCP module exposes Streamable HTTP at `/mcp`. Configure a registered client to use `https://<application-origin>/mcp`. A client assigned several projects selects one with `/mcp?projectId=<assigned-id>` and uses that URL for the session. Public OAuth resource metadata is available at `/.well-known/oauth-protected-resource` and describes how the client connects to Better Auth.
+The optional MCP module exposes Streamable HTTP at `/mcp`. Configure a registered client to use `https://<application-origin>/mcp`. A client assigned several projects selects one with `/mcp?projectId=<assigned-id>` and sends every MCP request to that URL. Public OAuth resource metadata is available at `/.well-known/oauth-protected-resource` and describes how the client connects to Better Auth.
 
 For local stdio, run `codexia-mcp` with an OAuth access token already issued to the registered MCP client in `CODEXIA_MCP_ACCESS_TOKEN`. Both transports enforce the same project assignments and `mcp:read`, `mcp:compute` and `mcp:propose` scopes. Applying proposals requires author approval. [MCP OAuth contract](docs/architecture/MCP-OAUTH.md)
 
