@@ -73,7 +73,9 @@ export async function fetchLatestProducerArtifact({plan,runId,repository,token,p
   const artifacts=await listProducerArtifacts(github,runId,artifactName);
   if(waitForProducerMs>0)console.log(JSON.stringify({phase:'profile-producer-wait',producerJob,waitMs}));
   const selected=selectLatestJobArtifact(artifactName,producerJob,artifacts,jobs,{runId,sourceSha:plan.sha});
-  const resolved=await resolveProducerJobAttempts(jobs,run,github,[producerJob]);
+  const resolved=await resolveProducerJobAttempts(jobs,run,
+    (producerRunId,attempt)=>paginateActionsInventory(github,github.rest.actions.listJobsForWorkflowRunAttempt,
+      {owner,repo,run_id:producerRunId,attempt_number:attempt},'jobs'),[producerJob]);
   const job=resolved.find(job=>job.name===producerJob);
   assert.ok(Number.isSafeInteger(job.run_attempt)&&job.run_attempt>0,'Invalid producer attempt');
   const bytes=await downloadArtifact(selected,repository,token,fetch,maxArchive===undefined?{}:{maxArchive});

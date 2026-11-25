@@ -70,7 +70,10 @@ if (reusedCoverageReports.length === 1) {
 }
 const artifacts = await paginateActionsInventory(github, github.rest.actions.listWorkflowRunArtifacts,
   { owner, repo, run_id: Number(GITHUB_RUN_ID) }, 'artifacts');
-const producerJobs = await resolveProducerJobAttempts(jobs, run, github, ['build-core', 'build-full', 'types-trace']);
+const producerJobs = await resolveProducerJobAttempts(jobs, run,
+  (runId, attempt) => paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRunAttempt,
+    { owner, repo, run_id: runId, attempt_number: attempt }, 'jobs'),
+  ['build-core', 'build-full', 'types-trace']);
 if (plan.tasks.includes('requirements-trace')) {
   const traceReport = reports.find(report => report.group === 'types-trace');
   const traceJob = producerJobs.find(job => job.name === 'types-trace');

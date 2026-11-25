@@ -210,7 +210,9 @@ export async function readReusableMainEvidence({ sourceSha, before, repository, 
   // Only digest-verified JSON is read. Never restore or execute code from a PR artifact.
   const reports = await Promise.all(selected.map(item => readArtifact(item, 'report.json')));
   assertPlanEvidence(plan, jobs, reports);
-  const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core', 'build-full']);
+  const producerJobs = await resolveProducerJobAttempts(jobs, run,
+    (runId, attempt) => request.paginate('actions/runs/' + runId + '/attempts/' + attempt + '/jobs', {}, 'jobs'),
+    ['build-core', 'build-full']);
   assertProfileArtifactEvidence(plan, producerJobs, reports, artifacts, run.id);
   for (const job of jobs.filter(job => job.conclusion === 'skipped')) {
     assert.ok(job.name === DEPLOYMENT_FIXTURE_CALLER || REUSED_MAIN_SKIPPED_JOBS.includes(job.name), 'Unexpected skipped PR job');

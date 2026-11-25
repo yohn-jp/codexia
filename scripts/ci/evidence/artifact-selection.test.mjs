@@ -12,6 +12,7 @@ import { resolveProducerJobAttempts, selectLatestEvidenceArtifacts, selectLatest
 import { listProducerArtifacts, waitForProducerJob } from './producer-artifact.mjs';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateGitHubArray } from '../../github/paginate-actions.mjs';
+import { createGitHubProofClient } from './proof-client.mjs';
 
 function octokitForPages(readRows, requested = []) {
   return createGitHubOctokit({ token: 'fixture-token', fetchImpl: async input => {
@@ -218,15 +219,21 @@ test('partial rerun resolves a carried-over producer to its original execution a
   const fresh = {...job('build-full', '2026-11-17T03:37:00Z', '2026-11-17T03:38:00Z'), id: 201, run_attempt: 2};
   const failed = {...fresh, name: 'oci-core', conclusion: 'failure'};
   const run = {id: Number(runId), run_attempt: 2};
-  const github = octokitForPages(url => {
-    const attempt = Number(/attempts\/(\d+)\/jobs/u.exec(url.pathname)[1]);
-    return attempt === 1 ? [old, {...fresh, id: 101, run_attempt: 1, started_at: old.started_at, completed_at: old.completed_at}] : [carried, fresh, failed];
-  });
-  const resolved = await resolveProducerJobAttempts([carried, fresh, failed], run, github, ['build-core','build-full','oci-core']);
+  const request = createGitHubProofClient({ repository: 'yohn-jp/codexia', token: 'fixture-token', request: async input => {
+    const url = new URL(String(input));
+    const attempt = Number(url.pathname.match(/attempts\/(\d+)\/jobs/u)?.[1]);
+    const rows = attempt === 1
+      ? [old, {...fresh, id: 101, run_attempt: 1, started_at: old.started_at, completed_at: old.completed_at}]
+      : [carried, fresh, failed];
+    return Response.json({ total_count: rows.length, jobs: rows });
+  } });
+  const resolved = await resolveProducerJobAttempts([carried, fresh, failed], run,
+    (runId, attempt) => request.paginate('actions/runs/' + runId + '/attempts/' + attempt + '/jobs', {}, 'jobs'),
+    ['build-core','build-full','oci-core']);
   assert.deepEqual(resolved.map(item => item.run_attempt), [1,2,2]);
   assert.equal(resolved[2].conclusion, 'failure');
-  const failing = createGitHubOctokit({ token:'fixture-token', fetchImpl:async()=>{throw new Error('history unavailable');} });
-  await assert.rejects(resolveProducerJobAttempts([carried], run, failing, ['build-core']), /history unavailable/u);
+  await assert.rejects(resolveProducerJobAttempts([carried], run, async () => { throw new Error('history unavailable'); },
+    ['build-core']), /history unavailable/u);
 });
 
 test('early browser waits only for its exact same-profile successful producer', async () => {
