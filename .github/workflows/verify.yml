@@ -546,9 +546,6 @@ jobs:
       - name: Observe browser runner before validation
         if: always() && !cancelled()
         continue-on-error: true
-        env:
-          CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          CODEXIA_CI_BROWSER_GROUP: ${{ matrix.group }}
         run: node scripts/ci/dashboard/runner-observation.mjs before "${{ runner.temp }}/browser-runner-observation"
       - name: Run selected validations
         if: always() && !cancelled()
@@ -562,9 +559,6 @@ jobs:
       - name: Observe browser runner after validation
         if: always() && !cancelled()
         continue-on-error: true
-        env:
-          CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          CODEXIA_CI_BROWSER_GROUP: ${{ matrix.group }}
         run: node scripts/ci/dashboard/runner-observation.mjs after "${{ runner.temp }}/browser-runner-observation"
       - uses: actions/upload-artifact@v7.0.2
         if: always() && !cancelled()

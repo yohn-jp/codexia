@@ -80,5 +80,7 @@ export function createGitHubProofClient({ repository, token, request = fetch }) 
     }
     throw new Error('Unexpected GitHub task proof API endpoint');
   };
-  return { get, paginate };
+  // The merged-source resolver accepts a callable request with a pagination method.
+  // Bind that contract here so every caller uses the same restricted client.
+  return { get: Object.assign(get, { paginate }), paginate };
 }
