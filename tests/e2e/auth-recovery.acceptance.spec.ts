@@ -61,7 +61,7 @@ test("an unauthenticated standalone browser without Web OAuth configuration cann
     json: {
       name: "codexia",
       version: "test",
-      contractVersion: "2",
+      contractVersion: 2,
       auth: ["oauth-owner", "oauth-mcp"],
       profile: "core",
       runtime: {},
