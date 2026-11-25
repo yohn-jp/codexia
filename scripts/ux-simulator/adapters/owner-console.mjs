@@ -7,6 +7,11 @@ const identityView = 'app/src/settings/OwnerIdentityPanel.tsx';
 const session = 'app/src/console/console-session.ts';
 const consentClient = 'app/src/settings/owner-security-client.ts';
 const catalog = 'docs/design/SCREEN-CONTROL-CATALOG.md';
+const setupRefreshHandler = `onClick={() => {
+                void run(async () => {
+                  await refresh();
+                });
+              }}`;
 
 function routeEntries(source) {
   if (!source.exists(entry)) return [];
@@ -92,11 +97,11 @@ export function projectConsole(source) {
         ...(sourceAt(source, setup, 'onClick={createPasskey}') ? [{ id: 'setup-passkey', role: 'actions', label: 'Passkey登録' }] : []),
       ],
     },
-    setupRoute && sourceAt(source, setup, 'status.state === "owner-enrolled"') && {
-      id: 'CON-03', platform: 'console', route: '/console/setup', source: sourceRef(sourceAt(source, setup, 'status.state === "owner-enrolled"')),
+    setupRoute && sourceAt(source, setup, "status.state === 'owner-enrolled'") && sourceAt(source, setup, setupRefreshHandler) && {
+      id: 'CON-03', platform: 'console', route: '/console/setup', source: sourceRef(sourceAt(source, setup, "status.state === 'owner-enrolled'")),
       regions: [
         { id: 'setup-enrollment-status', role: 'status', label: 'owner登録とclient準備状態', source: sourceRef(sourceAt(source, setup, 'status.clientsReady')) },
-        { id: 'setup-refresh', role: 'actions', label: '登録状況を更新', source: sourceRef(sourceAt(source, setup, 'onClick={() => { void run(async () => { await refresh(); }); }}')) },
+        { id: 'setup-refresh', role: 'actions', label: '登録状況を更新', source: sourceRef(sourceAt(source, setup, setupRefreshHandler)) },
       ],
     },
     screen(source, routes, 'CON-10', entry, '<IdentityManagementPanel placement="console" />', [
@@ -122,8 +127,8 @@ export function projectConsole(source) {
     homeNavigation(source, '/console', '/console/backups', 'バックアップ', 'CON-00.B', 'path: "/console/backups", title: "バックアップ"').control,
     control(source, { id: 'CON-01.A', platform: 'console', path: setup, label: 'キーを確認', handler: 'onSubmit={submitKey}', role: 'submit', region: 'setup-key-form' }),
     control(source, { id: 'CON-02.A', platform: 'console', path: setup, label: 'Passkeyを作成', handler: 'onClick={createPasskey}', region: 'setup-passkey' }),
-    control(source, { id: 'CON-03.A', platform: 'console', path: setup, label: '登録状況を更新', handler: 'onClick={() => { void run(async () => { await refresh(); }); }}', region: 'setup-refresh' }),
-    combinedControl(source, { id: 'CON-10.A', label: 'パスキーを追加', region: 'passkey-management', handlers: ['onSubmit={(event) => void addPasskey(event)}', 'onRename={renamePasskey}', 'onDelete={deletePasskey}'] }),
+    control(source, { id: 'CON-03.A', platform: 'console', path: setup, label: '登録状況を更新', handler: setupRefreshHandler, region: 'setup-refresh' }),
+    combinedControl(source, { id: 'CON-10.A', label: 'パスキーを追加', region: 'passkey-management', handlers: ['onSubmit={event => void addPasskey(event)}', 'onRename={renamePasskey}', 'onDelete={deletePasskey}'] }),
     combinedControl(source, { id: 'CON-11.A', label: '他のすべてのセッションを終了', region: 'session-management', handlers: ['onRevoke={revokeSession}', 'onClick={() => void revokeOtherSessions()}'] }),
   );
 
@@ -135,7 +140,7 @@ export function projectConsole(source) {
     ].map(([target, controlId, screenId, sectionNeedle]) => homeNavigation(source, '/console', target, '', controlId, sectionNeedle).transition),
     transition({ id: 'setup-key-authorized', platform: 'console', from: 'CON-01/key', to: 'CON-02/profile', event: 'submitKey', screen: 'CON-01', control: 'CON-01.A', condition: 'setStep("profile")', location: sourceAt(source, setup, 'setStep("profile");') }),
     transition({ id: 'setup-profile-confirmed', platform: 'console', from: 'CON-02/profile', to: 'CON-02/passkey', event: 'submitProfile', screen: 'CON-02', condition: 'setStep("passkey")', location: sourceAt(source, setup, 'setStep("passkey");') }),
-    sourceAt(source, setup, 'onClick={createPasskey}') && transition({ id: 'setup-owner-enrolled', platform: 'console', from: 'CON-02/passkey', to: 'CON-03/owner-enrolled', event: 'refresh', screen: 'CON-02', control: 'CON-02.A', condition: 'state.state === "owner-enrolled" && token', location: sourceAt(source, setup, 'if (state.state === "owner-enrolled" && token) {') }),
+    sourceAt(source, setup, 'onClick={createPasskey}') && transition({ id: 'setup-owner-enrolled', platform: 'console', from: 'CON-02/passkey', to: 'CON-03/owner-enrolled', event: 'refresh', screen: 'CON-02', control: 'CON-02.A', condition: "state.state === 'owner-enrolled' && token", location: sourceAt(source, setup, "if (state.state === 'owner-enrolled' && token) {") }),
     transition({ id: 'setup-profile-expired', platform: 'console', from: 'CON-02/profile', to: 'CON-01/key', event: 'submitProfile failure', screen: 'CON-02', condition: 'state === "setup-pending"', location: sourceAt(source, setup, 'setStep("key");') }),
     transition({ id: 'setup-active-console-link', platform: 'console', from: 'CON-03/active', to: 'CON-00/ready', event: 'open consoleUrl', screen: 'CON-03', condition: 'current === "active" || current === "blocked"', location: sourceAt(source, setup, '<a href={consoleUrl} className="codexia-console__link">管理コンソールへ</a>') }),
     ...[
