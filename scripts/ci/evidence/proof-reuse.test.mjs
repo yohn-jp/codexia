@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { VERIFICATION_GROUPS } from '../impact/contract.mjs';
 import { createVerificationPlan, planDigest } from '../impact/plan.mjs';
-import { createGitHubProofClient, resolveExactMainCoverageProof } from './proof-reuse.mjs';
+import { resolveExactMainCoverageProof } from './proof-reuse.mjs';
+import { createGitHubProofClient } from './proof-client.mjs';
 import { taskInvocation, taskWorkflowJob } from './task-inputs.mjs';
 import { main as planProofReuse } from './reuse-coverage-proof.mjs';
 
@@ -43,31 +44,34 @@ test('unavailable proof keeps the impact plan and runs selected coverage', async
 });
 
 
-test('task proof HTTP client accepts only the canonical read-only API paths', async () => {
+test('task proof Octokit client accepts only the canonical read-only API paths', async () => {
   const seen = [];
   const request = async (url, options) => {
     const address = String(url);
     seen.push({ url: address, options });
-    const data = new URL(address).pathname.endsWith('/actions/workflows/7/runs')
-      ? { total_count: 0, workflow_runs: [] } : { accepted: true };
+    const pathname = new URL(address).pathname;
+    const data = pathname.endsWith('/actions/workflows/7/runs')
+      ? { total_count: 0, workflow_runs: [] }
+      : pathname.endsWith('/commits/' + sourceSha + '/pulls') ? [] : { accepted: true };
     return responseFor(address, data);
   };
   const client = createGitHubProofClient({ repository: 'yohn-jp/codexia', token: 'test-token', request });
   const paths = [
     'actions/workflows/verify.yml',
-    'actions/runs/500', 'pulls/123', 'commits/' + sourceSha + '/pulls',
+    'actions/runs/500', 'pulls/123',
   ];
   for (const path of paths) assert.deepEqual(await client.get(path), { accepted: true });
   const runs = await client.paginate('actions/workflows/7/runs', { head_sha: sourceSha, event: 'push' }, 'workflow_runs');
   assert.deepEqual(runs, []);
+  assert.deepEqual(await client.paginate('commits/' + sourceSha + '/pulls', {}, null), []);
   assert.deepEqual(await client.paginate('/repos/yohn-jp/codexia/actions/workflows/7/runs',
     { head_sha: sourceSha, event: 'push' }, 'workflow_runs'), []);
   assert.ok(seen.every(item => item.url.startsWith('https://api.github.com/repos/yohn-jp/codexia/')));
   assert.ok(seen.every(item => new Headers(item.options.headers).get('authorization')?.includes('test-token')));
-  assert.ok(seen.every(item => item.options.redirect === 'error'));
+  assert.ok(seen.every(item => item.options.redirect === 'manual'));
 });
 
-test('task proof HTTP client blocks arbitrary file data and destinations without network I/O', async () => {
+test('task proof Octokit client blocks arbitrary file data and destinations without network I/O', async () => {
   let calls = 0;
   const request = async () => { calls += 1; throw new Error('Network request must not run'); };
   const client = createGitHubProofClient({ repository: 'yohn-jp/codexia', token: 'test-token', request });

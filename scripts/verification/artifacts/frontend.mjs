@@ -13,7 +13,8 @@ import { assertFrontendOAuthConfigIdentity, readFrontendOAuthConfig } from '../.
 import { assertVerificationJobs, verifiedSourceRun } from '../../release/components/policy.mjs';
 import { assertFrontendIdentity } from '../../release/frontend/verify-compatibility.mjs';
 import { verifyReusableMainProof } from '../../ci/certification/reuse-merged-pr.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
+import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
 const repository = 'yohn-jp/codexia';
 const shaPattern = /^[a-f0-9]{40}$/u;
@@ -216,14 +217,34 @@ export function selectExactMainVerifyRun(runs, expected) {
 }
 
 function createFrontendApi(token, fetchImpl) {
-  const github = createGitHubRestClient({ token, fetchImpl });
+  const octokit = createGitHubOctokit({ token, fetchImpl });
+  const [owner, repo] = repository.split('/');
   const request = async endpoint => {
-    const response = await github.request('GET', `/repos/${repository}/${endpoint}`);
-    if (response.status < 200 || response.status >= 300) throw new Error(`Frontend artifact provenance lookup failed (HTTP ${response.status}).`);
-    return response.data;
+    const commit = /^commits\/([a-f0-9]{40})$/u.exec(endpoint);
+    const run = /^actions\/runs\/([1-9]\d*)$/u.exec(endpoint);
+    const artifact = /^actions\/artifacts\/([1-9]\d*)$/u.exec(endpoint);
+    const workflow = /^actions\/workflows\/(verify\.yml|frontend-release\.yml)$/u.exec(endpoint);
+    if (commit) return (await octokit.rest.repos.getCommit({ owner, repo, ref: commit[1] })).data;
+    if (run) return (await octokit.rest.actions.getWorkflowRun({ owner, repo, run_id: Number(run[1]) })).data;
+    if (artifact) return (await octokit.rest.actions.getArtifact({ owner, repo, artifact_id: Number(artifact[1]) })).data;
+    if (workflow) return (await octokit.rest.actions.getWorkflow({ owner, repo, workflow_id: workflow[1] })).data;
+    throw new Error('Unapproved frontend artifact provenance endpoint');
   };
-  request.paginate = (endpoint, parameters, key) => github.paginate(
-    endpoint.startsWith(`/repos/${repository}/`) ? endpoint : `/repos/${repository}/${endpoint}`, parameters, key);
+  request.paginate = (endpoint, parameters = {}, key) => {
+    const workflowRuns = /^actions\/workflows\/(verify\.yml|frontend-release\.yml|[1-9]\d*)\/runs$/u.exec(endpoint);
+    const jobs = /^actions\/runs\/([1-9]\d*)\/jobs$/u.exec(endpoint);
+    const artifacts = /^actions\/runs\/([1-9]\d*)\/artifacts$/u.exec(endpoint);
+    const attemptJobs = /^actions\/runs\/([1-9]\d*)\/attempts\/([1-9]\d*)\/jobs$/u.exec(endpoint);
+    if (workflowRuns) return paginateActionsInventory(octokit, octokit.rest.actions.listWorkflowRuns,
+      { owner, repo, workflow_id: workflowRuns[1], ...parameters }, key);
+    if (jobs) return paginateActionsInventory(octokit, octokit.rest.actions.listJobsForWorkflowRun,
+      { owner, repo, run_id: Number(jobs[1]), ...parameters }, key);
+    if (artifacts) return paginateActionsInventory(octokit, octokit.rest.actions.listWorkflowRunArtifacts,
+      { owner, repo, run_id: Number(artifacts[1]), ...parameters }, key);
+    if (attemptJobs) return paginateActionsInventory(octokit, octokit.rest.actions.listJobsForWorkflowRunAttempt,
+      { owner, repo, run_id: Number(attemptJobs[1]), attempt_number: Number(attemptJobs[2]), ...parameters }, key);
+    throw new Error('Unapproved frontend artifact pagination endpoint');
+  };
   return request;
 }
 

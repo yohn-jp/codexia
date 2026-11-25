@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { REQUIRED_VERIFICATION_JOBS } from '../../ci/impact/contract.mjs';
-import { assertReleaseIdentity, assertVerificationJobs, assertVerificationLeafJobs, collectGitHubArrayPages, collectGitHubPages, releaseVerificationState, verifiedSourceRun } from './policy.mjs';
+import { assertReleaseIdentity, assertVerificationJobs, assertVerificationLeafJobs, releaseVerificationState, verifiedSourceRun } from './policy.mjs';
 
 const sha = 'a'.repeat(40);
 const run = { id: 1, head_sha: sha, head_branch: 'main', event: 'push', status: 'completed', conclusion: 'success' };
@@ -53,23 +53,6 @@ test('main release verification permits only a skipped supplemental Full-model O
     { name: 'full-model-oci', status: 'completed', conclusion: 'skipped' },
   ]), /Duplicate release verification job/);
   assert.throws(() => assertVerificationLeafJobs([...jobs.filter(job => job.name !== 'certification'), { name: 'full-model-oci', status: 'completed', conclusion: 'skipped' }]), /Unexpected release verification job/);
-});
-
-test('GitHub pagination policy delegates list collection to the Octokit client', async () => {
-  const expected = [{ id: 1 }, { id: 2 }];
-  const calls = [];
-  const client = { async paginate(endpoint, parameters, key) {
-    calls.push({ endpoint, parameters, key });
-    return expected;
-  } };
-  assert.deepEqual(await collectGitHubPages(client, '/repos/yohn-jp/codexia/actions/runs/44/jobs', 'jobs'), expected);
-  assert.deepEqual(await collectGitHubArrayPages(client, '/repos/yohn-jp/codexia/releases'), expected);
-  assert.deepEqual(calls, [
-    { endpoint: '/repos/yohn-jp/codexia/actions/runs/44/jobs', parameters: {}, key: 'jobs' },
-    { endpoint: '/repos/yohn-jp/codexia/releases', parameters: {}, key: null },
-  ]);
-  await assert.rejects(collectGitHubPages({}, '/repos/yohn-jp/codexia/jobs', 'jobs'), /Invalid GitHub pagination request/u);
-  await assert.rejects(collectGitHubArrayPages({}, '/repos/yohn-jp/codexia/releases'), /Invalid GitHub array pagination request/u);
 });
 
 test('OCI publication refuses existing image tags and fails closed on registry uncertainty', async () => {

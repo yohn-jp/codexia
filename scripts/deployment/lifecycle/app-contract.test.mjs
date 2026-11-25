@@ -351,8 +351,8 @@ test('image selection binds the exact-source Full artifact and verified publicat
   const source = readFileSync(new URL('./app.mjs', import.meta.url), 'utf8');
   const fixture = readFileSync(new URL('../../../deploy/ansible/test-push-app-lifecycle.sh', import.meta.url), 'utf8');
   assert.match(source, /selectBackendArtifacts/u);
-  assert.match(source, /apiArrayPages\('releases'\)/u,
-    'the GitHub releases endpoint must use its array response pagination contract');
+  assert.match(source, /paginateGitHubArray\(octokit\(\), octokit\(\)\.rest\.repos\.listReleases/u,
+    'the GitHub releases endpoint must use Octokit array pagination');
   assert.match(source, /metadata\.publication\?\.workflowHeadSha \?\? metadata\.sourceSha/u);
   assert.match(source, /run\.head_sha === workflowHead/u, 'a publication must bind its recorded workflow head');
   assert.match(fixture, /run_deploy "\$initial_key" true/u);

@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { selectLatestJobArtifact } from '../../ci/evidence/artifact-selection.mjs';
 import { downloadArtifact, extractArtifactFiles } from '../../ci/evidence/download-artifacts.mjs';
 import { readComponentVersion } from '../../release/components/version.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
+import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const PROFILES = ['core', 'full'];
@@ -111,12 +112,6 @@ async function sha256File(filename){
   return hash.digest('hex');
 }
 
-async function githubJson(github, route) {
-  const response = await github.request('GET', route);
-  if (response.status < 200 || response.status >= 300) throw new Error('Backend artifact provenance lookup failed (HTTP ' + response.status + ')');
-  return response.data;
-}
-
 export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={}) {
   assert.equal(env.GITHUB_REPOSITORY, REPOSITORY);
   assert.ok(['push','workflow_run'].includes(env.GITHUB_EVENT_NAME),'Backend publication must use verified main source');
@@ -128,21 +123,23 @@ export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={
   assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),expected.sourceSha,'Backend publish checkout source mismatch');
   const token = env.GH_TOKEN;
   assert.ok(typeof token === 'string' && token.length > 0, 'GitHub Actions read token required');
-  const github = createGitHubRestClient({ token, fetchImpl });
+  const github = createGitHubOctokit({ token, fetchImpl });
   const destination = env.CODEXIA_BACKEND_ARTIFACT_DIR;
   assert.ok(typeof destination === 'string' && path.isAbsolute(destination), 'Backend artifact destination must be absolute');
   const manifestPath=env.CODEXIA_BACKEND_ARTIFACT_MANIFEST;
   assert.ok(typeof manifestPath==='string'&&path.isAbsolute(manifestPath),'Backend artifact manifest path must be absolute');
-  const api = `/repos/${REPOSITORY}/actions/runs/${expected.runId}`;
-  const read = suffix => githubJson(github, api + suffix);
+  const [owner, repo] = REPOSITORY.split('/');
   const [run,artifacts,jobs] = await Promise.all([
-    read(''),
-    github.paginate(api + '/artifacts', {}, 'artifacts'),
-    github.paginate(api + '/jobs', { filter: 'latest' }, 'jobs'),
+    github.rest.actions.getWorkflowRun({ owner, repo, run_id: expected.runId }).then(response => response.data),
+    paginateActionsInventory(github, github.rest.actions.listWorkflowRunArtifacts,
+      { owner, repo, run_id: expected.runId }, 'artifacts'),
+    paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRun,
+      { owner, repo, run_id: expected.runId, filter: 'latest' }, 'jobs'),
   ]);
   const selected = selectBackendArtifacts(run,artifacts,jobs,expected);
   const attempts = new Map(await Promise.all([...new Set(selected.map(item=>item.producerAttempt))].map(async attempt=>[
-    attempt,await github.paginate(api + '/attempts/' + attempt + '/jobs', {}, 'jobs'),
+    attempt,await paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRunAttempt,
+      { owner, repo, run_id: expected.runId, attempt_number: attempt }, 'jobs'),
   ])));
   // Verify both producers before downloading; extract sequentially to keep
   // peak memory bounded by a single compressed image archive.

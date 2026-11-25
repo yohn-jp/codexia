@@ -10,7 +10,8 @@ import { componentReleaseAffected } from './impact.mjs';
 import { selectLatestPlanArtifact } from '../../ci/evidence/artifact-selection.mjs';
 import { downloadArtifact, extractJsonEntry } from '../../ci/evidence/download-artifacts.mjs';
 import { validateVerificationPlan } from '../../ci/impact/plan.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
+import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
 export function verifiedReleaseEvent(payload, env, checkoutSha) {
   const run = payload?.workflow_run;
@@ -56,10 +57,13 @@ async function readVerifiedPushBase(run, runId, repository, token) {
   assert.ok(token, 'Release requires Actions read permission');
   assert.ok(Number.isSafeInteger(runId) && runId > 0, 'Invalid trusted Verify run ID');
   assert.equal(repository, 'yohn-jp/codexia', 'Release repository mismatch');
-  const github = createGitHubRestClient({ token });
+  const github = createGitHubOctokit({ token });
+  const [owner, repo] = repository.split('/');
   const [jobs, artifacts] = await Promise.all([
-    github.paginate(`/repos/${repository}/actions/runs/${runId}/jobs`, { filter: 'latest' }, 'jobs'),
-    github.paginate(`/repos/${repository}/actions/runs/${runId}/artifacts`, {}, 'artifacts'),
+    paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRun,
+      { owner, repo, run_id: runId, filter: 'latest' }, 'jobs'),
+    paginateActionsInventory(github, github.rest.actions.listWorkflowRunArtifacts,
+      { owner, repo, run_id: runId }, 'artifacts'),
   ]);
   const planArtifact = selectLatestPlanArtifact(artifacts, jobs, { runId, sourceSha: run.head_sha });
   const data = await extractJsonEntry(await downloadArtifact(planArtifact, repository, token), 'ci-plan.json');

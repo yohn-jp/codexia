@@ -15,7 +15,8 @@ import { compareComponentVersions, readComponentVersion } from '../../release/co
 import { selectPushDeploymentCertificateArtifact, validatePushDeploymentCertificatePair } from '../handoff/verify-push.mjs';
 import { publicationInWorkflowWindow } from '../../release/components/record-model.mjs';
 import { successfulPublicationJobs, verifyExistingBackendRelease } from '../../release/backend/verify-existing.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
+import { paginateActionsInventory, paginateGitHubArray } from '../../github/paginate-actions.mjs';
 
 const repository = 'yohn-jp/codexia';
 const imagePrefix = 'ghcr.io/yohn-jp/codexia-backend';
@@ -82,17 +83,18 @@ export function publicError(error) {
     .replace(/(?:Bearer\s+)[A-Za-z0-9._-]+/giu, 'Bearer [REDACTED]').slice(0, 1200);
 }
 let github;
-function rest() { return github ??= createGitHubRestClient({ token, timeout: 20_000 }); }
-async function api(resource) {
-  const response = await rest().request('GET', `/repos/${repository}/${resource}`, { headers: { 'X-GitHub-Api-Version': '2022-11-28' } });
-  if (response.status < 200 || response.status >= 300) throw new Error(`GitHub provenance lookup failed (HTTP ${response.status})`);
-  return response.data;
-}
-async function apiPages(resource, key, parameters = {}) {
-  return rest().paginate(`/repos/${repository}/${resource}`, parameters, key);
-}
-async function apiArrayPages(resource, parameters = {}) {
-  return rest().paginate(`/repos/${repository}/${resource}`, parameters, null, { maxItems: 1_000_000 });
+function octokit() { return github ??= createGitHubOctokit({ token, timeout: 20_000 }); }
+async function readBackendInventory(endpoint, key, parameters = {}) {
+  if (endpoint === 'actions/runs') return paginateActionsInventory(octokit(),
+    octokit().rest.actions.listWorkflowRunsForRepo,
+    { owner: 'yohn-jp', repo: 'codexia', ...parameters }, key);
+  const jobs = /^actions\/runs\/([1-9]\d*)\/jobs$/u.exec(endpoint);
+  if (jobs) return paginateActionsInventory(octokit(), octokit().rest.actions.listJobsForWorkflowRun,
+    { owner: 'yohn-jp', repo: 'codexia', run_id: Number(jobs[1]), ...parameters }, key);
+  const artifacts = /^actions\/runs\/([1-9]\d*)\/artifacts$/u.exec(endpoint);
+  if (artifacts) return paginateActionsInventory(octokit(), octokit().rest.actions.listWorkflowRunArtifacts,
+    { owner: 'yohn-jp', repo: 'codexia', run_id: Number(artifacts[1]), ...parameters }, key);
+  throw new Error('Unapproved backend lifecycle evidence inventory');
 }
 function imageIdentity(image, { expectedImage = false, disposableRegistry = false } = {}) {
   const observed = JSON.parse(rootlessPodman(['image', 'inspect', image]))[0];
@@ -130,7 +132,8 @@ function validateImageIdentity(identity, expectedSha) {
 async function waitForExactSourceBackendRun() {
   const deadline = Date.now() + 45 * 60_000;
   while (Date.now() < deadline) {
-    const workflowRuns = await apiPages('actions/runs', 'workflow_runs', { head_sha: sourceSha });
+    const workflowRuns = await paginateActionsInventory(octokit(), octokit().rest.actions.listWorkflowRunsForRepo,
+      { owner: 'yohn-jp', repo: 'codexia', head_sha: sourceSha }, 'workflow_runs');
     const acceptedEvents = env.GITHUB_EVENT_NAME === 'pull_request' ? ['pull_request'] : ['pull_request', 'workflow_run'];
     const matches = workflowRuns.filter(run => run?.path === '.github/workflows/backend-release.yml' &&
       acceptedEvents.includes(run.event) && run.head_sha === sourceSha && run.repository?.full_name === repository &&
@@ -148,7 +151,7 @@ async function waitForExactSourceBackendRun() {
   throw new Error('Exact-source backend OCI artifact did not become available within 45 minutes');
 }
 
-export async function readExactBackendProducerArtifacts(run, expected, { readCollection = apiPages, pause = delay } = {}) {
+export async function readExactBackendProducerArtifacts(run, expected, { readCollection = readBackendInventory, pause = delay } = {}) {
   let remainingRetries = 3;
   for (;;) {
     const [jobs, artifacts] = await Promise.all([
@@ -229,23 +232,27 @@ export function selectLifecycleTransition(head, prior) {
 }
 
 async function certifiedCompatibleCandidate(head) {
-  const prior = selectPriorPublication(await apiArrayPages('releases'), head.identity);
+  const prior = selectPriorPublication(await paginateGitHubArray(octokit(), octokit().rest.repos.listReleases,
+    { owner: 'yohn-jp', repo: 'codexia' }, { maxItems: 1_000_000 }), head.identity);
   check(prior, 'No earlier published backend matches the current API epoch and persistence format');
   const { release, metadata } = prior;
   let scratch;
   try {
     const workflowHead = metadata.publication?.workflowHeadSha ?? metadata.sourceSha;
     const runs = metadata.publication
-      ? [await api(`actions/runs/${metadata.publication.workflowRunId}`)]
-      : await apiPages('actions/workflows/backend-release.yml/runs', 'workflow_runs', { event: 'workflow_run', branch: 'main', head_sha: workflowHead });
+      ? [(await octokit().rest.actions.getWorkflowRun({ owner: 'yohn-jp', repo: 'codexia', run_id: metadata.publication.workflowRunId })).data]
+      : await paginateActionsInventory(octokit(), octokit().rest.actions.listWorkflowRuns,
+        { owner: 'yohn-jp', repo: 'codexia', workflow_id: 'backend-release.yml', event: 'workflow_run', branch: 'main', head_sha: workflowHead }, 'workflow_runs');
     const publications = runs.filter(run => run.path === '.github/workflows/backend-release.yml' && run.event === 'workflow_run' &&
       run.head_branch === 'main' && run.head_sha === workflowHead && run.status === 'completed' &&
       run.conclusion === 'success' && publicationInWorkflowWindow(release, run));
     check(publications.length === 1, 'Backend release must bind one successful publication workflow');
     const [publicationRun] = publications;
     const [jobs, artifacts] = await Promise.all([
-      apiPages(`actions/runs/${publicationRun.id}/jobs`, 'jobs', { filter: 'latest' }),
-      apiPages(`actions/runs/${publicationRun.id}/artifacts`, 'artifacts'),
+      paginateActionsInventory(octokit(), octokit().rest.actions.listJobsForWorkflowRun,
+        { owner: 'yohn-jp', repo: 'codexia', run_id: publicationRun.id, filter: 'latest' }, 'jobs'),
+      paginateActionsInventory(octokit(), octokit().rest.actions.listWorkflowRunArtifacts,
+        { owner: 'yohn-jp', repo: 'codexia', run_id: publicationRun.id }, 'artifacts'),
     ]);
     const certificateArtifact = selectPushDeploymentCertificateArtifact(artifacts, publicationRun, { sourceSha: metadata.sourceSha });
     const certificateBytes = await downloadArtifact(certificateArtifact, repository, token, fetch, { maxArchive: 4 * 1024 * 1024, downloadTimeoutMs: 30_000 });

@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { backendPublicationFromEnvironment, buildComponentReleaseRecord } from './record-model.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
 
 const repository='yohn-jp/codexia';
 const digest=/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
@@ -67,32 +67,33 @@ async function main(){
   assert.equal(env.GITHUB_REF,'refs/heads/main');
   assert.ok(['push','workflow_run'].includes(env.GITHUB_EVENT_NAME),'Component release requires main or verified completion');
   const token=env.GH_TOKEN;assert.ok(token);
-  const github=createGitHubRestClient({token});
+  const github=createGitHubOctokit({token});
   const expectedTag=componentReleaseTagFromEnvironment(process.argv[2],env);
   const release=componentReleaseRecordFromEnvironment(env);
   assert.equal(release.tag,expectedTag,'Component release metadata differs from the trusted producer version');
-  async function api(resource,method='GET',data){
-    const response=await github.request(method,`/repos/${repository}/${resource}`,{
-      ...(data?{data}:{}),headers:{'X-GitHub-Api-Version':'2022-11-28'},
-    });
-    if(response.status===404&&method==='GET')return null;
-    if(response.status<200||response.status>=300)throw Error('Component release API request failed: HTTP '+response.status);
-    return response.data;
-  }
-  const resource='git/ref/tags/'+expectedTag;
-  let ref=await api(resource);
+  const [owner,repo]=repository.split('/');
+  const readOrMissing=async operation=>{
+    try{return (await operation()).data;}
+    catch(error){
+      if(error?.status===404)return null;
+      throw new Error('Component release API request failed'+(Number.isSafeInteger(error?.status)?': HTTP '+error.status:''),{cause:error});
+    }
+  };
+  let ref=await readOrMissing(()=>github.rest.git.getRef({owner,repo,ref:'tags/'+expectedTag}));
   if(!ref){
-    await api('git/refs','POST',{ref:'refs/tags/'+expectedTag,sha:release.targetSha});
-    ref=await api(resource);
+    try{await github.rest.git.createRef({owner,repo,ref:'refs/tags/'+expectedTag,sha:release.targetSha});}
+    catch(error){throw new Error('Component release API request failed'+(Number.isSafeInteger(error?.status)?': HTTP '+error.status:''),{cause:error});}
+    ref=await readOrMissing(()=>github.rest.git.getRef({owner,repo,ref:'tags/'+expectedTag}));
   }
   assert.equal(ref?.object?.type,'commit');assert.equal(ref.object.sha,release.targetSha,'Component version already belongs to a different source');
-  const existing=await api('releases/tags/'+expectedTag);
+  const existing=await readOrMissing(()=>github.rest.repos.getReleaseByTag({owner,repo,tag:expectedTag}));
   if(existing){
     assert.equal(existing.tag_name,release.tag);assert.equal(existing.body,release.body,'Existing component release binds different metadata');
     assert.equal(existing.draft,false);
   }else{
-    await api('releases','POST',{tag_name:release.tag,target_commitish:release.targetSha,name:release.title,body:release.body,
-      draft:false,prerelease:false,make_latest:'false'});
+    try{await github.rest.repos.createRelease({owner,repo,tag_name:release.tag,target_commitish:release.targetSha,name:release.title,body:release.body,
+      draft:false,prerelease:false,make_latest:'false'});}
+    catch(error){throw new Error('Component release API request failed'+(Number.isSafeInteger(error?.status)?': HTTP '+error.status:''),{cause:error});}
   }
   console.log('Recorded '+release.title+' from '+release.targetSha);
 }

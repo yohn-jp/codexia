@@ -21,26 +21,26 @@ test('selected exact artifact ID is retained even when a same-name older artifac
   }
 });
 
-test('exact REST artifact download validates bytes and isolates the GitHub read token', async () => {
+test('Octokit artifact download validates bytes and isolates the GitHub read token', async () => {
   const requests = [];
   const request = async (url, options) => {
     requests.push({ url, options });
     return requests.length === 1 ? new Response(null, { status: 302, headers: { location: 'https://storage.example/temporary?signature=secret' } }) : new Response(bytes);
   };
-  assert.deepEqual(await downloadArtifact(artifact, 'owner/repo', 'test-token', request), bytes);
-  assert.equal(requests[0].url, 'https://api.github.com/repos/owner/repo/actions/artifacts/10/zip');
-  assert.equal(requests[0].options.headers.Authorization, 'Bearer test-token');
+  assert.deepEqual(await downloadArtifact(artifact, 'yohn-jp/codexia', 'test-token', request), bytes);
+  assert.equal(String(requests[0].url), 'https://api.github.com/repos/yohn-jp/codexia/actions/artifacts/10/zip');
+  assert.equal(new Headers(requests[0].options.headers).get('authorization'), 'token test-token');
   assert.equal(requests[0].options.redirect, 'manual');
   assert.equal(requests[1].options.headers, undefined);
   assert.equal(requests[1].options.redirect, 'error');
 });
 
 test('download rejects missing artifacts, invalid redirects, size and digest mismatches', async () => {
-  await assert.rejects(downloadArtifact(artifact, 'owner/repo', 'token', async () => new Response(null, { status: 404 })), /redirect unavailable/);
-  await assert.rejects(downloadArtifact(artifact, 'owner/repo', 'token', async () => new Response(null, { status: 302, headers: { location: 'http://storage.example/archive' } })), /Invalid artifact download redirect/);
+  await assert.rejects(downloadArtifact(artifact, 'yohn-jp/codexia', 'token', async () => new Response(null, { status: 404 })), error => error.status === 404);
+  await assert.rejects(downloadArtifact(artifact, 'yohn-jp/codexia', 'token', async () => new Response(null, { status: 302, headers: { location: 'http://storage.example/archive' } })), /Invalid artifact download redirect/);
   for (const bad of [Buffer.from('different'), Buffer.from('archivE'), Buffer.from('short')]) {
     let call = 0;
-    await assert.rejects(downloadArtifact(artifact, 'owner/repo', 'token', async () => ++call === 1 ? new Response(null, { status: 302, headers: { location: 'https://storage.example/archive' } }) : new Response(bad)), /size|digest/);
+    await assert.rejects(downloadArtifact(artifact, 'yohn-jp/codexia', 'token', async () => ++call === 1 ? new Response(null, { status: 302, headers: { location: 'https://storage.example/archive' } }) : new Response(bad)), /size|digest/);
   }
 });
 
@@ -73,8 +73,8 @@ test('certification materializes only the selected plan and reports for one or m
   const traceGroup = { group: 'types-trace', sha: identity.sourceSha, workflowRunId: 123, workflowAttempt: 2, workflowJob: 'types' };
   const trace = {
     source: { sourceSha: identity.sourceSha, worktreeClean: true },
-    execution: { status: 'IN_PROGRESS', repository: 'owner/repo', sourceSha: identity.sourceSha, runId: '123',
-      runAttempt: 2, job: 'types', task: 'requirements-trace', runUrl: 'https://github.com/owner/repo/actions/runs/123' },
+    execution: { status: 'IN_PROGRESS', repository: 'yohn-jp/codexia', sourceSha: identity.sourceSha, runId: '123',
+      runAttempt: 2, job: 'types', task: 'requirements-trace', runUrl: 'https://github.com/yohn-jp/codexia/actions/runs/123' },
     requiredCaseIds: ['TEST-TRC-01-001'], caseExecutions: [{ testId: 'TEST-TRC-01-001', result: 'PASSED' }],
     obligationTrace: { rows: [] },
   };
@@ -84,9 +84,9 @@ test('certification materializes only the selected plan and reports for one or m
   const requestedIds = [];
   const options = {
     inventory: { identity, artifacts: [selectedPlan, selectedReport, olderReport, retainedReport, selectedTrace, missingTrace] },
-    identity, repository: 'owner/repo', token: 'fixture-token',
+    identity, repository: 'yohn-jp/codexia', token: 'fixture-token',
     async request(url) {
-      const { hostname, pathname } = new URL(url);
+      const { hostname, pathname } = new URL(String(url));
       if (hostname === 'api.github.com') {
         const id = Number(pathname.split('/').at(-2));
         requestedIds.push(id);
@@ -122,10 +122,10 @@ test('certification materializes only the selected plan and reports for one or m
 });
 
 test('trace proof rejects stale, foreign or skipped nested evidence in the selected artifact', () => {
-  const repository = 'owner/repo';
+  const repository = 'yohn-jp/codexia';
   const group = { group: 'types-trace', sha: identity.sourceSha, workflowRunId: 123, workflowAttempt: 2, workflowJob: 'types' };
   const execution = { status: 'IN_PROGRESS', repository, sourceSha: identity.sourceSha, runId: '123',
-    runAttempt: 2, job: 'types', task: 'requirements-trace', runUrl: 'https://github.com/owner/repo/actions/runs/123' };
+    runAttempt: 2, job: 'types', task: 'requirements-trace', runUrl: 'https://github.com/yohn-jp/codexia/actions/runs/123' };
   const testId = 'TEST-TRC-01-001';
   const run = { testId, repository, sourceSha: identity.sourceSha, runId: '123', attempt: 2,
     job: 'types', task: 'requirements-trace', url: execution.runUrl, result: 'PASS' };
