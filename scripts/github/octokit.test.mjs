@@ -29,7 +29,8 @@ test('Octokit rejects another origin or repository before sending a request', as
     requestCount++;
     return Response.json({});
   } });
-  await assert.rejects(octokit.request('GET https://attacker.invalid/repos/yohn-jp/codexia/actions/runs/1'), /api.github.com/u);
+  await assert.rejects(octokit.request('GET https://attacker.invalid/repos/yohn-jp/codexia/actions/runs/1'),
+    (error) => error.message.startsWith('GitHub REST requests must stay on api.github.com'));
   await assert.rejects(octokit.rest.actions.getWorkflowRun({ owner: 'another-owner', repo: 'codexia', run_id: 1 }), /outside the canonical repository/u);
   assert.equal(requestCount, 0);
 });
