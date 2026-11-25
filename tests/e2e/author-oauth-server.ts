@@ -13,6 +13,7 @@ export type Shell = "desktop" | "mobile";
 export interface AuthorNavigation { path?: string; expectedView?: Locator; continueCurrentPage?: boolean }
 export interface AuthorBrowserFixture extends BetterAuthFixture {
   readonly preparedAuthorEntries: boolean;
+  readonly startupMs: number;
 }
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -101,6 +102,7 @@ export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort,
   frontendSource?: string;
   preparedAuthorEntries?: boolean;
 }): Promise<AuthorBrowserFixture> {
+  const fixtureStarted = performance.now();
   const stateDirectory = await mkdtemp(join(tmpdir(), "codexia-author-browser-"));
   let server: BetterAuthFixture | undefined;
   const close = async () => {
@@ -129,7 +131,7 @@ export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort,
         if (!hasHandoff) throw new Error("Isolated prepared author entry was not built");
       }
     }
-    return { ...server, close, preparedAuthorEntries: usePreparedEntries };
+    return { ...server, close, preparedAuthorEntries: usePreparedEntries, startupMs: Math.round(performance.now() - fixtureStarted) };
   } catch (error) {
     await close();
     throw error;
