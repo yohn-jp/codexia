@@ -61,6 +61,42 @@ const relatedDiagram = atlas.diagrams.find(item => item.implementationPaths?.som
 assert.ok(relatedDiagram, 'Expected at least one Atlas diagram with same-SHA source evidence');
 const relatedFile = relatedDiagram.implementationPaths.find(path => indexedFiles.has(path));
 
+// Check the rendered heading against its effective ancestor background, including
+// transparent layers, so a mixed Scalar/portal theme cannot pass the smoke test.
+async function assertScalarTitleContrast(page) {
+  const title = page.locator('#scalar-api-reference').getByRole('heading', { name: 'Codexia API', exact: true }).first();
+  await title.waitFor();
+  const ratio = await title.evaluate(element => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    const layers = [];
+    for (let node = element; node; node = node.parentElement) {
+      layers.unshift(getComputedStyle(node).backgroundColor);
+    }
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, 1, 1);
+    for (const color of layers) {
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+    }
+    const luminance = () => {
+      const channels = Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3).map(value => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+    };
+    const background = luminance();
+    context.fillStyle = getComputedStyle(element).color;
+    context.fillRect(0, 0, 1, 1);
+    const foreground = luminance();
+    return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+  });
+  assert.ok(ratio >= 4.5, 'Scalar API title contrast must be at least 4.5:1 (actual ' + ratio.toFixed(2) + ':1)');
+}
+
 async function assertReflow(page, label) {
   const { viewport, content } = await page.evaluate(() => ({
     viewport: innerWidth,
@@ -232,7 +268,13 @@ try {
         assert.ok(await menu.evaluate(button => button.getBoundingClientRect().height >= 44), 'Mobile menu hit area');
         await menu.press('Enter');
         assert.equal(await menu.getAttribute('aria-expanded'), 'true');
-        if (destination === destinations[0]) await capture('navigation-expanded');
+        if (destination === destinations[0]) {
+          await capture('navigation-expanded');
+          await primary.getByRole('link').first().press('Escape');
+          assert.equal(await menu.getAttribute('aria-expanded'), 'false');
+          assert.ok(await menu.evaluate(button => document.activeElement === button), 'Escape must return focus to the menu button');
+          await menu.press('Enter');
+        }
       }
       const target = primary.getByRole('link').filter({ visible: true });
       const hrefs = await target.evaluateAll(links => links.map(link => link.href));
@@ -254,10 +296,11 @@ try {
         assert.ok(await page.locator('#copy-diagnostics').isDisabled());
         apiStatus = 429;
       } else if (destination === 'api/') {
+        await assertScalarTitleContrast(page);
         let body = await page.locator('body').innerText();
-        assert.match(body, /Static target contract from TypeSpec/u);
-        assert.match(body, /Runtime implementation: partial/u);
-        assert.match(body, /Verification: contract generation and lint are separate CI results/u);
+        assert.match(body, /OpenAPI 3.1 contract generated from TypeSpec/u);
+        assert.match(body, /current admitted operations register in Fastify/u);
+        assert.match(body, /this static reference is not a runtime inventory, CI result, or production API acceptance report/u);
         assert.match(body, /Authentication scheme definitions/u);
         assert.match(body, /BearerAuth[\s\S]*HTTP Bearer/u);
         assert.match(body, /ApiKeyAuth[\s\S]*__Secure-better-auth\.session_token/u);
@@ -279,7 +322,7 @@ try {
         assert.match(body, /404[\s\S]*cannot find/iu);
         await selectScalarOperation(page, '/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors', 'POST');
         body = await page.locator('body').innerText();
-        assert.match(body, /Runtime validation evidence:[\s\S]*incomplete and the published schema/u);
+        assert.match(body, /Current admitted route; Fastify registration uses the generated route and schema inventory/u);
         await assertReflow(page, 'API operation details');
         assert.equal(await page.getByRole('link', { name: 'Third-party notices' }).getAttribute('href'), './THIRD_PARTY_NOTICES.txt');
         assert.equal(await page.getByRole('button', { name: /Try it|Send API Request|Test Request/i }).count(), 0,
@@ -324,6 +367,14 @@ try {
       await page.locator('.cx-pages-brand').press('Enter');
       await page.waitForURL(base);
     }
+
+    const previousRequestCount = externalRequests.length;
+    await page.goto(base + 'architecture/#system-1');
+    const nativeView = page.locator('likec4-view[view-id="architecture"]');
+    await nativeView.locator('.react-flow__node').first().waitFor();
+    await assertReflow(page, 'Atlas LikeC4');
+    assert.deepEqual(externalRequests.slice(previousRequestCount), [], 'Atlas LikeC4 must stay on the Pages origin');
+    await capture('atlas-likec4');
 
     await page.goto(base + 'architecture/#admin-5');
     await page.reload();

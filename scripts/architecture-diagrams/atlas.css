@@ -69,12 +69,12 @@ button:disabled { cursor: not-allowed; opacity: 0.52; }
   gap: var(--atlas-space-8);
   max-width: var(--atlas-content-width);
   margin-inline: auto;
-  padding: 1.5rem clamp(1rem, 3vw, 2.75rem) 1.75rem;
+  padding: 0.9rem clamp(1rem, 3vw, 2.75rem) 1rem;
 }
 h1 {
   max-width: 18ch;
   margin: 0;
-  font: 600 clamp(2rem, 3.2vw, 2.75rem)/1.12 Georgia, "Noto Serif CJK JP", serif;
+  font: 650 1.75rem/1.2 system-ui, "Noto Sans CJK JP", sans-serif;
   letter-spacing: -0.025em;
 }
 .intro {
@@ -106,7 +106,7 @@ h1 {
 #diagram-total { font-variant-numeric: tabular-nums; }
 .workspace {
   display: grid;
-  grid-template-columns: clamp(17rem, 27vw, 21rem) minmax(0, 1fr);
+  grid-template-columns: clamp(15rem, 23vw, 19rem) minmax(0, 1fr);
   max-width: var(--atlas-content-width);
   min-height: calc(100vh - 10rem);
   margin-inline: auto;
@@ -310,7 +310,8 @@ h1 {
   gap: 0.35rem;
 }
 .zoom-controls button,
-.open-svg {
+.open-svg,
+.zoom-control-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -326,7 +327,8 @@ h1 {
   white-space: nowrap;
 }
 .zoom-controls button:hover,
-.open-svg:hover { background: var(--atlas-selected); }
+.open-svg:hover,
+.zoom-control-button:hover { background: var(--atlas-selected); }
 .zoom-controls #zoom-out,
 .zoom-controls #zoom-in {
   width: 2.75rem;
@@ -343,6 +345,12 @@ h1 {
 .open-svg {
   color: var(--atlas-accent);
   text-decoration-line: underline;
+  text-underline-offset: 0.18em;
+}
+.zoom-control-button {
+  color: var(--atlas-accent);
+  text-decoration: underline;
+  text-decoration-thickness: 0.07em;
   text-underline-offset: 0.18em;
 }
 .evidence-details {
@@ -425,9 +433,12 @@ h1 {
   width: 100%;
   max-width: none;
   height: auto;
-  min-height: 8rem;
 }
 .canvas img[hidden] { display: none; }
+.native-renderer { width: 100%; height: 100%; min-height: 36rem; }
+.native-renderer[hidden] { display: none; }
+.native-renderer likec4-view { width: 100%; height: 100%; min-height: 36rem; }
+.canvas:has(.native-renderer:not([hidden])) { padding: 0; }
 .loading {
   display: grid;
   place-content: center;
@@ -503,6 +514,8 @@ h1 {
   .diagram-head { grid-template-columns: minmax(0, 1fr); }
   .controls { justify-content: start; }
   .canvas { height: clamp(22.5rem, 66svh, 40rem); }
+  .native-renderer,
+  .native-renderer likec4-view { min-height: 28rem; }
 }
 @media (max-width: 520px) {
   h1 { font-size: clamp(1.65rem, 8vw, 1.9rem); }
@@ -532,7 +545,8 @@ h1 {
   .diagram-search #clear-search { padding-inline: 0.55rem; }
   .zoom-controls { gap: 0.2rem; }
   .zoom-controls button,
-  .open-svg { padding-inline: 0.45rem; font-size: 0.7rem; }
+  .open-svg,
+  .zoom-control-button { padding-inline: 0.45rem; font-size: 0.7rem; }
   .zoom-controls #zoom-out,
   .zoom-controls #zoom-in { width: 2.75rem; }
   .zoom-controls output { min-width: 2.7rem; }

@@ -84,7 +84,7 @@ flowchart TD
 | 論理画面 | 操作・表示 |
 | --- | --- |
 | UX-01 Catalog | platform/principal/screen/CTRL/journey/採用・実装観測状態を検索。全採用IDを列挙し不足を表示。正本、正規コード、journey開始・直接表示へ |
-| UX-02 Player | 中央に汎用wireframe、画面/region/controlと現在状態。周囲に遷移グラフ・現在位置・選択できる操作と分岐・戻り先。Desktopの複数panelとnative navigation/sheet等の構造差はデータから描画。設計投影・実装投影を明示切替 |
+| UX-02 Player | 中央に汎用wireframe、画面/region/controlと現在状態。遷移グラフに現在位置、遷移先、分岐条件、根拠を表示し、現在位置から根拠のある操作を図の中で選択する。汎用Playerの戻り操作と履歴で経路を確認できる。Desktopの複数panelとnative navigation/sheet等の構造差はデータから描画。設計投影・実装投影を明示切替 |
 | UX-03 Inspector | 遷移元/先・条件・根拠・観測方法・文脈・履歴・拒否/unknown、分岐注入、reset、再現URL/trace。設計上の到達と実装観測を混同しない |
 | UX-04 Compare | 同一SHAの設計対実装、検証済み2版の構造・control・state/transition/journeyの差分。欠落、未抽出、未観測、未実装、追加/変更/削除を区別 |
 

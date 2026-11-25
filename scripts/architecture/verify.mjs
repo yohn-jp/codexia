@@ -7,7 +7,6 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   assertNoPublicSecrets,
-  extractLikeC4Mermaid,
   LIKEC4_GENERATOR,
   LIKEC4_SOURCE_PATH,
   LIKEC4_VERSION,
@@ -16,12 +15,11 @@ import {
   validateLikeC4Export,
   validateThreatModelCheckIds,
   validateThreatRisks,
-  verifyGeneratedMermaid,
+  validateArchitectureView,
 } from './contract.mjs';
 import { THREAGILE_IMAGE } from './constants.mjs';
 export const THREAT_MODEL_PATH = 'docs/architecture/threagile/model.yaml';
 export const THREAT_MODEL_DOC_PATH = 'docs/architecture/THREAT-MODEL.md';
-export const MERMAID_DERIVATIVE_PATH = 'docs/architecture/likec4/generated/system-overview.mmd';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const LIKEC4_BIN = join(ROOT, 'scripts/architecture/node_modules/.bin/likec4');
 const DOCKER_TIMEOUT = 120_000;
@@ -103,17 +101,15 @@ export async function verifyArchitecture(evidenceDirectory, options = {}) {
   assert.equal(dirty, '', 'G5 exact-source verification requires a clean checkout');
 
   const modelFile = join(root, LIKEC4_SOURCE_PATH);
-  const derivativeFile = join(root, MERMAID_DERIVATIVE_PATH);
   const threatModelFile = join(root, THREAT_MODEL_PATH);
   const designFile = join(root, 'docs/architecture/SYSTEM-DESIGN.md');
   const threatDocFile = join(root, THREAT_MODEL_DOC_PATH);
   const toolLockFile = join(root, 'scripts/architecture/package-lock.json');
   const modelSource = await readFile(modelFile, 'utf8');
-  const derivative = await readFile(derivativeFile, 'utf8');
   const threatModel = await readFile(threatModelFile, 'utf8');
   const publicDesign = await readFile(designFile, 'utf8');
   const threatDoc = await readFile(threatDocFile, 'utf8');
-  assertNoPublicSecrets([modelSource, derivative, threatModel, publicDesign, threatDoc]);
+  assertNoPublicSecrets([modelSource, threatModel, publicDesign, threatDoc]);
   validateThreatModelCheckIds(threatModel);
 
   const likec4Version = run(likec4Bin, ['--version']).trim();
@@ -123,21 +119,14 @@ export async function verifyArchitecture(evidenceDirectory, options = {}) {
   const temp = await mkdtemp(join(process.env.TMPDIR || '/tmp', 'codexia-architecture-g5-'));
   try {
     const exportFile = join(temp, 'likec4-export.json');
-    const mermaidOutput = join(temp, 'likec4');
-    await mkdir(mermaidOutput, { recursive: true });
     run(likec4Bin, [
       'export', 'json', '--pretty', '--skip-layout', '-o', exportFile,
       join(root, 'docs/architecture/likec4'),
     ]);
-    run(likec4Bin, [
-      'gen', 'mermaid', join(root, 'docs/architecture/likec4'), '-o', mermaidOutput,
-    ]);
 
     const modelExport = JSON.parse(await readFile(exportFile, 'utf8'));
     validateLikeC4Export(modelExport);
-    const regeneratedOutput = await readFile(join(mermaidOutput, 'architecture.mmd'), 'utf8');
-    const regenerated = extractLikeC4Mermaid(regeneratedOutput);
-    verifyGeneratedMermaid(modelSource, derivative, regeneratedOutput);
+    const architectureView = validateArchitectureView(modelExport.views);
 
     const invalidModelDir = join(temp, 'invalid-boundary');
     await mkdir(invalidModelDir);
@@ -209,7 +198,6 @@ export async function verifyArchitecture(evidenceDirectory, options = {}) {
     await mkdir(evidence, { recursive: true });
     const evidenceFiles = new Map([
       ['likec4-export.json', exportFile],
-      ['likec4-generated.mmd', join(mermaidOutput, 'architecture.mmd')],
       ['threagile-risks.json', join(riskOutputDirectory, 'risks.json')],
       ['threagile-stats.json', join(riskOutputDirectory, 'stats.json')],
       ['threagile-technical-assets.json', join(riskOutputDirectory, 'technical-assets.json')],
@@ -222,7 +210,6 @@ export async function verifyArchitecture(evidenceDirectory, options = {}) {
     }
     const sourceInputs = [
       LIKEC4_SOURCE_PATH,
-      MERMAID_DERIVATIVE_PATH,
       THREAT_MODEL_PATH,
       THREAT_MODEL_DOC_PATH,
       'docs/architecture/SYSTEM-DESIGN.md',
@@ -243,10 +230,9 @@ export async function verifyArchitecture(evidenceDirectory, options = {}) {
       inputs: Object.fromEntries(await Promise.all(sourceInputs.map(async path =>
         [path, await sha256Path(join(root, path))]))),
       likec4: {
-        view: regenerated.title,
+        view: architectureView.title,
         elementCount: Object.keys(modelExport.elements).length,
         relationshipCount: Object.keys(modelExport.relations).length,
-        mermaidRegeneration: 'BYTE_FOR_BYTE_MATCH',
       },
       threagile: {
         riskInstanceCount: risks.length,

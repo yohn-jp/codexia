@@ -55,8 +55,19 @@ function fixture() {
   put(join(site,'architecture','atlas.css'),'');
   put(join(site,'architecture','atlas.js'),'');
   put(join(site,'architecture','svg','user-1.svg'),'<svg xmlns="http://www.w3.org/2000/svg"></svg>');
-  put(join(site,'architecture','svg','system-1.svg'),'<svg xmlns="http://www.w3.org/2000/svg"></svg>');
-  put(join(site,'architecture','manifest.json'),JSON.stringify({sourceSha:sha,diagrams:[{id:'user-1',image:'svg/user-1.svg'},{id:'system-1',image:'svg/system-1.svg',sourceModel:'docs/architecture/likec4/model.likec4',sourceModelSha256:digest(readFileSync('docs/architecture/likec4/model.likec4'))}]}));
+  mkdirSync(join(site,'architecture','likec4'));
+  put(join(site,'architecture','likec4','codexia-architecture.mjs'),'// fixture bundle');
+  put(join(site,'architecture','likec4','LICENSE'),'MIT License');
+  const sourceModel = 'docs/architecture/likec4/model.likec4';
+  const native = {
+    renderer: 'likec4', artifact: 'likec4/codexia-architecture.mjs', sourceModel,
+    sourceModelSha256: digest(readFileSync(sourceModel)),
+  };
+  put(join(site,'architecture','manifest.json'),JSON.stringify({sourceSha:sha,diagrams:[
+    {id:'user-1',renderer:'mermaid',image:'svg/user-1.svg'},
+    {...native,id:'system-1',viewId:'architecture'},
+    {...native,id:'system-3',viewId:'operations-topology'},
+  ]}));
   put(join(site,'graph','source.json'),JSON.stringify({sourceSha:sha}));
   put(join(site,'graph','analysis.mjs'),'export const analyze = true;\n');
   put(join(site,'graph','communities.html'),'<html><body><a href="./">Graph</a></body></html>');
@@ -182,7 +193,7 @@ test('review finalization rejects symlinked files before updating integrity meta
   } finally { cleanup(site); }
 });
 
-test('records and validates LikeC4 source, lock and published SVG provenance',()=>{
+test('records and validates LikeC4 source, lock and published web component provenance',()=>{
   const site=fixture();
   try {
     const atlasPath=join(site,'architecture','manifest.json');
@@ -190,15 +201,26 @@ test('records and validates LikeC4 source, lock and published SVG provenance',()
     const model=readFileSync('docs/architecture/likec4/model.likec4');
     assert.ok(atlas.diagrams.some(item => item.id === 'system-1'));
     put(atlasPath,JSON.stringify(atlas));
-    put(join(site,'architecture','svg','system-1.svg'),'<svg xmlns="http://www.w3.org/2000/svg"></svg>');
     const registry=generate(site,sha,origin);
     assert.equal(registry.likec4.sourceSha,sha);
     assert.equal(registry.likec4.model.sha256,digest(model));
     assert.equal(registry.likec4.generator.version,'1.61.0');
     assert.equal(registry.likec4.generator.lockSha256,digest(readFileSync('scripts/architecture/package-lock.json')));
     verify(site,origin);
-    put(join(site,'architecture','svg','system-1.svg'),'<svg>changed</svg>');
-    assert.throws(()=>verify(site,origin),/LikeC4.*digest/u);
+    assert.deepEqual(registry.likec4.views,[
+      {id:'system-1',viewId:'architecture'},
+      {id:'system-3',viewId:'operations-topology'},
+    ]);
+    for (const output of registry.likec4.outputs) {
+      const path = join(site,output.path);
+      const content = readFileSync(path);
+      assert.equal(output.sha256,digest(content));
+      put(path,'tampered content');
+      assert.throws(()=>verify(site,origin),/LikeC4.*digest/u);
+      put(path,content);
+    }
+    put(join(site,'architecture','likec4','unexpected.json'),'{}');
+    assert.throws(()=>verify(site,origin),/Unexpected LikeC4 build output/u);
   } finally {cleanup(site);}
 });
 

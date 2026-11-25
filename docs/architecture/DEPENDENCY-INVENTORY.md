@@ -83,13 +83,14 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@vitejs/plugin-react` | `^6.3.0` | app・フロントビルド | **要検証**: Vite・Reactビルドとの互換性を一緒に確認 |
 | `vite` | 現行 `^8.3.8` → **Vite 8継続採用** | app・フロントビルド | **採用確定**: 最新8系への追従、Reactプラグイン・CSS生成・Workers配信・OAuth分離を検証。バンドラー変更は本契約の対象外 |
 
-### Pages用の静的APIドキュメント
+### Pages用の設計ビューと静的APIドキュメント
 
 以下はRepository Audit Pagesの生成時だけ使う隔離npmパッケージである。
-製品のDesktop WebやAPI runtimeへ含めず、`scripts/pages-api/package-lock.json`で推移依存まで固定する。
+製品のDesktop WebやAPI runtimeから分離し、各生成器のnpm lockfileで推移依存まで固定する。
 
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
+| `likec4` | `1.61.0` | `scripts/architecture`・構造モデル検証と Web Component 生成 | MIT。Atlas の構造ビューを自己ホストする |
 | `@scalar/api-reference` | `1.83.0` | `scripts/pages-api`・TypeSpec由来OpenAPI 3.1の静的表示 | **新規採用**: MIT。API serverなし、Try It／認証入力／AI操作を非表示、認証operation例の削除、外部fetch禁止をChromiumで確認 |
 | `esbuild` | `0.28.2` | `scripts/pages-api`・ScalarのローカルJS/CSS bundle | **連動**: Pages生成だけで使用し、Scalarと一緒にlockを固定 |
 

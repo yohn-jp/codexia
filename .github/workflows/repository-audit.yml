@@ -10,6 +10,7 @@ on:
       - 'scripts/ci/dashboard/**'
       - 'scripts/graphify-pages/**'
       - 'scripts/architecture-diagrams/**'
+      - 'scripts/architecture/**'
       - 'scripts/pages-ui/**'
       - 'scripts/ux-simulator/**'
       - 'scripts/ci/impact/plan.mjs'
@@ -188,6 +189,8 @@ jobs:
           PUPPETEER_SKIP_DOWNLOAD: '1'
         run: |
           npm install --prefix "$RUNNER_TEMP/architecture-renderer" --ignore-scripts --no-audit --no-fund @mermaid-js/mermaid-cli@12.2.0 puppeteer@25.17.0
+      - name: Install locked LikeC4 CLI
+        run: npm ci --prefix scripts/architecture --ignore-scripts --no-audit --no-fund
       - name: Render all canonical architecture diagrams
         run: |
           node scripts/architecture-diagrams/pack.mjs \

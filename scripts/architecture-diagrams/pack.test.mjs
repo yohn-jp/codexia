@@ -7,11 +7,16 @@ import { fileURLToPath } from 'node:url';
 import {
   createManifest,
   DIAGRAM_DOCUMENTS,
-  LIKEC4_DERIVATIVE_PATH,
-  parseGeneratedSystemDiagram,
+  parseLikeC4Diagram,
   parseMermaidDiagrams,
   SYSTEM_DESIGN_PATH,
 } from './pack.mjs';
+import {
+  LIKEC4_OPERATIONS_VIEW_ID,
+  LIKEC4_OPERATIONS_VIEW_TITLE,
+  LIKEC4_VIEW_ID,
+  LIKEC4_VIEW_TITLE,
+} from '../architecture/contract.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const sha = 'a'.repeat(40);
@@ -23,17 +28,22 @@ test('all canonical system, UI, administration and delivery diagrams have stable
   }));
   const catalog = readFileSync(join(root, 'docs/design/SCREEN-CONTROL-CATALOG.md'), 'utf8');
   const modelSource = readFileSync(join(root, 'docs/architecture/likec4/model.likec4'), 'utf8');
-  const derivative = readFileSync(join(root, LIKEC4_DERIVATIVE_PATH), 'utf8');
   const systemDesign = readFileSync(join(root, SYSTEM_DESIGN_PATH), 'utf8');
-  const generatedSystemDiagram = parseGeneratedSystemDiagram(modelSource, derivative, systemDesign);
-  const manifest = createManifest(sha, sources, catalog, generatedSystemDiagram);
+  const modelDiagram = parseLikeC4Diagram(modelSource, systemDesign, {
+    id: 'system-1', viewId: LIKEC4_VIEW_ID, title: LIKEC4_VIEW_TITLE,
+  });
+  const operationsDiagram = parseLikeC4Diagram(modelSource, systemDesign, {
+    id: 'system-3', viewId: LIKEC4_OPERATIONS_VIEW_ID, title: LIKEC4_OPERATIONS_VIEW_TITLE,
+    heading: '## 運用プレーンと更新',
+  });
+  const manifest = createManifest(sha, sources, catalog, [modelDiagram, operationsDiagram]);
   assert.equal(manifest.format, 'codexia-architecture-atlas/v1');
   assert.equal(manifest.sourceSha, sha);
   const sourceCount = sources.reduce((total, item) =>
     total + item.markdown.split('\n').filter(line => line.trim() === '```mermaid').length, 0);
   assert.ok(sourceCount >= 40, 'The full screen catalog must be rendered');
-  assert.equal(manifest.diagrams.length, sourceCount + 1);
-  assert.equal(new Set(manifest.diagrams.map(d => d.id)).size, sourceCount + 1);
+  assert.equal(manifest.diagrams.length, sourceCount + 2);
+  assert.equal(new Set(manifest.diagrams.map(d => d.id)).size, sourceCount + 2);
   assert.deepEqual([...new Set(manifest.diagrams.map(d => d.group))],
     ['system', 'data', 'user', 'admin', 'screen', 'first', 'update', 'lifecycle']);
   assert.ok(manifest.diagrams.some(d => d.id === 'admin-4' && d.title.includes('管理コンソール')));
@@ -46,11 +56,25 @@ test('all canonical system, UI, administration and delivery diagrams have stable
   const systemOverview = manifest.diagrams.find(d => d.id === 'system-1');
   assert.equal(systemOverview.title, 'Codexia system context, containers, and trust boundaries');
   assert.equal(systemOverview.markdown, SYSTEM_DESIGN_PATH);
+  assert.equal(systemOverview.renderer, 'likec4');
+  assert.equal(systemOverview.viewId, LIKEC4_VIEW_ID);
+  assert.equal(systemOverview.artifact, 'likec4/codexia-architecture.mjs');
   assert.equal(systemOverview.sourceModel, 'docs/architecture/likec4/model.likec4');
   assert.equal(systemOverview.sourceModelSha256, createHash('sha256').update(modelSource).digest('hex'));
   assert.match(systemDesign.split(/\r?\n/u)[systemOverview.line - 1], /\[LikeC4 system model\]\(\.\/likec4\/model\.likec4\)/u);
   assert.ok(manifest.diagrams.some(d => d.id === 'system-2' && d.title === '運用プレーンと更新'),
-    'The original system-1 locator remains stable and the operations diagram is retained');
+    'The operations process remains at its stable Mermaid locator');
+  const topology = manifest.diagrams.find(d => d.id === 'system-3');
+  assert.equal(topology.renderer, 'likec4');
+  assert.equal(topology.viewId, LIKEC4_OPERATIONS_VIEW_ID);
+  assert.equal(topology.line, systemDesign.split(/\r?\n/u).findIndex(line => line.trim() === '## 運用プレーンと更新') + 1);
+  const withAnotherSystemDiagram = sources.map(source => source.section.id === 'system'
+    ? { ...source, markdown: source.markdown + '\n## Additional process\n\n```mermaid\nflowchart TD\n  A --> B\n```\n' }
+    : source);
+  const additional = createManifest(sha, withAnotherSystemDiagram, catalog, [modelDiagram, operationsDiagram])
+    .diagrams.find(diagram => diagram.title === 'Additional process');
+  assert.equal(additional?.id, 'system-4', 'Additional Mermaid entries must skip the native topology locator');
+  assert.equal(additional?.image, 'svg/system-4.svg');
   assert.ok(manifest.diagrams.some(d => d.id === 'screen-1' && d.title.includes('ENTRY-01')));
   assert.ok(manifest.diagrams.some(d => d.id === 'screen-19' && d.title.includes('CON-01')));
   const screenSection = DIAGRAM_DOCUMENTS.find(section => section.id === 'screen');
@@ -67,7 +91,7 @@ test('all canonical system, UI, administration and delivery diagrams have stable
   const crossHeading = screenLines.slice(0, crossShell.line - 2).findLast(line => /^#{1,4}\s/u.test(line));
   assert.equal(crossShell.title, crossHeading.replace(/^#{1,4}\s+/u, '').trim());
   assert.ok(manifest.diagrams.every(d => d.markdown.startsWith('docs/') &&
-    /^svg\/[a-z]+-\d+\.svg$/u.test(d.image) &&
+    (d.renderer === 'likec4' || /^svg\/[a-z]+-\d+\.svg$/u.test(d.image)) &&
     d.line > 0 && d.title.length > 0 && !('source' in d)));
   const entry = manifest.diagrams.find(d => d.screenIds.includes('ENTRY-01'));
   assert.ok(entry, 'ENTRY-01 must have a diagram');

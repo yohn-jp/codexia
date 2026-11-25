@@ -46,6 +46,7 @@
   .view-nav a { display: inline-flex; align-items: center; justify-content: center; min-block-size: 44px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 7px; }
   .view-nav a[aria-current="page"] { color: var(--fg); background: var(--selected); border-color: var(--cx-pages-selected, #527aa6); font-weight: 650; }
   .scope-line { color: var(--muted); font-size: 12px; }
+  .graph-target { max-inline-size: 32rem; margin-block: .75rem; }
   .layout { display: grid; grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); max-width: var(--content-width); min-height: calc(100dvh - 200px); margin-inline: auto; }
   .explorer-pane { min-width: 0; padding: 16px; background: color-mix(in srgb, var(--panel) 45%, var(--bg)); border-inline-end: 1px solid var(--line); }
   .file-explorer { min-width: 0; }
@@ -126,6 +127,12 @@
   .node.linked:hover rect { stroke-width: 3; }
   .node.linked:focus-visible rect { stroke: var(--focus); stroke-width: 4; }
   .columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+  .directory-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 6px; margin-top: 8px; }
+  .directory-group { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; min-height: 48px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-raised); text-align: start; cursor: pointer; }
+  .directory-group:hover { border-color: var(--accent); }
+  .directory-group[aria-pressed="true"] { background: var(--selected); border-color: var(--cx-pages-selected, #527aa6); }
+  .directory-group strong { min-width: 0; overflow-wrap: anywhere; }
+  .directory-group small { flex: 0 0 auto; color: var(--muted); font-size: 12px; text-align: end; }
   section.card { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
   .relations { display: grid; gap: 5px; max-height: 340px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
   .relation-row { min-width: 0; }
@@ -133,13 +140,15 @@
   .relation:hover { border-color: var(--accent); }
   .relation span { overflow-wrap: anywhere; font-size: 12px; }
   .relation small { max-width: 45%; color: var(--muted); font-size: 10px; text-align: end; overflow-wrap: anywhere; }
-  .relation-evidence { display: grid; gap: 3px; margin-block: 3px 6px; }
+  .relation-evidence { margin-block: 3px 6px; }
+  .relation-evidence summary { display: flex; align-items: center; min-height: 40px; padding-inline: 8px; color: var(--accent); font-size: 12px; cursor: pointer; overflow-wrap: anywhere; }
+  .relation-evidence-links { display: grid; gap: 3px; }
   .relation-evidence a { display: flex; align-items: center; min-height: 44px; padding: 5px 8px; border: 1px solid transparent; border-radius: 5px; line-height: 1.4; overflow-wrap: anywhere; word-break: break-word; }
   .relation-evidence a:hover { border-color: var(--line); background: var(--panel); }
   .empty { margin: 8px 0; color: var(--muted); font-size: 12px; }
   .expansion { margin: 14px 0; }
   .expansion-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  .expansion-list { display: grid; gap: 5px; margin: 9px 0 0; padding: 0; list-style: none; }
+  .expansion-list { display: grid; gap: 5px; max-block-size: min(34rem, 70vh); margin: 9px 0 0; padding: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; list-style: none; }
   .expansion-list li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb, var(--panel-raised) 70%, var(--bg)); overflow-wrap: anywhere; }
   .expansion-list code { color: var(--muted); font: 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
   .expansion-list button { justify-self: start; min-height: 44px; padding: 4px 3px; border: 0; background: transparent; color: var(--accent); text-align: left; text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; cursor: pointer; }
@@ -199,7 +208,7 @@
 <header class="top">
   <div class="top-row">
     <div><h1>Code Map</h1><span class="scope-line">Graphify静的解析</span></div>
-    <nav class="view-nav" aria-label="Code Map views"><a href="communities.html">コミュニティ</a></nav>
+    <nav class="view-nav" aria-label="Code Map views"><a href="./" aria-current="page">ファイル・シンボルグラフ</a><a href="communities.html">補助: コミュニティ集約</a></nav>
   </div>
 </header>
 <div class="layout">
@@ -208,7 +217,7 @@
       <summary class="file-explorer-summary"><span>ファイルを探す</span><span id="mobile-selection-label"></span></summary>
       <div class="file-explorer-body">
         <search class="filters" aria-label="ファイル検索と絞り込み">
-          <div><label for="search">ファイルパス・シンボル名</label><input id="search" type="search" name="q" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="例: auth / CoreStore / routes" aria-controls="file-list" aria-describedby="search-help"><small id="search-help" class="search-help">パスや抽出シンボル名で探せます。</small></div>
+          <div><label for="search">ファイルパス・シンボル名</label><input id="search" type="search" name="q" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="例: auth / CoreStore / routes" aria-controls="file-list" aria-describedby="search-help"><small id="search-help" class="search-help">ファイルを検索・選択すると、実際の参照元と参照先をグラフに表示します。</small></div>
           <div><label for="area">トップレベルディレクトリ</label><select id="area" name="area"><option value="">すべて</option></select></div>
           <div><label for="index-state">索引の状態</label><select id="index-state" name="state"><option value="indexed">解析済み</option><option value="unavailable">未取得の候補</option><option value="excluded">解析対象外</option><option value="all">すべての記録</option></select></div>
           <label class="check"><input type="checkbox" id="no-inbound" name="no-inbound">参照元の観測がないファイルのみ</label>
@@ -222,6 +231,7 @@
   <main id="main-content" tabindex="-1">
     <div class="head"><div><h2 id="selected-path" tabindex="-1">ファイルを選択</h2><div id="file-metrics" class="pills"></div><div id="symbol-detail" class="symbol-detail" hidden><h3 id="selected-symbol"></h3><span id="symbol-location" class="source-meta"></span><a id="symbol-source" hidden target="_blank" rel="noopener noreferrer">GitHubでシンボル位置を開く</a></div></div><div id="source-links" class="source-links">__GRAPHIFY_SOURCE_LINKS__</div></div>
     <div id="page-status" class="status" role="status" aria-live="polite"></div>
+    <div class="graph-target"><label for="graph-target">グラフの中心（ファイル／シンボル）</label><select id="graph-target" disabled><option value="">ファイル全体</option></select><small class="search-help">関数・クラス等を選ぶと、そのシンボルの参照関係に切り替わります。</small></div>
     <div class="filter-bar" aria-label="参照の絞り込み">
       <div><label for="direction">探索方向</label><select id="direction"><option value="both">参照元と参照先</option><option value="incoming">参照元</option><option value="outgoing">参照先</option></select></div>
       <div><label for="relation">関係種別</label><select id="relation"><option value="">すべての関係</option></select></div>
@@ -233,6 +243,13 @@
       <div class="canvas-head"><span class="legend-in">参照元 → 選択項目</span><span class="legend-out">選択項目 → 参照先</span><span id="graph-scope">ファイル間関係</span><span id="graph-limit-summary"></span></div>
       <svg id="neighbor-graph" role="group" aria-label="選択ファイルと隣接ファイルのグラフ"></svg>
     </div>
+    <section class="card" aria-labelledby="directory-groups-title">
+      <h3 id="directory-groups-title">ディレクトリ別の参照</h3>
+      <p class="empty">個別ファイル間で観測された参照を相手側のディレクトリごとに集計しています。集計を選ぶと、その方向の一致するファイル関係に絞ります。</p>
+      <div id="directory-groups" class="directory-groups"></div>
+      <p id="directory-focus-status" class="empty" role="status" aria-live="polite" hidden></p>
+      <p id="directory-groups-empty" class="empty" hidden></p>
+    </section>
     <section id="coverage" class="coverage" aria-label="解析範囲" hidden><details id="coverage-panel" class="coverage-panel"><summary id="coverage-panel-summary">解析範囲とGraphify統計</summary><div class="coverage-body"><dl id="coverage-summary" class="coverage-grid"></dl><p id="coverage-explanation" class="coverage-explanation"></p><p class="coverage-notice" role="note">静的解析で観測できた関係を表示します。参照元が見つからないことは、未使用や削除可能の証明ではありません。実行時ロード、MCP登録、SQL、テストなどは別の根拠で確認してください。</p><details id="coverage-details" class="coverage-details"><summary></summary><div tabindex="0" role="region" aria-label="解析対象外と未取得候補の一覧"><ul></ul></div></details></div></details></section>
     <div class="columns">
       <section class="card"><h3 id="incoming-title">参照元</h3><div id="incoming-list" class="relations" tabindex="0" role="region" aria-labelledby="incoming-title"></div></section>
@@ -240,6 +257,7 @@
     </div>
     <section class="card expansion" aria-labelledby="expansion-title">
       <div class="expansion-head"><h3 id="expansion-title">多段探索</h3><span id="expansion-summary" class="empty"></span></div>
+      <p class="empty">ディレクトリ絞り込みは直接の参照元/参照先と隣接図に適用します。この多段探索は選択した方向と関係種別で別に展開します。</p>
       <ol id="expansion-list" class="expansion-list"></ol>
       <p id="expansion-empty" class="empty" hidden>選択した方向と関係種別では、追加の段が観測されません。</p>
     </section>
@@ -279,9 +297,11 @@ import { expandGraph } from './analysis.mjs';
   let selectedSymbol = selected ? symbolById.get(query.get('symbol')) : null;
   if (selectedSymbol && selectedSymbol.path !== selected.path) selectedSymbol = null;
   let unavailableSymbolId=query.get('symbol')&&!selectedSymbol?query.get('symbol'):null;
+  let selectedDirectory = null;
   let shownSourceLink = null;
   const maxResults = 200;
   const maxExpandedNodes = 400;
+  const maxExpandedEdges = 120;
   const relationNames = [...new Set((data.relations || []).concat(files.flatMap(f => [...(f.incoming || []),...(f.outgoing || [])].flatMap(r => r.relations || [])), [...symbolById.values()].flatMap(s => [...(s.incoming || []),...(s.outgoing || [])].map(r => r.relation).filter(Boolean))))].sort();
   for (const area of [...new Set(files.map(f => f.path.split('/')[0]))].sort()) { const opt=document.createElement('option');opt.value=area;opt.textContent=area;$('area').append(opt); }
   for (const relation of relationNames) { const opt=document.createElement('option');opt.value=relation;opt.textContent=relation;$('relation').append(opt); }
@@ -307,6 +327,16 @@ import { expandGraph } from './analysis.mjs';
     if ($('relation').value) params.set('relation', $('relation').value); else params.delete('relation');
     if ($('depth').value !== '1') params.set('depth', $('depth').value); else params.delete('depth');
     if ($('display-limit').value !== '8') params.set('limit', $('display-limit').value); else params.delete('limit');
+    if ($('search').value.trim()) params.set('q', $('search').value.trim()); else params.delete('q');
+    if ($('area').value) params.set('area', $('area').value); else params.delete('area');
+    if ($('index-state').value !== 'indexed') params.set('state', $('index-state').value); else params.delete('state');
+    if ($('no-inbound').checked) params.set('noInbound', '1'); else params.delete('noInbound');
+    if (selectedDirectory) {
+      params.set('dir', selectedDirectory.path);
+      params.set('dirSide', selectedDirectory.side);
+    } else {
+      params.delete('dir');params.delete('dirSide');
+    }
     const next = location.pathname + '?' + params.toString() + location.hash;
     if (mode === 'replace') history.replaceState(null, '', next); else history.pushState(null, '', next);
   }
@@ -315,6 +345,7 @@ import { expandGraph } from './analysis.mjs';
     if (!next) return;
     selected = next;
     selectedSymbol = null;
+    selectedDirectory = null;
     unavailableSymbolId=null;
     updateUrl(mode);
     renderFiles(); renderSelected();
@@ -329,6 +360,7 @@ import { expandGraph } from './analysis.mjs';
     if (!next || !byPath.has(next.path)) return;
     selected = byPath.get(next.path);
     selectedSymbol = next;
+    selectedDirectory = null;
     unavailableSymbolId=null;
     updateUrl(mode);
     renderFiles(); renderSelected();
@@ -415,9 +447,10 @@ import { expandGraph } from './analysis.mjs';
     const incomingSource=symbolMode ? (selectedSymbol.incoming || []) : (f.incoming || []);
     const outgoingSource=symbolMode ? (selectedSymbol.outgoing || []) : (f.outgoing || []);
     const relationMatches=edge=>!$('relation').value || (symbolMode ? edge.relation===$('relation').value : (edge.relations || []).includes($('relation').value));
+    const directoryMatches=edge=>!selectedDirectory||directoryOf(edge.path)===selectedDirectory.path;
     const maxGraphEdges=Number($('display-limit').value)||8;
-    const incoming=direction==='outgoing'?[]:incomingSource.filter(relationMatches).slice(0,maxGraphEdges);
-    const outgoing=direction==='incoming'?[]:outgoingSource.filter(relationMatches).slice(0,maxGraphEdges);
+    const incoming=direction==='outgoing'||selectedDirectory?.side==='outgoing'?[]:incomingSource.filter(edge=>relationMatches(edge)&&directoryMatches(edge)).slice(0,maxGraphEdges);
+    const outgoing=direction==='incoming'||selectedDirectory?.side==='incoming'?[]:outgoingSource.filter(edge=>relationMatches(edge)&&directoryMatches(edge)).slice(0,maxGraphEdges);
     const rows=Math.max(incoming.length,outgoing.length,1);
     const height=Math.max(250,rows*58+76), cy=height/2;
     const svg=$('neighbor-graph');svg.replaceChildren();svg.setAttribute('viewBox',`0 0 1000 ${height}`);
@@ -472,22 +505,29 @@ import { expandGraph } from './analysis.mjs';
     $('graph-scope').textContent=symbolMode?'シンボル間関係 · 経路と関係種別を表示':'ファイル間関係 · 経路と関係種別を表示';
     svg.setAttribute('aria-label',symbolMode?`シンボル ${selectedSymbol.label} の参照元と参照先`:`ファイル ${f.path} の参照元と参照先`);
     if(incoming.length===0 && outgoing.length===0){const t=svgEl('text',{x:500,y:cy+54,'text-anchor':'middle',fill:'var(--muted)'});t.textContent='この条件では参照関係が観測されません';svg.append(t);}
-    const totalIn=incomingSource.filter(relationMatches).length, totalOut=outgoingSource.filter(relationMatches).length;
-    $('graph-limit-summary').textContent=`図に表示: 参照元 ${Math.min(totalIn,maxGraphEdges)}/${totalIn} · 参照先 ${Math.min(totalOut,maxGraphEdges)}/${totalOut}`;
+    const totalIn=incomingSource.filter(edge=>relationMatches(edge)&&directoryMatches(edge)).length, totalOut=outgoingSource.filter(edge=>relationMatches(edge)&&directoryMatches(edge)).length;
+    $('graph-limit-summary').textContent=`図に表示: 参照元 ${incoming.length}/${totalIn} · 参照先 ${outgoing.length}/${totalOut}`;
   }
   function appendEvidence(root, evidence) {
     if(!Array.isArray(evidence) || !evidence.length)return;
-    const filteredEvidence=$('relation').value?evidence.filter(item=>!item.relation||item.relation===$('relation').value):evidence;
+    const evidenceRows=evidence.filter(item=>Number.isSafeInteger(item?.line)&&item.line>0&&sourceLinkByPath.has(item.path));
+    const filteredEvidence=$('relation').value?evidenceRows.filter(item=>!item.relation||item.relation===$('relation').value):evidenceRows;
     if(!filteredEvidence.length)return;
-    const group=document.createElement('div');group.className='relation-evidence';
-    for (const item of filteredEvidence) {
-      const link = lineEvidenceLink(item);
-      if (!link) continue;
-      link.textContent = `${item.path}:${item.line}`;
-      link.setAttribute('aria-label', `GitHubソース ${item.path}:${item.line} を開く`);
-      group.append(link, document.createTextNode(' '));
-    }
-    if(group.querySelector('a'))root.append(group);
+    const group=document.createElement('details');group.className='relation-evidence';
+    const summary=document.createElement('summary');summary.textContent=`ソース位置 ${nf.format(filteredEvidence.length)}件 · SHA固定リンク`;
+    const links=document.createElement('div');links.className='relation-evidence-links';
+    group.append(summary,links);
+    group.addEventListener('toggle',()=>{
+      if(!group.open||links.childElementCount)return;
+      for (const item of filteredEvidence) {
+        const link = lineEvidenceLink(item);
+        if (!link) continue;
+        link.textContent = `${item.path}:${item.line}`;
+        link.setAttribute('aria-label', `GitHubソース ${item.path}:${item.line} を開く`);
+        links.append(link);
+      }
+    });
+    root.append(group);
   }
   function renderRelations(id,rels,symbolMode=false) {
     const root=$(id);root.replaceChildren();
@@ -513,6 +553,52 @@ import { expandGraph } from './analysis.mjs';
       row.append(b);appendEvidence(row,r.evidence);root.append(row);
     }
   }
+  const directoryOf=path=>path.includes('/')?path.slice(0,path.lastIndexOf('/')):'(root)';
+  function groupedDirectories(incoming,outgoing,symbolMode=Boolean(selectedSymbol)){
+    const groups=new Map();
+    for(const [side,edges] of [['incoming',incoming],['outgoing',outgoing]])for(const edge of edges){
+      const path=directoryOf(edge.path),key=side+'\0'+path;
+      if(!groups.has(key))groups.set(key,{side,path,files:new Set(),count:0,relations:new Set(),evidence:new Set()});
+      const group=groups.get(key);group.files.add(edge.path);group.count+=symbolMode?(edge.count||1):relationCount(edge);
+      for(const relation of (symbolMode?[edge.relation]:edge.relations||[]))if(relation)group.relations.add(relation);
+      for(const item of edge.evidence||[])group.evidence.add([item.path,item.line,item.relation].join('\0'));
+    }
+    return [...groups.values()].sort((a,b)=>a.side.localeCompare(b.side)||a.path.localeCompare(b.path));
+  }
+  function renderDirectoryGroups(incoming,outgoing){
+    const root=$('directory-groups');root.replaceChildren();
+    const groups=groupedDirectories(incoming,outgoing);
+    if(selectedDirectory&&!groups.some(group=>group.side===selectedDirectory.side&&group.path===selectedDirectory.path)){
+      selectedDirectory=null;updateUrl('replace');
+    }
+    const focus=$('directory-focus-status');focus.hidden=!selectedDirectory;
+    focus.textContent=selectedDirectory
+      ? `絞り込み中: ${selectedDirectory.side==='incoming'?'参照元':'参照先'} · ${selectedDirectory.path} · 参照元/先リストと隣接図の直接関係を絞っています。多段探索は選択した方向と関係種別で別に展開します。`
+      : '';
+    $('directory-groups-empty').hidden=groups.length>0;
+    $('directory-groups-empty').textContent=selectedDirectory
+      ? '現在の方向・関係種別に一致するファイル関係はこのディレクトリにありません。絞り込みを解除してください。'
+      : '現在の方向・関係種別に一致する参照はありません。解析範囲も確認してください。';
+    for(const group of groups){
+      const button=document.createElement('button');button.type='button';button.className='directory-group';
+      button.dataset.directorySide=group.side;button.dataset.directoryPath=group.path;
+      const active=selectedDirectory?.side===group.side&&selectedDirectory.path===group.path;
+      button.setAttribute('aria-pressed',String(active));
+      button.setAttribute('aria-label',`${group.side==='incoming'?'参照元':'参照先'}ディレクトリ ${group.path} · ${nf.format(group.files.size)}ファイル · ${nf.format(group.count)}件の静的関係`);
+      const label=document.createElement('strong');label.textContent=(group.side==='incoming'?'参照元 · ':'参照先 · ')+group.path;
+      const meta=document.createElement('small');meta.textContent=`${nf.format(group.files.size)}ファイル · ${nf.format(group.count)}関係`;
+      button.title=`Graphify観測関係: ${[...group.relations].sort().join(', ')||'種別未取得'} · 行根拠 ${nf.format(group.evidence.size)}件`;
+      button.append(label,meta);
+      button.addEventListener('click',()=>{
+        selectedDirectory=active?null:{side:group.side,path:group.path};
+        $('direction').value=active?'both':group.side;
+        updateUrl('replace');renderSelected();
+        const focusTarget=[...$('directory-groups').querySelectorAll('.directory-group')].find(item=>item.dataset.directorySide===group.side&&item.dataset.directoryPath===group.path);
+        focusTarget?.focus();
+      });
+      root.append(button);
+    }
+  }
   function renderExpansion(f) {
     const direction=$('direction').value;const maxDepth=Number($('depth').value);
     const list=$('expansion-list');list.replaceChildren();
@@ -529,7 +615,8 @@ import { expandGraph } from './analysis.mjs';
     const expanded=expandGraph(data,f.path,{direction,relations:$('relation').value?[$('relation').value]:[],maxDepth,maxNodes:maxExpandedNodes,...(selectedSymbol?{startId:String(selectedSymbol.id)}:{})});
     const nodes=new Map(expanded.nodes.map(node=>[String(node.id ?? node.path),node]));
     const rootKey=selectedSymbol?String(selectedSymbol.id):f.path;
-    for(const edge of expanded.edges){
+    const visibleEdges=expanded.edges.slice(0,maxExpandedEdges);
+    for(const edge of visibleEdges){
       const from=nodes.get(String(edge.from));const to=nodes.get(String(edge.to));if(!from||!to)continue;
       const depth=Math.max(from.depth,to.depth);const fromKey=String(edge.from),toKey=String(edge.to);const cycle=from.depth===to.depth||((fromKey===rootKey||toKey===rootKey)&&depth>1);
       const target=from.depth>to.depth?from:to;const targetKey=String(target.id ?? target.path);if(targetKey===rootKey)continue;
@@ -539,7 +626,8 @@ import { expandGraph } from './analysis.mjs';
     }
     $('expansion-empty').hidden=expanded.edges.length!==0;
     $('expansion-empty').textContent='選択した方向と関係種別では、追加の段が観測されません。';
-    $('expansion-summary').textContent=expanded.nodes.length?(expanded.nodes.length-1)+'件のノード'+(expanded.truncated?' · '+maxExpandedNodes+'件の上限で一部省略':''):'';
+    const omittedEdges=Math.max(0,expanded.edges.length-visibleEdges.length);
+    $('expansion-summary').textContent=expanded.nodes.length?(expanded.nodes.length-1)+'件のノード · '+visibleEdges.length+'/'+expanded.edges.length+'関係を表示'+(omittedEdges?' · '+omittedEdges+'件を省略':'')+(expanded.truncated?' · '+maxExpandedNodes+'件の上限で一部省略':''):'';
   }
   function renderCoverage() {
     const coverage=data.coverage; if(!coverage)return;
@@ -592,6 +680,15 @@ import { expandGraph } from './analysis.mjs';
     if(coverage.otherTrackedFiles!=null){const item=document.createElement('li');item.textContent=`候補・明示的除外に含まれないtrackedファイル: ${nf.format(coverage.otherTrackedFiles)}件`;list.append(item);}
   }
   function renderSelected() {
+    const target=$('graph-target');
+    const fileOption=document.createElement('option');fileOption.value='';fileOption.textContent='ファイル全体';
+    target.replaceChildren(fileOption);
+    for(const symbol of selected?.symbols || []){
+      if(typeof symbol==='string' || symbol.id==null)continue;
+      const option=document.createElement('option');option.value=String(symbol.id);option.textContent=symbol.label||String(symbol.id);target.append(option);
+    }
+    target.disabled=!selected||Boolean(selected.unavailable)||target.options.length===1;
+    target.value=selectedSymbol?String(selectedSymbol.id):'';
     const status=$('page-status');
     if(!selected){
       $('selected-path').textContent='解析対象ファイルなし';
@@ -652,12 +749,20 @@ import { expandGraph } from './analysis.mjs';
     else if(f.unavailable)unavailableMessage='指定パス「'+f.path+'」はGraphifyの索引にありません。coverageで対象外・未取得の一覧を確認してください。 ';
     const symbolMessage=unavailableSymbolId?'指定シンボル ID「'+unavailableSymbolId+'」はこの索引にありません。ファイル単位で表示しています。 ':'';
     status.textContent=unavailableMessage+symbolMessage+'Graphify静的解析';
-    renderGraph(f);
     const direction=$('direction').value;
-    const incoming=selectedSymbol?(direction==='outgoing'?[]:selectedSymbolRelations(selectedSymbol,'incoming')):(direction==='outgoing'?[]:(f.incoming||[]).filter(matchesRelation));
-    const outgoing=selectedSymbol?(direction==='incoming'?[]:selectedSymbolRelations(selectedSymbol,'outgoing')):(direction==='incoming'?[]:(f.outgoing||[]).filter(matchesRelation));
-    $('incoming-title').textContent=selectedSymbol?'シンボルの参照元 ('+incoming.length+')':f.unavailable?'参照元 (未取得)':'参照元 ('+(f.incoming||[]).length+')';
-    $('outgoing-title').textContent=selectedSymbol?'シンボルの参照先 ('+outgoing.length+')':f.unavailable?'参照先 (未取得)':'参照先 ('+(f.outgoing||[]).length+')';
+    let incoming=selectedSymbol?(direction==='outgoing'?[]:selectedSymbolRelations(selectedSymbol,'incoming')):(direction==='outgoing'?[]:(f.incoming||[]).filter(matchesRelation));
+    let outgoing=selectedSymbol?(direction==='incoming'?[]:selectedSymbolRelations(selectedSymbol,'outgoing')):(direction==='incoming'?[]:(f.outgoing||[]).filter(matchesRelation));
+    renderDirectoryGroups(incoming,outgoing);
+    if(selectedDirectory){
+      if(selectedDirectory.side==='incoming'){
+        incoming=incoming.filter(edge=>directoryOf(edge.path)===selectedDirectory.path);outgoing=[];
+      }else{
+        outgoing=outgoing.filter(edge=>directoryOf(edge.path)===selectedDirectory.path);incoming=[];
+      }
+    }
+    renderGraph(f);
+    $('incoming-title').textContent=selectedSymbol?'シンボルの参照元 ('+incoming.length+')':f.unavailable?'参照元 (未取得)':'参照元 ('+incoming.length+')';
+    $('outgoing-title').textContent=selectedSymbol?'シンボルの参照先 ('+outgoing.length+')':f.unavailable?'参照先 (未取得)':'参照先 ('+outgoing.length+')';
     renderRelations('incoming-list',incoming,Boolean(selectedSymbol));renderRelations('outgoing-list',outgoing,Boolean(selectedSymbol));renderExpansion(f);
     $('symbols-title').textContent=f.unavailable?'シンボル情報 (未取得)':'このファイルのシンボル ('+(f.symbols||[]).length+')';
     const root=$('symbols');root.replaceChildren();
@@ -695,16 +800,21 @@ import { expandGraph } from './analysis.mjs';
     if([...$('area').options].some(option=>option.value===area))continue;
     const option=document.createElement('option');option.value=area;option.textContent=area;$('area').append(option);
   }
-  $('search').addEventListener('input',()=>{renderFiles();announceSearchResults();});
-  $('area').addEventListener('change',()=>{renderFiles();announceSearchResults();});
+  $('graph-target').addEventListener('change',()=>{
+    if($('graph-target').value)selectSymbol($('graph-target').value);
+    else if(selected)select(selected.path);
+  });
+  $('search').addEventListener('input',()=>{updateUrl('replace');renderFiles();announceSearchResults();});
+  $('area').addEventListener('change',()=>{updateUrl('replace');renderFiles();announceSearchResults();});
   $('index-state').addEventListener('change',()=>{
     if($('index-state').value!=='indexed')$('no-inbound').checked=false;
+    updateUrl('replace');
     renderFiles();announceSearchResults();
   });
-  $('no-inbound').addEventListener('change',()=>{renderFiles();announceSearchResults();});
+  $('no-inbound').addEventListener('change',()=>{updateUrl('replace');renderFiles();announceSearchResults();});
   $('reset-filters').addEventListener('click',()=>{
     $('search').value='';$('area').value='';$('index-state').value='indexed';$('no-inbound').checked=false;
-    renderFiles();$('search').focus();
+    updateUrl('replace');renderFiles();$('search').focus();
   });
   for(const id of ['direction','relation','depth','display-limit'])$(id).addEventListener('change',()=>{updateUrl('replace');renderSelected();});
   const mobileExplorer=matchMedia('(max-width: 850px)');
@@ -726,14 +836,24 @@ import { expandGraph } from './analysis.mjs';
     unavailableSymbolId=params.get('symbol')&&!selectedSymbol?params.get('symbol'):null;
     $('direction').value=['incoming','outgoing'].includes(params.get('direction'))?params.get('direction'):'both';
     $('relation').value=relationNames.includes(params.get('relation'))?params.get('relation'):'';
+    selectedDirectory=['incoming','outgoing'].includes(params.get('dirSide'))&&params.has('dir')?{side:params.get('dirSide'),path:params.get('dir')}:null;
     $('depth').value=['1','2','3'].includes(params.get('depth'))?params.get('depth'):'1';
     $('display-limit').value=['8','16','24'].includes(params.get('limit'))?params.get('limit'):'8';
+    $('search').value=params.get('q')||'';
+    $('area').value=[...$('area').options].some(option=>option.value===params.get('area'))?params.get('area'):'';
+    $('index-state').value=['indexed','unavailable','excluded','all'].includes(params.get('state'))?params.get('state'):'indexed';
+    $('no-inbound').checked=params.get('noInbound')==='1'&&$('index-state').value==='indexed';
     renderFiles();renderSelected();
   });
   $('direction').value=['incoming','outgoing'].includes(query.get('direction'))?query.get('direction'):'both';
   $('relation').value=relationNames.includes(query.get('relation'))?query.get('relation'):'';
+  selectedDirectory=['incoming','outgoing'].includes(query.get('dirSide'))&&query.has('dir')?{side:query.get('dirSide'),path:query.get('dir')}:null;
   $('depth').value=['1','2','3'].includes(query.get('depth'))?query.get('depth'):'1';
   $('display-limit').value=['8','16','24'].includes(query.get('limit'))?query.get('limit'):'8';
+  $('search').value=query.get('q')||'';
+  $('area').value=[...$('area').options].some(option=>option.value===query.get('area'))?query.get('area'):'';
+  $('index-state').value=['indexed','unavailable','excluded','all'].includes(query.get('state'))?query.get('state'):'indexed';
+  $('no-inbound').checked=query.get('noInbound')==='1'&&$('index-state').value==='indexed';
   renderCoverage();renderFiles();renderSelected();
 })();
 </script>

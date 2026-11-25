@@ -5,6 +5,10 @@ createApiReference('#scalar-api-reference', {
   url: './codexia.openapi.yaml',
   layout: 'modern',
   showSidebar: true,
+  // The development portal uses a fixed dark surface; Scalar owns its internal palette.
+  darkMode: true,
+  forceDarkModeState: 'dark',
+  hideDarkModeToggle: true,
   hideTestRequestButton: true,
   hideClientButton: true,
   documentDownloadType: 'none',
@@ -14,42 +18,33 @@ createApiReference('#scalar-api-reference', {
   servers: [],
   agent: { disabled: true },
   authentication: { allowedSecuritySchemes: [] },
+  // Raise native secondary/danger tokens to AA contrast on Scalar's dark surfaces.
   customCss: `
-    :root {
-      --scalar-font: ui-sans-serif, system-ui, sans-serif;
-      --scalar-font-code: ui-monospace, monospace;
+    #scalar-api-reference .scalar-api-reference,
+    #scalar-api-reference .dark-mode {
+      --scalar-color-3: #a0a0a0;
+      --scalar-sidebar-search-color: #a0a0a0;
+      --scalar-color-red: #ff7373;
     }
-    /* Scalar's documentation layout must shrink inside the Pages viewport.
-       Keep long examples horizontally scrollable within their own panels. */
-    #scalar-api-reference {
-      display: block;
-      inline-size: 100%;
-      min-inline-size: 0;
-      max-inline-size: 100%;
-    }
+    /* Keep long operation paths and code examples inside the Pages viewport. */
+    #scalar-api-reference,
     #scalar-api-reference .references-layout,
     #scalar-api-reference .references-content,
+    #scalar-api-reference .scalar-api-reference,
     #scalar-api-reference .t-doc,
     #scalar-api-reference .t-doc__header,
-    #scalar-api-reference .t-doc__content,
-    #scalar-api-reference .scalar-api-reference {
+    #scalar-api-reference .t-doc__content {
       min-inline-size: 0;
       max-inline-size: 100%;
     }
-    #scalar-api-reference .t-doc__header > header {
-      min-inline-size: 0;
-      max-inline-size: 100%;
-    }
-    #scalar-api-reference pre,
-    #scalar-api-reference .scalar-code-block {
-      max-inline-size: 100%;
-      overflow-x: auto;
-    }
-    /* Keep the sticky mobile endpoint label within the Pages container. */
     #scalar-api-reference .t-doc__header > header > .flex-1.whitespace-nowrap {
       min-inline-size: 0;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    #scalar-api-reference pre {
+      max-inline-size: 100%;
+      overflow-x: auto;
     }
   `,
 });

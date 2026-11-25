@@ -102,7 +102,7 @@ function html(compare) {
     + '<title>UX Simulator · Codexia</title><link rel="stylesheet" href="./style.css">\n'
     + (compare ? '<link rel="stylesheet" href="./compare/style.css">\n' : '')
     + '<script type="module" src="./browser.mjs"></script></head>\n<body class="ux-page">\n'
-    + '<main id="main-content" tabindex="-1"><header class="ux-header"><h1>UX Simulator</h1><p>設計と正規コードの作業経路を探索</p></header>\n'
+    + '<main id="main-content" tabindex="-1"><header class="ux-header"><h1>UX Simulator</h1><p>シナリオを選び、次の操作と遷移先を確認しながら状態を辿ります。設計と実装の差分も確認できます。</p></header>\n'
     + '<div id="simulator"><noscript>操作には JavaScript が必要です。</noscript></div></main></body></html>\n';
 }
 

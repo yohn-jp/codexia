@@ -25,7 +25,7 @@ The accepted Desktop Web toolchain is **TypeScript 7 (native compiler/type check
 
 ## 採用済みツール移行目標と現行実装の区別
 
-[Specification toolchain](SPECIFICATION-TOOLCHAIN.md) により、**HTTPの型付き契約をTypeSpecで定義し、Fastifyの明示的ルート/JSON SchemaとOrval生成クライアントへ接続すること、MCP SDK v2、SQL-firstの実DB検証、StrictDocの要求追跡**を採用目標とする。**Fastifyは継続採用**し、下記の図と本文に記されたFastifyは現行と目標の両方に該当する。現在の手動catch-allからSchema-firstの明示ルートへの移行は未実装であり、同じAPI/OAuth/MCP権限とPostgreSQL単一正本を維持する。移行の完了は [HTTP基盤受入](HTTP-PLATFORM-MIGRATION.md)、[MCP移行受入](MCP-V2-MIGRATION.md)、[CI受入](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md) に必要な実行証拠が揃った時に限る。
+[Specification toolchain](SPECIFICATION-TOOLCHAIN.md) により、**HTTPの型付き契約をTypeSpecで定義し、Fastifyの明示的ルート/JSON SchemaとOrval生成クライアントへ接続すること、MCP SDK v2、SQL-firstの実DB検証、StrictDocの要求追跡**を採用目標とする。**Fastifyは継続採用**し、下記の図と本文に記されたFastifyは現行と目標の両方に該当する。現行のFastifyは、TypeSpec由来のルート・スキーマ一覧からcurrentに分類された契約を明示ルートとして登録する。API/OAuth/MCP権限とPostgreSQL単一正本は引き続きこの設計に従う。移行の完了は [HTTP基盤受入](HTTP-PLATFORM-MIGRATION.md)、[MCP移行受入](MCP-V2-MIGRATION.md)、[CI受入](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md) に必要な実行証拠が揃った時に限る。
 
 ## 製品・システム境界
 
@@ -36,7 +36,7 @@ The accepted Desktop Web toolchain is **TypeScript 7 (native compiler/type check
 - AI の推論・生成は外部クライアントで実施し、Codexia は MCP 経由で文脈、読取、検証、提案と作者承認を提供する。内部生成モデル API の拡張は凍結する。
 - Git レポジトリを原稿ストア、同期、復旧、デプロイ制御として復活させない。内部のファイル状投影は過渡的な読み取り表現であり、独立した正本または永久互換性の根拠にしない。
 
-**C4構造・信頼境界図の正本:** [LikeC4 system model](./likec4/model.likec4)。本書とリンク先の領域設計が製品上の意味・認可・永続化の正本を維持し、LikeC4 model は承認済みのsystem context、container/component、依存方向、外部trust relationshipを構造契約として表す。Architecture Atlas の `system-1` はこのモデルから生成する派生Mermaidであり、直接編集しない。
+**C4構造・信頼境界図の正本:** [LikeC4 system model](./likec4/model.likec4)。本書とリンク先の領域設計が製品上の意味・認可・永続化の正本を維持し、LikeC4 model は承認済みのsystem context、container/component、依存方向、外部trust relationshipを構造契約として表す。Architecture Atlas は、このモデルを `system-1` の構造・信頼境界ビューと `system-3` の運用トポロジービューで表示する。下記の運用順序と承認条件は、本書とデプロイ設計を参照する。
 
 通常の執筆UIと所有者管理UI（`/console`、初回登録の`/console/setup`、`/console/security`、`/console/identity`、**バックアップ保管先管理の`/console/backups`**）は**Cloudflare Workers Static Assets**が配信する。管理者登録キー検証・Passkey・OAuth・権限状態の正本は**VMのFastify/Better AuthとPostgreSQL**であり、Workersは管理者を作成しない。新規DBは本番起動前にAPIを**setup-only**として限定公開できる目標設計とし、その他の作品・MCP APIは停止/拒否する。既存DBのVM交換では同じownerを復旧し、新規登録キーを発行しない。現行の一時SSH登録サーバー方式からの移行は未実装である。
 

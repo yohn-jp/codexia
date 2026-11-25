@@ -43,7 +43,7 @@ try {
   });
   browser = await chromium.launch({ executablePath, args: ['--no-sandbox'] });
   for (const width of [1440, 768, 390, 320]) {
-    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 900 } });
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.route('**/*', (route) => {
@@ -57,6 +57,20 @@ try {
     const fits = async () => assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.goto(link('desktop', 'atlas-entry-01'));
     await assertHeading('Web /desktop/');
+    assert.equal(await stage.locator('.ux-route-map').isVisible(), true, 'The transition overview is visible without opening a disclosure');
+    assert.equal(await stage.locator('.ux-route-states > [aria-current="step"]').count(), 1);
+    assert.match(await stage.locator('.ux-route-edges').first().innerText(), /APIと認証を照合/u);
+    assert.ok(await stage.locator('.ux-route-action').count() > 0, 'The transition graph exposes current evidenced edges as operation buttons');
+    if (width === 390) {
+      const firstTransition = await stage.locator('.ux-route-action').first().boundingBox();
+      assert.ok(firstTransition && firstTransition.y + firstTransition.height <= 844,
+        'The first graph transition is visible in the initial 390×844 viewport');
+    }
+    const projectedEdge = stage.getByRole('button', { name: 'APIと認証を照合', exact: true });
+    const edgeDescription = await projectedEdge.getAttribute('aria-describedby');
+    assert.ok(edgeDescription.split(' ').length >= 2, 'The graph action describes its target and evidence');
+    for (const id of edgeDescription.split(' ')) assert.equal(await page.locator('[id="' + id + '"]').count(), 1);
+    assert.match(await Promise.all(edgeDescription.split(' ').map((id) => page.locator('[id="' + id + '"]').innerText())).then((values) => values.join(' ')), /遷移先: APIと認証を照合/u);
     const readability = await stage.evaluate((stage) => {
       const luminance = (color) => {
         const rgb = color.match(/[^(), ]+/g).slice(1, 4).map(Number).map((value) => value / 255);
@@ -73,9 +87,10 @@ try {
     });
     assert.ok(readability.ratio >= 4.5, 'UX wireframe heading must retain contrast under the Pages shell');
     assert.equal(readability.stray, false, 'Absent projection data must not render as text');
-    await button('APIと認証を照合').focus();
+    await projectedEdge.focus();
     await page.keyboard.press('Enter');
     await assertHeading('APIと認証を照合');
+    assert.match(await stage.locator('.ux-route-states > [aria-current="step"]').innerText(), /APIと認証を照合/u);
     await button('DB/認証不明').click();
     await assertHeading('接続と認可を再確認');
     await button('一つ戻る').click();

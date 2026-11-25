@@ -57,6 +57,8 @@ test('publishes auth schemes and errors with per-operation state and no server o
   assert.equal(auth['x-codexia-pages-status'].routeState, 'target');
   assert.equal(output.paths['/api/console/backups/status'].get['x-codexia-pages-status'].routeState, 'target');
   assert.equal(output.paths['/health/live'].get['x-codexia-pages-status'].routeState, 'current');
+  assert.match(output.paths['/health/live'].get.description, /Fastify registration uses the generated route and schema inventory/u);
+  assert.match(output.paths['/health/live'].get.description, /does not establish full contract conformance/u);
   assert.match(auth.description, /no current runtime implementation is claimed/u);
   assert.match(auth.description, /does not assert behavioral verification/u);
   assert.match(auth.description, /Runtime response deviation:[\s\S]*reduced 404 error body/u);

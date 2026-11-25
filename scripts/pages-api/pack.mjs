@@ -122,7 +122,7 @@ export function prepareOpenApi(sourceText, admitted) {
       const routeState = admittedStates.get(identity);
       assert.ok(routeState, `OpenAPI operation has no admitted source state: ${identity}`);
       const pageStatus = routeState === 'current'
-        ? 'Current admitted route; the generated schema is not yet the runtime route authority.'
+        ? 'Current admitted route; Fastify registration uses the generated route and schema inventory. This does not establish full contract conformance.'
         : 'Target operation; no current runtime implementation is claimed.';
       const verificationStatus = 'Pages does not assert behavioral verification for this operation.';
       const details = [
@@ -244,13 +244,13 @@ export async function pack(sitePath, sourceSha) {
 <body>
   <main id="main" tabindex="-1" class="cx-pages-container cx-pages-main">
     <h1>Codexia API Reference</h1>
-    <p class="cx-pages-lede">Static target contract from TypeSpec. Route coverage, server implementation and verification are separate states; this reference is not evidence that every operation is implemented or tested.</p>
+    <p class="cx-pages-lede">A read-only view of the OpenAPI 3.1 contract generated from TypeSpec. Each operation identifies its current or target state; this reference does not claim runtime behavior or verification.</p>
     <section class="cx-pages-empty" aria-labelledby="implementation-status">
       <h2 id="implementation-status">Implementation and verification status</h2>
-      <p><strong>Contract:</strong> target wire contract generated from TypeSpec and pinned to this Pages build source SHA.</p>
-      <p><strong>Runtime implementation:</strong> partial. The current Fastify API still dispatches through a compatibility route and does not consume this generated route/schema set.</p>
-      <p><strong>Verification:</strong> contract generation and lint are separate CI results; this page does not claim production API acceptance.</p>
-      <p>Authentication schemes and error response shapes are documentation only. Auth request/response examples are removed. No API server, credentials, or Try It request is available here.</p>
+      <p><strong>Contract:</strong> OpenAPI 3.1 generated from TypeSpec and pinned to this Pages build source SHA.</p>
+      <p><strong>Runtime:</strong> current admitted operations register in Fastify from the generated route and schema inventory. Target operations are not registered as implemented routes.</p>
+      <p><strong>Verification:</strong> this static reference is not a runtime inventory, CI result, or production API acceptance report.</p>
+      <p>Authentication schemes and error response shapes are documentation only. Authentication examples are removed. No API server, credential entry, or Try It request is available here.</p>
       <p><a href="./codexia.openapi.yaml">Open the static OpenAPI contract</a> · <a href="./THIRD_PARTY_NOTICES.txt">Third-party notices</a></p>
     </section>
     ${renderSecuritySchemes(document.components.securitySchemes)}
@@ -283,7 +283,7 @@ export async function pack(sitePath, sourceSha) {
     sourceSha,
     generatedAt: new Date().toISOString(),
     publication: 'public-static-contract',
-    targetState: { contract: 'generated-target', runtime: 'partial-compatibility-dispatcher', verification: 'not-asserted-by-this-page' },
+    targetState: { contract: 'generated-target', runtime: 'partial-generated-route-registration', verification: 'not-asserted-by-this-page' },
     input: { path: contractRelative, sha256: sha256(source), outputSha256: sha256(sanitizedContract) },
     routeInventory: { path: routesRelative, sha256: sha256(admittedBytes), currentCount: admitted.current.length, targetCount: admitted.target.length, operationStates: states },
     typeSpec: { packagePath: contractPackageRelative, packageSha256: sha256(typespecPackageBytes), lockPath: lockRelative, lockSha256: sha256(pnpmLockBytes), versions },
