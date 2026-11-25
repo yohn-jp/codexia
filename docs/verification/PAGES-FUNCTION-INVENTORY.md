@@ -67,7 +67,7 @@ GitHub Pages の配信先は当時の確認環境から未確認。
 | `/reviews/<SHA>/{gemini-review.md,gemini-diff.md,manifest.json,preview.json,rules.json}` | 同一SHAの完全/差分レビュー入力、選定ルールとカバレッジを取得 | [OCR delegate](../../scripts/audit/delegate.mjs) | 実装コード確認。AIによるレビュー結果ではない |
 | `/ci/` | PR/SHA選択、ジョブ時系列、実行/待ち時間、blocking chain、最長step、履歴比較、診断JSONコピー | [CI entry](../../scripts/ci/dashboard/site/index.html)、[browser client](../../scripts/ci/dashboard/site/dashboard.js) | 実装コード確認 |
 | `/ci/dashboard/{collection.mjs,analysis.mjs,diagnostics.mjs,timing.mjs}`、`/ci/impact/contract.mjs`、`/ci/verify.yml` 等 | ブラウザーCI解析の同梱ソース。利用者のUIページではない | [CI packer](../../scripts/ci/dashboard/collect.mjs) | 実装コード確認 |
-| `/graph/` | ファイル・シンボル検索、トップレベルディレクトリフィルタ、参照元なし候補抽出、ファイル選択、参照元/先一覧、隣接グラフ、SHA固定ソースリンク | [Graph packer](../../scripts/graphify-pages/pack.mjs)、[explorer](../../scripts/graphify-pages/explorer.html) | 実装コード確認 |
+| `/graph/` | ファイル・シンボル検索、ディレクトリ別の直接参照、参照元なし候補抽出、参照元/先一覧、隣接グラフ、SHA固定ソースリンク | [Graph packer](../../scripts/graphify-pages/pack.mjs)、[explorer](../../scripts/graphify-pages/explorer.html) | 実装コード確認 |
 | `/graph/?file=<path>` | 選択ファイルのディープリンクを開く。入力は生成済みindex内のパスに限定 | [explorer](../../scripts/graphify-pages/explorer.html) | 実装コード確認 |
 | `/graph/communities.html` | Graphify本来の集約コミュニティHTMLを変更せず閲覧 | [Graph packer](../../scripts/graphify-pages/pack.mjs) | 実装コード確認 |
 | `/graph/source.json` | 元SHAと集約件数・抽出モードを参照 | [Graph packer](../../scripts/graphify-pages/pack.mjs) | 実装コード確認 |

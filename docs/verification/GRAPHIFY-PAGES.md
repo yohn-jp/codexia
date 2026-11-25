@@ -6,7 +6,7 @@
 
 PR previews and main builds check out the exact source SHA. The pack step runs `graphifyy[sql,terraform]==0.9.115` on Python 3.12, `graphify extract . --code-only` with `GRAPHIFY_BACKEND=none`, and `graphify cluster-only --no-label`. The workflow supplies the same exclusion flags to Graphify extraction and candidate detection. The packer builds the explorer from the source `graph.json` and limits the index to Git-tracked paths in that checkout.
 
-- **Explorer** at `/graph/`. Search paths and symbols, choose incoming or outgoing references, filter by relation, and expand through multiple levels. The graph bounds the number of displayed results and retains the full immediate file lists. A selection can be reopened through `?file=` and, for a selected symbol, `?symbol=`.
+- **Explorer** at `/graph/`. Search paths and symbols, choose a file or symbol, and filter incoming and outgoing references by relation. Directory groups are calculated from the parent directories of the observed file endpoints. Selecting a group focuses the direct graph and reference lists on that directory and direction. Multi-hop exploration has a separate bounded list with an omission count. Expand a reference to open its SHA-pinned source evidence. File, symbol, and directory focus are preserved in the URL.
 - **Community overview** at `/graph/communities.html`. Graphify generates this HTML. Above its visualization threshold each node represents a community.
 - **Source metadata** at `/graph/source.json`. It records the source SHA, coverage and indexed file paths. Atlas uses the SHA and indexes to check whether a file link can open in Code Map.
 
