@@ -122,7 +122,7 @@ export function prepareOpenApi(sourceText, admitted) {
       const routeState = admittedStates.get(identity);
       assert.ok(routeState, `OpenAPI operation has no admitted source state: ${identity}`);
       const pageStatus = routeState === 'current'
-        ? 'Current admitted route; the generated schema is not yet the runtime route authority.'
+        ? 'Current admitted route; Fastify registration uses the generated route and schema inventory. This does not establish full contract conformance.'
         : 'Target operation; no current runtime implementation is claimed.';
       const verificationStatus = 'Pages does not assert behavioral verification for this operation.';
       const details = [
