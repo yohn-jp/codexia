@@ -17,7 +17,7 @@ export interface WorkspacePanelRequest {
   sequence: number;
 }
 
-/** Shared production UI assembled by the application controller for either shell. */
+/** Production Desktop UI assembled by the application controller. */
 export interface ApplicationShellProps {
   mode: UiMode;
   header: ReactNode;
@@ -31,8 +31,7 @@ export interface ApplicationShellProps {
   status: ReactNode;
   /** Present shell navigation errors in the same persistent status surface. */
   renderStatus?: (interactionError: string) => ReactNode;
-  onSwitchMode(): Promise<boolean>;
-  /** Stable author and device scope; desktop and mobile use separate layout keys. */
+  /** Stable author and device scope for the Desktop layout. */
   workspaceScope?: string;
   /** Host-approved core and activated module panels available in this workspace. */
   panels?: readonly WorkspacePanel[];
@@ -40,8 +39,6 @@ export interface ApplicationShellProps {
   beforeLayoutChange?: () => Promise<boolean>;
   /** Ask the workspace to reveal and focus a panel, for example History. */
   requestedPanel?: WorkspacePanelRequest;
-  /** Finish mobile editor navigation after the reference sheet has dismissed. */
-  onReferenceSheetDismissed?: () => boolean;
 }
 
 export type ApplicationShell = ComponentType<ApplicationShellProps>;

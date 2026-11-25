@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useActorRef, useSelector } from "@xstate/react";
-import { useNavigate } from "react-router-dom";
 import { nextOrderKey, snapshotKey } from "@codexia/contracts";
 import type { EditorTermSpan } from "../editor/terms";
 import { useRecentActivityResume } from "../resume/useRecentActivityResume";
@@ -20,12 +19,11 @@ import { api, type EditorSnapshotRead, type PersistenceAnchorView } from "../api
 import { KnowledgeContextInspector } from "./KnowledgeContextInspector";
 import { readWorkspaceSelectionForLocation, workspaceSelectionPath, writeWorkspaceSelection } from "./selection";
 import { PersistenceLegacyDraftImport } from "./PersistenceLegacyDraftImport";
-import { parseApplicationLocation, rememberUiMode, switchApplicationPath } from "../application/navigation";
+import { parseApplicationLocation } from "../application/navigation";
 import { PersistenceScratch, type ScratchGuard } from "./PersistenceScratch";
 import { protectEditorTransition } from "./transition";
 import { ApiError } from "../api-error";
 import { DesktopShell } from "../shells/desktop/DesktopShell";
-import { MobileShell } from "../shells/mobile/MobileShell";
 import type { WorkspacePanel, WorkspacePanelRequest } from "../application/contracts";
 import { applyThemeMode, loadThemeMode, persistThemeMode } from "../theme";
 import { ThemeControl } from "../components/ThemeControl";
@@ -284,31 +282,13 @@ function persistSelectionSafely(authorScope: string, selection: { projectId: str
   try { writeWorkspaceSelection(window.localStorage, authorScope, selection); } catch { /* Route and journal state do not depend on preferences. */ }
 }
 
-export function PersistenceWorkspace({ mode, authorScope, onSignOut, registerProtection, sessionBlocked = false }: {
-  mode: "desktop" | "mobile";
+export function PersistenceWorkspace({ authorScope, onSignOut, registerProtection, sessionBlocked = false }: {
   authorScope: string;
   onSignOut: () => void;
   registerProtection?: (guard: (() => Promise<boolean>) | null) => void;
   sessionBlocked?: boolean;
 }) {
-  if (mode === "mobile") return <MobilePersistenceWorkspace authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
-  return <PersistenceWorkspaceController mode="desktop" authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
-}
-
-function MobilePersistenceWorkspace({ authorScope, onSignOut, registerProtection, sessionBlocked }: { authorScope: string; onSignOut: () => void; registerProtection?: (guard: (() => Promise<boolean>) | null) => void; sessionBlocked: boolean }) {
-  const navigate = useNavigate();
-  const navigateUrl = useCallback((url: string, replace: boolean) => { navigate(url, { replace }); }, [navigate]);
-  return <PersistenceWorkspaceController mode="mobile" authorScope={authorScope} onSignOut={onSignOut} navigateUrl={navigateUrl} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
-}
-
-function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigateUrl, registerProtection, sessionBlocked = false }: {
-  mode: "desktop" | "mobile";
-  authorScope: string;
-  onSignOut: () => void;
-  navigateUrl?: (url: string, replace: boolean) => void;
-  registerProtection?: (guard: (() => Promise<boolean>) | null) => void;
-  sessionBlocked?: boolean;
-}) {
+  const mode = "desktop";
   const sessionBlockedRef = useRef(sessionBlocked);
   sessionBlockedRef.current = sessionBlocked;
   const selectionRef = useRef((() => { try { return readWorkspaceSelectionForLocation(window.localStorage, authorScope, mode, window.location.href); } catch { return null; } })());
@@ -402,14 +382,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const scratchGuardRef = useRef<ScratchGuard | null>(null);
   const registerScratchGuard = useCallback((guard: ScratchGuard | null) => { scratchGuardRef.current = guard; }, []);
   const editorRef = useRef<ManuscriptInputHandle>(null);
-  const pendingHeadingRevealRef = useRef<{ projectId: string; documentId: string; offset: number } | null>(null);
-  const onReferenceSheetDismissed = useCallback((): boolean => {
-    const pending = pendingHeadingRevealRef.current;
-    pendingHeadingRevealRef.current = null;
-    const current = activeRef.current;
-    if (!pending || current?.document.projectId !== pending.projectId || current.document.id !== pending.documentId) return false;
-    return editorRef.current?.revealOffset(pending.offset) ?? false;
-  }, []);
   const [editorPortalContainer] = useState<HTMLElement | null>(() => {
     if (typeof document === "undefined") return null;
     const container = document.createElement("div");
@@ -534,11 +506,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   }, [creationIntent, requestedPanel?.sequence]);
   const openCreation = useCallback((kind: "project" | "document") => {
     setCreationIntent(kind);
-    if (mode === "mobile") {
-      const sequence = ++panelRequestSequenceRef.current;
-      setRequestedPanel({ id: "outline", sequence });
-    }
-  }, [mode]);
+  }, []);
   useEffect(() => {
     if (!documentId || !projectId) {
       lastOutlineSelectionRef.current = "";
@@ -581,9 +549,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     const nextPath = workspaceSelectionPath(mode, selection, window.location.search);
     const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (nextPath === currentPath) return;
-    if (navigateUrl) navigateUrl(nextPath, replace);
-    else window.history[replace ? "replaceState" : "pushState"](window.history.state, "", nextPath);
-  }, [mode, navigateUrl]);
+    window.history[replace ? "replaceState" : "pushState"](window.history.state, "", nextPath);
+  }, []);
 
   useEffect(() => {
     let open = true;
@@ -1441,9 +1408,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       setProjectId(result.project.id);
       setDocumentId("");
       setProjectTitle("");
-      if (mode === "mobile" && projects.length === 0) {
-        setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
-      }
       projectCreationIntentRef.current = null;
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "作品を作成できませんでした。");
@@ -1635,9 +1599,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       persistSelectionSafely(authorScope, selectionRef.current);
       updateRouteSelection(selectionRef.current, false);
       setDocumentId(result.document.id);
-      if (mode === "mobile" && documents.length === 0) {
-        setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
-      }
       documentCreationIntentRef.current = null;
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "文書を作成できませんでした。");
@@ -2074,8 +2035,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       node.type === intent.type && node.name === intent.name && node.status === "proposed" && Object.keys(node.attributes).length === 0;
     const reportCreateError = (message: string): void => {
       if (projectIdRef.current !== intent.projectId) return;
-      if (mode === "mobile") setPageError(message);
-      else setKnowledgeCreateError({ projectId: intent.projectId, message });
+      setKnowledgeCreateError({ projectId: intent.projectId, message });
     };
     try {
       if (intent.needsReconciliation) {
@@ -2554,12 +2514,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               let markdown: string;
               try { markdown = editor.readForNavigation(); } catch { return; }
               if (!extractMarkdownHeadings(markdown).some((heading) => heading.offset === offset)) return;
-              if (mode === "mobile") {
-                if (reading) setReading(false);
-                pendingHeadingRevealRef.current = { projectId: current.document.projectId, documentId: current.document.id, offset };
-                setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
-                return;
-              }
               if (reading) {
                 setReading(false);
                 requestAnimationFrame(() => { editorRef.current?.revealOffset(offset); });
@@ -2621,7 +2575,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const evidencePendingForActive = Boolean(active && evidenceLoadPending &&
     evidenceLoadPending.projectId === active.document.projectId && evidenceLoadPending.documentId === active.document.id);
   const editor = (<main className="pg-editor-column" aria-label="PostgreSQL原稿編集">
-        {mode === "desktop" && pageError && <p className="pg-alert" role="alert">{pageError}</p>}
+        {pageError && <p className="pg-alert" role="alert">{pageError}</p>}
         {notice && <p className="pg-notice" role="status">{notice}</p>}
         {journalError && <p className="pg-alert" role="alert">{journalError}</p>}
         {!project && <section className="pg-empty">
@@ -2923,7 +2877,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     {journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals}
       onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}
   </> }, ...modulePanels);
-  const Shell = mode === "mobile" ? MobileShell : DesktopShell;
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
     <div className="pg-preserved-editor-parking" hidden inert aria-hidden="true" ref={attachEditorPortalParking} />
     {editorPortalContainer ? createPortal(editor, editorPortalContainer) : null}
@@ -2935,27 +2888,18 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       </article>,
       document.body,
     )}
-    <Shell mode={mode}
+    <DesktopShell mode={mode}
       header={<><h1>Database workspace</h1><JobInbox /><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
       documentTitle={active?.document.title}
       documentContext={writingContext}
       library={library} editor={editor} tools={knowledge}
       status={<>
         {loading && <p role="status">PostgreSQLの状態を読み込んでいます。</p>}
-        {mode === "mobile" && pageError && <p className="pg-alert" role="alert">{pageError}</p>}
       </>}
       workspaceScope={`postgres:${authorScope}`}
       panels={panels}
       requestedPanel={requestedPanel}
-      onReferenceSheetDismissed={mode === "mobile" ? onReferenceSheetDismissed : undefined}
       beforeLayoutChange={protectTransition}
-      onSwitchMode={async () => {
-        const nextMode = mode === "desktop" ? "mobile" : "desktop";
-        if (!await protectTransition()) return false;
-        rememberUiMode(nextMode);
-        window.location.assign(switchApplicationPath(window.location.href, nextMode));
-        return true;
-      }}
     />
   </div>;
 }

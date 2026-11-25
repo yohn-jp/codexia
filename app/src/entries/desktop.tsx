@@ -14,6 +14,6 @@ createRoot(root).render(
   window.location.pathname === '/console' || window.location.pathname.startsWith('/console/') ? (
     <ConsoleEntry />
   ) : (
-    <PersistenceEntry mode="desktop" />
+    <PersistenceEntry />
   ),
 );

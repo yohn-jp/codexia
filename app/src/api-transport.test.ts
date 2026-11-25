@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  clearNativeApiSession,
-  configureNativeApiSession,
   requestApi,
-  requestApiEventStream,
   requestApiNoContent,
 } from './api-transport.js';
 import { jobEventsGet } from './generated/http/client.js';
@@ -69,21 +66,6 @@ test('Codexia auth adapter routes reject implicit API bearer policy', async () =
     ),
     { code: 'AUTH_TRANSPORT_POLICY_REQUIRED' },
   );
-});
-
-test('native API event streams remain explicitly unsupported', async () => {
-  configureNativeApiSession({
-    apiOrigin: 'https://api.example.test',
-    accessTokenFor: async () => 'token',
-    fetchRequest: async () => Response.json({}),
-  });
-  try {
-    await assert.rejects(requestApiEventStream('/api/jobs/events', { signal: new AbortController().signal }), {
-      code: 'NATIVE_STREAM_UNSUPPORTED',
-    });
-  } finally {
-    clearNativeApiSession();
-  }
 });
 
 test('no-content transport accepts only 204 and preserves other response errors', async () => {

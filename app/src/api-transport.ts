@@ -8,12 +8,6 @@ export interface ApiTransportPolicy {
   auth: ApiTransportAuth;
 }
 
-export interface NativeApiSession {
-  apiOrigin: string | null;
-  accessTokenFor(requestUrl: string): Promise<string | null>;
-  fetchRequest(requestUrl: string, init: RequestInit): Promise<Response>;
-}
-
 export class DocumentDepartureError extends DOMException {
   constructor() {
     super('The document is leaving.', 'AbortError');
@@ -21,7 +15,6 @@ export class DocumentDepartureError extends DOMException {
 }
 
 let oauthAccessToken: string | undefined;
-let nativeApiSession: NativeApiSession | undefined;
 const configuredApiOrigin = (import.meta as ImportMeta & { env?: { VITE_CODEXIA_API_ORIGIN?: string } }).env?.VITE_CODEXIA_API_ORIGIN;
 let documentDeparting = false;
 let documentLifecycle = 0;
@@ -72,7 +65,7 @@ async function withDocumentDepartureClassification<T>(lifecycle: number, init: R
 }
 
 function effectivePolicy(path: string, policy: ApiTransportPolicy): ApiTransportPolicy {
-  // Better Auth and the Codexia auth adapter must never receive API/native OAuth credentials.
+  // Better Auth and the Codexia auth adapter must never receive API OAuth credentials.
   if (path.startsWith('/api/auth/') && policy.auth === 'api') {
     throw new ApiError('Auth routes require an explicit cookie or anonymous policy.', 403, 'AUTH_TRANSPORT_POLICY_REQUIRED');
   }
@@ -92,32 +85,6 @@ async function fetchApiRequest(path: string, init: RequestInit, policy: ApiTrans
   if (policy.auth === 'same-origin') {
     headers.delete('Authorization');
     return fetcher(apiRequestUrl(path), { ...init, headers, credentials: 'same-origin' });
-  }
-
-  if (nativeApiSession) {
-    const configuredOrigin = nativeApiSession.apiOrigin;
-    if (!configuredOrigin) throw new ApiError('Native API origin is not configured.', 503, 'NATIVE_API_ORIGIN_MISSING');
-    const originUrl = new URL(configuredOrigin);
-    if (
-      originUrl.protocol !== 'https:' ||
-      originUrl.pathname !== '/' ||
-      originUrl.search ||
-      originUrl.hash ||
-      originUrl.username ||
-      originUrl.password
-    )
-      throw new ApiError('Native API origin is invalid.', 503, 'NATIVE_API_ORIGIN_INVALID');
-    const requestUrl = new URL(apiRequestUrl(path, originUrl.origin), originUrl.origin);
-    if (requestUrl.origin !== originUrl.origin || !requestUrl.pathname.startsWith('/api/')) {
-      throw new ApiError('Native API request escaped its configured origin.', 503, 'NATIVE_API_ORIGIN_MISMATCH');
-    }
-    const accessToken = await nativeApiSession.accessTokenFor(requestUrl.toString());
-    if (accessToken !== null && (typeof accessToken !== 'string' || !accessToken)) {
-      throw new ApiError('Native authentication returned an invalid API token.', 503, 'NATIVE_API_TOKEN_INVALID');
-    }
-    headers.delete('Authorization');
-    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
-    return nativeApiSession.fetchRequest(requestUrl.toString(), { ...init, headers, credentials: 'omit' });
   }
 
   if (oauthAccessToken) headers.set('Authorization', `Bearer ${oauthAccessToken}`);
@@ -163,42 +130,13 @@ export function setOAuthAccessToken(token: string | null): void {
   oauthAccessToken = token ?? undefined;
 }
 
-/** Install an explicit native HTTPS API transport; never use WebView cookies for API data. */
-export function configureNativeApiSession(session: NativeApiSession): void {
-  if (!session || typeof session.accessTokenFor !== 'function' || typeof session.fetchRequest !== 'function') {
-    throw new TypeError('Native API session transport is invalid.');
-  }
-  if (session.apiOrigin !== null) {
-    const origin = new URL(session.apiOrigin);
-    if (origin.protocol !== 'https:' || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) {
-      throw new TypeError('Native API origin must be an explicit HTTPS origin.');
-    }
-    apiRequestUrl('/api/session', origin.origin);
-  }
-  oauthAccessToken = undefined;
-  nativeApiSession = session;
-}
-
-/** Return API request routing to the normal browser configuration. */
-export function clearNativeApiSession(): void {
-  nativeApiSession = undefined;
-  oauthAccessToken = undefined;
-}
-
-export function hasNativeApiSession(): boolean {
-  return nativeApiSession !== undefined;
-}
-
-/** Raw SSE retains request options, response body, errors, lifecycle, and native boundary. */
+/** Raw SSE retains request options, response body, errors and lifecycle. */
 export async function requestApiEventStream(
   path: string,
   init: RequestInit = {},
   policy: ApiTransportPolicy = { auth: 'api' },
   fetcher: typeof fetch = fetch,
 ): Promise<Response> {
-  if (nativeApiSession) {
-    throw new ApiError('Native job event streaming is unavailable; use the Job Inbox refresh action.', 501, 'NATIVE_STREAM_UNSUPPORTED');
-  }
   const headers = new Headers(init.headers);
   if (!headers.has('Accept')) headers.set('Accept', 'text/event-stream');
   const streamInit = { ...init, headers };
