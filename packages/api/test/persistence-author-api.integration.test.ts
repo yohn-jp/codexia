@@ -9,6 +9,98 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+interface PublicApiAdapter {
+  persistenceProjectPage(limit?: number): Promise<unknown>;
+  createPersistenceProject(command: { title: string; settings: Record<string, unknown> }): Promise<{ project: { id: string } }>;
+  createPersistenceDocument(projectId: string, command: {
+    kind: "scene";
+    title: string;
+    orderKey: string;
+    markdown: string;
+    idempotencyKey: string;
+  }): Promise<{ document: { id: string }; revision: { id: string; markdown: string }; replayed: boolean }>;
+  savePersistenceDocument(projectId: string, documentId: string, command: {
+    baseRevisionId: string;
+    changes: Array<{ fromUtf16: number; toUtf16: number; insert: string }>;
+    resultingSha256: string;
+    clientId: string;
+    idempotencyKey: string;
+  }): Promise<{ revision: { id: string; markdown: string }; replayed: boolean }>;
+  persistenceDocument(projectId: string, documentId: string): Promise<{ revision: { id: string; markdown: string } | null }>;
+}
+
+async function exercisePublicApiAdapter(base: string, token: string) {
+  const publicApi = await import(new URL("../../../app/src/api.ts", import.meta.url).href) as unknown as {
+    api: PublicApiAdapter;
+    setOAuthAccessToken(token: string | null): void;
+  };
+  const { api, setOAuthAccessToken } = publicApi;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const target = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
+    if (typeof target === "string" && target.startsWith("/api/")) {
+      return originalFetch(new URL(target, base), init);
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+
+  try {
+    setOAuthAccessToken(null);
+    await assert.rejects(api.persistenceProjectPage(20), (error: unknown) =>
+      error instanceof Error && "status" in error && error.status === 401 && "code" in error && error.code === "UNAUTHORIZED");
+
+    setOAuthAccessToken(token);
+    const title = `orval-public-api-${randomUUID()}`;
+    const { project } = await api.createPersistenceProject({ title, settings: { language: "ja" } });
+    const initialMarkdown = "前😀 東京\n";
+    const idempotencyKey = `orval-api-save-${randomUUID()}`;
+    const created = await api.createPersistenceDocument(project.id, {
+      kind: "scene",
+      title: "Orval adapter scene",
+      orderKey: "0001",
+      markdown: initialMarkdown,
+      idempotencyKey: `orval-api-create-${randomUUID()}`,
+    });
+    assert.equal(created.revision.markdown, initialMarkdown);
+
+    const prefix = "😀追記 ";
+    const updatedMarkdown = prefix + initialMarkdown;
+    const saveCommand = {
+      baseRevisionId: created.revision.id,
+      changes: [{ fromUtf16: 0, toUtf16: 0, insert: prefix }],
+      resultingSha256: sha256(updatedMarkdown),
+      clientId: "orval-public-api-test",
+      idempotencyKey,
+    };
+    const firstSave = await api.savePersistenceDocument(project.id, created.document.id, saveCommand);
+    assert.equal(firstSave.revision.markdown, updatedMarkdown);
+    assert.equal(firstSave.replayed, false);
+
+    const replay = await api.savePersistenceDocument(project.id, created.document.id, saveCommand);
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.revision.id, firstSave.revision.id);
+
+    await assert.rejects(
+      api.savePersistenceDocument(project.id, created.document.id, {
+        baseRevisionId: created.revision.id,
+        changes: [{ fromUtf16: 0, toUtf16: 0, insert: "stale" }],
+        resultingSha256: sha256(`stale${initialMarkdown}`),
+        clientId: "orval-public-api-test",
+        idempotencyKey: `orval-api-conflict-${randomUUID()}`,
+      }),
+      (error: unknown) =>
+        error instanceof Error && "status" in error && error.status === 409 && "code" in error && error.code === "PERSISTENCE_CONFLICT",
+    );
+
+    const current = await api.persistenceDocument(project.id, created.document.id);
+    assert.equal(current.revision?.id, firstSave.revision.id);
+    assert.equal(current.revision?.markdown, updatedMarkdown);
+  } finally {
+    setOAuthAccessToken(null);
+    globalThis.fetch = originalFetch;
+  }
+}
+
 async function startAuthorApi(t: TestContext) {
   const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
   assert.ok(databaseUrl, "CODEXIA_AUTH_TEST_DATABASE_URL must name an explicitly disposable PostgreSQL auth database");
@@ -26,6 +118,7 @@ async function startAuthorApi(t: TestContext) {
 
 test("authenticated PostgreSQL API saves, replays, follows Evidence, conflicts and restores", async (t) => {
   const { base, ownerHeaders, persistence, fixture } = await startAuthorApi(t);
+  await exercisePublicApiAdapter(base, await fixture.issueOwnerAccessToken());
   const unauthorized = await fetch(`${base}/api/v1/persistence/projects`);
   assert.equal(unauthorized.status, 401);
   const forbiddenTitle = `forbidden-${randomUUID()}`;
