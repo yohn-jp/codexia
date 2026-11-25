@@ -80,7 +80,6 @@ export function buildAuthorBrowserAssets(
       VITE_CODEXIA_OAUTH_CLIENT_ID: server.webClientId,
       VITE_CODEXIA_API_AUDIENCE: server.audience,
       VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: `${server.apiOrigin}/desktop`,
-      VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: `${server.apiOrigin}/mobile`,
       VITE_CODEXIA_OAUTH_SCOPES: "openid codexia:api",
     },
   });

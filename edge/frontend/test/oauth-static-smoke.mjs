@@ -18,7 +18,6 @@ const settings = {
   VITE_CODEXIA_OAUTH_CLIENT_ID: clientId,
   VITE_CODEXIA_API_AUDIENCE: audience,
   VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: `${fixtureOrigin}/desktop`,
-  VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: `${fixtureOrigin}/mobile`,
   VITE_CODEXIA_OAUTH_SCOPES: 'openid codexia:api',
 };
 const metadata = {

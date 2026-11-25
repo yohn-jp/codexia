@@ -88,7 +88,6 @@ test('the same public Web OAuth settings govern promotion, fallback builds, and 
     'VITE_CODEXIA_OAUTH_CLIENT_ID',
     'VITE_CODEXIA_API_AUDIENCE',
     'VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI',
-    'VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI',
     'VITE_CODEXIA_OAUTH_SCOPES',
   ];
   const expected=Object.fromEntries(keys.map(key=>[key,'${{ vars.'+key+' }}']));

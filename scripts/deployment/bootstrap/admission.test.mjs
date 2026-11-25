@@ -87,12 +87,11 @@ test('owner setup uses the exact certified browser origin, client and return URI
     VITE_CODEXIA_OAUTH_CLIENT_ID: 'codexia-web',
     VITE_CODEXIA_API_AUDIENCE: origin + '/api',
     VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: origin + '/desktop/',
-    VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: origin + '/mobile/',
   });
   assert.deepEqual(ownerSetupFrontendBindings(identity, origin), {
     codexia_owner_setup_expected_origin: origin,
     codexia_owner_setup_expected_web_client_id: 'codexia-web',
-    codexia_owner_setup_expected_web_redirect_uris: [origin + '/desktop/', origin + '/mobile/'],
+    codexia_owner_setup_expected_web_redirect_uris: [origin + '/desktop/'],
   });
   assert.throws(() => ownerSetupFrontendBindings(identity, 'https://another.invalid'), /origin and audience/);
   assert.throws(() => ownerSetupFrontendBindings(undefined, origin), /origin and audience/);
@@ -110,7 +109,6 @@ function observedSetup(database, backend = { state: 'absent' }, intent = 'instal
     VITE_CODEXIA_OAUTH_CLIENT_ID: 'codexia-web',
     VITE_CODEXIA_API_AUDIENCE: origin + '/api',
     VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: origin + '/desktop/',
-    VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: origin + '/mobile/',
   });
   const topology = {
     hostReady: true,

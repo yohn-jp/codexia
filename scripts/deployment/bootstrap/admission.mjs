@@ -42,11 +42,13 @@ export function ownerSetupFrontendBindings(identity, origin) {
   const settings = parsePublicFrontendConfigIdentity(identity);
   assert.ok(settings && settings.issuer === origin + '/api/auth' && settings.apiAudience === origin + '/api',
     'Certified frontend OAuth issuer must match the observed origin and audience');
+  const redirects = [settings.desktopRedirectUri];
+  if (settings.mobileRedirectUri && settings.mobileRedirectUri !== settings.desktopRedirectUri) {
+    redirects.push(settings.mobileRedirectUri);
+  }
   return {
     codexia_owner_setup_expected_origin: origin,
     codexia_owner_setup_expected_web_client_id: settings.clientId,
-    codexia_owner_setup_expected_web_redirect_uris: [...new Set([
-      settings.desktopRedirectUri, settings.mobileRedirectUri,
-    ])],
+    codexia_owner_setup_expected_web_redirect_uris: redirects,
   };
 }
