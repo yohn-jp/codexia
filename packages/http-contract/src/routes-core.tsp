@@ -50,6 +50,8 @@ op headStartup(): HeadJsonResponse | { @statusCode _: 503; @header contentType: 
 
 @tag("health") @useAuth(NoAuth)
 @route("/api/version") @get @operationId("api_version_get")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "The runtime and OCI probes use a numeric contractVersion; the API epoch baseline documents a string.")
 op getApiVersion(): VersionResponse;
 
 @tag("health") @useAuth(NoAuth)
@@ -58,6 +60,8 @@ op headApiVersion(): HeadJsonResponse;
 
 @tag("health") @useAuth(NoAuth)
 @route("/api/browser/version") @get @operationId("api_browser_version_get")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "The runtime and OCI probes use a numeric contractVersion; the API epoch baseline documents a string.")
 op getBrowserVersion(): VersionResponse;
 
 @tag("health") @useAuth(NoAuth)

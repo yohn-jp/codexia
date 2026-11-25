@@ -1,30 +1,43 @@
 /** Public, transport-neutral campaign contract v1. No platform or domain dependencies. */
-import { PUBLISHING_EPISODES_KEY } from "./publishing-episodes.js";
-import { PUBLISHING_SHARE_GRANTS_KEY } from "./publishing-share-grants.js";
+import { PUBLISHING_EPISODES_KEY } from './publishing-episodes.js';
+import { PUBLISHING_SHARE_GRANTS_KEY } from './publishing-share-grants.js';
 
 export const CONTRACT_VERSION = 1 as const;
 export const MAX_JOB_INPUT_BYTES = 8 * 1024 * 1024;
 export const MAX_JOB_OUTPUT_BYTES = 8 * 1024 * 1024;
 export const MAX_PROPOSAL_EVIDENCE_BYTES = 1024 * 1024;
-export const BUILTIN_MODULE_IDS = Object.freeze(["story", "diagnostics", "nlp", "semantic", "speaker", "assistant", "publishing", "mcp", "search"] as const);
+export const BUILTIN_MODULE_IDS = Object.freeze([
+  'story',
+  'diagnostics',
+  'nlp',
+  'semantic',
+  'speaker',
+  'assistant',
+  'publishing',
+  'mcp',
+  'search',
+] as const);
 export type ModuleId = (typeof BUILTIN_MODULE_IDS)[number];
 export {
-  MCP_OAUTH_SCOPES,
   buildMcpProtectedResourceMetadata,
   createMcpProtectedResourceMetadataResponse,
-  protectedResourceMetadataUrl,
+  MCP_OAUTH_SCOPES,
   type McpProtectedResourceMetadata,
   type McpProtectedResourceOptions,
-} from "./oauth-metadata.js";
+  protectedResourceMetadataUrl,
+} from './oauth-metadata.js';
 /** PostgreSQL project revision; never a Git object identity. */
 export interface SnapshotId {
   projectId: string;
   projectVersion: number;
 }
-export interface FileRevision { path: string; revision: string | null }
+export interface FileRevision {
+  path: string;
+  revision: string | null;
+}
 export const PRIVATE_PUBLISHING_PATHS = Object.freeze([
-  "meta/scriptorium/modules/publishing/episodes.yaml",
-  "meta/scriptorium/modules/publishing/share-grants.jsonl",
+  'meta/scriptorium/modules/publishing/episodes.yaml',
+  'meta/scriptorium/modules/publishing/share-grants.jsonl',
 ]);
 export function isPrivatePublishingPath(path: string): boolean {
   return PRIVATE_PUBLISHING_PATHS.includes(path);
@@ -34,31 +47,34 @@ export function isModulePreservationArchivePath(path: string): boolean {
   return /^meta\/scriptorium\/modules\/[^/]+\/legacy(?:\/|$)/u.test(path);
 }
 /** Binds a directory membership and every listed file revision, including absent members. */
-export interface ScopeRevision { prefix: string; revision: string }
+export interface ScopeRevision {
+  prefix: string;
+  revision: string;
+}
 /** Return a decimal order key after every existing text-ordered key without rewriting them. */
 export function nextOrderKey(orderKeys: readonly string[]): string {
-  const last = [...orderKeys].sort((left, right) => left < right ? -1 : left > right ? 1 : 0).at(-1);
-  if (last === undefined) return "0000000001";
+  const last = [...orderKeys].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0)).at(-1);
+  if (last === undefined) return '0000000001';
   if (!/^\d+$/.test(last)) return `${last}0`;
-  const incremented = (BigInt(last) + 1n).toString().padStart(last.length, "0");
+  const incremented = (BigInt(last) + 1n).toString().padStart(last.length, '0');
   // An unpadded boundary such as 9 -> 10 would sort backwards as text. Extending
   // the greatest existing key stays after it, and remains a decimal Story order.
   return incremented > last ? incremented : `${last}0`;
 }
 /** Binds the canonical PostgreSQL membership of one hierarchy sibling set. */
 export interface DocumentSetRevision {
-  kind: "volume" | "chapter" | "scene";
+  kind: 'volume' | 'chapter' | 'scene';
   parentId: string | null;
   documentIds: string[];
 }
 /** Contents are full UTF-8 or base64; null is an explicit deletion. */
 export interface FileChange extends FileRevision {
   content: string | null;
-  encoding?: "utf8" | "base64";
+  encoding?: 'utf8' | 'base64';
   /** Exact PostgreSQL manuscript edits; omitted by legacy full-document proposals. */
   textChanges?: readonly { fromUtf16: number; toUtf16: number; insert: string }[];
 }
-export type EffectClass = "manuscript" | "structure" | "metadata" | "settings" | "migration";
+export type EffectClass = 'manuscript' | 'structure' | 'metadata' | 'settings' | 'migration';
 export interface ChangeOperation {
   id: string;
   generation: number;
@@ -83,7 +99,7 @@ export interface ApplyReceipt {
 export interface ProjectObservation {
   snapshot: SnapshotId;
   observedAt: string;
-  state: "fresh" | "failed" | "unknown";
+  state: 'fresh' | 'failed' | 'unknown';
 }
 /** Presentation fields from the project record at the enclosing snapshot. */
 export interface SnapshotProjectPresentation {
@@ -92,7 +108,7 @@ export interface SnapshotProjectPresentation {
   readonly subtitle?: string;
 }
 export interface KnowledgeProjectionRef {
-  readonly kind: "knowledge-projection";
+  readonly kind: 'knowledge-projection';
   readonly snapshot: Readonly<SnapshotId>;
   readonly revision: string;
 }
@@ -103,12 +119,19 @@ export interface KnowledgeProjectionEvidence {
   readonly storySceneId: string | null;
   /** Verified quote at the anchor's immutable revision, if it fits the projection budget. */
   readonly quote: string | null;
-  readonly quoteOmission?: "projection-budget";
+  readonly quoteOmission?: 'projection-budget';
   readonly assertions: readonly Readonly<{ assertion: Readonly<{ status: string }>; role: string }>[];
   readonly assertionLimitReached: boolean;
 }
 export interface KnowledgeProjectionEntry {
-  readonly node: Readonly<{ id: string; name: string; type: string; status: string; attributes: Readonly<Record<string, unknown>>; deletedAt: string | null }>;
+  readonly node: Readonly<{
+    id: string;
+    name: string;
+    type: string;
+    status: string;
+    attributes: Readonly<Record<string, unknown>>;
+    deletedAt: string | null;
+  }>;
   readonly aliases: readonly Readonly<{ nodeId: string; surface: string; status: string; scope: string | null }>[];
   readonly relations: readonly Readonly<{ sourceId: string; targetId: string; status: string }>[];
   readonly evidence: readonly KnowledgeProjectionEvidence[];
@@ -117,7 +140,7 @@ export interface KnowledgeProjectionEntry {
   readonly relationLimitReached: boolean;
 }
 export interface KnowledgeProjectionData {
-  readonly documentMappings: readonly Readonly<{ documentId: string; storySceneId: string; mapping: "explicit" | "ambiguous" }>[];
+  readonly documentMappings: readonly Readonly<{ documentId: string; storySceneId: string; mapping: 'explicit' | 'ambiguous' }>[];
   readonly entries: readonly KnowledgeProjectionEntry[];
   readonly nodeLimitReached: boolean;
 }
@@ -138,9 +161,9 @@ export interface SnapshotReader {
   projectPresentation?: SnapshotProjectPresentation;
   /** Typed projection of canonical PostgreSQL Story documents for native readers. */
   nativeStoryDocuments?: readonly NativeStoryDocument[];
-  read(path: string, encoding?: "utf8" | "base64"): Promise<SnapshotFile | null>;
+  read(path: string, encoding?: 'utf8' | 'base64'): Promise<SnapshotFile | null>;
   /** Read up to SNAPSHOT_READ_MANY_LIMIT files at this snapshot, in input order with null for absent paths. */
-  readMany?(paths: readonly string[], encoding?: "utf8" | "base64"): Promise<readonly (SnapshotFile | null)[]>;
+  readMany?(paths: readonly string[], encoding?: 'utf8' | 'base64'): Promise<readonly (SnapshotFile | null)[]>;
   list(prefix: string): Promise<string[]>;
   /** Optional metadata-backed path revisions; values must match read(path).revision. */
   listRevisions?(prefix: string): Promise<FileRevision[]>;
@@ -179,7 +202,7 @@ export interface ChangeProposal {
   id: string;
   snapshot: SnapshotId;
   operations: ChangeOperation[];
-  source: "author" | "module" | "mcp";
+  source: 'author' | 'module' | 'mcp';
   evidence?: ProposalEvidence[];
 }
 /** Author review state. Unaccepted payload remains in private/browser recovery. */
@@ -191,7 +214,7 @@ export interface ProposalStatus {
   originalDigest?: string;
   /** Original proposal operation IDs in order, including privately retained operations. */
   operationIds?: string[];
-  state: "proposed" | "partially_approved" | "approved" | "applied";
+  state: 'proposed' | 'partially_approved' | 'approved' | 'applied';
   approvedOperationIds: string[];
   /** Durable author scope for each approved operation; retries cannot change the first approver. */
   approvedByOperationId?: Record<string, string>;
@@ -200,7 +223,11 @@ export interface ProposalStatus {
   appliedOperationIds: string[];
   stale: boolean;
 }
-export interface Approval { proposalId: string; operationIds: string[]; authorScope: string }
+export interface Approval {
+  proposalId: string;
+  operationIds: string[];
+  authorScope: string;
+}
 /** Port shared by module and external callers: no author authority. */
 export interface ProposalCoordinator {
   observe(projectId: string): Promise<ProjectObservation>;
@@ -231,26 +258,66 @@ export interface JobResult<T = unknown> {
   moduleVersion: string;
   output: T;
 }
-export interface MachineError { code: string; message: string; retryable: boolean }
-export type JobOutcome<T = unknown> = { ok: true; result: JobResult<T> } | { ok: false; id: string; snapshot: SnapshotId; error: MachineError };
-export interface ValueSchema<T = unknown> { parse(value: unknown): T }
-export type ActionResult<T = unknown> = { ok: true; snapshot: SnapshotId; data: T; proposals?: ChangeProposal[] } | { ok: false; snapshot: SnapshotId; error: MachineError };
+export interface MachineError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+export type JobOutcome<T = unknown> =
+  | { ok: true; result: JobResult<T> }
+  | { ok: false; id: string; snapshot: SnapshotId; error: MachineError };
+export interface ValueSchema<T = unknown> {
+  parse(value: unknown): T;
+}
+export type ActionResult<T = unknown> =
+  | { ok: true; snapshot: SnapshotId; data: T; proposals?: ChangeProposal[] }
+  | { ok: false; snapshot: SnapshotId; error: MachineError };
 /** Optional host-owned history for a source domain task; never grants author approval. */
-export interface DomainJobDescriptor { type: string }
-export interface ActionDescriptor { id: string; module: ModuleId | "core"; effect: "read" | "propose" | "compute"; job?: DomainJobDescriptor }
+export interface DomainJobDescriptor {
+  type: string;
+}
+export interface ActionDescriptor {
+  id: string;
+  module: ModuleId | 'core';
+  effect: 'read' | 'propose' | 'compute';
+  job?: DomainJobDescriptor;
+}
 export type ModuleRecordJsonValue = null | string | number | boolean | ModuleRecordJsonValue[] | ModuleRecordJsonObject;
 export type ModuleRecordJsonObject = { [key: string]: ModuleRecordJsonValue };
-export { NLP_FEATURE_SETTINGS_KEY, NLP_LEGACY_FEATURE_SETTINGS_PATH, parseNlpFeatureSettings, type NlpFeatureSettings } from "./nlp-feature-settings.js";
-export interface OwnModuleRecord { value: ModuleRecordJsonObject; version: number }
+export {
+  NLP_FEATURE_SETTINGS_KEY,
+  NLP_LEGACY_FEATURE_SETTINGS_PATH,
+  type NlpFeatureSettings,
+  parseNlpFeatureSettings,
+} from './nlp-feature-settings.js';
+export interface OwnModuleRecord {
+  value: ModuleRecordJsonObject;
+  version: number;
+}
 export interface OwnModuleRecordProposal {
   key: string;
   value: ModuleRecordJsonObject;
   expectedVersion: number | null;
   idempotencyKey: string;
 }
-export interface NativeChangeSetReference { id: string; projectId: string }
-export { PUBLISHING_SHARE_GRANTS_KEY, parsePublishingShareGrantIndex, convertPublishingShareGrantJsonl, type PublishingShareGrant } from "./publishing-share-grants.js";
-export { PUBLISHING_EPISODES_KEY, parsePublishingEpisodesRecord, parsePublishingEpisodeUpdate, convertPublishingEpisodesYaml, type PublishingEpisodeDocument, type PublishingEpisode } from "./publishing-episodes.js";
+export interface NativeChangeSetReference {
+  id: string;
+  projectId: string;
+}
+export {
+  convertPublishingEpisodesYaml,
+  PUBLISHING_EPISODES_KEY,
+  type PublishingEpisode,
+  type PublishingEpisodeDocument,
+  parsePublishingEpisodesRecord,
+  parsePublishingEpisodeUpdate,
+} from './publishing-episodes.js';
+export {
+  convertPublishingShareGrantJsonl,
+  PUBLISHING_SHARE_GRANTS_KEY,
+  type PublishingShareGrant,
+  parsePublishingShareGrantIndex,
+} from './publishing-share-grants.js';
 export const PUBLISHING_RECORD_KEYS = [PUBLISHING_EPISODES_KEY, PUBLISHING_SHARE_GRANTS_KEY] as const;
 export function isPublishingRecordKey(key: string): key is (typeof PUBLISHING_RECORD_KEYS)[number] {
   return PUBLISHING_RECORD_KEYS.some(candidate => candidate === key);
@@ -278,7 +345,7 @@ export interface ModuleActionContext {
 }
 export interface ModuleAction {
   id: string;
-  effect: "read" | "propose" | "compute";
+  effect: 'read' | 'propose' | 'compute';
   /** Declared by the owning module; the host records the exact outer action result privately. */
   job?: DomainJobDescriptor;
   inputSchema: ValueSchema;
@@ -288,12 +355,12 @@ export interface ModuleAction {
 export interface UiContribution {
   /** Versioned composition metadata; absent values retain the original panel semantics. */
   contractVersion?: 1;
-  kind?: "panel" | "editor-adornment" | "context-action";
-  contexts?: Array<"workspace" | "editor" | "reading">;
+  kind?: 'panel' | 'editor-adornment' | 'context-action';
+  contexts?: Array<'workspace' | 'editor' | 'reading'>;
   multipleInstances?: boolean;
   id: string;
   module: ModuleId;
-  slot: "editor" | "dock" | "inspection" | "review" | "settings";
+  slot: 'editor' | 'dock' | 'inspection' | 'review' | 'settings';
   title: string;
   action: string;
 }
@@ -310,7 +377,7 @@ export interface ModuleManifest {
   browserEntry?: string;
   workerEntry?: string;
   statePaths: string[];
-  locality: "local" | "optional-external";
+  locality: 'local' | 'optional-external';
   /** Host-owned HTTP registration descriptors; handlers are checked against these when the module activates. */
   http?: HttpContributionDescriptor[];
 }
@@ -337,12 +404,12 @@ export interface HttpContribution {
   id: string;
   /** Relative path template under the host-owned project or stable-repository prefix. */
   path: string;
-  methods: Array<"GET" | "HEAD" | "POST" | "DELETE">;
-  access: "owner" | "public";
-  effect: "read" | "compute" | "propose";
+  methods: Array<'GET' | 'HEAD' | 'POST' | 'DELETE'>;
+  access: 'owner' | 'public';
+  effect: 'read' | 'compute' | 'propose';
   handle(request: Request, context: ModuleActionContext): Promise<Response>;
 }
-export type HttpContributionDescriptor = Omit<HttpContribution, "handle">;
+export type HttpContributionDescriptor = Omit<HttpContribution, 'handle'>;
 export interface ModuleDefinition {
   manifest: ModuleManifest;
   capabilities?: CapabilityDefinition[];
@@ -351,17 +418,30 @@ export interface ModuleDefinition {
   ui: UiContribution[];
   dispose(): Promise<void>;
 }
-export type ModuleAvailability = "not-included" | "disabled" | "enabled-idle" | "active";
-export interface ModuleStatus { id: ModuleId; availability: ModuleAvailability; version?: string; activeJobs: number }
+export type ModuleAvailability = 'not-included' | 'disabled' | 'enabled-idle' | 'active';
+export interface ModuleStatus {
+  id: ModuleId;
+  availability: ModuleAvailability;
+  version?: string;
+  activeJobs: number;
+}
 
 export class ContractError extends Error {
-  readonly code = "invalid_contract";
-  constructor(message: string) { super(message); this.name = "ContractError"; }
+  readonly code = 'invalid_contract';
+  constructor(message: string) {
+    super(message);
+    this.name = 'ContractError';
+  }
 }
 export function assertProjectPath(value: unknown): asserts value is string {
-  if (typeof value !== "string" || value.length > 1024 || /[\\\x00-\x1f]/.test(value) ||
-      value.split("/").some(part => !part || part === "." || part === ".." || part.toLowerCase() === ".git")) {
-    throw new ContractError("Unsafe project path");
+  if (
+    typeof value !== 'string' ||
+    value.length > 1024 ||
+    value.includes('\\') ||
+    Array.from(value).some(character => character < ' ') ||
+    value.split('/').some(part => !part || part === '.' || part === '..' || part.toLowerCase() === '.git')
+  ) {
+    throw new ContractError('Unsafe project path');
   }
 }
 export const SNAPSHOT_READ_MANY_LIMIT = 32;
@@ -373,22 +453,22 @@ function documentPrefix(prefix: string | undefined): string | undefined {
 }
 
 function assertDocumentRevision(value: unknown): asserts value is string {
-  if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
-    throw new ContractError("Snapshot document has an invalid revision");
+  if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) {
+    throw new ContractError('Snapshot document has an invalid revision');
   }
 }
 
 function assertDocumentPath(path: unknown, prefix?: string): asserts path is string {
   assertProjectPath(path);
   if (prefix !== undefined && path !== prefix && !path.startsWith(`${prefix}/`)) {
-    throw new ContractError("Snapshot document is outside the requested scope");
+    throw new ContractError('Snapshot document is outside the requested scope');
   }
 }
 
 async function inBatches<T, R>(values: readonly T[], action: (value: T) => Promise<R>): Promise<R[]> {
   const output: R[] = [];
   for (let offset = 0; offset < values.length; offset += SNAPSHOT_READ_MANY_LIMIT) {
-    output.push(...await Promise.all(values.slice(offset, offset + SNAPSHOT_READ_MANY_LIMIT).map(action)));
+    output.push(...(await Promise.all(values.slice(offset, offset + SNAPSHOT_READ_MANY_LIMIT).map(action))));
   }
   return output;
 }
@@ -402,20 +482,20 @@ export function createDocumentSource(reader: SnapshotReader): DocumentSource {
     async enumerate(prefix) {
       const scope = documentPrefix(prefix);
       const listed = reader.listRevisions
-        ? await reader.listRevisions(scope ?? "")
-        : await inBatches(await reader.list(scope ?? ""), async path => {
+        ? await reader.listRevisions(scope ?? '')
+        : await inBatches(await reader.list(scope ?? ''), async path => {
             assertDocumentPath(path, scope);
             const file = await reader.read(path);
-            if (!file) throw new ContractError("Snapshot document is unavailable");
+            if (!file) throw new ContractError('Snapshot document is unavailable');
             assertDocumentRevision(file.revision);
             return { path, revision: file.revision };
           });
       const seen = new Set<string>();
       for (const item of listed) {
-        if (!item || typeof item !== "object") throw new ContractError("Invalid snapshot document listing");
+        if (!item || typeof item !== 'object') throw new ContractError('Invalid snapshot document listing');
         assertDocumentPath(item.path, scope);
         if (item.revision !== null) assertDocumentRevision(item.revision);
-        if (seen.has(item.path)) throw new ContractError("Snapshot document listing contains duplicate paths");
+        if (seen.has(item.path)) throw new ContractError('Snapshot document listing contains duplicate paths');
         seen.add(item.path);
       }
       return listed.map(item => ({ ...item })).sort((left, right) => left.path.localeCompare(right.path));
@@ -424,11 +504,11 @@ export function createDocumentSource(reader: SnapshotReader): DocumentSource {
       const seen = new Set<string>();
       for (const path of paths) {
         assertDocumentPath(path);
-        if (seen.has(path)) throw new ContractError("Snapshot document read contains duplicate paths");
+        if (seen.has(path)) throw new ContractError('Snapshot document read contains duplicate paths');
         seen.add(path);
       }
       function documentFile(path: string, file: SnapshotFile | null | undefined) {
-        if (!file) throw new ContractError("Snapshot document is unavailable");
+        if (!file) throw new ContractError('Snapshot document is unavailable');
         assertDocumentRevision(file.revision);
         return { path, content: file.content, revision: file.revision };
       }
@@ -438,7 +518,7 @@ export function createDocumentSource(reader: SnapshotReader): DocumentSource {
       for (let offset = 0; offset < paths.length; offset += SNAPSHOT_READ_MANY_LIMIT) {
         const batch = paths.slice(offset, offset + SNAPSHOT_READ_MANY_LIMIT);
         const files = await reader.readMany(batch);
-        if (files.length !== batch.length) throw new ContractError("Invalid snapshot document batch");
+        if (files.length !== batch.length) throw new ContractError('Invalid snapshot document batch');
         result.push(...batch.map((path, index) => documentFile(path, files[index])));
       }
       return result;
@@ -447,13 +527,13 @@ export function createDocumentSource(reader: SnapshotReader): DocumentSource {
       const scope = documentPrefix(prefix);
       const prior = new Map<string, string | null>();
       for (const item of previous) {
-        if (!item || typeof item !== "object") throw new ContractError("Invalid previous snapshot document");
+        if (!item || typeof item !== 'object') throw new ContractError('Invalid previous snapshot document');
         assertDocumentPath(item.path);
         if (scope !== undefined && item.path !== scope && !item.path.startsWith(`${scope}/`)) continue;
-        if (item.revision !== null && typeof item.revision !== "string") {
-          throw new ContractError("Invalid previous snapshot document revision");
+        if (item.revision !== null && typeof item.revision !== 'string') {
+          throw new ContractError('Invalid previous snapshot document revision');
         }
-        if (prior.has(item.path)) throw new ContractError("Previous snapshot document listing contains duplicate paths");
+        if (prior.has(item.path)) throw new ContractError('Previous snapshot document listing contains duplicate paths');
         prior.set(item.path, item.revision);
       }
       const current = await this.enumerate(scope);
@@ -471,104 +551,138 @@ export function snapshotKey(snapshot: SnapshotId): string {
 /** Content-neutral semantic read-set guard; callers choose the relevant project subtree. */
 export async function snapshotScopeRevision(reader: SnapshotReader, prefix: string): Promise<string> {
   assertProjectPath(prefix);
-  const files = reader.listRevisions
-    ? await reader.listRevisions(prefix)
-    : (await reader.list(prefix)).map(path => ({ path }));
+  const files = reader.listRevisions ? await reader.listRevisions(prefix) : (await reader.list(prefix)).map(path => ({ path }));
   const seen = new Set<string>();
   const entries: Array<[string, string]> = [];
   for (const file of files) {
-    if (!file || typeof file !== "object") throw new ContractError("Invalid snapshot scope listing");
+    if (!file || typeof file !== 'object') throw new ContractError('Invalid snapshot scope listing');
     const { path } = file;
     assertProjectPath(path);
     if ((path !== prefix && !path.startsWith(`${prefix}/`)) || seen.has(path)) {
-      throw new ContractError("Invalid snapshot scope listing");
+      throw new ContractError('Invalid snapshot scope listing');
     }
     seen.add(path);
-    const revision = "revision" in file ? file.revision : (await reader.read(path))?.revision;
-    if (typeof revision !== "string" || !/^[a-f0-9]{64}$/.test(revision)) {
-      throw new ContractError("Snapshot scope contains an unavailable file");
+    const revision = 'revision' in file ? file.revision : (await reader.read(path))?.revision;
+    if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) {
+      throw new ContractError('Snapshot scope contains an unavailable file');
     }
     entries.push([path, revision]);
   }
-  entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(entries)));
-  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  entries.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(entries)));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 /** Runtime boundary, also used for recovered browser payloads. Symlink checks remain Core-owned. */
 export function assertChangeOperation(value: unknown): asserts value is ChangeOperation {
   const v = value as ChangeOperation | null;
-  if (!v || typeof v !== "object" || typeof v.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(v.id) ||
-      !Number.isSafeInteger(v.generation) || v.generation < 0 || typeof v.message !== "string" ||
-      !v.message.trim() || v.message.length > 1024 || !Number.isSafeInteger(v.baseProjectVersion) || v.baseProjectVersion < 0 ||
-      !["manuscript", "structure", "metadata", "settings", "migration"].includes(v.effect) ||
-      typeof v.projectId !== "string" || !v.projectId || v.projectId.length > 512 ||
-      !Array.isArray(v.reads) || !Array.isArray(v.writes) || v.reads.length > 512 || !v.writes.length || v.writes.length > 256) {
-    throw new ContractError("Invalid change operation");
+  if (
+    !v ||
+    typeof v !== 'object' ||
+    typeof v.id !== 'string' ||
+    !/^[A-Za-z0-9_-]{1,128}$/.test(v.id) ||
+    !Number.isSafeInteger(v.generation) ||
+    v.generation < 0 ||
+    typeof v.message !== 'string' ||
+    !v.message.trim() ||
+    v.message.length > 1024 ||
+    !Number.isSafeInteger(v.baseProjectVersion) ||
+    v.baseProjectVersion < 0 ||
+    !['manuscript', 'structure', 'metadata', 'settings', 'migration'].includes(v.effect) ||
+    typeof v.projectId !== 'string' ||
+    !v.projectId ||
+    v.projectId.length > 512 ||
+    !Array.isArray(v.reads) ||
+    !Array.isArray(v.writes) ||
+    v.reads.length > 512 ||
+    !v.writes.length ||
+    v.writes.length > 256
+  ) {
+    throw new ContractError('Invalid change operation');
   }
   if (v.readScopes !== undefined) {
-    if (!Array.isArray(v.readScopes) || v.readScopes.length > 32) throw new ContractError("Invalid scope preconditions");
+    if (!Array.isArray(v.readScopes) || v.readScopes.length > 32) throw new ContractError('Invalid scope preconditions');
     const prefixes = new Set<string>();
     for (const scope of v.readScopes) {
-      if (!scope || typeof scope !== "object") throw new ContractError("Invalid scope precondition");
+      if (!scope || typeof scope !== 'object') throw new ContractError('Invalid scope precondition');
       assertProjectPath(scope.prefix);
-      if (prefixes.has(scope.prefix) || typeof scope.revision !== "string" || !/^[a-f0-9]{64}$/.test(scope.revision)) {
-        throw new ContractError("Invalid scope revision");
+      if (prefixes.has(scope.prefix) || typeof scope.revision !== 'string' || !/^[a-f0-9]{64}$/.test(scope.revision)) {
+        throw new ContractError('Invalid scope revision');
       }
       prefixes.add(scope.prefix);
     }
   }
-  if (v.readKnowledgeRevision !== undefined && (typeof v.readKnowledgeRevision !== "string" || !/^[a-f0-9]{64}$/u.test(v.readKnowledgeRevision))) {
-    throw new ContractError("Invalid Knowledge projection revision");
+  if (
+    v.readKnowledgeRevision !== undefined &&
+    (typeof v.readKnowledgeRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(v.readKnowledgeRevision))
+  ) {
+    throw new ContractError('Invalid Knowledge projection revision');
   }
   if (v.readDocumentSets !== undefined) {
-    if (!Array.isArray(v.readDocumentSets) || v.readDocumentSets.length > 32) throw new ContractError("Invalid document-set preconditions");
+    if (!Array.isArray(v.readDocumentSets) || v.readDocumentSets.length > 32) throw new ContractError('Invalid document-set preconditions');
     const sets = new Set<string>();
     for (const set of v.readDocumentSets) {
-      if (!set || typeof set !== "object" || !["volume", "chapter", "scene"].includes(set.kind) ||
-          (set.kind === "volume" ? set.parentId !== null : (typeof set.parentId !== "string" || !set.parentId)) ||
-          !Array.isArray(set.documentIds) || set.documentIds.length > 1000 ||
-          set.documentIds.some((id) => typeof id !== "string" || !id)) {
-        throw new ContractError("Invalid document-set precondition");
+      if (
+        !set ||
+        typeof set !== 'object' ||
+        !['volume', 'chapter', 'scene'].includes(set.kind) ||
+        (set.kind === 'volume' ? set.parentId !== null : typeof set.parentId !== 'string' || !set.parentId) ||
+        !Array.isArray(set.documentIds) ||
+        set.documentIds.length > 1000 ||
+        set.documentIds.some(id => typeof id !== 'string' || !id)
+      ) {
+        throw new ContractError('Invalid document-set precondition');
       }
       const ids = [...set.documentIds].sort();
-      if (new Set(ids).size !== ids.length) throw new ContractError("Duplicate document in document-set precondition");
+      if (new Set(ids).size !== ids.length) throw new ContractError('Duplicate document in document-set precondition');
       const key = JSON.stringify([set.kind, set.parentId]);
-      if (sets.has(key)) throw new ContractError("Duplicate document-set precondition");
+      if (sets.has(key)) throw new ContractError('Duplicate document-set precondition');
       sets.add(key);
     }
   }
   const seen = new Set<string>();
   let size = 0;
   for (const item of [...v.reads, ...v.writes]) {
-    if (!item || typeof item !== "object") throw new ContractError("Invalid file precondition");
+    if (!item || typeof item !== 'object') throw new ContractError('Invalid file precondition');
     assertProjectPath(item.path);
-    if (item.revision !== null && (typeof item.revision !== "string" || !/^[a-f0-9]{64}$/.test(item.revision))) {
-      throw new ContractError("Invalid file revision");
+    if (item.revision !== null && (typeof item.revision !== 'string' || !/^[a-f0-9]{64}$/.test(item.revision))) {
+      throw new ContractError('Invalid file revision');
     }
   }
   for (const item of v.writes) {
-    if (seen.has(item.path)) throw new ContractError("Duplicate write path");
+    if (seen.has(item.path)) throw new ContractError('Duplicate write path');
     seen.add(item.path);
-    if (item.content !== null && typeof item.content !== "string") throw new ContractError("Invalid recoverable content");
-    if (item.encoding !== undefined && item.encoding !== "utf8" && item.encoding !== "base64") throw new ContractError("Invalid encoding");
+    if (item.content !== null && typeof item.content !== 'string') throw new ContractError('Invalid recoverable content');
+    if (item.encoding !== undefined && item.encoding !== 'utf8' && item.encoding !== 'base64') throw new ContractError('Invalid encoding');
     size += item.content?.length ?? 0;
     if (item.textChanges !== undefined) {
-      if (v.effect !== "manuscript" || item.content === null || item.encoding === "base64" ||
-          !Array.isArray(item.textChanges) || item.textChanges.length < 1 || item.textChanges.length > 256) {
-        throw new ContractError("Invalid manuscript text changes");
+      if (
+        v.effect !== 'manuscript' ||
+        item.content === null ||
+        item.encoding === 'base64' ||
+        !Array.isArray(item.textChanges) ||
+        item.textChanges.length < 1 ||
+        item.textChanges.length > 256
+      ) {
+        throw new ContractError('Invalid manuscript text changes');
       }
       let previousEnd = 0;
       for (const change of item.textChanges) {
-        if (!change || typeof change !== "object" || !Number.isSafeInteger(change.fromUtf16) ||
-            !Number.isSafeInteger(change.toUtf16) || change.fromUtf16 < previousEnd ||
-            change.toUtf16 < change.fromUtf16 || typeof change.insert !== "string") {
-          throw new ContractError("Invalid manuscript text change range");
+        if (
+          !change ||
+          typeof change !== 'object' ||
+          !Number.isSafeInteger(change.fromUtf16) ||
+          !Number.isSafeInteger(change.toUtf16) ||
+          change.fromUtf16 < previousEnd ||
+          change.toUtf16 < change.fromUtf16 ||
+          typeof change.insert !== 'string'
+        ) {
+          throw new ContractError('Invalid manuscript text change range');
         }
         previousEnd = change.toUtf16;
         size += change.insert.length;
       }
     }
-    if (size > 8 * 1024 * 1024) throw new ContractError("Operation payload exceeds limit");
+    if (size > 8 * 1024 * 1024) throw new ContractError('Operation payload exceeds limit');
   }
 }
 
@@ -608,7 +722,7 @@ export interface BrowserModuleDefinition {
 }
 
 /** Private owner state for continuing a work on another device; never manuscript content. */
-export type RecentActivityDeviceType = "desktop" | "mobile";
+export type RecentActivityDeviceType = 'desktop' | 'mobile';
 export interface RecentActivityInput {
   sceneId: string;
   /** Source-compatible 1-based UI sentence position, or null when unknown. */

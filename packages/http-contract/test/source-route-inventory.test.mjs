@@ -165,12 +165,20 @@ test('generated Fastify routes exactly cover the admitted HTTP operation invento
   const generated = JSON.parse(readFileSync(generatedPath, 'utf8'));
   const routeKeys = generated.routes.map(({ method, url }) => `${method} ${url.replace(/:([A-Za-z][A-Za-z0-9_]*)/gu, '{$1}')}`);
   const admitted = [...inventory.current, ...inventory.target].sort();
-  assert.deepEqual([...routeKeys].sort(), admitted, 'generated route registrations must retain every current and target operation exactly once');
+  assert.deepEqual(
+    [...routeKeys].sort(),
+    admitted,
+    'generated route registrations must retain every current and target operation exactly once',
+  );
   assert.equal(new Set(routeKeys).size, routeKeys.length, 'generated Fastify route registrations must be unique');
   for (const route of generated.routes) {
     const key = `${route.method} ${route.url.replace(/:([A-Za-z][A-Za-z0-9_]*)/gu, '{$1}')}`;
     assert.ok(route.operationId, `${key} needs an operationId for runtime handler resolution`);
-    assert.equal(route.contractStatus === 'target', inventory.target.includes(key), `${key} target status must match the admitted inventory`);
+    assert.equal(
+      route.contractStatus === 'target',
+      inventory.target.includes(key),
+      `${key} target status must match the admitted inventory`,
+    );
   }
   const server = readFileSync(path.resolve(repositoryRoot, 'packages/api/src/server.ts'), 'utf8');
   assert.match(server, /for\s*\(const route of httpContract\.routes\)/u, 'the server must register routes from the generated contract');
@@ -242,16 +250,21 @@ test('MCP and publishing contribution methods and paths match OpenAPI', () => {
 
 test('generated persistence registrations resolve to independently declared handlers', () => {
   const source = readFileSync(path.resolve(repositoryRoot, 'packages', 'api', 'src', 'persistence-routes.ts'), 'utf8');
-  const ids = [...source.matchAll(/^\s{2}(persistence_[a-z0-9_]+): async\s*\(/gmu)].map(match => match[1]);
-  const persistenceRoutes = JSON.parse(readFileSync(path.resolve(repositoryRoot, 'packages/api/src/generated/http-contract.json'), 'utf8')).routes
-    .filter(route => route.url.startsWith('/api/v1/persistence/') && route.contractStatus !== 'target');
+  const ids = [...source.matchAll(/^ {2}(persistence_[a-z0-9_]+): async\b/gmu)].map(match => match[1]);
+  const persistenceRoutes = JSON.parse(
+    readFileSync(path.resolve(repositoryRoot, 'packages/api/src/generated/http-contract.json'), 'utf8'),
+  ).routes.filter(route => route.url.startsWith('/api/v1/persistence/') && route.contractStatus !== 'target');
   const expectedIds = persistenceRoutes.map(route => route.operationId);
   assert.deepEqual(ids.sort(), expectedIds.sort(), 'every current persistence operationId must resolve to exactly one handler');
   assert.equal(new Set(ids).size, ids.length, 'persistence handler operationIds must be unique');
   assert.match(source, /const handler = handlers\[operationId\]/u, 'persistence handlers must resolve by generated operationId');
   assert.match(source, /Unknown persistence operation \$\{operationId\}/u, 'unknown operationIds must fail closed');
   const server = readFileSync(path.resolve(repositoryRoot, 'packages/api/src/server.ts'), 'utf8');
-  assert.match(server, /handlePersistenceOperation\(route\.operationId/u, 'Fastify registrations must pass the generated operationId to persistence routing');
+  assert.match(
+    server,
+    /handlePersistenceOperation\(route\.operationId/u,
+    'Fastify registrations must pass the generated operationId to persistence routing',
+  );
   const openapi = new Set(operationKeys(contract));
   for (const route of persistenceRoutes) {
     const key = `${route.method} ${route.url.replace(/:([A-Za-z][A-Za-z0-9_]*)/gu, '{$1}')}`;

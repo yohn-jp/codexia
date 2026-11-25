@@ -84,6 +84,7 @@ SSE は Fastify の入場処理後に raw stream を開始し、切断とサー�
 
 ジョブ一覧、モジュール一覧、contribution 一覧、履歴、OAuth 同意一覧は既存の top-level array を返す。
 現行 API epoch の OpenAPI baseline に記録されたオブジェクトとの応答差分が解消されるまで、これらの 200 応答は Fastify の通常の JSON 出力を使用する。
+バージョン確認の 2 経路も通常の JSON 出力を使用し、OCI が検査する数値の `contractVersion` を維持する。
 setup 専用 readiness の応答差分も TypeSpec に記録する。
 静的 Web ファイルの配信は Fastify の未一致ハンドラーで GET/HEAD に限定する。
 
