@@ -22,8 +22,7 @@ test('all branch refs, including slash and HTML characters, are data only', () =
   assert.match(html, /<main>/u);
   const readyHtml=renderIndex({ observedAt:'now', branches:[{branch:'main',sha}], snapshots:{[sha]:{status:'ready',outputs:[{name:'repomix.json',bytes:10}]}} });
   assert.ok(readyHtml.includes('<a class="cx-pages-action" href="snapshots/' + sha + '/">Snapshot details</a>'));
-  assert.match(readyHtml, /Visual Context Pack/u);
-  assert.match(readyHtml, /actions\/workflows\/visual-context-pack\.yml\?query=branch%3Amain%20is%3Asuccess/u);
+  assert.doesNotMatch(readyHtml, /actions\/workflows\/visual-context-pack\.yml/u);
   assert.match(readyHtml, /<details class="cx-pages-branch" id="sha-[a-f0-9]{40}">/u);
   assert.doesNotMatch(readyHtml, /<table/u);
   const chunkedHtml=renderIndex({ observedAt:'now', branches:[{branch:'main',sha}], snapshots:{[sha]:{status:'ready',fileCount:3,outputs:[

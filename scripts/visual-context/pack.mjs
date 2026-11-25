@@ -108,6 +108,7 @@ export function renderPackDocuments({ sourceSha, generatedAt, environment, theme
   assert.ok(SHA.test(sourceSha), 'Expected a full commit SHA');
   assert.ok(Number.isFinite(Date.parse(generatedAt)), 'Invalid generation timestamp');
   const coverage = validateCaptureSet({ targets, themes, screenshots });
+  const targetById = new Map(targets.map(target => [target.id, target]));
   const pngBytes = screenshots.reduce((sum, shot) => sum + shot.bytes, 0);
   const manifest = {
     schemaVersion: 1,
@@ -120,9 +121,10 @@ export function renderPackDocuments({ sourceSha, generatedAt, environment, theme
     captureTargets: targets.map(({ id, screenId, scenarioId, label, screenTitle, purpose, operations, fileName }) => ({
       id, screenId, scenarioId, label, screenTitle, purpose, operations, fileName,
     })),
-    screenshots: screenshots.map(({ targetId, screenId, scenarioId, theme, path, status, width, height, bytes, sha256: digest }) => ({
-      targetId, screenId, scenarioId, theme, path, result: status, width, height, bytes, sha256: digest,
-    })),
+    screenshots: screenshots.map(({ targetId, theme, path, status, width, height, bytes, sha256: digest }) => {
+      const { screenId, scenarioId } = targetById.get(targetId);
+      return { targetId, screenId, scenarioId, theme, path, result: status, width, height, bytes, sha256: digest };
+    }),
     coverage: {
       targetCount: coverage.screenshotTargetCount,
       successCount: coverage.successCount,
@@ -141,7 +143,7 @@ export function renderPackDocuments({ sourceSha, generatedAt, environment, theme
     exclusions,
   };
   const targetRows = targets.map(target => {
-    const paths = themes.map(theme => `\`${theme}/${target.fileName}\``).join(', ');
+    const paths = screenshots.filter(shot => shot.targetId === target.id).map(shot => `\`${shot.path}\``).join(', ');
     return `| ${target.screenId} | ${target.scenarioId} | ${target.label} | ${target.purpose} | ${target.operations.join('、') || '—'} | ${paths} |`;
   }).join('\n');
   const exclusionRows = exclusions.length
