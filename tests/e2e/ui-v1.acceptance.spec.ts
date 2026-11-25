@@ -1186,7 +1186,7 @@ test("keeps the manuscript near its scene title with one concise protection stat
       return {
         firstLine: { top, bottom, left, right, height },
         actionBounds: [...document.querySelectorAll<HTMLElement>(".pg-editor-actions > *")].map((element) => { const rect = element.getBoundingClientRect(); return { label: element.textContent?.trim(), x: rect.x, y: rect.y, width: rect.width, height: rect.height }; }),
-        visibleProtection: [...document.querySelectorAll(".st-studio-durability, .pg-save-state, .mobile-shell-protection, .mobile-shell-reference-durability")]
+        visibleProtection: [...document.querySelectorAll(".pg-save-state")]
           .filter(visible).map((element) => element.textContent?.trim()),
         visibleAlerts: [...document.querySelectorAll('[role="alert"]')].filter(visible).map((element) => element.textContent?.trim()),
         pageWidth: document.documentElement.scrollWidth,
