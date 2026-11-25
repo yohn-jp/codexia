@@ -412,9 +412,7 @@ paths:
           content:
             application/json:
               schema:
-                anyOf:
-                  - $ref: '#/components/schemas/OwnerSetupState'
-                  - $ref: '#/components/schemas/OwnerSetupEnrolled'
+                $ref: '#/components/schemas/OwnerSetupStatusResponse'
         '403':
           description: Access is forbidden.
           headers:
@@ -529,7 +527,8 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - auth-adapter
-      x-codexia-runtime-response-deviation: Runtime serializes the consent list as a top-level array; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.
+      x-codexia-desktop-response-schema: '#/components/schemas/OAuthConsentRowList'
+      x-codexia-runtime-response-deviation: Runtime serializes the consent list as a top-level array; the approved baseline response body is an object. Keep the published compatibility schema unchanged and use the Codexia desktop response projection metadata for the verified typed array shape until an approved compatibility correction.
       x-codexia-security-deviation: The approved baseline encodes BearerAuth. Runtime requires the Better Auth owner-session cookie; this security representation remains incomplete pending an approved compatibility baseline correction.
       x-codexia-principal: OWNER-SESSION; same-origin request
       x-codexia-contract-status: incomplete
@@ -5591,6 +5590,32 @@ components:
           type: string
       unevaluatedProperties:
         not: {}
+    OAuthConsentRow:
+      type: object
+      required:
+        - id
+        - clientId
+        - scopes
+      properties:
+        id:
+          type: string
+        clientId:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
+    OAuthConsentRowList:
+      type: array
+      items:
+        $ref: '#/components/schemas/OAuthConsentRow'
     OwnerSessionBody:
       type: object
       required:
@@ -5710,6 +5735,10 @@ components:
             - active
       unevaluatedProperties:
         not: {}
+    OwnerSetupStatusResponse:
+      anyOf:
+        - $ref: '#/components/schemas/OwnerSetupState'
+        - $ref: '#/components/schemas/OwnerSetupEnrolled'
     OwnerSetupTransaction:
       type: object
       required:

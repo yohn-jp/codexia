@@ -1,22 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkOwnerSession, type ConsoleSessionRequest } from "./console-session.js";
+import { checkOwnerSession } from "./console-session.js";
 import { consumeConsoleReturnLocation, createConsoleReturnLocation, resolveConsoleReturnLocation } from "./console-return.js";
 
 test("owner session check sends same-origin cookies only and rejects incomplete responses", async () => {
-  let request: { input: string; init: ConsoleSessionRequest } | undefined;
+  let request: { input: string | URL | Request; init?: RequestInit } | undefined;
   const response = await checkOwnerSession(async (input, init) => {
     request = { input, init };
     return Response.json({ authenticated: true });
   });
   assert.equal(response, "owner");
   assert.equal(request?.input, "/api/auth/codexia/owner-session");
-  assert.equal(request?.init.method, "POST");
-  assert.equal(request?.init.credentials, "same-origin");
-  assert.equal(request?.init.cache, "no-store");
-  assert.deepEqual(request?.init.headers, { accept: "application/json", "content-type": "application/json" });
-  assert.equal(request?.init.body, "{}");
-  assert.equal("authorization" in (request?.init.headers ?? {}), false);
+  assert.equal(request?.init?.method, "POST");
+  assert.equal(request?.init?.credentials, "same-origin");
+  assert.equal(request?.init?.cache, "no-store");
+  assert.deepEqual(new Headers(request?.init?.headers), new Headers({ accept: "application/json", "content-type": "application/json" }));
+  assert.equal(request?.init?.body, "{}");
+  assert.equal(new Headers(request?.init?.headers).has("authorization"), false);
   assert.equal(await checkOwnerSession(async () => new Response(null, { status: 401 })), "unauthorized");
   assert.equal(await checkOwnerSession(async () => new Response(null, { status: 403 })), "forbidden");
   assert.equal(await checkOwnerSession(async () => new Response(null, { status: 503 })), "unavailable");

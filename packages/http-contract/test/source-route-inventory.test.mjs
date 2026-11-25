@@ -297,4 +297,14 @@ test('generated owner-session request, response, header, error and security sema
   assert.match(consentContext['x-codexia-security-deviation'], /approved baseline encodes BearerAuth/u);
   assert.match(consents['x-codexia-security-deviation'], /approved baseline encodes BearerAuth/u);
   assert.match(consents['x-codexia-runtime-response-deviation'], /top-level array/u);
+  assert.equal(consents.responses['200'].content['application/json'].schema.type, 'object');
+  assert.equal(consents['x-codexia-desktop-response-schema'], '#/components/schemas/OAuthConsentRowList');
+  const consentRow = contract.components.schemas.OAuthConsentRow;
+  assert.deepEqual(consentRow.required.sort(), ['clientId', 'id', 'scopes']);
+  assert.equal(consentRow.properties.id.type, 'string');
+  assert.equal(consentRow.properties.clientId.type, 'string');
+  assert.equal(consentRow.properties.scopes.type, 'array');
+  assert.deepEqual(contract.components.schemas.OAuthConsentRowList.items.$ref, '#/components/schemas/OAuthConsentRow');
+  assert.equal(contract.paths['/api/auth/codexia/setup/status'].get.responses['200'].content['application/json'].schema.$ref,
+    '#/components/schemas/OwnerSetupStatusResponse');
 });

@@ -1,63 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { passkeyClient } from "@better-auth/passkey/client";
 import { createAuthClient } from "better-auth/react";
+import { authorizeOwnerSetup, completeOwnerSetup, getOwnerSetupStatus, setOwnerSetupProfile, type OwnerSetupStatus } from "./setup-client";
 
-const API = "/api/auth/codexia/setup";
-const FETCH_OPTIONS = { credentials: "same-origin", cache: "no-store", redirect: "error" } as const;
-const TRANSACTION_HEADER = "x-codexia-setup-transaction";
-
-type Status =
-  | { state: "setup-pending" | "waiting" | "expired" | "blocked" | "active" }
-  | { state: "owner-enrolled"; clientsReady: boolean; sessionConfirmed?: boolean };
+type Status = OwnerSetupStatus;
 type Step = "key" | "profile" | "passkey";
-
-class SetupError extends Error {
-  constructor(readonly status: number) { super("Owner setup request failed"); }
-}
-
-async function getStatus(signal?: AbortSignal): Promise<Status> {
-  const response = await fetch(API + "/status", {
-    ...FETCH_OPTIONS, ...(signal ? { signal } : {}), headers: { accept: "application/json" },
-  });
-  if (!response.ok) throw new SetupError(response.status);
-  const body: unknown = await response.json();
-  if (!body || typeof body !== "object" || !("state" in body)) throw new SetupError(503);
-  switch (body.state) {
-    case "setup-pending":
-    case "waiting":
-    case "expired":
-    case "blocked":
-    case "active":
-      return { state: body.state };
-    case "owner-enrolled":
-      if ("clientsReady" in body && typeof body.clientsReady === "boolean") {
-        return { state: body.state, clientsReady: body.clientsReady };
-      }
-  }
-  throw new SetupError(503);
-}
-
-async function post(path: string, body: unknown, transaction?: string): Promise<Response> {
-  return fetch(API + path, {
-    ...FETCH_OPTIONS,
-    method: "POST",
-    headers: {
-      accept: "application/json", "content-type": "application/json",
-      ...(transaction ? { [TRANSACTION_HEADER]: transaction } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-}
-
-async function exchange(path: string, body: unknown, transaction?: string): Promise<string> {
-  const response = await post(path, body, transaction);
-  if (!response.ok) throw new SetupError(response.status);
-  const data: unknown = await response.json();
-  if (data && typeof data === "object" && "transaction" in data && typeof data.transaction === "string") {
-    return data.transaction;
-  }
-  throw new SetupError(503);
-}
+import { SetupError } from "./setup-client";
 
 export function ConsoleSetup({ consoleUrl }: { readonly consoleUrl: string }) {
   const [status, setStatus] = useState<Status | "checking" | "unavailable">("checking");
@@ -75,7 +23,7 @@ export function ConsoleSetup({ consoleUrl }: { readonly consoleUrl: string }) {
 
   useEffect(() => {
     const abort = new AbortController();
-    void getStatus(abort.signal).then(setStatus, () => {
+    void getOwnerSetupStatus(fetch, abort.signal).then(setStatus, () => {
       if (!abort.signal.aborted) setStatus("unavailable");
     });
     return () => abort.abort();
@@ -106,16 +54,15 @@ export function ConsoleSetup({ consoleUrl }: { readonly consoleUrl: string }) {
 
   async function refresh() {
     try {
-      const state = await getStatus();
+      const state = await getOwnerSetupStatus();
       setStatus(state);
       const token = transaction.current;
       if (state.state === "owner-enrolled" && token) {
         try {
-          const result = await post("/complete", {}, token);
-          if (result.ok) {
-            const data: { clientsReady?: boolean; sessionConfirmed?: boolean } = await result.json();
-            setStatus({ ...state, clientsReady: data.clientsReady === true, sessionConfirmed: data.sessionConfirmed === true });
-          } else if (!state.clientsReady) {
+          const result = await completeOwnerSetup(token);
+          const data = result && typeof result === "object" ? result as { clientsReady?: unknown; sessionConfirmed?: unknown } : {};
+          setStatus({ ...state, clientsReady: data.clientsReady === true, sessionConfirmed: data.sessionConfirmed === true });
+          if (data.clientsReady !== true) {
             setMessage("登録は完了しています。クライアントの準備状況を構築担当者に確認してください。");
           }
         } catch {
@@ -139,7 +86,7 @@ export function ConsoleSetup({ consoleUrl }: { readonly consoleUrl: string }) {
     void run(async () => {
       setKeyError(false);
       try {
-        transaction.current = await exchange("/authorize", { key: key.trim() });
+        transaction.current = await authorizeOwnerSetup(key.trim());
         setStep("profile");
       } catch (error) {
         if (error instanceof SetupError && (error.status === 400 || error.status === 403)) {
@@ -158,7 +105,7 @@ export function ConsoleSetup({ consoleUrl }: { readonly consoleUrl: string }) {
     if (!token) return;
     void run(async () => {
       try {
-        transaction.current = await exchange("/profile", { name, email }, token);
+        transaction.current = await setOwnerSetupProfile({ name, email }, token);
         setStep("passkey");
       } catch (error) {
         if (error instanceof SetupError && error.status === 400) {
@@ -183,7 +130,7 @@ export function ConsoleSetup({ consoleUrl }: { readonly consoleUrl: string }) {
       try {
         const setupAuth = createAuthClient({
           basePath: "/api/auth",
-          fetchOptions: { ...FETCH_OPTIONS, headers: { [TRANSACTION_HEADER]: token }, retry: 0 },
+          fetchOptions: { credentials: "same-origin", cache: "no-store", redirect: "error", headers: { "x-codexia-setup-transaction": token }, retry: 0 },
           plugins: [passkeyClient()],
         });
         const response = await setupAuth.passkey.addPasskey({ createSession: true });

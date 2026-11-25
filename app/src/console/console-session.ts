@@ -1,43 +1,29 @@
-export type OwnerSessionState = "owner" | "unauthorized" | "forbidden" | "unavailable";
+import { ownerSessionConfirmPost } from "../generated/http/client";
+import { ApiError } from "../api-error";
 
-export interface ConsoleSessionRequest {
-  readonly method: "POST";
-  readonly credentials: "same-origin";
-  readonly cache: "no-store";
-  readonly redirect: "error";
-  readonly headers: { readonly accept: "application/json"; readonly "content-type": "application/json" };
-  readonly body: "{}";
-  readonly signal?: AbortSignal;
-}
+export type OwnerSessionState = "owner" | "unauthorized" | "forbidden" | "unavailable";
 
 /** Confirms the dedicated Better Auth owner cookie; it never sends an API bearer. */
 export async function checkOwnerSession(
-  fetcher: (input: string, init: ConsoleSessionRequest) => Promise<Response> = fetch,
+  fetcher: typeof fetch = fetch,
   signal?: AbortSignal,
 ): Promise<OwnerSessionState> {
-  let response: Response;
+  let body: unknown;
   try {
-    response = await fetcher("/api/auth/codexia/owner-session", {
-      method: "POST",
+    body = await ownerSessionConfirmPost({}, {
       credentials: "same-origin",
       cache: "no-store",
       redirect: "error",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: "{}",
+      headers: { accept: "application/json" },
       ...(signal ? { signal } : {}),
+      transport: { auth: "same-origin" },
+      fetcher,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return "unauthorized";
+    if (error instanceof ApiError && error.status === 403) return "forbidden";
     return "unavailable";
   }
-  if (response.status === 401) return "unauthorized";
-  if (response.status === 403) return "forbidden";
-  if (!response.ok) return "unavailable";
-  try {
-    const body: unknown = await response.json();
-    if (body && typeof body === "object" && !Array.isArray(body) &&
-        Object.keys(body).length === 1 && (body as Record<string, unknown>).authenticated === true) return "owner";
-  } catch {
-    // Invalid or incomplete server responses fail closed.
-  }
-  return "unavailable";
+  return body && typeof body === "object" && !Array.isArray(body) &&
+    Object.keys(body).length === 1 && (body as Record<string, unknown>).authenticated === true ? "owner" : "unavailable";
 }

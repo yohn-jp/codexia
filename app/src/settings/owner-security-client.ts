@@ -1,3 +1,5 @@
+import { authListConsentsGet } from "../generated/http/client";
+
 export interface OwnerConsent {
   readonly id: string;
   readonly clientId: string;
@@ -5,16 +7,20 @@ export interface OwnerConsent {
 }
 
 export async function fetchOwnerConsents(fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<OwnerConsent[]> {
-  const response = await fetcher("/api/auth/oauth2/get-consents", {
-    method: "GET",
-    credentials: "same-origin",
-    cache: "no-store",
-    redirect: "error",
-    headers: { accept: "application/json" },
-    ...(signal ? { signal } : {}),
-  });
-  if (!response.ok) throw new Error("Owner consents could not be loaded");
-  const rows: unknown = await response.json();
+  let rows: unknown;
+  try {
+    rows = await authListConsentsGet({
+      credentials: "same-origin",
+      cache: "no-store",
+      redirect: "error",
+      headers: { accept: "application/json" },
+      ...(signal ? { signal } : {}),
+      transport: { auth: "same-origin" },
+      fetcher,
+    });
+  } catch {
+    throw new Error("Owner consents could not be loaded");
+  }
   if (!Array.isArray(rows)) throw new Error("Invalid owner consents");
   return rows.map((row: unknown) => {
     if (!row || typeof row !== "object" || !("id" in row) || !("clientId" in row) || !("scopes" in row) ||

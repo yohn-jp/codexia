@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 
 import { api } from "../api";
 import { authClient } from "../auth-client";
 import { checkOwnerSession } from "../console/console-session";
+import { fetchAuthMethodAvailability } from "../oauth-login";
 import { OwnerIdentityPanel } from "./OwnerIdentityPanel";
 import { confirmAuthMutation, outcomeWasUnconfirmed } from "./owner-security-client";
 import "./identity-management.css";
@@ -132,20 +133,8 @@ function supportsPasskeyRegistration(): boolean {
 
 async function readPasskeyAuthRuntime(): Promise<{ oidcConfigured: boolean } | null> {
   try {
-    const response = await fetch("/api/auth/codexia/auth-methods", {
-      method: "GET",
-      credentials: "same-origin",
-      cache: "no-store",
-      redirect: "error",
-      // Limit how long a degraded auth endpoint can delay the optional panel.
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!response.ok) return null;
-    const body: unknown = await response.json();
-    if (!body || typeof body !== "object") return null;
-    const methods = body as { passkey?: unknown; upstreamOidc?: unknown };
-    return methods.passkey === true && typeof methods.upstreamOidc === "boolean"
-      ? { oidcConfigured: methods.upstreamOidc } : null;
+    const methods = await fetchAuthMethodAvailability(fetch, AbortSignal.timeout(5_000));
+    return { oidcConfigured: methods.upstreamOidc };
   } catch {
     return null;
   }

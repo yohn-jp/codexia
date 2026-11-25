@@ -1,3 +1,5 @@
+import { authMethodsGet } from "./generated/http/client";
+
 const UPSTREAM_PROVIDER_ID = "workspace-oidc";
 
 /** The Better Auth login redirect carries an opaque, signed OAuth authorization request. */
@@ -62,15 +64,16 @@ export interface AuthMethodAvailability {
 }
 
 /** Reads the server's public sign-in capability without relying on deployment environment assumptions. */
-export async function fetchAuthMethodAvailability(fetcher: typeof fetch = fetch): Promise<AuthMethodAvailability> {
-  const response = await fetcher("/api/auth/codexia/auth-methods", {
-    method: "GET",
+export async function fetchAuthMethodAvailability(fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<AuthMethodAvailability> {
+  const value: unknown = await authMethodsGet({
     credentials: "same-origin",
     cache: "no-store",
+    redirect: "error",
     headers: { accept: "application/json" },
+    ...(signal ? { signal } : {}),
+    transport: { auth: "anonymous" },
+    fetcher,
   });
-  if (!response.ok) throw new Error("Sign-in methods could not be loaded.");
-  const value: unknown = await response.json();
   if (typeof value !== "object" || value === null || Array.isArray(value) ||
       (value as Record<string, unknown>).passkey !== true || typeof (value as Record<string, unknown>).upstreamOidc !== "boolean") {
     throw new Error("Sign-in methods could not be loaded.");

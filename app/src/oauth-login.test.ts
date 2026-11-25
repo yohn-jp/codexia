@@ -1,6 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { continueOAuthLogin, hasSignedOAuthPrompt, oauthConsentContinuationURL, oauthLoginCallbackURL } from "./oauth-login.js";
+import { continueOAuthLogin, fetchAuthMethodAvailability, hasSignedOAuthPrompt, oauthConsentContinuationURL, oauthLoginCallbackURL } from "./oauth-login.js";
+
+test("shared auth-method capability uses the generated anonymous same-origin adapter", async () => {
+  let request: { input: string | URL | Request; init?: RequestInit } | undefined;
+  const methods = await fetchAuthMethodAvailability(async (input, init) => {
+    request = { input, init };
+    return Response.json({ passkey: true, upstreamOidc: false });
+  });
+  assert.deepEqual(methods, { passkey: true, upstreamOidc: false });
+  assert.equal(request?.input, "/api/auth/codexia/auth-methods");
+  assert.equal(request?.init?.method, "GET");
+  assert.equal(request?.init?.credentials, "same-origin");
+  assert.equal(request?.init?.cache, "no-store");
+  assert.equal(request?.init?.redirect, "error");
+  assert.equal(new Headers(request?.init?.headers).get("accept"), "application/json");
+  await assert.rejects(fetchAuthMethodAvailability(async () => Response.json({ passkey: false, upstreamOidc: false })), /Sign-in methods could not be loaded/u);
+});
 
 test("OAuth login requires one opaque signed authorization request", () => {
   const prompt = new URLSearchParams({
