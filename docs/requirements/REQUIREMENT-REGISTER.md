@@ -2311,7 +2311,7 @@ Check an oversized request body receives 413 before the SDK action context is ac
 ## TEST-MCPV-004-003
 
 **Type**: TEST
-**MID**: 728e6bd2fc5f4c1c8a3dcad8bb8b9fd3
+**MID**: 290cc979d9a509fd13d2b4d6ce86b894
 **UID**: TEST-MCPV-004-003
 **Case name**: Better Auth PKCE MCP client lists and invokes tools through central OAuth admission
 **Exact-run reference**: NOT_RUN
