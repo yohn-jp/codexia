@@ -35,16 +35,16 @@ body.cx-pages-page {
 .cx-pages-page *::after { box-sizing: border-box; }
 
 .cx-pages-page ::selection { background: var(--cx-pages-accent); color: var(--cx-pages-on-accent); }
-.cx-pages-page :where(a) { color: var(--cx-pages-accent); text-decoration-thickness: 0.07em; text-underline-offset: 0.18em; overflow-wrap: anywhere; }
-.cx-pages-page :where(a:visited) { color: var(--cx-pages-accent); }
-.cx-pages-page :where(a, button, summary):focus-visible { outline: 3px solid var(--cx-pages-focus); outline-offset: 2px; }
+.cx-pages-page :where(a):where(:not(#scalar-api-reference *)) { color: var(--cx-pages-accent); text-decoration-thickness: 0.07em; text-underline-offset: 0.18em; overflow-wrap: anywhere; }
+.cx-pages-page :where(a:visited):where(:not(#scalar-api-reference *)) { color: var(--cx-pages-accent); }
+.cx-pages-page :where(a, button, summary):focus-visible:where(:not(#scalar-api-reference *)) { outline: 3px solid var(--cx-pages-focus); outline-offset: 2px; }
 
-.cx-pages-page :where(h1, h2, h3) { color: var(--cx-pages-text); font-weight: 650; line-height: 1.2; letter-spacing: -0.02em; overflow-wrap: anywhere; }
-.cx-pages-page h1 { margin: 0; font-size: 2rem; }
-.cx-pages-page h2 { margin: 0; font-size: 1.3rem; }
-.cx-pages-page h3 { margin: 0; font-size: 1.0625rem; }
-.cx-pages-page p { margin-block: 0; max-inline-size: 72ch; overflow-wrap: anywhere; }
-.cx-pages-page details { min-inline-size: 0; }
+.cx-pages-page :where(h1, h2, h3):where(:not(#scalar-api-reference *)) { color: var(--cx-pages-text); font-weight: 650; line-height: 1.2; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.cx-pages-page h1:where(:not(#scalar-api-reference *)) { margin: 0; font-size: 2rem; }
+.cx-pages-page h2:where(:not(#scalar-api-reference *)) { margin: 0; font-size: 1.3rem; }
+.cx-pages-page h3:where(:not(#scalar-api-reference *)) { margin: 0; font-size: 1.0625rem; }
+.cx-pages-page p:where(:not(#scalar-api-reference *)) { margin-block: 0; max-inline-size: 72ch; overflow-wrap: anywhere; }
+.cx-pages-page details:where(:not(#scalar-api-reference *)) { min-inline-size: 0; }
 
 .cx-pages-skip {
   position: absolute;
@@ -362,5 +362,5 @@ body.cx-pages-page {
   .cx-pages-header :where(a, button):focus-visible,
   .cx-pages-subheader a:focus-visible,
   .cx-pages-skip:focus-visible,
-  .cx-pages-page :where(a, button, summary):focus-visible { outline-color: Highlight; }
+  .cx-pages-page :where(a, button, summary):focus-visible:where(:not(#scalar-api-reference *)) { outline-color: Highlight; }
 }

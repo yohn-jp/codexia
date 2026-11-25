@@ -46,6 +46,7 @@
   .view-nav a { display: inline-flex; align-items: center; justify-content: center; min-block-size: 44px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 7px; }
   .view-nav a[aria-current="page"] { color: var(--fg); background: var(--selected); border-color: var(--cx-pages-selected, #527aa6); font-weight: 650; }
   .scope-line { color: var(--muted); font-size: 12px; }
+  .graph-target { max-inline-size: 32rem; margin-block: .75rem; }
   .layout { display: grid; grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); max-width: var(--content-width); min-height: calc(100dvh - 200px); margin-inline: auto; }
   .explorer-pane { min-width: 0; padding: 16px; background: color-mix(in srgb, var(--panel) 45%, var(--bg)); border-inline-end: 1px solid var(--line); }
   .file-explorer { min-width: 0; }
@@ -199,7 +200,7 @@
 <header class="top">
   <div class="top-row">
     <div><h1>Code Map</h1><span class="scope-line">Graphify静的解析</span></div>
-    <nav class="view-nav" aria-label="Code Map views"><a href="communities.html">コミュニティ</a></nav>
+    <nav class="view-nav" aria-label="Code Map views"><a href="./" aria-current="page">ファイル・シンボルグラフ</a><a href="communities.html">補助: コミュニティ集約</a></nav>
   </div>
 </header>
 <div class="layout">
@@ -208,7 +209,7 @@
       <summary class="file-explorer-summary"><span>ファイルを探す</span><span id="mobile-selection-label"></span></summary>
       <div class="file-explorer-body">
         <search class="filters" aria-label="ファイル検索と絞り込み">
-          <div><label for="search">ファイルパス・シンボル名</label><input id="search" type="search" name="q" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="例: auth / CoreStore / routes" aria-controls="file-list" aria-describedby="search-help"><small id="search-help" class="search-help">パスや抽出シンボル名で探せます。</small></div>
+          <div><label for="search">ファイルパス・シンボル名</label><input id="search" type="search" name="q" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="例: auth / CoreStore / routes" aria-controls="file-list" aria-describedby="search-help"><small id="search-help" class="search-help">ファイルを検索・選択すると、実際の参照元と参照先をグラフに表示します。</small></div>
           <div><label for="area">トップレベルディレクトリ</label><select id="area" name="area"><option value="">すべて</option></select></div>
           <div><label for="index-state">索引の状態</label><select id="index-state" name="state"><option value="indexed">解析済み</option><option value="unavailable">未取得の候補</option><option value="excluded">解析対象外</option><option value="all">すべての記録</option></select></div>
           <label class="check"><input type="checkbox" id="no-inbound" name="no-inbound">参照元の観測がないファイルのみ</label>
@@ -222,6 +223,7 @@
   <main id="main-content" tabindex="-1">
     <div class="head"><div><h2 id="selected-path" tabindex="-1">ファイルを選択</h2><div id="file-metrics" class="pills"></div><div id="symbol-detail" class="symbol-detail" hidden><h3 id="selected-symbol"></h3><span id="symbol-location" class="source-meta"></span><a id="symbol-source" hidden target="_blank" rel="noopener noreferrer">GitHubでシンボル位置を開く</a></div></div><div id="source-links" class="source-links">__GRAPHIFY_SOURCE_LINKS__</div></div>
     <div id="page-status" class="status" role="status" aria-live="polite"></div>
+    <div class="graph-target"><label for="graph-target">グラフの中心（ファイル／シンボル）</label><select id="graph-target" disabled><option value="">ファイル全体</option></select><small class="search-help">関数・クラス等を選ぶと、そのシンボルの参照関係に切り替わります。</small></div>
     <div class="filter-bar" aria-label="参照の絞り込み">
       <div><label for="direction">探索方向</label><select id="direction"><option value="both">参照元と参照先</option><option value="incoming">参照元</option><option value="outgoing">参照先</option></select></div>
       <div><label for="relation">関係種別</label><select id="relation"><option value="">すべての関係</option></select></div>
@@ -473,7 +475,7 @@ import { expandGraph } from './analysis.mjs';
     svg.setAttribute('aria-label',symbolMode?`シンボル ${selectedSymbol.label} の参照元と参照先`:`ファイル ${f.path} の参照元と参照先`);
     if(incoming.length===0 && outgoing.length===0){const t=svgEl('text',{x:500,y:cy+54,'text-anchor':'middle',fill:'var(--muted)'});t.textContent='この条件では参照関係が観測されません';svg.append(t);}
     const totalIn=incomingSource.filter(relationMatches).length, totalOut=outgoingSource.filter(relationMatches).length;
-    $('graph-limit-summary').textContent=`図に表示: 参照元 ${Math.min(totalIn,maxGraphEdges)}/${totalIn} · 参照先 ${Math.min(totalOut,maxGraphEdges)}/${totalOut}`;
+    $('graph-limit-summary').textContent=`図に表示: 参照元 ${incoming.length}/${totalIn} · 参照先 ${outgoing.length}/${totalOut}`;
   }
   function appendEvidence(root, evidence) {
     if(!Array.isArray(evidence) || !evidence.length)return;
@@ -592,6 +594,15 @@ import { expandGraph } from './analysis.mjs';
     if(coverage.otherTrackedFiles!=null){const item=document.createElement('li');item.textContent=`候補・明示的除外に含まれないtrackedファイル: ${nf.format(coverage.otherTrackedFiles)}件`;list.append(item);}
   }
   function renderSelected() {
+    const target=$('graph-target');
+    const fileOption=document.createElement('option');fileOption.value='';fileOption.textContent='ファイル全体';
+    target.replaceChildren(fileOption);
+    for(const symbol of selected?.symbols || []){
+      if(typeof symbol==='string' || symbol.id==null)continue;
+      const option=document.createElement('option');option.value=String(symbol.id);option.textContent=symbol.label||String(symbol.id);target.append(option);
+    }
+    target.disabled=!selected||Boolean(selected.unavailable)||target.options.length===1;
+    target.value=selectedSymbol?String(selectedSymbol.id):'';
     const status=$('page-status');
     if(!selected){
       $('selected-path').textContent='解析対象ファイルなし';
@@ -695,6 +706,10 @@ import { expandGraph } from './analysis.mjs';
     if([...$('area').options].some(option=>option.value===area))continue;
     const option=document.createElement('option');option.value=area;option.textContent=area;$('area').append(option);
   }
+  $('graph-target').addEventListener('change',()=>{
+    if($('graph-target').value)selectSymbol($('graph-target').value);
+    else if(selected)select(selected.path);
+  });
   $('search').addEventListener('input',()=>{renderFiles();announceSearchResults();});
   $('area').addEventListener('change',()=>{renderFiles();announceSearchResults();});
   $('index-state').addEventListener('change',()=>{
