@@ -1,30 +1,15 @@
 import type {
   CreateDocumentCommand,
   CreateProjectCommand,
-  Document as PersistenceDocument,
-  DocumentRevision as PersistenceRevision,
   DocumentRevisionPage,
   DocumentWriteResult,
+  Document as PersistenceDocument,
   Project as PersistenceProject,
+  DocumentRevision as PersistenceRevision,
   RestoreDocumentRevisionCommand,
   SaveDocumentCommand,
 } from '@codexia/persistence-contracts';
 import { ApiError } from './api-error';
-import type {
-  PersistenceDocumentCreateRequest,
-  PersistenceDocumentDeleteRequest,
-  PersistenceDocumentEnvelope as GeneratedPersistenceDocumentEnvelope,
-  PersistenceDocumentGetResponse as GeneratedPersistenceDocumentGetResponse,
-  PersistenceDocumentListResponse as GeneratedPersistenceDocumentListResponse,
-  PersistenceDocumentMetadataRequest,
-  PersistenceDocumentRestoreRequest,
-  ProjectPageResponse,
-  ProjectResponse,
-  SaveDocumentRequest,
-  WorkArchive,
-  WorkArchiveExport,
-  WorkImportResult,
-} from './generated/http/schemas';
 import {
   persistenceDocumentDelete,
   persistenceDocumentGet,
@@ -34,13 +19,28 @@ import {
   persistenceDocumentRevisionsGet,
   persistenceDocumentsGet,
   persistenceDocumentsPost,
+  persistenceImportPost,
   persistenceProjectArchiveGet,
   persistenceProjectGet,
   persistenceProjectsGet,
   persistenceProjectsPost,
   persistenceStatusGet,
-  persistenceImportPost,
 } from './generated/http/client';
+import type {
+  PersistenceDocumentEnvelope as GeneratedPersistenceDocumentEnvelope,
+  PersistenceDocumentGetResponse as GeneratedPersistenceDocumentGetResponse,
+  PersistenceDocumentListResponse as GeneratedPersistenceDocumentListResponse,
+  PersistenceDocumentCreateRequest,
+  PersistenceDocumentDeleteRequest,
+  PersistenceDocumentMetadataRequest,
+  PersistenceDocumentRestoreRequest,
+  ProjectPageResponse,
+  ProjectResponse,
+  SaveDocumentRequest,
+  WorkArchive,
+  WorkArchiveExport,
+  WorkImportResult,
+} from './generated/http/schemas';
 
 /** Public API aliases use generated wire types, with domain brands at the edge. */
 export type PortableWorkArchive = WorkArchiveExport;
@@ -56,7 +56,7 @@ export type PersistenceDocumentList = Omit<GeneratedPersistenceDocumentListRespo
 export type PersistenceDocumentEnvelope = Omit<GeneratedPersistenceDocumentEnvelope, 'document'> & { document: PersistenceDocument };
 export type PersistenceRevisionPage = DocumentRevisionPage;
 
-const apiOptions = (signal?: AbortSignal): RequestInit => signal ? { signal } : {};
+const apiOptions = (signal?: AbortSignal): RequestInit => (signal ? { signal } : {});
 
 /**
  * Persistence document and project operations generated from the TypeSpec
@@ -66,8 +66,7 @@ const apiOptions = (signal?: AbortSignal): RequestInit => signal ? { signal } : 
 export const documentApi = {
   persistenceStatus: (signal?: AbortSignal) => persistenceStatusGet(apiOptions(signal)),
 
-  exportWorkArchive: (projectId: string, signal?: AbortSignal) =>
-    persistenceProjectArchiveGet(projectId, apiOptions(signal)),
+  exportWorkArchive: (projectId: string, signal?: AbortSignal) => persistenceProjectArchiveGet(projectId, apiOptions(signal)),
 
   importWorkArchive: (archive: unknown, signal?: AbortSignal) =>
     persistenceImportPost(archive as WorkArchive, apiOptions(signal)) as unknown as Promise<PortableWorkImportResult>,
@@ -102,26 +101,25 @@ export const documentApi = {
     projectId: string,
     documentId: string,
     command: { expectedVersion: number; title?: string; parentId?: string | null; orderKey?: string },
-  ) => persistenceDocumentMetadataPatch(projectId, documentId, command satisfies PersistenceDocumentMetadataRequest) as unknown as Promise<PersistenceDocumentEnvelope>,
+  ) =>
+    persistenceDocumentMetadataPatch(
+      projectId,
+      documentId,
+      command satisfies PersistenceDocumentMetadataRequest,
+    ) as unknown as Promise<PersistenceDocumentEnvelope>,
 
   deletePersistenceDocument: (projectId: string, documentId: string, expectedVersion: number) =>
-    persistenceDocumentDelete(projectId, documentId, { expectedVersion } satisfies PersistenceDocumentDeleteRequest) as unknown as Promise<PersistenceDocumentEnvelope>,
+    persistenceDocumentDelete(projectId, documentId, {
+      expectedVersion,
+    } satisfies PersistenceDocumentDeleteRequest) as unknown as Promise<PersistenceDocumentEnvelope>,
 
-  createPersistenceDocument: (
-    projectId: string,
-    command: Omit<CreateDocumentCommand, 'projectId' | 'authorId'>,
-    signal?: AbortSignal,
-  ) => persistenceDocumentsPost(projectId, command satisfies PersistenceDocumentCreateRequest, {
-    ...apiOptions(signal),
-    headers: { 'Idempotency-Key': command.idempotencyKey },
-  }) as unknown as Promise<PersistenceDocumentWriteResult>,
+  createPersistenceDocument: (projectId: string, command: Omit<CreateDocumentCommand, 'projectId' | 'authorId'>, signal?: AbortSignal) =>
+    persistenceDocumentsPost(projectId, command satisfies PersistenceDocumentCreateRequest, {
+      ...apiOptions(signal),
+      headers: { 'Idempotency-Key': command.idempotencyKey },
+    }) as unknown as Promise<PersistenceDocumentWriteResult>,
 
-  persistenceDocument: (
-    projectId: string,
-    documentId: string,
-    signal?: AbortSignal,
-    revisionId?: string,
-  ) => {
+  persistenceDocument: (projectId: string, documentId: string, signal?: AbortSignal, revisionId?: string) => {
     const params = revisionId ? { revision: revisionId } : undefined;
     return persistenceDocumentGet(projectId, documentId, params, apiOptions(signal)) as unknown as Promise<PersistenceDocumentRead>;
   },
@@ -153,8 +151,9 @@ export const documentApi = {
     documentId: string,
     command: Omit<RestoreDocumentRevisionCommand, 'projectId' | 'documentId' | 'authorId'>,
     signal?: AbortSignal,
-  ) => persistenceDocumentRestorePost(projectId, documentId, command satisfies PersistenceDocumentRestoreRequest, {
-    ...apiOptions(signal),
-    headers: { 'Idempotency-Key': command.idempotencyKey },
-  }) as unknown as Promise<PersistenceDocumentWriteResult>,
+  ) =>
+    persistenceDocumentRestorePost(projectId, documentId, command satisfies PersistenceDocumentRestoreRequest, {
+      ...apiOptions(signal),
+      headers: { 'Idempotency-Key': command.idempotencyKey },
+    }) as unknown as Promise<PersistenceDocumentWriteResult>,
 };

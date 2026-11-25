@@ -1,3 +1,4 @@
+import type { ApplyReceipt, NativeChangeSetReference, ProposalStatus } from '@codexia/contracts';
 import type {
   Assertion,
   AssertionEvidence,
@@ -15,11 +16,6 @@ import type {
   SaveKnowledgeRelationCommand,
   SaveMentionLinkCommand,
 } from '@codexia/persistence-contracts';
-import type {
-  ApplyReceipt,
-  NativeChangeSetReference,
-  ProposalStatus,
-} from '@codexia/contracts';
 import { ApiError } from './api-error';
 import { PersistenceChangeSetDesktopBody } from './generated/http/schemas/persistenceChangeSetDesktopBody.zod';
 export type AuthorReviewFeedItem =
@@ -94,6 +90,7 @@ export interface PersistenceMergePreviewRead {
   targetMentions: MentionLink[];
   assertions: Assertion[];
 }
+
 import {
   persistenceAnchorAssertionsPost,
   persistenceAnchorMentionsPost,
@@ -101,8 +98,8 @@ import {
   persistenceAssertionEvidencePost,
   persistenceAssertionGet,
   persistenceAssertionPut,
-  persistenceChangesetApprovePost,
   persistenceChangesetApplyPost,
+  persistenceChangesetApprovePost,
   persistenceChangesetGet,
   persistenceChangesetRejectPost,
   persistenceChangesetsGet,
@@ -112,8 +109,8 @@ import {
   persistenceNodeAliasesPost,
   persistenceNodeEvidenceGet,
   persistenceNodeGet,
-  persistenceNodeMergePreviewPost,
   persistenceNodeMergePost,
+  persistenceNodeMergePreviewPost,
   persistenceNodePut,
   persistenceNodeRelationsPost,
   persistenceNodesGet,
@@ -149,9 +146,8 @@ function checkedProjectChangeSet<T extends { changeSet: ChangeSet }>(envelope: T
   if (
     'receipt' in envelope &&
     envelope.receipt &&
-    (record(envelope.receipt) &&
-      record(envelope.receipt.changeSet) &&
-      (envelope.receipt.changeSet.id !== changeSet.id || envelope.receipt.changeSet.projectId !== changeSet.projectId))
+    record(envelope.receipt) && record(envelope.receipt.changeSet) &&
+    (envelope.receipt.changeSet.id !== changeSet.id || envelope.receipt.changeSet.projectId !== changeSet.projectId)
   ) {
     return invalidResponse();
   }
@@ -220,7 +216,9 @@ export const knowledgeApi = {
     signal?: AbortSignal,
   ): Promise<{ changeSet: ChangeSet }> =>
     checkedProjectChangeSet(
-      (await persistenceChangesetApprovePost(projectId, changeSetId, { expectedVersion }, options(signal))) as unknown as { changeSet: ChangeSet },
+      (await persistenceChangesetApprovePost(projectId, changeSetId, { expectedVersion }, options(signal))) as unknown as {
+        changeSet: ChangeSet;
+      },
     ),
 
   rejectNativeChangeSet: async (
@@ -230,7 +228,9 @@ export const knowledgeApi = {
     signal?: AbortSignal,
   ): Promise<{ changeSet: ChangeSet }> =>
     checkedProjectChangeSet(
-      (await persistenceChangesetRejectPost(projectId, changeSetId, { expectedVersion }, options(signal))) as unknown as { changeSet: ChangeSet },
+      (await persistenceChangesetRejectPost(projectId, changeSetId, { expectedVersion }, options(signal))) as unknown as {
+        changeSet: ChangeSet;
+      },
     ),
 
   applyNativeChangeSet: async (
@@ -275,14 +275,14 @@ export const knowledgeApi = {
     signal?: AbortSignal,
   ): Promise<PersistenceDocumentAnchors> =>
     (await persistenceDocumentAnchorsGet(
-        projectId,
-        documentId,
-        {
-          ...(revisionId ? { revision: revisionId } : {}),
-          ...(signal ? { limit: 500 } : {}),
-        },
-        options(signal),
-      )) as unknown as PersistenceDocumentAnchors,
+      projectId,
+      documentId,
+      {
+        ...(revisionId ? { revision: revisionId } : {}),
+        ...(signal ? { limit: 500 } : {}),
+      },
+      options(signal),
+    )) as unknown as PersistenceDocumentAnchors,
 
   createPersistenceAnchor: async (
     projectId: string,
@@ -300,7 +300,8 @@ export const knowledgeApi = {
       typeof created.anchor.fromUtf16 !== 'number' ||
       typeof created.anchor.toUtf16 !== 'number' ||
       created.anchor.toUtf16 < created.anchor.fromUtf16
-    ) return invalidResponse();
+    )
+      return invalidResponse();
     return created as typeof created & { anchor: EvidenceAnchor };
   },
 
@@ -399,7 +400,9 @@ export const knowledgeApi = {
     },
     signal?: AbortSignal,
   ): Promise<{ assertion: Assertion }> =>
-    (await persistenceAnchorAssertionsPost(projectId, documentId, evidenceId, command, options(signal))) as unknown as { assertion: Assertion },
+    (await persistenceAnchorAssertionsPost(projectId, documentId, evidenceId, command, options(signal))) as unknown as {
+      assertion: Assertion;
+    },
 
   persistenceAssertion: async (projectId: string, assertionId: string, signal?: AbortSignal): Promise<PersistenceAssertionRead> =>
     (await persistenceAssertionGet(projectId, assertionId, undefined, options(signal))) as unknown as PersistenceAssertionRead,
@@ -417,7 +420,12 @@ export const knowledgeApi = {
     assertionId: string,
     signal?: AbortSignal,
   ): Promise<PersistenceAssertionEvidenceRead> =>
-    (await persistenceAssertionEvidenceGet(projectId, assertionId, undefined, options(signal))) as unknown as PersistenceAssertionEvidenceRead,
+    (await persistenceAssertionEvidenceGet(
+      projectId,
+      assertionId,
+      undefined,
+      options(signal),
+    )) as unknown as PersistenceAssertionEvidenceRead,
 
   linkPersistenceAssertionEvidence: async (
     projectId: string,
@@ -425,7 +433,9 @@ export const knowledgeApi = {
     command: Pick<AssertionEvidence, 'evidenceId' | 'role'>,
     signal?: AbortSignal,
   ): Promise<{ evidence: AssertionEvidence }> =>
-    (await persistenceAssertionEvidencePost(projectId, assertionId, command, options(signal))) as unknown as { evidence: AssertionEvidence },
+    (await persistenceAssertionEvidencePost(projectId, assertionId, command, options(signal))) as unknown as {
+      evidence: AssertionEvidence;
+    },
 };
 
 /** Decode an action payload's native ChangeSet as either a full schema-checked record or a narrow reference. */
