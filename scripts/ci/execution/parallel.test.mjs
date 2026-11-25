@@ -73,7 +73,7 @@ test('dependency builds are deduplicated and failures block only their dependant
 test('browser shards use different database, port pairs, state and trace output', () => {
   const service = 'postgres://codexia:synthetic@postgres:5432/codexia_test';
   const a = browserFixtureSettings('browser-core-ui-v1', 0, service, 'codexia_ci_' + 'a'.repeat(32), '/tmp/state-a');
-  const b = browserFixtureSettings('browser-core-ui-v1', 1, service, 'codexia_ci_' + 'b'.repeat(32), '/tmp/state-b');
+  const b = browserFixtureSettings('browser-core-writing', 1, service, 'codexia_ci_' + 'b'.repeat(32), '/tmp/state-b');
   assert.equal(a.CODEXIA_E2E_ADMIN_DATABASE_URL, b.CODEXIA_E2E_ADMIN_DATABASE_URL);
   for (const key of ['CODEXIA_E2E_DATABASE_URL','CODEXIA_E2E_PORT','CODEXIA_E2E_STATE_DIR','CODEXIA_E2E_OUTPUT_DIR','CODEXIA_E2E_PROJECT_TITLE']) assert.notEqual(a[key], b[key]);
   assert.ok(Number(b.CODEXIA_E2E_PORT) > Number(a.CODEXIA_E2E_PORT) + 1);
