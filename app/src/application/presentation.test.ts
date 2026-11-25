@@ -49,8 +49,8 @@ test('global component selectors stay inside the React root while document and t
 
 test('global selector scoping preserves pseudo-elements and selector-list boundaries', () => {
   assert.equal(
-    scopeGlobalSelector?.('.panel::before, .panel::after, ion-content::part(scroll), dialog::backdrop'),
-    ':where(#root) .panel::before,\n:where(#root) .panel::after,\n:where(#root) ion-content::part(scroll),\n:where(#root) dialog::backdrop',
+    scopeGlobalSelector?.('.panel::before, .panel::after, x-scroll-host::part(scroll), dialog::backdrop'),
+    ':where(#root) .panel::before,\n:where(#root) .panel::after,\n:where(#root) x-scroll-host::part(scroll),\n:where(#root) dialog::backdrop',
   );
   assert.equal(
     scopeGlobalSelector?.(':root[data-zp-theme="dark"] .panel::before, .shell:is(.a, .b) /* a,b */ .item'),

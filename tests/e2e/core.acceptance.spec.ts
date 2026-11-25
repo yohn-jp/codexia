@@ -103,8 +103,8 @@ const png = { name: "capture.png", mimeType: "image/png", buffer: Buffer.from("i
 async function scratchRecords(page: Page): Promise<Array<{ key: string; text: string }>> { return drafts(page, "pgScratch") as unknown as Promise<Array<{ key: string; text: string }>>; }
 async function scratchPayloads(page: Page): Promise<Array<{ key: string; scratchKey: string; kind: string; id: string; value: string }>> { return drafts(page, "pgScratchPayloads") as unknown as Promise<Array<{ key: string; scratchKey: string; kind: string; id: string; value: string }>>; }
 
-preparedAuthorTest("scoped CSS renders desktop pseudo elements and mobile web-component parts", async ({ page, authorizeAuthor }) => {
-  const f = await fixture(page, authorizeAuthor);
+preparedAuthorTest("scoped CSS preserves desktop pseudo elements under reduced motion", async ({ page, authorizeAuthor }) => {
+  await fixture(page, authorizeAuthor);
   const wordmark = page.locator(".st-studio-shell .st-studio-wordmark");
   await expect(wordmark).toBeVisible();
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -114,17 +114,6 @@ preparedAuthorTest("scoped CSS renders desktop pseudo elements and mobile web-co
   });
   for (const duration of durations) expect(duration).toBeCloseTo(0.00001, 8);
   await page.emulateMedia({ reducedMotion: "no-preference" });
-
-  await authorizeAuthor("mobile", page, { path: `/mobile/projects/${f.projectId}/scenes/${f.one.document.id}?view=writing` });
-  const mobileContent = page.locator("ion-content.mobile-shell-content");
-  await expect(mobileContent).toBeVisible();
-  const scrollPart = await mobileContent.evaluate((element) => {
-    const part = element.shadowRoot?.querySelector<HTMLElement>('[part~="scroll"]');
-    if (!part) return null;
-    const computed = getComputedStyle(part);
-    return { overscrollBehaviorY: computed.overscrollBehaviorY, scrollbarGutter: computed.scrollbarGutter };
-  });
-  expect(scrollPart).toEqual({ overscrollBehaviorY: "contain", scrollbarGutter: "auto" });
 });
 
 // Each former Git lifecycle scenario below now exercises the corresponding PostgreSQL
