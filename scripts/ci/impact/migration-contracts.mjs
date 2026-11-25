@@ -76,7 +76,7 @@ function fixtureType(filename) {
 export function deploymentFixtureImpact({ files, transition = null, contracts = migrationContracts, fixtureType: inspect = fixtureType }) {
   const common = files === null || touches(files, sharedPaths);
   const ids = new Set(['shared']);
-  const selected = common ? [{ id: 'shared', fixture: '', kind: 'shared', candidateSource: '' }] : [];
+  const selected = common ? [{ id: 'shared', fixture: '', kind: 'shared' }] : [];
   for (const contract of contracts) {
     assert.match(contract.id, /^[a-z0-9][a-z0-9-]{0,63}$/u, 'Invalid migration contract id');
     assert.ok(!ids.has(contract.id), 'Duplicate migration contract ID: ' + contract.id);
@@ -85,10 +85,8 @@ export function deploymentFixtureImpact({ files, transition = null, contracts = 
     const inputs = contract.inputs ?? [];
     assert.ok(Array.isArray(inputs) && inputs.every(entry => typeof entry === 'string' && entry.length > 0 &&
       !entry.startsWith('/') && !entry.split('/').includes('..')), 'Invalid migration fixture inputs');
-    assert.ok(contract.fixtureCandidateSource == null || sha.test(contract.fixtureCandidateSource),
-      'Invalid pinned historical fixture source');
     if (common || transition?.id === contract.id || touches(files, [contract.fixture, ...inputs])) {
-      selected.push({ id: contract.id, fixture: contract.fixture, kind, candidateSource: '' });
+      selected.push({ id: contract.id, fixture: contract.fixture, kind });
     }
   }
   return selected;
@@ -129,20 +127,7 @@ export async function deploymentImpactForSource({ event, sha: source, base, git 
       transition = deploymentMigrationContract(before, after);
     }
   }
-  const selected = deploymentFixtureImpact({ files, transition });
-  const historical = selected.filter(row => row.kind === 'rootless' &&
-    migrationContracts.some(contract => contract.id === row.id && contract.fixtureCandidateSource));
-  if (historical.length > 0) {
-    const target = await compatibilityAt(source, git);
-    for (const row of historical) {
-      const contract = migrationContracts.find(value => value.id === row.id);
-      const fullTarget = await compatibilityAt(contract.fixtureCandidateSource, git);
-      if (!isDeepStrictEqual(target, fullTarget)) {
-        row.candidateSource = contract.fixtureCandidateSource;
-      }
-    }
-  }
-  return selected;
+  return deploymentFixtureImpact({ files, transition });
 }
 
 export async function deploymentFixturesForCheckout() {

@@ -19,7 +19,8 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def identity(epoch):
+def identity(release):
+    epoch = release + 6
     return {
         "format": "codexia-backend-identity/v1",
         "sourceSha": str(epoch) * 40,
@@ -27,7 +28,7 @@ def identity(epoch):
         "platform": "linux/amd64",
         "version": f"1.0.{epoch}",
         "apiEpoch": epoch,
-        "persistenceFormat": epoch,
+        "persistenceFormat": 3,
         "migrationFingerprint": f"sha256:{'a' * 64}",
     }
 
@@ -76,6 +77,12 @@ if name == "systemctl":
         if service == api:
             unit = (root / "quadlet/codexia-api.container").read_text()
             s["image"] = next(line[6:] for line in unit.splitlines() if line.startswith("Image="))
+            if s["image"].endswith("2" * 64) and (s.get("killDuringStart") or s.get("failStart")):
+                s["database"] = "f" * 64
+                save()
+                if s.get("killDuringStart"):
+                    os.kill(os.getppid(), signal.SIGKILL)
+                sys.exit(1)
         save()
     elif cmd == "stop":
         s[service] = False
@@ -160,26 +167,12 @@ elif name == "podman":
         del s[api]
         save()
     elif cmd == "run":
-        if s.get("denyConversion") and any("maintain-" in arg for arg in args):
-            sys.exit(99)
-        if not s.get(api, False) and not s[tunnel] and "--apply" in args:
-            s["database"] = "f" * 64
-            save()
-            if s.get("killDuringApply"):
-                os.kill(os.getppid(), signal.SIGKILL)
-                sys.exit(0)
-            if s.get("failApply"):
-                sys.exit(1)
-            s["converted"] = True
-            save()
-        elif "--check" in args and not s.get("converted") and any("snapshot" in arg for arg in args):
-            sys.exit(2)
-        elif any("update-identity.json" in arg for arg in args):
+        if any("update-identity.json" in arg for arg in args):
             is_candidate = any(arg.endswith("2" * 64) for arg in args)
             print(json.dumps(s["identities"][int(is_candidate)]))
         elif "--input-type=module" in args:
             print("sha256:" + "a" * 64)
-        elif not (any("verify-auth" in arg for arg in args) or "--check" in args or "--apply" in args):
+        elif not any("verify-auth" in arg for arg in args):
             sys.exit(96)
     else:
         sys.exit(97)
@@ -250,7 +243,7 @@ class CutoverHostTest(unittest.TestCase):
             "priorContainerId": "c" * 64,
             "candidateUnit": str(candidate_unit),
             "candidateUnitSha256": digest(candidate_unit.read_bytes()),
-            "migration": "snapshot-history-v2",
+            "migration": None,
             "settingsSha256": digest(SETTINGS),
             "ownerBindingSha256": "sha256:" + digest(b"fixture-owner"),
         }
@@ -320,9 +313,9 @@ class CutoverHostTest(unittest.TestCase):
         self.assertEqual(self.invoke("observe")["tunnelOpenedAt"], opened["phaseChangedAt"])
         self.assertEqual(json.loads(self.release.read_text())["image"], CANDIDATE)
 
-    def test_failed_conversion_retains_intent_and_requires_actual_restore(self):
+    def test_failed_activation_retains_intent_and_requires_actual_restore(self):
         self.checkpoint()
-        self.runtime.write_text(json.dumps(self.live() | {"failApply": True}))
+        self.runtime.write_text(json.dumps(self.live() | {"failStart": True}))
         self.invoke("apply", success=False)
         self.assertTrue(self.journal.exists())
         recovery = self.invoke("recover-quiesce")
@@ -358,12 +351,12 @@ class CutoverHostTest(unittest.TestCase):
         self.assertFalse(self.live()["codexia-tunnel"])
         self.assertNotIn("checksumManifestSha256", json.loads(self.journal.read_text()))
 
-    def test_abrupt_conversion_exit_cannot_repeat_mutation_or_start_writers(self):
+    def test_abrupt_activation_exit_cannot_repeat_mutation_or_start_writers(self):
         self.checkpoint()
-        self.runtime.write_text(json.dumps(self.live() | {"killDuringApply": True}))
+        self.runtime.write_text(json.dumps(self.live() | {"killDuringStart": True}))
         self.invoke("apply", success=False)
         subprocess.run(["flock", "--wait", "5", self.state / "host.lock", "true"], check=True)
-        self.assertEqual(self.invoke("observe")["phase"], "converting")
+        self.assertEqual(self.invoke("observe")["phase"], "activating")
         self.invoke("apply", success=False)
         self.assertTrue(self.invoke("recover-quiesce")["requiresRestore"])
         self.invoke("recover", success=False, restoreReceiptSha256="9" * 64)
@@ -395,7 +388,7 @@ class CutoverHostTest(unittest.TestCase):
         prior, candidate = [{**identity(i), "persistenceFormat": 3, "apiEpoch": epoch}
                             for i, epoch in ((1, 7), (2, 11))]
         self.input.update(priorIdentity=prior, candidateIdentity=candidate, migration=None)
-        self.runtime.write_text(json.dumps(self.live() | {"identities": [prior, candidate], "denyConversion": True}))
+        self.runtime.write_text(json.dumps(self.live() | {"identities": [prior, candidate]}))
         self.release.write_text(json.dumps(json.loads(self.release.read_text()) | {"identity": prior}))
         self.checkpoint()
         self.invoke("apply")
@@ -408,7 +401,8 @@ class CutoverHostTest(unittest.TestCase):
 
     def test_unapproved_handler_and_undeclared_data_change_fail_before_admission(self):
         self.invoke("admit", success=False, migration="/tmp/unapproved.py")
-        self.invoke("admit", success=False, migration=None)
+        changed_format = {**self.input["candidateIdentity"], "persistenceFormat": 4}
+        self.invoke("admit", success=False, candidateIdentity=changed_format)
         self.assertFalse(self.journal.exists())
         self.assertTrue(self.live()["codexia-api"])
 
@@ -427,7 +421,7 @@ class CutoverHostTest(unittest.TestCase):
         self.assertEqual(self.release.read_bytes(), original_release)
 
     def prepare_first_activation(self):
-        self.runtime.write_text(json.dumps(self.live() | {"codexia-tunnel": False, "denyConversion": True}))
+        self.runtime.write_text(json.dumps(self.live() | {"codexia-tunnel": False}))
         live = self.live()
         del live["codexia-api"]
         self.runtime.write_text(json.dumps(live))

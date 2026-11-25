@@ -8,14 +8,16 @@ import { createZip, pngDimensions, validateCaptureSet, renderPackDocuments, veri
 
 const digest = 'a'.repeat(64);
 const targets = [
-  { id: 'library-empty', screenId: 'LIB-01', scenarioId: 'atlas-lib-01', label: '空の作品一覧', purpose: '作品を作成・選択します。', operations: ['作品を作成'] },
-  { id: 'writing', screenId: 'WRT-01', scenarioId: 'atlas-wrt-01', label: '執筆ワークスペース', purpose: '本文を編集します。', operations: ['保存'] },
+  { id: 'library-empty', fileName: '001-library-empty.png', screenId: 'LIB-01', scenarioId: 'atlas-lib-01', label: '空の作品一覧', purpose: '作品を作成・選択します。', operations: ['作品を作成'] },
+  { id: 'writing', fileName: '002-writing.png', screenId: 'WRT-01', scenarioId: 'atlas-wrt-01', label: '執筆ワークスペース', purpose: '本文を編集します。', operations: ['保存'] },
 ];
 const themes = ['light', 'dark'];
-const shots = targets.flatMap((target, targetIndex) => themes.map((theme, themeIndex) => ({
+const shots = targets.flatMap(target => themes.map((theme, themeIndex) => ({
   targetId: target.id,
+  screenId: target.screenId,
+  scenarioId: target.scenarioId,
   theme,
-  path: `${theme}/${String(targetIndex + 1).padStart(3, '0')}-${target.id}.png`,
+  path: `${theme}/${target.fileName}`,
   status: 'success',
   width: 1920,
   height: 1080,
