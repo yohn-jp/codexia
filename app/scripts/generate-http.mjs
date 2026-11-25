@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { generate } from "orval";
 import { parse } from "yaml";
-import { httpClientConfig, operationIds } from "../orval.config.mjs";
+import { httpClientConfig, operationIds, provisionalOperationIds } from "../orval.config.mjs";
 
 const appRoot = fileURLToPath(new URL("../", import.meta.url));
 const input = fileURLToPath(new URL("../../packages/http-contract/openapi/codexia.openapi.yaml", import.meta.url));
@@ -25,7 +25,17 @@ for (const [route, pathItem] of Object.entries(parse(readFileSync(input, "utf8")
 for (const id of operationIds) {
   const operation = operations.get(id);
   assert.ok(operation, `Desktop client operation ${id} is absent from OpenAPI`);
-  assert.equal(operation.operation["x-codexia-contract-status"], undefined, `Desktop client operation ${id} is provisional`);
+  const status = operation.operation["x-codexia-contract-status"];
+  assert.notEqual(status, "target", `Desktop client operation ${id} is target-only`);
+  if (status !== undefined) {
+    assert.equal(status, "incomplete", `Desktop client operation ${id} has an unknown contract status`);
+    assert.ok(provisionalOperationIds.includes(id), `Desktop client operation ${id} is incomplete without an explicit Desktop exception`);
+  }
+}
+
+for (const id of provisionalOperationIds) {
+  assert.ok(operationIds.includes(id), `Provisional Desktop allowlist ${id} is not selected`);
+  assert.equal(operations.get(id)?.operation["x-codexia-contract-status"], "incomplete", `Provisional Desktop allowlist ${id} is not marked incomplete`);
 }
 
 function generatedFiles(directory) {
