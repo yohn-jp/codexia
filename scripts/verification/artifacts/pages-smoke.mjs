@@ -268,7 +268,13 @@ try {
         assert.ok(await menu.evaluate(button => button.getBoundingClientRect().height >= 44), 'Mobile menu hit area');
         await menu.press('Enter');
         assert.equal(await menu.getAttribute('aria-expanded'), 'true');
-        if (destination === destinations[0]) await capture('navigation-expanded');
+        if (destination === destinations[0]) {
+          await capture('navigation-expanded');
+          await primary.getByRole('link').first().press('Escape');
+          assert.equal(await menu.getAttribute('aria-expanded'), 'false');
+          assert.ok(await menu.evaluate(button => document.activeElement === button), 'Escape must return focus to the menu button');
+          await menu.press('Enter');
+        }
       }
       const target = primary.getByRole('link').filter({ visible: true });
       const hrefs = await target.evaluateAll(links => links.map(link => link.href));
@@ -292,9 +298,9 @@ try {
       } else if (destination === 'api/') {
         await assertScalarTitleContrast(page);
         let body = await page.locator('body').innerText();
-        assert.match(body, /Static target contract from TypeSpec/u);
-        assert.match(body, /Runtime implementation: partial/u);
-        assert.match(body, /Verification: contract generation and lint are separate CI results/u);
+        assert.match(body, /OpenAPI 3.1 contract generated from TypeSpec/u);
+        assert.match(body, /current admitted operations register in Fastify/u);
+        assert.match(body, /this static reference is not a runtime inventory, CI result, or production API acceptance report/u);
         assert.match(body, /Authentication scheme definitions/u);
         assert.match(body, /BearerAuth[\s\S]*HTTP Bearer/u);
         assert.match(body, /ApiKeyAuth[\s\S]*__Secure-better-auth\.session_token/u);
@@ -316,7 +322,7 @@ try {
         assert.match(body, /404[\s\S]*cannot find/iu);
         await selectScalarOperation(page, '/api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors', 'POST');
         body = await page.locator('body').innerText();
-        assert.match(body, /Runtime validation evidence:[\s\S]*incomplete and the published schema/u);
+        assert.match(body, /Current admitted route; Fastify registration uses the generated route and schema inventory/u);
         await assertReflow(page, 'API operation details');
         assert.equal(await page.getByRole('link', { name: 'Third-party notices' }).getAttribute('href'), './THIRD_PARTY_NOTICES.txt');
         assert.equal(await page.getByRole('button', { name: /Try it|Send API Request|Test Request/i }).count(), 0,

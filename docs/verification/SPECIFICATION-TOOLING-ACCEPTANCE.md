@@ -66,7 +66,7 @@ HTTP契約の検証は既存Verifyの `unit-http-contract` と `typecheck-http-c
 ## LikeC4・Architecture Atlasのownership
 
 - **LikeC4が対象とするのはC4系のsystem context、container/component、依存方向、外部trust relationship。** プロダクト構成の意味は [System design](../architecture/SYSTEM-DESIGN.md) と [Internal boundaries](../architecture/INTERNAL-BOUNDARIES.md) が承認し、LikeC4はその採用設計を可視化する実行可能な構造契約。
-- 既存 [Architecture Atlas](ARCHITECTURE-ATLAS.md) のMermaidは個別画面・状態遷移・初期配備・更新と既存system viewを所有。LikeC4に移行したC4ビューのみ新モデルをownershipとし、元Mermaidの同じC4図は更新元を一本化/派生化する。既存状態遷移のMermaidは削除・無断移管しない。
+- [Architecture Atlas](ARCHITECTURE-ATLAS.md) は、構造・信頼境界と運用トポロジーをLikeC4モデルからネイティブに表示する。画面・状態遷移、配備・更新手順、ER図は領域設計書のMermaidから表示する。
 - **Threagile**は攻撃者、脅威、資産分類、リスクと対策・残留リスクを所有する。LikeC4の全構造を別の独立した真実として再記載しない。モデル間の対応は `EXT-*`/`REQ-AUTH-*` 等で参照し、データフロー/境界の相違をCI/レビューの逸脱として記録する。
 - C4図/脅威図は「この通信・リスクが設計上存在する」を示す。実環境にEdge ruleが適用されている証明や攻撃不能の証明にはならない。
 - 初期のリスク対象: OAuthとMCPのissuer/resource mismatch、BOLA、セッション混同、share-readerの拡張、偽のDB receipt、Cloudflare/Workers・Tailscale管理プレーン交錯、backup鍵/復元、公開Pagesの機密漏えい。

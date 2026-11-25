@@ -22,7 +22,7 @@
 | URL | 表示名 / 画面ID | 責務 |
 | --- | --- | --- |
 | `/` | Portal / PORTAL-01 | 主要4機能への入口、サイトマップ、ビルド SHA、GitHub への導線 |
-| `/architecture/` | Architecture Atlas / ARCH-01 | 正本の設計図を選択し、生成 SVG と SHA 固定の原文を閲覧 |
+| `/architecture/` | Architecture Atlas / ARCH-01 | LikeC4 の構造図と Mermaid の設計図を選択し、SHA 固定の正本を閲覧 |
 | `/graph/` | Code Map / GRAPH-01 | Graphify が抽出したファイルとシンボルの静的参照を探索 |
 | `/graph/communities.html` | Community Overview / GRAPH-02 | Graphify の集約概観を閲覧 |
 | `/ci/` | CI Observatory / CI-01 | PR と実行 SHA を起点とする公開 CI テレメトリ、履歴、診断 JSON |
@@ -47,7 +47,7 @@ flowchart TB
     HOME --> CI["/ci/<br/>CI観測を調べる"]
     HOME --> AUDIT["/audit/<br/>ソース監査資料"]
     HOME --> DOC["GitHub Docs<br/>設計正本・外部リンク"]
-    ARCH --> DIAGRAM["図ID #group-n<br/>SVG・SHA固定原文"]
+    ARCH --> DIAGRAM["図ID #group-n<br/>LikeC4またはMermaid・SHA固定原文"]
     GRAPH --> FILE["?file=path<br/>1ファイルの参照元/先"]
     GRAPH --> COMMUNITY["communities.html<br/>集約グラフ"]
     CI --> RUN["選択PR・実行SHA<br/>Jobs・診断JSON"]
@@ -102,7 +102,7 @@ flowchart LR
 | 画面ID | 初見で分かること | 主要操作 | 失敗/空/再読込時の表現 | 元のコンテキスト |
 | --- | --- | --- | --- | --- |
 | PORTAL-01 | 全ツール、何を調べられるか、公開の版 | カテゴリを選択、Docsへ移動 | 一部生成なし→個別の利用不可。全体を空白にしない | トップから戻った際に開いていた区画 |
-| ARCH-01 | 設計上の対象/図名/正本SHA | カテゴリ、図選択、ズーム、原文/単体SVG | 描画失敗→原文リンク。図が実装済みとは書かない | 図のハッシュ、倍率は選択後初期化 |
+| ARCH-01 | 設計上の対象/図名/正本SHA | カテゴリ、図選択、拡大と移動、LikeC4 の関係探索、原文、Mermaid の単体SVG | 描画失敗→原文リンク。図が実装済みとは書かない | 図のハッシュ、倍率は選択後初期化 |
 | GRAPH-01 | 対象SHA、解析対象・除外範囲、選択ファイル | 検索、ファイルとシンボルの選択、方向と関係種別を絞った多段探索 | indexed 0・未解析・関係0を区別、relation missingを推定しない | `?file=`と選択方向/絞込条件 |
 | GRAPH-02 | コミュニティ概要は集約ノードである | native graphを閲覧し、ファイル探索へ戻る | community 0 ≠ ソース未使用 | 概観から元の選択ファイルへ戻れる導線（目標） |
 | CI-01 | 選択 PR と実行 SHA、Verify の結果、観測したボトルネック | PR 選択、job と step の分析、診断 JSON のコピー、GitHub への移動 | API 制限、取得失敗、未計測、切詰め、skip を区別 | PR と実行 SHA を選び直して履歴を比較 |

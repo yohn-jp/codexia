@@ -8,7 +8,8 @@ import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { containsCredentialPattern } from './publication-policy.mjs';
 import { verifySpecifications } from './specifications.mjs';
-import { parseGeneratedMermaid } from '../architecture/contract.mjs';
+import { LIKEC4_SOURCE_PATH, LIKEC4_VERSION, LIKEC4_VIEW_ID } from '../architecture/contract.mjs';
+import { LIKEC4_PUBLIC_BUNDLE, LIKEC4_PUBLIC_LICENSE } from '../architecture/webcomponent.mjs';
 import { inspectUxArtifact } from './ux-artifact.mjs';
 
 const self = fileURLToPath(import.meta.url);
@@ -49,23 +50,41 @@ function likec4Provenance(site, sourceSha) {
   const atlasPath = join(site, 'architecture', 'manifest.json');
   if (!existsSync(atlasPath)) return undefined;
   const atlas = JSON.parse(readPageFile(atlasPath, 'utf8'));
-  const diagram = atlas.diagrams?.find(item => item.id === 'system-1');
-  assert.ok(diagram, 'LikeC4 system-1 view missing');
+  const diagrams = atlas.diagrams?.filter(item => item.renderer === 'likec4');
+  assert.ok(diagrams?.some(item => item.id === 'system-1' && item.viewId === LIKEC4_VIEW_ID), 'LikeC4 system-1 view missing');
   assert.equal(atlas.sourceSha, sourceSha, 'LikeC4 Atlas source mismatch');
-  const paths = { model:'docs/architecture/likec4/model.likec4', derivative:'docs/architecture/likec4/generated/system-overview.mmd', lock:'scripts/architecture/package-lock.json' };
+  const lockPath = 'scripts/architecture/package-lock.json';
   const atSource = path => execFileSync('git', ['show', `${sourceSha}:${path}`]);
-  const model = atSource(paths.model), derivative = atSource(paths.derivative), lock = atSource(paths.lock);
-  const parsed = parseGeneratedMermaid(derivative.toString('utf8'));
-  assert.equal(parsed.sourceSha256, sha256(model), 'LikeC4 derivative source digest mismatch');
-  assert.equal(diagram.sourceModel, paths.model, 'LikeC4 model path mismatch');
-  assert.equal(diagram.sourceModelSha256, sha256(model), 'LikeC4 model digest mismatch');
-  assert.equal(diagram.image, 'svg/system-1.svg', 'LikeC4 SVG path mismatch');
+  const modelDigest = sha256(atSource(LIKEC4_SOURCE_PATH));
+  const lock = atSource(lockPath);
   const packageLock = JSON.parse(lock.toString('utf8'));
   const version = packageLock.packages?.['']?.dependencies?.likec4;
-  assert.equal(version, '1.61.0', 'Unexpected LikeC4 generator version');
-  assert.equal(packageLock.packages?.['node_modules/likec4']?.version, version, 'LikeC4 lock version mismatch');
-  const svg = readPageFile(join(site,'architecture','svg','system-1.svg'));
-  return { sourceSha, generatedAt: new Date().toISOString(), publication:'public', model:{path:paths.model,sha256:sha256(model)}, derivative:{path:paths.derivative,sha256:sha256(derivative)}, generator:{name:'likec4',version,lockPath:paths.lock,lockSha256:sha256(lock)}, output:{path:'architecture/svg/system-1.svg',sha256:sha256(svg)} };
+  assert.equal(version, LIKEC4_VERSION, 'Unexpected LikeC4 generator version');
+  const lockedDependency = packageLock.packages?.['node_modules/likec4'];
+  assert.equal(lockedDependency?.version, version, 'LikeC4 lock version mismatch');
+  assert.match(lockedDependency?.integrity ?? '', /^sha512-/u, 'LikeC4 lock integrity missing');
+  const views = new Set();
+  for (const diagram of diagrams) {
+    assert.equal(diagram.sourceModel, LIKEC4_SOURCE_PATH, 'LikeC4 model path mismatch');
+    assert.equal(diagram.sourceModelSha256, modelDigest, 'LikeC4 model digest mismatch');
+    assert.equal(diagram.artifact, LIKEC4_PUBLIC_BUNDLE, 'LikeC4 web component path mismatch');
+    assert.match(diagram.viewId ?? '', /^[a-zA-Z][a-zA-Z0-9_-]*$/u, 'Invalid LikeC4 view ID');
+    assert.ok(!views.has(diagram.viewId), 'Duplicate LikeC4 view ID');
+    views.add(diagram.viewId);
+  }
+  const outputs = [LIKEC4_PUBLIC_BUNDLE, LIKEC4_PUBLIC_LICENSE].map(name => {
+    const path = `architecture/${name}`;
+    const content = readPageFile(join(site,path));
+    assert.ok(content.length > 0, 'Empty LikeC4 publication artifact');
+    return { path, sha256: sha256(content) };
+  });
+  return {
+    sourceSha, generatedAt: new Date().toISOString(), publication: 'public',
+    model: { path: LIKEC4_SOURCE_PATH, sha256: modelDigest },
+    generator: { name: 'likec4', version, integrity: lockedDependency.integrity, lockPath, lockSha256: sha256(lock) },
+    views: diagrams.map(({id, viewId}) => ({id, viewId})),
+    outputs,
+  };
 }
 
 function makeRoutes(site, sourceSha, origin, audit) {
@@ -78,9 +97,9 @@ function makeRoutes(site, sourceSha, origin, audit) {
     { route:'/', label:'Development Portal', description:'Site map for Codexia design, code structure, CI observation and source audit.', category:'Overview', sourceSha, generationStatus:'ready', coverageStatus:'site-routes', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs', internalLinks:rootLinks },
     { route:'/requirements/html/', label:'Requirements and traceability', description:'StrictDoc requirements and trace matrix; source references are not test results.', category:'Verification', sourceSha, generationStatus:existsSync(page(site,'/requirements/html/')) ? 'ready':'unavailable', coverageStatus:'see-manifest', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs/requirements', internalLinks:existsSync(page(site,'/requirements/html/')) ? ['../../','requirements/REQUIREMENT-REGISTER.md-TRACE.html'] : ['../../'] },
     { route:'/requirements/traceability/', label:'Traceability status', description:'Requirement conformance, obligations, reverse source inventory, exact-source observations and visible gaps for this Pages build.', category:'Verification', sourceSha, generationStatus:existsSync(page(site,'/requirements/traceability/')) ? 'ready':'unavailable', coverageStatus:'obligation-and-surface-status', dataKind:'build-snapshot', externalDocumentationUrl:`https://github.com/yohn-jp/codexia/tree/${sourceSha}/docs/verification/TRACEABILITY-REGISTER.md`, internalLinks:existsSync(page(site,'/requirements/traceability/')) ? ['../../','../html/','traceability.json'] : ['../../'] },
-    ...(existsSync(page(site,'/api/')) ? [{ route:'/api/', label:'API Reference', description:'Static Scalar view of the TypeSpec-generated target OpenAPI contract. Runtime implementation and verification state are reported separately.', category:'Contracts', sourceSha, generationStatus:'ready', coverageStatus:'generated-target-contract', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/packages/http-contract/openapi', internalLinks:['../','codexia.openapi.yaml','manifest.json'] }] : []),
+    ...(existsSync(page(site,'/api/')) ? [{ route:'/api/', label:'API Reference', description:'Read-only TypeSpec-generated OpenAPI contract with current and target operations. Runtime verification is separate.', category:'Contracts', sourceSha, generationStatus:'ready', coverageStatus:'current-and-target-contract', dataKind:'build-snapshot', externalDocumentationUrl:`https://github.com/yohn-jp/codexia/tree/${sourceSha}/packages/http-contract/openapi`, internalLinks:['../','codexia.openapi.yaml','manifest.json'] }] : []),
     ...(uxAvailable ? [{ route:'/ux/', label:'UX Simulator', description:'Source-bound design and implementation projections with explicit coverage gaps.', category:'Design', sourceSha, generationStatus:'ready', coverageStatus:JSON.parse(readPageFile(join(site,'ux','manifest.json'),'utf8')).status, dataKind:'build-snapshot', externalDocumentationUrl:`https://github.com/yohn-jp/codexia/tree/${sourceSha}/docs/design/UX-SIMULATOR-CONTRACT.md`, internalLinks:['../','manifest.json','snapshot.json'] }] : []),
-    { route:'/architecture/', label:'Architecture Atlas', description:'Rendered views of canonical Mermaid design documents.', category:'Architecture', sourceSha, generationStatus: existsSync(page(site,'/architecture/')) ? 'ready':'unavailable', coverageStatus:'see-manifest', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs', internalLinks:['../'] },
+    { route:'/architecture/', label:'Architecture Atlas', description:'Interactive LikeC4 architecture and diagrams from approved designs.', category:'Architecture', sourceSha, generationStatus: existsSync(page(site,'/architecture/')) ? 'ready':'unavailable', coverageStatus:'see-manifest', dataKind:'build-snapshot', externalDocumentationUrl:`https://github.com/yohn-jp/codexia/tree/${sourceSha}/docs`, internalLinks:['../'] },
     { route:'/graph/', label:'Code Map', description:'Static code relationships extracted by Graphify.', category:'Code', sourceSha, generationStatus: existsSync(page(site,'/graph/')) ? 'ready':'unavailable', coverageStatus:'see-graph-data', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main', internalLinks:['../','communities.html'] },
     { route:'/ci/', label:'CI Observatory', description:'Public GitHub Actions run and job observations, fetched by the browser.', category:'Verification', generationStatus: existsSync(page(site,'/ci/')) ? 'ready':'unavailable', coverageStatus:'live-public-actions-api', dataKind:'browser-live', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/actions', internalLinks:['../'] },
     { route:'/security/', label:'Code scanning export', description:'Authorized GitHub Code scanning alerts, downloadable as JSON or CSV. Findings are never published by Pages.', category:'Security', generationStatus: existsSync(page(site,'/security/')) ? 'ready':'unavailable', coverageStatus:'authorized-main-alerts', dataKind:'browser-authenticated', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/security/code-scanning', internalLinks:['../'] },
@@ -113,11 +132,12 @@ function renderPortal(manifest,audit) {
     'branch-head-snapshot':'Branch snapshots',
     'see-manifest':'Coverage in manifest',
     'see-graph-data':'Coverage in graph data',
+    'current-and-target-contract':'Current and target operations',
     'live-public-actions-api':'Public Actions API',
     'branch-head-snapshots':'Observed branch heads',
   };
   const label=value=>esc(labels[value]??value);
-  const cards = manifest.routes.filter(x => ['/requirements/html/','/requirements/traceability/','/api/','/architecture/','/graph/','/ci/','/security/','/audit/'].includes(x.route)).map(item => {
+  const cards = manifest.routes.filter(x => ['/requirements/html/','/requirements/traceability/','/api/','/architecture/','/graph/','/ux/','/ci/','/security/','/audit/'].includes(x.route)).map(item => {
     const available = item.generationStatus === 'ready';
     const target = item.route.slice(1);
     const detail=item.route==='/audit/'?`<details class="cx-pages-disclosure"><summary>${(audit.branches??[]).length} observed branches · snapshot and review status</summary><div class="cx-pages-disclosure-content"><ul class="cx-pages-branch-list">${(audit.branches??[]).map(branch=>{
@@ -130,7 +150,7 @@ function renderPortal(manifest,audit) {
     const community=item.route==='/graph/'?`<p><a href="graph/communities.html">Community overview</a></p>`:'';
     return `<article class="cx-pages-card"><div class="cx-pages-card-heading"><h2>${esc(item.label)}</h2>${statusBadge(available?'ready':'unavailable')}</div><p class="cx-pages-card-description">${esc(item.description)}</p><p class="cx-pages-card-meta">${label(item.dataKind)} · ${label(item.coverageStatus)}</p><div class="cx-pages-card-actions"><a class="cx-pages-action cx-pages-action--primary" href="${esc(target)}">Open ${esc(item.label)}</a></div>${community}${detail}</article>`;
   }).join('\n');
-  const overview=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia Development Portal</title></head><body><main class="cx-pages-container cx-pages-main"><header class="cx-pages-hero"><h1>Codexia Development Portal</h1><p class="cx-pages-lede">Explore the project’s architecture, API contract, code relationships, CI activity, security exports, and branch source snapshots.</p></header><section class="cx-pages-grid" aria-label="Development tools">${cards}</section><footer class="cx-pages-footer"><p class="cx-pages-source-line"><span>Pages build source SHA</span><code class="cx-pages-code">${esc(manifest.sourceSha)}</code></p><h2>Project links</h2><div class="cx-pages-actions"><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/tree/main/docs">GitHub Docs</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia">Repository</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/actions">Actions</a></div><small>Architecture and code maps are build snapshots. CI reads public Actions data in the browser. Audit lists observed branch HEAD snapshots. Status describes generated inputs, not release certification.</small></footer></main></body></html>\n`;
+  const overview=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia Development Portal</title></head><body><main class="cx-pages-container cx-pages-main"><header class="cx-pages-hero"><h1>Codexia Development Portal</h1><p class="cx-pages-lede">Explore architecture, code relationships, UX flows, and the API contract. Check CI activity and follow the source behind each view.</p></header><section class="cx-pages-grid" aria-label="Development tools">${cards}</section><footer class="cx-pages-footer"><p class="cx-pages-source-line"><span>Pages build source SHA</span><code class="cx-pages-code">${esc(manifest.sourceSha)}</code></p><h2>Project links</h2><div class="cx-pages-actions"><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/tree/${esc(manifest.sourceSha)}/docs">GitHub Docs</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia">Repository</a><a class="cx-pages-action" href="https://github.com/yohn-jp/codexia/actions">Actions</a></div><small>Architecture and code maps are build snapshots. CI reads public Actions data in the browser. Audit lists observed branch HEAD snapshots. Status describes generated inputs, not release certification.</small></footer></main></body></html>\n`;
   return overview;
 }
 
@@ -397,7 +417,7 @@ function validateRegistry(site,manifest,audit,origin) {
   } else assert.equal(existsSync(join(site,'ux','manifest.json')),false,'UX artifact exists without a registered route');
   const architecture=manifest.routes.find(item=>item.route==='/architecture/');
   if (architecture.generationStatus==='ready') {
-    const atlas=JSON.parse(readFileSync(join(site,'architecture','manifest.json'),'utf8'));
+    const atlas=JSON.parse(readPageFile(join(site,'architecture','manifest.json'),'utf8'));
     assert.ok(atlas.sourceSha===sourceSha,'Architecture source SHA differs from Pages build');
     const expectedLikec4=likec4Provenance(site,sourceSha);
     if (expectedLikec4) {
@@ -414,6 +434,11 @@ function validateRegistry(site,manifest,audit,origin) {
       assert.ok(diagram && typeof diagram.id==='string' && /^[a-z]+-\d+$/u.test(diagram.id),'Invalid Architecture diagram identity');
       assert.ok(!diagramIds.includes(diagram.id),'Duplicate Architecture diagram identity');
       diagramIds.push(diagram.id);
+      assert.ok(['likec4','mermaid'].includes(diagram.renderer),'Invalid Architecture diagram renderer');
+      if (diagram.renderer === 'likec4') {
+        assert.equal(diagram.image,undefined,'Native LikeC4 view must not point to an SVG');
+        continue;
+      }
       assert.ok(typeof diagram.image==='string' && /^svg\/[a-z]+-\d+\.svg$/u.test(diagram.image) && diagram.image===`svg/${diagram.id}.svg`,'Invalid Architecture SVG path');
       assert.ok(!images.includes(diagram.image),'Duplicate Architecture SVG path');
       images.push(diagram.image);
@@ -421,7 +446,10 @@ function validateRegistry(site,manifest,audit,origin) {
       assert.ok(/<svg(?:\s|>)/u.test(svg.slice(0,2048)) && /<\/svg>/u.test(svg.slice(-2048)),'Invalid Architecture SVG asset');
     }
     const architectureEntries=readdirSync(join(site,'architecture')).sort();
-    assert.ok(JSON.stringify(architectureEntries)===JSON.stringify(['atlas.css','atlas.js','index.html','manifest.json','svg']),'Unexpected Architecture build output');
+    assert.deepEqual(architectureEntries,['atlas.css','atlas.js','index.html','likec4','manifest.json','svg'],'Unexpected Architecture build output');
+    assert.deepEqual(readdirSync(join(site,'architecture','likec4')).sort(),
+      [LIKEC4_PUBLIC_BUNDLE, LIKEC4_PUBLIC_LICENSE].map(name => name.split('/').at(-1)).sort(),
+      'Unexpected LikeC4 build output');
     assert.ok(JSON.stringify(readdirSync(join(site,'architecture','svg')).sort())===JSON.stringify(images.map(image=>image.slice(4)).sort()),'Architecture SVG directory differs from manifest');
   }
   const graphRoute=manifest.routes.find(item=>item.route==='/graph/');
@@ -455,7 +483,7 @@ function verifyScalar(site,sourceSha) {
   assert.equal(manifest.schemaVersion,1,'Unexpected Scalar artifact manifest version');
   assert.equal(manifest.sourceSha,sourceSha,'Scalar artifact source SHA mismatch');
   assert.equal(manifest.publication,'public-static-contract','Scalar artifact publication classification mismatch');
-  assert.deepEqual(manifest.targetState,{contract:'generated-target',runtime:'partial-compatibility-dispatcher',verification:'not-asserted-by-this-page'},'Scalar target/runtime/verification state must remain explicit');
+  assert.deepEqual(manifest.targetState,{contract:'generated-target',runtime:'partial-generated-route-registration',verification:'not-asserted-by-this-page'},'Scalar target/runtime/verification state must remain explicit');
   assert.equal(manifest.input?.path,'packages/http-contract/openapi/codexia.openapi.yaml','Scalar input path mismatch');
   const source=execFileSync('git',['show',`${sourceSha}:packages/http-contract/openapi/codexia.openapi.yaml`]);
   const routes=execFileSync('git',['show',`${sourceSha}:packages/http-contract/test/fixtures/admitted-routes.json`]);
@@ -504,7 +532,7 @@ function verifyScalar(site,sourceSha) {
   assert.ok((yaml.match(/^\s*x-codexia-pages-status:/gmu)??[]).length===admitted.current.length+admitted.target.length,'Per-operation status annotations are incomplete');
   const html=readPageFile(join(directory,'index.html'),'utf8');
   assert.ok(html.includes("connect-src 'self'"),'Scalar CSP must prohibit external fetches');
-  assert.ok(html.includes('Static target contract from TypeSpec') && html.includes('partial. The current Fastify API'),'Scalar page must distinguish contract from implementation');
+  assert.ok(html.includes('OpenAPI 3.1 contract generated from TypeSpec') && html.includes('current admitted operations register in Fastify'),'Scalar page must distinguish contract from implementation');
   assert.ok(html.includes('Auth request/response examples are removed') && html.includes('No API server, credentials, or Try It request'),'Scalar publication boundary notice missing');
   assert.ok(html.includes('Authentication scheme definitions') && html.includes('ApiKeyAuth'),'Read-only authentication scheme details missing');
   return manifest;

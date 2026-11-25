@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | `/` | Development Portal | サイトマップとデータ出典。サイト全体の台帳は `site-manifest.json` |
 | `/api/` | API Reference | TypeSpecから生成したOpenAPI 3.1をScalarで静的表示。contractの出典・生成器lock・入力digest・出力digestを`site-manifest.json`と`api/manifest.json`に記録 |
-| `/architecture/` | Architecture Atlas | ビルド対象 SHA の正本 Markdown。図の URL ハッシュと原文行を保持 |
+| `/architecture/` | Architecture Atlas | ビルド対象 SHA の LikeC4 モデルと正本 Markdown。図の URL ハッシュと原文行を保持 |
 | `/graph/` | Code Map | 同じビルド対象 SHA から Graphify が抽出した静的参照。既存の `?file=` と集約概観の URL を保持 |
 | `/ci/` | CI Observatory | 閲覧時に公開APIからPRリビジョン一覧をページ単位で取得。選択したリビジョンだけjob/stepを取得。API履歴制約・未解決runを明示し、個別タスク時間は未計測 |
 | `/security/` | Code scanning export | 利用者ブラウザーの読み取り専用認証で `main` の全状態アラートを GitHub API から取得、JSON/CSV に出力。公開ファイルに検出情報なし |
@@ -28,7 +28,7 @@ PR の `repository-audit-screenshots` には検証時の画面を保存する。
 
 `/api/` はPagesと同一source SHAの`@codexia/http-contract check-generated`でTypeSpecとの生成一致を確認したOpenAPI 3.1を、Scalar 1.83.0でローカルbundleとして表示する。
 OpenAPIのsecurity scheme、operation、parameter、request/response schema、HTTP status/error responseを読める。
-公開画面は契約上のtargetを示し、Fastifyでのroute/schema適用や本番受入を証明しない。
+公開画面は現在登録される契約と採用目標の操作を区別する。Fastify 実装では current の操作を生成ルートとスキーマから登録する。動作適合と本番受入は個別の検証証拠を参照する。
 security schemeは値を入力するUIを出さず、名称・方式・cookie名の読み取り専用要約を表示する。
 
 Pages生成時に認証operationのrequest/response例を除き、契約に含まれるAPI server定義を公開用コピーから削除する。
@@ -71,9 +71,9 @@ GitHub Pages の配信先は当時の確認環境から未確認。
 | `/graph/?file=<path>` | 選択ファイルのディープリンクを開く。入力は生成済みindex内のパスに限定 | [explorer](../../scripts/graphify-pages/explorer.html) | 実装コード確認 |
 | `/graph/communities.html` | Graphify本来の集約コミュニティHTMLを変更せず閲覧 | [Graph packer](../../scripts/graphify-pages/pack.mjs) | 実装コード確認 |
 | `/graph/source.json` | 元SHAと集約件数・抽出モードを参照 | [Graph packer](../../scripts/graphify-pages/pack.mjs) | 実装コード確認 |
-| `/architecture/` | 画面・状態・システム・DB・導入・更新の正本MarkdownをSVG化した図をカテゴリ別に開く。拡大、縮小、GitHubの元行、SVG単体、hashディープリンク | [Atlas packer](../../scripts/architecture-diagrams/pack.mjs)、[viewer](../../scripts/architecture-diagrams/index.html) | 実装コード確認 |
+| `/architecture/` | LikeC4 のシステム構造と運用トポロジー、Mermaid の画面・状態・ER・導入・更新の図を開く。拡大・縮小、元行、hashディープリンクを利用できる | [Atlas packer](../../scripts/architecture-diagrams/pack.mjs)、[viewer](../../scripts/architecture-diagrams/index.html) | 実装コード確認 |
 | `/architecture/#<group>-<index>` | SHA/文書/行の紐付く図へ直接移動する。ビルド時の`manifest.json`に存在するIDに限る | [Atlas JS](../../scripts/architecture-diagrams/atlas.js) | 実装コード確認 |
-| `/architecture/manifest.json`、`/architecture/svg/*.svg` | 図の原文所在、SHAと描画済みSVGを配布 | [Atlas packer](../../scripts/architecture-diagrams/pack.mjs) | 実装コード確認 |
+| `/architecture/manifest.json`、`/architecture/likec4/`、`/architecture/svg/*.svg` | 図の原文所在、SHA、LikeC4 モジュールと Mermaid SVG を配布 | [Atlas packer](../../scripts/architecture-diagrams/pack.mjs) | 実装コード確認 |
 
 `/docs/`、`/audit/`、`/pages/` は**現行生成経路で公開済みと確認できない**。仮のサイトマップから存在するURLとして案内しない。
 

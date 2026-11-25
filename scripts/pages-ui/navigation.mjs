@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const SHA = /^[a-f0-9]{40}$/i;
 export const apiReferencePage = Object.freeze({
-  id: 'api', title: 'API Reference', section: 'API', mode: 'static target contract', source: 'TypeSpec-generated OpenAPI 3.1',
+  id: 'api', title: 'API Reference', section: 'API', mode: 'current and target operations', source: 'TypeSpec-generated OpenAPI 3.1',
 });
 
 const CORE_PAGES = new Map([
@@ -17,7 +17,7 @@ const CORE_PAGES = new Map([
   ['ux/index.html', { id: 'ux', title: 'UX Simulator', section: 'Design', mode: 'source projections', source: 'Design and implementation projections' }],
   ['security/index.html', { id: 'security', title: 'Code scanning export', section: 'Security', mode: 'authorized on-demand', source: 'GitHub Code scanning API (authorized locally)' }],
   ['graph/index.html', { id: 'graph', title: 'Code Map', section: 'Code Map', mode: 'build snapshot', source: 'Graphify static analysis' }],
-  ['architecture/index.html', { id: 'architecture', title: 'Architecture Atlas', section: 'Architecture', mode: 'build snapshot', source: 'Canonical design documents' }],
+  ['architecture/index.html', { id: 'architecture', title: 'Architecture Atlas', section: 'Architecture', mode: 'build snapshot', source: 'LikeC4 model and canonical design documents' }],
 ]);
 
 const NAV_ITEMS = [
@@ -63,7 +63,7 @@ function breadcrumbsFor(pagePath, page) {
 function renderShell(pagePath, page, skipTarget) {
   const nav = NAV_ITEMS.map(([id, label, target]) => {
     const current = page.id === id || ((page.id === 'snapshot' || page.id === 'review') && id === 'audit');
-    const href = id === 'docs' && page.id === 'ux' && page.sha
+    const href = id === 'docs' && page.sha && !['snapshot', 'review'].includes(page.id)
       ? `https://github.com/yohn-jp/codexia/tree/${page.sha}/docs`
       : target.startsWith('https://') ? target : pathFromPage(pagePath, target);
     return '<li><a href="' + escapeHtml(href) + '"' + (current ? ' aria-current="page"' : '') + '>' + escapeHtml(label) + '</a></li>';
@@ -136,16 +136,15 @@ export function decorateUxPage(html, sha) {
 
 async function readSourceSha(siteRoot, pagePath, page) {
   if (page.sha) return page.sha;
-  const candidates = page.id === 'graph'
-    ? ['graph/source.json']
-    : page.id === 'architecture'
-      ? ['architecture/manifest.json']
-      : page.id === 'ux'
-        ? ['ux/manifest.json']
-      : [];
-  for (const candidate of candidates) {
+  const manifestPath = {
+    api: 'api/manifest.json',
+    architecture: 'architecture/manifest.json',
+    graph: 'graph/source.json',
+    ux: 'ux/manifest.json',
+  }[page.id];
+  if (manifestPath) {
     try {
-      const data = JSON.parse(await readFile(join(siteRoot, candidate), 'utf8'));
+      const data = JSON.parse(await readFile(join(siteRoot, manifestPath), 'utf8'));
       const value = data.sourceSha ?? data.sourceSHA ?? data.commitSha;
       if (typeof value === 'string' && SHA.test(value)) return value;
     } catch { /* A missing or malformed optional manifest remains unknown. */ }

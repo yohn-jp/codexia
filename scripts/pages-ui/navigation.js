@@ -13,6 +13,11 @@
   button.addEventListener('click', () => {
     setExpanded(button.getAttribute('aria-expanded') !== 'true');
   });
+  document.querySelector('.cx-pages-header').addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !narrow.matches || button.getAttribute('aria-expanded') !== 'true') return;
+    setExpanded(false);
+    button.focus();
+  });
   narrow.addEventListener('change', updateLayout);
   updateLayout();
 

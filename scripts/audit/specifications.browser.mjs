@@ -14,7 +14,7 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
   assert.equal(registry.likec4?.publication, 'public');
   assert.equal(registry.routes.find(item => item.route === '/requirements/html/')?.generationStatus, 'ready');
   assert.equal(registry.routes.find(item => item.route === '/requirements/traceability/')?.generationStatus, 'ready');
-  const types = {'.html':'text/html', '.css':'text/css', '.js':'text/javascript', '.json':'application/json', '.svg':'image/svg+xml'};
+  const types = {'.html':'text/html', '.css':'text/css', '.js':'text/javascript', '.mjs':'text/javascript', '.json':'application/json', '.svg':'image/svg+xml'};
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const name = url.pathname.endsWith('/') ? `${url.pathname}index.html` : url.pathname;
@@ -52,15 +52,25 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     assert.ok(trace.summary.requirementCount > 0 && trace.summary.obligationCount > 0);
     assert.ok(trace.summary.obligationGapCount + trace.summary.reverseGapCount > 0, 'Known gaps must remain visible in the Pages projection');
     assert.ok(trace.requirements.some(item => item.requirementId === 'REQ-TRACE-001'));
-    assert.equal((await page.goto(`${base}/architecture/#system-1`)).status(), 200);
-    const image = page.locator('#svg-image:not([hidden])');
-    await image.waitFor();
-    assert.match(await image.getAttribute('src'), /^svg\/system-1\.svg(?:\?.*)?$/u);
-    const dimensions = await image.evaluate(img => ({width:img.naturalWidth,height:img.naturalHeight}));
-    assert.ok(dimensions.width > 0 && dimensions.height > 0, 'LikeC4 SVG did not render');
-    const svg = await page.request.get(`${base}/${registry.likec4.output.path}`);
-    assert.equal(svg.status(), 200);
-    assert.equal(createHash('sha256').update(await svg.body()).digest('hex'), registry.likec4.output.sha256, 'LikeC4 SVG digest differs from site manifest');
+    const remoteRequests = [];
+    page.on('request', request => {
+      if (!request.url().startsWith(base + '/') && !request.url().startsWith('data:')) remoteRequests.push(request.url());
+    });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    for (const {id, viewId} of registry.likec4.views) {
+      assert.equal((await page.goto(`${base}/architecture/#${id}`)).status(), 200);
+      const diagram = page.locator(`likec4-view[view-id="${viewId}"]`);
+      await diagram.waitFor();
+      await diagram.locator('.react-flow__node').first().waitFor();
+    }
+    assert.deepEqual(errors, [], 'LikeC4 must render without browser errors');
+    assert.deepEqual(remoteRequests, [], 'LikeC4 must load without external requests');
+    for (const {path: name, sha256} of registry.likec4.outputs) {
+      const asset = await page.request.get(`${base}/${name}`);
+      assert.equal(asset.status(), 200);
+      assert.equal(createHash('sha256').update(await asset.body()).digest('hex'), sha256, `LikeC4 asset digest mismatch: ${name}`);
+    }
   } finally {
     if (browser) await browser.close();
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

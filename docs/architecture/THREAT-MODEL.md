@@ -33,7 +33,7 @@ These groupings describe trust relationships in the design. Actual Cloudflare, T
 
 ## G5 static verification
 
-The scoped verifier runs LikeC4 syntax/semantic validation and structural boundary checks, regenerates the checked Mermaid derivative byte-for-byte, analyzes the Threagile model with the pinned image, checks required risk instances and suppression state, and scans public architecture inputs for secret-like values.
+The scoped verifier runs LikeC4 syntax/semantic validation and structural boundary checks, checks the native architecture view in the LikeC4 model export, analyzes the Threagile model with the pinned image, checks required risk instances and suppression state, and scans public architecture inputs for secret-like values.
 
 It injects a wrong LikeC4 trust boundary and a Desktop Web-to-host-SSH relation into separate fixtures. LikeC4 parses and exports both fixtures before the structural checks must reject them. It also marks a required risk as mitigated and inserts a synthetic bearer value. Missing verification identifiers, both boundary violations, risk suppression and secret exposure must be rejected. This proves that the static gate detects those model faults; it does not prove the live API, OAuth, UI, host, backup or restore implementation.
 

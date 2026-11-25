@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   assertNoPublicSecrets,
-  createGeneratedMermaid,
-  parseGeneratedMermaid,
+  LIKEC4_VIEW_ID,
+  LIKEC4_VIEW_TITLE,
   REQUIRED_RISK_ASSETS,
   REQUIRED_RISK_BOUNDARIES,
   REQUIRED_RISK_CHECK_IDS,
@@ -14,7 +14,7 @@ import {
   validateLikeC4Export,
   validateThreatModelCheckIds,
   validateThreatRisks,
-  verifyGeneratedMermaid,
+  validateArchitectureView,
 } from './contract.mjs';
 
 function likeC4Export() {
@@ -103,16 +103,9 @@ test('public architecture inputs reject credential exposure', () => {
   assert.throws(() => assertNoPublicSecrets([leaked]), /secret-like material/u);
 });
 
-test('checked Mermaid derivative binds exact LikeC4 source bytes and regenerated output', () => {
-  const modelSource = "model { author = person 'Author' }\n";
-  const generated = 'graph LR\n  Author["Author"]\n';
-  const derivative = createGeneratedMermaid(modelSource, generated);
-  const parsed = parseGeneratedMermaid(derivative);
-  assert.equal(parsed.sourcePath, 'docs/architecture/likec4/model.likec4');
-  assert.equal(parsed.generator, 'likec4@1.61.0');
-  assert.equal(parsed.source, generated.trim());
-  assert.equal(verifyGeneratedMermaid(modelSource, derivative, generated), true);
-
-  assert.throws(() => verifyGeneratedMermaid(modelSource + ' // changed\n', derivative, generated), /source digest/u);
-  assert.throws(() => verifyGeneratedMermaid(modelSource, derivative, generated + '  %% drift\n'), /regeneration/u);
+test('LikeC4 model export retains the approved native architecture view', () => {
+  const view = { title: LIKEC4_VIEW_TITLE, nodes: [{}], edges: [{}] };
+  assert.equal(validateArchitectureView({ [LIKEC4_VIEW_ID]: view }), view);
+  assert.throws(() => validateArchitectureView({}), /view title/u);
+  assert.throws(() => validateArchitectureView({ [LIKEC4_VIEW_ID]: { ...view, edges: [] } }), /elements and relationships/u);
 });
