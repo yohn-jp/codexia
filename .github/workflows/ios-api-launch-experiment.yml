@@ -56,7 +56,8 @@ jobs:
             git config --global core.untrackedCache true
             git fsmonitor--daemon start
           fi
-          git config --show-origin --get-regexp '^core\.(fsmonitor|untrackedcache) 27 iPhone Simulator without booting
+          git config --show-origin --get-regexp '^core\.(fsmonitor|untrackedcache)$' || true
+      - name: Select iOS 27 iPhone Simulator without booting
         if: matrix.lane != 'macos-contract'
         run: |
           set -euo pipefail
@@ -122,11 +123,20 @@ jobs:
           set -euo pipefail
           test -f "$NATIVE_TEST_RUN"
           evidence="$RUNNER_TEMP/ios-api-evidence"
-          # Observe host resource pressure and process lifetime without changing test semantics.
           (
             while true; do
               date -u '+%Y-%m-%dT%H:%M:%SZ'
-              ps -axo pid,ppid,%cpu,rss,etime,comm | grep -E 'xcodebuild|SWBBuildService|CoreSimulator|testmanagerd|Simulator|git
+              ps -axo pid,ppid,%cpu,rss,etime,comm | grep -E 'xcodebuild|SWBBuildService|CoreSimulator|testmanagerd|Simulator|git$' || true
+              vm_stat
+              sysctl vm.swapusage
+              sleep 10
+            done
+          ) > "$evidence/host-samples.log" 2>&1 &
+          observer=$!
+          trap 'kill "$observer" 2>/dev/null || true' EXIT
+          export GIT_TRACE2_EVENT="$evidence/git-trace.jsonl"
+          date -u '+launch-start %Y-%m-%dT%H:%M:%SZ'
+          xcodebuild -xctestrun "$NATIVE_TEST_RUN" \
             -destination "platform=iOS Simulator,id=$CODEXIA_SIMULATOR_ID" \
             -parallel-testing-enabled NO -resultBundlePath "$evidence/tests.xcresult" \
             test-without-building 2>&1 | tee "$evidence/tests.log"
@@ -146,213 +156,6 @@ jobs:
         uses: actions/upload-artifact@v7.0.2
         with:
           name: ios-api-launch-${{ matrix.lane }}-${{ matrix.variant }}-${{ github.event.pull_request.head.sha || github.sha }}-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios-api-evidence/
-          if-no-files-found: error
-          retention-days: 14
- || true
-      - name: Select iOS 27 iPhone Simulator without booting
-        if: matrix.lane != 'macos-contract'
-        run: |
-          set -euo pipefail
-          xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
-          device_id=$(python3 -c 'import json,sys; devices=json.load(open(sys.argv[1]))["devices"]; print(next(d["udid"] for runtime,group in devices.items() if ".iOS-27-" in runtime for d in group if d["name"].startswith("iPhone")))' "$RUNNER_TEMP/devices.json")
-          echo "CODEXIA_SIMULATOR_ID=$device_id" >> "$GITHUB_ENV"
-      - name: Resolve and build exact test products before Simulator boot
-        if: matrix.lane != 'macos-contract'
-        timeout-minutes: 25
-        working-directory: ios/CodexiaTransport
-        env:
-          LANE: ${{ matrix.lane }}
-        run: |
-          set -euo pipefail
-          derived="$RUNNER_TEMP/ios-api-derived"
-          evidence="$RUNNER_TEMP/ios-api-evidence"
-          args=(-destination 'generic/platform=iOS Simulator' ARCHS=arm64
-            -derivedDataPath "$derived" -clonedSourcePackagesDirPath "$RUNNER_TEMP/ios-api-packages"
-            -onlyUsePackageVersionsFromResolvedFile -parallel-testing-enabled NO
-            -showBuildTimingSummary -resultBundlePath "$evidence/build.xcresult")
-          case "$LANE" in
-            keychain-simulator)
-              workspace=KeychainProbe/KeychainProbe.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
-              mkdir -p "$workspace"
-              cp Package.resolved "$workspace/Package.resolved"
-              args=(-project KeychainProbe/KeychainProbe.xcodeproj -scheme KeychainProbe "${args[@]}")
-              ;;
-            transport-simulator)
-              args=(-scheme CodexiaTransport-Package "${args[@]}")
-              ;;
-            *) exit 1 ;;
-          esac
-          xcodebuild "${args[@]}" build-for-testing 2>&1 | tee "$evidence/build.log"
-          git diff --exit-code -- Package.resolved
-          if [[ "$LANE" == keychain-simulator ]]; then
-            cmp Package.resolved "$workspace/Package.resolved"
-            host="$derived/Build/Products/Debug-iphonesimulator/KeychainHost.app"
-            test -d "$host"
-            codesign --verify "$host"
-            # Retain Xcode-generated Simulator entitlements as diagnostic evidence.
-            cp "$derived/Build/Intermediates.noindex/KeychainProbe.build/Debug-iphonesimulator/KeychainHost.build/KeychainHost.app-Simulated.xcent" "$evidence/keychain-entitlements.plist"
-            # Actual Keychain access remains verified by the unchanged hosted tests.
-          fi
-          test_run=$(python3 - "$derived" <<'PY'
-          import pathlib, sys
-          runs = sorted((pathlib.Path(sys.argv[1]) / "Build" / "Products").glob("*.xctestrun"))
-          if len(runs) != 1 or not runs[0].is_file():
-              raise SystemExit(f"Expected exactly one xctestrun, found {runs}")
-          print(runs[0])
-          PY
-          )
-          echo "NATIVE_TEST_RUN=$test_run" >> "$GITHUB_ENV"
-      - name: Boot Simulator and verify readiness
-        if: matrix.lane != 'macos-contract'
-        timeout-minutes: 12
-        run: |
-          set -euo pipefail
-          xcrun simctl bootstatus "$CODEXIA_SIMULATOR_ID" -b 2>&1 | tee "$RUNNER_TEMP/ios-api-evidence/boot.log"
-      - name: Execute complete same-scheme tests without rebuilding
-        if: matrix.lane != 'macos-contract'
-        timeout-minutes: 18
-        run: |
-          set -euo pipefail
-          test -f "$NATIVE_TEST_RUN"
-          evidence="$RUNNER_TEMP/ios-api-evidence"
-          xcodebuild -xctestrun "$NATIVE_TEST_RUN" \
-            -destination "platform=iOS Simulator,id=$CODEXIA_SIMULATOR_ID" \
-            -parallel-testing-enabled NO -resultBundlePath "$evidence/tests.xcresult" \
-            test-without-building 2>&1 | tee "$evidence/tests.log"
-          test -d "$evidence/tests.xcresult"
-          xcrun xcresulttool get test-results summary --path "$evidence/tests.xcresult" > "$evidence/test-summary.json"
-          xcrun xcresulttool get test-results tests --path "$evidence/tests.xcresult" > "$evidence/test-inventory.json"
-          python3 - "$evidence/test-summary.json" <<'PY'
-          import json, sys
-          with open(sys.argv[1]) as stream:
-              result = json.load(stream)
-          assert result["passedTests"] > 0 and result["failedTests"] == 0, result
-          PY
-      - name: Retain measured lane evidence
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: ios-api-${{ matrix.lane }}-${{ github.event.pull_request.head.sha || github.sha }}-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios-api-evidence/
-          if-no-files-found: error
-          retention-days: 14
- || true
-              vm_stat
-              sysctl vm.swapusage
-              sleep 10
-            done
-          ) > "$evidence/host-samples.log" 2>&1 &
-          observer=$!
-          trap 'kill "$observer" 2>/dev/null || true' EXIT
-          export GIT_TRACE2_EVENT="$evidence/git-trace.jsonl"
-          date -u '+launch-start %Y-%m-%dT%H:%M:%SZ'
-          xcodebuild -xctestrun "$NATIVE_TEST_RUN" \
-            -destination "platform=iOS Simulator,id=$CODEXIA_SIMULATOR_ID" \
-            -parallel-testing-enabled NO -resultBundlePath "$evidence/tests.xcresult" \
-            test-without-building 2>&1 | tee "$evidence/tests.log"
-          test -d "$evidence/tests.xcresult"
-          xcrun xcresulttool get test-results summary --path "$evidence/tests.xcresult" > "$evidence/test-summary.json"
-          xcrun xcresulttool get test-results tests --path "$evidence/tests.xcresult" > "$evidence/test-inventory.json"
-          python3 - "$evidence/test-summary.json" <<'PY'
-          import json, sys
-          with open(sys.argv[1]) as stream:
-              result = json.load(stream)
-          assert result["passedTests"] > 0 and result["failedTests"] == 0, result
-          PY
-      - name: Retain measured lane evidence
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: ios-api-${{ matrix.lane }}-${{ github.event.pull_request.head.sha || github.sha }}-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios-api-evidence/
-          if-no-files-found: error
-          retention-days: 14
- || true
-      - name: Select iOS 27 iPhone Simulator without booting
-        if: matrix.lane != 'macos-contract'
-        run: |
-          set -euo pipefail
-          xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
-          device_id=$(python3 -c 'import json,sys; devices=json.load(open(sys.argv[1]))["devices"]; print(next(d["udid"] for runtime,group in devices.items() if ".iOS-27-" in runtime for d in group if d["name"].startswith("iPhone")))' "$RUNNER_TEMP/devices.json")
-          echo "CODEXIA_SIMULATOR_ID=$device_id" >> "$GITHUB_ENV"
-      - name: Resolve and build exact test products before Simulator boot
-        if: matrix.lane != 'macos-contract'
-        timeout-minutes: 25
-        working-directory: ios/CodexiaTransport
-        env:
-          LANE: ${{ matrix.lane }}
-        run: |
-          set -euo pipefail
-          derived="$RUNNER_TEMP/ios-api-derived"
-          evidence="$RUNNER_TEMP/ios-api-evidence"
-          args=(-destination 'generic/platform=iOS Simulator' ARCHS=arm64
-            -derivedDataPath "$derived" -clonedSourcePackagesDirPath "$RUNNER_TEMP/ios-api-packages"
-            -onlyUsePackageVersionsFromResolvedFile -parallel-testing-enabled NO
-            -showBuildTimingSummary -resultBundlePath "$evidence/build.xcresult")
-          case "$LANE" in
-            keychain-simulator)
-              workspace=KeychainProbe/KeychainProbe.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
-              mkdir -p "$workspace"
-              cp Package.resolved "$workspace/Package.resolved"
-              args=(-project KeychainProbe/KeychainProbe.xcodeproj -scheme KeychainProbe "${args[@]}")
-              ;;
-            transport-simulator)
-              args=(-scheme CodexiaTransport-Package "${args[@]}")
-              ;;
-            *) exit 1 ;;
-          esac
-          xcodebuild "${args[@]}" build-for-testing 2>&1 | tee "$evidence/build.log"
-          git diff --exit-code -- Package.resolved
-          if [[ "$LANE" == keychain-simulator ]]; then
-            cmp Package.resolved "$workspace/Package.resolved"
-            host="$derived/Build/Products/Debug-iphonesimulator/KeychainHost.app"
-            test -d "$host"
-            codesign --verify "$host"
-            # Retain Xcode-generated Simulator entitlements as diagnostic evidence.
-            cp "$derived/Build/Intermediates.noindex/KeychainProbe.build/Debug-iphonesimulator/KeychainHost.build/KeychainHost.app-Simulated.xcent" "$evidence/keychain-entitlements.plist"
-            # Actual Keychain access remains verified by the unchanged hosted tests.
-          fi
-          test_run=$(python3 - "$derived" <<'PY'
-          import pathlib, sys
-          runs = sorted((pathlib.Path(sys.argv[1]) / "Build" / "Products").glob("*.xctestrun"))
-          if len(runs) != 1 or not runs[0].is_file():
-              raise SystemExit(f"Expected exactly one xctestrun, found {runs}")
-          print(runs[0])
-          PY
-          )
-          echo "NATIVE_TEST_RUN=$test_run" >> "$GITHUB_ENV"
-      - name: Boot Simulator and verify readiness
-        if: matrix.lane != 'macos-contract'
-        timeout-minutes: 12
-        run: |
-          set -euo pipefail
-          xcrun simctl bootstatus "$CODEXIA_SIMULATOR_ID" -b 2>&1 | tee "$RUNNER_TEMP/ios-api-evidence/boot.log"
-      - name: Execute complete same-scheme tests without rebuilding
-        if: matrix.lane != 'macos-contract'
-        timeout-minutes: 18
-        run: |
-          set -euo pipefail
-          test -f "$NATIVE_TEST_RUN"
-          evidence="$RUNNER_TEMP/ios-api-evidence"
-          xcodebuild -xctestrun "$NATIVE_TEST_RUN" \
-            -destination "platform=iOS Simulator,id=$CODEXIA_SIMULATOR_ID" \
-            -parallel-testing-enabled NO -resultBundlePath "$evidence/tests.xcresult" \
-            test-without-building 2>&1 | tee "$evidence/tests.log"
-          test -d "$evidence/tests.xcresult"
-          xcrun xcresulttool get test-results summary --path "$evidence/tests.xcresult" > "$evidence/test-summary.json"
-          xcrun xcresulttool get test-results tests --path "$evidence/tests.xcresult" > "$evidence/test-inventory.json"
-          python3 - "$evidence/test-summary.json" <<'PY'
-          import json, sys
-          with open(sys.argv[1]) as stream:
-              result = json.load(stream)
-          assert result["passedTests"] > 0 and result["failedTests"] == 0, result
-          PY
-      - name: Retain measured lane evidence
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: ios-api-${{ matrix.lane }}-${{ github.event.pull_request.head.sha || github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ios-api-evidence/
           if-no-files-found: error
           retention-days: 14
