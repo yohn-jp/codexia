@@ -2018,58 +2018,13 @@ public enum Operations {
                 public var headers: Operations.owner_setup_status_get.Output.Ok.Headers
                 /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/content/json/value1`.
-                        public var value1: Components.Schemas.OwnerSetupState?
-                        /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/content/json/value2`.
-                        public var value2: Components.Schemas.OwnerSetupEnrolled?
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - value1:
-                        ///   - value2:
-                        public init(
-                            value1: Components.Schemas.OwnerSetupState? = nil,
-                            value2: Components.Schemas.OwnerSetupEnrolled? = nil
-                        ) {
-                            self.value1 = value1
-                            self.value2 = value2
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            var errors: [any Swift.Error] = []
-                            do {
-                                self.value1 = try .init(from: decoder)
-                            } catch {
-                                errors.append(error)
-                            }
-                            do {
-                                self.value2 = try .init(from: decoder)
-                            } catch {
-                                errors.append(error)
-                            }
-                            try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
-                                [
-                                    self.value1,
-                                    self.value2
-                                ],
-                                type: Self.self,
-                                codingPath: decoder.codingPath,
-                                errors: errors
-                            )
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try self.value1?.encode(to: encoder)
-                            try self.value2?.encode(to: encoder)
-                        }
-                    }
                     /// - Remark: Generated from `#/paths/api/auth/codexia/setup/status/GET/responses/200/content/application\/json`.
-                    case json(Operations.owner_setup_status_get.Output.Ok.Body.jsonPayload)
+                    case json(Components.Schemas.OwnerSetupStatusResponse)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Operations.owner_setup_status_get.Output.Ok.Body.jsonPayload {
+                    public var json: Components.Schemas.OwnerSetupStatusResponse {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -15837,12 +15792,12 @@ public enum Operations {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/archive/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/archive/GET/responses/200/content/application\/json`.
-                    case json(Components.Schemas.WorkArchive)
+                    case json(Components.Schemas.WorkArchiveExport)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Components.Schemas.WorkArchive {
+                    public var json: Components.Schemas.WorkArchiveExport {
                         get throws {
                             switch self {
                             case let .json(body):
