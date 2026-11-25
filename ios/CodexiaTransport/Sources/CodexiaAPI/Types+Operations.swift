@@ -19522,12 +19522,12 @@ public enum Operations {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/PATCH/responses/409/content`.
                 @frozen public enum Body: Sendable, Hashable {
                     /// - Remark: Generated from `#/paths/api/v1/persistence/projects/{projectId}/documents/{documentId}/PATCH/responses/409/content/application\/json`.
-                    case json(Components.Schemas.SaveConflictResponse)
+                    case json(Components.Schemas.SaveDocumentConflictResponse)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Components.Schemas.SaveConflictResponse {
+                    public var json: Components.Schemas.SaveDocumentConflictResponse {
                         get throws {
                             switch self {
                             case let .json(body):

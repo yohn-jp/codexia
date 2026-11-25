@@ -78,7 +78,7 @@ test("generated save schema rejects malformed input before invoking the handler"
   assert.equal(calls, 0);
 });
 
-test("generated save responses serialize the receipt and stale-revision conflict by status", async (t) => {
+test("generated save responses serialize the receipt and both conflict variants by status", async (t) => {
   const createdAt = "2026-11-23T00:00:00.000Z";
   const document = {
     id: "document-1", projectId: "project-1", parentId: null, kind: "chapter", title: "Opening",
@@ -94,13 +94,17 @@ test("generated save responses serialize the receipt and stale-revision conflict
     error: "The document revision changed", code: "PERSISTENCE_CONFLICT",
     details: { currentRevisionId: document.headRevisionId }, current: { document, revision },
   };
+  const idempotencyConflict = {
+    error: "The save key identifies another operation", code: "IDEMPOTENCY_CONFLICT",
+  };
   const app = createPersistenceFixture(t, async (request, reply) => {
     assert.deepEqual({ ...request.params as Record<string, string> }, { projectId: document.projectId, documentId: document.id });
     assert.equal(request.headers["idempotency-key"], saveHeaders["Idempotency-Key"]);
     assert.equal(request.headers["x-client-id"], saveHeaders["X-Client-Id"]);
-    if ((request.body as typeof saveBody).baseRevisionId === "stale-revision") {
-      return reply.code(409).send({ ...conflict, fixtureOnly: true });
-    }
+    const { baseRevisionId } = request.body as typeof saveBody;
+    if (baseRevisionId === "stale-revision") return reply.code(409).send(conflict);
+    if (baseRevisionId === "reused-key") return reply.code(409).send(idempotencyConflict);
+    if (baseRevisionId === "invalid-conflict") return reply.code(409).send({ ...conflict, fixtureOnly: true });
     return reply.code(200).send({ ...receipt, fixtureOnly: true });
   });
 
@@ -114,4 +118,17 @@ test("generated save responses serialize the receipt and stale-revision conflict
   });
   assert.equal(stale.statusCode, 409, stale.payload);
   assert.deepEqual(stale.json(), conflict);
+
+  const reusedKey = await app.inject({
+    method: "PATCH", url: documentUrl, headers: saveHeaders,
+    payload: { ...saveBody, baseRevisionId: "reused-key" },
+  });
+  assert.equal(reusedKey.statusCode, 409, reusedKey.payload);
+  assert.deepEqual(reusedKey.json(), idempotencyConflict);
+
+  const unexpectedField = await app.inject({
+    method: "PATCH", url: documentUrl, headers: saveHeaders,
+    payload: { ...saveBody, baseRevisionId: "invalid-conflict" },
+  });
+  assert.equal(unexpectedField.statusCode, 500);
 });

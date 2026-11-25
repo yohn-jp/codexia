@@ -58,7 +58,10 @@ public struct DocumentSave: Sendable {
                 guard matches(receipt) else { return .unknown(.invalidReceipt) }
                 return .committed(receipt)
             case .conflict(let conflict):
-                return .conflict(try conflict.body.json)
+                switch try conflict.body.json {
+                case .SaveConflictResponse(let body): return .conflict(body)
+                case .SaveIdempotencyConflictResponse: return .conflict(nil)
+                }
             case .badRequest:
                 return .rejected(status: 400)
             case .notFound:

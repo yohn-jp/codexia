@@ -3360,7 +3360,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SaveConflictResponse'
+                $ref: '#/components/schemas/SaveDocumentConflictResponse'
       tags:
         - persistence
       requestBody:
@@ -8492,6 +8492,10 @@ components:
             - type: 'null'
       unevaluatedProperties:
         not: {}
+    SaveDocumentConflictResponse:
+      oneOf:
+        - $ref: '#/components/schemas/SaveConflictResponse'
+        - $ref: '#/components/schemas/SaveIdempotencyConflictResponse'
     SaveDocumentRequest:
       type: object
       required:
@@ -8526,6 +8530,25 @@ components:
           $ref: '#/components/schemas/PersistenceDocumentRevision'
         replayed:
           type: boolean
+      unevaluatedProperties:
+        not: {}
+    SaveIdempotencyConflictResponse:
+      type: object
+      required:
+        - code
+        - error
+      properties:
+        code:
+          type: string
+          enum:
+            - IDEMPOTENCY_CONFLICT
+        error:
+          type: string
+        details:
+          anyOf:
+            - type: object
+              additionalProperties: {}
+            - type: 'null'
       unevaluatedProperties:
         not: {}
     SceneWritingStatsBody:
