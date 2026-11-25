@@ -1,7 +1,7 @@
-import { apiRequestUrl } from "./oauth";
-import { ApiError, readApiResponse, type ApiResponseGuard } from "./api-error";
+import { ApiError, type ApiResponseGuard, readApiResponse } from './api-error';
+import { apiRequestUrl } from './oauth';
 
-export type ApiTransportAuth = "api" | "same-origin" | "anonymous";
+export type ApiTransportAuth = 'api' | 'same-origin' | 'anonymous';
 
 /** Route-specific authentication policy passed through generated Orval options. */
 export interface ApiTransportPolicy {
@@ -16,7 +16,7 @@ export interface NativeApiSession {
 
 export class DocumentDepartureError extends DOMException {
   constructor() {
-    super("The document is leaving.", "AbortError");
+    super('The document is leaving.', 'AbortError');
   }
 }
 
@@ -38,14 +38,18 @@ function resumeDocument(): void {
   documentLifecycle += 1;
 }
 
-if (typeof window !== "undefined") {
-  window.addEventListener("beforeunload", event => {
-    queueMicrotask(() => {
-      if (!event.defaultPrevented) markDocumentDeparting();
-    });
-  }, { capture: true });
-  window.addEventListener("pagehide", markDocumentDeparting, { capture: true });
-  window.addEventListener("pageshow", resumeDocument, { capture: true });
+if (typeof window !== 'undefined') {
+  window.addEventListener(
+    'beforeunload',
+    event => {
+      queueMicrotask(() => {
+        if (!event.defaultPrevented) markDocumentDeparting();
+      });
+    },
+    { capture: true },
+  );
+  window.addEventListener('pagehide', markDocumentDeparting, { capture: true });
+  window.addEventListener('pageshow', resumeDocument, { capture: true });
 }
 
 function assertDocumentCanStartRequest(init: RequestInit): void {
@@ -69,59 +73,59 @@ async function withDocumentDepartureClassification<T>(lifecycle: number, init: R
 
 function effectivePolicy(path: string, policy: ApiTransportPolicy): ApiTransportPolicy {
   // Better Auth and the Codexia auth adapter must never receive API/native OAuth credentials.
-  if (path.startsWith("/api/auth/") && policy.auth === "api") {
-    throw new ApiError("Auth routes require an explicit cookie or anonymous policy.", 403, "AUTH_TRANSPORT_POLICY_REQUIRED");
+  if (path.startsWith('/api/auth/') && policy.auth === 'api') {
+    throw new ApiError('Auth routes require an explicit cookie or anonymous policy.', 403, 'AUTH_TRANSPORT_POLICY_REQUIRED');
   }
   return policy;
 }
 
-async function fetchApiRequest(
-  path: string,
-  init: RequestInit,
-  policy: ApiTransportPolicy,
-  fetcher: typeof fetch,
-): Promise<Response> {
+async function fetchApiRequest(path: string, init: RequestInit, policy: ApiTransportPolicy, fetcher: typeof fetch): Promise<Response> {
   assertDocumentCanStartRequest(init);
   const headers = new Headers(init.headers);
-  if (init.body !== undefined && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (init.body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
 
-  if (policy.auth === "anonymous") {
-    headers.delete("Authorization");
-    return fetcher(apiRequestUrl(path), { ...init, headers, credentials: "omit" });
+  if (policy.auth === 'anonymous') {
+    headers.delete('Authorization');
+    return fetcher(apiRequestUrl(path), { ...init, headers, credentials: 'omit' });
   }
 
-  if (policy.auth === "same-origin") {
-    headers.delete("Authorization");
-    return fetcher(apiRequestUrl(path), { ...init, headers, credentials: "same-origin" });
+  if (policy.auth === 'same-origin') {
+    headers.delete('Authorization');
+    return fetcher(apiRequestUrl(path), { ...init, headers, credentials: 'same-origin' });
   }
 
   if (nativeApiSession) {
     const configuredOrigin = nativeApiSession.apiOrigin;
-    if (!configuredOrigin) throw new ApiError("Native API origin is not configured.", 503, "NATIVE_API_ORIGIN_MISSING");
+    if (!configuredOrigin) throw new ApiError('Native API origin is not configured.', 503, 'NATIVE_API_ORIGIN_MISSING');
     const originUrl = new URL(configuredOrigin);
     if (
-      originUrl.protocol !== "https:" || originUrl.pathname !== "/" || originUrl.search || originUrl.hash ||
-      originUrl.username || originUrl.password
-    ) throw new ApiError("Native API origin is invalid.", 503, "NATIVE_API_ORIGIN_INVALID");
+      originUrl.protocol !== 'https:' ||
+      originUrl.pathname !== '/' ||
+      originUrl.search ||
+      originUrl.hash ||
+      originUrl.username ||
+      originUrl.password
+    )
+      throw new ApiError('Native API origin is invalid.', 503, 'NATIVE_API_ORIGIN_INVALID');
     const requestUrl = new URL(apiRequestUrl(path, originUrl.origin), originUrl.origin);
-    if (requestUrl.origin !== originUrl.origin || !requestUrl.pathname.startsWith("/api/")) {
-      throw new ApiError("Native API request escaped its configured origin.", 503, "NATIVE_API_ORIGIN_MISMATCH");
+    if (requestUrl.origin !== originUrl.origin || !requestUrl.pathname.startsWith('/api/')) {
+      throw new ApiError('Native API request escaped its configured origin.', 503, 'NATIVE_API_ORIGIN_MISMATCH');
     }
     const accessToken = await nativeApiSession.accessTokenFor(requestUrl.toString());
-    if (accessToken !== null && (typeof accessToken !== "string" || !accessToken)) {
-      throw new ApiError("Native authentication returned an invalid API token.", 503, "NATIVE_API_TOKEN_INVALID");
+    if (accessToken !== null && (typeof accessToken !== 'string' || !accessToken)) {
+      throw new ApiError('Native authentication returned an invalid API token.', 503, 'NATIVE_API_TOKEN_INVALID');
     }
-    headers.delete("Authorization");
-    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-    return nativeApiSession.fetchRequest(requestUrl.toString(), { ...init, headers, credentials: "omit" });
+    headers.delete('Authorization');
+    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+    return nativeApiSession.fetchRequest(requestUrl.toString(), { ...init, headers, credentials: 'omit' });
   }
 
-  if (oauthAccessToken) headers.set("Authorization", `Bearer ${oauthAccessToken}`);
+  if (oauthAccessToken) headers.set('Authorization', `Bearer ${oauthAccessToken}`);
   return fetcher(apiRequestUrl(path, configuredApiOrigin), {
     ...init,
     headers,
     // Bearer and ambient cookie credentials are never sent together.
-    credentials: oauthAccessToken ? "omit" : "same-origin",
+    credentials: oauthAccessToken ? 'omit' : 'same-origin',
   });
 }
 
@@ -130,26 +134,28 @@ export async function requestApi<T>(
   guard: ApiResponseGuard<T>,
   path: string,
   init: RequestInit = {},
-  policy: ApiTransportPolicy = { auth: "api" },
+  policy: ApiTransportPolicy = { auth: 'api' },
   fetcher: typeof fetch = fetch,
 ): Promise<T> {
   const lifecycle = documentLifecycle;
   const routePolicy = effectivePolicy(path, policy);
   return withDocumentDepartureClassification(lifecycle, init, async () =>
-    readApiResponse(await fetchApiRequest(path, init, routePolicy, fetcher), guard));
+    readApiResponse(await fetchApiRequest(path, init, routePolicy, fetcher), guard),
+  );
 }
 
 /** Accept exactly a 204 response for operations whose runtime contract is no-content. */
 export function requestApiNoContent(
   path: string,
   init: RequestInit = {},
-  policy: ApiTransportPolicy = { auth: "api" },
+  policy: ApiTransportPolicy = { auth: 'api' },
   fetcher: typeof fetch = fetch,
 ): Promise<void> {
   const lifecycle = documentLifecycle;
   const routePolicy = effectivePolicy(path, policy);
   return withDocumentDepartureClassification(lifecycle, init, async () =>
-    readApiResponse(await fetchApiRequest(path, init, routePolicy, fetcher), (value): value is undefined => value === undefined));
+    readApiResponse(await fetchApiRequest(path, init, routePolicy, fetcher), (value): value is undefined => value === undefined),
+  );
 }
 
 /** Store an API access token only in the current JavaScript runtime. */
@@ -159,15 +165,15 @@ export function setOAuthAccessToken(token: string | null): void {
 
 /** Install an explicit native HTTPS API transport; never use WebView cookies for API data. */
 export function configureNativeApiSession(session: NativeApiSession): void {
-  if (!session || typeof session.accessTokenFor !== "function" || typeof session.fetchRequest !== "function") {
-    throw new TypeError("Native API session transport is invalid.");
+  if (!session || typeof session.accessTokenFor !== 'function' || typeof session.fetchRequest !== 'function') {
+    throw new TypeError('Native API session transport is invalid.');
   }
   if (session.apiOrigin !== null) {
     const origin = new URL(session.apiOrigin);
-    if (origin.protocol !== "https:" || origin.pathname !== "/" || origin.search || origin.hash || origin.username || origin.password) {
-      throw new TypeError("Native API origin must be an explicit HTTPS origin.");
+    if (origin.protocol !== 'https:' || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) {
+      throw new TypeError('Native API origin must be an explicit HTTPS origin.');
     }
-    apiRequestUrl("/api/session", origin.origin);
+    apiRequestUrl('/api/session', origin.origin);
   }
   oauthAccessToken = undefined;
   nativeApiSession = session;
@@ -187,14 +193,14 @@ export function hasNativeApiSession(): boolean {
 export async function requestApiEventStream(
   path: string,
   init: RequestInit = {},
-  policy: ApiTransportPolicy = { auth: "api" },
+  policy: ApiTransportPolicy = { auth: 'api' },
   fetcher: typeof fetch = fetch,
 ): Promise<Response> {
   if (nativeApiSession) {
-    throw new ApiError("Native job event streaming is unavailable; use the Job Inbox refresh action.", 501, "NATIVE_STREAM_UNSUPPORTED");
+    throw new ApiError('Native job event streaming is unavailable; use the Job Inbox refresh action.', 501, 'NATIVE_STREAM_UNSUPPORTED');
   }
   const headers = new Headers(init.headers);
-  if (!headers.has("Accept")) headers.set("Accept", "text/event-stream");
+  if (!headers.has('Accept')) headers.set('Accept', 'text/event-stream');
   const streamInit = { ...init, headers };
   const lifecycle = documentLifecycle;
   const routePolicy = effectivePolicy(path, policy);
@@ -202,15 +208,19 @@ export async function requestApiEventStream(
     const response = await fetchApiRequest(path, streamInit, routePolicy, fetcher);
     if (!response.ok) {
       let body: unknown = null;
-      try { body = await response.json(); } catch { /* preserve the status and fallback error below */ }
-      const details = body && typeof body === "object" ? body as Record<string, unknown> : {};
+      try {
+        body = await response.json();
+      } catch {
+        /* preserve the status and fallback error below */
+      }
+      const details = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
       throw new ApiError(
-        typeof details.error === "string" ? details.error : `Request failed (${response.status})`,
+        typeof details.error === 'string' ? details.error : `Request failed (${response.status})`,
         response.status,
-        typeof details.code === "string" ? details.code : "REQUEST_FAILED",
+        typeof details.code === 'string' ? details.code : 'REQUEST_FAILED',
       );
     }
-    if (!response.body) throw new ApiError("Job event stream is unavailable", response.status, "STREAM_UNAVAILABLE");
+    if (!response.body) throw new ApiError('Job event stream is unavailable', response.status, 'STREAM_UNAVAILABLE');
     return response;
   });
 }

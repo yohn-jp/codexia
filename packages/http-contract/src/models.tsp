@@ -1168,7 +1168,6 @@ model WorkArchiveExportMention extends WorkArchiveMention {
   status: "proposed" | "confirmed" | "ambiguous" | "rejected";
   @minLength(1) @maxLength(512) @pattern(".*\\S.*")
   source: string;
-  @minValue(0) @maxValue(1)
   confidence: float64 | null;
   extractorVersion: string | null;
 }
@@ -1181,7 +1180,6 @@ model WorkArchiveExportAssertion extends WorkArchiveAssertion {
   @minLength(1) @maxLength(512) @pattern(".*\\S.*")
   perspective: string;
   narrativeTime: JsonObject;
-  @minValue(0) @maxValue(1)
   confidence: float64 | null;
   status: "proposed" | "confirmed" | "rejected" | "retired";
 }

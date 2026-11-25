@@ -657,7 +657,7 @@ APIの入口、body/query、レスポンス、エラー、認可、競合、冪�
 **Conformance status**: MAPPED_UNVERIFIED
 **Applicability**: CURRENT
 **Design owner**: [Core](../architecture/CORE.md)、[Interaction contract](../design/INTERACTION-CONTRACT.md)
-**Implementation identifiers**: persistence-routes.ts; postgres-store.ts; app/src/api.ts
+**Implementation identifiers**: persistence-routes.ts; postgres-store.ts; app/src/api-documents.ts
 **Verification identifiers**: tests/e2e/core.acceptance.spec.ts
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
@@ -672,7 +672,7 @@ APIの入口、body/query、レスポンス、エラー、認可、競合、冪�
 - **Type**: File
   **Path**: docs/design/INTERACTION-CONTRACT.md
 - **Type**: File
-  **Path**: app/src/api.ts
+  **Path**: app/src/api-documents.ts
 - **Type**: File
   **Path**: tests/e2e/core.acceptance.spec.ts
 
@@ -682,7 +682,7 @@ APIの入口、body/query、レスポンス、エラー、認可、競合、冪�
 **MID**: 2054c8ca1ebb89dfc9c67169bd819bf3
 **UID**: OBL-REQ-API-002-O01
 **Design reference**: [Core](../architecture/CORE.md)、[Interaction contract](../design/INTERACTION-CONTRACT.md)
-**Implementation identifiers**: app/src/api.ts
+**Implementation identifiers**: app/src/api-documents.ts
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
 **Comment**: Broad whole-requirement candidate mapping; decomposition into the specific obligations below is incomplete and exact-source certification remains unverified.
@@ -695,7 +695,7 @@ APIの入口、body/query、レスポンス、エラー、認可、競合、冪�
   **ID**: REQ-API-002
 
 - **Type**: File
-  **Path**: app/src/api.ts
+  **Path**: app/src/api-documents.ts
 
 ## REQ-MCP-001
 
@@ -854,7 +854,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **Conformance status**: MAPPED_UNVERIFIED
 **Applicability**: CURRENT
 **Design owner**: [Interaction contract](../design/INTERACTION-CONTRACT.md)、[UX contract](../design/UX-CONTRACT.md)
-**Implementation identifiers**: app/src/storage/; app/src/api.ts; app/src/journal.test.ts
+**Implementation identifiers**: app/src/storage/; app/src/application/persistence-save-protocol.ts; app/src/journal.test.ts
 **Verification identifiers**: tests/e2e/auth-recovery.acceptance.spec.ts; tests/e2e/core.acceptance.spec.ts
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
@@ -869,7 +869,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 - **Type**: File
   **Path**: docs/design/UX-CONTRACT.md
 - **Type**: File
-  **Path**: app/src/api.ts
+  **Path**: app/src/application/persistence-save-protocol.ts
 - **Type**: File
   **Path**: app/src/journal.test.ts
 - **Type**: File
@@ -883,7 +883,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **MID**: 375573280f98b604ac8b6f18d376e847
 **UID**: OBL-REQ-UI-002-O01
 **Design reference**: [Interaction contract](../design/INTERACTION-CONTRACT.md)、[UX contract](../design/UX-CONTRACT.md)
-**Implementation identifiers**: app/src/api.ts
+**Implementation identifiers**: app/src/application/persistence-save-protocol.ts
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
 **Comment**: Broad whole-requirement candidate mapping; decomposition into the specific obligations below is incomplete and exact-source certification remains unverified.
@@ -896,7 +896,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **ID**: REQ-UI-002
 
 - **Type**: File
-  **Path**: app/src/api.ts
+  **Path**: app/src/application/persistence-save-protocol.ts
 
 ## REQ-UI-003
 

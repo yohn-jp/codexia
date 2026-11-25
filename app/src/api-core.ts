@@ -1,4 +1,3 @@
-import { assertChangeOperation } from '@codexia/contracts';
 import type {
   ActionResult,
   ApplyReceipt,
@@ -12,11 +11,12 @@ import type {
   SnapshotId,
   UiContribution,
 } from '@codexia/contracts';
-import * as generated from './generated/http/client';
-import * as generatedSchemas from './generated/http/schemas';
-import type * as wire from './generated/http/schemas';
+import { assertChangeOperation } from '@codexia/contracts';
 import { ApiError } from './api-error';
 import { hasNativeApiSession } from './api-transport';
+import * as generated from './generated/http/client';
+import type * as wire from './generated/http/schemas';
+import * as generatedSchemas from './generated/http/schemas';
 
 export type JobStatus = wire.PublicJobBody['status'];
 export type PublicJob = wire.PublicJobBody;
@@ -35,70 +35,23 @@ export type JobEvent = {
   at: string;
 };
 
-function assertProposalStatus(status: wire.CoreProposalStatusBody): asserts status is wire.CoreProposalStatusBody & {
-  proposal: ChangeProposal;
-  applications: ApplyReceipt[];
-} {
-  for (const operation of status.proposal.operations) assertChangeOperation(operation);
-}
-
-function validateProposalStatus(status: wire.CoreProposalStatusBody): ProposalStatus {
+function validatedProposal(proposal: wire.CoreChangeProposalBody): ChangeProposal {
   try {
-    assertProposalStatus(status);
+    for (const operation of proposal.operations) assertChangeOperation(operation);
   } catch {
     throw new ApiError('The server returned an invalid response', 502, 'INVALID_RESPONSE');
   }
-  return status as unknown as ProposalStatus;
+  return proposal as unknown as ChangeProposal;
 }
 
 function validateProposalStatuses(response: wire.ProposalListBody): { proposals: ProposalStatus[] } {
-  return { proposals: response.proposals.map(validateProposalStatus) };
-}
-
-function invalidResponse(): never {
-  throw new ApiError('The server returned an invalid response', 502, 'INVALID_RESPONSE');
+  for (const status of response.proposals) validatedProposal(status.proposal);
+  return response as unknown as { proposals: ProposalStatus[] };
 }
 
 function validateActionResult(response: wire.DesktopActionResultBody): ActionResult {
-  const result: unknown = response;
-  if (!result || typeof result !== 'object' || Array.isArray(result)) return invalidResponse();
-  const value = result as Record<string, unknown>;
-  const snapshot = value.snapshot;
-  if (
-    !snapshot ||
-    typeof snapshot !== 'object' ||
-    Array.isArray(snapshot) ||
-    typeof (snapshot as Record<string, unknown>).projectId !== 'string' ||
-    !Number.isSafeInteger((snapshot as Record<string, unknown>).projectVersion) ||
-    Number((snapshot as Record<string, unknown>).projectVersion) < 1
-  ) return invalidResponse();
-  if (value.ok === true) {
-    if (!('data' in value) || (value.proposals !== undefined && !Array.isArray(value.proposals))) return invalidResponse();
-    if (Array.isArray(value.proposals)) {
-      for (const proposal of value.proposals) {
-        if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) return invalidResponse();
-        const operations = (proposal as Record<string, unknown>).operations;
-        if (!Array.isArray(operations)) return invalidResponse();
-        try {
-          for (const operation of operations) assertChangeOperation(operation);
-        } catch {
-          return invalidResponse();
-        }
-      }
-    }
-    return value as unknown as ActionResult;
-  }
-  if (value.ok === false) {
-    const error = value.error;
-    if (
-      !error || typeof error !== 'object' || Array.isArray(error) ||
-      typeof (error as Record<string, unknown>).code !== 'string' ||
-      typeof (error as Record<string, unknown>).message !== 'string' ||
-      typeof (error as Record<string, unknown>).retryable !== 'boolean'
-    ) return invalidResponse();
-    return value as unknown as ActionResult;
-  }
-  return invalidResponse();
+  if (response.ok) response.proposals?.forEach(validatedProposal);
+  return response as unknown as ActionResult;
 }
 
 function requestOptions(signal?: AbortSignal): { signal?: AbortSignal } {
@@ -107,8 +60,7 @@ function requestOptions(signal?: AbortSignal): { signal?: AbortSignal } {
 
 /** Desktop Web core operations generated from the TypeSpec HTTP contract. */
 export const coreApi = {
-  version: (): Promise<RuntimeVersion> =>
-    hasNativeApiSession() ? generated.apiVersionGet() : generated.apiBrowserVersionGet(),
+  version: (): Promise<RuntimeVersion> => (hasNativeApiSession() ? generated.apiVersionGet() : generated.apiBrowserVersionGet()),
   session: (): Promise<Session> => generated.apiSessionGet(),
   jobs: (signal?: AbortSignal): Promise<PublicJob[]> => generated.jobsListGet(requestOptions(signal)),
   job: (jobId: string, signal?: AbortSignal): Promise<PublicJob> => generated.jobGet(jobId, requestOptions(signal)),
@@ -128,53 +80,48 @@ export const coreApi = {
   ): Promise<RecentActivityResponse> => {
     const { order, ...init } = options;
     const headers = order ? { 'X-Codexia-Recent-Activity-Order': order } : undefined;
-    return generated.projectRecentActivityPut(projectId, { ...input }, {
-      ...(init.signal ? { signal: init.signal } : {}),
-      ...(init.keepalive !== undefined ? { keepalive: init.keepalive } : {}),
-      ...(headers ? { headers } : {}),
-    }) as Promise<RecentActivityResponse>;
+    return generated.projectRecentActivityPut(
+      projectId,
+      { ...input },
+      {
+        ...(init.signal ? { signal: init.signal } : {}),
+        ...(init.keepalive !== undefined ? { keepalive: init.keepalive } : {}),
+        ...(headers ? { headers } : {}),
+      },
+    ) as Promise<RecentActivityResponse>;
   },
   proposalStatuses: async (projectId: string): Promise<{ proposals: ProposalStatus[] }> =>
     validateProposalStatuses(await generated.projectProposalsListGet(projectId)),
-  propose: async (projectId: string, proposal: ChangeProposal, signal?: AbortSignal): Promise<ChangeProposal> => {
-    const response = await generated.projectProposalsCreatePost(projectId, { ...proposal }, requestOptions(signal));
-    try {
-      for (const operation of response.operations) assertChangeOperation(operation);
-    } catch {
-      throw new ApiError('The server returned an invalid response', 502, 'INVALID_RESPONSE');
-    }
-    return response as unknown as ChangeProposal;
-  },
+  propose: async (projectId: string, proposal: ChangeProposal, signal?: AbortSignal): Promise<ChangeProposal> =>
+    validatedProposal(await generated.projectProposalsCreatePost(projectId, { ...proposal }, requestOptions(signal))),
   approve: (projectId: string, approval: Approval, signal?: AbortSignal): Promise<void> =>
-    generated.projectApprovalsPost(projectId, { ...approval }, { ...requestOptions(signal), responseMode: 'no-content' }).then(() => undefined),
+    generated
+      .projectApprovalsPost(projectId, { ...approval }, { ...requestOptions(signal), responseMode: 'no-content' })
+      .then(() => undefined),
   apply: (projectId: string, operation: ChangeOperation, signal?: AbortSignal): Promise<ApplyReceipt> =>
     generated.projectApplyPost(projectId, { ...operation }, requestOptions(signal)) as Promise<ApplyReceipt>,
   moduleSnapshot: async (projectId: string, documentId?: string): Promise<EditorSnapshotRead> => {
-    const result = await generated.projectSnapshotGet(
-      projectId,
-      { projection: 'editor', ...(documentId ? { documentId } : {}) },
-    );
+    const result = await generated.projectSnapshotGet(projectId, { projection: 'editor', ...(documentId ? { documentId } : {}) });
     const expectedPath = documentId ? `documents/${documentId}.md` : undefined;
     if (result.document && result.document.path !== expectedPath) {
       throw new ApiError('The server returned a different editor document', 502, 'INVALID_RESPONSE');
     }
     return result;
   },
-  modules: (projectId: string): Promise<ModuleStatus[]> =>
-    generated.projectModulesGet(projectId) as Promise<ModuleStatus[]>,
+  modules: (projectId: string): Promise<ModuleStatus[]> => generated.projectModulesGet(projectId) as Promise<ModuleStatus[]>,
   contributions: (projectId: string): Promise<UiContribution[]> =>
     generated.projectContributionsGet(projectId) as Promise<UiContribution[]>,
-  action: (
-    projectId: string,
-    actionId: string,
-    input: unknown,
-    signal?: AbortSignal,
-    snapshot?: SnapshotId,
-  ): Promise<ActionResult> =>
-    generated.projectActionPost(projectId, actionId, { input, ...(snapshot ? { snapshot } : {}) }, {
-      ...requestOptions(signal),
-      schema: generatedSchemas.DesktopActionResultBody,
-    })
+  action: (projectId: string, actionId: string, input: unknown, signal?: AbortSignal, snapshot?: SnapshotId): Promise<ActionResult> =>
+    generated
+      .projectActionPost(
+        projectId,
+        actionId,
+        { input, ...(snapshot ? { snapshot } : {}) },
+        {
+          ...requestOptions(signal),
+          schema: generatedSchemas.DesktopActionResultBody,
+        },
+      )
       .then(response => validateActionResult(response as unknown as wire.DesktopActionResultBody)),
   resolveDocumentReference: async (projectId: string, path: string, snapshot?: SnapshotId): Promise<string | null> => {
     const resolution = await coreApi.action(projectId, 'core.document.resolve', { path }, undefined, snapshot);

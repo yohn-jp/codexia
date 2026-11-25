@@ -629,10 +629,18 @@ test('Mitogen launcher changes select the rootless contract on PR and main', asy
     assert.ok(workflow.on[event].paths.includes(launcher), event);
   }
   assert.deepEqual((await plan([launcher])).tasks, ['unit-root', 'coverage']);
-  const shared = 'app/src/api.ts';
+  const shared = 'app/src/api-transport.ts';
   assert.deepEqual((await plan([launcher, shared])).tasks, (await plan([shared])).tasks);
   for (const event of ['push', 'workflow_dispatch']) {
     assert.equal((await plan([launcher], event)).mode, 'full');
+  }
+});
+
+test('Orval manifest and transport changes verify the deployment API route assertion', async () => {
+  for (const file of ['app/src/api-transport.ts', 'app/src/generated/http/client.operations.ts']) {
+    const selected = await plan([file]);
+    assert.ok(selected.tasks.includes('unit-root'), file);
+    assert.ok(selected.tasks.includes('unit-app'), file);
   }
 });
 

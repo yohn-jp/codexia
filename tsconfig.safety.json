@@ -16,7 +16,7 @@
   "include": [
     "app/src/api.ts",
     "app/src/api-error.ts",
-    "app/src/api-response.ts",
+    "app/src/api-transport.ts",
     "packages/api/src/authorization-error.ts",
     "modules/mcp/src/session-lifetime.ts",
     "scripts/release/components/policy.mjs",

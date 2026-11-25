@@ -155,7 +155,9 @@ IDは重複させず、表示名や説明を変えるときも維持する。
 
 1. 領域設計で公開範囲、許可主体、リクエスト、成功・失敗時の応答を決め、該当するTypeSpecを変更する。
 2. `pnpm --filter @codexia/http-contract generate` でOpenAPIを再生成する。TypeSpecと生成差分を同じ変更に含める。
-3. `pnpm test:http-contract` で生成差分、Redocly、oasdiff、Fastifyのスキーマ適合を確認する。生成物を使用するDesktopとiOSの再生成検査も実行する。
+3. `pnpm test:http-contract` で生成差分、Redocly、oasdiff、Fastifyのスキーマ適合を確認する。
+   `pnpm --filter @codexia/app generate:http` と `pnpm --filter @codexia/app check-generated:http` でDesktop Webの生成クライアントとoperation照合を更新・検査する。
+   iOSの再生成検査も実行する。
 4. 廃止予定を告知する場合はTypeSpecに廃止予定を記載する。互換性を壊す削除や変更は、利用者の移行とAPI epochの切替を規定する互換手順で扱う。
 
 ## バックアップ管理API（採用済み目標・未実装）

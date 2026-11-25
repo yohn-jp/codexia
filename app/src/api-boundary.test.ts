@@ -25,7 +25,8 @@ test('audit browser API rejects malformed, empty and incorrectly shaped successf
 });
 
 test('audit browser API rejects an invalid runtime profile in the version response', async () => {
-  globalThis.fetch = async () => Response.json({ name: 'codexia', version: '0.1.0', profile: null });
+  globalThis.fetch = async () =>
+    Response.json({ name: 'codexia', version: '0.1.0', contractVersion: 2, profile: null, auth: [], runtime: {}, modules: [] });
   await assert.rejects(api.version(), invalid);
 });
 
@@ -134,8 +135,8 @@ test('Knowledge browse carries server-selected filters into the opaque cursor co
     attributes: {},
     version: 1,
     deletedAt: null,
-    createdAt: '',
-    updatedAt: '',
+    createdAt: '2026-11-23T00:00:00.000Z',
+    updatedAt: '2026-11-23T00:00:00.000Z',
   }));
   const received: Array<Record<string, string>> = [];
   globalThis.fetch = async input => {

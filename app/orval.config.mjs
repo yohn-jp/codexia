@@ -81,6 +81,7 @@ export const provisionalOperationIds = [
   'auth_list_consents_get',
   'jobs_list_get',
   'persistence_anchor_mentions_post',
+  'project_action_post',
   'project_apply_post',
   'project_approvals_post',
   'project_contributions_get',

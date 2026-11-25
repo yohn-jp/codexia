@@ -199,6 +199,9 @@ op listProjectActions(@path projectId: string): ProjectActionsBody;
 
 @tag("actions") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:compute|propose)")
 @route("/api/projects/{projectId}/actions/{actionId}") @post @operationId("project_action_post")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "Desktop validates the success and failure variants of the synchronous Action result; the API epoch baseline retains the published object schema.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopActionResultBody")
 op invokeProjectAction(@path projectId: string, @path actionId: string, @body body: JsonObject, @header("Prefer") prefer?: string): ActionResultBody | { @statusCode _: 202; @header("Location") location: string; @header("Preference-Applied") preferenceApplied: "respond-async"; @header("X-Codexia-Job-Id") jobId: string; @body job: PublicJobBody; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
 @tag("snapshots") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")

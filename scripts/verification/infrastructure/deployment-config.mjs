@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { operations } from '../../../app/src/generated/http/client.operations.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const read = (relative) => readFile(path.join(root, relative), 'utf8');
@@ -16,7 +17,7 @@ const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terr
   read('edge/frontend/static/_headers'),
   read('edge/frontend/static/_redirects'),
   read('packages/api/src/server.ts'),
-  read('app/src/api.ts'),
+  read('app/src/api-transport.ts'),
   read('deploy/cloudflare/terraform/main.tf'),
   read('deploy/cloudflare/terraform/variables.tf'),
   read('deploy/quadlet/codexia-api.container'),
@@ -66,7 +67,7 @@ assert.match(terraformMain, /originRoutes/u);
 assert.match(terraformVariables, /condition\s*=\s*var\.origin_service\s*==\s*"http:\/\/codexia-api:3000"/u);
 assert.doesNotMatch(terraformVariables, /codexia-api-proxy/u, "retired proxy ingress must not be an accepted origin");
 
-assert.match(apiClient, /(['"])\/api\/session\1/u, 'the UI API client must keep using same-origin API paths');
+assert.equal(operations.apiSessionGet.path, '/api/session', 'the UI API client must keep using same-origin API paths');
 assert.doesNotMatch(apiClient, /VITE_API_URL/u, 'the frontend API origin is same-origin and must not be injected at build time');
 assert.match(apiSource, /CODEXIA_CORS_ALLOWED_ORIGINS/u, 'cross-origin browser access must remain deploy-time opt-in');
 
