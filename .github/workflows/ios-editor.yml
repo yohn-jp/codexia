@@ -10,12 +10,6 @@ on:
         description: Registered public iOS OAuth client ID
         type: string
         required: false
-  pull_request:
-    paths:
-      - 'ios/CodexiaEditor/**'
-      - 'ios/CodexiaApp/**'
-      - 'ios/CodexiaTransport/**'
-      - '.github/workflows/ios-editor.yml'
 permissions:
   contents: read
 concurrency:

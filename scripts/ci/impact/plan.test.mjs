@@ -652,7 +652,7 @@ test('iOS packaging workflow changes retain root proof and its shared inputs sta
   assert.deepEqual(Object.keys(workflow.on).sort(), ['workflow_dispatch']);
   assert.deepEqual(workflow.on.workflow_dispatch.inputs.profile.options, ['core', 'full']);
   const native = parse(readFileSync(new URL('../../../.github/workflows/ios-editor.yml', import.meta.url), 'utf8'));
-  assert.ok(native.on.pull_request);
+  assert.deepEqual(Object.keys(native.on), ['workflow_dispatch']);
   assert.equal(native.jobs['native-ipa'].if, "${{ github.event_name == 'workflow_dispatch' }}");
   assert.deepEqual(native.jobs.editor.strategy.matrix.lane, ['state-model', 'editor-simulator', 'app-simulator']);
   assert.equal(workflow.jobs.build['runs-on'], 'xcode-27');
@@ -795,9 +795,7 @@ test('native Swift-only PR inputs select owner contract without unrelated Deskto
   }
   assert.deepEqual((await plan(owned)).tasks, ['unit-root', 'coverage', 'requirements-trace']);
   const nativeApi = parse(readFileSync(new URL('../../../.github/workflows/ios-api.yml', import.meta.url), 'utf8'));
-  for (const input of ['.github/workflows/ios-api.yml', 'ios/CodexiaTransport/**', 'packages/http-contract/openapi/codexia.openapi.yaml']) {
-    assert.ok(nativeApi.on.pull_request.paths.includes(input), input);
-  }
+  assert.deepEqual(Object.keys(nativeApi.on), ['workflow_dispatch']);
   assert.equal(nativeApi.jobs.api['runs-on'], 'xcode-27');
 });
 
@@ -855,7 +853,7 @@ test('native-owned input admission requires the Xcode workflow while its Swift s
     const workflowFile = new URL('../../../.github/workflows/' + owner.workflow, import.meta.url);
     assert.ok(existsSync(workflowFile), owner.dir + ' requires its native workflow');
     const workflow = parse(readFileSync(workflowFile, 'utf8'));
-    for (const input of owner.paths) assert.ok(workflow.on.pull_request.paths.includes(input), input);
+    assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch'], owner.workflow);
     assert.equal(workflow.jobs[owner.job]['runs-on'], 'xcode-27', owner.workflow);
     assert.ok(workflow.jobs[owner.job].steps.some(step => String(step.run ?? '').includes('swift test') ||
       String(step.run ?? '').includes('xcodebuild')), owner.workflow + ' must execute a native build/test');

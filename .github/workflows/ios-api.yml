@@ -1,11 +1,5 @@
 name: Native iOS API
 on:
-  pull_request:
-    paths:
-      - scripts/shared/python-env.sh
-      - .github/workflows/ios-api.yml
-      - ios/CodexiaTransport/**
-      - packages/http-contract/openapi/codexia.openapi.yaml
   workflow_dispatch:
 
 permissions:
