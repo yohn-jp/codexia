@@ -349,6 +349,7 @@ globalStyle('.manuscript-preview', {
   fontFamily: 'var(--reader-font-family, var(--manuscript-serif))',
 });
 globalStyle('.manuscript-preview.is-vertical', { maxHeight: 'var(--reader-max-width, 70rem)' });
+globalStyle('.pg-editor > .scene-reading', { minWidth: '0' });
 globalStyle('.reading-pager', { position: 'relative', width: '100%', minHeight: 'inherit' });
 globalStyle('.reading-pager-content', { minHeight: 'inherit' });
 globalStyle('.reading-pager-content.is-vertical', { writingMode: 'vertical-rl', textOrientation: 'mixed' });

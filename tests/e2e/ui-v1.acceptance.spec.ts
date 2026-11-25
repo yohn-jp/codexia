@@ -722,13 +722,21 @@ test("Desktop reader keeps first-to-last Japanese paragraphs visible at narrow v
       await page.setViewportSize({ width, height: 844 });
       const text = Array.from({ length: 130 }, (_, index) => `第${index + 1}段落｜日本語の本文を読む。`).join("\n");
       await createOAuthWritingFixture(authorizeAuthor, page, "desktop", undefined, text);
+      // The multi-panel Desktop workbench scrolls horizontally below 760px.
+      // Read in one panel so the pager and its touch zones fit the viewport.
+      const panels = page.getByRole("toolbar", { name: "ワークスペース配置" }).locator("details");
+      await panels.locator("summary").click();
+      await panels.getByRole("button", { name: "作品と構成を隠す", exact: true }).click();
+      await panels.locator("summary").click();
       await page.getByRole("button", { name: "読む", exact: true }).click();
       const displayMenu = page.locator(".pg-editor-display-menu");
       if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
       await page.getByLabel("組方向").selectOption(direction);
+      await displayMenu.locator("summary").click();
       await expect.poll(() => visibleReaderParagraphs(page)).toContainEqual(expect.stringContaining("第1段落"));
 
       const pager = page.locator(".reading-pager");
+      await pager.scrollIntoViewIfNeeded();
       const pagerBounds = await pager.boundingBox();
       expect(pagerBounds).not.toBeNull();
       expect(pagerBounds!.x).toBeGreaterThanOrEqual(0);
