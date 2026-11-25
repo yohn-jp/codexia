@@ -101,7 +101,7 @@ export function projectConsole(source) {
       id: 'CON-03', platform: 'console', route: '/console/setup', source: sourceRef(sourceAt(source, setup, "status.state === 'owner-enrolled'")),
       regions: [
         { id: 'setup-enrollment-status', role: 'status', label: 'owner登録とclient準備状態', source: sourceRef(sourceAt(source, setup, 'status.clientsReady')) },
-        { id: 'setup-refresh', role: 'actions', label: '登録状況を更新', source: sourceRef(sourceAt(source, setup, setupRefreshHandler)) },
+        { id: 'setup-refresh', role: 'actions', label: '登録状況を更新', source: sourceRef(sourceAt(source, setup, 'await refresh();')) },
       ],
     },
     screen(source, routes, 'CON-10', entry, '<IdentityManagementPanel placement="console" />', [
@@ -127,7 +127,7 @@ export function projectConsole(source) {
     homeNavigation(source, '/console', '/console/backups', 'バックアップ', 'CON-00.B', 'path: "/console/backups", title: "バックアップ"').control,
     control(source, { id: 'CON-01.A', platform: 'console', path: setup, label: 'キーを確認', handler: 'onSubmit={submitKey}', role: 'submit', region: 'setup-key-form' }),
     control(source, { id: 'CON-02.A', platform: 'console', path: setup, label: 'Passkeyを作成', handler: 'onClick={createPasskey}', region: 'setup-passkey' }),
-    control(source, { id: 'CON-03.A', platform: 'console', path: setup, label: '登録状況を更新', handler: setupRefreshHandler, region: 'setup-refresh' }),
+    control(source, { id: 'CON-03.A', platform: 'console', path: setup, label: '登録状況を更新', handler: 'await refresh();', region: 'setup-refresh' }),
     combinedControl(source, { id: 'CON-10.A', label: 'パスキーを追加', region: 'passkey-management', handlers: ['onSubmit={event => void addPasskey(event)}', 'onRename={renamePasskey}', 'onDelete={deletePasskey}'] }),
     combinedControl(source, { id: 'CON-11.A', label: '他のすべてのセッションを終了', region: 'session-management', handlers: ['onRevoke={revokeSession}', 'onClick={() => void revokeOtherSessions()}'] }),
   );
