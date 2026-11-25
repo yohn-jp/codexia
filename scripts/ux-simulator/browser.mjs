@@ -161,19 +161,8 @@ function paintStage() {
     : edge.method === 'trace' ? '実行証拠あり' : '設計正本';
   replace(stage,
     h('p', { class: 'ux-source' }, [labels[state.platform], modeLabels[state.projection], flow.label].join(' · ')),
-    h('div', { class: 'ux-wireframe', 'data-form': variant },
-      h('p', { class: 'ux-current-label' }, '現在の状態 · ' + (state.history.filter(({ edge }) => edge).length) + ' 回の遷移操作'),
-      heading,
-      memberFields(screen).map((region) => h('section', { class: 'ux-region' },
-        h('h3', {}, region.label ?? region.id), h('small', {}, region.role ?? '領域'))),
-      screenControls(screenId).length > 0 && h('details', { class: 'ux-control-list' }, h('summary', {}, '操作仕様'),
-        h('ul', {}, screenControls(screenId).map((control) => h('li', {},
-          button(control.id + '　' + (control.label ?? control.role ?? ''), () => {
-            selectedControl = control;
-            paintInspector();
-            inspector.open = true;
-          })))))),
-    !menu.length && h('p', {}, state.projection === 'expected' ? 'この図の終端です。' : 'この位置から辿れる正規ソースの遷移がありません。'),
+    h('p', { class: 'ux-current-label' }, '現在の状態 · ' + (state.history.filter(({ edge }) => edge).length) + ' 回の遷移操作'),
+    heading,
     h('section', { class: 'ux-route-map', 'aria-labelledby': 'ux-route-title' },
       h('h3', { id: 'ux-route-title' }, '遷移の全体図'),
       h('p', { class: 'ux-source' }, '現在位置の根拠付き遷移を選択できます。'),
@@ -197,6 +186,17 @@ function paintStage() {
               edge.condition && h('small', { id: 'ux-route-condition-' + edge.id, class: 'ux-route-condition' }, '条件: ' + edge.condition),
               h('small', { id: 'ux-route-evidence-' + edge.id, class: 'ux-route-evidence' }, edgeEvidence(edge))))) : h('small', { class: 'ux-source' }, 'この範囲に出る遷移はありません。'));
         })))),
+    h('div', { class: 'ux-wireframe', 'data-form': variant },
+      memberFields(screen).map((region) => h('section', { class: 'ux-region' },
+        h('h3', {}, region.label ?? region.id), h('small', {}, region.role ?? '領域'))),
+      screenControls(screenId).length > 0 && h('details', { class: 'ux-control-list' }, h('summary', {}, '操作仕様'),
+        h('ul', {}, screenControls(screenId).map((control) => h('li', {},
+          button(control.id + '　' + (control.label ?? control.role ?? ''), () => {
+            selectedControl = control;
+            paintInspector();
+            inspector.open = true;
+          })))))),
+    !menu.length && h('p', {}, state.projection === 'expected' ? 'この図の終端です。' : 'この位置から辿れる正規ソースの遷移がありません。'),
     h('div', { class: 'actions' },
       button('一つ戻る', () => apply(back(state)), { disabled: !state.stack.length }),
       linked && button('参照先 ' + item.linkedScreen + ' の図', () =>
