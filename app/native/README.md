@@ -1,4 +1,4 @@
-# Native iOS authentication
+# Legacy Capacitor authentication
 
 The iOS shell is a separate public OAuth client of Codexia's embedded Better Auth OAuth Provider. Better Auth owns upstream OIDC federation and issues the access token accepted by Codexia's API. The iOS client never sends an upstream ID token as an API bearer.
 
@@ -10,6 +10,6 @@ The API transport requires `VITE_CODEXIA_API_ORIGIN` to be an explicit HTTPS ori
 
 Set `VITE_CODEXIA_PUBLIC_READER_ORIGIN` to the public reader site's HTTPS origin when the native app should create distributable publication links. It accepts an origin only, without credentials, path, query, or fragment, and is independent of `VITE_CODEXIA_API_ORIGIN`. If it is unset, the share panel cannot create a link and never substitutes the Capacitor WebView origin. Web builds continue to use their current page origin.
 
-Sign-out clears the in-memory access token and Keychain refresh token, then requests refresh-token revocation. Already-issued API access JWTs can remain valid until expiration. The owning client can explicitly revoke an individual access token through the [RFC 7009 endpoint](../../docs/deployment/IOS-CLIENT.md#client-implementation).
+Sign-out clears the in-memory access token and Keychain refresh token, then requests refresh-token revocation. Already-issued API access JWTs can remain valid until expiration. The owning client can explicitly revoke an individual access token through the [RFC 7009 endpoint](../../docs/deployment/IOS-CLIENT.md#authentication-and-network).
 
-`npm test` runs native configuration, API-origin, callback-scheme, and bridge guard checks. The unsigned iOS workflow installs the isolated Capacitor toolchain before bundling, generates the project, registers the callback scheme, and resolves AppAuth through Swift Package Manager. Its macOS build verifies native compilation and IPA structure, not a configured provider, live API, signed install, or physical-device acceptance.
+`npm test` runs the retained Capacitor configuration, API-origin, callback-scheme and bridge checks. The [native iOS build and distribution guide](../../docs/deployment/IOS-CLIENT.md) covers SwiftUI IPA packaging and personal-device signing.
