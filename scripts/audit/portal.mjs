@@ -8,7 +8,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { containsCredentialPattern } from './publication-policy.mjs';
 import { verifySpecifications } from './specifications.mjs';
-import { LIKEC4_SOURCE_PATH, LIKEC4_VERSION, LIKEC4_VIEW_ID } from '../architecture/contract.mjs';
+import { LIKEC4_OPERATIONS_VIEW_ID, LIKEC4_SOURCE_PATH, LIKEC4_VERSION, LIKEC4_VIEW_ID } from '../architecture/contract.mjs';
 import { LIKEC4_PUBLIC_BUNDLE, LIKEC4_PUBLIC_LICENSE } from '../architecture/webcomponent.mjs';
 import { inspectUxArtifact } from './ux-artifact.mjs';
 
@@ -51,7 +51,9 @@ function likec4Provenance(site, sourceSha) {
   if (!existsSync(atlasPath)) return undefined;
   const atlas = JSON.parse(readPageFile(atlasPath, 'utf8'));
   const diagrams = atlas.diagrams?.filter(item => item.renderer === 'likec4');
-  assert.ok(diagrams?.some(item => item.id === 'system-1' && item.viewId === LIKEC4_VIEW_ID), 'LikeC4 system-1 view missing');
+  for (const [id, viewId] of [['system-1', LIKEC4_VIEW_ID], ['system-3', LIKEC4_OPERATIONS_VIEW_ID]]) {
+    assert.ok(diagrams?.some(item => item.id === id && item.viewId === viewId), `LikeC4 ${id} view missing`);
+  }
   assert.equal(atlas.sourceSha, sourceSha, 'LikeC4 Atlas source mismatch');
   const lockPath = 'scripts/architecture/package-lock.json';
   const atSource = path => execFileSync('git', ['show', `${sourceSha}:${path}`]);

@@ -58,7 +58,16 @@ function fixture() {
   mkdirSync(join(site,'architecture','likec4'));
   put(join(site,'architecture','likec4','codexia-architecture.mjs'),'// fixture bundle');
   put(join(site,'architecture','likec4','LICENSE'),'MIT License');
-  put(join(site,'architecture','manifest.json'),JSON.stringify({sourceSha:sha,diagrams:[{id:'user-1',renderer:'mermaid',image:'svg/user-1.svg'},{id:'system-1',renderer:'likec4',viewId:'architecture',artifact:'likec4/codexia-architecture.mjs',sourceModel:'docs/architecture/likec4/model.likec4',sourceModelSha256:digest(readFileSync('docs/architecture/likec4/model.likec4'))}]}));
+  const sourceModel = 'docs/architecture/likec4/model.likec4';
+  const native = {
+    renderer: 'likec4', artifact: 'likec4/codexia-architecture.mjs', sourceModel,
+    sourceModelSha256: digest(readFileSync(sourceModel)),
+  };
+  put(join(site,'architecture','manifest.json'),JSON.stringify({sourceSha:sha,diagrams:[
+    {id:'user-1',renderer:'mermaid',image:'svg/user-1.svg'},
+    {...native,id:'system-1',viewId:'architecture'},
+    {...native,id:'system-3',viewId:'operations-topology'},
+  ]}));
   put(join(site,'graph','source.json'),JSON.stringify({sourceSha:sha}));
   put(join(site,'graph','analysis.mjs'),'export const analyze = true;\n');
   put(join(site,'graph','communities.html'),'<html><body><a href="./">Graph</a></body></html>');
@@ -198,7 +207,10 @@ test('records and validates LikeC4 source, lock and published web component prov
     assert.equal(registry.likec4.generator.version,'1.61.0');
     assert.equal(registry.likec4.generator.lockSha256,digest(readFileSync('scripts/architecture/package-lock.json')));
     verify(site,origin);
-    assert.deepEqual(registry.likec4.views,[{id:'system-1',viewId:'architecture'}]);
+    assert.deepEqual(registry.likec4.views,[
+      {id:'system-1',viewId:'architecture'},
+      {id:'system-3',viewId:'operations-topology'},
+    ]);
     for (const output of registry.likec4.outputs) {
       const path = join(site,output.path);
       const content = readFileSync(path);
