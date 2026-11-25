@@ -8,4 +8,4 @@ if (!root) throw new Error('Missing React root');
 
 const initialTheme = loadThemeMode();
 applyThemeMode(initialTheme);
-createRoot(root).render(<App mode="desktop" />);
+createRoot(root).render(<App />);
