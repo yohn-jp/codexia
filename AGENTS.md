@@ -26,7 +26,7 @@ Read only the contracts relevant to the task:
 
 Follow the latest explicit user instruction, accepted Issue/implementation contract, and repository-local canonical sources. Implement only the accepted scope; do not introduce speculative abstractions, compatibility paths, or unrelated refactors. Reuse existing authorities and components.
 
-Work on an isolated branch/worktree; never change `main` directly. Submit a PR for implementation changes. Merge, publish, or deploy only when explicitly authorized. Do not overwrite unrelated work or bypass guards. Keep execution prompts and verification results in PRs or test artifacts, not maintained product documentation. Preserve the closed migration evidence in `evidence/migration`; do not reopen its ledger.
+Work on an isolated branch/worktree; never change `main` directly. Submit a PR for implementation changes. Merge, publish, or deploy only when explicitly authorized. Before an authorized merge, confirm the latest PR head is based on the current `main` and the exact-head Verify has succeeded; use the read-only `scripts/ci/certification/merge-readiness.mjs` advisory when available. Do not force a full PR plan solely to make main proof reusable. Do not overwrite unrelated work or bypass guards. Keep execution prompts and verification results in PRs or test artifacts, not maintained product documentation. Preserve the closed migration evidence in `evidence/migration`; do not reopen its ledger.
 
 ## Validation
 

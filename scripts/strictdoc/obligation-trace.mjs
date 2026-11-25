@@ -73,11 +73,13 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
     if (parents.length !== 1 || parents[0] !== requirementId) violations.push(`${obligation.UID} must have exactly one Parent relation to ${requirementId}`);
     const designRefs = String(obligation['Design reference'] ?? '').split(/\s*;\s*/u).filter(Boolean);
     const sourceRefs = relationValues(obligation, 'File').map((ref) => ({ ...ref, identifier: ref.path }));
+    const requirementImplementationIdentifiers = String(requirement?.['Implementation identifiers'] ?? '').split(/\s*;\s*/u).filter(Boolean);
+    const requirementComment = String(requirement?.Comment ?? '').trim();
     const surfaceIdentifiers = String(obligation['Surface identifiers'] ?? '').split(/\s*;\s*/u).filter(Boolean).map((item) => {
       const separator = item.indexOf('=');
       const kind = separator > 0 ? item.slice(0, separator) : '';
       const id = separator > 0 ? item.slice(separator + 1) : '';
-      if (!['httpOperation', 'routeId', 'toolName', 'objectId', 'controlId', 'nativeIosView', 'iacResource', 'ansibleSource', 'surfaceId', 'identifier'].includes(kind) || !id) {
+      if (!['httpOperation', 'routeId', 'toolName', 'objectId', 'controlId', 'nativeIosView', 'iacResource', 'ansibleSource', 'ciWorkflow', 'surfaceId', 'identifier'].includes(kind) || !id) {
         violations.push(`${obligation.UID} has invalid surface identifier ${item}`);
         return null;
       }
@@ -118,6 +120,7 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
       decisionStatus: requirement?.['Decision status'] ?? 'UNKNOWN',
       conformanceStatus: requirement?.['Conformance status'] ?? 'UNMAPPED',
       applicability: requirement?.Applicability ?? 'UNKNOWN',
+      requirementImplementationIdentifiers, requirementComment,
       designRefs, sourceRefs,
       implementationIdentifiers: String(obligation['Implementation identifiers'] ?? '').split(/\s*;\s*/u).filter(Boolean),
       surfaceIdentifiers, testIds, exactRuns, status,

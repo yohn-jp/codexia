@@ -260,12 +260,13 @@ class S3TransferTests(unittest.TestCase):
 
         fake_boto3 = type("Boto3", (), {"session": type("SessionModule", (), {"Session": FakeSession})})()
         fake_botocore_config = type("BotocoreConfig", (), {"Config": FakeConfig})
-        with patch.dict(sys.modules, {
+        with patch.object(s3_transfer, "_install_pinned_https_transport") as install_transport, patch.dict(sys.modules, {
             "boto3": fake_boto3,
             "botocore": type("Botocore", (), {"config": fake_botocore_config})(),
             "botocore.config": fake_botocore_config,
         }):
             s3_transfer._make_client(profile(caBundle="/protected/fixture-ca.pem"))
+        install_transport.assert_called_once()
 
         client_kwargs = captures["client_kwargs"]
         self.assertEqual(captures["service"], "s3")
@@ -352,6 +353,17 @@ class S3TransferTests(unittest.TestCase):
                 guard.needs_retry(response=response)
         with self.assertRaises(s3_transfer.TransferError):
             guard.before_send(type("Request", (), {"url": "https://metadata.example.test/latest/meta-data"})())
+
+    def test_endpoint_guard_returns_only_validated_numeric_addresses(self) -> None:
+        guard = s3_transfer.EndpointGuard(profile(), "https://objects.example.test")
+        public_answer = [(None, None, None, None, ("93.184.216.34", 443))]
+        with patch("s3_transfer.socket.getaddrinfo", return_value=public_answer):
+            self.assertEqual(guard._resolve_public_addresses("objects.example.test", 443), ("93.184.216.34",))
+
+        rebinding_answer = [(None, None, None, None, ("127.0.0.1", 443))]
+        with patch("s3_transfer.socket.getaddrinfo", return_value=rebinding_answer):
+            with self.assertRaises(s3_transfer.TransferError):
+                guard._resolve_public_addresses("objects.example.test", 443)
 
     def test_environment_variable_cannot_enable_private_s3_endpoints(self) -> None:
         private_answer = [(None, None, None, None, ("127.0.0.1", 443))]
@@ -573,6 +585,50 @@ class S3TransferTests(unittest.TestCase):
             )
 
         self.assertEqual(list(self.output.iterdir()), [])
+
+    def test_download_bounds_commit_marker_reads_and_closes_the_stream(self) -> None:
+        self.write_artifact()
+        client = FakeS3Client()
+        transfer = self.make_transfer(client)
+        receipt_path = self.receipts / "backup.json"
+        backup_id = "20261123T120000Z-12345678-1234-4234-9234-1234567890ab"
+        transfer.upload_artifact(
+            self.artifact,
+            backup_id=backup_id,
+            source_identity="a" * 40,
+            receipt_path=receipt_path,
+        )
+
+        class TrackingBody(io.BytesIO):
+            read_limit: int | None = None
+            was_closed = False
+
+            def read(self, size: int = -1) -> bytes:
+                self.read_limit = size
+                return super().read(size)
+
+            def close(self) -> None:
+                self.was_closed = True
+                super().close()
+
+        for content_length in (s3_transfer.MAX_COMMIT_MARKER_BYTES + 1, 1, None):
+            with self.subTest(content_length=content_length):
+                body = TrackingBody(b"x" * (s3_transfer.MAX_COMMIT_MARKER_BYTES + 1))
+                response = {"Body": body}
+                if content_length is not None:
+                    response["ContentLength"] = content_length
+                with patch.object(client, "get_object", return_value=response):
+                    with self.assertRaisesRegex(s3_transfer.TransferError, "commit marker"):
+                        transfer.download_artifact(
+                            backup_id=backup_id, receipt_path=receipt_path, output_dir=self.output
+                        )
+                self.assertTrue(body.was_closed)
+                self.assertEqual(
+                    body.read_limit,
+                    None if isinstance(content_length, int) and content_length > s3_transfer.MAX_COMMIT_MARKER_BYTES
+                    else s3_transfer.MAX_COMMIT_MARKER_BYTES + 1,
+                )
+                self.assertEqual(list(self.output.iterdir()), [])
 
     def test_download_restores_exact_ciphertext_only_after_receipt_and_manifest_match(self) -> None:
         files = self.write_artifact()

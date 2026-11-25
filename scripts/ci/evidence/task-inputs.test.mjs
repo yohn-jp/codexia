@@ -198,7 +198,7 @@ test('uncommitted worktree changes cannot influence proof for a pinned Git SHA',
   }
 });
 
-test('browser input proofs bind the lane image for both browsers in the shared WebKit lane', async t => {
+test('browser input proofs bind the Chromium image for every lane', async t => {
   const root = await fixture(t);
   const sha = await git(root, 'rev-parse', 'HEAD');
   const mutatedRoot = await mkdtemp(path.join(os.tmpdir(), 'codexia-browser-image-proof-'));
@@ -216,23 +216,19 @@ test('browser input proofs bind the lane image for both browsers in the shared W
     path.join(toolchainDirectory, 'toolchain.json'));
   const digestsFile = path.join(mutatedRoot, 'scripts/ci/browser/image-digests.mjs');
   const digests = await readFile(digestsFile, 'utf8');
-  await writeFile(digestsFile, digests.replace(PLAYWRIGHT_IMAGE_DIGESTS.webkit, `sha256:${'f'.repeat(64)}`));
+  await writeFile(digestsFile, digests.replace(PLAYWRIGHT_IMAGE_DIGESTS.chromium, `sha256:${'f'.repeat(64)}`));
   await mkdir(path.join(mutatedRoot, 'scripts/architecture'), { recursive: true });
   await cp(new URL('../../architecture/constants.mjs', import.meta.url), path.join(mutatedRoot, 'scripts/architecture/constants.mjs'));
-  const { captureTaskInputSource: captureWithChangedWebKitImage } = await import(
+  const { captureTaskInputSource: captureWithChangedChromiumImage } = await import(
     pathToFileURL(path.join(mutatedScripts, 'task-inputs.mjs')).href
   );
   const inputs = { root, sha, runtime };
   const original = captureTaskInputSource(inputs);
-  const changed = captureWithChangedWebKitImage(inputs);
+  const changed = captureWithChangedChromiumImage(inputs);
   for (const profile of ['core', 'full']) {
-    for (const shard of ['ui-v1', 'webkit']) {
+    for (const shard of ['ui-v1', 'core', 'oauth-web', 'auth-recovery', 'passkey-bootstrap']) {
       const task = `browser-${profile}-${shard}`;
-      assert.notEqual(changed(task).environment, original(task).environment, `${task} runs in the changed multi-browser image`);
-    }
-    for (const shard of ['core', 'oauth-web', 'auth-recovery', 'passkey-bootstrap']) {
-      const task = `browser-${profile}-${shard}`;
-      assert.equal(changed(task).environment, original(task).environment, `${task} uses the unchanged Chromium-only image`);
+      assert.notEqual(changed(task).environment, original(task).environment, `${task} runs in the changed Chromium image`);
     }
   }
 });

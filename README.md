@@ -12,6 +12,8 @@ The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) contains broad
 
 ## Run locally
 
+For isolated Codex Cloud tasks, follow the [Cloud development environment](docs/verification/CLOUD-DEVELOPMENT.md).
+
 Use the [local UI preview](docs/verification/UI-PREVIEW.md) to try the currently implemented Desktop React Web. The existing Mobile Web preview is legacy, not a native iOS deliverable. It runs a disposable PostgreSQL container and a local Better Auth issuer. Install Node.js and pnpm versions satisfying [`package.json`](package.json), and start Docker or Podman.
 
 ```sh

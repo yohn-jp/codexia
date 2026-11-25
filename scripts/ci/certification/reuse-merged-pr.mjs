@@ -310,7 +310,6 @@ async function main() {
   assert.equal(repository, 'yohn-jp/codexia', 'Unexpected repository');
   const client = createGitHubProofClient({ repository, token });
   const request = client.get;
-  request.paginate = client.paginate;
   const resolve = async () => {
     const payload = JSON.parse(await readFile(eventPath, 'utf8'));
     assert.equal(payload.ref, ref);

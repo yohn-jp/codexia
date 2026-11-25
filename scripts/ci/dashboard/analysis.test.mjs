@@ -46,14 +46,14 @@ const jobs = [
   job(1,'plan',0,1,4),
   job(2,'build-core',4,8,28),
   job(3,'build-full',4,6,20),
-  job(4,'browser-core-webkit',28,31,57),
+  job(4,'browser-core-ui-v1',28,31,57),
   job(5,'certification',57,59,62),
 ];
 
 test('graph reads workflow job templates and needs, including matrix jobs', () => {
   const parsed = readVerifyGraph(graph);
   assert.deepEqual(parsed.find(x=>x.id==='browser').needs,['plan','build']);
-  assert.equal(nameMatches(parsed.find(x=>x.id==='browser').template,'browser-core-webkit'),true);
+  assert.equal(nameMatches(parsed.find(x=>x.id==='browser').template,'browser-core-ui-v1'),true);
   assert.equal(nameMatches(parsed.find(x=>x.id==='browser').template,'unit-core'),false);
   assert.throws(()=>readVerifyGraph('jobs:\n  plan:\n    name: plan\n'),/Unrecognized/u);
 });
@@ -61,7 +61,7 @@ test('graph reads workflow job templates and needs, including matrix jobs', () =
 test('observed dependency chain chooses latest completed prerequisite', () => {
   const chain = blockingChain(run(),jobs,graph);
   assert.equal(chain.verified,true);
-  assert.deepEqual(chain.names,['plan','build-core','browser-core-webkit','certification']);
+  assert.deepEqual(chain.names,['plan','build-core','browser-core-ui-v1','certification']);
   assert.equal(chain.certificationSeconds,62);
   const report = observeRun(run(),jobs,graph);
   assert.equal(report.timing.runnerSeconds,3+20+14+26+3);
@@ -75,7 +75,7 @@ test('bottleneck attribution separates validation and reveals near-finishing sib
   const sameFinishGroup = [...jobs, job(7,'browser-full-writing',28,32,54)];
   const report = observeRun(run(),sameFinishGroup,graph);
   assert.equal(report.bottleneck.available,true);
-  assert.equal(report.bottleneck.leafName,'browser-core-webkit');
+  assert.equal(report.bottleneck.leafName,'browser-core-ui-v1');
   assert.equal(report.bottleneck.leafSeconds,26);
   assert.equal(report.bottleneck.leafQueueSeconds,3);
   assert.equal(report.bottleneck.beforeValidationSeconds,0);
@@ -84,13 +84,13 @@ test('bottleneck attribution separates validation and reveals near-finishing sib
   assert.equal(report.bottleneck.runnerUpName,'browser-full-writing');
   assert.equal(report.bottleneck.runnerUpGapSeconds,3);
   assert.deepEqual(report.bottleneck.nearFinish.map(item=>item.name),
-    ['browser-core-webkit','browser-full-writing']);
+    ['browser-core-ui-v1','browser-full-writing']);
 });
 
 test('bottleneck remains unavailable for failed certification, reruns and missing steps', () => {
   assert.equal(observeRun(run({conclusion:'failure'}),jobs,graph).bottleneck.available,false);
   assert.equal(observeRun(run({run_attempt:2}),jobs,graph).bottleneck.available,false);
-  const noSteps = jobs.map(item => item.name === 'browser-core-webkit' ? { ...item, steps: [] } : item);
+  const noSteps = jobs.map(item => item.name === 'browser-core-ui-v1' ? { ...item, steps: [] } : item);
   const observation = observeRun(run(),noSteps,graph).bottleneck;
   assert.equal(observation.available,true);
   assert.equal(observation.validationSeconds,null);
@@ -353,9 +353,9 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   assert.equal(await copyButton.isDisabled(), true);
   releaseInventory();
   const timeline = page.getByRole('region', { name: 'Job timeline' });
-  await timeline.getByText('browser-core-webkit', { exact: false }).first().waitFor();
+  await timeline.getByText('browser-core-ui-v1', { exact: false }).first().waitFor();
   assert.equal(await page.locator('#selection-result').textContent(), 'success');
-  assert.match(await page.locator('#selection-bottleneck').textContent(), /browser-core-webkit/u);
+  assert.match(await page.locator('#selection-bottleneck').textContent(), /browser-core-ui-v1/u);
   assert.equal(await page.getByRole('link', { name: '最新Verifyを開く' }).count(), 1);
   const stepsRegion = page.locator('.table-scroll');
   assert.equal(await stepsRegion.getAttribute('tabindex'), '0');
@@ -384,7 +384,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   const copied = JSON.parse(copies[0]);
   assert.equal(copied.origin.pr, 42);
   assert.equal(copied.origin.executedSha, 'a'.repeat(40));
-  assert.equal(copied.selectedVerify.observedLastLeaf.leafName, 'browser-core-webkit');
+  assert.equal(copied.selectedVerify.observedLastLeaf.leafName, 'browser-core-ui-v1');
   assert.equal(copied.selectedVerify.observedLastLeaf.leafSeconds, 26);
   t.diagnostic('initial revision telemetry and diagnostic copy passed');
 
@@ -450,7 +450,7 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
   await page.reload();
   await page.getByRole('status').filter({ hasText: /Job inventory exceeds supported pagination/u }).waitFor();
   assert.equal(await copyButton.isDisabled(), true);
-  assert.equal(await timeline.getByText('browser-core-webkit', { exact: false }).count(), 0);
+  assert.equal(await timeline.getByText('browser-core-ui-v1', { exact: false }).count(), 0);
   t.diagnostic('empty and incomplete API cases passed');
 
   mode = 'measured';

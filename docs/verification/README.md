@@ -1,5 +1,7 @@
 # Verification
 
+For isolated Codex Cloud tasks, use the [Cloud development procedure](CLOUD-DEVELOPMENT.md) rather than a separately maintained application/authentication launcher.
+
 [Pages公開物の機能棚卸し](PAGES-FUNCTION-INVENTORY.md)は単一の公開ワークフローと各画面のデータ出典、観測の限界をまとめる。
 [Pages統合サイトマップと画面UX設計](../design/DEVELOPMENT-PAGES-UX.md)は画面の設計正本を定義する。
 統合ポータルの受入証拠は、対象SHAのRepository Audit Pagesの結果と生成物を参照する。
@@ -38,10 +40,10 @@ The second command prints the fingerprint only when the applied ledger exactly m
 
 ## Browser checks
 
-During transition install the configured browsers and run acceptance against each profile. The adopted author Web target is Windows Chromium; once the executable inventory has migrated per [E2E execution](E2E-EXECUTION.md), install only Chromium for ordinary author acceptance. Until then the command below reflects the current executable inventory, not a permanent WebKit support requirement:
+Install Chromium and run acceptance against each profile, as required by [E2E execution](E2E-EXECUTION.md). The duplicate WebKit project is retired:
 
 ```sh
-pnpm exec playwright install chromium webkit
+pnpm exec playwright install chromium
 export CODEXIA_E2E_DATABASE_URL='postgres://user:password@127.0.0.1:5432/codexia_e2e'
 # The database above must be disposable; browser tests persist fixtures and do not clean the database.
 CODEXIA_PROFILE=core pnpm test:e2e

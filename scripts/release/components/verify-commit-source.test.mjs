@@ -42,7 +42,7 @@ test('commit publication CLI requires exact main source and the complete success
     assert.equal(run({ GITHUB_OUTPUT: output }).status, 0);
     assert.equal(existsSync(output), false, 'API-derived run data is not written to a workflow output file');
     assert.notEqual(run({ WAIT: '1' }).status, 0, 'Missing completed Verify proof must fail promptly without polling');
-    for (const changes of [{ API_ERROR: '1' }, { FAIL_JOB: 'certification' }, { FAIL_JOB: 'browser-core-webkit' }, { GITHUB_SHA: 'a'.repeat(40) }, { GITHUB_REF: 'refs/heads/other' }]) {
+    for (const changes of [{ API_ERROR: '1' }, { FAIL_JOB: 'certification' }, { FAIL_JOB: 'browser-core-ui-v1' }, { GITHUB_SHA: 'a'.repeat(40) }, { GITHUB_REF: 'refs/heads/other' }]) {
       const result = run(changes);
       assert.notEqual(result.status, 0, result.stdout);
     }

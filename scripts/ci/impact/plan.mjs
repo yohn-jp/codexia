@@ -180,6 +180,26 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/audit/portal.mjs',
   'scripts/audit/ux-artifact.mjs',
   'scripts/audit/ux-artifact.test.mjs',
+  // Reviewed root-only CI contract tests; orchestration implementations still fail closed.
+  'scripts/ci/browser/coverage-reporter.test.mjs',
+  'scripts/ci/browser/shards.test.mjs',
+  'scripts/ci/certification/reuse-merged-pr.test.mjs',
+  'scripts/ci/evidence/artifact-selection.test.mjs',
+  'scripts/ci/evidence/coverage-inputs.test.mjs',
+  'scripts/ci/evidence/download-artifacts.test.mjs',
+  'scripts/ci/evidence/input-proof.test.mjs',
+  'scripts/ci/evidence/profile-artifact.test.mjs',
+  'scripts/ci/evidence/proof-reuse.test.mjs',
+  'scripts/ci/evidence/task-inputs.test.mjs',
+  'scripts/ci/evidence/validation.test.mjs',
+  'scripts/ci/execution/parallel.test.mjs',
+  'scripts/ci/execution/typecheck-tests.test.mjs',
+  'scripts/ci/execution/workspace.test.mjs',
+  'scripts/ci/impact/contract.test.mjs',
+  'scripts/ci/impact/design-admission.test.mjs',
+  'scripts/ci/impact/evidence-checkout.test.mjs',
+  'scripts/ci/impact/plan.test.mjs',
+  'scripts/ci/impact/security-scan-scope.test.mjs',
   'scripts/ci/impact/security-admission.test.mjs',
   'scripts/pages-api/pack.mjs',
   'scripts/pages-api/pack.test.mjs',
@@ -347,7 +367,6 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
         add('test-types-app-e2e');
         for (const profile of PROFILES) {
           add(`build-${profile}`, `browser-${profile}-${spec.id}`);
-          if (spec.id === 'ui-v1') add(`browser-${profile}-webkit`);
         }
         continue;
       }
@@ -466,7 +485,7 @@ export function verificationPlanOutputs(plan) {
     types: JSON.stringify(plan.groups.filter(group => group.startsWith('types-')).map(group => group.slice(6))),
     build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),
     oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
-    browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'webkit']
+    browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'ui-v1']
       .filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => ({ group: `${profile}-${id}`, profile })))),
     full_model_oci: String(plan.full_model_oci),
   };

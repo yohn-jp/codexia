@@ -168,9 +168,12 @@ test('UX projection source and Pages inputs select scoped canonical proofs', asy
   }
   for (const file of ['scripts/audit/ux-artifact.mjs', 'scripts/audit/ux-artifact.test.mjs',
     '.github/workflows/repository-audit.yml']) assert.ok(OPERATIONAL_ROOT_PATHS.includes(file), file);
-  for (const file of ['scripts/ci/evidence/task-inputs.mjs', 'scripts/ci/evidence/task-inputs.test.mjs']) {
-    assert.equal((await plan([file])).mode, 'full', 'shared CI evidence authority preserves full verification');
-  }
+  assert.equal((await plan(['scripts/ci/evidence/task-inputs.mjs'])).mode, 'full', 'shared CI evidence authority preserves full verification');
+  const evidenceTest = await plan(['scripts/ci/evidence/task-inputs.test.mjs']);
+  assert.equal(evidenceTest.mode, 'affected', 'root-only evidence contract test does not alter execution authority');
+  assert.ok(evidenceTest.tasks.includes('unit-root'));
+  assert.ok(evidenceTest.tasks.includes('coverage'));
+  assert.equal(evidenceTest.full_model_oci, false);
 });
 
 test('Verify selects HTTP contract source comparison when any owning route source changes', async () => {
@@ -399,7 +402,7 @@ test('shared app changes retain both profile browser coverage without backend un
   assert.ok(selected.tasks.includes('unit-app'));
   for (const profile of ['core', 'full']) {
     assert.ok(selected.tasks.includes(`build-${profile}`));
-    assert.ok(selected.tasks.includes(`browser-${profile}-webkit`));
+    assert.ok(selected.tasks.includes(`browser-${profile}-ui-v1`));
     assert.ok(selected.tasks.includes(`browser-${profile}-core`));
   }
   assert.ok(!selected.tasks.includes('unit-api'));
@@ -544,7 +547,7 @@ test('OAuth browser acceptance is selected in both profile browser lanes', async
     assert.ok(selected.tasks.includes(`build-${profile}`));
     assert.ok(selected.tasks.includes(`browser-${profile}-oauth-web`));
     assert.ok(selected.groups.includes(`browser-${profile}-reference`));
-    assert.ok(!selected.groups.includes(`browser-${profile}-webkit`));
+    assert.ok(!selected.groups.includes(`browser-${profile}-ui-v1`));
   }
   assert.ok(!selected.tasks.includes('unit-api'));
 });
@@ -684,6 +687,25 @@ test('iOS packaging workflow changes retain root proof and its shared inputs sta
   assert.equal(unknownMixed.mode, 'full');
 });
 
+test('CI contract-test changes select only root and coverage, including the iOS freeze diff', async () => {
+  const paths = ['scripts/ci/impact/plan.test.mjs', 'scripts/ci/evidence/proof-reuse.test.mjs',
+    'scripts/ci/certification/reuse-merged-pr.test.mjs'];
+  for (const file of paths) {
+    const result = await plan([file]);
+    assert.equal(result.mode, 'affected', file);
+    assert.deepEqual(result.tasks, ['unit-root', 'coverage'], file);
+    assert.equal(result.full_model_oci, false, file);
+  }
+  const freeze = await plan([...paths, '.github/workflows/ios-api.yml', '.github/workflows/ios-editor.yml']);
+  assert.deepEqual(freeze.tasks, ['unit-root', 'coverage']);
+  const { VERIFICATION_TASKS } = await import('./contract.mjs');
+  for (const file of ['scripts/ci/impact/plan.mjs', 'scripts/ci/evidence/proof-reuse.mjs', 'scripts/ci/impact/unknown.test.mjs']) {
+    const result = await plan([...paths, file]);
+    assert.deepEqual(result.tasks, VERIFICATION_TASKS, file);
+    assert.equal(result.full_model_oci, true, file);
+  }
+});
+
 test('root and coverage-only plans have a single owner for contract test execution', async () => {
   const runner = readFileSync(new URL('../execution/group.mjs', import.meta.url),'utf8');
   const root = JSON.parse(readFileSync(new URL('../../../package.json',import.meta.url),'utf8'));
@@ -740,7 +762,7 @@ test('iOS packaging and CI dashboard changes remain root-scoped, mixed source re
     assert.equal((await plan([file])).full_model_oci, false);
   }
   const changed = await plan(['.github/workflows/ios-unsigned-ipa.yml', 'app/src/main.tsx']);
-  assert.ok(changed.tasks.includes('build-full') && changed.tasks.includes('browser-full-webkit'));
+  assert.ok(changed.tasks.includes('build-full') && changed.tasks.includes('browser-full-ui-v1'));
   assert.deepEqual((await plan(['scripts/ci/dashboard/analysis.mjs', 'unknown/unreviewed.txt'])).tasks, VERIFICATION_TASKS);
   assert.deepEqual((await plan(['.github/workflows/ios-unsigned-ipa.yml'], 'push')).tasks, VERIFICATION_TASKS);
 });

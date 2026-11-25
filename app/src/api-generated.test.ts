@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { EvidenceId, RevisionId } from '@codexia/persistence-contracts';
 import { api, setOAuthAccessToken } from './api.js';
-import { getJobEventsGetUrl, getPersistenceDocumentsGetUrl, getPersistenceStatusGetUrl } from './generated/http/client.js';
+import {
+  getJobEventsGetUrl,
+  getPersistenceDocumentAnchorsGetUrl,
+  getPersistenceDocumentsGetUrl,
+  getPersistenceStatusGetUrl,
+} from './generated/http/client.js';
 
 test('generated persistence status uses the authenticated transport and preserves response errors', async t => {
   const controller = new AbortController();
@@ -164,4 +169,33 @@ test('generated job events leave the response stream readable and retain admissi
 
   reply = Response.json({ error: 'Busy', code: 'STREAM_BUSY' }, { status: 503 });
   await assert.rejects(api.jobEventStream(controller.signal), { status: 503, code: 'STREAM_BUSY' });
+});
+
+test('generated document anchor reads keep the maximum page independent of cancellation', async t => {
+  const controller = new AbortController();
+  const urls: string[] = [];
+  const signals: Array<AbortSignal | null> = [];
+  t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+    urls.push(url);
+    signals.push(init.signal ?? null);
+    assert.equal(init.method, 'GET');
+    assert.equal(init.credentials, 'omit');
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer anchor-read-token');
+    return Response.json({ revisionId: null, anchors: [] });
+  });
+  setOAuthAccessToken('anchor-read-token');
+  t.after(() => setOAuthAccessToken(null));
+
+  await api.persistenceDocumentAnchors('project-1', 'document-1');
+  await api.persistenceDocumentAnchors('project-1', 'document-1', 'revision-1', controller.signal);
+
+  assert.deepEqual(urls, [
+    getPersistenceDocumentAnchorsGetUrl('project-1', 'document-1', { limit: 500 }),
+    getPersistenceDocumentAnchorsGetUrl('project-1', 'document-1', { revision: 'revision-1', limit: 500 }),
+  ]);
+  assert.deepEqual(urls, [
+    '/api/v1/persistence/projects/project-1/documents/document-1/anchors?limit=500',
+    '/api/v1/persistence/projects/project-1/documents/document-1/anchors?revision=revision-1&limit=500',
+  ]);
+  assert.deepEqual(signals, [null, controller.signal]);
 });

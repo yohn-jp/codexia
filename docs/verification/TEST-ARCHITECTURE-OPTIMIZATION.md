@@ -55,7 +55,7 @@ Normative test design contract. [CI/CD architecture](CI-CD.md) owns execution, s
 
 ### ブラウザー・プラットフォームの証明境界
 
-[System design](../architecture/SYSTEM-DESIGN.md) の採用対象に従う。作者用DesktopのWebKit/macOS/Firefox互換性は独立した品質要求ではない。Chromiumに残す正常・異常・境界証明とWebKit固有の旧Mobile/公開面の証明を識別し、削除理由を記録する。旧Mobileの撤去は #794 のNative受入条件を変更しない。公開reader・外部認証の契約は別管理し、狭幅アクセシビリティ、セキュリティ、実DB/実APIの証明は維持する。Windows固有のIME・入力・フォントは実Windows受入、NativeはSimulatorと物理iPhoneで証明する。Browser実行最適化の詳細は [E2E execution](E2E-EXECUTION.md) が所有する。
+[System design](../architecture/SYSTEM-DESIGN.md) の採用対象に従う。作者用DesktopのWebKit/macOS/Firefox互換性は独立した品質要求ではない。WebKitの重複実行を廃止し、Chromiumに残す正常・異常・境界証明を維持する。旧Mobileの撤去は #794 のNative受入条件を変更しない。公開reader・外部認証の契約は別管理し、狭幅アクセシビリティ、セキュリティ、実DB/実APIの証明は維持する。Windows固有のIME・入力・フォントは実Windows受入、NativeはSimulatorと物理iPhoneで証明する。Browser実行最適化の詳細は [E2E execution](E2E-EXECUTION.md) が所有する。
 
 ## 3. 状態遷移ベースのテスト設計
 

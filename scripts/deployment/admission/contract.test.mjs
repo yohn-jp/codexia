@@ -284,7 +284,7 @@ test('first activation checks the real transaction window after backup and readi
   const clock = shell.slice(clockStart, clockEnd);
   const transaction = shell.slice(transactionStart, transactionEnd)
     .replaceAll("{{ '{{' }}", '{{').replaceAll("{{ '}}' }}", '}}');
-  assert.match(transaction, /require_activation_window_or_restore\nif ! install -m 0644/u);
+  assert.match(transaction, /require_activation_window_or_restore\nif ! install -m 0600/u);
   assert.match(transaction, /require_activation_window_or_restore\n\s*if ! systemctl --user start codexia-tunnel\.service/u);
 
   const directory = mkdtempSync(path.join(tmpdir(), 'codexia-first-activation-window-'));
@@ -354,7 +354,7 @@ test('rollback clears candidate start-limit failures before restarting the prior
   const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;
   const restore = shell.slice(shell.indexOf('restore_previous(){'), shell.indexOf('if { [[ "$tunnel_present" == true ]]'));
-  const install = restore.indexOf('install -m 0644 "$state_dir/rollback-api.container" "$active_unit"');
+  const install = restore.indexOf('install -m 0600 "$state_dir/rollback-api.container" "$active_unit"');
   const reload = restore.indexOf('systemctl --user daemon-reload', install);
   const reset = restore.indexOf('systemctl --user reset-failed codexia-api.service', reload);
   const start = restore.indexOf('systemctl --user start codexia-api.service', reset);
@@ -363,7 +363,7 @@ test('rollback clears candidate start-limit failures before restarting the prior
     'rollback must restore and reload the prior unit, reset candidate start-limit state, then start and verify health');
 
   const recovery = readFileSync(new URL('../../../deploy/ansible/push-deployment-recover.sh', import.meta.url), 'utf8');
-  const recoveryInstall = recovery.indexOf('install -m 0644 -- "$state_dir/rollback-api.container" "$active_unit"');
+  const recoveryInstall = recovery.indexOf('install -m 0600 -- "$state_dir/rollback-api.container" "$active_unit"');
   const recoveryReload = recovery.indexOf('systemctl --user daemon-reload', recoveryInstall);
   const recoveryReset = recovery.indexOf('systemctl --user reset-failed codexia-api.service', recoveryReload);
   const recoveryStart = recovery.indexOf('systemctl --user start codexia-api.service', recoveryReset);
@@ -468,7 +468,7 @@ test('first activation verifies the initialized database after backup under both
   const shell = transaction['ansible.builtin.shell'].cmd;
   const backup = shell.indexOf('backup-locked');
   const freshMigration = shell.indexOf('verifyPostgresSchema');
-  const startApi = shell.indexOf('systemctl --user start codexia-api.service', shell.indexOf('install -m 0644 "$candidate_unit" "$active_unit"'));
+  const startApi = shell.indexOf('systemctl --user start codexia-api.service', shell.indexOf('install -m 0600 "$candidate_unit" "$active_unit"'));
   assert.ok(backup >= 0 && freshMigration > backup && startApi > freshMigration,
     'first schema verification must follow its backup and precede API activation');
   assert.doesNotMatch(shell, /if \[\[ -n "\$current_image" \]\]; then[\s\S]*backup-locked/u,
@@ -525,7 +525,7 @@ test('push activation keeps one canonical API writer and exposes Tunnel only aft
 
   const stopTunnel = shell.indexOf('systemctl --user stop codexia-tunnel.service');
   const stopApi = shell.indexOf('systemctl --user stop codexia-api.service');
-  const installCandidate = shell.indexOf('install -m 0644 "$candidate_unit" "$active_unit"');
+  const installCandidate = shell.indexOf('install -m 0600 "$candidate_unit" "$active_unit"');
   const startCandidate = shell.indexOf('systemctl --user start codexia-api.service', installCandidate);
   const readiness = shell.indexOf('if [[ "$candidate_health" != healthy ]]');
   const startTunnel = shell.indexOf('systemctl --user start codexia-tunnel.service', readiness);
@@ -609,7 +609,7 @@ test('Better Auth activation uses protected staged settings on a fresh or existi
   const shell = transaction['ansible.builtin.shell'].cmd;
   const backup = shell.indexOf('backup-locked');
   const verifyClients = shell.indexOf('/app/node_modules/@codexia/api/dist/verify-auth-clients.js', backup);
-  const installCandidate = shell.indexOf('install -m 0644 "$candidate_unit" "$active_unit"');
+  const installCandidate = shell.indexOf('install -m 0600 "$candidate_unit" "$active_unit"');
   assert.ok(backup >= 0 && verifyClients > backup && installCandidate > verifyClients,
     'Better Auth client checks must follow encrypted backup and precede candidate installation');
   assert.match(shell, /authSettingsSha256/u);

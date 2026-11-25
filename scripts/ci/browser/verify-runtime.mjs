@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
-import { chromium, webkit } from "@playwright/test";
+import { chromium } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { browserRuntimeRequirements } from "./image-digests.mjs";
 
@@ -13,9 +13,8 @@ const root = fileURLToPath(new URL("../../../", import.meta.url));
 process.chdir(root);
 
 // Derive browser requirements from the canonical CI task inventory.
-// The transitional WebKit group also contains Chromium UI tasks.
 const browserGroup = process.env.CODEXIA_CI_BROWSER_GROUP;
-const { projects, imageDigest: expectedImageDigest } = browserRuntimeRequirements(`browser-${browserGroup}`);
+const { imageDigest: expectedImageDigest } = browserRuntimeRequirements(`browser-${browserGroup}`);
 assert.equal(process.platform, "linux", "Browser verification requires the Linux Noble container");
 assert.equal(process.arch, "x64", "The pinned Playwright image digest is the Linux amd64 image");
 assert.equal(process.versions.node, "24.22.3", "The browser runner must use pinned Node 24.22.3");
@@ -49,7 +48,6 @@ async function verifyBrowser(name, browserType) {
 }
 
 const browsers = { chromium: await verifyBrowser("Chromium", chromium) };
-if (projects.has("webkit")) browsers.webkit = await verifyBrowser("WebKit", webkit);
 process.stdout.write(`PLAYWRIGHT_RUNTIME PASS ${JSON.stringify({
   os: "ubuntu-noble",
   imageDigest: expectedImageDigest,

@@ -38,7 +38,7 @@ export const SCREEN_IMPLEMENTATION_PATHS = Object.freeze({
   'ENTRY-01': ['app/src/launcher.tsx'],
   'AUTH-01': ['app/src/OAuthLoginPage.tsx', 'app/src/oauth-login.ts'],
   'AUTH-02': ['app/src/OAuthConsentPage.tsx', 'app/src/oauth-consent.ts'],
-  'LIB-01': ['app/src/persistence/PersistenceEntry.tsx', 'app/src/application/LibraryOutline.tsx'],
+  'LIB-01': ['app/src/persistence/PersistenceEntry.tsx', 'app/src/persistence/PersistenceWorkspace.tsx'],
   'WRT-01': ['app/src/persistence/PersistenceWorkspace.tsx'],
   'READ-01': ['app/src/editor/MobileReadingPager.tsx'],
 });

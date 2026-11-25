@@ -103,7 +103,7 @@ setup 専用 readiness の応答差分も TypeSpec に記録する。
 - **B: 契約生成** — TypeSpec→OpenAPI 3.1→Redocly/oasdiff、OpenAPI→Fastify schema/route定義とOrval Web clientを生成・照合。iOS Swift生成の受入は[iOS SwiftUI正本](IOS-SWIFTUI-ARCHITECTURE.md)に分離する。変換後のSchemaで正常/異常/境界を試し、変換で情報を失ったらfail。
 - **C: 明示ルート** — Fastify上でrouteを段階移管し、中央admission、Ajv、response serializer、エラーとstreamingを検証。業務handlerをgenerator-owned directoryへ置かない。
 - **D: 特殊経路** — Better Auth、MCP SDK v2、module HTTP、SSE、public reader、graceful shutdownを検証。旧catch-all/二重validator/不要compatibilityを除去。
-- **E: 実動作認定** — 実DB/API/MCP/正式対応Chromium/OCIの受入を維持し、旧Mobile・公開面のWebKit例外は [E2E execution](../verification/E2E-EXECUTION.md) に従い、contract testとexact-source CI証拠を結合する。
+- **E: 実動作認定** — 実DB/API/MCP/正式対応Chromium/OCIの受入を維持し、ブラウザー実行はChromiumに一本化し、[E2E execution](../verification/E2E-EXECUTION.md) に従い、contract testとexact-source CI証拠を結合する。
 
 **Fastify vs Honoの実装ベンチマークは選定条件としない。** Fastifyを維持した状態での性能回帰（p50/p95/p99、RSS、SSE、起動・drain）は別途確認する。仕様からの生成、認可、stream、response serializer、DB semanticsが成立しない場合は未完了と判定する。
 
