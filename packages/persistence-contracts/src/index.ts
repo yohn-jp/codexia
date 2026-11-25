@@ -666,6 +666,7 @@ export interface Persistence {
 }
 
 export type PersistenceErrorCode =
+  | "unavailable"
   | "not_found"
   | "conflict"
   | "idempotency_conflict"

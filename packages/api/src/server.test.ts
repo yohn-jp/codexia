@@ -2541,15 +2541,12 @@ describe('Codexia HTTP boundary', () => {
     }
   });
 
-  it('fails API readiness and persistence status while PostgreSQL is unavailable', async t => {
+  it('reports unavailable persistence for health checks and admitted operations', async t => {
     const staticDir = await mkdtemp(resolve(tmpdir(), 'codexia-api-postgres-ready-'));
     tempDirs.push(staticDir);
-    const persistence = {
-      async checkHealth() {
-        throw new Error('database unavailable');
-      },
-    } as unknown as ApiServerOptions['persistence'];
-    const apiServer = await startCustomApi(makeStore(), staticDir, { persistence });
+    const persistence = createPostgresPersistence({ host: staticDir });
+    t.after(() => persistence.close());
+    const apiServer = await startCustomApi(new CoreStore({ persistence }), staticDir, { persistence });
     t.after(apiServer.close);
 
     const readiness = await fetch(`${apiServer.base}/health/ready`);
@@ -2561,6 +2558,23 @@ describe('Codexia HTTP boundary', () => {
     });
     assert.equal(status.status, 503);
     assert.deepEqual(await status.json(), { error: 'PostgreSQL persistence is not ready', code: 'PERSISTENCE_UNAVAILABLE' });
+
+    const headers = signedRequests.ownerHeaders();
+    const path = `${apiServer.base}/api/v1/persistence/projects`;
+    const read = await fetch(path, { headers });
+    assert.equal(read.status, 503);
+    assert.deepEqual(await read.json(), { error: 'PostgreSQL persistence is not ready', code: 'PERSISTENCE_UNAVAILABLE' });
+    const write = await fetch(path, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Unavailable storage fixture' }),
+    });
+    assert.equal(write.status, 503);
+    assert.deepEqual(await write.json(), { error: 'PostgreSQL persistence is not ready', code: 'PERSISTENCE_UNAVAILABLE' });
+
+    const coreRead = await fetch(`${apiServer.base}/api/projects`, { headers });
+    assert.equal(coreRead.status, 503);
+    assert.deepEqual(await coreRead.json(), { error: 'PostgreSQL persistence is not ready', code: 'PERSISTENCE_UNAVAILABLE' });
   });
 
   it('exposes the source Core read surface through pinned routes and composed host actions', async t => {
