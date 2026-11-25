@@ -336,6 +336,16 @@ model KnowledgeRelationBody {
 }
 
 model PersistenceNodeListBody {
+  nodes?: KnowledgeNodeBody[];
+  nextCursor?: string | null;
+  projectVersion?: int32;
+  ...Record<unknown>;
+}
+
+// The public route serves both its legacy unfiltered node list and its newer
+// versioned browse page. Desktop only calls the browse form and validates the
+// stricter shape through the generated response projection.
+model DesktopPersistenceNodeListBody {
   nodes: KnowledgeNodeBody[];
   nextCursor: string | null;
   projectVersion: int32;

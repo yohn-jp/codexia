@@ -100,6 +100,9 @@ op createAnchorMention(@path projectId: string, @path documentId: string, @path 
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/nodes") @get @operationId("persistence_nodes_get")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "The public route preserves its legacy unfiltered list response with nodes only, while the browsed response includes nextCursor and projectVersion. Desktop only calls the browsed form and validates the strict generated page projection.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopPersistenceNodeListBody")
 op listPersistenceNodes(@path projectId: string, @query q?: string, @query type?: string, @query status?: string, @query limit?: int32, @query cursor?: string, @query projectVersion?: int32): PersistenceNodeListBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
