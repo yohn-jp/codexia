@@ -73,7 +73,11 @@ export interface AuthMethodAvailability {
 export async function fetchAuthMethodAvailability(fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<AuthMethodAvailability> {
   let value: unknown;
   try {
-    value = await authMethodsGet({ ...(signal ? { signal } : {}), fetcher });
+    value = await authMethodsGet({
+      headers: { accept: 'application/json' },
+      ...(signal ? { signal } : {}),
+      fetcher,
+    });
   } catch {
     throw new Error('Sign-in methods could not be loaded.');
   }
