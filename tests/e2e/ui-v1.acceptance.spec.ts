@@ -13,8 +13,7 @@ type TestPostgresClient = {
 };
 const { Client } = requirePersistence("pg") as { Client: new (options: { connectionString: string }) => TestPostgresClient };
 
-// WebKit is retained only for mixed/legacy Mobile and independent public-surface proof.
-// @author-desktop marks reviewed Desktop-only scenarios; Chromium still runs every case.
+// Chromium executes every UI case, including shared and public-surface behavior.
 test.use({ hasTouch: true });
 async function expectMarkdown(page: Page, text: string) { await expect.poll(() => markdown(page)).toBe(text); }
 const legacyKey = "scriptorium:draft:legacy-project:legacy-scene";
@@ -185,9 +184,7 @@ test("a committed save with a lost response stays unconfirmed until the same ope
 
 test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page); const text = "先に確定した本文。";
-  // Use the same user-facing replacement path that passes in WebKit. The
-  // legacy fill probe was diagnostic only and can append to a contenteditable
-  // document in WebKit while Chromium masks the automation difference.
+  // Use the user-facing replacement path rather than a diagnostic contenteditable fill.
   await editor(page).click();
   await editor(page).press("ControlOrMeta+a");
   await page.keyboard.insertText(text);
@@ -1115,7 +1112,7 @@ test("optional terminology cancels work at pagehide and resumes at pageshow", { 
   }
 });
 
-test("Full WebKit terminology stays safe across a held native Shell departure window", async ({ page, authorizeAuthor }) => {
+test("Full terminology stays safe across a held native Shell departure window", async ({ page, authorizeAuthor }) => {
   await createOAuthWritingFixture(authorizeAuthor, page); const text = "東京《とうきょう》の用語と変換を保持する。";
   await expectMarkdown(page, "最初の本文。\n次の文章です。");
   await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text);

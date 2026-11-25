@@ -24,7 +24,7 @@ test('release gate requires the exact successful job set including every matrix 
   assert.doesNotThrow(() => assertVerificationJobs(jobs));
   assert.doesNotThrow(() => assertVerificationLeafJobs(jobs.filter(job => job.name !== 'certification')));
   assert.throws(() => assertVerificationLeafJobs(jobs), /Unexpected release verification job/);
-  for (const required of ['plan', 'browser-core-webkit', 'browser-full-webkit', 'certification']) {
+  for (const required of ['plan', 'browser-core-ui-v1', 'browser-full-ui-v1', 'certification']) {
     assert.ok(jobs.some(job => job.name === required), required + ' is a release obligation');
     assert.throws(() => assertVerificationJobs(jobs.filter(job => job.name !== required)), /exact required job set/);
   }

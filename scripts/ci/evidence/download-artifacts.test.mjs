@@ -10,7 +10,7 @@ import { assertTraceArtifact, downloadArtifact, extractArtifactFiles, extractJso
 const identity = { runId: '123', sourceSha: 'a'.repeat(40) };
 const bytes = Buffer.from('archive');
 const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-const artifact = { id: 10, name: 'ci-evidence-browser-full-webkit', workflow_run: { id: 123, head_sha: identity.sourceSha }, expired: false, digest, size_in_bytes: bytes.length };
+const artifact = { id: 10, name: 'ci-evidence-browser-full-ui-v1', workflow_run: { id: 123, head_sha: identity.sourceSha }, expired: false, digest, size_in_bytes: bytes.length };
 const inventory = { identity, artifacts: [artifact, { ...artifact, id: 20 }] };
 
 test('selected exact artifact ID is retained even when a same-name older artifact has a higher ID', () => {
@@ -67,8 +67,8 @@ test('certification materializes only the selected plan and reports for one or m
   }
 
   const selectedPlan = await fixture(1, 'ci-plan', 'ci-plan.json', { sha: identity.sourceSha });
-  const selectedReport = await fixture(2, artifact.name, 'report.json', { group: 'browser-full-webkit', workflowAttempt: 2 });
-  const olderReport = await fixture(9, artifact.name, 'report.json', { group: 'browser-full-webkit', workflowAttempt: 1 });
+  const selectedReport = await fixture(2, artifact.name, 'report.json', { group: 'browser-full-ui-v1', workflowAttempt: 2 });
+  const olderReport = await fixture(9, artifact.name, 'report.json', { group: 'browser-full-ui-v1', workflowAttempt: 1 });
   const retainedReport = await fixture(3, 'ci-evidence-unit-core', 'report.json', { group: 'unit-core', workflowAttempt: 1 });
   const traceGroup = { group: 'types-trace', sha: identity.sourceSha, workflowRunId: 123, workflowAttempt: 2, workflowJob: 'types' };
   const trace = {
@@ -104,7 +104,7 @@ test('certification materializes only the selected plan and reports for one or m
   for (const ids of [[2], [2, 3]]) {
     const directory = path.join(root, `evidence-${ids.length}`);
     await downloadSelectedArtifacts({ ...options, ids, kind: 'evidence', directory });
-    const groups = ids.length === 1 ? ['browser-full-webkit'] : ['browser-full-webkit', 'unit-core'];
+    const groups = ids.length === 1 ? ['browser-full-ui-v1'] : ['browser-full-ui-v1', 'unit-core'];
     assert.deepEqual((await readdir(directory)).sort(), groups.map(group => `ci-evidence-${group}`));
     for (const group of groups) {
       const groupDirectory = path.join(directory, `ci-evidence-${group}`);
@@ -146,11 +146,11 @@ test('trace proof rejects stale, foreign or skipped nested evidence in the selec
 test('extracts only one requested JSON entry and rejects missing or malformed JSON', async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), 'codexia-ci-test-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  await writeFile(path.join(dir, 'report.json'), '{"group":"browser-full-webkit"}');
+  await writeFile(path.join(dir, 'report.json'), '{"group":"browser-full-ui-v1"}');
   await writeFile(path.join(dir, 'extra.txt'), 'not evidence');
   execFileSync('zip', ['-q', 'artifact.zip', 'report.json', 'extra.txt'], { cwd: dir });
   const zip = await readFile(path.join(dir, 'artifact.zip'));
-  assert.equal((await extractJsonEntry(zip, 'report.json')).toString(), '{"group":"browser-full-webkit"}');
+  assert.equal((await extractJsonEntry(zip, 'report.json')).toString(), '{"group":"browser-full-ui-v1"}');
   for (const [offset, diagnostic] of [[6, /Multi-disk/], [8, /entry count/]]) {
     const broken = Buffer.from(zip);
     broken.writeUInt16LE(1, broken.length - 22 + offset);

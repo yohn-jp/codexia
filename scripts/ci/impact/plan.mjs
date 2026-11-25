@@ -367,7 +367,6 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
         add('test-types-app-e2e');
         for (const profile of PROFILES) {
           add(`build-${profile}`, `browser-${profile}-${spec.id}`);
-          if (spec.id === 'ui-v1') add(`browser-${profile}-webkit`);
         }
         continue;
       }
@@ -486,7 +485,7 @@ export function verificationPlanOutputs(plan) {
     types: JSON.stringify(plan.groups.filter(group => group.startsWith('types-')).map(group => group.slice(6))),
     build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),
     oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
-    browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'webkit']
+    browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'ui-v1']
       .filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => ({ group: `${profile}-${id}`, profile })))),
     full_model_oci: String(plan.full_model_oci),
   };

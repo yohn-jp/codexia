@@ -9,7 +9,7 @@
 3. owner、MCP-CLIENT、SHARE-READER、SETUP、OPERATORを昇格・混同しない。MCPはread/compute/proposeまで、承認・適用は作者のみ。
 4. Web UIとTailscale/SSH/Ansible管理面を分離し、Webから任意VM/Podmanコマンドや本番DB復元を提供しない。オフVMバックアップ先の指定はowner UIからできるが、実行はoperator provisioned executorと既存host lock/backup.shを再利用する。
 5. Architecture AtlasのMermaid画面・状態図、LikeC4構造図、Threagile脅威と各要求の**正本所有先を明示**する。見た目の図を適合証拠としない。
-6. CIのsole plan/impact authority、exact-source job/attempt/artifact identity、単一Pages publisher、Core/Fullと正式対応のChromium証明を維持する。WebKitの移行例外は [E2E execution](../verification/E2E-EXECUTION.md) に従う。旧testsの削除は独立した証明力に基づき判断する。
+6. CIのsole plan/impact authority、exact-source job/attempt/artifact identity、単一Pages publisher、Core/Fullと正式対応のChromium証明を維持する。ブラウザー実行はChromiumに一本化し、[E2E execution](../verification/E2E-EXECUTION.md) に従う。旧testsの削除は独立した証明力に基づき判断する。
 
 ## Workstream定義（Issue一件＝完成可能な責務）
 

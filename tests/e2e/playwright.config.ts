@@ -39,16 +39,5 @@ export default defineConfig({
           : undefined,
       },
     },
-    {
-      name: "webkit",
-      testMatch: "**/ui-v1.acceptance.spec.ts",
-      grepInvert: /@author-desktop\b/u,
-      use: {
-        browserName: "webkit",
-        launchOptions: process.env.CODEXIA_E2E_WEBKIT
-          ? { executablePath: process.env.CODEXIA_E2E_WEBKIT }
-          : undefined,
-      },
-    },
   ],
 });

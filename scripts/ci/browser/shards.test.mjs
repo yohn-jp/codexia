@@ -9,6 +9,7 @@ import { buildBrowserTestArguments, resolveBrowserShard, resolveBrowserTestCli, 
 test("unknown profiles and shards are rejected before a runner starts", () => {
   assert.throws(() => resolveBrowserShard("preview", "core"), /Unknown browser profile/u);
   assert.throws(() => resolveBrowserShard("core", "empty"), /Unknown browser shard/u);
+  assert.throws(() => resolveBrowserShard("core", "webkit"), /Unknown browser shard/u);
 });
 
 test("Playwright discovers only the selected spec and browser project", t => {
@@ -20,7 +21,7 @@ test("Playwright discovers only the selected spec and browser project", t => {
   delete env.CODEXIA_BASE_URL;
   const cases = [
     { profile: "core", id: "job-inbox", file: "job-inbox.acceptance.spec.ts", project: "chromium" },
-    { profile: "full", id: "webkit", file: "ui-v1.acceptance.spec.ts", project: "webkit" },
+    { profile: "full", id: "ui-v1", file: "ui-v1.acceptance.spec.ts", project: "chromium" },
   ];
   for (const { profile, id, file, project } of cases) {
     const shard = resolveBrowserShard(profile, id);
@@ -37,7 +38,7 @@ test("Playwright discovers only the selected spec and browser project", t => {
   }
 });
 
-test("WebKit discovery retains every unclassified or mixed UI case and excludes only reviewed Desktop cases", () => {
+test("Chromium discovery retains Desktop and shared UI cases", () => {
   const env = { ...process.env, CODEXIA_E2E_TEST_FILE: "ui-v1.acceptance.spec.ts",
     CODEXIA_E2E_DATABASE_URL: "postgres://127.0.0.1/unused" };
   const discover = (id, selection = []) => {
@@ -51,17 +52,15 @@ test("WebKit discovery retains every unclassified or mixed UI case and excludes 
     return suites.flatMap(collect).map(spec => ({ title: spec.title, line: spec.line }));
   };
   const chromium = discover("ui-v1");
-  const webkit = discover("webkit");
   const desktop = discover("ui-v1", ["--grep", "@author-desktop"]);
   assert.ok(desktop.length > 0, "The reviewed Desktop cases must remain in Chromium");
   const identity = spec => JSON.stringify([spec.line, spec.title]);
   const desktopIds = new Set(desktop.map(identity));
   assert.ok(desktopIds.size < chromium.length, "Desktop selection must not absorb the entire UI suite");
   assert.ok(desktop.every(spec => chromium.some(all => identity(all) === identity(spec))));
-  assert.deepEqual(webkit.map(identity).sort(), chromium.filter(spec => !desktopIds.has(identity(spec))).map(identity).sort());
   assert.ok(desktop.some(spec => spec.title.includes("keyboard select-all replacement")), "Desktop input proof must remain in Chromium");
-  assert.ok(webkit.some(spec => spec.title.includes("Mobile reader")), "Legacy Mobile reader proof must remain");
-  assert.ok(webkit.some(spec => spec.title.includes("guarded shell switches")), "Mixed shell proof must remain");
+  assert.ok(chromium.some(spec => spec.title.includes("Mobile reader")), "Legacy Mobile reader proof must remain");
+  assert.ok(chromium.some(spec => spec.title.includes("guarded shell switches")), "Mixed shell proof must remain");
 });
 
 test("browser coverage counts discovered, executed, skipped and failed cases", () => {

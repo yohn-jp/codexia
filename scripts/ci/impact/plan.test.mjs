@@ -402,7 +402,7 @@ test('shared app changes retain both profile browser coverage without backend un
   assert.ok(selected.tasks.includes('unit-app'));
   for (const profile of ['core', 'full']) {
     assert.ok(selected.tasks.includes(`build-${profile}`));
-    assert.ok(selected.tasks.includes(`browser-${profile}-webkit`));
+    assert.ok(selected.tasks.includes(`browser-${profile}-ui-v1`));
     assert.ok(selected.tasks.includes(`browser-${profile}-core`));
   }
   assert.ok(!selected.tasks.includes('unit-api'));
@@ -547,7 +547,7 @@ test('OAuth browser acceptance is selected in both profile browser lanes', async
     assert.ok(selected.tasks.includes(`build-${profile}`));
     assert.ok(selected.tasks.includes(`browser-${profile}-oauth-web`));
     assert.ok(selected.groups.includes(`browser-${profile}-reference`));
-    assert.ok(!selected.groups.includes(`browser-${profile}-webkit`));
+    assert.ok(!selected.groups.includes(`browser-${profile}-ui-v1`));
   }
   assert.ok(!selected.tasks.includes('unit-api'));
 });
@@ -762,7 +762,7 @@ test('iOS packaging and CI dashboard changes remain root-scoped, mixed source re
     assert.equal((await plan([file])).full_model_oci, false);
   }
   const changed = await plan(['.github/workflows/ios-unsigned-ipa.yml', 'app/src/main.tsx']);
-  assert.ok(changed.tasks.includes('build-full') && changed.tasks.includes('browser-full-webkit'));
+  assert.ok(changed.tasks.includes('build-full') && changed.tasks.includes('browser-full-ui-v1'));
   assert.deepEqual((await plan(['scripts/ci/dashboard/analysis.mjs', 'unknown/unreviewed.txt'])).tasks, VERIFICATION_TASKS);
   assert.deepEqual((await plan(['.github/workflows/ios-unsigned-ipa.yml'], 'push')).tasks, VERIFICATION_TASKS);
 });

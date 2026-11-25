@@ -94,7 +94,7 @@ test('each browser group requires evidence from the matching verified Core or Fu
   });
   assert.equal(reports.length,6);
   assert.doesNotThrow(()=>assertProfileArtifactEvidence(plan,jobs,reports,artifacts,runId));
-  for(const group of ['browser-full-writing','browser-full-reference','browser-full-webkit']){
+  for(const group of ['browser-full-writing','browser-full-reference','browser-full-ui-v1']){
     assert.throws(()=>assertProfileArtifactEvidence(plan,jobs,reports.filter(r=>r.group!==group),artifacts,runId));
     const bad=structuredClone(reports);
     bad.find(r=>r.group===group).profileArtifact={...bad.find(r=>r.group==='browser-core-writing').profileArtifact};
