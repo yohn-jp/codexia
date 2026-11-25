@@ -533,7 +533,7 @@ function verifyScalar(site,sourceSha) {
   const html=readPageFile(join(directory,'index.html'),'utf8');
   assert.ok(html.includes("connect-src 'self'"),'Scalar CSP must prohibit external fetches');
   assert.ok(html.includes('OpenAPI 3.1 contract generated from TypeSpec') && html.includes('current admitted operations register in Fastify'),'Scalar page must distinguish contract from implementation');
-  assert.ok(html.includes('Auth request/response examples are removed') && html.includes('No API server, credentials, or Try It request'),'Scalar publication boundary notice missing');
+  assert.ok(html.includes('Authentication examples are removed') && html.includes('No API server, credential entry, or Try It request'),'Scalar publication boundary notice missing');
   assert.ok(html.includes('Authentication scheme definitions') && html.includes('ApiKeyAuth'),'Read-only authentication scheme details missing');
   return manifest;
 }
