@@ -88,6 +88,10 @@ model {
       #data
       metadata { trustBoundary 'data' }
     }
+    podman = container 'Rootless Podman Quadlet host services' {
+      #operations
+      metadata { trustBoundary 'host-operations' }
+    }
     ssh = component 'Pinned SSH host entry' {
       #operations
       metadata { trustBoundary 'host-operations' }
@@ -104,6 +108,18 @@ model {
     workflow = container 'GitHub Actions protected admission' {
       #operations
       metadata { trustBoundary 'operations' }
+      verify = component 'Verify and exact-source certificate' {
+        #operations
+        metadata { trustBoundary 'operations' }
+      }
+      release = component 'Backend release workflow (digest publication)' {
+        #operations
+        metadata { trustBoundary 'operations' }
+      }
+      admission = component 'Protected deployment admission' {
+        #operations
+        metadata { trustBoundary 'operations' }
+      }
     }
     ansible = component 'Pinned SSH and Ansible desired state' {
       #operations
@@ -122,6 +138,14 @@ model {
       metadata { trustBoundary 'offsite-storage' }
     }
   }
+  github = externalSystem 'GitHub main source repository' {
+    #operations
+    metadata { trustBoundary 'operations' }
+  }
+  ghcr = externalSystem 'GHCR Full image by digest' {
+    #operations
+    metadata { trustBoundary 'operations' }
+  }
 
   author -> web 'Writes through the authoring UI'
   web -> indexedDb 'Stores recoverable local drafts only'
@@ -137,9 +161,17 @@ model {
   codexia.fastify.persistence -> codexia.postgres 'Reads and commits canonical project data'
   codexia.fastify.betterAuth -> codexia.postgres 'Stores authentication state'
 
-  operations.workflow -> tailscale 'Obtains the protected Tailscale OIDC identity'
+  github -> operations.workflow.verify 'Provides the main source for verification'
+  operations.workflow.verify -> operations.workflow.release 'Provides the exact-source certificate'
+  operations.workflow.release -> ghcr 'Publishes the immutable Full image by digest'
+  ghcr -> operations.workflow.admission 'Supplies the digest-pinned image'
+  operations.workflow.admission -> tailscale 'Obtains the protected Tailscale OIDC identity'
+  operations.workflow.admission -> operations.ansible 'Runs the admitted deployment workflow'
+  operations.workflow -> tailscale 'Obtains the protected OIDC identity for deployment'
   operations.workflow -> operations.ansible 'Runs the admitted deployment workflow'
   operations.ansible -> codexia.ssh 'Uses pinned SSH over the tailnet'
+  operations.ansible -> codexia.podman 'Converges the protected Quadlet desired state'
+  codexia.podman -> codexia.postgres 'Runs PostgreSQL with preserved volumes'
   codexia.ssh -> codexia.backupExecutor 'Invokes the protected host-locked backup path'
   codexia.backupExecutor -> codexia.postgres 'Reads a quiesced PostgreSQL backup source'
   codexia.backupExecutor -> codexia.history 'Includes the host history volume in backup'
@@ -153,6 +185,20 @@ views {
     include edge.**
     include codexia.**
     include operations.**
+    include offsite.**
+  }
+
+  view operations-topology {
+    title 'Protected deployment topology'
+    include github
+    include ghcr
+    include tailscale
+    include operations.**
+    include codexia.ssh
+    include codexia.backupExecutor
+    include codexia.podman
+    include codexia.postgres
+    include codexia.history
     include offsite.**
   }
 }

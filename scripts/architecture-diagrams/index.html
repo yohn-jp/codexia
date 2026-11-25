@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
   <meta name="description" content="Codexia canonical architecture diagrams and transition states">
   <title>Architecture Atlas — Codexia</title>
   <link rel="stylesheet" href="./atlas.css">
@@ -17,7 +17,7 @@
     <div class="masthead-title">
       <div>
         <h1>Architecture Atlas</h1>
-        <p class="intro">正本Markdownから生成した設計図です。実装の受入確認には使えません。</p>
+            <p class="intro">正本から生成した設計図です。実装の受入確認には使えません。</p>
       </div>
       <dl class="revision" aria-label="Atlas source revision">
         <div>
@@ -76,6 +76,10 @@
             </p>
           </div>
           <div class="controls" aria-label="図の表示操作">
+            <button type="button" id="native-interact" class="zoom-control-button"
+                    aria-label="LikeC4の操作画面を開く" hidden disabled>
+              図を操作する
+            </button>
             <div class="zoom-controls" role="group" aria-label="表示倍率">
               <button type="button" id="zoom-out" aria-label="縮小" title="縮小" disabled>−</button>
               <output id="zoom-value" aria-live="polite">100%</output>
@@ -102,7 +106,7 @@
         </div>
         <div class="canvas-foot">
           <span id="view-status" role="status" aria-live="polite">—</span>
-          <span>原本はMarkdown / 表示はビルド時生成SVG</span>
+            <span>原本の種類に応じてMermaid SVGまたはLikeC4を表示</span>
         </div>
 
         <details id="evidence-details" class="evidence-details">
@@ -127,7 +131,7 @@
   </div>
 
   <footer class="footer">
-    <span>CANONICAL DESIGN · SOURCE-BOUND SVG · NO RUNTIME MERMAID CDN</span>
+    <span>CANONICAL DESIGN · SOURCE-BOUND DIAGRAMS · NO RUNTIME MERMAID CDN</span>
     <a href="https://github.com/yohn-jp/codexia/tree/main/docs">Documentation</a>
   </footer>
 </div>

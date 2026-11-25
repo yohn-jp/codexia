@@ -5,6 +5,10 @@ const loadingActions = document.getElementById('loading-actions');
 const retryLoad = document.getElementById('retry-load');
 const retryDiagram = document.getElementById('retry-diagram');
 const canvas = document.getElementById('canvas');
+const nativeRenderer = document.createElement('div');
+nativeRenderer.className = 'native-renderer';
+nativeRenderer.hidden = true;
+canvas.prepend(nativeRenderer);
 const image = document.createElement('img');
 image.id = 'svg-image';
 image.alt = '';
@@ -17,6 +21,7 @@ const groupTitle = document.getElementById('diagram-group');
 const kind = document.getElementById('diagram-kind');
 const sourceLink = document.getElementById('source-link');
 const svgLink = document.getElementById('svg-link');
+const nativeInteract = document.getElementById('native-interact');
 const viewStatus = document.getElementById('view-status');
 const zoomIn = document.getElementById('zoom-in');
 const zoomOut = document.getElementById('zoom-out');
@@ -51,13 +56,15 @@ const groups = new Map();
 const narrowViewport = window.matchMedia('(max-width: 900px)');
 let wasNarrow = narrowViewport.matches;
 
-function setZoom(next, preservePosition = true) {
+function setZoom(next, preservePosition = true, fixedWidthPx = null) {
   const oldMaxX = Math.max(1, canvas.scrollWidth - canvas.clientWidth);
   const oldMaxY = Math.max(1, canvas.scrollHeight - canvas.clientHeight);
   const horizontalPosition = oldMaxX > 1 ? canvas.scrollLeft / oldMaxX : 0;
   const verticalPosition = oldMaxY > 1 ? canvas.scrollTop / oldMaxY : 0;
   zoom = Math.min(4, Math.max(.1, next));
-  image.style.width = Math.round(zoom * 100) + '%';
+  image.style.width = fixedWidthPx === null
+    ? Number((zoom * 100).toFixed(2)) + '%'
+    : Math.floor(fixedWidthPx) + 'px';
   zoomValue.textContent = Math.round(zoom * 100) + '%';
   zoomOut.disabled = !image.naturalWidth || zoom <= .1;
   zoomIn.disabled = !image.naturalWidth || zoom >= 4;
@@ -76,11 +83,18 @@ function setZoom(next, preservePosition = true) {
 
 function fitWholeDiagram() {
   if (!image.naturalWidth || !image.naturalHeight) return;
-  const widthAtFit = Math.max(1, canvas.clientWidth - 24);
-  const heightAtFit = Math.max(1, canvas.clientHeight - 24);
-  const heightAtWidth = image.naturalHeight * (widthAtFit / image.naturalWidth);
-  const scale = Math.min(1, heightAtFit / heightAtWidth);
-  setZoom(scale, false);
+  const style = getComputedStyle(canvas);
+  const paddingX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+  const paddingY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  const widthAtFit = Math.max(1, canvas.clientWidth - paddingX);
+  const heightAtFit = Math.max(1, canvas.clientHeight - paddingY);
+  const renderedWidth = Math.min(
+    widthAtFit,
+    heightAtFit * image.naturalWidth / image.naturalHeight,
+    image.naturalWidth,
+  );
+  const scale = renderedWidth / widthAtFit;
+  setZoom(scale, false, Math.floor(renderedWidth));
   viewStatus.textContent = '図全体を表示 · ' + zoomValue.textContent;
 }
 
@@ -224,10 +238,17 @@ function show(diagram, options = {}) {
   groupTitle.textContent = diagram.groupLabel;
   kind.textContent = diagram.kind;
   sourceLink.href = sourceUrl(diagram.markdown, diagram.line);
-  svgLink.href = diagram.image;
+  const isNative = diagram.renderer === 'likec4';
+  nativeInteract.hidden = !isNative;
+  nativeInteract.disabled = isNative;
+  svgLink.hidden = isNative;
+  svgLink.href = isNative ? '#' : diagram.image;
+  document.querySelector('.zoom-controls').hidden = isNative;
   image.hidden = true;
+  nativeRenderer.hidden = true;
+  nativeRenderer.replaceChildren();
   loading.hidden = false;
-  loadingMessage.textContent = 'SVGを読み込んでいます。';
+  loadingMessage.textContent = isNative ? 'LikeC4ビューを読み込んでいます。' : 'SVGを読み込んでいます。';
   loadingActions.hidden = true;
   retryLoad.hidden = true;
   retryDiagram.hidden = true;
@@ -235,27 +256,11 @@ function show(diagram, options = {}) {
   zoomIn.disabled = true;
   zoomReset.disabled = true;
   fitDiagram.disabled = true;
-  image.alt = diagram.groupLabel + ' — ' + diagram.title + ' の設計図。全内容はリンク先の正本Markdownで確認できます。';
-  image.onload = () => {
-    if (current?.id !== diagram.id) return;
-    image.hidden = false;
-    loading.hidden = true;
-    zoomMode = 'width';
-    setZoom(1, false);
-    viewStatus.textContent = '図を表示中 · 幅に合わせて表示 · 100%';
-  };
-  image.onerror = () => {
-    if (current?.id !== diagram.id) return;
-    image.hidden = true;
-    loading.hidden = false;
-    loadingMessage.textContent = 'SVGを読み込めませんでした。正本Markdownを開くか、図を再読み込みしてください。';
-    loadingActions.hidden = false;
-    retryDiagram.hidden = false;
-    viewStatus.textContent = 'SVGの表示に失敗';
-  };
-  image.src = options.retry
-    ? diagram.image + '?retry=' + Date.now() + '-' + (++imageAttempt)
-    : diagram.image;
+  if (isNative) {
+    void loadNativeView(diagram);
+  } else {
+    loadSvgView(diagram, options);
+  }
   canvas.scrollTop = 0;
   canvas.scrollLeft = 0;
   zoom = 1;
@@ -278,6 +283,81 @@ function show(diagram, options = {}) {
     if (fromUser) title.focus({ preventScroll: true });
     requestAnimationFrame(() => viewer.scrollIntoView({ block: 'start' }));
   }
+}
+
+function openNativeExplorer() {
+  const component = nativeRenderer.querySelector('likec4-view');
+  const pane = component?.shadowRoot && findInOpenShadowTree(component.shadowRoot, '.react-flow__pane');
+  if (!pane) {
+    viewStatus.textContent = 'LikeC4ビューの準備ができていません。再読み込みしてください。';
+    return;
+  }
+  pane.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, view: window }));
+  viewStatus.textContent = '図を操作中 · Escキーでビューに戻れます';
+}
+nativeInteract.addEventListener('click', openNativeExplorer);
+
+function findInOpenShadowTree(root, selector) {
+  const match = root.querySelector(selector);
+  if (match) return match;
+  for (const element of root.querySelectorAll('*')) {
+    if (!element.shadowRoot) continue;
+    const nested = findInOpenShadowTree(element.shadowRoot, selector);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+async function loadNativeView(diagram) {
+  try {
+    await import('./' + diagram.artifact);
+    if (current?.id !== diagram.id) return;
+    await customElements.whenDefined('likec4-view');
+    if (current?.id !== diagram.id) return;
+    const component = document.createElement('likec4-view');
+    component.setAttribute('view-id', diagram.viewId);
+    component.setAttribute('browser', 'true');
+    component.setAttribute('color-scheme', 'dark');
+    component.setAttribute('aria-label', diagram.groupLabel + ' — ' + diagram.title);
+    nativeRenderer.append(component);
+    nativeRenderer.hidden = false;
+    nativeInteract.disabled = false;
+    loading.hidden = true;
+    viewStatus.textContent = 'LikeC4を表示中 · 図の操作はビュー内で行えます';
+  } catch {
+    if (current?.id !== diagram.id) return;
+    nativeRenderer.hidden = true;
+    loading.hidden = false;
+    loadingMessage.textContent = 'LikeC4ビューを読み込めませんでした。正本の設計書を開くか、再読み込みしてください。';
+    loadingActions.hidden = false;
+    nativeInteract.disabled = true;
+    retryDiagram.hidden = false;
+    viewStatus.textContent = 'LikeC4の表示に失敗';
+  }
+}
+
+function loadSvgView(diagram, options) {
+  image.alt = diagram.groupLabel + ' — ' + diagram.title + ' の設計図。全内容はリンク先の正本Markdownで確認できます。';
+  image.onload = () => {
+    if (current?.id !== diagram.id) return;
+    image.hidden = false;
+    loading.hidden = true;
+    zoomMode = 'width';
+    setZoom(1, false);
+    viewStatus.textContent = '図を表示中 · 幅に合わせて表示 · 100%';
+  };
+  image.onerror = () => {
+    if (current?.id !== diagram.id) return;
+    image.hidden = true;
+    loading.hidden = false;
+    loadingMessage.textContent = 'SVGを読み込めませんでした。正本Markdownを開くか、図を再読み込みしてください。';
+    loadingActions.hidden = false;
+    retryDiagram.hidden = false;
+    viewStatus.textContent = 'SVGの表示に失敗';
+  };
+  image.src = options.retry
+    ? diagram.image + '?retry=' + Date.now() + '-' + (++imageAttempt)
+    : diagram.image;
 }
 
 function matches(id) {
@@ -446,7 +526,12 @@ async function load() {
         !/^[a-f0-9]{40}$/.test(manifest.sourceSha) ||
         !Array.isArray(manifest.diagrams) || manifest.diagrams.length === 0 ||
         !manifest.diagrams.every(item => /^[a-z]+-\d+$/.test(item.id) &&
-          /^svg\/[a-z]+-\d+\.svg$/.test(item.image) &&
+          (item.renderer === 'mermaid'
+            ? /^svg\/[a-z]+-\d+\.svg$/.test(item.image)
+            : item.renderer === 'likec4' && /^likec4\/[a-z0-9-]+\.mjs$/.test(item.artifact) &&
+              /^[a-z][a-z0-9-]*$/.test(item.viewId) &&
+              /^docs\/architecture\/likec4\/model\.likec4$/.test(item.sourceModel) &&
+              /^[a-f0-9]{64}$/.test(item.sourceModelSha256)) &&
           /^docs\/(?:architecture|design|deployment)\/[A-Z0-9-]+\.md$/.test(item.markdown) &&
           Number.isSafeInteger(item.line) && item.line > 0 &&
           typeof item.title === 'string' && typeof item.groupLabel === 'string' &&

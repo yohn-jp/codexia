@@ -7,9 +7,13 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   assertNoPublicSecrets,
+  LIKEC4_OPERATIONS_VIEW_ID,
+  LIKEC4_OPERATIONS_VIEW_TITLE,
   LIKEC4_SOURCE_PATH,
-  parseGeneratedMermaid,
+  LIKEC4_VIEW_ID,
+  LIKEC4_VIEW_TITLE,
 } from '../architecture/contract.mjs';
+import { generateLikeC4Webcomponent, LIKEC4_PUBLIC_BUNDLE } from '../architecture/webcomponent.mjs';
 
 export const DIAGRAM_DOCUMENTS = Object.freeze([
   { id: 'system', label: 'システム全体', path: 'docs/architecture/SYSTEM-DESIGN.md' },
@@ -79,6 +83,7 @@ export function parseMermaidDiagrams(markdown, section) {
       markdown: section.path,
       line: start,
       kind: source.split(/\s/u, 1)[0],
+      renderer: 'mermaid',
       screenIds,
       designStatus: /【([^】]+)】/u.exec(heading)?.[1] ?? null,
       implementationPaths,
@@ -90,60 +95,62 @@ export function parseMermaidDiagrams(markdown, section) {
 }
 
 /** @param {string} modelSource @param {string} derivative @param {string} systemDesign */
-export function parseGeneratedSystemDiagram(modelSource, derivative, systemDesign) {
+export function parseLikeC4Diagram(modelSource, systemDesign, { id, viewId, title: viewTitle, heading }) {
   assert.equal(typeof modelSource, 'string', 'LikeC4 model source must be text');
   assert.equal(typeof systemDesign, 'string', 'System design must be text');
-  const parsed = parseGeneratedMermaid(derivative);
   const sourceSha256 = createHash('sha256').update(modelSource, 'utf8').digest('hex');
-  assert.equal(parsed.sourceSha256, sourceSha256,
-    'Atlas LikeC4 derivative is stale for the model source');
   const lines = systemDesign.split(/\r?\n/u);
-  const pointerLines = lines.flatMap((line, index) =>
-    line.includes(`[LikeC4 system model](./likec4/model.likec4)`) ? [index + 1] : []);
-  assert.equal(pointerLines.length, 1,
-    'System design must contain one canonical pointer to the LikeC4 system model');
-  assertNoPublicSecrets([modelSource, derivative, systemDesign]);
+  const pointerLines = heading
+    ? lines.flatMap((line, index) => line.trim() === heading ? [index + 1] : [])
+    : lines.flatMap((line, index) =>
+      line.includes(`[LikeC4 system model](./likec4/model.likec4)`) ? [index + 1] : []);
+  assert.equal(pointerLines.length, 1, 'System design must contain one canonical LikeC4 provenance line');
+  assertNoPublicSecrets([modelSource, systemDesign]);
   return {
-    id: 'system-1',
+    id,
     group: 'system',
-    groupLabel: 'システム全体',
-    title: parsed.title,
+    groupLabel: viewId === LIKEC4_OPERATIONS_VIEW_ID ? '運用プレーン' : 'システム全体',
+    title: viewTitle,
     markdown: SYSTEM_DESIGN_PATH,
     line: pointerLines[0],
-    kind: parsed.source.split(/\s/u, 1)[0],
+    kind: 'LikeC4',
     screenIds: [],
     designStatus: null,
     implementationPaths: [],
-    image: 'svg/system-1.svg',
-    source: parsed.source,
+    renderer: 'likec4',
+    viewId,
+    artifact: LIKEC4_PUBLIC_BUNDLE,
     sourceModel: LIKEC4_SOURCE_PATH,
     sourceModelSha256: sourceSha256,
   };
 }
 
-export function createManifest(sha, sources, screenCatalog = '', generatedSystemDiagram = null) {
+export function createManifest(sha, sources, screenCatalog = '', nativeDiagrams = []) {
   assert.match(sha, /^[a-f0-9]{40}$/u, 'Expected a source commit SHA');
-  assert.ok(generatedSystemDiagram, 'Incomplete architecture atlas: LikeC4-derived system-1 is required');
+  assert.ok(nativeDiagrams.length >= 2, 'Incomplete architecture atlas: native LikeC4 views are required');
   const diagrams = sources.flatMap(({ section, markdown }) => parseMermaidDiagrams(markdown, section));
   const systemDiagrams = diagrams.filter(d => d.group === 'system');
   assert.ok(systemDiagrams.length > 0, 'Incomplete architecture atlas: system operations Mermaid must remain registered');
   let systemIndex = 2;
   const shiftedDiagrams = diagrams.map(diagram => {
     if (diagram.group !== 'system') return diagram;
+    if (systemIndex === 3) systemIndex++;
     const shifted = { ...diagram, id: 'system-' + systemIndex };
     shifted.image = 'svg/' + shifted.id + '.svg';
     systemIndex++;
     return shifted;
   });
-  const catalog = [generatedSystemDiagram, ...shiftedDiagrams];
+  const catalog = [...nativeDiagrams, ...shiftedDiagrams];
   assert.ok(catalog.length >= 40 && catalog.length <= 64, 'Incomplete or excessive architecture diagram catalog');
   assert.ok(catalog.filter(d => d.group === 'screen').length >= 23,
     'Accepted logical screens require their individual state diagrams');
   for (const group of ['system', 'data', 'user', 'admin', 'screen', 'first', 'update', 'lifecycle']) {
     assert.ok(catalog.some(d => d.group === group), 'Missing required diagram group: ' + group);
   }
-  if (generatedSystemDiagram) assert.equal(generatedSystemDiagram.id, 'system-1',
-    'The LikeC4-derived C4 diagram owns the stable system-1 locator');
+  assert.equal(nativeDiagrams.find(d => d.viewId === LIKEC4_VIEW_ID)?.id, 'system-1',
+    'The LikeC4 context view owns the stable system-1 locator');
+  assert.equal(nativeDiagrams.find(d => d.viewId === LIKEC4_OPERATIONS_VIEW_ID)?.id, 'system-3',
+    'The LikeC4 operations topology owns the system-3 locator');
   return {
     format: 'codexia-architecture-atlas/v1',
     sourceSha: sha,
@@ -159,12 +166,17 @@ export async function buildAtlas(siteDir, sha, rendererPath, root = ROOT) {
   const sources = await Promise.all(DIAGRAM_DOCUMENTS.map(async section =>
     ({ section, markdown: await readFile(join(root, section.path), 'utf8') })));
   const screenCatalog = await readFile(join(root, SCREEN_CONTROL_PATH), 'utf8');
-  const [modelSource, derivative, systemDesign] = await Promise.all([
+  const [modelSource, systemDesign] = await Promise.all([
     readFile(join(root, LIKEC4_SOURCE_PATH), 'utf8'),
-    readFile(join(root, LIKEC4_DERIVATIVE_PATH), 'utf8'),
     readFile(join(root, SYSTEM_DESIGN_PATH), 'utf8'),
   ]);
-  const systemDiagram = parseGeneratedSystemDiagram(modelSource, derivative, systemDesign);
+  const systemDiagram = parseLikeC4Diagram(modelSource, systemDesign, {
+    id: 'system-1', viewId: LIKEC4_VIEW_ID, title: LIKEC4_VIEW_TITLE,
+  });
+  const operationsDiagram = parseLikeC4Diagram(modelSource, systemDesign, {
+    id: 'system-3', viewId: LIKEC4_OPERATIONS_VIEW_ID, title: LIKEC4_OPERATIONS_VIEW_TITLE,
+    heading: '## 運用プレーンと更新',
+  });
   const mermaidDiagrams = sources.flatMap(({ section, markdown }) => parseMermaidDiagrams(markdown, section));
   let systemIndex = 2;
   const diagrams = [systemDiagram, ...mermaidDiagrams.map(diagram => {
@@ -174,11 +186,14 @@ export async function buildAtlas(siteDir, sha, rendererPath, root = ROOT) {
     systemIndex++;
     return shifted;
   })];
-  const manifest = createManifest(sha, sources, screenCatalog, systemDiagram);
+  const manifest = createManifest(sha, sources, screenCatalog, [systemDiagram, operationsDiagram]);
   const output = join(resolve(siteDir), 'architecture');
   const stage = await mkdtemp(join(tmpdir(), 'codexia-mermaid-'));
   try {
     await mkdir(join(output, 'svg'), { recursive: true });
+    const likec4Dir = join(output, 'likec4');
+    await mkdir(likec4Dir, { recursive: true });
+    generateLikeC4Webcomponent(join(root, 'docs/architecture/likec4'), join(output, LIKEC4_PUBLIC_BUNDLE));
     const themeConfig = join(stage, 'mermaid-theme.json');
     await writeFile(themeConfig, JSON.stringify({
       theme: 'base',
@@ -199,6 +214,7 @@ export async function buildAtlas(siteDir, sha, rendererPath, root = ROOT) {
       },
     }));
     for (const diagram of diagrams) {
+      if (diagram.renderer === 'likec4') continue;
       const input = join(stage, diagram.id + '.mmd');
       const dest = join(output, diagram.image);
       await writeFile(input, diagram.source + '\n');

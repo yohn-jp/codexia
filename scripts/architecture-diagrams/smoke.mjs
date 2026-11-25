@@ -16,6 +16,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const types = {
     '.html': 'text/html',
     '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
     '.css': 'text/css',
     '.json': 'application/json',
     '.svg': 'image/svg+xml',
@@ -79,12 +80,24 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const base = 'http://127.0.0.1:' + server.address().port + '/architecture';
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(base + '/#entry-does-not-exist', { waitUntil: 'networkidle' });
-    await page.locator('#svg-image:not([hidden])').waitFor({ timeout: 20000 });
-    const first = await page.locator('#svg-image').evaluate(img => ({
-      naturalWidth: img.naturalWidth,
-      naturalHeight: img.naturalHeight,
-    }));
-    assert.ok(first.naturalWidth > 50 && first.naturalHeight > 50, 'First SVG failed to render');
+    const native = page.locator('likec4-view[view-id="architecture"]');
+    await native.locator('.react-flow__node').first().waitFor({ timeout: 20000 });
+    assert.ok(await native.locator('.react-flow__node').count() >= 20,
+      'Native system context should render its model nodes');
+    const operateButton = page.getByRole('button', { name: 'LikeC4の操作画面を開く' });
+    assert.ok(await operateButton.isVisible(), 'Native views need a visible interactive entry');
+    await operateButton.focus();
+    await page.keyboard.press('Enter');
+    const nativeDialog = native.locator('dialog[open]');
+    await nativeDialog.waitFor({ timeout: 10000 });
+    const nativeZoomControls = nativeDialog.locator('.react-flow__controls button');
+    await nativeZoomControls.first().waitFor({ timeout: 10000 });
+    assert.ok(await nativeZoomControls.count() >= 3,
+      'Keyboard-opened LikeC4 view should expose zoom and fit controls');
+    const graphMode = nativeDialog.getByText('Graph', { exact: true });
+    assert.ok(await graphMode.count() > 0, 'LikeC4 browser should expose the related graph view');
+    await page.keyboard.press('Escape');
+    await nativeDialog.waitFor({ state: 'hidden', timeout: 5000 });
     assert.ok(atlasManifest.diagrams.length > 0, 'Atlas manifest must contain diagrams');
     assert.equal(await page.locator('#diagram-total').textContent(), atlasManifest.diagrams.length + '件');
     assert.ok(atlasManifest.diagrams.some(item => item.id === 'screen-23'));
@@ -225,7 +238,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     await page.unroute('**/manifest.json');
     expectedManifestFailure = false;
     await page.locator('#retry-load').click();
-    await page.locator('#svg-image:not([hidden])').waitFor();
+    await page.locator('likec4-view[view-id="architecture"] .react-flow__node').first().waitFor();
 
     for (const [width, height] of [[768, 1024], [390, 844], [320, 800]]) {
       await page.setViewportSize({ width, height });
