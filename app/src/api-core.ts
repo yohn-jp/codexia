@@ -18,8 +18,8 @@ import * as generated from './generated/http/client';
 import type * as wire from './generated/http/schemas';
 import * as generatedSchemas from './generated/http/schemas';
 
-export type JobStatus = wire.PublicJobBody['status'];
-export type PublicJob = wire.PublicJobBody;
+export type JobStatus = PublicJob['status'];
+export type PublicJob = wire.DesktopPublicJobBody;
 export type InboxItem = wire.InboxItemBody;
 export type InboxListResponse = wire.InboxListBody;
 export type Session = wire.ApiSessionBody;

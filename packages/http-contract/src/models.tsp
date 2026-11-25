@@ -148,7 +148,7 @@ model PublicJobBody {
   id: string;
   type: string;
   status: "queued" | "running" | "done" | "error";
-  progress: JobProgress | null;
+  progress: float64 | null;
   result: unknown;
   error: string | null;
   errorCode?: string;
@@ -230,7 +230,12 @@ model DesktopContributionResponseItem {
   ...Record<unknown>;
 }
 
-model DesktopJobList is Array<PublicJobBody>;
+model DesktopPublicJobBody {
+  ...OmitProperties<PublicJobBody, "progress">;
+  progress: JobProgress | null;
+}
+
+model DesktopJobList is Array<DesktopPublicJobBody>;
 model DesktopModuleList is Array<DesktopModuleResponseItem>;
 model DesktopContributionList is Array<DesktopContributionResponseItem>;
 
@@ -894,40 +899,22 @@ model ProposalApplyReceiptBody {
   ...Record<unknown>;
 }
 
-model CoreAuthorReviewItemBody {
-  kind: "core-proposal";
-  id: string;
-  projectId: string;
-  createdAt: utcDateTime;
-  state: "proposed" | "partially_approved" | "approved" | "applied";
-  approvalModel: "per-operation";
-  applicationModel: "per-operation";
-  status: CoreProposalStatusBody;
-  receipts: ProposalApplyReceiptBody[];
-  stale: boolean;
+model AuthorReviewItemBody {
+  kind?: "core-proposal" | "native-change-set";
+  id?: string; projectId?: string; createdAt?: utcDateTime;
+  state?: "proposed" | "partially_approved" | "approved" | "applied" | "rejected";
+  approvalModel?: "per-operation" | "whole-change-set";
+  applicationModel?: "per-operation" | "transaction";
+  status?: CoreProposalStatusBody;
+  receipts?: JsonObject[];
+  stale?: boolean;
+  changeSet?: PersistenceChangeSetBody;
+  receipt?: PersistenceChangeSetApplicationBody | null;
   ...Record<unknown>;
-}
-
-model NativeAuthorReviewItemBody {
-  kind: "native-change-set";
-  id: string;
-  projectId: string;
-  createdAt: utcDateTime;
-  state: "proposed" | "approved" | "applied" | "rejected";
-  approvalModel: "whole-change-set";
-  applicationModel: "transaction";
-  changeSet: PersistenceChangeSetBody;
-  receipt: PersistenceChangeSetApplicationBody | null;
-  ...Record<unknown>;
-}
-
-union AuthorReviewItemBody {
-  coreProposal: CoreAuthorReviewItemBody;
-  nativeChangeSet: NativeAuthorReviewItemBody;
 }
 
 model PersistenceReviewFeedBody {
-  items: AuthorReviewItemBody[];
+  items?: AuthorReviewItemBody[];
   ...Record<unknown>;
 }
 

@@ -91,6 +91,9 @@ op listJobs(): JsonResponse | { @statusCode _: 403; @body body: ApiError; } | { 
 
 @tag("jobs") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/jobs/{jobId}") @get @operationId("job_get")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "Desktop validates progress between zero and one. The API epoch baseline keeps the nullable progress number schema.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopPublicJobBody")
 op getJob(@path jobId: string): PublicJobBody | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 503; @body body: ApiError; };
 
 @tag("jobs") @extension("x-codexia-principal", "OWNER-API")

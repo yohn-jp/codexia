@@ -55,6 +55,7 @@ TypeSpecからの生成、スキーマ変換と検査は `packages/http-contract
 - Desktop Webのfetch境界で、OWNER-APIのbearer、Consoleの同一origin cookie、初期セットアップの資格情報ポリシーを適用する。
   JSON成功応答は生成Zod schemaで検証し、追加フィールドを保持する。Job EventStreamは生成関数から未消費のレスポンスを受け取り、既存のストリーム処理へ渡す。
   呼び出し側が中断と再送を制御する。保存の再送では最初と同じ冪等性キーを使用する。
+  OAuthログイン画面の認証方式照会は同じOpenAPIから独立して生成し、資格情報を同一originのCookieに限定する。
   OAuth同意の照会と確定は、署名済み `oauth_query` を引き継ぐBetter AuthのOAuth Providerクライアントを使用する。
 - Fastifyが所有: request lifecycle、content parser、Ajv validation、response serializer、route registration、error handling、streaming/abort、graceful shutdown。schema validationが成功しても認可成功とはみなさない。
 - 既存Core/DBが所有: project/object/revision/effect、author-only approve/apply、idempotency、transaction、receipt。これをHTTP schema/validatorへ移管しない。
