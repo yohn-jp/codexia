@@ -52,3 +52,35 @@ test('PostgreSQL API admits only authenticated declared persistence methods and 
   assert.equal(unknownPath.status, 404);
   assert.equal(((await unknownPath.json()) as { code: string }).code, 'NOT_FOUND');
 });
+
+test('PostgreSQL document list honors the requested project version', async t => {
+  const { base, ownerHeaders, persistence } = await startAuthorApi(t);
+  const project = await persistence.transaction(tx => tx.createProject({ title: 'Versioned document list' }));
+  const documentsUrl = `${base}/api/v1/persistence/projects/${project.id}/documents`;
+  const pinnedUrl = `${documentsUrl}?parentId=root&limit=1&projectVersion=${project.version}`;
+  const pinned = await fetch(pinnedUrl, { headers: ownerHeaders });
+  assert.equal(pinned.status, 200);
+  assert.deepEqual(await pinned.json(), { documents: [] });
+
+  const created = await fetch(documentsUrl, {
+    method: 'POST',
+    headers: { ...ownerHeaders, 'Idempotency-Key': randomUUID() },
+    body: JSON.stringify({ kind: 'scene', title: 'New scene', markdown: '' }),
+  });
+  assert.equal(created.status, 201);
+  const { document } = (await created.json()) as { document: { id: string } };
+
+  const stale = await fetch(pinnedUrl, { headers: ownerHeaders });
+  assert.equal(stale.status, 409);
+  assert.equal(((await stale.json()) as { code: string }).code, 'SNAPSHOT_UNAVAILABLE');
+
+  const current = await fetch(documentsUrl, { headers: ownerHeaders });
+  assert.equal(current.status, 200);
+  assert.deepEqual(
+    ((await current.json()) as { documents: { id: string }[] }).documents.map(row => row.id),
+    [document.id],
+  );
+
+  const invalid = await fetch(`${documentsUrl}?projectVersion=0`, { headers: ownerHeaders });
+  assert.equal(invalid.status, 400);
+});

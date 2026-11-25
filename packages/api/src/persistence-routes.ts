@@ -305,7 +305,9 @@ const handlers: Record<string, PersistenceHandler> = {
     const parentId =
       parentValue === null ? undefined : parentValue === 'root' ? null : (decoded(parentValue, 'Parent document id') as DocumentId);
     const limit = requestLimit(input.query.get('limit'), 500, 1000);
-    const documents = await persistence.read(reader => reader.listDocuments(projectId, parentId, limit));
+    const version = selectedProjectVersion(input.query);
+    const list = (reader: PersistenceReader) => reader.listDocuments(projectId, parentId, limit);
+    const documents = await (version === undefined ? persistence.read(list) : readNativeKnowledge(persistence, projectId, version, list));
     return { status: 200, body: { documents } };
   },
   persistence_documents_post: async (input, persistence) => {
