@@ -73,7 +73,7 @@ import {
   type KnowledgeMergeResult,
   type ProposeKnowledgeMergeCommand,
 } from "@codexia/persistence-contracts";
-import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from "pg";
+import { Pool, type PoolClient, type PoolConfig, type QueryResult, type QueryResultRow } from "pg";
 import { applyKnowledgeMerge, knowledgeMergeOperation, planKnowledgeMerge, shouldGenerateSourceNameAlias } from "./knowledge-merge.js";
 
 type DbRow = QueryResultRow;
@@ -1607,7 +1607,7 @@ class PostgresTransaction implements PersistenceTransaction {
     assertNonEmpty(command.type, "Knowledge relation type");
     if (!(await this.getKnowledgeNode(command.projectId, command.sourceId))) throw notFound("source knowledge node", command.sourceId);
     if (!(await this.getKnowledgeNode(command.projectId, command.targetId))) throw notFound("target knowledge node", command.targetId);
-    let result;
+    let result: QueryResult<DbRow>;
     if (command.expectedVersion === null) {
       result = await this.query(
         `INSERT INTO knowledge_relation(project_id, id, source_id, target_id, type, attributes, validity, status)
@@ -1652,7 +1652,7 @@ class PostgresTransaction implements PersistenceTransaction {
       throw validationError("Evidence quote hash does not match the referenced revision range");
     }
 
-    let result;
+    let result: QueryResult<DbRow>;
     if (command.expectedVersion === null) {
       result = await this.query(
         `INSERT INTO text_anchor(project_id, id, document_id, current_revision_id, from_utf16, to_utf16, quote_sha256, status)
@@ -1707,7 +1707,7 @@ class PostgresTransaction implements PersistenceTransaction {
     assertNonEmpty(command.modality, "Assertion modality");
     assertNonEmpty(command.perspective, "Assertion perspective");
     assertConfidence(command.confidence);
-    let result;
+    let result: QueryResult<DbRow>;
     if (command.expectedVersion === null) {
       result = await this.query(
         `INSERT INTO assertion(project_id, id, proposition, modality, perspective, narrative_time, confidence, status)
