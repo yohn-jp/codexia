@@ -45,6 +45,17 @@ export function publicFrontendEvidence(value) {
   return { format, sourceSha, version, profile, apiEpoch };
 }
 
+function hasSameFrontendOAuthContract(deployed, desired) {
+  const prior = parsePublicFrontendConfigIdentity(deployed);
+  const next = parsePublicFrontendConfigIdentity(desired);
+  if (deployed === desired) return true;
+  // A newer Desktop-only artifact may drop the retired callback from the
+  // public record without changing the Desktop client's OAuth contract.
+  if (!prior?.mobileRedirectUri || !next || next.mobileRedirectUri) return false;
+  const { mobileRedirectUri, ...desktopConfig } = prior;
+  return isDeepStrictEqual(desktopConfig, next);
+}
+
 function stateDatabase(database, target, intent) {
   if (!database) return 'unknown';
   if (database.state === 'absent') return intent === 'restore' ? 'lost' : 'absent';
@@ -143,15 +154,16 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       const deployed = frontendIdentity(edge.frontend);
       const desired = targetIdentity.frontend;
       if (!isDeepStrictEqual(deployed, desired)) changeAxes.push('frontend');
-      if (deployed.oauthConfigIdentity !== desired.oauthConfigIdentity && !changeAxes.includes('oauth-contract')) {
+      const compatibleOAuth = hasSameFrontendOAuthContract(deployed.oauthConfigIdentity, desired.oauthConfigIdentity);
+      if (!compatibleOAuth && !changeAxes.includes('oauth-contract')) {
         changeAxes.push('oauth-contract');
       }
       if (source) source.frontend = publicFrontendEvidence(deployed);
-      state.F = deployed.apiEpoch === desired.apiEpoch && deployed.oauthConfigIdentity === desired.oauthConfigIdentity
+      state.F = deployed.apiEpoch === desired.apiEpoch && compatibleOAuth
         ? 'compatible' : 'incompatible';
       try {
         assertFrontendReleaseAdmission(deployed, desired);
-        frontendAdmission = state.B === 'compatible' && deployed.oauthConfigIdentity === desired.oauthConfigIdentity
+        frontendAdmission = state.B === 'compatible' && compatibleOAuth
           ? 'allowed' : 'denied';
       } catch {
         blockers.push('stale-or-conflicting-frontend-candidate');
