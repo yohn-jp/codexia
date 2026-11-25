@@ -259,9 +259,9 @@ const CORS_HEADERS = new Map([
   ['prefer', 'Prefer'],
 ]);
 const MCP_CORS_HEADERS = new Map([
-  ['mcp-session-id', 'Mcp-Session-Id'],
   ['mcp-protocol-version', 'MCP-Protocol-Version'],
-  ['last-event-id', 'Last-Event-ID'],
+  ['mcp-method', 'Mcp-Method'],
+  ['mcp-name', 'Mcp-Name'],
 ]);
 
 function normalizeCorsOrigins(origins: readonly string[] | undefined): ReadonlySet<string> {
@@ -1746,7 +1746,7 @@ export function createServer(options: ApiServerOptions): Server {
         throw httpFailure(403, 'CORS_COOKIE_DENIED', 'Cross-origin API access requires bearer credentials without cookies');
       }
       response.setHeader('Access-Control-Allow-Origin', originHeader);
-      if (mcpStreamableRoute) response.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id, WWW-Authenticate');
+      if (mcpStreamableRoute) response.setHeader('Access-Control-Expose-Headers', 'MCP-Protocol-Version, WWW-Authenticate');
     }
 
     return crossOrigin;
@@ -2843,10 +2843,6 @@ export function createServer(options: ApiServerOptions): Server {
         canReviewPrivateChangeSets,
         resolvePublishingAuthor,
       );
-      if (mcpStreamableRoute && admittedMcpClient) {
-        const { issuer, clientId, userId } = admittedMcpClient;
-        host.mcpSessionIdentity = JSON.stringify([issuer, clientId, userId]);
-      }
       const result = await runtime.invokeHttp(moduleId, contributionId, makeWebRequest(request, parsedBody, signal, relativePath), host);
       if (domainJobId) response.setHeader('X-Codexia-Job-Id', domainJobId);
       reply.hijack();

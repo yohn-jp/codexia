@@ -26,7 +26,7 @@
   },
   "dependencies": {
     "@codexia/contracts": "workspace:*",
-    "@modelcontextprotocol/sdk": "1.32.2",
+    "@modelcontextprotocol/server": "2.4.0",
     "zod": "catalog:production"
   },
   "codexiaModule": {
@@ -45,5 +45,8 @@
   },
   "bin": {
     "codexia-mcp": "./dist/stdio.js"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0"
   }
 }

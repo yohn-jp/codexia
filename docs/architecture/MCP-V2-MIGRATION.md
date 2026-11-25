@@ -1,18 +1,33 @@
 # MCP SDK v2 / 2026-07-28 プロトコル移行設計
 
-**種別: 採用済みSDK移行目標・未実装。** MCP OAuthの `resource`/audience、client identity、`mcp:read/compute/propose`、assigned project、author-only承認は [MCP OAuth](MCP-OAUTH.md)、[Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md)、[Core](CORE.md) が正本。MCPをHTTP API/独自driverで再実装せず、[Toolchain](SPECIFICATION-TOOLCHAIN.md) の公式MCP TypeScript SDK v2を使用する。
+**種別: 採用済みSDK移行契約。** MCP OAuthの `resource`/audience、client identity、`mcp:read/compute/propose`、assigned project、author-only承認は [MCP OAuth](MCP-OAUTH.md)、[Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md)、[Core](CORE.md) が正本。MCPをHTTP API/独自driverで再実装せず、[Toolchain](SPECIFICATION-TOOLCHAIN.md) の公式MCP TypeScript SDK v2を使用する。
 
-**実装観測:** main@e02933aead466b14cbcd336905b9c2a2a2b39f06の `modules/mcp/src/http.ts` はSDK v1 `WebStandardStreamableHTTPServerTransport`、session registry、`Mcp-Session-Id`、GET/POST/DELETE、idle/lifecycle管理。 `modules/mcp/src/stdio.ts` はv1の `StdioServerTransport` 。 `modules/mcp/src/tools/` のZodは互換import `zod/v3` を使用する箇所がある。 `packages/api/src/oauth-mcp.ts` がownerとMCPの権限を分ける。
+HTTP は `modules/mcp/src/http.ts` の `createMcpHandler`、stdio は `modules/mcp/src/stdio.ts` の `serveStdio` で受ける。
+両 transport は `modules/mcp/src/tools.ts` の `createCodexiaMcpServer` から同じツールを登録する。
+`packages/api/src/oauth-mcp.ts` は OAuth の owner と MCP の権限を分ける。
 
 ## v2 SDKの採用とプロトコル世代を分ける
 
-- **SDK:** `@modelcontextprotocol/server` v2 stable、Fastifyから公式Web標準handlerを呼ぶ際に必要なNode adapter。Hono専用adapterは導入しない。stdioには `@modelcontextprotocol/server/stdio` の公式entrypointを使う。
+- **SDK**。実行時は `@modelcontextprotocol/server` v2 を使う。
+  Fastify の既存 module HTTP adapter が渡す Web Request を公式 `fetch` ハンドラーへ接続する。
+  stdio は `@modelcontextprotocol/server/stdio` を使う。
 - **ツール:** `McpServer` の登録方式を公式migration guideに沿って変更する。input/output Schema、tool metadata、戻り値とerrorのvalidationをZod v4へ統一する。既存のtool nameやeffect権限を無断変更しない。
 - **2026-07-28 wire protocol:** SDK v2のインストールだけでは自動で新世代にならない。2026のHTTPは原則statelessで、旧 `initialize`、`Mcp-Session-Id`、GET stream/DELETE sessionへの依存を取り除く。公式 `createMcpHandler(factory)` が2026 per-request HTTP entrypoint、stdioは `serveStdio(factory)` が新旧世代の接続を選ぶ。
-- **異なる世代への扱い:** v2 entrypointには2025-era向けstateless fallbackの設定がある。これを**無期限のlegacy承認とはみなさない**。受入を要求するクライアントの実際の対応状況を調べ、対象protocol/versionと移行期限、2025-eraを拒否する条件を設計に明示する。古いsessionful実装と新しいstatelessを無秩序に並行維持しない。
+- **異なる世代への扱い**。現行クライアントの移行期間と拒否条件は次節に定める。
 - **Zod:** v2公式exampleは `zod/v4` に従う。v1互換の `zod/v3` が残るのは移行対象。v2側にschemaを導入しただけではcore toolの出力整合は証明されない。
 
 公式: [MCP SDK v2](https://ts.sdk.modelcontextprotocol.io/v2/)、[v1→v2 upgrade](https://ts.sdk.modelcontextprotocol.io/v2/migration/upgrade-to-v2)、[2026-era opt-in](https://ts.sdk.modelcontextprotocol.io/v2/migration/support-2026-07-28)、[MCP conformance](https://github.com/modelcontextprotocol/conformance)、[Inspector](https://github.com/modelcontextprotocol/inspector)。
+
+## プロトコルの互換期間
+
+Codex CLI 0.172.0 は HTTP 接続時に `2025-06-18` の `initialize` を送る。
+既存クライアントの移行期間として、2027-01-28 00:00 UTC より前は、公式 SDK v2 の旧世代 stateless fallback を利用できる。
+互換モードで交渉できる版は SDK 2.4.0 の `SUPPORTED_PROTOCOL_VERSIONS` に従い、`2025-11-25`、`2025-06-18`、`2025-03-26`、`2024-11-05`、`2024-10-07` を含む。
+stdio の新規プロセスも同じ期限まで SDK が提供する旧世代の接続を受け付ける。
+期限以降は HTTP の各リクエストと新規 stdio プロセスに `legacy: "reject"` を適用する。
+互換期間中も、接続元の認可と対象作品の選択は各リクエストでやり直す。
+MCP のセッション ID の発行、イベントストリームの再開、セッション削除は廃止する。
+GET と DELETE の成功応答の廃止は、[API epoch 2→3 の協調切替契約](../deployment/MCP-V2-API-EPOCH.md)に従う。
 
 ## 移行後のリクエスト境界
 
@@ -49,7 +64,7 @@ Existing Core / PostgreSQL snapshot / proposal
 | HTTP method | GET/POST/DELETEを使う旧sessionful入口 | SDK公式2026 HTTP handling。旧session処理を削除 | POST/Content-Type/headers/abortと不正method拒否 |
 | stream | SSEとtransport session lifetime | 2026 per-request SSEとcloseによるcancellation、必要なsubscription protocol | 中断やerrorが別clientへ漏れない |
 | identity | mcpSessionIdentity / project in session | token/client/assigned projectを**毎request**検証 | cross-client replay、stale assignment、scope step-up |
-| protocol headers | `Mcp-Session-Id` 等 | 新世代のversion / tool/param routing headersとper-request `_meta` | malformed/unknown header、CORS、401/403 |
+| protocol headers | `Mcp-Session-Id` 等 | `MCP-Protocol-Version`、`Mcp-Method`、`Mcp-Name` とリクエストごとの `_meta` | ヘッダーと本文の不一致、CORS、401/403 |
 | stdio | StdioServerTransportのv1接続 | serveStdio factory、stdioから同じtool/action群 | STDOUTはJSON-RPCのみ、終了/abort、caps |
 | approval | core proposal、owner UI approve/apply | **同じ**Core actionと権限。MCP approve/applyは引き続き禁止 | scopeだけでauthorに昇格不可 |
 
@@ -81,7 +96,7 @@ Existing Core / PostgreSQL snapshot / proposal
 | MCPV-004 | Cross-principal | owner、MCP、失効client、別project、scope不足/過剰の認可拒否。MCPによるapprove/apply不可 |
 | MCPV-005 | State integrity | snapshot競合、提案後の作者承認、replay/duplicate、transaction receipt、実PostgreSQL再起動 |
 | MCPV-006 | Transport/lifecycle | HTTP/stdio、stream abort、timeout、invalid header、oversized input、shutdown/drain、別request/別clientの漏えい |
-| MCPV-007 | Protocol-era boundary | 2026-onlyと承認済み2025 fallbackを試し、期限後に旧sessionful方法が到達不能 |
+| MCPV-007 | Protocol-era boundary | 2026-only と期限付きの 2025 fallback を試す。旧 sessionful 操作は移行期間中も 405 となり、期限以降は 2025 系の呼び出しも拒否する |
 | MCPV-008 | Client interop | 採用する外部AIクライアントでOAuth PKCE、token refresh、対象選択、Tool/Resultの実通信 |
 
 conformanceの `--requirements 2026-07-28` は仕様リリース時点のrequired scenario集合に対応し、単なる最新のall-suitesと区別する。テスト対象のOAuth authorization-server部分はMCP resource serverのconformanceだけでは証明できないため、Better Authの実認証E2Eで検証する。Inspectorが接続できることだけでconformance済みとしない。
@@ -94,4 +109,7 @@ conformanceの `--requirements 2026-07-28` は仕様リリース時点のrequire
 4. Fastifyのouter admissionとMCP handlerを接続。OAuth metadata、tool limits、stream/recoveryの負のtestを実行する。
 5. 保護された実クライアント/テストの受入が成立した後、不要なv1 session mapと恒久compatibilityを撤去する。
 
-**本PRではSDKの更新・tool実装・protocol acceptanceは未実施。** バージョン番号は導入PR時点の最新安定を個別に検証し、Node/TypeScript/Zod/FastifyへのWeb標準handler adapterのpeer互換をlockfileで固定する。
+SDK と Zod の固定版は [依存台帳](DEPENDENCY-INVENTORY.md) で管理する。
+公式 codemod は旧 SDK の import と登録 API の差分確認に使う。
+transport とプロトコル世代の変更は、公式移行ガイドに従って検証する。
+個々の受入結果は MCPV ID と exact-source の実行証拠を PR または CI artifact で照合する。

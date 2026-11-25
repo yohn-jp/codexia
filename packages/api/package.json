@@ -54,6 +54,7 @@
     "dist"
   ],
   "devDependencies": {
-    "@types/pg": "8.23.1"
+    "@types/pg": "8.23.1",
+    "@codexia/module-mcp": "workspace:*"
   }
 }

@@ -32,7 +32,7 @@ test('Fastify conversion rejects media dispatch it cannot enforce', () => {
 test('generated MCP response uses media-specific schemas and preserves the raw SSE stream', async t => {
   const openapi = parse(readFileSync(new URL('../openapi/codexia.openapi.yaml', import.meta.url), 'utf8'));
   const { routes, schemas } = toFastifyRoutes(openapi);
-  const route = routes.find(({ method, url }) => method === 'GET' && url === '/mcp');
+  const route = routes.find(({ method, url }) => method === 'POST' && url === '/mcp');
   assert.ok(route);
 
   const app = Fastify();
@@ -56,12 +56,18 @@ test('generated MCP response uses media-specific schemas and preserves the raw S
     },
   });
 
-  const json = await app.inject({ method: 'GET', url: '/mcp', headers: { accept: 'application/json' } });
+  const request = {
+    method: 'POST',
+    url: '/mcp',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    payload: '{}',
+  };
+  const json = await app.inject(request);
   assert.equal(json.statusCode, 200, json.body);
   assert.match(json.headers['content-type'], /^application\/json\b/u);
   assert.deepEqual(json.json(), message);
 
-  const sse = await app.inject({ method: 'GET', url: '/mcp', headers: { accept: 'text/event-stream' } });
+  const sse = await app.inject({ ...request, headers: { ...request.headers, accept: 'text/event-stream' } });
   assert.equal(sse.statusCode, 200, sse.body);
   assert.equal(sse.headers['content-type'], 'text/event-stream');
   assert.equal(sse.body, event);

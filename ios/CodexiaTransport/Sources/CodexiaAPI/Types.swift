@@ -1524,16 +1524,24 @@ extension APIProtocol {
     }
     /// - Remark: HTTP `GET /mcp`.
     /// - Remark: Generated from `#/paths//mcp/get(mcp_root_get)`.
-    public func mcp_root_get(headers: Operations.mcp_root_get.Input.Headers = .init()) async throws -> Operations.mcp_root_get.Output {
-        try await mcp_root_get(Operations.mcp_root_get.Input(headers: headers))
+    public func mcp_root_get(
+        query: Operations.mcp_root_get.Input.Query = .init(),
+        headers: Operations.mcp_root_get.Input.Headers = .init()
+    ) async throws -> Operations.mcp_root_get.Output {
+        try await mcp_root_get(Operations.mcp_root_get.Input(
+            query: query,
+            headers: headers
+        ))
     }
     /// - Remark: HTTP `POST /mcp`.
     /// - Remark: Generated from `#/paths//mcp/post(mcp_root_post)`.
     public func mcp_root_post(
+        query: Operations.mcp_root_post.Input.Query = .init(),
         headers: Operations.mcp_root_post.Input.Headers = .init(),
         body: Operations.mcp_root_post.Input.Body
     ) async throws -> Operations.mcp_root_post.Output {
         try await mcp_root_post(Operations.mcp_root_post.Input(
+            query: query,
             headers: headers,
             body: body
         ))

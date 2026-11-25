@@ -10119,29 +10119,29 @@ public enum Operations {
             public var path: Operations.project_mcp_stream_get.Input.Path
             /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/header`.
             public struct Headers: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/header/Mcp-Session-Id`.
-                public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/header/MCP-Protocol-Version`.
                 public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
-                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/header/Last-Event-ID`.
-                public var Last_hyphen_Event_hyphen_ID: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/header/Mcp-Method`.
+                public var Mcp_hyphen_Method: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/header/Mcp-Name`.
+                public var Mcp_hyphen_Name: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_get.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
-                ///   - Mcp_hyphen_Session_hyphen_Id:
                 ///   - MCP_hyphen_Protocol_hyphen_Version:
-                ///   - Last_hyphen_Event_hyphen_ID:
+                ///   - Mcp_hyphen_Method:
+                ///   - Mcp_hyphen_Name:
                 ///   - accept:
                 public init(
-                    Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
                     MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
-                    Last_hyphen_Event_hyphen_ID: Swift.String? = nil,
+                    Mcp_hyphen_Method: Swift.String? = nil,
+                    Mcp_hyphen_Name: Swift.String? = nil,
                     accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_get.AcceptableContentType>] = .defaultValues()
                 ) {
-                    self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
                     self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
-                    self.Last_hyphen_Event_hyphen_ID = Last_hyphen_Event_hyphen_ID
+                    self.Mcp_hyphen_Method = Mcp_hyphen_Method
+                    self.Mcp_hyphen_Name = Mcp_hyphen_Name
                     self.accept = accept
                 }
             }
@@ -10160,130 +10160,6 @@ public enum Operations {
             }
         }
         @frozen public enum Output: Sendable, Hashable {
-            public struct Ok: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/responses/200/headers`.
-                public struct Headers: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/responses/200/headers/Mcp-Session-Id`.
-                    public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/responses/200/headers/MCP-Protocol-Version`.
-                    public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/responses/200/headers/WWW-Authenticate`.
-                    public var WWW_hyphen_Authenticate: Swift.String?
-                    /// Creates a new `Headers`.
-                    ///
-                    /// - Parameters:
-                    ///   - Mcp_hyphen_Session_hyphen_Id:
-                    ///   - MCP_hyphen_Protocol_hyphen_Version:
-                    ///   - WWW_hyphen_Authenticate:
-                    public init(
-                        Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
-                        MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
-                        WWW_hyphen_Authenticate: Swift.String? = nil
-                    ) {
-                        self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
-                        self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
-                        self.WWW_hyphen_Authenticate = WWW_hyphen_Authenticate
-                    }
-                }
-                /// Received HTTP response headers
-                public var headers: Operations.project_mcp_stream_get.Output.Ok.Headers
-                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/responses/200/content`.
-                @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/responses/200/content/text\/event-stream`.
-                    case text_event_hyphen_stream(OpenAPIRuntime.HTTPBody)
-                    /// The associated value of the enum case if `self` is `.text_event_hyphen_stream`.
-                    ///
-                    /// - Throws: An error if `self` is not `.text_event_hyphen_stream`.
-                    /// - SeeAlso: `.text_event_hyphen_stream`.
-                    public var text_event_hyphen_stream: OpenAPIRuntime.HTTPBody {
-                        get throws {
-                            switch self {
-                            case let .text_event_hyphen_stream(body):
-                                return body
-                            default:
-                                try throwUnexpectedResponseBody(
-                                    expectedContent: "text/event-stream",
-                                    body: self
-                                )
-                            }
-                        }
-                    }
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/responses/200/content/application\/json`.
-                    case json(Operations.project_mcp_stream_get.Output.Ok.Body.jsonPayload)
-                    /// The associated value of the enum case if `self` is `.json`.
-                    ///
-                    /// - Throws: An error if `self` is not `.json`.
-                    /// - SeeAlso: `.json`.
-                    public var json: Operations.project_mcp_stream_get.Output.Ok.Body.jsonPayload {
-                        get throws {
-                            switch self {
-                            case let .json(body):
-                                return body
-                            default:
-                                try throwUnexpectedResponseBody(
-                                    expectedContent: "application/json",
-                                    body: self
-                                )
-                            }
-                        }
-                    }
-                }
-                /// Received HTTP response body
-                public var body: Operations.project_mcp_stream_get.Output.Ok.Body
-                /// Creates a new `Ok`.
-                ///
-                /// - Parameters:
-                ///   - headers: Received HTTP response headers
-                ///   - body: Received HTTP response body
-                public init(
-                    headers: Operations.project_mcp_stream_get.Output.Ok.Headers = .init(),
-                    body: Operations.project_mcp_stream_get.Output.Ok.Body
-                ) {
-                    self.headers = headers
-                    self.body = body
-                }
-            }
-            /// The request has succeeded.
-            ///
-            /// - Remark: Generated from `#/paths//api/projects/{projectId}/modules/mcp/streamable/get(project_mcp_stream_get)/responses/200`.
-            ///
-            /// HTTP response code: `200 ok`.
-            case ok(Operations.project_mcp_stream_get.Output.Ok)
-            /// The associated value of the enum case if `self` is `.ok`.
-            ///
-            /// - Throws: An error if `self` is not `.ok`.
-            /// - SeeAlso: `.ok`.
-            public var ok: Operations.project_mcp_stream_get.Output.Ok {
-                get throws {
-                    switch self {
-                    case let .ok(response):
-                        return response
-                    default:
-                        try throwUnexpectedResponseStatus(
-                            expectedStatus: "ok",
-                            response: self
-                        )
-                    }
-                }
-            }
             public struct Unauthorized: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/responses/401/headers`.
                 public struct Headers: Sendable, Hashable {
@@ -10354,19 +10230,67 @@ public enum Operations {
                     }
                 }
             }
+            public struct MethodNotAllowed: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/responses/405/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/GET/responses/405/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.project_mcp_stream_get.Output.MethodNotAllowed.Body
+                /// Creates a new `MethodNotAllowed`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.project_mcp_stream_get.Output.MethodNotAllowed.Body) {
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//api/projects/{projectId}/modules/mcp/streamable/get(project_mcp_stream_get)/responses/405`.
+            ///
+            /// HTTP response code: `405 methodNotAllowed`.
+            case methodNotAllowed(Operations.project_mcp_stream_get.Output.MethodNotAllowed)
+            /// The associated value of the enum case if `self` is `.methodNotAllowed`.
+            ///
+            /// - Throws: An error if `self` is not `.methodNotAllowed`.
+            /// - SeeAlso: `.methodNotAllowed`.
+            public var methodNotAllowed: Operations.project_mcp_stream_get.Output.MethodNotAllowed {
+                get throws {
+                    switch self {
+                    case let .methodNotAllowed(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "methodNotAllowed",
+                            response: self
+                        )
+                    }
+                }
+            }
             /// Undocumented response.
             ///
             /// A response with a code that is not documented in the OpenAPI document.
             case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
         }
         @frozen public enum AcceptableContentType: AcceptableProtocol {
-            case text_event_hyphen_stream
             case json
             case other(Swift.String)
             public init?(rawValue: Swift.String) {
                 switch rawValue.lowercased() {
-                case "text/event-stream":
-                    self = .text_event_hyphen_stream
                 case "application/json":
                     self = .json
                 default:
@@ -10377,15 +10301,12 @@ public enum Operations {
                 switch self {
                 case let .other(string):
                     return string
-                case .text_event_hyphen_stream:
-                    return "text/event-stream"
                 case .json:
                     return "application/json"
                 }
             }
             public static var allCases: [Self] {
                 [
-                    .text_event_hyphen_stream,
                     .json
                 ]
             }
@@ -10411,24 +10332,29 @@ public enum Operations {
             public var path: Operations.project_mcp_stream_post.Input.Path
             /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/header`.
             public struct Headers: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/header/Mcp-Session-Id`.
-                public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/header/MCP-Protocol-Version`.
                 public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/header/Mcp-Method`.
+                public var Mcp_hyphen_Method: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/header/Mcp-Name`.
+                public var Mcp_hyphen_Name: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_post.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
-                ///   - Mcp_hyphen_Session_hyphen_Id:
                 ///   - MCP_hyphen_Protocol_hyphen_Version:
+                ///   - Mcp_hyphen_Method:
+                ///   - Mcp_hyphen_Name:
                 ///   - accept:
                 public init(
-                    Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
                     MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
+                    Mcp_hyphen_Method: Swift.String? = nil,
+                    Mcp_hyphen_Name: Swift.String? = nil,
                     accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_post.AcceptableContentType>] = .defaultValues()
                 ) {
-                    self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
                     self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
+                    self.Mcp_hyphen_Method = Mcp_hyphen_Method
+                    self.Mcp_hyphen_Name = Mcp_hyphen_Name
                     self.accept = accept
                 }
             }
@@ -10544,8 +10470,6 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/200/headers`.
                 public struct Headers: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/200/headers/Mcp-Session-Id`.
-                    public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/200/headers/MCP-Protocol-Version`.
                     public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
                     /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/200/headers/WWW-Authenticate`.
@@ -10553,15 +10477,12 @@ public enum Operations {
                     /// Creates a new `Headers`.
                     ///
                     /// - Parameters:
-                    ///   - Mcp_hyphen_Session_hyphen_Id:
                     ///   - MCP_hyphen_Protocol_hyphen_Version:
                     ///   - WWW_hyphen_Authenticate:
                     public init(
-                        Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
                         MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
                         WWW_hyphen_Authenticate: Swift.String? = nil
                     ) {
-                        self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
                         self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
                         self.WWW_hyphen_Authenticate = WWW_hyphen_Authenticate
                     }
@@ -10665,6 +10586,145 @@ public enum Operations {
                     }
                 }
             }
+            public struct Accepted: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/202/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/202/headers/MCP-Protocol-Version`.
+                    public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - MCP_hyphen_Protocol_hyphen_Version:
+                    public init(MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil) {
+                        self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.project_mcp_stream_post.Output.Accepted.Headers
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/202/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/202/content/json`.
+                    public struct jsonPayload: Codable, Hashable, Sendable {
+                        /// A container of undocumented properties.
+                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - additionalProperties: A container of undocumented properties.
+                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                            self.additionalProperties = additionalProperties
+                        }
+                        public init(from decoder: any Swift.Decoder) throws {
+                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                        }
+                        public func encode(to encoder: any Swift.Encoder) throws {
+                            try encoder.encodeAdditionalProperties(additionalProperties)
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/202/content/application\/json`.
+                    case json(Operations.project_mcp_stream_post.Output.Accepted.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Operations.project_mcp_stream_post.Output.Accepted.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.project_mcp_stream_post.Output.Accepted.Body
+                /// Creates a new `Accepted`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.project_mcp_stream_post.Output.Accepted.Headers = .init(),
+                    body: Operations.project_mcp_stream_post.Output.Accepted.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The request has been accepted for processing, but processing has not yet completed.
+            ///
+            /// - Remark: Generated from `#/paths//api/projects/{projectId}/modules/mcp/streamable/post(project_mcp_stream_post)/responses/202`.
+            ///
+            /// HTTP response code: `202 accepted`.
+            case accepted(Operations.project_mcp_stream_post.Output.Accepted)
+            /// The associated value of the enum case if `self` is `.accepted`.
+            ///
+            /// - Throws: An error if `self` is not `.accepted`.
+            /// - SeeAlso: `.accepted`.
+            public var accepted: Operations.project_mcp_stream_post.Output.Accepted {
+                get throws {
+                    switch self {
+                    case let .accepted(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "accepted",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct BadRequest: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/400/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/400/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.project_mcp_stream_post.Output.BadRequest.Body
+                /// Creates a new `BadRequest`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.project_mcp_stream_post.Output.BadRequest.Body) {
+                    self.body = body
+                }
+            }
+            /// The server could not understand the request due to invalid syntax.
+            ///
+            /// - Remark: Generated from `#/paths//api/projects/{projectId}/modules/mcp/streamable/post(project_mcp_stream_post)/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Operations.project_mcp_stream_post.Output.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            public var badRequest: Operations.project_mcp_stream_post.Output.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
             public struct Unauthorized: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/401/headers`.
                 public struct Headers: Sendable, Hashable {
@@ -10735,6 +10795,159 @@ public enum Operations {
                     }
                 }
             }
+            public struct Forbidden: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/403/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/403/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.project_mcp_stream_post.Output.Forbidden.Body
+                /// Creates a new `Forbidden`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.project_mcp_stream_post.Output.Forbidden.Body) {
+                    self.body = body
+                }
+            }
+            /// Access is forbidden.
+            ///
+            /// - Remark: Generated from `#/paths//api/projects/{projectId}/modules/mcp/streamable/post(project_mcp_stream_post)/responses/403`.
+            ///
+            /// HTTP response code: `403 forbidden`.
+            case forbidden(Operations.project_mcp_stream_post.Output.Forbidden)
+            /// The associated value of the enum case if `self` is `.forbidden`.
+            ///
+            /// - Throws: An error if `self` is not `.forbidden`.
+            /// - SeeAlso: `.forbidden`.
+            public var forbidden: Operations.project_mcp_stream_post.Output.Forbidden {
+                get throws {
+                    switch self {
+                    case let .forbidden(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "forbidden",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ContentTooLarge: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/413/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/413/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.project_mcp_stream_post.Output.ContentTooLarge.Body
+                /// Creates a new `ContentTooLarge`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.project_mcp_stream_post.Output.ContentTooLarge.Body) {
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//api/projects/{projectId}/modules/mcp/streamable/post(project_mcp_stream_post)/responses/413`.
+            ///
+            /// HTTP response code: `413 contentTooLarge`.
+            case contentTooLarge(Operations.project_mcp_stream_post.Output.ContentTooLarge)
+            /// The associated value of the enum case if `self` is `.contentTooLarge`.
+            ///
+            /// - Throws: An error if `self` is not `.contentTooLarge`.
+            /// - SeeAlso: `.contentTooLarge`.
+            public var contentTooLarge: Operations.project_mcp_stream_post.Output.ContentTooLarge {
+                get throws {
+                    switch self {
+                    case let .contentTooLarge(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "contentTooLarge",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct UnsupportedMediaType: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/415/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/POST/responses/415/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.project_mcp_stream_post.Output.UnsupportedMediaType.Body
+                /// Creates a new `UnsupportedMediaType`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.project_mcp_stream_post.Output.UnsupportedMediaType.Body) {
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//api/projects/{projectId}/modules/mcp/streamable/post(project_mcp_stream_post)/responses/415`.
+            ///
+            /// HTTP response code: `415 unsupportedMediaType`.
+            case unsupportedMediaType(Operations.project_mcp_stream_post.Output.UnsupportedMediaType)
+            /// The associated value of the enum case if `self` is `.unsupportedMediaType`.
+            ///
+            /// - Throws: An error if `self` is not `.unsupportedMediaType`.
+            /// - SeeAlso: `.unsupportedMediaType`.
+            public var unsupportedMediaType: Operations.project_mcp_stream_post.Output.UnsupportedMediaType {
+                get throws {
+                    switch self {
+                    case let .unsupportedMediaType(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unsupportedMediaType",
+                            response: self
+                        )
+                    }
+                }
+            }
             /// Undocumented response.
             ///
             /// A response with a code that is not documented in the OpenAPI document.
@@ -10792,24 +11005,29 @@ public enum Operations {
             public var path: Operations.project_mcp_stream_delete.Input.Path
             /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/header`.
             public struct Headers: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/header/Mcp-Session-Id`.
-                public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/header/MCP-Protocol-Version`.
                 public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/header/Mcp-Method`.
+                public var Mcp_hyphen_Method: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/header/Mcp-Name`.
+                public var Mcp_hyphen_Name: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_delete.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
-                ///   - Mcp_hyphen_Session_hyphen_Id:
                 ///   - MCP_hyphen_Protocol_hyphen_Version:
+                ///   - Mcp_hyphen_Method:
+                ///   - Mcp_hyphen_Name:
                 ///   - accept:
                 public init(
-                    Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
                     MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
+                    Mcp_hyphen_Method: Swift.String? = nil,
+                    Mcp_hyphen_Name: Swift.String? = nil,
                     accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_mcp_stream_delete.AcceptableContentType>] = .defaultValues()
                 ) {
-                    self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
                     self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
+                    self.Mcp_hyphen_Method = Mcp_hyphen_Method
+                    self.Mcp_hyphen_Name = Mcp_hyphen_Name
                     self.accept = accept
                 }
             }
@@ -10828,106 +11046,6 @@ public enum Operations {
             }
         }
         @frozen public enum Output: Sendable, Hashable {
-            public struct Ok: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/responses/200/headers`.
-                public struct Headers: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/responses/200/headers/Mcp-Session-Id`.
-                    public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/responses/200/headers/MCP-Protocol-Version`.
-                    public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/responses/200/headers/WWW-Authenticate`.
-                    public var WWW_hyphen_Authenticate: Swift.String?
-                    /// Creates a new `Headers`.
-                    ///
-                    /// - Parameters:
-                    ///   - Mcp_hyphen_Session_hyphen_Id:
-                    ///   - MCP_hyphen_Protocol_hyphen_Version:
-                    ///   - WWW_hyphen_Authenticate:
-                    public init(
-                        Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
-                        MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
-                        WWW_hyphen_Authenticate: Swift.String? = nil
-                    ) {
-                        self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
-                        self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
-                        self.WWW_hyphen_Authenticate = WWW_hyphen_Authenticate
-                    }
-                }
-                /// Received HTTP response headers
-                public var headers: Operations.project_mcp_stream_delete.Output.Ok.Headers
-                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/responses/200/content`.
-                @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
-                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/responses/200/content/application\/json`.
-                    case json(Operations.project_mcp_stream_delete.Output.Ok.Body.jsonPayload)
-                    /// The associated value of the enum case if `self` is `.json`.
-                    ///
-                    /// - Throws: An error if `self` is not `.json`.
-                    /// - SeeAlso: `.json`.
-                    public var json: Operations.project_mcp_stream_delete.Output.Ok.Body.jsonPayload {
-                        get throws {
-                            switch self {
-                            case let .json(body):
-                                return body
-                            }
-                        }
-                    }
-                }
-                /// Received HTTP response body
-                public var body: Operations.project_mcp_stream_delete.Output.Ok.Body
-                /// Creates a new `Ok`.
-                ///
-                /// - Parameters:
-                ///   - headers: Received HTTP response headers
-                ///   - body: Received HTTP response body
-                public init(
-                    headers: Operations.project_mcp_stream_delete.Output.Ok.Headers = .init(),
-                    body: Operations.project_mcp_stream_delete.Output.Ok.Body
-                ) {
-                    self.headers = headers
-                    self.body = body
-                }
-            }
-            /// The request has succeeded.
-            ///
-            /// - Remark: Generated from `#/paths//api/projects/{projectId}/modules/mcp/streamable/delete(project_mcp_stream_delete)/responses/200`.
-            ///
-            /// HTTP response code: `200 ok`.
-            case ok(Operations.project_mcp_stream_delete.Output.Ok)
-            /// The associated value of the enum case if `self` is `.ok`.
-            ///
-            /// - Throws: An error if `self` is not `.ok`.
-            /// - SeeAlso: `.ok`.
-            public var ok: Operations.project_mcp_stream_delete.Output.Ok {
-                get throws {
-                    switch self {
-                    case let .ok(response):
-                        return response
-                    default:
-                        try throwUnexpectedResponseStatus(
-                            expectedStatus: "ok",
-                            response: self
-                        )
-                    }
-                }
-            }
             public struct Unauthorized: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/responses/401/content`.
                 @frozen public enum Body: Sendable, Hashable {
@@ -10974,6 +11092,57 @@ public enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "unauthorized",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct MethodNotAllowed: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/responses/405/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/modules/mcp/streamable/DELETE/responses/405/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.project_mcp_stream_delete.Output.MethodNotAllowed.Body
+                /// Creates a new `MethodNotAllowed`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.project_mcp_stream_delete.Output.MethodNotAllowed.Body) {
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//api/projects/{projectId}/modules/mcp/streamable/delete(project_mcp_stream_delete)/responses/405`.
+            ///
+            /// HTTP response code: `405 methodNotAllowed`.
+            case methodNotAllowed(Operations.project_mcp_stream_delete.Output.MethodNotAllowed)
+            /// The associated value of the enum case if `self` is `.methodNotAllowed`.
+            ///
+            /// - Throws: An error if `self` is not `.methodNotAllowed`.
+            /// - SeeAlso: `.methodNotAllowed`.
+            public var methodNotAllowed: Operations.project_mcp_stream_delete.Output.MethodNotAllowed {
+                get throws {
+                    switch self {
+                    case let .methodNotAllowed(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "methodNotAllowed",
                             response: self
                         )
                     }
@@ -25576,31 +25745,44 @@ public enum Operations {
     public enum mcp_root_get {
         public static let id: Swift.String = "mcp_root_get"
         public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/mcp/GET/query`.
+            public struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/mcp/GET/query/projectId`.
+                public var projectId: Swift.String?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                public init(projectId: Swift.String? = nil) {
+                    self.projectId = projectId
+                }
+            }
+            public var query: Operations.mcp_root_get.Input.Query
             /// - Remark: Generated from `#/paths/mcp/GET/header`.
             public struct Headers: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/mcp/GET/header/Mcp-Session-Id`.
-                public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
                 /// - Remark: Generated from `#/paths/mcp/GET/header/MCP-Protocol-Version`.
                 public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
-                /// - Remark: Generated from `#/paths/mcp/GET/header/Last-Event-ID`.
-                public var Last_hyphen_Event_hyphen_ID: Swift.String?
+                /// - Remark: Generated from `#/paths/mcp/GET/header/Mcp-Method`.
+                public var Mcp_hyphen_Method: Swift.String?
+                /// - Remark: Generated from `#/paths/mcp/GET/header/Mcp-Name`.
+                public var Mcp_hyphen_Name: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_get.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
-                ///   - Mcp_hyphen_Session_hyphen_Id:
                 ///   - MCP_hyphen_Protocol_hyphen_Version:
-                ///   - Last_hyphen_Event_hyphen_ID:
+                ///   - Mcp_hyphen_Method:
+                ///   - Mcp_hyphen_Name:
                 ///   - accept:
                 public init(
-                    Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
                     MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
-                    Last_hyphen_Event_hyphen_ID: Swift.String? = nil,
+                    Mcp_hyphen_Method: Swift.String? = nil,
+                    Mcp_hyphen_Name: Swift.String? = nil,
                     accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_get.AcceptableContentType>] = .defaultValues()
                 ) {
-                    self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
                     self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
-                    self.Last_hyphen_Event_hyphen_ID = Last_hyphen_Event_hyphen_ID
+                    self.Mcp_hyphen_Method = Mcp_hyphen_Method
+                    self.Mcp_hyphen_Name = Mcp_hyphen_Name
                     self.accept = accept
                 }
             }
@@ -25608,136 +25790,17 @@ public enum Operations {
             /// Creates a new `Input`.
             ///
             /// - Parameters:
+            ///   - query:
             ///   - headers:
-            public init(headers: Operations.mcp_root_get.Input.Headers = .init()) {
+            public init(
+                query: Operations.mcp_root_get.Input.Query = .init(),
+                headers: Operations.mcp_root_get.Input.Headers = .init()
+            ) {
+                self.query = query
                 self.headers = headers
             }
         }
         @frozen public enum Output: Sendable, Hashable {
-            public struct Ok: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/mcp/GET/responses/200/headers`.
-                public struct Headers: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/mcp/GET/responses/200/headers/Mcp-Session-Id`.
-                    public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
-                    /// - Remark: Generated from `#/paths/mcp/GET/responses/200/headers/MCP-Protocol-Version`.
-                    public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
-                    /// - Remark: Generated from `#/paths/mcp/GET/responses/200/headers/WWW-Authenticate`.
-                    public var WWW_hyphen_Authenticate: Swift.String?
-                    /// Creates a new `Headers`.
-                    ///
-                    /// - Parameters:
-                    ///   - Mcp_hyphen_Session_hyphen_Id:
-                    ///   - MCP_hyphen_Protocol_hyphen_Version:
-                    ///   - WWW_hyphen_Authenticate:
-                    public init(
-                        Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
-                        MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
-                        WWW_hyphen_Authenticate: Swift.String? = nil
-                    ) {
-                        self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
-                        self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
-                        self.WWW_hyphen_Authenticate = WWW_hyphen_Authenticate
-                    }
-                }
-                /// Received HTTP response headers
-                public var headers: Operations.mcp_root_get.Output.Ok.Headers
-                /// - Remark: Generated from `#/paths/mcp/GET/responses/200/content`.
-                @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/mcp/GET/responses/200/content/text\/event-stream`.
-                    case text_event_hyphen_stream(OpenAPIRuntime.HTTPBody)
-                    /// The associated value of the enum case if `self` is `.text_event_hyphen_stream`.
-                    ///
-                    /// - Throws: An error if `self` is not `.text_event_hyphen_stream`.
-                    /// - SeeAlso: `.text_event_hyphen_stream`.
-                    public var text_event_hyphen_stream: OpenAPIRuntime.HTTPBody {
-                        get throws {
-                            switch self {
-                            case let .text_event_hyphen_stream(body):
-                                return body
-                            default:
-                                try throwUnexpectedResponseBody(
-                                    expectedContent: "text/event-stream",
-                                    body: self
-                                )
-                            }
-                        }
-                    }
-                    /// - Remark: Generated from `#/paths/mcp/GET/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
-                    /// - Remark: Generated from `#/paths/mcp/GET/responses/200/content/application\/json`.
-                    case json(Operations.mcp_root_get.Output.Ok.Body.jsonPayload)
-                    /// The associated value of the enum case if `self` is `.json`.
-                    ///
-                    /// - Throws: An error if `self` is not `.json`.
-                    /// - SeeAlso: `.json`.
-                    public var json: Operations.mcp_root_get.Output.Ok.Body.jsonPayload {
-                        get throws {
-                            switch self {
-                            case let .json(body):
-                                return body
-                            default:
-                                try throwUnexpectedResponseBody(
-                                    expectedContent: "application/json",
-                                    body: self
-                                )
-                            }
-                        }
-                    }
-                }
-                /// Received HTTP response body
-                public var body: Operations.mcp_root_get.Output.Ok.Body
-                /// Creates a new `Ok`.
-                ///
-                /// - Parameters:
-                ///   - headers: Received HTTP response headers
-                ///   - body: Received HTTP response body
-                public init(
-                    headers: Operations.mcp_root_get.Output.Ok.Headers = .init(),
-                    body: Operations.mcp_root_get.Output.Ok.Body
-                ) {
-                    self.headers = headers
-                    self.body = body
-                }
-            }
-            /// The request has succeeded.
-            ///
-            /// - Remark: Generated from `#/paths//mcp/get(mcp_root_get)/responses/200`.
-            ///
-            /// HTTP response code: `200 ok`.
-            case ok(Operations.mcp_root_get.Output.Ok)
-            /// The associated value of the enum case if `self` is `.ok`.
-            ///
-            /// - Throws: An error if `self` is not `.ok`.
-            /// - SeeAlso: `.ok`.
-            public var ok: Operations.mcp_root_get.Output.Ok {
-                get throws {
-                    switch self {
-                    case let .ok(response):
-                        return response
-                    default:
-                        try throwUnexpectedResponseStatus(
-                            expectedStatus: "ok",
-                            response: self
-                        )
-                    }
-                }
-            }
             public struct Unauthorized: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/mcp/GET/responses/401/headers`.
                 public struct Headers: Sendable, Hashable {
@@ -25808,19 +25871,67 @@ public enum Operations {
                     }
                 }
             }
+            public struct MethodNotAllowed: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/mcp/GET/responses/405/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/mcp/GET/responses/405/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.mcp_root_get.Output.MethodNotAllowed.Body
+                /// Creates a new `MethodNotAllowed`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.mcp_root_get.Output.MethodNotAllowed.Body) {
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//mcp/get(mcp_root_get)/responses/405`.
+            ///
+            /// HTTP response code: `405 methodNotAllowed`.
+            case methodNotAllowed(Operations.mcp_root_get.Output.MethodNotAllowed)
+            /// The associated value of the enum case if `self` is `.methodNotAllowed`.
+            ///
+            /// - Throws: An error if `self` is not `.methodNotAllowed`.
+            /// - SeeAlso: `.methodNotAllowed`.
+            public var methodNotAllowed: Operations.mcp_root_get.Output.MethodNotAllowed {
+                get throws {
+                    switch self {
+                    case let .methodNotAllowed(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "methodNotAllowed",
+                            response: self
+                        )
+                    }
+                }
+            }
             /// Undocumented response.
             ///
             /// A response with a code that is not documented in the OpenAPI document.
             case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
         }
         @frozen public enum AcceptableContentType: AcceptableProtocol {
-            case text_event_hyphen_stream
             case json
             case other(Swift.String)
             public init?(rawValue: Swift.String) {
                 switch rawValue.lowercased() {
-                case "text/event-stream":
-                    self = .text_event_hyphen_stream
                 case "application/json":
                     self = .json
                 default:
@@ -25831,15 +25942,12 @@ public enum Operations {
                 switch self {
                 case let .other(string):
                     return string
-                case .text_event_hyphen_stream:
-                    return "text/event-stream"
                 case .json:
                     return "application/json"
                 }
             }
             public static var allCases: [Self] {
                 [
-                    .text_event_hyphen_stream,
                     .json
                 ]
             }
@@ -25850,26 +25958,44 @@ public enum Operations {
     public enum mcp_root_post {
         public static let id: Swift.String = "mcp_root_post"
         public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/mcp/POST/query`.
+            public struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/mcp/POST/query/projectId`.
+                public var projectId: Swift.String?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                public init(projectId: Swift.String? = nil) {
+                    self.projectId = projectId
+                }
+            }
+            public var query: Operations.mcp_root_post.Input.Query
             /// - Remark: Generated from `#/paths/mcp/POST/header`.
             public struct Headers: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/mcp/POST/header/Mcp-Session-Id`.
-                public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
                 /// - Remark: Generated from `#/paths/mcp/POST/header/MCP-Protocol-Version`.
                 public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
+                /// - Remark: Generated from `#/paths/mcp/POST/header/Mcp-Method`.
+                public var Mcp_hyphen_Method: Swift.String?
+                /// - Remark: Generated from `#/paths/mcp/POST/header/Mcp-Name`.
+                public var Mcp_hyphen_Name: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_post.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
-                ///   - Mcp_hyphen_Session_hyphen_Id:
                 ///   - MCP_hyphen_Protocol_hyphen_Version:
+                ///   - Mcp_hyphen_Method:
+                ///   - Mcp_hyphen_Name:
                 ///   - accept:
                 public init(
-                    Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
                     MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
+                    Mcp_hyphen_Method: Swift.String? = nil,
+                    Mcp_hyphen_Name: Swift.String? = nil,
                     accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_post.AcceptableContentType>] = .defaultValues()
                 ) {
-                    self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
                     self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
+                    self.Mcp_hyphen_Method = Mcp_hyphen_Method
+                    self.Mcp_hyphen_Name = Mcp_hyphen_Name
                     self.accept = accept
                 }
             }
@@ -25968,12 +26094,15 @@ public enum Operations {
             /// Creates a new `Input`.
             ///
             /// - Parameters:
+            ///   - query:
             ///   - headers:
             ///   - body:
             public init(
+                query: Operations.mcp_root_post.Input.Query = .init(),
                 headers: Operations.mcp_root_post.Input.Headers = .init(),
                 body: Operations.mcp_root_post.Input.Body
             ) {
+                self.query = query
                 self.headers = headers
                 self.body = body
             }
@@ -25982,8 +26111,6 @@ public enum Operations {
             public struct Ok: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/mcp/POST/responses/200/headers`.
                 public struct Headers: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/mcp/POST/responses/200/headers/Mcp-Session-Id`.
-                    public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
                     /// - Remark: Generated from `#/paths/mcp/POST/responses/200/headers/MCP-Protocol-Version`.
                     public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
                     /// - Remark: Generated from `#/paths/mcp/POST/responses/200/headers/WWW-Authenticate`.
@@ -25991,15 +26118,12 @@ public enum Operations {
                     /// Creates a new `Headers`.
                     ///
                     /// - Parameters:
-                    ///   - Mcp_hyphen_Session_hyphen_Id:
                     ///   - MCP_hyphen_Protocol_hyphen_Version:
                     ///   - WWW_hyphen_Authenticate:
                     public init(
-                        Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
                         MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
                         WWW_hyphen_Authenticate: Swift.String? = nil
                     ) {
-                        self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
                         self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
                         self.WWW_hyphen_Authenticate = WWW_hyphen_Authenticate
                     }
@@ -26103,6 +26227,145 @@ public enum Operations {
                     }
                 }
             }
+            public struct Accepted: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/mcp/POST/responses/202/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/mcp/POST/responses/202/headers/MCP-Protocol-Version`.
+                    public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - MCP_hyphen_Protocol_hyphen_Version:
+                    public init(MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil) {
+                        self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.mcp_root_post.Output.Accepted.Headers
+                /// - Remark: Generated from `#/paths/mcp/POST/responses/202/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/mcp/POST/responses/202/content/json`.
+                    public struct jsonPayload: Codable, Hashable, Sendable {
+                        /// A container of undocumented properties.
+                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - additionalProperties: A container of undocumented properties.
+                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                            self.additionalProperties = additionalProperties
+                        }
+                        public init(from decoder: any Swift.Decoder) throws {
+                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                        }
+                        public func encode(to encoder: any Swift.Encoder) throws {
+                            try encoder.encodeAdditionalProperties(additionalProperties)
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/mcp/POST/responses/202/content/application\/json`.
+                    case json(Operations.mcp_root_post.Output.Accepted.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Operations.mcp_root_post.Output.Accepted.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.mcp_root_post.Output.Accepted.Body
+                /// Creates a new `Accepted`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.mcp_root_post.Output.Accepted.Headers = .init(),
+                    body: Operations.mcp_root_post.Output.Accepted.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The request has been accepted for processing, but processing has not yet completed.
+            ///
+            /// - Remark: Generated from `#/paths//mcp/post(mcp_root_post)/responses/202`.
+            ///
+            /// HTTP response code: `202 accepted`.
+            case accepted(Operations.mcp_root_post.Output.Accepted)
+            /// The associated value of the enum case if `self` is `.accepted`.
+            ///
+            /// - Throws: An error if `self` is not `.accepted`.
+            /// - SeeAlso: `.accepted`.
+            public var accepted: Operations.mcp_root_post.Output.Accepted {
+                get throws {
+                    switch self {
+                    case let .accepted(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "accepted",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct BadRequest: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/mcp/POST/responses/400/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/mcp/POST/responses/400/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.mcp_root_post.Output.BadRequest.Body
+                /// Creates a new `BadRequest`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.mcp_root_post.Output.BadRequest.Body) {
+                    self.body = body
+                }
+            }
+            /// The server could not understand the request due to invalid syntax.
+            ///
+            /// - Remark: Generated from `#/paths//mcp/post(mcp_root_post)/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Operations.mcp_root_post.Output.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            public var badRequest: Operations.mcp_root_post.Output.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
             public struct Unauthorized: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/mcp/POST/responses/401/headers`.
                 public struct Headers: Sendable, Hashable {
@@ -26173,6 +26436,159 @@ public enum Operations {
                     }
                 }
             }
+            public struct Forbidden: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/mcp/POST/responses/403/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/mcp/POST/responses/403/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.mcp_root_post.Output.Forbidden.Body
+                /// Creates a new `Forbidden`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.mcp_root_post.Output.Forbidden.Body) {
+                    self.body = body
+                }
+            }
+            /// Access is forbidden.
+            ///
+            /// - Remark: Generated from `#/paths//mcp/post(mcp_root_post)/responses/403`.
+            ///
+            /// HTTP response code: `403 forbidden`.
+            case forbidden(Operations.mcp_root_post.Output.Forbidden)
+            /// The associated value of the enum case if `self` is `.forbidden`.
+            ///
+            /// - Throws: An error if `self` is not `.forbidden`.
+            /// - SeeAlso: `.forbidden`.
+            public var forbidden: Operations.mcp_root_post.Output.Forbidden {
+                get throws {
+                    switch self {
+                    case let .forbidden(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "forbidden",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct ContentTooLarge: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/mcp/POST/responses/413/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/mcp/POST/responses/413/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.mcp_root_post.Output.ContentTooLarge.Body
+                /// Creates a new `ContentTooLarge`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.mcp_root_post.Output.ContentTooLarge.Body) {
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//mcp/post(mcp_root_post)/responses/413`.
+            ///
+            /// HTTP response code: `413 contentTooLarge`.
+            case contentTooLarge(Operations.mcp_root_post.Output.ContentTooLarge)
+            /// The associated value of the enum case if `self` is `.contentTooLarge`.
+            ///
+            /// - Throws: An error if `self` is not `.contentTooLarge`.
+            /// - SeeAlso: `.contentTooLarge`.
+            public var contentTooLarge: Operations.mcp_root_post.Output.ContentTooLarge {
+                get throws {
+                    switch self {
+                    case let .contentTooLarge(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "contentTooLarge",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct UnsupportedMediaType: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/mcp/POST/responses/415/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/mcp/POST/responses/415/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.mcp_root_post.Output.UnsupportedMediaType.Body
+                /// Creates a new `UnsupportedMediaType`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.mcp_root_post.Output.UnsupportedMediaType.Body) {
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//mcp/post(mcp_root_post)/responses/415`.
+            ///
+            /// HTTP response code: `415 unsupportedMediaType`.
+            case unsupportedMediaType(Operations.mcp_root_post.Output.UnsupportedMediaType)
+            /// The associated value of the enum case if `self` is `.unsupportedMediaType`.
+            ///
+            /// - Throws: An error if `self` is not `.unsupportedMediaType`.
+            /// - SeeAlso: `.unsupportedMediaType`.
+            public var unsupportedMediaType: Operations.mcp_root_post.Output.UnsupportedMediaType {
+                get throws {
+                    switch self {
+                    case let .unsupportedMediaType(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unsupportedMediaType",
+                            response: self
+                        )
+                    }
+                }
+            }
             /// Undocumented response.
             ///
             /// A response with a code that is not documented in the OpenAPI document.
@@ -26217,24 +26633,29 @@ public enum Operations {
         public struct Input: Sendable, Hashable {
             /// - Remark: Generated from `#/paths/mcp/DELETE/header`.
             public struct Headers: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/mcp/DELETE/header/Mcp-Session-Id`.
-                public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
                 /// - Remark: Generated from `#/paths/mcp/DELETE/header/MCP-Protocol-Version`.
                 public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
+                /// - Remark: Generated from `#/paths/mcp/DELETE/header/Mcp-Method`.
+                public var Mcp_hyphen_Method: Swift.String?
+                /// - Remark: Generated from `#/paths/mcp/DELETE/header/Mcp-Name`.
+                public var Mcp_hyphen_Name: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_delete.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
-                ///   - Mcp_hyphen_Session_hyphen_Id:
                 ///   - MCP_hyphen_Protocol_hyphen_Version:
+                ///   - Mcp_hyphen_Method:
+                ///   - Mcp_hyphen_Name:
                 ///   - accept:
                 public init(
-                    Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
                     MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
+                    Mcp_hyphen_Method: Swift.String? = nil,
+                    Mcp_hyphen_Name: Swift.String? = nil,
                     accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.mcp_root_delete.AcceptableContentType>] = .defaultValues()
                 ) {
-                    self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
                     self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
+                    self.Mcp_hyphen_Method = Mcp_hyphen_Method
+                    self.Mcp_hyphen_Name = Mcp_hyphen_Name
                     self.accept = accept
                 }
             }
@@ -26248,106 +26669,6 @@ public enum Operations {
             }
         }
         @frozen public enum Output: Sendable, Hashable {
-            public struct Ok: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/mcp/DELETE/responses/200/headers`.
-                public struct Headers: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/mcp/DELETE/responses/200/headers/Mcp-Session-Id`.
-                    public var Mcp_hyphen_Session_hyphen_Id: Swift.String?
-                    /// - Remark: Generated from `#/paths/mcp/DELETE/responses/200/headers/MCP-Protocol-Version`.
-                    public var MCP_hyphen_Protocol_hyphen_Version: Swift.String?
-                    /// - Remark: Generated from `#/paths/mcp/DELETE/responses/200/headers/WWW-Authenticate`.
-                    public var WWW_hyphen_Authenticate: Swift.String?
-                    /// Creates a new `Headers`.
-                    ///
-                    /// - Parameters:
-                    ///   - Mcp_hyphen_Session_hyphen_Id:
-                    ///   - MCP_hyphen_Protocol_hyphen_Version:
-                    ///   - WWW_hyphen_Authenticate:
-                    public init(
-                        Mcp_hyphen_Session_hyphen_Id: Swift.String? = nil,
-                        MCP_hyphen_Protocol_hyphen_Version: Swift.String? = nil,
-                        WWW_hyphen_Authenticate: Swift.String? = nil
-                    ) {
-                        self.Mcp_hyphen_Session_hyphen_Id = Mcp_hyphen_Session_hyphen_Id
-                        self.MCP_hyphen_Protocol_hyphen_Version = MCP_hyphen_Protocol_hyphen_Version
-                        self.WWW_hyphen_Authenticate = WWW_hyphen_Authenticate
-                    }
-                }
-                /// Received HTTP response headers
-                public var headers: Operations.mcp_root_delete.Output.Ok.Headers
-                /// - Remark: Generated from `#/paths/mcp/DELETE/responses/200/content`.
-                @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/mcp/DELETE/responses/200/content/json`.
-                    public struct jsonPayload: Codable, Hashable, Sendable {
-                        /// A container of undocumented properties.
-                        public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                        /// Creates a new `jsonPayload`.
-                        ///
-                        /// - Parameters:
-                        ///   - additionalProperties: A container of undocumented properties.
-                        public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                            self.additionalProperties = additionalProperties
-                        }
-                        public init(from decoder: any Swift.Decoder) throws {
-                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                        }
-                        public func encode(to encoder: any Swift.Encoder) throws {
-                            try encoder.encodeAdditionalProperties(additionalProperties)
-                        }
-                    }
-                    /// - Remark: Generated from `#/paths/mcp/DELETE/responses/200/content/application\/json`.
-                    case json(Operations.mcp_root_delete.Output.Ok.Body.jsonPayload)
-                    /// The associated value of the enum case if `self` is `.json`.
-                    ///
-                    /// - Throws: An error if `self` is not `.json`.
-                    /// - SeeAlso: `.json`.
-                    public var json: Operations.mcp_root_delete.Output.Ok.Body.jsonPayload {
-                        get throws {
-                            switch self {
-                            case let .json(body):
-                                return body
-                            }
-                        }
-                    }
-                }
-                /// Received HTTP response body
-                public var body: Operations.mcp_root_delete.Output.Ok.Body
-                /// Creates a new `Ok`.
-                ///
-                /// - Parameters:
-                ///   - headers: Received HTTP response headers
-                ///   - body: Received HTTP response body
-                public init(
-                    headers: Operations.mcp_root_delete.Output.Ok.Headers = .init(),
-                    body: Operations.mcp_root_delete.Output.Ok.Body
-                ) {
-                    self.headers = headers
-                    self.body = body
-                }
-            }
-            /// The request has succeeded.
-            ///
-            /// - Remark: Generated from `#/paths//mcp/delete(mcp_root_delete)/responses/200`.
-            ///
-            /// HTTP response code: `200 ok`.
-            case ok(Operations.mcp_root_delete.Output.Ok)
-            /// The associated value of the enum case if `self` is `.ok`.
-            ///
-            /// - Throws: An error if `self` is not `.ok`.
-            /// - SeeAlso: `.ok`.
-            public var ok: Operations.mcp_root_delete.Output.Ok {
-                get throws {
-                    switch self {
-                    case let .ok(response):
-                        return response
-                    default:
-                        try throwUnexpectedResponseStatus(
-                            expectedStatus: "ok",
-                            response: self
-                        )
-                    }
-                }
-            }
             public struct Unauthorized: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/mcp/DELETE/responses/401/content`.
                 @frozen public enum Body: Sendable, Hashable {
@@ -26394,6 +26715,57 @@ public enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "unauthorized",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct MethodNotAllowed: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/mcp/DELETE/responses/405/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/mcp/DELETE/responses/405/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.mcp_root_delete.Output.MethodNotAllowed.Body
+                /// Creates a new `MethodNotAllowed`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.mcp_root_delete.Output.MethodNotAllowed.Body) {
+                    self.body = body
+                }
+            }
+            /// Client error
+            ///
+            /// - Remark: Generated from `#/paths//mcp/delete(mcp_root_delete)/responses/405`.
+            ///
+            /// HTTP response code: `405 methodNotAllowed`.
+            case methodNotAllowed(Operations.mcp_root_delete.Output.MethodNotAllowed)
+            /// The associated value of the enum case if `self` is `.methodNotAllowed`.
+            ///
+            /// - Throws: An error if `self` is not `.methodNotAllowed`.
+            /// - SeeAlso: `.methodNotAllowed`.
+            public var methodNotAllowed: Operations.mcp_root_delete.Output.MethodNotAllowed {
+                get throws {
+                    switch self {
+                    case let .methodNotAllowed(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "methodNotAllowed",
                             response: self
                         )
                     }

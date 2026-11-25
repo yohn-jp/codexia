@@ -34,12 +34,12 @@ function operationSurfaces(admitted, file) {
 
 function literalMcpTools(source, file) {
   const surfaces = [];
-  const regex = /\bserver\.tool\s*\(\s*(["'])([A-Za-z][A-Za-z0-9_.-]*)\1/gu;
+  const regex = /\bserver\.(?:tool|registerTool)\s*\(\s*(["'])([A-Za-z][A-Za-z0-9_.-]*)\1/gu;
   for (const match of source.matchAll(regex)) {
     const line = source.slice(0, match.index).split('\n').length;
-    surfaces.push({ kind: 'mcpTool', id: match[2], source: { path: file, line }, provenance: 'Literal server.tool registration in MCP source; dynamic registrations are outside this scan.' });
+    surfaces.push({ kind: 'mcpTool', id: match[2], source: { path: file, line }, provenance: 'Literal server.tool or server.registerTool registration in MCP source; dynamic registrations are outside this scan.' });
   }
-  if (/\bserver\.tool\s*\(\s*(?!["'])/u.test(source)) {
+  if (/\bserver\.(?:tool|registerTool)\s*\(\s*(?!["'])/u.test(source)) {
     surfaces.push({ kind: 'mcpRegistration', id: `dynamic:${file}`, source: { path: file }, provenance: 'A non-literal tool registration was observed; name and effect require runtime/catalog resolution.' });
   }
   return surfaces;
