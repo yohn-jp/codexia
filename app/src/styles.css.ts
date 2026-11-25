@@ -1,6 +1,7 @@
 import './theme.css';
 import './shell-theme.css';
-import { type CSSProperties, globalStyle } from '@vanilla-extract/css';
+import type { CSSProperties } from '@vanilla-extract/css';
+import { scopedGlobalStyle as globalStyle } from './styles/scoped-global-style.css';
 
 globalStyle(':root', {
   fontFamily: 'var(--manuscript-sans)',
@@ -399,7 +400,12 @@ globalStyle('.manuscript-history-detail pre', { maxHeight: '24rem', overflow: 'a
 globalStyle('.diff-line', { display: 'block' });
 globalStyle('.diff-line.is-add', { background: 'var(--diff-add)' });
 globalStyle('.diff-line.is-remove', { color: 'var(--diff-remove-text)', background: 'var(--diff-remove)', textDecoration: 'line-through' });
-globalStyle('.print-view', {
+// React portals the print document directly to body so print styles must cross the #root boundary.
+globalStyle(
+  'body > .pg-print-document,\nbody > .pg-print-document::before,\nbody > .pg-print-document::after,\nbody > .pg-print-document *,\nbody > .pg-print-document *::before,\nbody > .pg-print-document *::after',
+  { boxSizing: 'border-box' },
+);
+globalStyle('body > .pg-print-document.print-view', {
   maxWidth: 'var(--reader-max-width, 960px)',
   margin: '0 auto',
   fontFamily: 'var(--reader-font-family, var(--manuscript-serif))',
@@ -407,8 +413,8 @@ globalStyle('.print-view', {
   lineHeight: 'var(--reader-line-height, 1.8)',
   letterSpacing: 'var(--reader-letter-spacing, 0)',
 });
-globalStyle('.print-view.is-vertical', { maxHeight: 'var(--reader-max-width, 960px)' });
-globalStyle('.print-view', { display: 'none' });
+globalStyle('body > .pg-print-document.print-view.is-vertical', { maxHeight: 'var(--reader-max-width, 960px)' });
+globalStyle('body > .pg-print-document.print-view', { display: 'none' });
 globalStyle('.conflict', {
   margin: '0.8rem 0 1rem',
   padding: '1rem',
@@ -598,7 +604,7 @@ globalStyle('.editor, .editor-columns, .manuscript-column', {
   '@media': { print: { display: 'block', maxWidth: 'none', minHeight: '0', padding: '0', border: '0', boxShadow: 'none' } },
 });
 globalStyle('.manuscript-input', { '@media': { print: { display: 'none' } } });
-globalStyle('.print-view', {
+globalStyle('body > .pg-print-document.print-view', {
   '@media': {
     print: {
       display: 'block !important',
@@ -612,13 +618,13 @@ globalStyle('.print-view', {
     },
   },
 });
-globalStyle('.print-view.is-vertical', { '@media': { print: { writingMode: 'vertical-rl' } } });
+globalStyle('body > .pg-print-document.print-view.is-vertical', { '@media': { print: { writingMode: 'vertical-rl' } } });
 globalStyle('html:has(> body > .pg-print-document),\n  body:has(> .pg-print-document)', {
   '@media': { print: { height: 'auto', minHeight: '0', maxHeight: 'none', overflow: 'visible' } },
 });
 globalStyle('body:has(> .pg-print-document)', { '@media': { print: { position: 'static', transform: 'none', background: 'white' } } });
 globalStyle('body:has(> .pg-print-document) > #root', { '@media': { print: { display: 'none !important' } } });
-globalStyle('.pg-print-document', { '@media': { print: { maxWidth: 'none', overflowWrap: 'anywhere' } } });
+globalStyle('body > .pg-print-document', { '@media': { print: { maxWidth: 'none', overflowWrap: 'anywhere' } } });
 globalStyle('.reading-view', {
   '@media': {
     '(max-width: 760px)': {

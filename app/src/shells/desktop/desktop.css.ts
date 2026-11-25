@@ -1,4 +1,5 @@
-import { type CSSProperties, globalStyle } from '@vanilla-extract/css';
+import type { CSSProperties } from '@vanilla-extract/css';
+import { scopedGlobalStyle as globalStyle } from '../../styles/scoped-global-style.css';
 
 globalStyle('.st-desktop-shell', { display: 'flex', width: '100%', minWidth: '0', height: '100vh' });
 globalStyle('.st-desktop-shell', {

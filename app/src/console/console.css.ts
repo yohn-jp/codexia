@@ -1,4 +1,4 @@
-import { globalStyle } from '@vanilla-extract/css';
+import { scopedGlobalStyle as globalStyle } from '../styles/scoped-global-style.css';
 
 globalStyle('.codexia-console', { height: '100vh' });
 globalStyle('.codexia-console', {

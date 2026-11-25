@@ -1,4 +1,4 @@
-import { globalStyle } from '@vanilla-extract/css';
+import { scopedGlobalStyle as globalStyle } from '../../styles/scoped-global-style.css';
 
 globalStyle('.st-desktop-shell.st-studio-shell .st-workspace-desktop-controls', {
   minBlockSize: 'calc(2.75rem + 5px)',

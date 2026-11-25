@@ -1,4 +1,5 @@
-import { type CSSProperties, globalStyle } from '@vanilla-extract/css';
+import type { CSSProperties } from '@vanilla-extract/css';
+import { scopedGlobalStyle as globalStyle } from '../styles/scoped-global-style.css';
 
 globalStyle('.proposal-review.native-changeset-review', {
   container: 'native-review / inline-size',

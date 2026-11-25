@@ -1,7 +1,7 @@
 import type { RecentActivityDeviceType } from '@codexia/contracts';
 import type { Project } from '@codexia/persistence-contracts';
 import type { Tree } from '../api';
-import { buttonSize } from '../components/button.css';
+import { buttonRecipe } from '../components/button.css';
 import { type ContinueCandidate, formatHandoffHint, sceneTitleInTree } from '../resume/continueCandidates';
 import type { JournalEntry } from '../storage/journal';
 
@@ -94,11 +94,11 @@ function ContinuePanel({
               <li key={candidate.sceneId}>
                 <strong>{sceneTitleInTree(tree, candidate.sceneId)}</strong>
                 {handoff && <small>{handoff}</small>}
-                <button type="button" className={`quiet-button ${buttonSize({ size: 'compact' })}`} onClick={() => onContinue(candidate)}>
+                <button type="button" className={`quiet-button ${buttonRecipe({ size: 'compact' })}`} onClick={() => onContinue(candidate)}>
                   {index === 0 ? '続きを書く' : 'こちらを開く'}
                 </button>
                 {candidate.pageIndex !== null && (
-                  <button type="button" className={`quiet-button ${buttonSize({ size: 'compact' })}`} onClick={() => onRead(candidate)}>
+                  <button type="button" className={`quiet-button ${buttonRecipe({ size: 'compact' })}`} onClick={() => onRead(candidate)}>
                     読書位置を開く
                   </button>
                 )}
