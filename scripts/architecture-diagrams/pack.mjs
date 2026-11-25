@@ -125,7 +125,7 @@ export function parseLikeC4Diagram(modelSource, systemDesign, { id, viewId, titl
   };
 }
 
-export function createManifest(sha, sources, screenCatalog = '', nativeDiagrams = []) {
+function createAtlas(sha, sources, screenCatalog, nativeDiagrams) {
   assert.match(sha, /^[a-f0-9]{40}$/u, 'Expected a source commit SHA');
   assert.ok(nativeDiagrams.length >= 2, 'Incomplete architecture atlas: native LikeC4 views are required');
   const diagrams = sources.flatMap(({ section, markdown }) => parseMermaidDiagrams(markdown, section));
@@ -151,7 +151,7 @@ export function createManifest(sha, sources, screenCatalog = '', nativeDiagrams 
     'The LikeC4 context view owns the stable system-1 locator');
   assert.equal(nativeDiagrams.find(d => d.viewId === LIKEC4_OPERATIONS_VIEW_ID)?.id, 'system-3',
     'The LikeC4 operations topology owns the system-3 locator');
-  return {
+  const manifest = {
     format: 'codexia-architecture-atlas/v1',
     sourceSha: sha,
     diagrams: catalog.map(({ source, ...published }) => ({
@@ -159,6 +159,11 @@ export function createManifest(sha, sources, screenCatalog = '', nativeDiagrams 
       screenContracts: parseScreenContracts(screenCatalog, published.screenIds),
     })),
   };
+  return { catalog, manifest };
+}
+
+export function createManifest(sha, sources, screenCatalog = '', nativeDiagrams = []) {
+  return createAtlas(sha, sources, screenCatalog, nativeDiagrams).manifest;
 }
 
 export async function buildAtlas(siteDir, sha, rendererPath, root = ROOT) {
@@ -177,16 +182,7 @@ export async function buildAtlas(siteDir, sha, rendererPath, root = ROOT) {
     id: 'system-3', viewId: LIKEC4_OPERATIONS_VIEW_ID, title: LIKEC4_OPERATIONS_VIEW_TITLE,
     heading: '## 運用プレーンと更新',
   });
-  const mermaidDiagrams = sources.flatMap(({ section, markdown }) => parseMermaidDiagrams(markdown, section));
-  let systemIndex = 2;
-  const diagrams = [systemDiagram, ...mermaidDiagrams.map(diagram => {
-    if (diagram.group !== 'system') return diagram;
-    const shifted = { ...diagram, id: 'system-' + systemIndex };
-    shifted.image = 'svg/' + shifted.id + '.svg';
-    systemIndex++;
-    return shifted;
-  })];
-  const manifest = createManifest(sha, sources, screenCatalog, [systemDiagram, operationsDiagram]);
+  const { catalog, manifest } = createAtlas(sha, sources, screenCatalog, [systemDiagram, operationsDiagram]);
   const output = join(resolve(siteDir), 'architecture');
   const stage = await mkdtemp(join(tmpdir(), 'codexia-mermaid-'));
   try {
@@ -213,7 +209,7 @@ export async function buildAtlas(siteDir, sha, rendererPath, root = ROOT) {
         fontSize: '16px',
       },
     }));
-    for (const diagram of diagrams) {
+    for (const diagram of catalog) {
       if (diagram.renderer === 'likec4') continue;
       const input = join(stage, diagram.id + '.mmd');
       const dest = join(output, diagram.image);
@@ -236,7 +232,7 @@ export async function buildAtlas(siteDir, sha, rendererPath, root = ROOT) {
   } finally {
     await rm(stage, { recursive: true, force: true });
   }
-  return { output, count: diagrams.length, sourceSha: sha };
+  return { output, count: catalog.length, sourceSha: sha };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

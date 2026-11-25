@@ -68,6 +68,13 @@ test('all canonical system, UI, administration and delivery diagrams have stable
   assert.equal(topology.renderer, 'likec4');
   assert.equal(topology.viewId, LIKEC4_OPERATIONS_VIEW_ID);
   assert.equal(topology.line, systemDesign.split(/\r?\n/u).findIndex(line => line.trim() === '## 運用プレーンと更新') + 1);
+  const withAnotherSystemDiagram = sources.map(source => source.section.id === 'system'
+    ? { ...source, markdown: source.markdown + '\n## Additional process\n\n```mermaid\nflowchart TD\n  A --> B\n```\n' }
+    : source);
+  const additional = createManifest(sha, withAnotherSystemDiagram, catalog, [modelDiagram, operationsDiagram])
+    .diagrams.find(diagram => diagram.title === 'Additional process');
+  assert.equal(additional?.id, 'system-4', 'Additional Mermaid entries must skip the native topology locator');
+  assert.equal(additional?.image, 'svg/system-4.svg');
   assert.ok(manifest.diagrams.some(d => d.id === 'screen-1' && d.title.includes('ENTRY-01')));
   assert.ok(manifest.diagrams.some(d => d.id === 'screen-19' && d.title.includes('CON-01')));
   const screenSection = DIAGRAM_DOCUMENTS.find(section => section.id === 'screen');
