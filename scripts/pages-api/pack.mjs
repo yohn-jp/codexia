@@ -283,7 +283,7 @@ export async function pack(sitePath, sourceSha) {
     sourceSha,
     generatedAt: new Date().toISOString(),
     publication: 'public-static-contract',
-    targetState: { contract: 'typespec-generated-openapi-3.1', runtime: 'partial-generated-route-registration', verification: 'not-asserted-by-this-page' },
+    targetState: { contract: 'generated-target', runtime: 'partial-generated-route-registration', verification: 'not-asserted-by-this-page' },
     input: { path: contractRelative, sha256: sha256(source), outputSha256: sha256(sanitizedContract) },
     routeInventory: { path: routesRelative, sha256: sha256(admittedBytes), currentCount: admitted.current.length, targetCount: admitted.target.length, operationStates: states },
     typeSpec: { packagePath: contractPackageRelative, packageSha256: sha256(typespecPackageBytes), lockPath: lockRelative, lockSha256: sha256(pnpmLockBytes), versions },
