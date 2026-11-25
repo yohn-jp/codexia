@@ -9,7 +9,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { startBetterAuthFixture, type BetterAuthFixture } from "../../packages/api/test/fixtures/better-auth-server.js";
 import { browserServerProfile } from "./browser-server-profile";
 
-export type Shell = "desktop" | "mobile";
+export type Shell = "desktop";
 export interface AuthorNavigation { path?: string; expectedView?: Locator; continueCurrentPage?: boolean }
 export interface AuthorBrowserFixture extends BetterAuthFixture {
   readonly preparedAuthorEntries: boolean;
@@ -29,9 +29,9 @@ function observePhase(stage: string, started: number, profile: string): void {
 // on one successful observation; each independently required entry must
 // prove configuration and byte equivalence before any reuse is admitted.
 function compareAuthorAssets(producer: string, fixture: string, profile: string): void {
-  const entries = ["launcher", "desktop", "mobile", "oauth", "owner-setup"];
+  const entries = ["launcher", "desktop", "oauth", "owner-setup"];
   const partition = (file: string) => file.startsWith("console/setup/") ? "owner-setup"
-    : entries.slice(1, 4).find(entry => file.startsWith(entry + "/")) ?? "launcher";
+    : ["desktop", "oauth"].find(entry => file.startsWith(entry + "/")) ?? "launcher";
   const inventory = (directory: string) => {
     const files = new Map<string, string>();
     function visit(relative: string): void {
@@ -124,12 +124,10 @@ export async function startAuthorBrowserFixture({ databaseUrl, profile, apiPort,
     const usePreparedEntries = preparedAuthorEntries && !frontendSource;
     buildAuthorBrowserAssets(server, profile, assets, frontendSource, usePreparedEntries);
     if (usePreparedEntries) {
-      for (const shell of ["desktop", "mobile"] as const) {
-        const directory = join(assets, shell, "assets");
-        const hasHandoff = readdirSync(directory).some(name => name.endsWith(".js") &&
-          readFileSync(join(directory, name), "utf8").includes("__codexiaClaimPreparedAuthor"));
-        if (!hasHandoff) throw new Error("Isolated prepared author entry was not built");
-      }
+      const directory = join(assets, "desktop", "assets");
+      const hasHandoff = readdirSync(directory).some(name => name.endsWith(".js") &&
+        readFileSync(join(directory, name), "utf8").includes("__codexiaClaimPreparedAuthor"));
+      if (!hasHandoff) throw new Error("Isolated prepared author entry was not built");
     }
     return { ...server, close, preparedAuthorEntries: usePreparedEntries, startupMs: Math.round(performance.now() - fixtureStarted) };
   } catch (error) {

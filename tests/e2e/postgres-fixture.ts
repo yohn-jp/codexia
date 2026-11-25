@@ -120,18 +120,18 @@ export async function seedWritingProject(fetch: APIRequestContext["fetch"], orig
   return { project, scene, second };
 }
 
-export function writingFixturePath(shell: "desktop" | "mobile", project: Pick<FixtureProject, "id">, scene: Pick<FixtureDocument, "id">): string {
-  return `/${shell}/projects/${project.id}/scenes/${scene.id}${shell === "mobile" ? "?view=writing" : ""}`;
+export function writingFixturePath(shell: "desktop", project: Pick<FixtureProject, "id">, scene: Pick<FixtureDocument, "id">): string {
+  return `/${shell}/projects/${project.id}/scenes/${scene.id}`;
 }
 
-export async function openWritingProject(authorizeAuthor: AuthorizeAuthor, page: Page, shell: "desktop" | "mobile", project: FixtureProject, scene: FixtureDocument): Promise<AuthorSession> {
+export async function openWritingProject(authorizeAuthor: AuthorizeAuthor, page: Page, shell: "desktop", project: FixtureProject, scene: FixtureDocument): Promise<AuthorSession> {
   const author = await authorizeAuthor(shell, page, { path: writingFixturePath(shell, project, scene) });
   await expect(manuscriptEditor(page)).toBeVisible();
   await expect(page.getByRole("heading", { name: scene.title, exact: true })).toBeVisible();
   return author;
 }
 
-export async function createOAuthWritingFixture(authorizeAuthor: AuthorizeAuthor, page: Page, shell: "desktop" | "mobile" = "desktop", title?: string, manuscript?: string): Promise<WritingFixture & { author: AuthorSession }> {
+export async function createOAuthWritingFixture(authorizeAuthor: AuthorizeAuthor, page: Page, shell: "desktop" = "desktop", title?: string, manuscript?: string): Promise<WritingFixture & { author: AuthorSession }> {
   const initial = await authorizeAuthor(shell, undefined, { apiSetupOnly: true });
   const fixture = await test.step("CI phase: seed-writing-project", () => seedWritingProject(initial.fetch, initial.origin, title, manuscript));
   const author = await openWritingProject(authorizeAuthor, page, shell, fixture.project, fixture.scene);

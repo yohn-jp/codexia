@@ -105,10 +105,10 @@ export async function seedVisualManuscript(author: AuthorSession): Promise<Visua
   return { project, firstScene: { ...firstScene, title: "一　薄明の羅針盤" } };
 }
 
-export async function buildManuscript(page: Page, mode: "desktop" | "mobile", authorizeAuthor: AuthorizeAuthor) {
+export async function buildManuscript(page: Page, mode: "desktop", authorizeAuthor: AuthorizeAuthor) {
   const initial = await authorizeAuthor(mode, undefined, { apiSetupOnly: true });
   const fixture = await seedVisualManuscript(initial);
-  const author = await authorizeAuthor(mode, page, { path: `/${mode}/projects/${fixture.project.id}/scenes/${fixture.firstScene.id}${mode === "mobile" ? "?view=writing" : ""}` });
+  const author = await authorizeAuthor(mode, page, { path: `/${mode}/projects/${fixture.project.id}/scenes/${fixture.firstScene.id}` });
   await expect(manuscriptEditor(page)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expectServerSaved(page);
