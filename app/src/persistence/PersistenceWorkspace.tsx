@@ -449,7 +449,6 @@ export function PersistenceWorkspace({ authorScope, onSignOut, registerProtectio
   const evidenceReadSequenceRef = useRef(0);
   const evidenceReadControllerRef = useRef<AbortController | null>(null);
   const [requestedPanel, setRequestedPanel] = useState<WorkspacePanelRequest>();
-  const [creationIntent, setCreationIntent] = useState<"project" | "document">();
 
   const resume = useRecentActivityResume({ binding: projectId ? { projectId, authorScope, projectScopeKey: projectId } : null, enabled: Boolean(projectId) });
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
@@ -482,30 +481,18 @@ export function PersistenceWorkspace({ authorScope, onSignOut, registerProtectio
   }, [activeDocument, documentOutline, outlineReadyProject, project]);
   const moveTargets = useMemo(() => activeDocument ? documentMoveTargets(documents, activeDocument) : [], [documents, activeDocument]);
   const moveTargetAvailable = !moveParent || moveTargets.some((target) => target.id === moveParent);
-  useEffect(() => {
-    if (!creationIntent) return;
-    let cancelled = false;
-    let attempts = 0;
-    const focusCreation = () => {
-      if (cancelled || attempts++ >= 120) return;
-      const selector = creationIntent === "project" ? ".pg-library-create" : ".pg-library-create-document";
-      const details = Array.from(document.querySelectorAll<HTMLDetailsElement>(selector))
-        .find((candidate) => candidate.getClientRects().length > 0);
-      const input = details?.querySelector<HTMLInputElement>("input");
-      if (!details || !input) {
-        window.setTimeout(focusCreation, 50);
-        return;
-      }
-      details.open = true;
-      input.focus();
-      if (document.activeElement === input) setCreationIntent(undefined);
-      else window.setTimeout(focusCreation, 50);
-    };
-    window.setTimeout(focusCreation, 0);
-    return () => { cancelled = true; };
-  }, [creationIntent, requestedPanel?.sequence]);
   const openCreation = useCallback((kind: "project" | "document") => {
-    setCreationIntent(kind);
+    setRequestedPanel({
+      id: "outline",
+      sequence: ++panelRequestSequenceRef.current,
+      getFocusTarget: (panel) => {
+        const selector = kind === "project" ? ".pg-library-create" : ".pg-library-create-document";
+        const details = panel.querySelector<HTMLDetailsElement>(selector);
+        if (!details) return undefined;
+        details.open = true;
+        return details.querySelector<HTMLInputElement>("input") ?? undefined;
+      },
+    });
   }, []);
   useEffect(() => {
     if (!documentId || !projectId) {
@@ -2584,7 +2571,7 @@ export function PersistenceWorkspace({ authorScope, onSignOut, registerProtectio
           <button type="button" onClick={() => openCreation("project")}>最初の作品を作成</button>
         </section>}
         {missingExplicitRouteDocument && <section className="pg-empty" role="status"><h2>指定された文書が見つかりません</h2><p>この作品に指定された文書はありません。目次から開く文書を選択してください。</p></section>}
-        {project && !missingExplicitRouteDocument && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
+        {project && !missingExplicitRouteDocument && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" disabled={!canCreateDocument} onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
         {active && <section className="pg-editor" data-reader={reading ? "true" : undefined} aria-label={active.document.title}>
           <div className="pg-editor-heading">
             <div><p className="eyebrow">{writingContext}</p><h2>{active.document.title}</h2></div>
