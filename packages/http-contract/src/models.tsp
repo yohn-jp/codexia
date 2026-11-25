@@ -379,13 +379,30 @@ model AssertionEvidenceListBody {
   ...Record<unknown>;
 }
 
+model PersistenceChangeSetOperation {
+  type?: "document.create" | "document.update" | "document.delete" | "document.save" | "document.restore" | "module.record.save" | "knowledge.node.save" | "knowledge.alias.save" | "knowledge.relation.save" | "evidence.anchor.save" | "evidence.mention.save" | "evidence.assertion.save" | "evidence.assertion.link" | "knowledge.merge";
+  command?: JsonObject;
+  hierarchy?: JsonObject;
+  ...Record<unknown>;
+}
+
 model PersistenceChangeSetBody {
-  id?: string; projectId?: string; authorId?: string;
+  id?: string;
+  projectId?: string;
+  authorId?: string;
   status?: "proposed" | "approved" | "applied" | "rejected";
-  operations?: JsonObject[]; readSet?: JsonObject[]; writeSet?: JsonObject[]; provenance?: JsonObject;
-  version?: int32; idempotencyKey?: string; createdAt?: utcDateTime;
-  approvedAt?: utcDateTime | null; approvedBy?: string | null; appliedAt?: utcDateTime | null;
-  rejectedAt?: utcDateTime | null; rejectedBy?: string | null;
+  operations?: PersistenceChangeSetOperation[];
+  readSet?: JsonObject[];
+  writeSet?: JsonObject[];
+  provenance?: JsonObject;
+  version?: int32;
+  idempotencyKey?: string;
+  createdAt?: utcDateTime;
+  approvedAt?: utcDateTime | null;
+  approvedBy?: string | null;
+  appliedAt?: utcDateTime | null;
+  rejectedAt?: utcDateTime | null;
+  rejectedBy?: string | null;
   ...Record<unknown>;
 }
 
