@@ -139,70 +139,98 @@ model OAuthConsentContextBody {
 }
 
 model ApiSessionBody {
-  authenticated?: boolean;
-  authorScope?: string;
+  authenticated: true;
+  authorScope: string;
   ...Record<unknown>;
 }
 
 model PublicJobBody {
-  id?: string;
-  type?: string;
-  status?: "queued" | "running" | "done" | "error";
-  progress?: float64 | null;
-  result?: unknown;
-  error?: string | null;
+  id: string;
+  type: string;
+  status: "queued" | "running" | "done" | "error";
+  @minValue(0.0) @maxValue(1.0)
+  progress: float64 | null;
+  result: unknown;
+  error: string | null;
   errorCode?: string;
   retryable?: boolean;
-  createdAt?: utcDateTime;
-  updatedAt?: utcDateTime;
-  finishedAt?: utcDateTime | null;
+  createdAt: utcDateTime;
+  updatedAt: utcDateTime;
+  finishedAt: utcDateTime | null;
   ...Record<unknown>;
 }
 
 model InboxItemBody {
-  id?: string;
-  kind?: "job-complete";
-  jobId?: string;
-  jobType?: string;
-  title?: string;
-  body?: string;
-  status?: "done" | "error";
-  read?: boolean;
-  userId?: string | null;
-  projectKey?: string;
-  createdAt?: utcDateTime;
+  id: string;
+  kind: "job-complete";
+  jobId: string;
+  jobType: string;
+  title: string;
+  body: string;
+  status: "done" | "error";
+  read: boolean;
+  userId: string | null;
+  projectKey: string;
+  createdAt: utcDateTime;
   ...Record<unknown>;
 }
 
 model InboxListBody {
-  items?: InboxItemBody[];
-  unreadCount?: int32;
+  items: InboxItemBody[];
+  unreadCount: int32;
   ...Record<unknown>;
 }
 
 model InboxReadAllBody {
-  marked?: int32;
+  marked: int32;
   ...Record<unknown>;
 }
 
 model InboxReadItemBody {
-  item?: InboxItemBody;
+  item: InboxItemBody;
   ...Record<unknown>;
 }
 
 model RecentActivityItemBody {
-  sceneId?: string;
-  sentenceOffset?: int32 | null;
+  sceneId: string;
+  sentenceOffset: int32 | null;
   pageIndex?: int32 | null;
-  deviceType?: "desktop" | "mobile";
-  updatedAt?: utcDateTime;
+  deviceType: "desktop" | "mobile";
+  updatedAt: utcDateTime;
   ...Record<unknown>;
 }
 
 model RecentActivityBody {
-  items?: RecentActivityItemBody[];
+  items: RecentActivityItemBody[];
   ...Record<unknown>;
 }
+
+// Desktop Web wire row schemas are emitted as components for the generated
+// client; the published operations retain their approved legacy envelopes.
+model DesktopModuleResponseItem {
+  id: "story" | "diagnostics" | "nlp" | "semantic" | "speaker" | "assistant" | "publishing" | "mcp" | "search";
+  availability: "not-included" | "disabled" | "enabled-idle" | "active";
+  version?: string;
+  activeJobs: int32;
+  ...Record<unknown>;
+}
+
+model DesktopContributionResponseItem {
+  contractVersion?: 1;
+  kind?: "panel" | "editor-adornment" | "context-action";
+  contexts?: ("workspace" | "editor" | "reading")[];
+  multipleInstances?: boolean;
+  id: string;
+  module: "story" | "diagnostics" | "nlp" | "semantic" | "speaker" | "assistant" | "publishing" | "mcp" | "search";
+  slot: "editor" | "dock" | "inspection" | "review" | "settings";
+  title: string;
+  action: string;
+  ...Record<unknown>;
+}
+
+model DesktopJobList is Array<PublicJobBody>;
+model DesktopModuleList is Array<DesktopModuleResponseItem>;
+model DesktopContributionList is Array<DesktopContributionResponseItem>;
 
 model ProjectObservationBody {
   snapshot?: { projectId?: string; projectVersion?: int32; ...Record<unknown>; };
@@ -266,8 +294,8 @@ model ProjectSceneResponse {
 }
 
 model ProjectSnapshotResponse {
-  snapshot?: JsonObject;
-  document?: { path?: string; revision?: string; ...Record<unknown>; } | null;
+  snapshot: SnapshotIdBody;
+  document: { path: string; @pattern("^[0-9a-f]{64}$") revision: string; ...Record<unknown>; } | null;
   ...Record<unknown>;
 }
 
@@ -458,31 +486,54 @@ model KnowledgeMergeResultBody {
   ...Record<unknown>;
 }
 
-model CoreProposalStatusBody {
-  proposal?: JsonObject;
-  payloadComplete?: boolean;
-  originalDigest?: string;
-  operationIds?: string[];
-  state?: "proposed" | "partially_approved" | "approved" | "applied";
-  approvedOperationIds?: string[];
-  approvedByOperationId?: Record<string>;
-  applications?: JsonObject[];
-  appliedOperationIds?: string[];
-  stale?: boolean;
+model SnapshotIdBody {
+  projectId: string;
+  @minValue(1)
+  projectVersion: int32;
   ...Record<unknown>;
 }
 
 model CoreChangeProposalBody {
-  id?: string;
-  snapshot?: { projectId?: string; projectVersion?: int32; ...Record<unknown>; };
-  operations?: JsonObject[];
-  source?: "author" | "module" | "mcp";
-  evidence?: JsonObject[];
+  id: string;
+  snapshot: SnapshotIdBody;
+  operations: JsonObject[];
+  source: "author" | "module" | "mcp";
+  evidence?: CoreProposalEvidenceBody[];
+  ...Record<unknown>;
+}
+
+model CoreProposalFileRevisionBody {
+  path: string;
+  revision: string | null;
+  ...Record<unknown>;
+}
+
+model CoreProposalEvidenceBody {
+  id: string;
+  snapshot: SnapshotIdBody;
+  module: "story" | "diagnostics" | "nlp" | "semantic" | "speaker" | "assistant" | "publishing" | "mcp" | "search";
+  kind: string;
+  paths: CoreProposalFileRevisionBody[];
+  details: unknown;
+  ...Record<unknown>;
+}
+
+model CoreProposalStatusBody {
+  proposal: CoreChangeProposalBody;
+  payloadComplete?: boolean;
+  originalDigest?: string;
+  operationIds?: string[];
+  state: "proposed" | "partially_approved" | "approved" | "applied";
+  approvedOperationIds: string[];
+  approvedByOperationId?: Record<string>;
+  applications: ProposalApplyReceiptBody[];
+  appliedOperationIds: string[];
+  stale: boolean;
   ...Record<unknown>;
 }
 
 model ProposalListBody {
-  proposals?: CoreProposalStatusBody[];
+  proposals: CoreProposalStatusBody[];
   ...Record<unknown>;
 }
 
@@ -505,10 +556,10 @@ model GlobalReviewQueueBody {
 }
 
 model ProjectActionDescriptorBody {
-  id?: string;
-  module?: string;
-  effect?: "read" | "compute" | "propose";
-  job?: boolean;
+  id: string;
+  module: string;
+  effect: "read" | "compute" | "propose";
+  job: boolean;
   ...Record<unknown>;
 }
 
@@ -583,26 +634,48 @@ model WritingStatsResponseBody {
 }
 
 model ProposalApplyReceiptBody {
-  operationId?: string; generation?: int32; projectVersion?: int32; revisions?: JsonObject[];
+  operationId: string;
+  generation: int32;
+  @minValue(1)
+  projectVersion: int32;
+  revisions: CoreProposalFileRevisionBody[];
   ...Record<unknown>;
 }
 
-model AuthorReviewItemBody {
-  kind?: "core-proposal" | "native-change-set";
-  id?: string; projectId?: string; createdAt?: utcDateTime;
-  state?: "proposed" | "partially_approved" | "approved" | "applied" | "rejected";
-  approvalModel?: "per-operation" | "whole-change-set";
-  applicationModel?: "per-operation" | "transaction";
-  status?: CoreProposalStatusBody;
-  receipts?: JsonObject[];
-  stale?: boolean;
-  changeSet?: PersistenceChangeSetBody;
-  receipt?: PersistenceChangeSetApplicationBody | null;
+model CoreAuthorReviewItemBody {
+  kind: "core-proposal";
+  id: string;
+  projectId: string;
+  createdAt: utcDateTime;
+  state: "proposed" | "partially_approved" | "approved" | "applied";
+  approvalModel: "per-operation";
+  applicationModel: "per-operation";
+  status: CoreProposalStatusBody;
+  receipts: ProposalApplyReceiptBody[];
+  stale: boolean;
   ...Record<unknown>;
+}
+
+model NativeAuthorReviewItemBody {
+  kind: "native-change-set";
+  id: string;
+  projectId: string;
+  createdAt: utcDateTime;
+  state: "proposed" | "approved" | "applied" | "rejected";
+  approvalModel: "whole-change-set";
+  applicationModel: "transaction";
+  changeSet: PersistenceChangeSetBody;
+  receipt: PersistenceChangeSetApplicationBody | null;
+  ...Record<unknown>;
+}
+
+union AuthorReviewItemBody {
+  coreProposal: CoreAuthorReviewItemBody;
+  nativeChangeSet: NativeAuthorReviewItemBody;
 }
 
 model PersistenceReviewFeedBody {
-  items?: AuthorReviewItemBody[];
+  items: AuthorReviewItemBody[];
   ...Record<unknown>;
 }
 
@@ -1080,6 +1153,11 @@ model VersionResponse {
   runtime: JsonObject;
   modules: JsonObject[];
   ...Record<never>;
+}
+
+model DesktopVersionResponse {
+  ...OmitProperties<VersionResponse, "contractVersion">;
+  contractVersion: int32;
 }
 
 model EventStream {
