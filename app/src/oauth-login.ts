@@ -79,7 +79,7 @@ export async function fetchAuthMethodAvailability(fetcher: typeof fetch = fetch,
       redirect: 'error',
       headers: { accept: 'application/json' },
       ...(signal ? { signal } : {}),
-      transport: { auth: 'anonymous' },
+      transport: { auth: 'same-origin' },
       fetcher,
     });
   } catch {

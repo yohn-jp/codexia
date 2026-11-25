@@ -8,7 +8,7 @@ import {
   oauthLoginCallbackURL,
 } from './oauth-login.js';
 
-test('shared auth-method capability uses the generated anonymous same-origin adapter', async () => {
+test('auth-method capability preserves same-origin credentials through the generated adapter', async () => {
   let request: { input: string | URL | Request; init?: RequestInit } | undefined;
   const methods = await fetchAuthMethodAvailability(async (input, init) => {
     request = { input, init };
