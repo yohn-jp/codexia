@@ -348,7 +348,8 @@ export async function resolveFrontendPromotion({env=process.env,fetchImpl=fetch}
     const archive=await downloadArtifact(artifact,repository,env.GH_TOKEN,fetchImpl,{maxArchive:MAX_ASSET_ARCHIVE});
     scratch=await mkdtemp(path.join(env.RUNNER_TEMP||tmpdir(),'codexia-frontend-promotion-'));
     const files=await extractArtifactFiles(archive,scratch,{maxArchive:MAX_ASSET_ARCHIVE,maxUncompressed:MAX_ASSET_BYTES});
-    for(const required of ['index.html','desktop/index.html','desktop/update-identity.json','mobile/index.html']) assert.ok(files.includes(required),'Promoted frontend artifact is missing '+required);
+    for(const required of ['index.html','desktop/index.html','desktop/update-identity.json']) assert.ok(files.includes(required),'Promoted frontend artifact is missing '+required);
+    assert.ok(!files.some(file=>file.startsWith('mobile/')),'Retired Mobile Web output in promoted frontend artifact');
     const identity=assertFrontendIdentity(JSON.parse(await readFile(path.join(scratch,'desktop/update-identity.json'),'utf8')));
     assertFrontendOAuthConfigIdentity(identity,env);
     const apiEpoch=JSON.parse(readFileSync(new URL('../../../deploy/frontend-compatibility.json',import.meta.url),'utf8')).apiEpoch;
@@ -479,7 +480,8 @@ export async function verifyCutoverFrontendArtifact(input, { env = process.env, 
   }, producerAttemptJobs);
   const bytes = await downloadArtifact(artifact, repository, token, fetchImpl, { maxArchive: MAX_ASSET_ARCHIVE });
   const destination = fileURLToPath(new URL('../../../app/dist/', import.meta.url));
-  await extractArtifactFiles(bytes, destination, { maxArchive: MAX_ASSET_ARCHIVE, maxUncompressed: MAX_ASSET_BYTES });
+  const extracted = await extractArtifactFiles(bytes, destination, { maxArchive: MAX_ASSET_ARCHIVE, maxUncompressed: MAX_ASSET_BYTES });
+  assert.ok(!extracted.some(file=>file.startsWith('mobile/')),'Retired Mobile Web output in cutover artifact');
   const identity = assertFrontendIdentity(JSON.parse(readFileSync(path.join(destination, 'desktop/update-identity.json'), 'utf8')));
   assertFrontendOAuthConfigIdentity(identity, env);
   assert.equal(identity.version, readComponentVersion('frontend', String(run.run_number)), 'Frontend version differs from the producer');
@@ -546,7 +548,7 @@ export async function verifyFrontendArtifact({ env = process.env, fetchImpl = fe
   }
 
   const artifactBytes = await downloadArtifact(artifact, repository, token, fetchImpl, {maxArchive:MAX_ASSET_ARCHIVE});
-  await extractArtifactFiles(artifactBytes, fileURLToPath(new URL('../../../app/dist/', import.meta.url)), {
+  const extracted = await extractArtifactFiles(artifactBytes, fileURLToPath(new URL('../../../app/dist/', import.meta.url)), {
     maxArchive:MAX_ASSET_ARCHIVE,
     maxUncompressed:MAX_ASSET_BYTES,
   });

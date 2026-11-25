@@ -46,7 +46,7 @@ assert.ok(version.modules.every((module) => module.availability === 'not-include
   'image starts with included modules idle');
 
 const assetUrls = new Set();
-for (const entry of ['/', '/desktop/', '/mobile/']) {
+for (const entry of ['/', '/desktop/']) {
   const htmlResponse = await get(entry);
   assert.match(htmlResponse.headers.get('content-type') ?? '', /^text\/html(?:;|$)/u);
   const html = await htmlResponse.text();
@@ -60,6 +60,11 @@ for (const entry of ['/', '/desktop/', '/mobile/']) {
   assert.ok(entryAssets.some((asset) => /\.css(?:\?|$)/u.test(asset)), `${entry} references CSS`);
   if (entry !== '/') assert.ok(entryAssets.every((asset) => asset.startsWith(entry)), `${entry} assets are isolated`);
   for (const asset of entryAssets) assetUrls.add(asset);
+}
+
+for (const route of ['/mobile', '/mobile/', '/mobile/writing', '/mobile/index.html', '/mobile/assets/missing.js']) {
+  const retired = await fetch(new URL(route, baseUrl), { redirect: 'manual' });
+  assert.equal(retired.status, 404, `Retired Mobile Web route ${route}`);
 }
 
 const checkedAssets = new Set();
@@ -87,9 +92,9 @@ while (pendingAssets.length > 0) {
   assert.match(contentType, expectedType, `${assetPath} has the expected MIME type`);
   const body = await response.text();
   assert.ok(body.length > 0, `${assetPath} is non-empty`);
-  for (const match of body.matchAll(/["']((?:\/(?:desktop\/|mobile\/)?assets\/|\.{1,2}\/)[A-Za-z0-9._/-]{1,220}\.(?:m?js|css|svg|png|jpe?g|webp|avif|gif|woff2?|ttf|otf|ico)(?:\?[^"']*)?)["']/gu)) {
+  for (const match of body.matchAll(/["']((?:\/(?:desktop\/)?assets\/|\.{1,2}\/)[A-Za-z0-9._/-]{1,220}\.(?:m?js|css|svg|png|jpe?g|webp|avif|gif|woff2?|ttf|otf|ico)(?:\?[^"']*)?)["']/gu)) {
     pendingAssets.push({ url: match[1], from: assetUrl });
   }
 }
 
-console.info(`OCI HTTP checks passed: ${profileName} profile, ${included.length} included module(s) idle, health/readiness, launcher/Desktop/Mobile HTML nonces, and ${checkedAssets.size} built asset(s).`);
+console.info(`OCI HTTP checks passed: ${profileName} profile, ${included.length} included module(s) idle, health/readiness, launcher/Desktop HTML nonces, and ${checkedAssets.size} built asset(s).`);

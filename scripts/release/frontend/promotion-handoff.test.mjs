@@ -15,11 +15,9 @@ test('verified PR artifact digest and identity flow through extraction into a ma
   const sourceSha='a'.repeat(40),mainSha='b'.repeat(40),tree='c'.repeat(40),baseSha='d'.repeat(40),planDigest='e'.repeat(64);
   const identity={format:'codexia-frontend-identity/v1',version:'0.1.77',sourceSha,profile:'full',apiEpoch:1};
   await mkdir(path.join(dir,'build','desktop'),{recursive:true});
-  await mkdir(path.join(dir,'build','mobile'),{recursive:true});
   await writeFile(path.join(dir,'build','index.html'),'<html></html>');
   await writeFile(path.join(dir,'build','desktop','index.html'),'<html></html>');
   await writeFile(path.join(dir,'build','desktop','update-identity.json'),JSON.stringify(identity));
-  await writeFile(path.join(dir,'build','mobile','index.html'),'<html></html>');
   execFileSync('zip',['-q','-r','frontend.zip','.'],{cwd:path.join(dir,'build')});
   const archive=await readFile(path.join(dir,'build','frontend.zip'));
   const archiveDigest='sha256:'+createHash('sha256').update(archive).digest('hex');
