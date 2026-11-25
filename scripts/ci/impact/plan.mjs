@@ -97,13 +97,11 @@ export function matchesFullModelOciPath(file) {
 // their corresponding executable integration proofs. New paths fail closed.
 export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   '.github/workflows/ansible-base-secrets.yml',
-  '.github/workflows/ios-unsigned-ipa.yml',
   '.github/workflows/ansible-host.yml',
   '.github/workflows/backend-deployment-handoff.yml',
   '.github/workflows/deployment-config.yml',
   '.github/workflows/epoch-cutover-fixture.yml',
   '.github/workflows/production-epoch-cutover.yml',
-  '.github/workflows/ios-unsigned-ipa.yml',
   '.github/workflows/push-backup.yml',
   '.github/workflows/push-host.yml',
   '.github/workflows/repository-audit.yml',
