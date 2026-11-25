@@ -5,6 +5,7 @@ export const LIKEC4_GENERATOR = `likec4@${LIKEC4_VERSION}`;
 export const LIKEC4_SOURCE_PATH = 'docs/architecture/likec4/model.likec4';
 export const LIKEC4_VIEW_ID = 'architecture';
 export const LIKEC4_OPERATIONS_VIEW_ID = 'operations-topology';
+export const LIKEC4_OPERATIONS_VIEW_TITLE = 'Protected deployment topology';
 export const LIKEC4_VIEW_TITLE = 'Codexia system context, containers, and trust boundaries';
 
 export const REQUIRED_TRUST_BOUNDARIES = Object.freeze({
@@ -248,8 +249,13 @@ export function assertNoPublicSecrets(texts) {
 
 /** @param {Record<string, {title?: string, nodes?: unknown[], edges?: unknown[]}>} views */
 export function validateArchitectureView(views) {
-  const view = views?.[LIKEC4_VIEW_ID];
-  assert.equal(view?.title, LIKEC4_VIEW_TITLE, 'LikeC4 view title differs from the architecture contract');
-  assert.ok(view.nodes?.length && view.edges?.length, 'LikeC4 architecture view must include elements and relationships');
-  return view;
+  for (const [id, title] of [
+    [LIKEC4_VIEW_ID, LIKEC4_VIEW_TITLE],
+    [LIKEC4_OPERATIONS_VIEW_ID, LIKEC4_OPERATIONS_VIEW_TITLE],
+  ]) {
+    const view = views?.[id];
+    assert.equal(view?.title, title, `LikeC4 ${id} view title differs from the architecture contract`);
+    assert.ok(view.nodes?.length && view.edges?.length, `LikeC4 ${id} view must include elements and relationships`);
+  }
+  return views[LIKEC4_VIEW_ID];
 }

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   assertNoPublicSecrets,
+  LIKEC4_OPERATIONS_VIEW_ID,
+  LIKEC4_OPERATIONS_VIEW_TITLE,
   LIKEC4_VIEW_ID,
   LIKEC4_VIEW_TITLE,
   REQUIRED_RISK_ASSETS,
@@ -105,7 +107,9 @@ test('public architecture inputs reject credential exposure', () => {
 
 test('LikeC4 model export retains the approved native architecture view', () => {
   const view = { title: LIKEC4_VIEW_TITLE, nodes: [{}], edges: [{}] };
-  assert.equal(validateArchitectureView({ [LIKEC4_VIEW_ID]: view }), view);
-  assert.throws(() => validateArchitectureView({}), /view title/u);
+  const topology = { title: LIKEC4_OPERATIONS_VIEW_TITLE, nodes: [{}], edges: [{}] };
+  const views = { [LIKEC4_VIEW_ID]: view, [LIKEC4_OPERATIONS_VIEW_ID]: topology };
+  assert.equal(validateArchitectureView(views), view);
+  assert.throws(() => validateArchitectureView({ [LIKEC4_VIEW_ID]: view }), /operations-topology view title/u);
   assert.throws(() => validateArchitectureView({ [LIKEC4_VIEW_ID]: { ...view, edges: [] } }), /elements and relationships/u);
 });
