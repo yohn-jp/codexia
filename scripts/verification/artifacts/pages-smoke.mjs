@@ -61,6 +61,42 @@ const relatedDiagram = atlas.diagrams.find(item => item.implementationPaths?.som
 assert.ok(relatedDiagram, 'Expected at least one Atlas diagram with same-SHA source evidence');
 const relatedFile = relatedDiagram.implementationPaths.find(path => indexedFiles.has(path));
 
+// Check the rendered heading against its effective ancestor background, including
+// transparent layers, so a mixed Scalar/portal theme cannot pass the smoke test.
+async function assertScalarTitleContrast(page) {
+  const title = page.locator('#scalar-api-reference').getByRole('heading', { name: 'Codexia API', exact: true }).first();
+  await title.waitFor();
+  const ratio = await title.evaluate(element => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    const layers = [];
+    for (let node = element; node; node = node.parentElement) {
+      layers.unshift(getComputedStyle(node).backgroundColor);
+    }
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, 1, 1);
+    for (const color of layers) {
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+    }
+    const luminance = () => {
+      const channels = Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3).map(value => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+    };
+    const background = luminance();
+    context.fillStyle = getComputedStyle(element).color;
+    context.fillRect(0, 0, 1, 1);
+    const foreground = luminance();
+    return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+  });
+  assert.ok(ratio >= 4.5, 'Scalar API title contrast must be at least 4.5:1 (actual ' + ratio.toFixed(2) + ':1)');
+}
+
 async function assertReflow(page, label) {
   const { viewport, content } = await page.evaluate(() => ({
     viewport: innerWidth,
@@ -254,6 +290,7 @@ try {
         assert.ok(await page.locator('#copy-diagnostics').isDisabled());
         apiStatus = 429;
       } else if (destination === 'api/') {
+        await assertScalarTitleContrast(page);
         let body = await page.locator('body').innerText();
         assert.match(body, /Static target contract from TypeSpec/u);
         assert.match(body, /Runtime implementation: partial/u);
