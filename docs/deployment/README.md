@@ -2,8 +2,6 @@
 
 **Normative lifecycle transitions:** [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) owns cross-component state classification, route selection, initial pair activation, maintenance and recovery. [Initial deployment](INITIAL-DEPLOYMENT-FLOW.md) and [Compatible backend update / rollback](UPDATE-FLOW.md) define the required state machines. Runbooks describe how to operate the approved transition; the current script is implementation evidence, not the design authority.
 
-**API epoch maintenance:** [MCP v2 API epoch transition](MCP-V2-API-EPOCH.md) owns the approved API-only 2→3 compatibility change and its constrained OpenAPI comparison proof. It does not authorize deployment.
-
 **Protected production entrypoints:** [GitHub Actions Bootstrap workflow](PRODUCTION-BOOTSTRAP.md) handles approved initial host, database and Better Auth convergence. [Push deployment](PUSH-DEPLOYMENT.md) handles independently certified application activation and compatible updates. Neither bootstrap nor ordinary backend deployment performs the Frontend/Backend epoch pair cutover. The separately approved activation and maintenance routes in the lifecycle design are required when either component is absent or incompatible and ordinary admission cannot succeed.
 
 This directory implements the deployable boundary specified by [System design](../architecture/SYSTEM-DESIGN.md) and [Infrastructure as code](IAC.md). The React/Vite application is released as Cloudflare Workers Static Assets. The API is a separate rootless Podman service; Cloudflare Tunnel is its only public origin path.

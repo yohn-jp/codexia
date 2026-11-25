@@ -26,7 +26,6 @@ function rootless(fixture) {
   run('bash', ['-n', fixture.fixture]);
   run('bash', [fixture.fixture], { ...process.env, RUNNER_TEMP: temporary,
     EPOCH_FIXTURE_SOURCE_SHA: process.env.CODEXIA_EXPECTED_SHA,
-    EPOCH_FIXTURE_CANDIDATE_SHA: fixture.candidateSource,
   });
 }
 

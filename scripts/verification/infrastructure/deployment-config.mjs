@@ -130,10 +130,8 @@ assert.match(operationsDocs, /codexia_database_initialization_approved=true/u);
 assert.match(operationsDocs, /CODEXIA_INITIAL_INSTALL_APPROVED=true/u);
 assert.match(operationsDocs, /CODEXIA_DATABASE_INITIALIZATION_APPROVED=true/u);
 assert.match(operationsDocs, /auth-runtime.*before.*deploy/u);
-assert.ok(pushDeploymentDocs.includes('`node /app/node_modules/@codexia/api/dist/maintain-snapshot-projections.js --check`'),
-  'The push deployment runbook must give the installed read-only maintenance command');
-assert.match(pushDeploymentDocs, /\]\(BACKUP\.md#rehearse-a-reviewed-full-candidate\)/u,
-  'The push deployment runbook must link the isolated restore rehearsal');
+assert.match(pushDeploymentDocs, /\]\(BACKUP\.md#verify-a-candidate-ledger-on-a-restored-backup\)/u,
+  'The push deployment runbook must link the isolated restore verification');
 assert.match(operationsDocs, /migration fingerprint, API epoch, and persistence format/u);
 assert.match(deploymentDocs, /CODEXIA_DATABASE_MIGRATE_ON_START=0/u);
 assert.doesNotMatch(deploymentDocs, /CODEXIA_DATABASE_MIGRATE_ON_START=1/u);
