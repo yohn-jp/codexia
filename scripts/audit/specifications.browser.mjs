@@ -91,10 +91,16 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     assert.notEqual(unverifiedColor, 'rgb(120, 223, 180)', 'UNVERIFIED must not use the VERIFIED success color');
     await page.getByRole('button', { name: '条件を解除' }).click();
 
-    const reverseLink = page.locator('#surface-table tbody tr[data-trace-row] a[href^="#obligation-"]').first();
+    await page.getByLabel('状態').selectOption('CANDIDATE_ONLY');
+    const candidateRows = await surfaceRows.filter({ visible: true }).evaluateAll(rows => rows.map(row => row.dataset.status.split(/\s+/u)));
+    assert.ok(candidateRows.length > 0 && candidateRows.every(statuses => statuses.includes('CANDIDATE_ONLY')));
+    await page.getByLabel('状態').selectOption('LINKED');
+    const reverseLink = surfaceRows.filter({ visible: true }).locator('a[href^="#obligation-"]').first();
     assert.ok(await reverseLink.count() > 0, 'reverse surface should link to its obligation');
     await reverseLink.click();
     assert.match(page.url(), /#obligation-OBL-REQ-/u);
+    assert.equal(await page.getByLabel('状態').inputValue(), '', 'following an obligation link should reveal its filtered destination');
+    assert.equal(await page.locator(new URL(page.url()).hash).isVisible(), true);
     const testLink = page.locator('#test-table a[href^="#obligation-"]').first();
     assert.ok(await testLink.count() > 0, 'test execution should link back to its obligation');
     await testLink.click();

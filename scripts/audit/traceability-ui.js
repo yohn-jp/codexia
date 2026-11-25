@@ -42,13 +42,20 @@
   form.addEventListener('submit', event => { event.preventDefault(); apply(); });
   form.addEventListener('input', () => apply());
   form.addEventListener('change', () => apply());
-  document.querySelector('#clear-filters')?.addEventListener('click', () => {
+  const clearFilters = () => {
     form.reset();
     query.value = '';
     area.value = '';
     status.value = '';
     kind.value = '';
     apply();
+  };
+  document.querySelector('#clear-filters')?.addEventListener('click', clearFilters);
+  document.addEventListener('click', event => {
+    const link = event.target.closest?.('a[href^="#"]');
+    if (!link) return;
+    const target = document.getElementById(link.getAttribute('href').slice(1));
+    if (target?.closest('[data-trace-row]')?.hidden) clearFilters();
   });
   apply(false);
 })();

@@ -55,6 +55,8 @@ test('projects obligations, reverse surfaces, and evidence links without conform
     assert.equal(traceJson.requirements[0].area, 'UI');
     assert.equal(traceJson.summary.areaCounts.UI.obligationCount, 1);
     assert.equal(traceJson.summary.reverseDispositionCounts.CANDIDATE_ONLY, 1);
+    assert.match(tracePage, /id="surface-2"[^>]*data-status="UNMAPPED CANDIDATE_ONLY"/u);
+    assert.match(tracePage, /id="surface-1"[^>]*data-status="UNVERIFIED LINKED"/u);
     assert.equal(traceJson.reverseTrace[1].requirementId, null, 'candidate IDs must not become accepted requirement links');
     assert.deepEqual(traceJson.reverseTrace[1].candidateRequirementIds, ['REQ-MCP-002']);
     assert.equal(traceJson.caseExecutions[1].result, 'NOT_RUN');
@@ -77,11 +79,16 @@ test('projects obligations, reverse surfaces, and evidence links without conform
 
     const staleReference = structuredClone(report);
     staleReference.obligationTrace.rows[0].sourceRefs.push({ path: 'packages/api/src/missing-trace-target.ts' });
+    staleReference.reverseTrace.gaps.push({ kind: 'BLOCKED', source: { path: 'packages/api/src/missing-gap-source.ts' } });
+    staleReference.obligationTrace.gaps.push('OBL-REQ-UI-001-O01: no exact-source run evidence for TEST-TRC-02-001');
     writeFileSync(join(output, 'trace-report.json'), JSON.stringify(staleReference));
     const staleSite = join(root, 'stale-reference');
     packSpecifications(staleSite, output, sha);
     const staleTrace = JSON.parse(readFileSync(join(staleSite, 'requirements/traceability/traceability.json'), 'utf8'));
     assert.ok(staleTrace.referenceAudit.broken.some(item => item.path === 'packages/api/src/missing-trace-target.ts'));
+    assert.ok(staleTrace.referenceAudit.broken.some(item => item.path === 'packages/api/src/missing-gap-source.ts'));
+    assert.equal(staleTrace.summary.brokenReferenceCount, staleTrace.referenceAudit.broken.length);
+    assert.match(readFileSync(join(staleSite, 'requirements/traceability/index.html'), 'utf8'), /data-status="UNVERIFIED"[^>]*data-search="[^"]*no exact-source run evidence/u);
     assert.match(readFileSync(join(staleSite, 'requirements/traceability/index.html'), 'utf8'), /missing-trace-target\.ts/u);
     writeFileSync(join(output, 'trace-report.json'), JSON.stringify(report));
 

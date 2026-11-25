@@ -262,8 +262,6 @@ function publicTraceability(report, sourceSha) {
     };
   }
   const caseResultCounts = countsBy(publicCases, 'result');
-  referenceAudit.broken.sort((a, b) => a.path.localeCompare(b.path) || a.kind.localeCompare(b.kind) || a.from.localeCompare(b.from));
-  delete referenceAudit._seen;
   const reverseLinkCount = reverse.filter(row => row.disposition === 'LINKED').length;
   const notApplicableSurfaceCount = reverse.filter(row => row.disposition === 'NOT_APPLICABLE').length;
   const trace = {
@@ -320,7 +318,7 @@ function publicTraceability(report, sourceSha) {
   const reverseHtml = reverse.map(row => {
     const relationLink = row.obligationId ? `<a href="#obligation-${esc(row.obligationId)}">${esc(row.requirementId)} · ${esc(row.obligationId)}</a>` : '対応義務リンクなし';
     const candidates = row.candidateRequirementIds.map(id => requirements.some(item => item.requirementId === id) ? `<a class="candidate" href="#${esc(id)}">${esc(id)} candidate</a>` : `<span class="candidate">${esc(id)} candidate</span>`).join('<br>');
-    return `<tr id="${esc(row.surfaceKey)}" ${attr({ area: row.area, status: row.status, disposition: row.disposition }, `${row.surface.kind} ${row.surface.id} ${row.operationId ?? ''} ${row.contractStatus ?? ''} ${row.requirementId ?? ''} ${row.obligationId ?? ''} ${row.inventoryClassification ?? ''} ${row.provenance}`, row.surface.kind)}><td><code>${esc(row.surface.kind)}</code><br><small>${esc(SURFACE_AREA_LABELS[row.area] ?? row.area)}</small></td><td><strong>${esc(row.surface.id)}</strong>${row.operationId ? `<p><code>Operation ID: ${esc(row.operationId)}</code> · ${esc(row.contractStatus ?? '')}</p>` : ''}<p>${esc(row.provenance)}</p></td><td>${relationLink}${candidates ? `<div>${candidates}</div>` : ''}</td><td><span class="state" data-state="${esc(row.status)}">${esc(row.disposition)}</span><br><small>${esc(row.status)}</small>${row.inventoryClassification ? `<p>${esc(row.inventoryClassification)}</p>` : '<p>分類なし</p>'}</td><td>${row.sourceLink ? `<a href="${esc(row.sourceLink.url)}">${esc(row.sourceLink.path)}${row.sourceLink.line ? `:L${row.sourceLink.line}` : ''}</a>` : '<span class="missing">source link unavailable</span>'}</td></tr>`;
+    return `<tr id="${esc(row.surfaceKey)}" ${attr({ area: row.area, status: [row.status, row.disposition] }, `${row.surface.kind} ${row.surface.id} ${row.operationId ?? ''} ${row.contractStatus ?? ''} ${row.requirementId ?? ''} ${row.obligationId ?? ''} ${row.inventoryClassification ?? ''} ${row.provenance}`, row.surface.kind)}><td><code>${esc(row.surface.kind)}</code><br><small>${esc(SURFACE_AREA_LABELS[row.area] ?? row.area)}</small></td><td><strong>${esc(row.surface.id)}</strong>${row.operationId ? `<p><code>Operation ID: ${esc(row.operationId)}</code> · ${esc(row.contractStatus ?? '')}</p>` : ''}<p>${esc(row.provenance)}</p></td><td>${relationLink}${candidates ? `<div>${candidates}</div>` : ''}</td><td><span class="state" data-state="${esc(row.status)}">${esc(row.disposition)}</span><br><small>${esc(row.status)}</small>${row.inventoryClassification ? `<p>${esc(row.inventoryClassification)}</p>` : '<p>分類なし</p>'}</td><td>${row.sourceLink ? `<a href="${esc(row.sourceLink.url)}">${esc(row.sourceLink.path)}${row.sourceLink.line ? `:L${row.sourceLink.line}` : ''}</a>` : '<span class="missing">source link unavailable</span>'}</td></tr>`;
   }).join('');
   const areaHtml = Object.entries(areaCounts).map(([area, count]) => `<tr ${attr({ area, status: '' }, `${area} ${count.label} ${JSON.stringify(count)}`)}><th scope="row">${esc(count.label)} <small>${esc(area)}</small></th><td>${count.requirementCount}</td><td>${count.obligationCount}</td><td>${count.conformanceCounts.UNMAPPED ?? 0}</td><td>${count.conformanceCounts.PARTIAL ?? 0}</td><td>${count.conformanceCounts.MAPPED_UNVERIFIED ?? 0}</td><td>${count.conformanceCounts.VERIFIED ?? 0}</td><td>${count.testLinkedObligationCount}</td><td>${count.exactRunCount}</td></tr>`).join('');
   const surfaceAreaHtml = Object.entries(surfaceAreaCounts).map(([area, count]) => `<tr ${attr({ area, status: '' }, `${area} ${count.label} ${JSON.stringify(count)}`)}><th scope="row">${esc(count.label)} <small>${esc(area)}</small></th><td>${count.surfaceCount}</td><td>${count.linkedCount}</td><td>${count.noObligationLinkCount}</td><td>${count.candidateOnlyCount}</td><td>${count.notApplicableCount}</td><td>${count.unclassifiedCount}</td></tr>`).join('');
@@ -328,7 +326,7 @@ function publicTraceability(report, sourceSha) {
     ...obligationGaps.map((item, index) => ({ source: '義務', item, index })),
     ...reverseGaps.map((item, index) => ({ source: '実装面', item, index })),
   ].map(({ source, item, index }) => {
-    const kind = typeof item === 'string' ? 'UNMAPPED' : item.kind ?? 'UNKNOWN';
+    const kind = typeof item === 'string' ? (item.includes(': no exact-source run evidence for ') ? 'UNVERIFIED' : 'UNMAPPED') : item.kind ?? 'UNKNOWN';
     const area = typeof item === 'string' ? requirementArea(item.match(/OBL-(REQ-[A-Z]+-\d{3})/u)?.[1]) : item.surface ? surfaceArea(item.surface.kind) : requirementArea(item.obligationId?.match(/OBL-(REQ-[A-Z]+-\d{3})/u)?.[1]);
     const text = typeof item === 'string' ? item : `${item.surface ? `${item.surface.kind} ${item.surface.id} · ` : ''}${item.reason ?? item.provenance ?? item.area ?? JSON.stringify(item)}`;
     const surface = typeof item === 'object' && item.surface ? reverse.find(row => row.surface.kind === item.surface.kind && row.surface.id === item.surface.id) : null;
@@ -344,6 +342,9 @@ function publicTraceability(report, sourceSha) {
     const runHtml = item.exactRuns.map(run => `<a href="${esc(run.url)}">run ${esc(run.runId)} / ${esc(run.result)}</a>`).join('<br>') || 'exact-source runなし';
     return `<tr id="test-${esc(item.testId)}" ${attr({ area, status: item.result }, `${item.testId} ${item.name} ${item.result} ${item.obligationIds.join(' ')}`)}><td><strong>${esc(item.testId)}</strong><p>${esc(item.name)}</p></td><td><span class="state" data-state="${esc(item.result)}">${esc(item.result)}</span></td><td>${sourceHtml}</td><td>${obligationHtml}</td><td>${runHtml}</td></tr>`;
   }).join('');
+  referenceAudit.broken.sort((a, b) => a.path.localeCompare(b.path) || a.kind.localeCompare(b.kind) || a.from.localeCompare(b.from));
+  delete referenceAudit._seen;
+  trace.summary.brokenReferenceCount = referenceAudit.broken.length;
   const brokenHtml = referenceAudit.broken.map(item => `<li><strong>${esc(item.kind)}</strong> · <code>${esc(item.path)}</code> · ${esc(item.from)} · ${esc(item.reason)}</li>`).join('') || '<li>検出したリンク切れはありません。</li>';
   const runNote = execution.status === 'IN_PROGRESS'
     ? `Actions run <a href="${esc(execution.runUrl)}">${esc(execution.runId)}</a> / attempt ${esc(execution.attempt)} / ${esc(execution.job)} / ${esc(execution.task)} をsource <code>${esc(sourceSha)}</code>で観測。既存のVerify certifierがartifactを別途照合する。`
