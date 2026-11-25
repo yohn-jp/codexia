@@ -684,6 +684,25 @@ test('iOS packaging workflow changes retain root proof and its shared inputs sta
   assert.equal(unknownMixed.mode, 'full');
 });
 
+test('CI contract-test changes select only root and coverage, including the iOS freeze diff', async () => {
+  const paths = ['scripts/ci/impact/plan.test.mjs', 'scripts/ci/evidence/proof-reuse.test.mjs',
+    'scripts/ci/certification/reuse-merged-pr.test.mjs'];
+  for (const file of paths) {
+    const result = await plan([file]);
+    assert.equal(result.mode, 'affected', file);
+    assert.deepEqual(result.tasks, ['unit-root', 'coverage'], file);
+    assert.equal(result.full_model_oci, false, file);
+  }
+  const freeze = await plan([...paths, '.github/workflows/ios-api.yml', '.github/workflows/ios-editor.yml']);
+  assert.deepEqual(freeze.tasks, ['unit-root', 'coverage']);
+  const { VERIFICATION_TASKS } = await import('./contract.mjs');
+  for (const file of ['scripts/ci/impact/plan.mjs', 'scripts/ci/evidence/proof-reuse.mjs', 'scripts/ci/impact/unknown.test.mjs']) {
+    const result = await plan([...paths, file]);
+    assert.deepEqual(result.tasks, VERIFICATION_TASKS, file);
+    assert.equal(result.full_model_oci, true, file);
+  }
+});
+
 test('root and coverage-only plans have a single owner for contract test execution', async () => {
   const runner = readFileSync(new URL('../execution/group.mjs', import.meta.url),'utf8');
   const root = JSON.parse(readFileSync(new URL('../../../package.json',import.meta.url),'utf8'));
