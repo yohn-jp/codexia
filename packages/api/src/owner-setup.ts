@@ -11,13 +11,13 @@ import { verifyAuthSchema } from "./auth-schema.js";
 import { createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "./better-auth.js";
 import { grantIsPending, grantMatches, installedSetupOwner, readOwnerSetup, type SetupRegistration } from "./owner-setup-store.js";
 import { provisionSetupOAuthClients } from "./setup-oauth-clients.js";
+import { httpContract, httpContractSchemaController } from "./http-contract.js";
 
 export const OWNER_SETUP_PATH = "/api/auth/codexia/setup";
 const CONTEXT_HEADER = "x-codexia-setup-transaction";
 const TEN_MINUTES = 600;
 const RATE_LIMIT_SECONDS = 60;
 
-const setupKeyBody = z.object({ key: z.string().regex(/^[A-Za-z0-9_-]{43}$/u) }).strict();
 const profileBody = z.object({
   name: z.string().trim().min(1).max(120),
   email: z.email().max(254),
@@ -25,7 +25,6 @@ const profileBody = z.object({
 const transactionBody = z.object({
   grantId: z.uuid(), sub: z.uuid(), exp: z.number().int(), profile: profileBody.optional(),
 });
-const emptyBody = z.object({}).strict();
 const credentialBody = z.object({
   response: z.record(z.string(), z.unknown()), createSession: z.literal(true).optional(),
 }).strict();
@@ -83,7 +82,16 @@ export function createOwnerSetupApp(
     throw new Error("Setup requires the production origin, no existing owner, and three distinct preapproved OAuth clients");
   }
 
-  const app = Fastify({ bodyLimit: 128 * 1024, logger: false });
+  const app = Fastify({ bodyLimit: 128 * 1024, logger: false, exposeHeadRoutes: false, schemaController: httpContractSchemaController });
+  // The setup wire contract is generated from TypeSpec just like the normal API.
+  // Register all component IDs because setup operation schemas reference shared
+  // components through Fastify `$ref`s.
+  for (const schema of httpContract.schemas) app.addSchema(schema);
+  function setupRouteSchema(method: "GET" | "POST", url: string) {
+    const route = httpContract.routes.find((candidate) => candidate.method === method && candidate.url === url);
+    if (!route) throw new Error(`Missing generated setup route schema: ${method} ${url}`);
+    return route.schema;
+  }
   // Status polling and setup grant attempts have independent budgets.
   const withinStatusWindow = createSetupRateLimiter();
   const withinAdmissionWindow = createSetupRateLimiter();
@@ -172,14 +180,17 @@ export function createOwnerSetupApp(
   app.addHook("onRequest", async (_request, reply) => {
     reply.header("Cache-Control", "no-store");
   });
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     const failure = z.object({ statusCode: z.number().min(400).max(499) }).safeParse(error);
     const status = failure.success ? failure.data.statusCode : 503;
     if (status === 429) {
       void reply.code(429).send({ code: "SETUP_RATE_LIMIT" });
       return;
     }
-    void reply.code(status).send({ code: status === 503 ? "SETUP_UNAVAILABLE" : "SETUP_REQUEST_INVALID" });
+    const validationCode = request.url === OWNER_SETUP_PATH + "/authorize" ? "SETUP_KEY_INVALID"
+      : request.url === OWNER_SETUP_PATH + "/profile" ? "SETUP_PROFILE_INVALID"
+        : "SETUP_REQUEST_INVALID";
+    void reply.code(status).send({ code: status === 503 ? "SETUP_UNAVAILABLE" : validationCode });
   });
   app.setNotFoundHandler((_request, reply) => reply.code(403).send({ code: "SETUP_ONLY" }));
   app.addHook("onClose", async () => auth.pool.end());
@@ -209,7 +220,7 @@ export function createOwnerSetupApp(
     });
   });
 
-  app.get(OWNER_SETUP_PATH + "/status", { exposeHeadRoute: false }, async (request, reply) => {
+  app.get(OWNER_SETUP_PATH + "/status", { exposeHeadRoute: false, schema: setupRouteSchema("GET", OWNER_SETUP_PATH + "/status") }, async (request, reply) => {
     if (request.headers.authorization || (request.headers.origin && request.headers.origin !== origin.origin)) {
       return reply.code(403).send({ code: "SETUP_SAME_ORIGIN_REQUIRED" });
     }
@@ -245,27 +256,29 @@ export function createOwnerSetupApp(
       if (request.url.includes("?")) return reply.code(400).send({ code: "SETUP_REQUEST_INVALID" });
     });
 
-    setup.post(OWNER_SETUP_PATH + "/authorize", async (request, reply) => {
-      if (!withinAdmissionWindow()) {
-        return reply.header("Retry-After", String(RATE_LIMIT_SECONDS)).code(429).send({ code: "SETUP_RATE_LIMIT" });
-      }
-      const input = setupKeyBody.safeParse(request.body);
-      if (!input.success) return reply.code(400).send({ code: "SETUP_KEY_INVALID" });
+    setup.post(OWNER_SETUP_PATH + "/authorize", {
+      schema: setupRouteSchema("POST", OWNER_SETUP_PATH + "/authorize"),
+      async onRequest(_request, reply) {
+        if (!withinAdmissionWindow()) {
+          return reply.header("Retry-After", String(RATE_LIMIT_SECONDS)).code(429).send({ code: "SETUP_RATE_LIMIT" });
+        }
+      },
+    }, async (request, reply) => {
+      const input = request.body as { key: string };
       const state = await readOwnerSetup(auth.pool);
-      if (!grantMatches(state, input.data.key)) return reply.code(403).send({ code: "SETUP_KEY_INVALID" });
+      if (!grantMatches(state, input.key)) return reply.code(403).send({ code: "SETUP_KEY_INVALID" });
       const expires = Math.min(Math.floor(state.expires_at.getTime() / 1000), Math.floor(Date.now() / 1000) + TEN_MINUTES);
       return { transaction: await signTransaction(state.grant_id, randomUUID(), expires) };
     });
 
-    setup.post(OWNER_SETUP_PATH + "/profile", async (request, reply) => {
+    setup.post(OWNER_SETUP_PATH + "/profile", { schema: setupRouteSchema("POST", OWNER_SETUP_PATH + "/profile") }, async (request, reply) => {
       const tx = await readTransaction(request.headers[CONTEXT_HEADER]);
       if (!tx || tx.profile) return reply.code(403).send({ code: "SETUP_TRANSACTION_INVALID" });
-      const input = profileBody.safeParse(request.body);
-      if (!input.success) return reply.code(400).send({ code: "SETUP_PROFILE_INVALID" });
+      const input = request.body as z.infer<typeof profileBody>;
       if (!grantIsPending(await readOwnerSetup(auth.pool), tx.grantId)) {
         return reply.code(409).send({ code: "SETUP_CLOSED" });
       }
-      return { transaction: await signTransaction(tx.grantId, tx.sub, tx.exp, input.data) };
+      return { transaction: await signTransaction(tx.grantId, tx.sub, tx.exp, input) };
     });
 
     async function ceremony(method: "GET" | "POST", token: string | string[] | undefined, cookie: string | undefined, body: unknown) {
@@ -305,8 +318,7 @@ export function createOwnerSetupApp(
       return reply.header("Set-Cookie", result.headers.getSetCookie()).send({ enrolled: true });
     });
 
-    setup.post(OWNER_SETUP_PATH + "/complete", async (request, reply) => {
-      if (!emptyBody.safeParse(request.body).success) return reply.code(400).send({ code: "SETUP_REQUEST_INVALID" });
+    setup.post(OWNER_SETUP_PATH + "/complete", { schema: setupRouteSchema("POST", OWNER_SETUP_PATH + "/complete") }, async (request, reply) => {
       const tx = await readTransaction(request.headers[CONTEXT_HEADER]);
       const state = await readOwnerSetup(auth.pool);
       if (!tx?.profile || state?.grant_id !== tx.grantId || state.owner_id !== tx.sub ||

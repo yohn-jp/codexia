@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, randomUUID, sign as signJwt } from "node:crypto";
 import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { get as httpGet } from "node:http";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,13 +62,17 @@ function instrumentPersistence(
   });
 }
 
+const TEST_PROJECT = {
+  id: "project-1", title: "A Work", version: 1, settings: {},
+  createdAt: "2026-10-17T00:00:00.000Z", updatedAt: "2026-10-17T00:00:00.000Z",
+};
 /** Admission-only fixture. Persistence integration cases below use a disposable PostgreSQL schema. */
 function makeStore(onSaveScene: () => void = () => undefined): CoreStoreShape {
-  const project = { id: "project-1", title: "A Work", version: 1 };
+  const project = TEST_PROJECT;
   return {
     listProjects: async () => [project],
     listProjectsPage: async () => ({ projects: [project], nextCursor: null }),
-    createProject: async ({ title }: { title: string }) => ({ id: "project-2", title, version: 1 }),
+    createProject: async ({ title }: { title: string }) => ({ ...project, id: "project-2", title, version: 1 }),
     status: async () => ({ ...SNAPSHOT, state: "durable" as const }),
     observe: async () => ({ snapshot: SNAPSHOT, observedAt: "2026-10-17T00:00:00.000Z", state: "fresh" }),
     saveScene: async () => { onSaveScene(); throw Error("direct scene writes are forbidden"); },
@@ -141,6 +146,10 @@ interface PublishingObservations {
   linkedReaderError?: string;
 }
 
+function withHttpDescriptors(manifest: ModuleManifest, definition: ModuleDefinition): ModuleManifest {
+  return { ...manifest, http: definition.http?.map(({ handle: _handle, ...descriptor }) => descriptor) ?? [] };
+}
+
 function publishingRuntime(cacheDirectory: string, observed: PublishingObservations): ModuleRuntime {
   const manifest: ModuleManifest = {
     id: "publishing", version: "0.1.0", contractVersion: 1,
@@ -180,7 +189,7 @@ function publishingRuntime(cacheDirectory: string, observed: PublishingObservati
     }],
     async dispose() {},
   };
-  return new ModuleRuntime({ manifests: [manifest], enabled: ["publishing"], loaders: { publishing: async () => definition }, cacheDirectory });
+  return new ModuleRuntime({ manifests: [withHttpDescriptors(manifest, definition)], enabled: ["publishing"], loaders: { publishing: async () => definition }, cacheDirectory });
 }
 
 function actionBoundaryRuntime(cacheDirectory: string): ModuleRuntime {
@@ -260,7 +269,7 @@ function actionBoundaryRuntime(cacheDirectory: string): ModuleRuntime {
     async dispose() {},
   };
   return new ModuleRuntime({
-    manifests: [mcpManifest, nlpManifest], enabled: ["mcp", "nlp"], cacheDirectory,
+    manifests: [withHttpDescriptors(mcpManifest, mcpDefinition), nlpManifest], enabled: ["mcp", "nlp"], cacheDirectory,
     loaders: { mcp: async () => mcpDefinition, nlp: async () => nlpDefinition },
   });
 }
@@ -351,7 +360,7 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
   };
   return {
     runtime: new ModuleRuntime({
-      manifests: [speakerManifest, mcpManifest], enabled: ["speaker", "mcp"], cacheDirectory,
+      manifests: [speakerManifest, withHttpDescriptors(mcpManifest, mcpDefinition)], enabled: ["speaker", "mcp"], cacheDirectory,
       loaders: { speaker: async () => definition, mcp: async () => mcpDefinition },
     }),
     asyncStarted,
@@ -539,6 +548,44 @@ afterEach(async () => {
 });
 
 describe("Codexia HTTP boundary", () => {
+  it("runs admission before payload validation and rejects unregistered methods and origins", async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-fastify-admission-"));
+    tempDirs.push(staticDir);
+    const store = makeStore();
+    let creates = 0;
+    const create = store.createProject.bind(store);
+    store.createProject = (input) => { creates++; return create(input); };
+    const api = await startCustomApi(store, staticDir, { corsAllowedOrigins: ["https://web.codexia.test"] });
+    t.after(api.close);
+
+    const projects = api.base + "/api/projects";
+    const malformed = await fetch(projects, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{",
+    });
+    assert.equal(malformed.status, 401);
+    const headers = { ...signedRequests.ownerHeaders(), "Content-Type": "application/json" };
+    const numericTitle = await fetch(projects, { method: "POST", headers, body: '{"title":42}' });
+    assert.equal(numericTitle.status, 400, "Ajv must retain JSON scalar types");
+    const wrongMedia = await fetch(projects, {
+      method: "POST", headers: { ...headers, "Content-Type": "text/plain" }, body: '{"title":"draft"}',
+    });
+    assert.equal(wrongMedia.status, 415);
+    assert.equal(creates, 0);
+    const preflight = { Origin: "https://web.codexia.test", "Access-Control-Request-Method": "DELETE" };
+    assert.equal((await fetch(projects, { method: "OPTIONS", headers: preflight })).status, 403);
+    assert.equal((await fetch(projects + "/missing/operation", { method: "OPTIONS", headers: preflight })).status, 404);
+    const encodedSeparator = await fetch(projects + "/project%2Felsewhere", { headers });
+    assert.equal(encodedSeparator.status, 400);
+    const hostStatus = await new Promise<number | undefined>((resolveStatus, rejectRequest) => {
+      const probe = httpGet(api.base + "/mcp", { headers: { Host: "unexpected.example" } }, (response) => {
+        response.resume();
+        resolveStatus(response.statusCode);
+      });
+      probe.once("error", rejectRequest);
+    });
+    assert.equal(hostStatus, 403);
+  });
+
   it("routes Better Auth discovery and token requests through the Fastify entry point", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-better-auth-routes-"));
     tempDirs.push(staticDir);
@@ -1267,7 +1314,7 @@ describe("Codexia HTTP boundary", () => {
     const projectCollection = await fetch(apiServer.base + "/api/projects", { headers: author });
     assert.equal(projectCollection.status, 200);
     assert.deepEqual(await projectCollection.json(), {
-      projects: [{ id: "project-1", title: "A Work", version: 1 }], nextCursor: null,
+      projects: [TEST_PROJECT], nextCursor: null,
     });
     const scene = apiServer.base + "/api/projects/project-1/scenes/scene-1";
     const save = (revision: string, origin: string) => fetch(scene, {
@@ -1276,7 +1323,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await save("revision-1", "https://unlisted.example")).status, 403);
     for (const revision of ["revision-1", "revision-old"]) {
       const mutation = await save(revision, apiServer.base);
-      assert.equal(mutation.status, 404);
+      assert.equal(mutation.status, 405);
     }
     assert.equal(directSaveCalls, 0);
   });
@@ -1626,16 +1673,6 @@ describe("Codexia HTTP boundary", () => {
       assert.equal(directPersistence.status, 403, `MCP direct persistence route ${path} is closed`);
       assert.equal((await directPersistence.json() as { code: string }).code, "OAUTH_MCP_PERSISTENCE_DENIED");
     }
-    for (const path of [
-      "/api/v1/persistence/projects",
-      "/api/v1/persistence/projects?limit=1",
-      "/api/v1/persistence/projects/project-1/archive",
-      "/api/v1/persistence/projects/project-2/archive",
-    ]) {
-      const directPersistence = await send(path, readToken);
-      assert.equal(directPersistence.status, 403, `MCP direct persistence route ${path} is closed`);
-      assert.equal((await directPersistence.json() as { code: string }).code, "OAUTH_MCP_PERSISTENCE_DENIED");
-    }
 
     const metadataChallenge = await fetch(`${api.base}/api/projects/project-1/modules/mcp/streamable`);
     assert.equal(metadataChallenge.status, 401);
@@ -1643,9 +1680,8 @@ describe("Codexia HTTP boundary", () => {
       'Bearer resource_metadata="https://api.codexia.example/.well-known/oauth-protected-resource/api", scope="mcp:read mcp:compute mcp:propose"');
 
     const limitedSession = await send("/api/session", readToken);
-    assert.equal(limitedSession.status, 200);
-    assert.equal((await limitedSession.json() as { authorScope: string }).authorScope, "",
-      "MCP bearer authentication must not become the owner author scope");
+    assert.equal(limitedSession.status, 403, "the owner session probe is unavailable to MCP credentials");
+    assert.equal((await limitedSession.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
 
     const actionList = await send("/api/projects/project-1/actions", readToken);
     assert.equal(actionList.status, 200);
@@ -1778,7 +1814,7 @@ describe("Codexia HTTP boundary", () => {
     const auth = { Authorization: signedRequests.ownerHeaders().Authorization };
 
     const projects = await fetch(`${apiServer.base}/api/projects`, { headers: auth });
-    assert.deepEqual(await projects.json(), { projects: [{ id: "project-1", title: "A Work", version: 1 }], nextCursor: null });
+    assert.deepEqual(await projects.json(), { projects: [TEST_PROJECT], nextCursor: null });
     const detail = await fetch(`${apiServer.base}/api/projects/project-1`, { headers: auth });
     const detailBody = await detail.json() as { project: { id: string; title: string; version: number }; observation: { snapshot: SnapshotId; state: string } };
     assert.equal(detail.status, 200);
@@ -2321,7 +2357,7 @@ describe("Codexia HTTP boundary", () => {
           ...(method !== "DELETE" ? { body: JSON.stringify({ url: "https://github.com/other/repo.git", token: "must-not-echo", autoMerge: true }) } : {}),
         });
         const responseText = await response.text();
-        assert.equal(response.status, 404, `${method} /api/projects/project-1 returned ${response.status}: ${responseText}`);
+        assert.equal(response.status, 405, `${method} /api/projects/project-1 returned ${response.status}: ${responseText}`);
         assert.equal(responseText.includes("must-not-echo"), false);
       }
     }
@@ -2360,7 +2396,7 @@ describe("Codexia HTTP boundary", () => {
         method, headers: { ...headers, ...(method === "DELETE" ? {} : { "Content-Type": "application/json" }) },
         ...(method !== "DELETE" ? { body: JSON.stringify({ url: "/tmp/forbidden.git" }) } : {}),
       });
-      assert.equal(response.status, 404, `${method} /api/projects/${project.id}${suffix} returned ${response.status}: ${await response.clone().text()}`);
+      assert.equal(response.status, suffix ? 404 : 405, `${method} /api/projects/${project.id}${suffix} returned ${response.status}: ${await response.clone().text()}`);
     }
     const reopened = new CoreStore({ persistence });
     assert.equal((await reopened.observe(project.id)).snapshot.projectVersion, applied.projectVersion);
@@ -2448,7 +2484,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(invokedBody.ok, true, JSON.stringify(invokedBody));
 
     const ownerRoute = await fetch(`${apiServer.base}/api/projects/project-1/modules/publishing/share/secret`);
-    assert.equal(ownerRoute.status, 401);
+    assert.equal(ownerRoute.status, 404);
     const publicResponse = await fetch(`${apiServer.base}/api/public/projects/project-1/modules/publishing/share/secret?lang=en`, {
       headers: {
         Authorization: signedRequests.mcpHeaders().Authorization,
@@ -2497,7 +2533,7 @@ describe("Codexia HTTP boundary", () => {
       async dispose() {},
     };
     const runtime = new ModuleRuntime({
-      manifests: [manifest], enabled: ["mcp"], cacheDirectory: cacheDir, moduleDrainTimeoutMs: 50,
+      manifests: [withHttpDescriptors(manifest, definition)], enabled: ["mcp"], cacheDirectory: cacheDir, moduleDrainTimeoutMs: 50,
       loaders: { mcp: async () => definition },
     });
     const apiServer = await startCustomApi(makeSnapshotStore().store, staticDir, { runtime });
@@ -3012,7 +3048,7 @@ it("binds Publishing record ports to the requested snapshot and authenticated au
       async dispose() {},
     };
     return new ModuleRuntime({
-      manifests: [manifest], enabled: ["publishing"], loaders: { publishing: async () => definition }, cacheDirectory: directory,
+      manifests: [withHttpDescriptors(manifest, definition)], enabled: ["publishing"], loaders: { publishing: async () => definition }, cacheDirectory: directory,
     });
   };
   const client = createSignedRequestFixture();

@@ -582,6 +582,9 @@ importers:
       '@codexia/persistence-postgres':
         specifier: workspace:*
         version: link:../persistence-postgres
+      '@fastify/ajv-compiler':
+        specifier: 4.0.8
+        version: 4.0.8
       '@fastify/rate-limit':
         specifier: 11.3.0
         version: 11.3.0

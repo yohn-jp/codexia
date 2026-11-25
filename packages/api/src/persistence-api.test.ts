@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import type { EvidenceId, KnowledgeNodeId } from "@codexia/persistence-contracts";
-import { handlePersistenceRoute } from "./persistence-routes.js";
+import { handlePersistenceOperation } from "./persistence-routes.js";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
 
@@ -37,9 +37,9 @@ test("assertion creation checks the selected mention beyond the first 500 links"
     }
     return anchor;
   });
-  const propose = (nodeId: KnowledgeNodeId) => handlePersistenceRoute({
-    persistence, method: "POST", requestHeaders: {}, requireAuthor: async () => "author",
-    url: `/api/v1/persistence/projects/${project.id}/documents/${document.id}/anchors/${anchorId}/assertions`,
+  const propose = (nodeId: KnowledgeNodeId) => handlePersistenceOperation("persistence_anchor_assertions_post", {
+    persistence, requestHeaders: {}, requireAuthor: async () => "author",
+    params: { projectId: project.id, documentId: document.id, anchorId }, query: new URLSearchParams(),
     body: { id: randomUUID(), nodeId, statement: "A supported claim", modality: "fact", perspective: "narrator",
       revisionId: revision.id, expectedAnchorVersion: anchor.version },
   });

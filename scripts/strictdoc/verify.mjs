@@ -272,67 +272,25 @@ function stripSourceComments(source) {
   return characters.join('');
 }
 
-function findClosingBrace(source, openIndex) {
-  let depth = 0;
-  let quote;
-  for (let index = openIndex; index < source.length; index += 1) {
-    const character = source[index];
-    if (quote) {
-      if (character === '\\') index += 1;
-      else if (character === quote) quote = undefined;
-      continue;
+function discoverGeneratedContractRoutes(source) {
+  let contract;
+  try {
+    contract = JSON.parse(source);
+  } catch (error) {
+    throw new Error(`Generated Fastify route artifact is not valid JSON: ${error.message}`, { cause: error });
+  }
+  if (!contract || !Array.isArray(contract.routes)) throw new Error('Generated Fastify route artifact must contain a routes array');
+  const routes = [];
+  for (const route of contract.routes) {
+    if (!route || typeof route.method !== 'string' || typeof route.url !== 'string' || typeof route.operationId !== 'string') {
+      throw new Error('Generated Fastify route entry must include method, url, and operationId');
     }
-    if (character === "'" || character === '"' || character === '`') {
-      quote = character;
-      continue;
+    if (!/^(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|TRACE)$/u.test(route.method)) {
+      throw new Error(`Unsupported HTTP method in generated Fastify route artifact: ${route.method}`);
     }
-    if (character === '{') depth += 1;
-    else if (character === '}' && --depth === 0) return index;
+    routes.push(`${route.method} ${route.url.replace(/:([A-Za-z][A-Za-z0-9_]*)/gu, '{$1}')}`);
   }
-  throw new Error('Unclosed source block while discovering route families');
-}
-
-const HTTP_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
-
-function methodsInRouteBlock(text) {
-  const methods = new Set();
-  for (const match of text.matchAll(/\b(?:input\.)?method\s*===\s*(["'])([A-Z]+)\1/gu)) {
-    if (!HTTP_METHODS.has(match[2])) throw new Error(`Unsupported HTTP method in bounded route source: ${match[2]}`);
-    methods.add(match[2]);
-  }
-  if (/\bisRead\b/u.test(text)) {
-    methods.add('GET');
-    methods.add('HEAD');
-  }
-  // In the supported dispatch style, `method !== X` immediately returns 405,
-  // so X is the accepted method for that branch.
-  for (const match of text.matchAll(/\bif\s*\(([^()]*)\)\s*return\s*\{\s*status\s*:\s*405\b/gu)) {
-    for (const rejected of match[1].matchAll(/\b(?:input\.)?method\s*!==\s*(["'])([A-Z]+)\1/gu)) {
-      if (!HTTP_METHODS.has(rejected[2])) throw new Error(`Unsupported HTTP method in bounded route source: ${rejected[2]}`);
-      methods.add(rejected[2]);
-    }
-  }
-  return methods;
-}
-
-function discoverRouteFamilies(source) {
-  const code = stripSourceComments(source);
-  const found = new Set();
-  const pathPattern = /\b(?:routePath|url\.pathname)\s*===\s*(["'])(\/[^"']*)\1/gu;
-  const ifPattern = /\bif\s*\(([^()]*)\)\s*\{/gu;
-  for (const match of code.matchAll(ifPattern)) {
-    const condition = match[1];
-    const paths = [...condition.matchAll(pathPattern)].map((pathMatch) => pathMatch[2]);
-    if (paths.length === 0) continue;
-    const openIndex = match.index + match[0].lastIndexOf('{');
-    const closeIndex = findClosingBrace(code, openIndex);
-    const methods = methodsInRouteBlock(`${condition}\n${code.slice(openIndex + 1, closeIndex)}`);
-    if (methods.size === 0) methods.add('ANY');
-    for (const routePath of paths) {
-      for (const method of methods) found.add(`${method} ${routePath}`);
-    }
-  }
-  return [...found].sort();
+  return routes;
 }
 
 function discoverMcpToolNames(source) {
@@ -465,7 +423,7 @@ export async function discoverSourceInventory(root, scope) {
     ansibleRoot: scope?.ansible,
   });
   const discovered = {
-    routes: routeFiles.flatMap(({ source }) => discoverRouteFamilies(source)),
+    routes: routeFiles.flatMap(({ source }) => discoverGeneratedContractRoutes(source)),
     tools: toolFiles.flatMap(({ source }) => discoverMcpToolNames(source)),
     databaseObjects: databaseFiles.flatMap(({ source }) => discoverSqlObjects(source)),
     nativeIosViews: platform.surfaces.filter(item => item.kind === 'nativeIosView').map(item => item.id),

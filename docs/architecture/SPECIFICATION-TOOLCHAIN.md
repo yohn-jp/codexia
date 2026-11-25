@@ -61,7 +61,7 @@ OpenAPIのpatch番号は明確化や訂正に使用され、同じminor系列の
 
 | 現行コード/仕様の実情 | 変更後の目標 | 必須の変更と不変条件 |
 | --- | --- | --- |
-| packages/api/src/server.tsはFastifyを生成するが、共通catch-all内でmethod/pathを手動分岐。Node IncomingMessage/ServerResponse、SSE、Abort、独自security headersを使用 | TypeSpec→OpenAPI→Fastifyの明示的route/JSON SchemaとOrval client | 全method/path、CSP/nonce、CORS/CSRF、body limit、HTTP 401/403/404/405/409、stream/drainを追跡して移管。動的module route等は明示的adapter |
+| TypeSpec から生成した OpenAPI と Fastify スキーマで通常 API と setup API を登録。SSE と外部プロトコルは明示的なアダプターを経由 | TypeSpec→OpenAPI→Fastifyの明示的route/JSON SchemaとOrval client | 全method/path、CSP/nonce、CORS/CSRF、body limit、HTTP 401/403/404/405/409、stream/drainを追跡して移管。動的module route等は明示的adapter |
 | packages/api/src/persistence-routes.tsがbody/headersを手動検証しCore/DBへ委譲 | TypeSpec/OpenAPI由来のFastify JSON Schema/Ajvを入口に使用 | 既存のsemantic precondition、transaction/owner判定をvalidatorへ誤移管しない。Zodは業務/MCP/clientで維持 |
 | modules/mcp/src/http.tsはv1のstateful session map、Mcp-Session-Id、GET/POST/DELETE、idle timerを使う | SDK v2と2026 specのStateless HTTPをFastifyへ公式Web標準handler adapter経由で接続。必要な移行期間だけ正式に承認されたversionを扱う | owner/project/scopeの毎request再検証、CORS/headers、切断、stream、retry、旧session削除を実証 |
 | modules/mcp/src/stdio.tsはv1のStdioServerTransportへconnect、tool registrarはZod互換モード | v2のserveStdioとZod v4 | 入出力schema、同じaction/effect、STDOUT汚染なし、旧protocol拒否/許可の方針を明記 |

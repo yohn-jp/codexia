@@ -11,6 +11,7 @@ export const mcpManifest: ModuleManifest = {
   serverEntry: "./dist/index.js",
   statePaths: [],
   locality: "local",
+  http: [{ id: "streamable", path: "streamable", methods: ["GET", "POST", "DELETE"], access: "owner", effect: "propose" }],
 };
 
 /** Register the external MCP transports without allocating models or persistent storage. */

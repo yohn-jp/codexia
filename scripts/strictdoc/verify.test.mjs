@@ -147,12 +147,14 @@ test('discovers an unclassified SQL object from source instead of trusting cache
   const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-inventory-source-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, 'packages', 'persistence-postgres', 'migrations'), { recursive: true });
-  await mkdir(path.join(root, 'packages', 'api', 'src'), { recursive: true });
+  await mkdir(path.join(root, 'packages', 'api', 'src', 'generated'), { recursive: true });
   await mkdir(path.join(root, 'modules', 'mcp', 'src'), { recursive: true });
-  await writeFile(path.join(root, 'packages', 'api', 'src', 'server.ts'), [
-    'if (routePath === "/api/projects" && method === "GET") { return; }',
-    'if (routePath === "/api/spec01-inventory-fixture" && method === "POST") { return; }',
-  ].join('\n'));
+  await writeFile(path.join(root, 'packages', 'api', 'src', 'generated', 'http-contract.json'), JSON.stringify({
+    routes: [
+      { method: 'GET', url: '/api/projects', operationId: 'projects_list_get' },
+      { method: 'POST', url: '/api/spec01-inventory-fixture', operationId: 'spec01_inventory_fixture_post' },
+    ],
+  }));
   await writeFile(path.join(root, 'modules', 'mcp', 'src', 'tools.ts'), [
     'server.tool("list_projects", "existing tool", {});',
     'server.tool("spec01_inventory_fixture", "unclassified tool", {});',
@@ -169,7 +171,7 @@ test('discovers an unclassified SQL object from source instead of trusting cache
   assert.equal(typeof verifier.verifySourceInventory, 'function', 'the verifier must expose the same source-bound inventory check used by runVerifier');
   const result = await verifier.verifySourceInventory(root, {
     scope: {
-      routes: ['packages/api/src/server.ts'],
+      routes: ['packages/api/src/generated/http-contract.json'],
       tools: ['modules/mcp/src/tools.ts'],
       databaseObjects: ['packages/persistence-postgres/migrations/0001-initial.sql'],
     },

@@ -10,7 +10,7 @@ import {
   NativeKnowledgeServiceError, applyNativeChangeSet, approveNativeChangeSet, getNativeChangeSet,
   proposeNativeKnowledgeChange, readNativeKnowledge, rejectNativeChangeSet,
 } from "./native-knowledge-service.js";
-import { handlePersistenceRoute } from "./persistence-routes.js";
+import { handlePersistenceOperation } from "./persistence-routes.js";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL ?? "postgres://codexia:codexia@127.0.0.1:55440/codexia_test";
 let persistence = createPostgresPersistence(connectionString);
@@ -47,22 +47,22 @@ test("only author review reads include private Publishing ChangeSets and receipt
   const approved = await approveNativeChangeSet(persistence, p.id, privateReview.changeSet.id, 1, "reviewer");
   await applyNativeChangeSet(persistence, p.id, approved.id, approved.version);
 
-  const baseUrl = `/api/v1/persistence/projects/${p.id}/changesets`;
-  const route = (url: string, canReviewPrivateChangeSets: boolean) => {
-    const request = { persistence, url, body: null, requestHeaders: {}, canReviewPrivateChangeSets,
-      async requireAuthor() { assert.fail("GET must use the host's verified review permission"); } };
-    return handlePersistenceRoute({ ...request, method: "GET" });
-  };
-  const externalList = await route(`${baseUrl}?limit=1`, false);
+  const route = (changeSetId: string | undefined, canReviewPrivateChangeSets: boolean) =>
+    handlePersistenceOperation(changeSetId ? "persistence_changeset_get" : "persistence_changesets_get", {
+      persistence, params: { projectId: p.id, ...(changeSetId ? { changeSetId } : {}) },
+      query: new URLSearchParams("limit=1"), body: null, requestHeaders: {}, canReviewPrivateChangeSets,
+      async requireAuthor() { assert.fail("GET must use the host's verified review permission"); },
+    });
+  const externalList = await route(undefined, false);
   assert.equal(externalList?.status, 200);
   assert.deepEqual((externalList.body as { changeSets: Array<{ id: string }> }).changeSets.map(set => set.id), [ordinary.changeSet.id]);
-  assert.equal((await route(`${baseUrl}/${approved.id}`, false))?.status, 404);
-  assert.equal((await route(`${baseUrl}/${ordinary.changeSet.id}`, false))?.status, 200);
+  assert.equal((await route(approved.id, false))?.status, 404);
+  assert.equal((await route(ordinary.changeSet.id, false))?.status, 200);
 
-  const authorList = await route(`${baseUrl}?limit=1`, true);
+  const authorList = await route(undefined, true);
   assert.equal(authorList?.status, 200);
   assert.deepEqual((authorList.body as { changeSets: Array<{ id: string }> }).changeSets.map(set => set.id), [approved.id]);
-  const authorDetail = await route(`${baseUrl}/${approved.id}`, true);
+  const authorDetail = await route(approved.id, true);
   assert.equal(authorDetail?.status, 200);
   assert.match(JSON.stringify((authorDetail.body as { receipt: unknown }).receipt), /Private proofreading/);
 
@@ -212,16 +212,16 @@ test("authenticated persistence routes expose the native ChangeSet review lifecy
   const p = await project("native-route");
   const operation = nodeOperation(p.id, "Route node");
   const base = { persistence, requestHeaders: { "idempotency-key": "route-change" }, async requireAuthor() { return "authenticated-author"; } };
-  const created = await handlePersistenceRoute({ ...base, method: "POST", url: `/api/v1/persistence/projects/${p.id}/changesets`, body: { projectVersion: p.version, operations: [operation] } });
+  const created = await handlePersistenceOperation("persistence_changesets_post", { ...base, params: { projectId: p.id }, query: new URLSearchParams(), body: { projectVersion: p.version, operations: [operation] } });
   assert.equal(created?.status, 201);
   const changeSet = (created?.body as { changeSet: { id: string; version: number } }).changeSet;
-  const listed = await handlePersistenceRoute({ ...base, method: "GET", url: `/api/v1/persistence/projects/${p.id}/changesets` , body: null });
+  const listed = await handlePersistenceOperation("persistence_changesets_get", { ...base, params: { projectId: p.id }, query: new URLSearchParams() , body: null });
   assert.ok((listed?.body as { changeSets: readonly { id: string }[] }).changeSets.some(item => item.id === changeSet.id));
-  const approved = await handlePersistenceRoute({ ...base, method: "POST", url: `/api/v1/persistence/projects/${p.id}/changesets/${changeSet.id}/approve`, body: { expectedVersion: changeSet.version } });
+  const approved = await handlePersistenceOperation("persistence_changeset_approve_post", { ...base, params: { projectId: p.id, changeSetId: changeSet.id }, query: new URLSearchParams(), body: { expectedVersion: changeSet.version } });
   const approvedSet = (approved?.body as { changeSet: { version: number } }).changeSet;
-  const applied = await handlePersistenceRoute({ ...base, method: "POST", url: `/api/v1/persistence/projects/${p.id}/changesets/${changeSet.id}/apply`, body: { expectedVersion: approvedSet.version } });
+  const applied = await handlePersistenceOperation("persistence_changeset_apply_post", { ...base, params: { projectId: p.id, changeSetId: changeSet.id }, query: new URLSearchParams(), body: { expectedVersion: approvedSet.version } });
   assert.equal((applied?.body as { changeSet: { status: string } }).changeSet.status, "applied");
-  const fetched = await handlePersistenceRoute({ ...base, method: "GET", url: `/api/v1/persistence/projects/${p.id}/changesets/${changeSet.id}`, body: null });
+  const fetched = await handlePersistenceOperation("persistence_changeset_get", { ...base, params: { projectId: p.id, changeSetId: changeSet.id }, query: new URLSearchParams(), body: null });
   assert.equal((fetched?.body as { receipt: { results: readonly unknown[] } }).receipt.results.length, 1);
 });
 
@@ -241,8 +241,8 @@ test("author review feed joins both durable proposal authorities and keeps their
     operations: [nodeOperation(p.id, "Feed node")],
   });
   const authCalls: string[] = [];
-  const response = await handlePersistenceRoute({
-    persistence, method: "GET", url: `/api/v1/persistence/projects/${p.id}/review-feed?limit=20`, body: null,
+  const response = await handlePersistenceOperation("persistence_review_feed_get", {
+    persistence, params: { projectId: p.id }, query: new URLSearchParams(`limit=20`), body: null,
     requestHeaders: {}, async requireAuthor() { authCalls.push("author"); return "author"; },
   });
   assert.deepEqual(authCalls, ["author"], "the unified feed is restricted to authenticated authors");

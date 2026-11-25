@@ -13,6 +13,10 @@ export const publishingManifest: ModuleManifest = {
   browserEntry: "./dist/browser.js",
   statePaths: ["meta/scriptorium/modules/publishing"],
   locality: "local",
+  http: [
+    { id: "publishing.http.public-share", path: "share/:token", methods: ["GET"], access: "public", effect: "read" },
+    { id: "publishing.http.public-share-scene", path: "share/:token/scenes/:sceneId", methods: ["GET"], access: "public", effect: "read" },
+  ],
 };
 
 /** The optional module is imported only when Publishing is enabled and activated. */

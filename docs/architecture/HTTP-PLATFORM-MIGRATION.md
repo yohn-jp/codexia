@@ -3,8 +3,10 @@
 **種別: 採用済み設計。** HTTPワイヤ契約は [API contract](API-CONTRACT.md)、principal・method・resource・effect認可は [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md)、OAuthは [API AuthN/AuthZ](API-AUTHN-AUTHZ.md) が所有する。[Toolchain](SPECIFICATION-TOOLCHAIN.md) に基づき、**TypeSpec → OpenAPI 3.1 → Fastify JSON Schema/Ajvと生成クライアント**へ一方向に接続する。Honoへのランタイム移行は採用しない。
 
 TypeSpecからの生成、スキーマ変換と検査は `packages/http-contract` が所有する。
-現在のAPIにはFastifyの明示routeのほか、共通catch-allと `packages/api/src/persistence-routes.ts` の手動分岐がある。
-生成スキーマによる隔離Fastifyの試験と、本番ハンドラーのschema-first移行は個別に受け入れる。
+本番 API と setup 専用 API は TypeSpec から生成した Fastify スキーマを使用する。
+`packages/http-contract/scripts/generate-fastify.mjs` は OpenAPI から `packages/api/src/generated/http-contract.json` を生成する。
+`check-generated` は OpenAPI と Fastify 用スキーマの両方の再生成差分を検査する。
+各 route は operation ID で処理へ接続し、CORS preflight は登録済みの API/MCP パスと method に限定する。
 
 ## 二択の結論
 
@@ -56,7 +58,7 @@ TypeSpecからの生成、スキーマ変換と検査は `packages/http-contract
 | `/api/health`、`/health/*` | 公開するmethod/pathを明示登録 | 最小healthのみ |
 | `/api/*` の作品・job・persistence | method/pathごとのschema付きroute | OWNER-API、必要なMCP effectを区別。persistenceはOWNER-API専用 |
 | `/api/auth/*` | Better Auth公式Web Request handlerをFastify adapterから呼ぶ。auth固有のbody/cookie/streamingを壊さない | OWNER-SESSION、OAuthの登録client、PKCE/CSRF |
-| `/mcp` とmodule MCP HTTP | MCP SDK v2公式Web handlerをFastify adapterで呼ぶ | MCP-CLIENTのresource/audience、scope、project、effectを毎request確認 |
+| `/mcp` とmodule MCP HTTP | 既存の SDK v1 Web adapter を明示ルートへ接続する。SDK v2 は [MCP 移行設計](MCP-V2-MIGRATION.md) に従って切り替える | MCP-CLIENTのresource/audience、scope、project、effectを毎request確認 |
 | `/api/public/projects/*` | share reader専用route | share capability以外のprivate情報を返さない |
 | module HTTP contribution | manifestから明示method/pathを登録するhost-owned adapter | module access/effectとcentral admission。未知routeはfail closed |
 | setup API | [初期導入設計](../deployment/INITIAL-DEPLOYMENT-FLOW.md) に従うsetup専用Fastifyのroute | SETUPに限定した操作と公開可否応答を区別する。稼働環境での登録受入は別途確認する |
@@ -72,6 +74,18 @@ TypeSpecからの生成、スキーマ変換と検査は `packages/http-contract
 3. **Host/Origin:** 公式MCP handler任せにせず、Fastify outer ingressでDNS rebinding対策、trusted proxy/Host/Originの整合、URL encodingを検査する。
 4. **Schema serializer:** Fastifyのresponse schemaが未定義のrouteやraw応答で、出力が暗黙に検証されると主張しない。意図した2xx/4xx/5xx statusごとにresponse schemaまたは明示的な検証根拠を持つ。
 5. **認可の失敗:** 401/403/404/405/409/413/415/503の適用条件、機械可読code、存在漏えい禁止、method偽装、preflightとContent-Typeの違いをテストする。
+
+## 実装で維持する応答境界
+
+Better Auth の公式ルートと OAuth/OIDC discovery はプロトコル実装が返す status、header、cookie、body stream を引き継ぐ。
+MCP とモジュールの応答は runtime のアクセス制御を通過した Web Response を転送する。
+公開 reader の 404 は OpenAPI の `x-codexia-runtime-response-deviation` に記載された既存の応答を維持する。
+SSE は Fastify の入場処理後に raw stream を開始し、切断とサーバー終了でクローズする。
+
+ジョブ一覧、モジュール一覧、contribution 一覧、履歴、OAuth 同意一覧は既存の top-level array を返す。
+現行 API epoch の OpenAPI baseline に記録されたオブジェクトとの応答差分が解消されるまで、これらの 200 応答は Fastify の通常の JSON 出力を使用する。
+setup 専用 readiness の応答差分も TypeSpec に記録する。
+静的 Web ファイルの配信は Fastify の未一致ハンドラーで GET/HEAD に限定する。
 
 ## 導入と受入
 

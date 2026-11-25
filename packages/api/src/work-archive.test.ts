@@ -5,7 +5,7 @@ import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/per
 import { CoreError, CoreStore } from "@codexia/core";
 import type { ChangeOperation, ChangeProposal } from "@codexia/contracts";
 import type { ChangeSet, DocumentId, EvidenceId, KnowledgeNodeId, Persistence, PersistenceTransaction, ProjectId } from "@codexia/persistence-contracts";
-import { handlePersistenceRoute } from "./persistence-routes.js";
+import { handlePersistenceOperation } from "./persistence-routes.js";
 import { exportWorkArchive, importWorkArchive } from "./work-archive.js";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
@@ -294,8 +294,8 @@ test("overlapping identical portable import requests replay the committed projec
       }))),
     close: async () => {},
   };
-  const request = () => handlePersistenceRoute({
-    persistence: overlapping, method: "POST", url: "/api/v1/persistence/import",
+  const request = () => handlePersistenceOperation("persistence_import_post", {
+    persistence: overlapping, params: {}, query: new URLSearchParams(),
     body: archive, requestHeaders: {}, requireAuthor: async () => "owner",
   });
   const timer = setTimeout(release, 5000);

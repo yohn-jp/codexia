@@ -11,6 +11,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 test('reverse discovery records authority and provenance for HTTP, MCP, DB, UI and operational surfaces', async () => {
   const { surfaces, limitations } = await discoverReverseSurfaces({ repositoryRoot });
   assert.ok(surfaces.some((item) => item.kind === 'httpOperation' && item.id === 'GET /api/projects'));
+  assert.ok(surfaces.some((item) => item.kind === 'httpRuntimeRoute' && item.id === 'GET /api/projects' && item.source.path === 'packages/api/src/generated/http-contract.json'));
   assert.ok(surfaces.some((item) => item.kind === 'mcpTool' && item.id === 'list_projects'));
   assert.ok(surfaces.some((item) => item.kind === 'databaseCatalogObject' && item.id === 'public.project'));
   assert.ok(surfaces.some((item) => item.kind === 'uiControl' && item.id === 'WRT-01.A'));

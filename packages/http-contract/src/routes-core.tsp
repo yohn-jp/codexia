@@ -136,21 +136,21 @@ op getProjectContributions(@path projectId: string): JsonResponse;
 
 @tag("projects") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/projects/{projectId}/tree") @get @operationId("project_tree_get")
-op getProjectTree(@path projectId: string): ProjectTreeResponse;
+op getProjectTree(@path projectId: string, @query snapshot?: string, @query projectVersion?: safeint): ProjectTreeResponse;
 
 @tag("projects") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/projects/{projectId}/scenes/{sceneId}") @get @operationId("project_scene_get")
-op getProjectScene(@path projectId: string, @path sceneId: string): ProjectSceneResponse;
+op getProjectScene(@path projectId: string, @path sceneId: string, @query snapshot?: string, @query projectVersion?: safeint): ProjectSceneResponse;
 
 @tag("projects") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/projects/{projectId}/snapshot") @get @operationId("project_snapshot_get")
-op getProjectSnapshot(@path projectId: string, @query snapshot?: string): ProjectSnapshotResponse;
+op getProjectSnapshot(@path projectId: string, @query snapshot?: string, @query projectVersion?: safeint, @query("projection") editorProjection?: "editor", @query documentId?: string): ProjectSnapshotResponse;
 
 @tag("projects") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/projects/{projectId}/history") @get @operationId("project_history_get")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-runtime-response-deviation", "Runtime emits an array of commit records; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.")
-op getProjectHistory(@path projectId: string, @query snapshot?: string): JsonResponse;
+op getProjectHistory(@path projectId: string, @query snapshot?: string, @query projectVersion?: safeint): JsonResponse;
 
 @tag("projects") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/projects/{projectId}/status") @get @operationId("project_status_get")
@@ -176,13 +176,13 @@ op getProposal(@path projectId: string, @path proposalId: string): CoreProposalS
 @route("/api/projects/{projectId}/approvals") @post @operationId("project_approvals_post")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-runtime-response-deviation", "Runtime returns HTTP 204 with no body after approval; the approved baseline documents a JSON response. The status and body discrepancy remains tracked pending an approved compatibility correction.")
-op approveProposal(@path projectId: string, @body body: JsonObject): JsonResponse | { @statusCode _: 403; @body body: ApiError; };
+op approveProposal(@path projectId: string, @body body: JsonObject): JsonResponse | { @statusCode _: 204; } | { @statusCode _: 403; @body body: ApiError; };
 
 @tag("proposals") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/projects/{projectId}/apply") @post @operationId("project_apply_post")
 @extension("x-codexia-contract-status", "incomplete")
-@extension("x-codexia-runtime-response-deviation", "Runtime returns HTTP 201; the approved baseline success response is 200. The status discrepancy remains tracked pending an approved compatibility correction.")
-op applyProposal(@path projectId: string, @body body: JsonObject): ProposalApplyReceiptBody | { @statusCode _: 403; @body body: ApiError; };
+@extension("x-codexia-runtime-response-deviation", "Runtime returns HTTP 201; the approved baseline success response is 200. The baseline 200 remains documented for API-epoch compatibility comparison.")
+op applyProposal(@path projectId: string, @body body: JsonObject): ProposalApplyReceiptBody | { @statusCode _: 201; @body body: ProposalApplyReceiptBody; } | { @statusCode _: 403; @body body: ApiError; };
 
 @tag("actions") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/projects/{projectId}/actions") @get @operationId("project_actions_get")
@@ -190,29 +190,29 @@ op listProjectActions(@path projectId: string): ProjectActionsBody;
 
 @tag("actions") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:compute|propose)")
 @route("/api/projects/{projectId}/actions/{actionId}") @post @operationId("project_action_post")
-op invokeProjectAction(@path projectId: string, @path actionId: string, @body body: JsonObject): ActionResultBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
+op invokeProjectAction(@path projectId: string, @path actionId: string, @body body: JsonObject, @header("Prefer") prefer?: string): ActionResultBody | { @statusCode _: 202; @header("Location") location: string; @header("Preference-Applied") preferenceApplied: "respond-async"; @header("X-Codexia-Job-Id") jobId: string; @body job: PublicJobBody; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
 @tag("snapshots") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots") @get @operationId("manuscript_snapshots_get")
-op listManuscriptSnapshots(@path projectId: string, @path manuscriptId: string): ManuscriptSnapshotListBody;
+op listManuscriptSnapshots(@path projectId: string, @path manuscriptId: string, @query sceneId?: string, @query snapshot?: string, @query projectVersion?: safeint): ManuscriptSnapshotListBody;
 
 @tag("snapshots") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/{snapshotId}") @get @operationId("manuscript_snapshot_get")
-op getManuscriptSnapshot(@path projectId: string, @path manuscriptId: string, @path snapshotId: string): ManuscriptSnapshotReadBody;
+op getManuscriptSnapshot(@path projectId: string, @path manuscriptId: string, @path snapshotId: string, @query snapshot?: string, @query projectVersion?: safeint): ManuscriptSnapshotReadBody;
 
 @tag("search") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/projects/{projectId}/search") @get @operationId("project_search_get")
-op searchProject(@path projectId: string, @query q: string, @query limit?: int32, @query snapshot?: string): ProjectSearchBody | { @statusCode _: 400; @body body: ApiError; };
+op searchProject(@path projectId: string, @query q: string, @query limit?: int32, @query snapshot?: string, @query projectVersion?: safeint): ProjectSearchBody | { @statusCode _: 400; @body body: ApiError; };
 
 @tag("search") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/projects/{projectId}/writing-stats") @get @operationId("project_writing_stats_get")
-op getWritingStats(@path projectId: string, @query snapshot?: string): WritingStatsResponseBody;
+op getWritingStats(@path projectId: string, @query snapshot?: string, @query projectVersion?: safeint): WritingStatsResponseBody;
 
 @tag("projects") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/projects/{projectId}/scratch") @post @operationId("project_scratch_post")
 @extension("x-codexia-contract-status", "incomplete")
-@extension("x-codexia-runtime-response-deviation", "Runtime returns HTTP 201; the approved baseline success response is 200. The status discrepancy remains tracked pending an approved compatibility correction.")
-op createScratch(@path projectId: string, @body body: JsonObject): ScratchCreateBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
+@extension("x-codexia-runtime-response-deviation", "Runtime returns HTTP 201; the approved baseline success response is 200. The baseline 200 remains documented for API-epoch compatibility comparison.")
+op createScratch(@path projectId: string, @body body: JsonObject): ScratchCreateBody | { @statusCode _: 201; @body body: ScratchCreateBody; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
 @tag("reviews") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/projects/{projectId}/review-queue") @get @operationId("project_review_queue_get")

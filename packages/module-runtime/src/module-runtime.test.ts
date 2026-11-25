@@ -102,7 +102,7 @@ test("disabled modules are not imported; enabling an absent module reports redep
 });
 
 test("external-agent admission excludes Assistant discovery and denies direct, future, and HTTP entrypoints before loading", async () => {
-  const metadata = manifest("assistant");
+  const metadata = manifest("assistant", { http: [{ id: "generate", path: "generate", methods: ["POST"], access: "owner", effect: "compute" }] });
   const storyMetadata = manifest("story");
   const schema: ValueSchema = { parse: (value) => value };
   let loaded = 0;
@@ -1201,7 +1201,11 @@ test("own module records bind to the executing module and admitted snapshot", as
 });
 
 test("HTTP contributions are hidden until activation and public reads cannot propose; streamed calls drain on cancel", async () => {
-  const metadata = manifest("publishing");
+  const metadata = manifest("publishing", { http: [
+    { id: "public-read", path: "public/status", methods: ["GET"], access: "public", effect: "read" },
+    { id: "public-context", path: "public/context", methods: ["GET"], access: "public", effect: "read" },
+    { id: "stream", path: "public/stream", methods: ["GET"], access: "public", effect: "read" },
+  ] });
   const story = manifest("story");
   let proposals = 0;
   let storyImports = 0;
@@ -1303,7 +1307,7 @@ test("HTTP contributions are hidden until activation and public reads cannot pro
 });
 
 test("owner compute HTTP contributions can compose reads, compute, and jobs but cannot propose", async () => {
-  const publishing = manifest("publishing");
+  const publishing = manifest("publishing", { http: [{ id: "qa-stream", path: "qa/stream", methods: ["POST"], access: "owner", effect: "compute" }] });
   const story = manifest("story");
   let proposeActionCalls = 0;
   let hostProposalCalls = 0;
@@ -1445,7 +1449,7 @@ async function readMcpSseResult(response: Response): Promise<{
 }
 
 test("the production MCP module activates and serves tools through Streamable HTTP", async () => {
-  const metadata = manifest("mcp", { serverEntry: "./dist/index.js" });
+  const metadata = manifest("mcp", { serverEntry: "./dist/index.js", http: [{ id: "streamable", path: "streamable", methods: ["GET", "POST", "DELETE"], access: "owner", effect: "propose" }] });
   const runtime = new ModuleRuntime({
     manifests: [metadata], enabled: ["mcp"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { mcp: async (context) => {
@@ -1564,7 +1568,7 @@ test("a late non-cooperative action cannot return success after disable times ou
 });
 
 test("a late HTTP handler cannot return a response after module disable", async () => {
-  const metadata = manifest("assistant");
+  const metadata = manifest("assistant", { http: [{ id: "late-response", path: "late", methods: ["GET"], access: "owner", effect: "read" }] });
   let finishHandler: ((response: Response) => void) | undefined;
   let markStarted!: () => void;
   const started = new Promise<void>((resolve) => { markStarted = resolve; });
@@ -1629,7 +1633,7 @@ test("composition contributions validate kind and host contexts independently of
 });
 
 test("host action-effect ceilings filter discovery and independently deny nested MCP invocations and proposals", async (t) => {
-  const metadata = manifest("story");
+  const metadata = manifest("story", { http: [{ id: "stream", path: "stream", methods: ["POST"], access: "owner", effect: "propose" }] });
   const schema: ValueSchema = { parse: (value) => value };
   let computeExecutions = 0;
   let proposalExecutions = 0;

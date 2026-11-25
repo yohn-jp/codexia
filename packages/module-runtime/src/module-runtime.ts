@@ -250,6 +250,13 @@ function validateDefinition(expected: ModuleManifest, definition: ModuleDefiniti
     httpPaths.set(contribution.path, routeMethods);
     httpIds.add(contribution.id);
   }
+  const declaredHttp = (expected.http ?? []).map(({ id, path, methods, access, effect }) => ({ id, path, methods: [...methods], access, effect }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const implementedHttp = (definition.http ?? []).map(({ id, path, methods, access, effect }) => ({ id, path, methods: [...methods], access, effect }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  if (JSON.stringify(declaredHttp) !== JSON.stringify(implementedHttp)) {
+    throw new ModuleRuntimeError("invalid_module_definition", `Module ${expected.id} HTTP contributions do not match its manifest`);
+  }
 }
 
 /** Metadata-first lifecycle host for trusted installed modules. */
@@ -429,6 +436,14 @@ export class ModuleRuntime {
     if (!manifest || !this.plan.enabled.has(id)) return [];
     const definition = this.sessions.get(manifest.id)?.definition;
     return (definition?.http ?? []).map(({ handle: _handle, ...descriptor }) => ({ ...descriptor, methods: [...descriptor.methods] }));
+  }
+
+  /** Manifest-declared HTTP registrations for enabled modules, available without activating their code. */
+  httpRegistrationManifests(): readonly Pick<ModuleManifest, "id" | "http">[] {
+    return this.plan.order.map((id) => {
+      const manifest = this.manifests.get(id)!;
+      return { id, http: (manifest.http ?? []).map((descriptor) => ({ ...descriptor, methods: [...descriptor.methods] })) };
+    });
   }
 
   /** Activates enabled modules on demand so action discovery never imports absent/disabled packages. */

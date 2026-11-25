@@ -311,6 +311,8 @@ export interface ModuleManifest {
   workerEntry?: string;
   statePaths: string[];
   locality: "local" | "optional-external";
+  /** Host-owned HTTP registration descriptors; handlers are checked against these when the module activates. */
+  http?: HttpContributionDescriptor[];
 }
 export interface WorkerService {
   request<T = unknown>(request: JobRequest, signal: AbortSignal): Promise<JobOutcome<T>>;
@@ -340,6 +342,7 @@ export interface HttpContribution {
   effect: "read" | "compute" | "propose";
   handle(request: Request, context: ModuleActionContext): Promise<Response>;
 }
+export type HttpContributionDescriptor = Omit<HttpContribution, "handle">;
 export interface ModuleDefinition {
   manifest: ModuleManifest;
   capabilities?: CapabilityDefinition[];

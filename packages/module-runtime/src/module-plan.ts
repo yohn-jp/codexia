@@ -1,4 +1,4 @@
-import { CONTRACT_VERSION, type ModuleId, type ModuleManifest } from "@codexia/contracts";
+import { CONTRACT_VERSION, type HttpContributionDescriptor, type ModuleId, type ModuleManifest } from "@codexia/contracts";
 import { ModuleRuntimeError, isModuleId, MODULE_IDS } from "./runtime-error.js";
 
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/;
@@ -26,6 +26,40 @@ function safeEntry(value: unknown, label: string): string | undefined {
     throw new ModuleRuntimeError("invalid_manifest", `Unsafe ${label}`);
   }
   return entry;
+}
+
+function copyHttpDescriptors(id: ModuleId, value: unknown): HttpContributionDescriptor[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 64) throw new ModuleRuntimeError("invalid_manifest", `Module ${id} has invalid HTTP metadata`);
+  const ids = new Set<string>();
+  const registrations = new Set<string>();
+  return value.map((candidate: unknown) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw new ModuleRuntimeError("invalid_manifest", `Module ${id} has invalid HTTP metadata`);
+    }
+    const descriptor = candidate as HttpContributionDescriptor;
+    const methods = descriptor.methods;
+    if (typeof descriptor.id !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/u.test(descriptor.id) || ids.has(descriptor.id) ||
+        typeof descriptor.path !== "string" || descriptor.path.length === 0 || descriptor.path.length > 512 || descriptor.path.startsWith("/") ||
+        /[\\\x00-\x20?#%]/u.test(descriptor.path) || descriptor.path.split("/").some((part) =>
+          !part || part === "." || part === ".." || !/^[A-Za-z0-9._:-]+$/u.test(part)) ||
+        !Array.isArray(methods) || methods.length === 0 || methods.length > 4 ||
+        methods.some((method) => !["GET", "HEAD", "POST", "DELETE"].includes(method)) || new Set(methods).size !== methods.length ||
+        !["owner", "public"].includes(descriptor.access) || !["read", "compute", "propose"].includes(descriptor.effect) ||
+        (descriptor.access === "public" && descriptor.effect !== "read") ||
+        (descriptor.effect === "compute" && methods.some((method) => method === "GET" || method === "HEAD"))) {
+      throw new ModuleRuntimeError("invalid_manifest", `Module ${id} has invalid HTTP metadata`);
+    }
+    ids.add(descriptor.id);
+    for (const method of methods) {
+      const registration = `${method} ${descriptor.path}`;
+      if (registrations.has(registration)) throw new ModuleRuntimeError("invalid_manifest", `Module ${id} has duplicate HTTP registrations`);
+      registrations.add(registration);
+    }
+    return Object.freeze({ id: descriptor.id, path: descriptor.path,
+      methods: Object.freeze([...methods]) as unknown as HttpContributionDescriptor["methods"],
+      access: descriptor.access, effect: descriptor.effect });
+  });
 }
 
 function copyManifest(value: ModuleManifest): Readonly<ModuleManifest> {
@@ -67,6 +101,7 @@ function copyManifest(value: ModuleManifest): Readonly<ModuleManifest> {
   const provides = capabilities(manifest.provides, "provided capabilities");
   const requires = capabilities(manifest.requires, "required capabilities");
   const optionalRequires = capabilities(manifest.optionalRequires ?? [], "optional capabilities");
+  const http = copyHttpDescriptors(id, manifest.http);
   if (optionalRequires.some((capability) => requires.includes(capability) || provides.includes(capability))) {
     throw new ModuleRuntimeError("invalid_manifest", `Module ${id} repeats a provided, required, or optional capability`);
   }
@@ -83,6 +118,7 @@ function copyManifest(value: ModuleManifest): Readonly<ModuleManifest> {
     workerEntry: safeEntry(manifest.workerEntry, `${id} worker entry`),
     statePaths: Object.freeze([...manifest.statePaths]) as unknown as string[],
     locality: manifest.locality,
+    http: Object.freeze(http) as unknown as HttpContributionDescriptor[],
   });
 }
 

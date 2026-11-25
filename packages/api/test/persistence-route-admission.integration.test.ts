@@ -25,16 +25,16 @@ test('PostgreSQL API admits only authenticated declared persistence methods and 
   const candidateProjectId = randomUUID() as ProjectId;
 
   const unauthorizedUnknownPath = await fetch(`${base}/api/v1/persistence/not-a-route`);
-  assert.equal(unauthorizedUnknownPath.status, 401, 'authentication runs before persistence route lookup');
-  assert.equal(((await unauthorizedUnknownPath.json()) as { code: string }).code, 'UNAUTHORIZED');
+  assert.equal(unauthorizedUnknownPath.status, 404, 'unknown paths are rejected before credential validation');
+  assert.equal(((await unauthorizedUnknownPath.json()) as { code: string }).code, 'NOT_FOUND');
 
   const unauthorizedWrongMethod = await fetch(`${base}/api/v1/persistence/projects`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: candidateProjectId, title: 'must not be created' }),
   });
-  assert.equal(unauthorizedWrongMethod.status, 401, 'anonymous callers do not learn that the path is known but the method is not');
-  assert.equal(((await unauthorizedWrongMethod.json()) as { code: string }).code, 'UNAUTHORIZED');
+  assert.equal(unauthorizedWrongMethod.status, 405, 'the registered template rejects this method before processing credentials or body');
+  assert.equal(((await unauthorizedWrongMethod.json()) as { code: string }).code, 'METHOD_NOT_ALLOWED');
 
   const wrongMethod = await fetch(`${base}/api/v1/persistence/projects`, {
     method: 'PUT',

@@ -104,7 +104,7 @@ test('TypeSpec emits deterministic OpenAPI 3.1 and explicit operation IDs', t =>
   assert.equal(openapi.info.version, '2.0.0');
   assert.equal(openapi['x-codexia-api-epoch'], 2);
   assert.equal(openapi['x-codexia-cors'].credentials, false);
-  assert.match(openapi['x-codexia-cors'].preflight.route, /generic OPTIONS catch-all/u);
+  assert.match(openapi['x-codexia-cors'].preflight.route, /explicit OPTIONS for registered API and MCP paths/u);
   assert.equal(openapi['x-codexia-cors'].preflight.successStatus, 204);
   assert.equal(openapi['x-codexia-cors'].preflight.deniedStatus, 403);
   assert.deepEqual(openapi['x-codexia-cors'].preflight.allowMethods, ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);

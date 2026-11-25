@@ -22,7 +22,7 @@
 | 段階 | 検証と生成物 | fail条件 | 速さ/環境 |
 | --- | --- | --- | --- |
 | G0 ドキュメント静的 | StrictDoc parse、REQ-ID/relationのvalidation、Markdownリンク、TypeSpec compile | 欠落、重複、不正grammar、無効なreference | 文書変更時の軽量CI |
-| G1 HTTPスキーマ | TypeSpec→OpenAPI 3.1.0、Redocly、oasdiff、Fastify route/JSON Schemaの生成・整合、Orval client再生成diff、TypeScript typecheck | 実routeの未定義、破壊的変更の無承認、二重schema、非決定的生成 | API/contracts/client変更時 |
+| G1 HTTPスキーマ | TypeSpec→OpenAPI 3.1.0、Redocly、oasdiff、実行時 Fastify route inventory と JSON Schema 生成物の照合、Orval client再生成diff、TypeScript typecheck | 実routeの未定義、破壊的変更の無承認、二重schema、非決定的生成 | API/contracts/client変更時 |
 | G2 実行時契約 | 使い捨てPostgreSQLのAPIでSchemathesis、owner/BOLA/競合/冪等性/receiptとMCP conformance | 仕様違反/認可迂回/保存不一致、未実行対象の偽PASS | API/MCP/DB変更時 |
 | G3 データ契約 | migration適用→pgTAP/pg_catalog、Better Auth schema、復元、tbls生成 | 物理差分/不一致、schema identity異常、復元失敗 | DB/auth/migration/依存変更時 |
 | G4 UX/host | 既存Playwright（正式対応Chromium。移行例外は [E2E execution](E2E-EXECUTION.md)）、XState v5の状態遷移義務、OCI、Ansible/Cloudflare config/probes、S3互換fixture | UI保存/復旧、session/auth、backup config/保全job/復元証拠、edge/deploy回帰 | 既存impact rulesに従う |

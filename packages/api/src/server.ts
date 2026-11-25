@@ -1,3 +1,5 @@
+import { httpContract, httpContractSchemaController } from "./http-contract.js";
+import { deriveModuleHttpRoutes, type FastifyHttpContributionRoute } from "./http-contributions.js";
 import { EventStreams } from "./event-streams.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { resolveBetterAuthOidcSettings } from "./auth-mode.js";
@@ -13,9 +15,9 @@ import { readFileSync } from "node:fs";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply, type HTTPMethods } from "fastify";
 import type { createBetterAuthRuntime } from "./better-auth.js";
-import { CONTRACT_VERSION, NLP_FEATURE_SETTINGS_KEY, assertProjectPath, isModulePreservationArchivePath, isPrivatePublishingPath, isPublishingRecordKey, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type ProposalStatus, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import { CONTRACT_VERSION, NLP_FEATURE_SETTINGS_KEY, assertProjectPath, isModulePreservationArchivePath, isPrivatePublishingPath, isPublishingRecordKey, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type ProposalStatus, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ProposeManuscriptRestoreInput, ReorderHierarchyInput } from "@codexia/core";
 import type { ChangeSetResult, Persistence, ProjectId, ProjectPageCursor } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema, type PostgresPersistence } from "@codexia/persistence-postgres";
@@ -24,8 +26,45 @@ import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, ty
 import { createNativeKnowledgeActions } from "./native-knowledge-actions.js";
 import { assertCurrentJobHistory, JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
 import { RecentActivityStore } from "./recent-activity-store.js";
-import { handlePersistenceRoute } from "./persistence-routes.js";
+import { handlePersistenceOperation } from "./persistence-routes.js";
 import { compareProjectPageKeys, decodeProjectPageCursor, encodeProjectPageCursor } from "./project-pagination.js";
+// The installed protocol handler owns these endpoints and their wire schemas.
+const BETTER_AUTH_HTTP_ROUTES = [
+  ["GET", "/api/auth/oauth2/authorize"],
+  ["POST", "/api/auth/oauth2/authorize"],
+  ["POST", "/api/auth/oauth2/token"],
+  ["POST", "/api/auth/oauth2/revoke"],
+  ["POST", "/api/auth/oauth2/introspect"],
+  ["GET", "/api/auth/oauth2/userinfo"],
+  ["POST", "/api/auth/oauth2/userinfo"],
+  ["POST", "/api/auth/oauth2/consent"],
+  ["POST", "/api/auth/oauth2/continue"],
+  ["GET", "/api/auth/oauth2/end-session"],
+  ["POST", "/api/auth/oauth2/end-session"],
+  ["POST", "/api/auth/oauth2/register"],
+  ["GET", "/api/auth/jwks"],
+  ["GET", "/api/auth/get-session"],
+  ["GET", "/api/auth/list-sessions"],
+  ["POST", "/api/auth/revoke-session"],
+  ["POST", "/api/auth/revoke-other-sessions"],
+  ["POST", "/api/auth/revoke-sessions"],
+  ["POST", "/api/auth/sign-out"],
+  ["POST", "/api/auth/sign-in/sso"],
+  ["POST", "/api/auth/sign-in/social"],
+  ["GET", "/api/auth/callback/workspace-oidc"],
+  ["POST", "/api/auth/sign-up/email"],
+  ["GET", "/api/auth/sso/callback/codexia-owner-oidc"],
+  ["GET", "/api/auth/passkey/generate-authenticate-options"],
+  ["POST", "/api/auth/passkey/verify-authentication"],
+  ["GET", "/api/auth/passkey/generate-register-options"],
+  ["POST", "/api/auth/passkey/verify-registration"],
+  ["GET", "/api/auth/passkey/list-user-passkeys"],
+  ["POST", "/api/auth/passkey/update-passkey"],
+  ["POST", "/api/auth/passkey/delete-passkey"],
+  ["GET", "/api/auth/codexia/owner-security/identity"],
+  ["POST", "/api/auth/codexia/owner-security/revoke-consent"],
+] as const;
+
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 const POSTGRES_REVISION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
@@ -187,27 +226,6 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
   response.end(JSON.stringify(value));
 }
 
-async function readJson(request: IncomingMessage, parsedBody?: unknown): Promise<unknown> {
-  const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
-  if (contentType !== "application/json") {
-    throw httpFailure(415, "JSON_REQUIRED", "Send a JSON request body");
-  }
-  if (parsedBody !== undefined) return parsedBody;
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > MAX_JSON_BYTES) throw httpFailure(413, "BODY_TOO_LARGE", "Request body is too large");
-    chunks.push(buffer);
-  }
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
-  } catch {
-    throw httpFailure(400, "INVALID_JSON", "Request body must be valid JSON");
-  }
-}
-
 function serializeParsedJson(value: unknown): string {
   const serialized = JSON.stringify(value);
   if (typeof serialized !== "string") throw httpFailure(400, "INVALID_JSON", "Request body must be a JSON value");
@@ -223,32 +241,12 @@ function sendError(response: ServerResponse, error: unknown): void {
     sendJson(response, error.status, { error: error.message, code: error.code });
     return;
   }
-  if (isRecord(error) && typeof error.status === "number" && typeof error.code === "string" && typeof error.message === "string") {
-    sendJson(response, error.status, { error: error.message, code: error.code });
-    return;
-  }
   console.error("Unhandled Codexia API error", error);
   sendJson(response, 500, { error: "Internal server error", code: "INTERNAL_ERROR" });
 }
 
-function parseProjectId(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    throw httpFailure(400, "INVALID_ID", "Project identifier is invalid");
-  }
-}
-
 function isPostgresRevisionId(value: unknown): value is string {
   return typeof value === "string" && POSTGRES_REVISION_ID.test(value);
-}
-
-function parseSceneId(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    throw httpFailure(400, "INVALID_ID", "Scene identifier is invalid");
-  }
 }
 
 function isPublicReaderPath(pathname: string): boolean {
@@ -436,8 +434,6 @@ function isVisibleProposal(status: ProposalStatus, canReviewPrivateChangeSets: b
     !status.proposal.operations.some((operation) => operation.writes.some(({ path }) => isPrivatePublishingPath(path)));
 }
 
-function projectPathId(value: string): string { return parseProjectId(value); }
-
 function optionalSnapshot(query: URLSearchParams, selectedProjectId?: string): { pinned?: SnapshotId } {
   if (query.has("view") || query.has("snapshot")) throw httpFailure(400, "INVALID_SNAPSHOT", "Use a PostgreSQL project version");
   const projectId = selectedProjectId ?? query.get("projectId");
@@ -459,11 +455,9 @@ type CoreStoreApi = CoreStore;
 
 type RuntimeHttpHost = ModuleRuntime & {
   metadata?: () => unknown;
-  httpContributions?: (id: string) => readonly Omit<HttpContribution, "handle">[];
   invokeHttp?: (id: string, contributionId: string, request: Request, host: ActionHostContext) => Promise<Response>;
 };
 
-type HttpContributionDescriptor = Omit<HttpContribution, "handle">;
 
 type TrackedDomainAction = ActionDescriptor & { job: NonNullable<ActionDescriptor["job"]> };
 type DomainJobTracker = (
@@ -502,8 +496,8 @@ export function createServer(options: ApiServerOptions): Server {
   const oauthResource = options.oauthMcp?.audience ?? publicBetterAuth?.audience;
   const oauthAuthorizationServer = options.oauthMcp?.issuer ?? publicBetterAuth?.issuer;
   const oauthMcpMetadataUrl = oauthResource ? protectedResourceMetadataUrl(oauthResource) : undefined;
-  const oauthMcpMetadataResponse = oauthResource && oauthAuthorizationServer
-    ? createMcpProtectedResourceMetadataResponse({ resource: oauthResource, authorizationServer: oauthAuthorizationServer })
+  const oauthMcpMetadata = oauthResource && oauthAuthorizationServer
+    ? { resource: oauthResource, authorizationServer: oauthAuthorizationServer }
     : undefined;
   const corsAllowedOrigins = normalizeCorsOrigins(options.corsAllowedOrigins);
   const staticDir = options.staticDir ?? resolve(process.cwd(), "app/dist");
@@ -545,8 +539,8 @@ export function createServer(options: ApiServerOptions): Server {
   if (profile === "full" && !options.runtime && !options.runtimeOptions) {
     throw new Error("The full profile requires trusted runtime manifests and lazy loaders");
   }
-  const app: FastifyInstance = Fastify({ logger: false, trustProxy });
-  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_request, body, done) => done(null, body));
+  const app: FastifyInstance = Fastify({ logger: false, trustProxy, exposeHeadRoutes: false, bodyLimit: MAX_JSON_BYTES,
+    schemaController: httpContractSchemaController });
   let unsubscribeJobLifecycle = (): void => undefined;
   let shuttingDown = false;
   let activeRequests = 0;
@@ -576,26 +570,32 @@ export function createServer(options: ApiServerOptions): Server {
     }
   });
 
-  app.addContentTypeParser("application/json", { parseAs: "string", bodyLimit: MAX_JSON_BYTES }, (_request, body, done) => {
-    try { done(null, JSON.parse(body as string) as unknown); }
-    catch {
-      const error = new Error("Request body must be valid JSON") as Error & { status: number; code: string };
-      error.status = 400;
-      error.code = "INVALID_JSON";
-      done(error);
-    }
-  });
   app.addHook("onRequest", (request, reply, done) => {
     const nonce = randomBytes(18).toString("base64");
     STYLE_NONCES.set(request.raw, nonce);
     setSecurityHeaders(reply.raw, nonce);
+    activeRequests++;
+    reply.raw.once("close", () => { activeRequests--; });
     done();
   });
-  app.setErrorHandler((error, _request, reply) => {
-    const status = (error as Error & { statusCode?: number }).statusCode;
-    if (status === 413) sendJson(reply.raw, 413, { error: "Request body is too large", code: "BODY_TOO_LARGE" });
-    else if (status === 415) sendJson(reply.raw, 415, { error: "Send a JSON request body", code: "JSON_REQUIRED" });
-    else sendError(reply.raw, error);
+  app.setErrorHandler((error: Error & { statusCode?: number; validationContext?: string }, _request, reply) => {
+    let failure: HttpFailure;
+    if (isHttpFailure(error)) failure = error;
+    else if (error.statusCode === 413) failure = httpFailure(413, "BODY_TOO_LARGE", "Request body is too large");
+    else if (error.statusCode === 415) failure = httpFailure(415, "JSON_REQUIRED", "Send a JSON request body");
+    else if (error.validationContext) {
+      const code = error.validationContext === "querystring" && _request.routeOptions.url === "/api/projects/:projectId/snapshot"
+        && error.message.includes("/projection") ? "INVALID_PROJECTION"
+        : error.validationContext === "querystring" && queryOf(_request.raw).has("view") ? "INVALID_SNAPSHOT"
+        : error.validationContext === "querystring" ? "INVALID_QUERY" :
+        error.validationContext === "params" ? "INVALID_ID" : "INVALID_BODY";
+      failure = httpFailure(400, code, "Request does not match the HTTP contract");
+    } else if (error.statusCode === 400) failure = httpFailure(400, "INVALID_JSON", "Request body must be valid JSON");
+    else {
+      console.error("Unhandled Codexia API error", error);
+      failure = httpFailure(500, "INTERNAL_ERROR", "Internal server error");
+    }
+    void reply.code(failure.status).send({ error: failure.message, code: failure.code });
   });
   app.addHook("onClose", async () => {
     try {
@@ -609,9 +609,6 @@ export function createServer(options: ApiServerOptions): Server {
     }
   });
 
-  const fail = (response: ServerResponse, status: number, code: string, message: string): void => {
-    sendJson(response, status, { error: message, code });
-  };
   const abortSignalFor = (request: IncomingMessage, response: ServerResponse): AbortSignal => {
     const controller = new AbortController();
     requestControllers.add(controller);
@@ -1123,39 +1120,14 @@ export function createServer(options: ApiServerOptions): Server {
     const url = originalUrl.href;
     const headers = new Headers();
     for (const [name, value] of Object.entries(request.headers)) {
-      if (value === undefined || ["host", "connection", "cookie", "authorization", "proxy-authorization"].includes(name.toLowerCase())) continue;
+      if (value === undefined || ["host", "connection", "content-length", "transfer-encoding", "cookie", "authorization", "proxy-authorization"].includes(name.toLowerCase())) continue;
       for (const item of Array.isArray(value) ? value : [value]) headers.append(name, item);
     }
     const init: RequestInit = { method, headers, signal };
     if (body !== undefined && !["GET", "HEAD"].includes(method)) init.body = JSON.stringify(body);
     return new Request(url, init);
   };
-  const matchTemplate = (template: string, relative: string): boolean => {
-    const expected = template.replace(/^\/+|\/+$/gu, "").split("/").filter(Boolean);
-    const actual = relative.replace(/^\/+|\/+$/gu, "").split("/").filter(Boolean);
-    if (expected.length !== actual.length) return false;
-    return expected.every((part, index) => {
-      const value = actual[index]!;
-      try {
-        const decoded = decodeURIComponent(value);
-        if (!decoded || decoded.includes("/") || decoded.includes("\\") || decoded === "." || decoded === "..") return false;
-      } catch { return false; }
-      if (part.startsWith(":")) return /^[A-Za-z0-9._~-]{1,256}$/u.test(decodeURIComponent(value));
-      return part === value;
-    });
-  };
-  const contributionFor = async (moduleId: string, relative: string, method: string): Promise<HttpContributionDescriptor | undefined> => {
-    try { await runtime.activate(moduleId); }
-    catch (error) {
-      const candidate = error as { code?: unknown; message?: unknown };
-      if (candidate?.code === "module_disabled" || candidate?.code === "redeployment_required" || candidate?.code === "unknown_module_id") return undefined;
-      throw error;
-    }
-    const contributions: readonly HttpContributionDescriptor[] = runtime.httpContributions?.(moduleId) ?? [];
-    return contributions.find((contribution) => contribution.methods.includes(method as HttpContribution["methods"][number]) && matchTemplate(contribution.path, relative));
-  };
-
-  const createScratch = async (projectId: string, value: unknown, authorScope: string, response: ServerResponse): Promise<void> => {
+  const createScratch = async (projectId: string, value: unknown, authorScope: string, json: SendJson): Promise<void> => {
     if (!isRecord(value) || typeof value.text !== "string" || value.text.length > 100_000 ||
         (value.source !== undefined && !["voice", "camera", "text"].includes(String(value.source))) ||
         (value.sceneId !== undefined && (typeof value.sceneId !== "string" || !value.sceneId || value.sceneId.length > 256)) ||
@@ -1213,24 +1185,43 @@ export function createServer(options: ApiServerOptions): Server {
     const proposal = await options.store.propose(projectId, { id: randomBytes(16).toString("hex"), snapshot: reader.snapshot, operations: [operation], source: "author" });
     await options.store.approve(projectId, { proposalId: proposal.id, operationIds: [operation.id], authorScope });
     const receipt = await options.store.apply(projectId, operation);
-    sendJson(response, 201, {
+    json(201, {
       id, path: filePath, createdAt, ...(source ? { source } : {}), sceneId: sceneId ?? null,
       attachments: attachments.map(({ filename, path, mimeType }) => ({ filename, path, mimeType })), proposal, receipt,
     });
   };
 
-  const handle = async (request: IncomingMessage, response: ServerResponse, parsedBody?: unknown): Promise<void> => {
-    const styleNonce = STYLE_NONCES.get(request) ?? randomBytes(18).toString("base64");
-    if (!response.headersSent) setSecurityHeaders(response, styleNonce);
-    let routePath = requestPath(request);
-    const standaloneMcpRoute = routePath === "/mcp";
-    const mcpStreamableRoute = standaloneMcpRoute || routePath.endsWith("/modules/mcp/streamable");
-    const isApiRoute = standaloneMcpRoute || routePath.startsWith("/api/");
-    const method = request.method ?? "GET";
-    const query = queryOf(request);
-    const isRead = method === "GET" || method === "HEAD";
-    const publicRead = isRead && (VERSION_PATHS.includes(routePath) || ["/api/health", "/api/ready", "/health/live", "/health/ready", "/health/startup"].includes(routePath));
-    const publicModuleRoute = routePath.startsWith("/api/public/projects/") && routePath.includes("/modules/");
+  type AdmissionPolicy = "public" | "api" | "persistence" | "mcp" | "mcp-module";
+  const publicAuthorities = new Set([oauthResource, oauthAuthorizationServer, options.betterAuth.issuer]
+    .filter((url): url is string => typeof url === "string")
+    .map(url => new URL(url).host));
+  const checkRequestTarget = (request: IncomingMessage, mcp: boolean): void => {
+    const rawPath = (request.url ?? "/").split("?", 1)[0]!;
+    if (!rawPath.startsWith("/") || rawPath.startsWith("//") || /[\\\x00-\x20\x7f]/u.test(rawPath)) {
+      throw httpFailure(400, "INVALID_PATH", "Request target must use an origin-relative path");
+    }
+    const host = request.headers.host;
+    if (!host || /[\s,@/\\?#]/u.test(host)) throw httpFailure(400, "HOST_INVALID", "Request Host is invalid");
+    let target: URL;
+    try {
+      target = new URL(`${requestProtocol(request, trustProxy)}//${host}`);
+    } catch {
+      throw httpFailure(400, "HOST_INVALID", "Request Host is invalid");
+    }
+    const forwardedHost = request.headers["x-forwarded-host"];
+    if (trustProxy && forwardedHost !== undefined && forwardedHost !== host) {
+      throw httpFailure(400, "HOST_INVALID", "Forwarded Host does not match the request Host");
+    }
+    if (mcp && publicAuthorities.size > 0 && !publicAuthorities.has(target.host)) {
+      const peer = request.socket.remoteAddress?.replace(/^::ffff:/u, "");
+      const local = peer === "127.0.0.1" || peer === "::1";
+      if (!local || !["127.0.0.1", "localhost", "[::1]"].includes(target.hostname)) {
+        throw httpFailure(403, "MCP_HOST_DENIED", "Request Host is not configured for MCP");
+      }
+    }
+  };
+  const checkOrigin = (request: IncomingMessage, response: ServerResponse, isApiRoute: boolean, mcpStreamableRoute: boolean) => {
+    checkRequestTarget(request, mcpStreamableRoute);
     const originHeader = request.headers.origin;
     const crossOrigin = originHeader !== undefined && !sameOrigin(request, trustProxy);
     if (isApiRoute && crossOrigin) {
@@ -1238,167 +1229,31 @@ export function createServer(options: ApiServerOptions): Server {
       vary(response, "Access-Control-Request-Method");
       vary(response, "Access-Control-Request-Headers");
       if (typeof originHeader !== "string" || !corsAllowedOrigins.has(originHeader)) {
-        fail(response, 403, "CORS_ORIGIN_DENIED", "Cross-origin API access is not configured for this origin");
-        return;
+        throw httpFailure(403, "CORS_ORIGIN_DENIED", "Cross-origin API access is not configured for this origin");
       }
       if (request.headers.cookie !== undefined) {
-        fail(response, 403, "CORS_COOKIE_DENIED", "Cross-origin API access requires bearer credentials without cookies");
-        return;
+        throw httpFailure(403, "CORS_COOKIE_DENIED", "Cross-origin API access requires bearer credentials without cookies");
       }
       response.setHeader("Access-Control-Allow-Origin", originHeader);
       if (mcpStreamableRoute) response.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate");
     }
 
-    if (oauthMcpMetadataUrl && oauthMcpMetadataResponse && method === "GET" && routePath === new URL(oauthMcpMetadataUrl).pathname) {
-      response.writeHead(oauthMcpMetadataResponse.status, Object.fromEntries(oauthMcpMetadataResponse.headers.entries()));
-      response.end(Buffer.from(await oauthMcpMetadataResponse.arrayBuffer()));
-      return;
-    }
-    if (options.betterAuth && method === "GET" && routePath === "/.well-known/oauth-authorization-server/api/auth") {
-      const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: options.betterAuth.toHeaders(request.headers) });
-      const metadata = await options.betterAuth.advertisePublicClientTokenAuth(await options.betterAuth.authorizationServerMetadata(metadataRequest));
-      response.writeHead(metadata.status, Object.fromEntries(metadata.headers.entries()));
-      response.end(Buffer.from(await metadata.arrayBuffer()));
-      return;
-    }
-    if (options.betterAuth && method === "GET" && routePath === "/.well-known/openid-configuration/api/auth") {
-      const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: options.betterAuth.toHeaders(request.headers) });
-      const metadata = await options.betterAuth.advertisePublicClientTokenAuth(await options.betterAuth.openIdConfigMetadata(metadataRequest));
-      response.writeHead(metadata.status, Object.fromEntries(metadata.headers.entries()));
-      response.end(Buffer.from(await metadata.arrayBuffer()));
-      return;
-    }
-    if (options.betterAuth && routePath === "/api/auth/oauth2/consent-context" && method === "POST") {
-      if (!sameOrigin(request, trustProxy)) { fail(response, 403, "CROSS_ORIGIN_REQUEST", "OAuth consent context requires a same-origin request"); return; }
-      let body: unknown;
-      try { body = await readJson(request, parsedBody); }
-      catch { fail(response, 400, "OAUTH_CONSENT_CONTEXT_INVALID", "OAuth consent context request is invalid"); return; }
-      if (!isRecord(body) || !hasOnlyKeys(body, new Set(["oauth_query"])) || typeof body.oauth_query !== "string" || !body.oauth_query) {
-        fail(response, 400, "OAUTH_CONSENT_CONTEXT_INVALID", "OAuth consent context request is invalid"); return;
+    return crossOrigin;
+  };
+  const checkPathParams = (params: Record<string, string>): void => {
+    for (const param of Object.values(params)) {
+      if (/[\/\\\u0000-\u001f\u007f]/u.test(param) || param === "." || param === "..") {
+        throw httpFailure(400, "INVALID_ID", "Invalid route parameter");
       }
-      try {
-        const context = await options.betterAuth.getConsentContext(options.betterAuth.toHeaders(request.headers), body.oauth_query);
-        sendJson(response, 200, context);
-      } catch {
-        fail(response, request.headers.cookie ? 403 : 401, "OAUTH_CONSENT_CONTEXT_DENIED", "OAuth consent context could not be verified");
-      }
-      return;
     }
-    if (options.betterAuth && routePath === "/api/auth/codexia/setup/status" && method === "GET") {
-      response.setHeader("Cache-Control", "no-store");
-      if (crossOrigin || request.headers.authorization !== undefined) {
-        sendJson(response, 403, { code: "SETUP_SAME_ORIGIN_REQUIRED" });
-        return;
-      }
-      sendJson(response, 200, { state: "active" });
-      return;
-    }
-    if (options.betterAuth && routePath === "/api/auth/codexia/owner-session" && method === "POST") {
-      if (!sameOrigin(request, trustProxy)) {
-        fail(response, 403, "CROSS_ORIGIN_REQUEST", "Owner session confirmation requires the exact same origin");
-        return;
-      }
-      if (request.headers.authorization !== undefined) {
-        fail(response, 403, "OWNER_SESSION_COOKIE_REQUIRED", "Owner session confirmation does not accept bearer credentials");
-        return;
-      }
-      let body: unknown;
-      try { body = await readJson(request, parsedBody); }
-      catch { fail(response, 400, "OWNER_SESSION_REQUEST_INVALID", "Owner session confirmation request is invalid"); return; }
-      if (!isRecord(body) || Object.keys(body).length !== 0) {
-        fail(response, 400, "OWNER_SESSION_REQUEST_INVALID", "Owner session confirmation request is invalid");
-        return;
-      }
-      const result = await options.betterAuth.checkOwnerSession(options.betterAuth.toHeaders(request.headers));
-      if (result.status === 200) sendJson(response, 200, { authenticated: true });
-      else if (result.status === 403) fail(response, 403, "OWNER_SESSION_REQUIRED", "Owner session confirmation was denied");
-      else fail(response, 401, "AUTHENTICATION_REQUIRED", "A valid owner session is required");
-      return;
-    }
-    if (options.betterAuth && routePath === "/api/auth/token") {
-      fail(response, 404, "JWT_SESSION_TOKEN_DISABLED", "Generic session JWTs are not accepted as API access tokens");
-      return;
-    }
-    if (options.betterAuth && routePath === "/api/auth/oauth2/get-consents" && method === "GET") {
-      if (crossOrigin) { fail(response, 403, "CROSS_ORIGIN_REQUEST", "OAuth consent listing requires a same-origin request"); return; }
-      const result = await options.betterAuth.listOwnerOAuthConsents(options.betterAuth.toHeaders(request.headers));
-      if (result.status === 200) sendJson(response, 200, result.consents);
-      else fail(response, result.status, "OAUTH_CONSENT_LIST_DENIED", "OAuth consent listing requires the owner session");
-      return;
-    }
-    if (options.betterAuth && routePath.startsWith("/api/auth/")) {
-      const host = request.headers.host ?? "localhost";
-      const authUrl = `${requestProtocol(request, trustProxy)}//${host}${request.url ?? "/"}`;
-      const headers = options.betterAuth.toHeaders(request.headers);
-      headers.delete("connection");
-      headers.delete("content-length");
-      headers.delete("host");
-      headers.delete("transfer-encoding");
-      const authMethod = request.method ?? "GET";
-      let body: BodyInit | undefined;
-      if (authMethod !== "GET" && authMethod !== "HEAD" && parsedBody !== undefined) {
-        body = typeof parsedBody === "string" ? parsedBody : JSON.stringify(parsedBody);
-      }
-      const authRequest = new Request(authUrl, { method: authMethod, headers, ...(body !== undefined ? { body } : {}) });
-      const authResponse = await options.betterAuth.handler(authRequest);
-      const responseHeaders: Record<string, string | string[]> = Object.fromEntries(authResponse.headers.entries());
-      const cookies = authResponse.headers.getSetCookie();
-      if (cookies.length) responseHeaders["set-cookie"] = cookies;
-      response.writeHead(authResponse.status, responseHeaders);
-      response.end(Buffer.from(await authResponse.arrayBuffer()));
-      return;
-    }
-
-    if (method === "OPTIONS") {
-      if (isApiRoute && crossOrigin) {
-        const requestedMethod = request.headers["access-control-request-method"];
-        if (typeof requestedMethod !== "string" || !CORS_METHODS.has(requestedMethod.toUpperCase())) {
-          fail(response, 403, "CORS_METHOD_DENIED", "Cross-origin API method is not allowed");
-          return;
-        }
-        const rawHeaders = request.headers["access-control-request-headers"];
-        const requestedHeaders = typeof rawHeaders === "string" && rawHeaders.trim()
-          ? rawHeaders.split(",").map((header) => header.trim().toLowerCase())
-          : [];
-        const availableHeader = (header: string) => CORS_HEADERS.get(header) ?? (mcpStreamableRoute ? MCP_CORS_HEADERS.get(header) : undefined);
-        if (requestedHeaders.some((header) => !availableHeader(header))) {
-          fail(response, 403, "CORS_HEADER_DENIED", "Cross-origin API request headers are not allowed");
-          return;
-        }
-        response.setHeader("Access-Control-Allow-Methods", requestedMethod.toUpperCase());
-        if (requestedHeaders.length) {
-          response.setHeader("Access-Control-Allow-Headers", [...new Set(requestedHeaders)].map(availableHeader).join(", "));
-        }
-      }
-      response.writeHead(204, { Allow: "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS" });
-      response.end();
-      return;
-    }
-    if (routePath === "/api/health" && isRead) { sendJson(response, 200, { status: "ok" }); return; }
-    if (routePath === "/api/ready" && isRead) {
-      const databaseReady = await postgresReady(options.persistence);
-      const ready = !shuttingDown && databaseReady;
-      sendJson(response, ready ? 200 : 503, { ok: ready, pendingRequests: activeRequests, persistenceReady: databaseReady });
-      return;
-    }
-    if (routePath === "/health/live" && isRead) { sendJson(response, 200, { ok: true }); return; }
-    if (routePath === "/health/startup" && isRead) { sendJson(response, started && !closed ? 200 : 503, { ok: started && !closed, started }); return; }
-    if (routePath === "/health/ready" && isRead) {
-      const databaseReady = await postgresReady(options.persistence);
-      const ready = !shuttingDown && databaseReady;
-      sendJson(response, ready ? 200 : 503, { ok: ready, pendingRequests: activeRequests, persistenceReady: databaseReady });
-      return;
-    }
-
-    if (isRead && VERSION_PATHS.includes(routePath)) {
-      sendJson(response, 200, {
-        name: "codexia", version: API_VERSION, contractVersion: CONTRACT_VERSION,
-        ...(standaloneIdentity ? { apiEpoch: standaloneIdentity.apiEpoch } : {}),
-        profile, auth: ["oauth-owner", "oauth-mcp"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
-        modules: await enabledStatuses(),
-      });
-      return;
-    }
+  };
+  const admit = async (request: IncomingMessage, response: ServerResponse, params: Record<string, string>,
+    query: URLSearchParams, policy: AdmissionPolicy) => {
+    const standaloneMcpRoute = policy === "mcp";
+    const mcpStreamableRoute = standaloneMcpRoute || policy === "mcp-module";
+    const needsBearer = policy !== "public";
+    const isRead = request.method === "GET" || request.method === "HEAD";
+    let resolvedProjectId = params.projectId ?? "";
     const authHeader = request.headers.authorization;
     const bearer = typeof authHeader === "string" && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
     let oauthPrincipal: Awaited<ReturnType<NonNullable<typeof authenticateOAuthOwner>>> | undefined;
@@ -1408,11 +1263,10 @@ export function createServer(options: ApiServerOptions): Server {
       if (!oauthMcpMetadataUrl) throw httpFailure(503, "MCP_OAUTH_UNAVAILABLE", "Standalone MCP OAuth is not configured");
       if (!bearer || !authenticateOAuthMcp) {
         response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
-        fail(response, 401, "UNAUTHORIZED", "MCP OAuth authentication required");
-        return;
+        throw httpFailure(401, "UNAUTHORIZED", "MCP OAuth authentication required");
       }
     }
-    if (!standaloneMcpRoute && bearer && authenticateOAuthOwner) {
+    if (needsBearer && !standaloneMcpRoute && bearer && authenticateOAuthOwner) {
       try { oauthPrincipal = await authenticateOAuthOwner(bearer); }
       catch (error) {
         if (authenticateOAuthMcp && error instanceof OAuthAuthenticationError && error.code === "OAUTH_SCOPE_REQUIRED") {
@@ -1424,8 +1278,7 @@ export function createServer(options: ApiServerOptions): Server {
             if (failure.status === 401 && mcpStreamableRoute && oauthMcpMetadataUrl) {
               response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
             }
-            fail(response, failure.status, failure.code, failure.message);
-            return;
+            throw httpFailure(failure.status, failure.code, failure.message);
           }
         } else {
           const failure = error instanceof OAuthAuthenticationError
@@ -1434,12 +1287,11 @@ export function createServer(options: ApiServerOptions): Server {
           if (failure.status === 401 && mcpStreamableRoute && oauthMcpMetadataUrl) {
             response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
           }
-          fail(response, failure.status, failure.code, failure.message);
-          return;
+          throw httpFailure(failure.status, failure.code, failure.message);
         }
       }
     }
-    if (bearer && authenticateOAuthMcp && (standaloneMcpRoute || !authenticateOAuthOwner)) {
+    if (needsBearer && bearer && authenticateOAuthMcp && (standaloneMcpRoute || !authenticateOAuthOwner)) {
       try { admittedMcpClient = await authenticateOAuthMcp(bearer); }
       catch (error) {
         const failure = error instanceof OAuthAuthenticationError
@@ -1448,8 +1300,7 @@ export function createServer(options: ApiServerOptions): Server {
         if (failure.status === 401 && mcpStreamableRoute && oauthMcpMetadataUrl) {
           response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
         }
-        fail(response, failure.status, failure.code, failure.message);
-        return;
+        throw httpFailure(failure.status, failure.code, failure.message);
       }
     }
     if (standaloneMcpRoute && admittedMcpClient) {
@@ -1461,7 +1312,10 @@ export function createServer(options: ApiServerOptions): Server {
       const projectId = requested[0] ?? (assigned.length === 1 ? assigned[0] : undefined);
       if (!projectId) throw httpFailure(400, "MCP_PROJECT_REQUIRED", "Specify projectId when the OAuth client has several project assignments");
       assertAssignedProject(projectId, assigned);
-      routePath = `/api/projects/${encodeURIComponent(projectId)}/modules/mcp/streamable`;
+      resolvedProjectId = projectId;
+    }
+    if (admittedMcpClient && policy === "persistence") {
+      throw httpFailure(403, "OAUTH_MCP_PERSISTENCE_DENIED", "Standalone MCP clients cannot use the direct persistence API");
     }
     const isAuthor = Boolean(oauthPrincipal);
     const isBearer = Boolean(admittedMcpClient);
@@ -1478,14 +1332,13 @@ export function createServer(options: ApiServerOptions): Server {
       if (oauthMcpMetadataUrl) response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl, requiredScope));
       throw httpFailure(403, "OAUTH_MCP_SCOPE_REQUIRED", `Access token does not grant ${requiredScope}`);
     };
-    if (admittedMcpClient && routePath.startsWith("/api/") && isRead && !publicRead && !mcpStreamableRoute) {
+    if (admittedMcpClient && isRead && !mcpStreamableRoute) {
       requireMcpEffect("read");
     }
-    if (routePath.startsWith("/api/") && !publicRead && !publicModuleRoute && !hasAuth) {
+    if (!hasAuth && needsBearer) {
       response.setHeader("WWW-Authenticate", mcpStreamableRoute && oauthMcpMetadataUrl
         ? mcpChallenge(oauthMcpMetadataUrl) : 'Bearer realm="codexia"');
-      fail(response, 401, "UNAUTHORIZED", "Authentication required");
-      return;
+      throw httpFailure(401, "UNAUTHORIZED", "Authentication required");
     }
     const requireAuthorSession = async (): Promise<string> => {
       if (!isAuthor) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author identity is required");
@@ -1500,94 +1353,108 @@ export function createServer(options: ApiServerOptions): Server {
       await authorizeActionProposal();
       return admittedMcpClient?.userId ?? "owner";
     } : undefined;
-    if (shuttingDown && routePath.startsWith("/api/") && !isRead) {
-      fail(response, 503, "SHUTTING_DOWN", "The server is draining and is not accepting new mutations");
-      return;
+    if (needsBearer && shuttingDown && !isRead) {
+      throw httpFailure(503, "SHUTTING_DOWN", "The server is draining and is not accepting new mutations");
     }
-    const signal = abortSignalFor(request, response);
-    if (admittedMcpClient && routePath.startsWith("/api/v1/persistence/")) {
-      fail(response, 403, "OAUTH_MCP_PERSISTENCE_DENIED", "Standalone MCP clients cannot use the direct persistence API");
-      return;
+    if (admittedMcpClient && resolvedProjectId && !(await findAuthorizedProject(resolvedProjectId, admittedMcpClient.projectIds))) {
+      throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
     }
-    const persistenceResponse = await handlePersistenceRoute({
-      persistence: options.persistence,
-      method,
-      url: request.url ?? routePath,
-      body: parsedBody,
-      requestHeaders: request.headers,
-      canReviewPrivateChangeSets,
-      requireAuthor: requireAuthorSession,
-    });
-    if (persistenceResponse) {
-      sendJson(response, persistenceResponse.status, persistenceResponse.body);
+    return { projectId: resolvedProjectId, isAuthor, isBearer, canReviewPrivateChangeSets, admittedMcpClient, mcpAllowedEffects,
+      requireMcpEffect, requireAuthorSession, authorizeActionProposal, resolveNativeProposalActor, resolvePublishingAuthor,
+      signal: abortSignalFor(request, response) };
+  };
+  type Admission = Awaited<ReturnType<typeof admit>> & {
+    params: Record<string, string>;
+    query: URLSearchParams;
+    crossOrigin: boolean;
+  };
+  type SendJson = (status: number, value: unknown) => void;
+  type Handler = (context: Admission & {
+    request: IncomingMessage;
+    response: ServerResponse;
+    reply: FastifyReply;
+    parsedBody: unknown;
+    json: SendJson;
+    reject: (status: number, code: string, message: string) => void;
+  }) => Promise<void>;
+  const routeContexts = new WeakMap<FastifyRequest, Admission>();
+  const sendWebResponse = async (reply: FastifyReply, response: Response, headers: Record<string, string | string[]> = Object.fromEntries(response.headers)): Promise<void> => {
+    reply.code(response.status).headers(headers);
+    for (const name of ["connection", "transfer-encoding", "content-length"]) reply.removeHeader(name);
+    await reply.send(response.body ? Readable.fromWeb(response.body as never) : undefined);
+  };
+  const handlers: Record<string, Handler> = {
+    api_health_get: async ({ json }) => {
+      json(200, { status: "ok" }); return;
+    },
+    api_ready_get: async ({ json }) => {
+      const databaseReady = await postgresReady(options.persistence);
+      const ready = !shuttingDown && databaseReady;
+      json(ready ? 200 : 503, { ok: ready, pendingRequests: activeRequests, persistenceReady: databaseReady });
       return;
-    }
-    if (routePath === "/api/session" && method === "GET") {
-      sendJson(response, 200, {
-        authenticated: true,
-        authorScope: isAuthor ? "owner" : "",
+    },
+    health_live_get: async ({ json }) => {
+      json(200, { ok: true }); return;
+    },
+    health_ready_get: async ({ json }) => {
+      const databaseReady = await postgresReady(options.persistence);
+      const ready = !shuttingDown && databaseReady;
+      json(ready ? 200 : 503, { ok: ready, pendingRequests: activeRequests, persistenceReady: databaseReady });
+      return;
+    },
+    health_startup_get: async ({ json }) => {
+      json(started && !closed ? 200 : 503, { ok: started && !closed, started }); return;
+    },
+    api_version_get: async ({ json }) => {
+      json(200, {
+        name: "codexia", version: API_VERSION, contractVersion: CONTRACT_VERSION,
+        ...(standaloneIdentity ? { apiEpoch: standaloneIdentity.apiEpoch } : {}),
+        profile, auth: ["oauth-owner", "oauth-mcp"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
+        modules: await enabledStatuses(),
       });
       return;
-    }
-    if (routePath === "/api/projects/events" && method === "GET") {
+    },
+    api_session_get: async ({ requireAuthorSession, json }) => {
+      const authorScope = await requireAuthorSession();
+      json(200, {
+        authenticated: true,
+        authorScope,
+      });
+      return;
+    },
+    project_events_get: async ({ response, reply, admittedMcpClient }) => {
       if (admittedMcpClient) throw httpFailure(403, "OAUTH_MCP_PROJECT_EVENTS_DENIED", "Standalone MCP clients cannot subscribe to the owner-wide project event stream");
       if (projectEventStreams.full) throw httpFailure(503, "PROJECT_EVENT_STREAM_LIMIT", "Too many project event streams are open");
+      reply.hijack();
       projectEventStreams.open(response, "no-store", undefined);
       return;
-    }
-    if (routePath === "/api/jobs/events" && method === "GET") {
-      if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job events require an owner identity"); return; }
+    },
+    job_events_get: async ({ response, reply, isAuthor, reject }) => {
+      if (!isAuthor) { reject(403, "AUTHOR_SESSION_REQUIRED", "Job events require an owner identity"); return; }
       if (jobEventStreams.full) throw httpFailure(503, "JOB_EVENT_STREAM_LIMIT", "Too many job event streams are open");
+      reply.hijack();
       jobEventStreams.open(response, "no-cache", ": ok\n\n");
       return;
-    }
-    if (routePath === "/api/jobs" && method === "GET") {
-      if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner identity"); return; }
-      try { sendJson(response, 200, await jobHistory.listJobs()); }
+    },
+    jobs_list_get: async ({ isAuthor, json, reject }) => {
+      if (!isAuthor) { reject(403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner identity"); return; }
+      try { json(200, await jobHistory.listJobs()); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Job history is temporarily unavailable"); }
       return;
-    }
-    const jobMatch = routePath.match(/^\/api\/jobs\/([^/]+)$/u);
-    if (jobMatch && method === "GET") {
-      if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner identity"); return; }
-      const jobId = parseProjectId(jobMatch[1]!);
-      try {
-        const job = await jobHistory.getJob(jobId);
-        if (!job) throw httpFailure(404, "JOB_NOT_FOUND", "Job was not found");
-        sendJson(response, 200, job);
-      } catch (error) {
-        if (isHttpFailure(error)) throw error;
-        throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Job history is temporarily unavailable");
-      }
-      return;
-    }
-    if (routePath === "/api/inbox" && method === "GET") {
-      if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Inbox requires an owner identity"); return; }
-      try { sendJson(response, 200, await jobHistory.listInbox({ unreadOnly: query.get("unread") === "1" })); }
+    },
+    inbox_list_get: async ({ query, isAuthor, json, reject }) => {
+      if (!isAuthor) { reject(403, "AUTHOR_SESSION_REQUIRED", "Inbox requires an owner identity"); return; }
+      try { json(200, await jobHistory.listInbox({ unreadOnly: query.get("unread") === "1" })); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Inbox is temporarily unavailable"); }
       return;
-    }
-    if (routePath === "/api/inbox/read-all" && method === "POST") {
+    },
+    inbox_read_all_post: async ({ requireAuthorSession, json }) => {
       await requireAuthorSession();
-      try { sendJson(response, 200, { marked: await jobHistory.markAllInboxRead() }); }
+      try { json(200, { marked: await jobHistory.markAllInboxRead() }); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Inbox is temporarily unavailable"); }
       return;
-    }
-    const inboxReadMatch = routePath.match(/^\/api\/inbox\/([^/]+)\/read$/u);
-    if (inboxReadMatch && method === "POST") {
-      await requireAuthorSession();
-      const inboxId = parseProjectId(inboxReadMatch[1]!);
-      try {
-        const item = await jobHistory.markInboxRead(inboxId);
-        if (!item) throw httpFailure(404, "INBOX_ITEM_NOT_FOUND", "Inbox item was not found");
-        sendJson(response, 200, { item });
-      } catch (error) {
-        if (isHttpFailure(error)) throw error;
-        throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Inbox is temporarily unavailable");
-      }
-      return;
-    }
-    if (routePath === "/api/projects" && method === "GET") {
+    },
+    projects_list_get: async ({ query, admittedMcpClient, json }) => {
       const limit = boundedInt(query.get("limit"), 200, 1, 200);
       let cursor: ProjectPageCursor | undefined;
       try { cursor = decodeProjectPageCursor(query.get("cursor")); }
@@ -1612,400 +1479,643 @@ export function createServer(options: ApiServerOptions): Server {
       } else {
         page = await options.store.listProjectsPage(limit, cursor);
       }
-      sendJson(response, 200, { projects: page.projects, nextCursor: page.nextCursor ? encodeProjectPageCursor(page.nextCursor) : null });
+      json(200, { projects: page.projects, nextCursor: page.nextCursor ? encodeProjectPageCursor(page.nextCursor) : null });
       return;
-    }
-    if (routePath === "/api/projects" && method === "POST") {
+    },
+    projects_create_post: async ({ request, parsedBody, requireAuthorSession, json }) => {
       await requireAuthorSession();
-      const body = await readJson(request, parsedBody);
-      if (!isRecord(body) || typeof body.title !== "string" || !body.title.trim()) throw httpFailure(400, "INVALID_PROJECT", "Project title is required");
-      const project = await options.store.createProject({ title: body.title.trim() });
-      sendJson(response, 201, project); return;
-    }
-    if (routePath === "/api/review-queue" && method === "GET") {
+      const { title } = parsedBody as { title: string };
+      const project = await options.store.createProject({ title: title.trim() });
+      json(201, project); return;
+    },
+    review_queue_get: async ({ canReviewPrivateChangeSets, admittedMcpClient, json }) => {
       if (!coreStore.reviewQueue) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
       const projectIds = admittedMcpClient
         ? [...admittedMcpClient.projectIds]
         : null;
-      sendJson(response, 200, await coreStore.reviewQueue(projectIds, { excludePrivateProposals: !canReviewPrivateChangeSets }));
+      json(200, await coreStore.reviewQueue(projectIds, { excludePrivateProposals: !canReviewPrivateChangeSets }));
       return;
-    }
-
-    const projectRoot = routePath.match(/^\/api\/projects\/([^/]+)(?:\/(.*))?$/u);
-    if (projectRoot) {
-      const projectId = projectPathId(projectRoot[1]!);
-      assertAssignedProject(projectId, admittedMcpClient?.projectIds);
-      if (admittedMcpClient && !(await findAuthorizedProject(projectId, admittedMcpClient.projectIds))) {
-        throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
+    },
+    job_get: async ({ params, isAuthor, json, reject }) => {
+      if (!isAuthor) { reject(403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner identity"); return; }
+      const jobId = params.jobId!;
+      try {
+        const job = await jobHistory.getJob(jobId);
+        if (!job) throw httpFailure(404, "JOB_NOT_FOUND", "Job was not found");
+        json(200, job);
+      } catch (error) {
+        if (isHttpFailure(error)) throw error;
+        throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Job history is temporarily unavailable");
       }
-      const suffix = projectRoot[2] ?? "";
-      if (suffix === "recent-activity" && (method === "GET" || method === "PUT")) {
-        if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Recent activity requires an owner identity"); return; }
-        const activityAuthorScope = "owner";
-
-        try {
-          if (method === "GET") {
-            sendJson(response, 200, { items: await recentActivity.list(activityAuthorScope, projectId) });
-            return;
-          }
-          const input = parseRecentActivityInput(await readJson(request, parsedBody));
-          const header = request.headers["x-codexia-recent-activity-order"];
-          let order: { writer: string; sequence: number } | undefined;
-          if (header !== undefined) {
-            const match = typeof header === "string" ? /^([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}):([1-9][0-9]{0,15})$/u.exec(header) : null;
-            const sequence = Number(match?.[2]);
-            if (!match || !Number.isSafeInteger(sequence)) throw httpFailure(400, "INVALID_RECENT_ACTIVITY", "Recent activity order is invalid");
-            order = { writer: match[1]!, sequence };
-          }
-          sendJson(response, 200, { items: await recentActivity.upsert(activityAuthorScope, projectId, input, order) });
-          return;
-        } catch (error) {
-          if (isHttpFailure(error)) throw error;
-          throw httpFailure(503, "RECENT_ACTIVITY_UNAVAILABLE", "Recent activity history is temporarily unavailable");
-        }
+      return;
+    },
+    inbox_item_read_post: async ({ params, requireAuthorSession, json }) => {
+      await requireAuthorSession();
+      const inboxId = params.inboxId!;
+      try {
+        const item = await jobHistory.markInboxRead(inboxId);
+        if (!item) throw httpFailure(404, "INBOX_ITEM_NOT_FOUND", "Inbox item was not found");
+        json(200, { item });
+      } catch (error) {
+        if (isHttpFailure(error)) throw error;
+        throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Inbox is temporarily unavailable");
       }
-      if (suffix === "" && method === "GET") {
-        const project = await findAuthorizedProject(projectId, admittedMcpClient?.projectIds);
-        if (!project) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project not found");
-        const observation = await options.store.observe(projectId);
-        sendJson(response, 200, { project, observation });
+      return;
+    },
+    project_get: async ({ projectId, admittedMcpClient, json }) => {
+      const project = await findAuthorizedProject(projectId, admittedMcpClient?.projectIds);
+      if (!project) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project not found");
+      const observation = await options.store.observe(projectId);
+      json(200, { project, observation });
+      return;
+    },
+    project_modules_get: async ({ json }) => {
+      json(200, await enabledStatuses()); return;
+    },
+    project_contributions_get: async ({ json }) => {
+      await activateEnabled();
+      const contributions = (await enabledStatuses())
+        .filter((status) => status.availability === "enabled-idle" || status.availability === "active")
+        .flatMap((status) => runtime.contributions(status.id));
+      json(200, contributions); return;
+    },
+    project_tree_get: async ({ query, projectId, json }) => {
+      const selected = optionalSnapshot(query, projectId);
+      json(200, await options.store.readTreeSnapshot(projectId, selected.pinned));
+      return;
+    },
+    project_snapshot_get: async ({ query, projectId, json }) => {
+      const projection = query.getAll("projection");
+      if (projection.length !== 1 || projection[0] !== "editor") {
+        throw httpFailure(400, "INVALID_PROJECTION", "Select the editor snapshot projection");
+      }
+      const selected = optionalSnapshot(query, projectId);
+      const documentId = query.get("documentId");
+      if (documentId !== null && !isPostgresRevisionId(documentId)) {
+        throw httpFailure(400, "INVALID_ID", "Use a canonical PostgreSQL document identifier");
+      }
+      const reader = await freshReader(projectId, selected.pinned);
+      if (documentId === null) {
+        json(200, { snapshot: reader.snapshot, document: null });
         return;
       }
-      if (suffix === "modules" && method === "GET") { sendJson(response, 200, await enabledStatuses()); return; }
-      if (suffix === "contributions" && method === "GET") {
-        await activateEnabled();
-        const contributions = (await enabledStatuses())
-          .filter((status) => status.availability === "enabled-idle" || status.availability === "active")
-          .flatMap((status) => runtime.contributions(status.id));
-        sendJson(response, 200, contributions); return;
+      if (!reader.listRevisions) {
+        throw httpFailure(503, "SNAPSHOT_REVISIONS_UNAVAILABLE", "Editor document revisions are unavailable");
       }
-      if (suffix === "tree" && method === "GET") {
-        const selected = optionalSnapshot(query, projectId);
-        sendJson(response, 200, await options.store.readTreeSnapshot(projectId, selected.pinned));
-        return;
-      }
-      const sceneMatch = suffix.match(/^scenes\/([^/]+)$/u);
-      if (sceneMatch && method === "GET") {
-        const sceneId = parseSceneId(sceneMatch[1]!);
-        const selected = optionalSnapshot(query, projectId);
-        sendJson(response, 200, await options.store.readSceneSnapshot(projectId, sceneId, selected.pinned));
-        return;
-      }
-      if (suffix === "snapshot" && method === "GET") {
-        const projection = query.getAll("projection");
-        if (projection.length !== 1 || projection[0] !== "editor") {
-          throw httpFailure(400, "INVALID_PROJECTION", "Select the editor snapshot projection");
-        }
-        const selected = optionalSnapshot(query, projectId);
-        const documentId = query.get("documentId");
-        if (documentId !== null && !isPostgresRevisionId(documentId)) {
-          throw httpFailure(400, "INVALID_ID", "Use a canonical PostgreSQL document identifier");
-        }
-        const reader = await freshReader(projectId, selected.pinned);
-        if (documentId === null) {
-          sendJson(response, 200, { snapshot: reader.snapshot, document: null });
-          return;
-        }
-        if (!reader.listRevisions) {
-          throw httpFailure(503, "SNAPSHOT_REVISIONS_UNAVAILABLE", "Editor document revisions are unavailable");
-        }
-        const path = `documents/${documentId}.md`;
-        const entry = (await reader.listRevisions(path)).find((candidate) => candidate.path === path);
-        sendJson(response, 200, { snapshot: reader.snapshot, document: entry ? { path, revision: entry.revision } : null });
-        return;
-      }
-      if (suffix === "history" && method === "GET") { sendJson(response, 200, await options.store.history(projectId, optionalSnapshot(query, projectId).pinned)); return; }
-      if (suffix === "status" && method === "GET") { sendJson(response, 200, await options.store.status(projectId)); return; }
-      if (suffix === "observation" && method === "GET") { sendJson(response, 200, await options.store.observe(projectId)); return; }
-      if (suffix === "proposals" && method === "POST") {
-        requireMcpEffect("propose");
-        const body = await readJson(request, parsedBody);
-        if (!isRecord(body) || !isRecord(body.snapshot) || !Array.isArray(body.operations) || !body.operations.length) throw httpFailure(400, "INVALID_PROPOSAL", "A proposal snapshot and at least one operation are required");
+      const path = `documents/${documentId}.md`;
+      const entry = (await reader.listRevisions(path)).find((candidate) => candidate.path === path);
+      json(200, { snapshot: reader.snapshot, document: entry ? { path, revision: entry.revision } : null });
+      return;
+    },
+    project_history_get: async ({ query, projectId, json }) => {
+      json(200, await options.store.history(projectId, optionalSnapshot(query, projectId).pinned)); return;
+    },
+    project_status_get: async ({ projectId, json }) => {
+      json(200, await options.store.status(projectId)); return;
+    },
+    project_observation_get: async ({ projectId, json }) => {
+      json(200, await options.store.observe(projectId)); return;
+    },
+    project_proposals_create_post: async ({ request, parsedBody, signal, projectId, isBearer, requireMcpEffect, json }) => {
+      requireMcpEffect("propose");
+      const body = parsedBody;
+      if (!isRecord(body) || !isRecord(body.snapshot) || !Array.isArray(body.operations) || !body.operations.length) throw httpFailure(400, "INVALID_PROPOSAL", "A proposal snapshot and at least one operation are required");
+      if (signal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Proposal request was cancelled");
+      if ("proposalId" in body) throw httpFailure(400, "INVALID_PROPOSAL", "Use id for the proposal identity");
+      const requestedId = typeof body.id === "string" && body.id ? body.id : undefined;
+      let source: ChangeProposal["source"] = isBearer ? "mcp" : "author";
+      if (requestedId !== undefined) {
+        if (!coreStore.getProposal) throw httpFailure(503, "PROPOSAL_IDENTITY_UNAVAILABLE", "Core cannot verify an existing proposal identity for this retry");
+        const existing = await coreStore.getProposal(projectId, requestedId);
         if (signal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Proposal request was cancelled");
-        if ("proposalId" in body) throw httpFailure(400, "INVALID_PROPOSAL", "Use id for the proposal identity");
-        const requestedId = typeof body.id === "string" && body.id ? body.id : undefined;
-        let source: ChangeProposal["source"] = isBearer ? "mcp" : "author";
-        if (requestedId !== undefined) {
-          if (!coreStore.getProposal) throw httpFailure(503, "PROPOSAL_IDENTITY_UNAVAILABLE", "Core cannot verify an existing proposal identity for this retry");
-          const existing = await coreStore.getProposal(projectId, requestedId);
-          if (signal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Proposal request was cancelled");
-          if (existing) {
-            if (existing.proposal.id !== requestedId) throw httpFailure(503, "PROPOSAL_IDENTITY_INVALID", "Core returned a mismatched proposal identity");
-            // Preserve only Core's immutable source for an existing identity; Core still checks the full original digest below.
-            source = existing.proposal.source;
-          }
+        if (existing) {
+          if (existing.proposal.id !== requestedId) throw httpFailure(503, "PROPOSAL_IDENTITY_INVALID", "Core returned a mismatched proposal identity");
+          // Preserve only Core's immutable source for an existing identity; Core still checks the full original digest below.
+          source = existing.proposal.source;
         }
-        const proposal: ChangeProposal = {
-          id: requestedId || randomBytes(16).toString("hex"),
-          snapshot: body.snapshot as unknown as SnapshotId,
-          operations: body.operations as ChangeOperation[],
-          source,
-          ...(Array.isArray(body.evidence) ? { evidence: body.evidence as ProposalEvidence[] } : {}),
+      }
+      const proposal: ChangeProposal = {
+        id: requestedId || randomBytes(16).toString("hex"),
+        snapshot: body.snapshot as unknown as SnapshotId,
+        operations: body.operations as ChangeOperation[],
+        source,
+        ...(Array.isArray(body.evidence) ? { evidence: body.evidence as ProposalEvidence[] } : {}),
+      };
+      const stored = await options.store.propose(projectId, proposal);
+      if (signal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Proposal request was cancelled");
+      json(201, stored); return;
+    },
+    project_proposals_list_get: async ({ projectId, canReviewPrivateChangeSets, json }) => {
+      if (!coreStore.listProposals) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
+      const proposals = await coreStore.listProposals(projectId);
+      json(200, { proposals: proposals.filter((status) => isVisibleProposal(status, canReviewPrivateChangeSets)).slice(0, 1000) }); return;
+    },
+    project_approvals_post: async ({ request, reply, parsedBody, projectId, requireAuthorSession }) => {
+      const authorScope = await requireAuthorSession();
+      const body = parsedBody;
+      if (!isRecord(body) || typeof body.proposalId !== "string" || !body.proposalId || !Array.isArray(body.operationIds) || !body.operationIds.every((id) => typeof id === "string")) throw httpFailure(400, "INVALID_APPROVAL", "Proposal and operation IDs are required");
+      await options.store.approve(projectId, { proposalId: body.proposalId, operationIds: body.operationIds as string[], authorScope });
+      void reply.code(204).send(); return;
+    },
+    project_apply_post: async ({ request, parsedBody, projectId, requireAuthorSession, json }) => {
+      await requireAuthorSession();
+      const body = parsedBody;
+      json(201, await options.store.apply(projectId, body as ChangeOperation)); return;
+    },
+    project_actions_get: async ({ signal, projectId, isBearer, admittedMcpClient, mcpAllowedEffects, resolveNativeProposalActor, json }) => {
+      json(200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor) }); return;
+    },
+    project_scratch_post: async ({ request, parsedBody, projectId, requireAuthorSession, json }) => {
+      const authorScope = await requireAuthorSession();
+      await createScratch(projectId, parsedBody, authorScope, json); return;
+    },
+    project_review_queue_get: async ({ projectId, canReviewPrivateChangeSets, json }) => {
+      if (!coreStore.listProposalsSnapshot) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
+      const result = await coreStore.listProposalsSnapshot(projectId);
+      json(200, { snapshot: result.snapshot, proposals: result.proposals.filter((status) => isVisibleProposal(status, canReviewPrivateChangeSets)).slice(0, 1000) }); return;
+    },
+    project_scene_get: async ({ params, query, projectId, json }) => {
+      const sceneId = params.sceneId!;
+      const selected = optionalSnapshot(query, projectId);
+      json(200, await options.store.readSceneSnapshot(projectId, sceneId, selected.pinned));
+      return;
+    },
+    project_proposal_get: async ({ params, projectId, canReviewPrivateChangeSets, json }) => {
+      if (!coreStore.getProposal) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
+      const proposal = await coreStore.getProposal(projectId, params.proposalId!);
+      if (!proposal || !isVisibleProposal(proposal, canReviewPrivateChangeSets)) throw httpFailure(404, "PROPOSAL_NOT_FOUND", "Proposal not found");
+      json(200, proposal); return;
+    },
+    project_action_post: async ({ request, response, parsedBody, params, signal, projectId, isAuthor, isBearer, canReviewPrivateChangeSets, admittedMcpClient, mcpAllowedEffects, requireMcpEffect, authorizeActionProposal, resolveNativeProposalActor, resolvePublishingAuthor, json }) => {
+      const body = parsedBody;
+      if (!isRecord(body) || !("input" in body)) throw httpFailure(400, "INVALID_ACTION", "Action input is required");
+      const actionId = params.actionId!;
+      if (isBearer && actionId.startsWith("assistant.")) {
+        throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
+      }
+      const descriptors = await listActionDescriptors(projectId, signal, isBearer || params.actionId!.startsWith("mcp.") ? "mcp" : "author", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor);
+      let descriptor = descriptors.find((item) => item.id === actionId);
+      if (!descriptor && admittedMcpClient) {
+        const completeDescriptors = await listActionDescriptors(projectId, signal, "mcp", undefined, admittedMcpClient.projectIds, resolveNativeProposalActor);
+        const requestedDescriptor = completeDescriptors.find((item) => item.id === actionId);
+        if (requestedDescriptor) requireMcpEffect(requestedDescriptor.effect);
+      }
+      if (!descriptor) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
+      if (isBearer && !["read", "compute", "propose"].includes(descriptor.effect)) throw httpFailure(403, "BEARER_EFFECT_DENIED", "Bearer credentials may only invoke read, compute, and propose actions");
+      requireMcpEffect(descriptor.effect);
+      let boundSnapshot: SnapshotId | undefined;
+      if (body.snapshot !== undefined) {
+        const selected = body.snapshot;
+        if (!isRecord(selected) || selected.projectId !== projectId || !Number.isSafeInteger(selected.projectVersion) || (selected.projectVersion as number) < 1) {
+          throw httpFailure(400, "INVALID_SNAPSHOT", "A project-bound PostgreSQL version is required");
+        }
+        boundSnapshot = selected as unknown as SnapshotId;
+      }
+      const reader = await freshReader(projectId, boundSnapshot);
+      const source = descriptor.module === "core"
+        ? isBearer ? "mcp" : "author"
+        : isBearer || descriptor.module === "mcp" ? "mcp" : "module";
+      const prefer = request.headers.prefer;
+      const respondAsyncRequested = isAuthor && (Array.isArray(prefer) ? prefer : [prefer ?? ""])
+        .flatMap((value) => value.split(","))
+        .some((value) => value.trim().toLowerCase() === "respond-async");
+      const jobController = respondAsyncRequested && descriptor.module !== "core" ? new AbortController() : undefined;
+      let domainJobId: string | undefined;
+      let resolveDomainJobStart!: (id: string) => void;
+      const domainJobStarted = new Promise<string>((resolveStarted) => { resolveDomainJobStart = resolveStarted; });
+      const abortBeforeAcceptance = (): void => {
+        if (!domainJobId) jobController?.abort(signal.reason ?? new Error("The action request was cancelled before job registration"));
+      };
+      if (jobController) {
+        asyncDomainJobControllers.add(jobController);
+        if (signal.aborted) abortBeforeAcceptance();
+        else signal.addEventListener("abort", abortBeforeAcceptance, { once: true });
+      }
+      const actionSignal = jobController?.signal ?? signal;
+      const host = actionHost(projectId, reader, actionSignal, source, "owner", (id) => {
+        domainJobId = id;
+        signal.removeEventListener("abort", abortBeforeAcceptance);
+        resolveDomainJobStart(id);
+      }, authorizeActionProposal, "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets, resolvePublishingAuthor);
+      if (descriptor.module === "core") {
+        const coreAction = host.actions?.find(({ action }) => action.id === descriptor.id)?.action;
+        if (!coreAction) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
+        const moduleContext: ModuleActionContext = {
+          projectId, reader, signal,
+          invoke: async () => ({ ok: false, snapshot: reader.snapshot, error: { code: "ACTION_UNAVAILABLE", message: "Core host actions cannot dispatch module actions", retryable: false } }),
+          listActions: async () => descriptors,
+          linkedReader: async (repositoryId: string) => host.linkedReader!(repositoryId),
+          propose: async (operations, evidence, proposalId) => {
+            if (coreAction.effect !== "propose") throw httpFailure(403, "ACTION_EFFECT_DENIED", "Read-only Core actions cannot propose changes");
+            return host.propose(operations, evidence, proposalId, signal);
+          },
+          runJob: async (request) => ({ ok: false, id: request.id, snapshot: reader.snapshot, error: { code: "ACTION_EFFECT_DENIED", message: "Core host actions cannot run jobs", retryable: false } }),
         };
-        const stored = await options.store.propose(projectId, proposal);
-        if (signal.aborted) throw httpFailure(499, "ACTION_CANCELLED", "Proposal request was cancelled");
-        sendJson(response, 201, stored); return;
-      }
-      if (suffix === "proposals" && method === "GET") {
-        if (!coreStore.listProposals) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
-        const proposals = await coreStore.listProposals(projectId);
-        sendJson(response, 200, { proposals: proposals.filter((status) => isVisibleProposal(status, canReviewPrivateChangeSets)).slice(0, 1000) }); return;
-      }
-      const proposalMatch = suffix.match(/^proposals\/([^/]+)$/u);
-      if (proposalMatch && method === "GET") {
-        if (!coreStore.getProposal) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
-        const proposal = await coreStore.getProposal(projectId, parseProjectId(proposalMatch[1]!));
-        if (!proposal || !isVisibleProposal(proposal, canReviewPrivateChangeSets)) throw httpFailure(404, "PROPOSAL_NOT_FOUND", "Proposal not found");
-        sendJson(response, 200, proposal); return;
-      }
-      if (suffix === "approvals" && method === "POST") {
-        const authorScope = await requireAuthorSession();
-        const body = await readJson(request, parsedBody);
-        if (!isRecord(body) || typeof body.proposalId !== "string" || !body.proposalId || !Array.isArray(body.operationIds) || !body.operationIds.every((id) => typeof id === "string")) throw httpFailure(400, "INVALID_APPROVAL", "Proposal and operation IDs are required");
-        await options.store.approve(projectId, { proposalId: body.proposalId, operationIds: body.operationIds as string[], authorScope });
-        response.writeHead(204); response.end(); return;
-      }
-      if (suffix === "apply" && method === "POST") {
-        await requireAuthorSession();
-        const body = await readJson(request, parsedBody);
-        sendJson(response, 201, await options.store.apply(projectId, body as ChangeOperation)); return;
-      }
-      if (suffix === "actions" && method === "GET") {
-        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor) }); return;
-      }
-      const actionMatch = suffix.match(/^actions\/([^/]+)$/u);
-      if (actionMatch && method === "POST") {
-        const body = await readJson(request, parsedBody);
-        if (!isRecord(body) || !("input" in body)) throw httpFailure(400, "INVALID_ACTION", "Action input is required");
-        const actionId = parseProjectId(actionMatch[1]!);
-        if (isBearer && actionId.startsWith("assistant.")) {
-          throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
+        let input: unknown;
+        try { input = coreAction.inputSchema.parse(body.input); }
+        catch (error) {
+          json(200, { ok: false, snapshot: reader.snapshot, error: { code: "invalid_action_input", message: error instanceof Error ? error.message.slice(0, 512) : "Action input is invalid", retryable: false } } satisfies ActionResult);
+          return;
         }
-        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor);
-        let descriptor = descriptors.find((item) => item.id === actionId);
-        if (!descriptor && admittedMcpClient) {
-          const completeDescriptors = await listActionDescriptors(projectId, signal, "mcp", undefined, admittedMcpClient.projectIds, resolveNativeProposalActor);
-          const requestedDescriptor = completeDescriptors.find((item) => item.id === actionId);
-          if (requestedDescriptor) requireMcpEffect(requestedDescriptor.effect);
-        }
-        if (!descriptor) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
-        if (isBearer && !["read", "compute", "propose"].includes(descriptor.effect)) throw httpFailure(403, "BEARER_EFFECT_DENIED", "Bearer credentials may only invoke read, compute, and propose actions");
-        requireMcpEffect(descriptor.effect);
-        let boundSnapshot: SnapshotId | undefined;
-        if (body.snapshot !== undefined) {
-          const selected = body.snapshot;
-          if (!isRecord(selected) || selected.projectId !== projectId || !Number.isSafeInteger(selected.projectVersion) || (selected.projectVersion as number) < 1) {
-            throw httpFailure(400, "INVALID_SNAPSHOT", "A project-bound PostgreSQL version is required");
-          }
-          boundSnapshot = selected as unknown as SnapshotId;
-        }
-        const reader = await freshReader(projectId, boundSnapshot);
-        const source = descriptor.module === "core"
-          ? isBearer ? "mcp" : "author"
-          : isBearer || descriptor.module === "mcp" ? "mcp" : "module";
-        const prefer = request.headers.prefer;
-        const respondAsyncRequested = isAuthor && (Array.isArray(prefer) ? prefer : [prefer ?? ""])
-          .flatMap((value) => value.split(","))
-          .some((value) => value.trim().toLowerCase() === "respond-async");
-        const jobController = respondAsyncRequested && descriptor.module !== "core" ? new AbortController() : undefined;
-        let domainJobId: string | undefined;
-        let resolveDomainJobStart!: (id: string) => void;
-        const domainJobStarted = new Promise<string>((resolveStarted) => { resolveDomainJobStart = resolveStarted; });
-        const abortBeforeAcceptance = (): void => {
-          if (!domainJobId) jobController?.abort(signal.reason ?? new Error("The action request was cancelled before job registration"));
-        };
-        if (jobController) {
-          asyncDomainJobControllers.add(jobController);
-          if (signal.aborted) abortBeforeAcceptance();
-          else signal.addEventListener("abort", abortBeforeAcceptance, { once: true });
-        }
-        const actionSignal = jobController?.signal ?? signal;
-        const host = actionHost(projectId, reader, actionSignal, source, "owner", (id) => {
-          domainJobId = id;
-          signal.removeEventListener("abort", abortBeforeAcceptance);
-          resolveDomainJobStart(id);
-        }, authorizeActionProposal, "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets, resolvePublishingAuthor);
-        if (descriptor.module === "core") {
-          const coreAction = host.actions?.find(({ action }) => action.id === descriptor.id)?.action;
-          if (!coreAction) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
-          const moduleContext: ModuleActionContext = {
-            projectId, reader, signal,
-            invoke: async () => ({ ok: false, snapshot: reader.snapshot, error: { code: "ACTION_UNAVAILABLE", message: "Core host actions cannot dispatch module actions", retryable: false } }),
-            listActions: async () => descriptors,
-            linkedReader: async (repositoryId: string) => host.linkedReader!(repositoryId),
-            propose: async (operations, evidence, proposalId) => {
-              if (coreAction.effect !== "propose") throw httpFailure(403, "ACTION_EFFECT_DENIED", "Read-only Core actions cannot propose changes");
-              return host.propose(operations, evidence, proposalId, signal);
-            },
-            runJob: async (request) => ({ ok: false, id: request.id, snapshot: reader.snapshot, error: { code: "ACTION_EFFECT_DENIED", message: "Core host actions cannot run jobs", retryable: false } }),
-          };
-          let input: unknown;
-          try { input = coreAction.inputSchema.parse(body.input); }
+        let result = await coreAction.invoke(input, moduleContext);
+        if (result.ok) {
+          try { result = { ...result, data: coreAction.outputSchema.parse(result.data) }; }
           catch (error) {
-            sendJson(response, 200, { ok: false, snapshot: reader.snapshot, error: { code: "invalid_action_input", message: error instanceof Error ? error.message.slice(0, 512) : "Action input is invalid", retryable: false } } satisfies ActionResult);
-            return;
+            result = { ok: false, snapshot: reader.snapshot, error: { code: "invalid_action_result", message: error instanceof Error ? error.message.slice(0, 512) : "Action result is invalid", retryable: false } };
           }
-          let result = await coreAction.invoke(input, moduleContext);
-          if (result.ok) {
-            try { result = { ...result, data: coreAction.outputSchema.parse(result.data) }; }
-            catch (error) {
-              result = { ok: false, snapshot: reader.snapshot, error: { code: "invalid_action_result", message: error instanceof Error ? error.message.slice(0, 512) : "Action result is invalid", retryable: false } };
-            }
-          }
-          sendJson(response, 200, result); return;
         }
-        const invocation = runtime.invokeAction(descriptor.module, actionId, body.input, host);
-        const settledInvocation = invocation.then(
-          (result) => ({ kind: "result" as const, result }),
-          (error: unknown) => ({ kind: "error" as const, error }),
-        );
-        if (jobController) {
-          void settledInvocation.then(() => {
-            asyncDomainJobControllers.delete(jobController);
-            signal.removeEventListener("abort", abortBeforeAcceptance);
-          });
-        }
-        if (respondAsyncRequested) {
-          const outcome = await Promise.race([
-            domainJobStarted.then((id) => ({ kind: "started" as const, id })),
-            settledInvocation.then((settled) => ({ kind: "settled" as const, settled })),
-          ]);
-          if (outcome.kind === "started") {
-            const job = await jobHistory.getJob(outcome.id);
-            if (!job) throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "The registered job could not be read back");
-            response.setHeader("X-Codexia-Job-Id", job.id);
-            response.setHeader("Location", `/api/jobs/${encodeURIComponent(job.id)}`);
-            response.setHeader("Preference-Applied", "respond-async");
-            sendJson(response, 202, job);
-            return;
-          }
-          if (outcome.settled.kind === "error") throw outcome.settled.error;
-          if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
-          sendJson(response, 200, outcome.settled.result);
+        json(200, result); return;
+      }
+      const invocation = runtime.invokeAction(descriptor.module, actionId, body.input, host);
+      const settledInvocation = invocation.then(
+        (result) => ({ kind: "result" as const, result }),
+        (error: unknown) => ({ kind: "error" as const, error }),
+      );
+      if (jobController) {
+        void settledInvocation.then(() => {
+          asyncDomainJobControllers.delete(jobController);
+          signal.removeEventListener("abort", abortBeforeAcceptance);
+        });
+      }
+      if (respondAsyncRequested) {
+        const outcome = await Promise.race([
+          domainJobStarted.then((id) => ({ kind: "started" as const, id })),
+          settledInvocation.then((settled) => ({ kind: "settled" as const, settled })),
+        ]);
+        if (outcome.kind === "started") {
+          const job = await jobHistory.getJob(outcome.id);
+          if (!job) throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "The registered job could not be read back");
+          response.setHeader("X-Codexia-Job-Id", job.id);
+          response.setHeader("Location", `/api/jobs/${encodeURIComponent(job.id)}`);
+          response.setHeader("Preference-Applied", "respond-async");
+          json(202, job);
           return;
         }
-        const outcome = await settledInvocation;
-        if (outcome.kind === "error") throw outcome.error;
+        if (outcome.settled.kind === "error") throw outcome.settled.error;
         if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
-        sendJson(response, 200, outcome.result); return;
-      }
-      const snapshotsMatch = suffix.match(/^manuscripts\/([^/]+)\/snapshots$/u);
-      if (snapshotsMatch && method === "GET") {
-        if (!coreStore.listManuscriptSnapshots) throw httpFailure(503, "SNAPSHOT_HISTORY_UNAVAILABLE", "Manuscript snapshot history is not available in this Core version");
-        const selected = optionalSnapshot(query, projectId);
-        const sceneId = query.get("sceneId") ?? undefined;
-        if (sceneId !== undefined && (!sceneId || sceneId.length > 256)) throw httpFailure(400, "INVALID_ID", "Scene identifier is invalid");
-        sendJson(response, 200, await coreStore.listManuscriptSnapshots(projectId, parseProjectId(snapshotsMatch[1]!), sceneId, selected.pinned));
+        json(200, outcome.settled.result);
         return;
       }
-      const snapshotMatch = suffix.match(/^manuscripts\/([^/]+)\/snapshots\/([^/]+)$/u);
-      if (snapshotMatch && method === "GET") {
-        if (!coreStore.readManuscriptSnapshot) throw httpFailure(503, "SNAPSHOT_HISTORY_UNAVAILABLE", "Manuscript snapshot history is not available in this Core version");
-        const selected = optionalSnapshot(query, projectId);
-        const snapshotId = parseProjectId(snapshotMatch[2]!);
-        if (!isPostgresRevisionId(snapshotId)) throw httpFailure(400, "INVALID_SNAPSHOT", "Manuscript revision ID must be a canonical PostgreSQL revision UUID");
-        const result = await coreStore.readManuscriptSnapshot(projectId, snapshotId, parseProjectId(snapshotMatch[1]!), undefined, selected.pinned);
-        if (!result) throw httpFailure(404, "MANUSCRIPT_SNAPSHOT_NOT_FOUND", "Manuscript revision is not reachable from the selected PostgreSQL project version");
-        if (Buffer.byteLength(JSON.stringify(result), "utf8") > MAX_SNAPSHOT_BYTES) throw httpFailure(413, "SNAPSHOT_TOO_LARGE", "Manuscript snapshot exceeds the response size limit");
-        sendJson(response, 200, result); return;
-      }
+      const outcome = await settledInvocation;
+      if (outcome.kind === "error") throw outcome.error;
+      if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
+      json(200, outcome.result); return;
+    },
+    manuscript_snapshots_get: async ({ params, query, projectId, json }) => {
+      if (!coreStore.listManuscriptSnapshots) throw httpFailure(503, "SNAPSHOT_HISTORY_UNAVAILABLE", "Manuscript snapshot history is not available in this Core version");
+      const selected = optionalSnapshot(query, projectId);
+      const sceneId = query.get("sceneId") ?? undefined;
+      if (sceneId !== undefined && (!sceneId || sceneId.length > 256)) throw httpFailure(400, "INVALID_ID", "Scene identifier is invalid");
+      json(200, await coreStore.listManuscriptSnapshots(projectId, params.manuscriptId!, sceneId, selected.pinned));
+      return;
+    },
+    manuscript_snapshot_get: async ({ response, params, query, projectId, json }) => {
+      if (!coreStore.readManuscriptSnapshot) throw httpFailure(503, "SNAPSHOT_HISTORY_UNAVAILABLE", "Manuscript snapshot history is not available in this Core version");
+      const selected = optionalSnapshot(query, projectId);
+      const snapshotId = params.snapshotId!;
+      if (!isPostgresRevisionId(snapshotId)) throw httpFailure(400, "INVALID_SNAPSHOT", "Manuscript revision ID must be a canonical PostgreSQL revision UUID");
+      const result = await coreStore.readManuscriptSnapshot(projectId, snapshotId, params.manuscriptId!, undefined, selected.pinned);
+      if (!result) throw httpFailure(404, "MANUSCRIPT_SNAPSHOT_NOT_FOUND", "Manuscript revision is not reachable from the selected PostgreSQL project version");
+      if (Buffer.byteLength(JSON.stringify(result), "utf8") > MAX_SNAPSHOT_BYTES) throw httpFailure(413, "SNAPSHOT_TOO_LARGE", "Manuscript snapshot exceeds the response size limit");
+      json(200, result); return;
+    },
+    project_search_get: async ({ query, projectId, json }) => {
+      const term = query.get("q") ?? "";
+      if (!term.trim() || term.length > 512) throw httpFailure(400, "INVALID_QUERY", "A search query from 1 to 512 characters is required");
+      const limit = boundedInt(query.get("limit"), 20, 1, 100);
+      const selected = optionalSnapshot(query, projectId);
+      json(200, await searchSnapshot(projectId, term, limit, selected)); return;
+    },
+    project_writing_stats_get: async ({ query, projectId, json }) => {
+      const selected = optionalSnapshot(query, projectId);
+      json(200, await writingStatsSnapshot(projectId, selected)); return;
+    },
+    project_recent_activity_get: async ({ projectId, isAuthor, json, reject }) => {
+      if (!isAuthor) { reject(403, "AUTHOR_SESSION_REQUIRED", "Recent activity requires an owner identity"); return; }
+      const activityAuthorScope = "owner";
 
-      const moduleRoute = suffix.match(/^modules\/([^/]+)(?:\/(.*))?$/u);
-      if (moduleRoute) {
-        const moduleId = parseProjectId(moduleRoute[1]!);
-        if (admittedMcpClient && moduleId !== "mcp") {
-          throw httpFailure(403, "OAUTH_MCP_MODULE_DENIED", "Standalone MCP clients may only use the MCP transport route");
+      try {
+        json(200, { items: await recentActivity.list(activityAuthorScope, projectId) });
+        return;
+      } catch (error) {
+        if (isHttpFailure(error)) throw error;
+        throw httpFailure(503, "RECENT_ACTIVITY_UNAVAILABLE", "Recent activity history is temporarily unavailable");
+      }
+    },
+    project_recent_activity_put: async ({ request, parsedBody, projectId, isAuthor, json, reject }) => {
+      if (!isAuthor) { reject(403, "AUTHOR_SESSION_REQUIRED", "Recent activity requires an owner identity"); return; }
+      const activityAuthorScope = "owner";
+
+      try {
+        const input = parseRecentActivityInput(parsedBody);
+        const header = request.headers["x-codexia-recent-activity-order"];
+        let order: { writer: string; sequence: number } | undefined;
+        if (header !== undefined) {
+          const match = typeof header === "string" ? /^([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}):([1-9][0-9]{0,15})$/u.exec(header) : null;
+          const sequence = Number(match?.[2]);
+          if (!match || !Number.isSafeInteger(sequence)) throw httpFailure(400, "INVALID_RECENT_ACTIVITY", "Recent activity order is invalid");
+          order = { writer: match[1]!, sequence };
         }
-        if (moduleId === "assistant" && isBearer) {
-          throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
-        }
-        const contribution = await contributionFor(moduleId, moduleRoute[2] ?? "", method);
-        if (!contribution || contribution.access !== "owner") throw httpFailure(404, "MODULE_ROUTE_UNAVAILABLE", "Module route is unavailable");
-        if (isBearer && !["read", "compute", "propose"].includes(contribution.effect)) throw httpFailure(403, "BEARER_EFFECT_DENIED", "Bearer credentials may only use read, compute, and propose module routes");
-        if (admittedMcpClient && moduleId === "mcp" && !mcpStreamableRoute) requireMcpEffect(contribution.effect);
-        // The MCP transport advertises "propose" because some tools create
-        // proposals, but initialization and read-only tools require read only.
-        // Actual proposal writes are gated by actionHost.authorizeProposal.
-        if (!runtime.invokeHttp) throw httpFailure(503, "MODULE_HTTP_UNAVAILABLE", "The runtime does not support HTTP module contributions");
-        if (contribution.effect === "read" && method !== "GET" && method !== "HEAD") throw httpFailure(405, "MODULE_HTTP_METHOD_DENIED", "Read-only module routes must use GET or HEAD");
-        const reader = await freshReader(projectId);
-        let domainJobId: string | undefined;
-        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, "owner", mcpAllowedEffects, admittedMcpClient?.projectIds, resolveNativeProposalActor, canReviewPrivateChangeSets, resolvePublishingAuthor);
-        if (mcpStreamableRoute && admittedMcpClient) {
-          const { issuer, clientId, userId } = admittedMcpClient;
-          host.mcpSessionIdentity = JSON.stringify([issuer, clientId, userId]);
-        }
-        const webRequest = makeWebRequest(request, parsedBody, signal, moduleRoute[2] ?? "");
-        const moduleResponse = await runtime.invokeHttp(moduleId, contribution.id, webRequest, host);
-        if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
-        await serveModuleResponse(moduleResponse, response, signal);
+        json(200, { items: await recentActivity.upsert(activityAuthorScope, projectId, input, order) });
+        return;
+      } catch (error) {
+        if (isHttpFailure(error)) throw error;
+        throw httpFailure(503, "RECENT_ACTIVITY_UNAVAILABLE", "Recent activity history is temporarily unavailable");
+      }
+    },
+    auth_consent_context_post: async ({ request, parsedBody, json, reject }) => {
+      if (!sameOrigin(request, trustProxy)) { reject(403, "CROSS_ORIGIN_REQUEST", "OAuth consent context requires a same-origin request"); return; }
+      const body = parsedBody;
+      if (!isRecord(body) || !hasOnlyKeys(body, new Set(["oauth_query"])) || typeof body.oauth_query !== "string" || !body.oauth_query) {
+        reject(400, "OAUTH_CONSENT_CONTEXT_INVALID", "OAuth consent context request is invalid"); return;
+      }
+      try {
+        const context = await options.betterAuth!.getConsentContext(options.betterAuth!.toHeaders(request.headers), body.oauth_query);
+        json(200, context);
+      } catch {
+        reject(request.headers.cookie ? 403 : 401, "OAUTH_CONSENT_CONTEXT_DENIED", "OAuth consent context could not be verified");
+      }
+      return;
+    },
+    owner_setup_status_get: async ({ request, response, json, crossOrigin }) => {
+      response.setHeader("Cache-Control", "no-store");
+      if (crossOrigin || request.headers.authorization !== undefined) {
+        json(403, { code: "SETUP_SAME_ORIGIN_REQUIRED" });
         return;
       }
+      json(200, { state: "active" });
+      return;
+    },
+    owner_session_confirm_post: async ({ request, json, reject }) => {
+      if (!sameOrigin(request, trustProxy)) {
+        reject(403, "CROSS_ORIGIN_REQUEST", "Owner session confirmation requires the exact same origin");
+        return;
+      }
+      if (request.headers.authorization !== undefined) {
+        reject(403, "OWNER_SESSION_COOKIE_REQUIRED", "Owner session confirmation does not accept bearer credentials");
+        return;
+      }
+      const result = await options.betterAuth!.checkOwnerSession(options.betterAuth!.toHeaders(request.headers));
+      if (result.status === 200) json(200, { authenticated: true });
+      else if (result.status === 403) reject(403, "OWNER_SESSION_REQUIRED", "Owner session confirmation was denied");
+      else reject(401, "AUTHENTICATION_REQUIRED", "A valid owner session is required");
+      return;
+    },
+    auth_list_consents_get: async ({ request, json, reject, crossOrigin }) => {
+      if (crossOrigin) { reject(403, "CROSS_ORIGIN_REQUEST", "OAuth consent listing requires a same-origin request"); return; }
+      const result = await options.betterAuth!.listOwnerOAuthConsents(options.betterAuth!.toHeaders(request.headers));
+      if (result.status === 200) json(200, result.consents);
+      else reject(result.status, "OAUTH_CONSENT_LIST_DENIED", "OAuth consent listing requires the owner session");
+      return;
+    },
+    authorizationServerMetadata: async ({ request, reply }) => {
+      const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: options.betterAuth!.toHeaders(request.headers) });
+      const metadata = await options.betterAuth!.advertisePublicClientTokenAuth(await options.betterAuth!.authorizationServerMetadata(metadataRequest));
+      await sendWebResponse(reply, metadata);
+      return;
+    },
+    openIdConfigMetadata: async ({ request, reply }) => {
+      const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: options.betterAuth!.toHeaders(request.headers) });
+      const metadata = await options.betterAuth!.advertisePublicClientTokenAuth(await options.betterAuth!.openIdConfigMetadata(metadataRequest));
+      await sendWebResponse(reply, metadata);
+      return;
+    },
+    protectedResourceMetadata: async ({ reply }) => {
+      await sendWebResponse(reply, createMcpProtectedResourceMetadataResponse(oauthMcpMetadata!));
+      return;
+    },
+    betterAuthWeb: async ({ request, reply, parsedBody, signal }) => {
+      const host = request.headers.host ?? "localhost";
+      const authUrl = `${requestProtocol(request, trustProxy)}//${host}${request.url ?? "/"}`;
+      const headers = options.betterAuth!.toHeaders(request.headers);
+      headers.delete("connection");
+      headers.delete("content-length");
+      headers.delete("host");
+      headers.delete("transfer-encoding");
+      const authMethod = request.method ?? "GET";
+      let body: BodyInit | undefined;
+      if (authMethod !== "GET" && authMethod !== "HEAD" && parsedBody !== undefined) {
+        body = typeof parsedBody === "string" ? parsedBody : JSON.stringify(parsedBody);
+      }
+      const authRequest = new Request(authUrl, { method: authMethod, headers, signal, ...(body !== undefined ? { body } : {}) });
+      const authResponse = await options.betterAuth!.handler(authRequest);
+      const responseHeaders: Record<string, string | string[]> = Object.fromEntries(authResponse.headers.entries());
+      const cookies = authResponse.headers.getSetCookie();
+      if (cookies.length) responseHeaders["set-cookie"] = cookies;
+      await sendWebResponse(reply, authResponse, responseHeaders);
+      return;
+    },
+  };
+  const publicHealth = new Set(["/api/health", "/api/ready", "/health/live", "/health/ready", "/health/startup", ...VERSION_PATHS]);
+  const responseDeviations = new Set(["jobs_list_get", "project_modules_get", "project_contributions_get",
+    "project_history_get", "auth_list_consents_get"]);
+  const pathMethods = new Map<string, Set<HTTPMethods>>();
+  const knownMethods = new Set<HTTPMethods>();
+  for (const schema of httpContract.schemas) app.addSchema(schema);
 
-      const searchMatch = suffix.match(/^search$/u);
-      if (searchMatch && method === "GET") {
-        const term = query.get("q") ?? "";
-        if (!term.trim() || term.length > 512) throw httpFailure(400, "INVALID_QUERY", "A search query from 1 to 512 characters is required");
-        const limit = boundedInt(query.get("limit"), 20, 1, 100);
-        const selected = optionalSnapshot(query, projectId);
-        sendJson(response, 200, await searchSnapshot(projectId, term, limit, selected)); return;
-      }
-      const statsMatch = suffix.match(/^writing-stats$/u);
-      if (statsMatch && method === "GET") {
-        const selected = optionalSnapshot(query, projectId);
-        sendJson(response, 200, await writingStatsSnapshot(projectId, selected)); return;
-      }
-      if (suffix === "scratch" && method === "POST") {
-        const authorScope = await requireAuthorSession();
-        await createScratch(projectId, await readJson(request, parsedBody), authorScope, response); return;
-      }
-      if (suffix === "review-queue" && method === "GET") {
-        if (!coreStore.listProposalsSnapshot) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
-        const result = await coreStore.listProposalsSnapshot(projectId);
-        sendJson(response, 200, { snapshot: result.snapshot, proposals: result.proposals.filter((status) => isVisibleProposal(status, canReviewPrivateChangeSets)).slice(0, 1000) }); return;
-      }
-
-      if (suffix.startsWith("modules/") || suffix.startsWith("actions/")) throw httpFailure(404, "NOT_FOUND", "API route not found");
+  const register = (
+    instance: FastifyInstance, method: HTTPMethods, url: string, handler: Handler,
+    contract?: (typeof httpContract.routes)[number], policy: AdmissionPolicy = "public",
+  ) => {
+    const methods = pathMethods.get(url) ?? new Set<HTTPMethods>();
+    methods.add(method);
+    knownMethods.add(method);
+    pathMethods.set(url, methods);
+    const schema = contract && { ...contract.schema };
+    if (schema && contract && responseDeviations.has(contract.operationId)) {
+      const responses = { ...schema.response as Record<string, unknown> };
+      delete responses["200"];
+      schema.response = responses;
     }
+    instance.route({
+      method, url, ...(schema ? { schema } : {}),
+      onRequest: async (request, reply) => {
+        const input = request.raw;
+        const response = reply.raw;
+        const params = (request.params ?? {}) as Record<string, string>;
+        const query = queryOf(input);
+        const crossOrigin = checkOrigin(input, response, url.startsWith("/api/") || url === "/mcp", policy === "mcp" || policy === "mcp-module");
+        checkPathParams(params);
+        if (contract?.operationId === "owner_session_confirm_post" || contract?.operationId === "auth_consent_context_post") {
+          if (!sameOrigin(input, trustProxy)) throw httpFailure(403, "CROSS_ORIGIN_REQUEST", "The authentication operation requires the exact same origin");
+        }
+        const admission = await admit(input, response, params, query, policy);
+        if ((contract?.requestContentTypes.length ?? 0) > 0) {
+          const contentType = input.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+          if (!contract!.requestContentTypes.includes(contentType)) {
+            throw httpFailure(415, "JSON_REQUIRED", "Send a supported request body");
+          }
+        }
+        routeContexts.set(request, { ...admission, params, query, crossOrigin });
+      },
+      handler: async (request, reply) => {
+        const admission = routeContexts.get(request)!;
+        const json: SendJson = (status, value) => {
+          void reply.code(status).type("application/json; charset=utf-8").send(value);
+        };
+        try {
+          await handler({ ...admission, request: request.raw, response: reply.raw, reply, parsedBody: request.body, json,
+            reject: (status, code, message) => json(status, { error: message, code }) });
+        } catch (error) {
+          if (reply.raw.headersSent || reply.sent) {
+            reply.raw.destroy(error instanceof Error ? error : undefined);
+          } else {
+            throw error;
+          }
+        }
+      },
+    });
+  };
 
-    if (routePath.startsWith("/api/public/projects/") && routePath.includes("/modules/")) {
-      const publicMatch = routePath.match(/^\/api\/public\/projects\/([^/]+)\/modules\/([^/]+)(?:\/(.*))?$/u);
-      if (!publicMatch) throw httpFailure(404, "NOT_FOUND", "Public module route not found");
-      const projectId = parseProjectId(publicMatch[1]!);
-      assertAssignedProject(projectId, admittedMcpClient?.projectIds);
-      const moduleId = parseProjectId(publicMatch[2]!);
-      if (!(await findAuthorizedProject(projectId, admittedMcpClient?.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Public project was not found");
-      const contribution = await contributionFor(moduleId, publicMatch[3] ?? "", method);
-      if (!contribution || contribution.access !== "public" || contribution.effect !== "read") throw httpFailure(404, "MODULE_ROUTE_UNAVAILABLE", "Public module route is unavailable");
-      if (!isRead) throw httpFailure(405, "PUBLIC_MODULE_READ_ONLY", "Public module routes are read-only");
+  const ownerSetupOnly = new Set(["owner_setup_authorize_post", "owner_setup_profile_post", "owner_setup_complete_post"]);
+  const authAdapters = new Set(["auth_methods_get", "auth_consent_context_post", "auth_list_consents_get",
+    "owner_session_confirm_post", "owner_setup_status_get"]);
+  handlers.auth_methods_get = handlers.betterAuthWeb!;
+  handlers.api_browser_version_get = handlers.api_version_get!;
+
+  const invokeContribution = (
+    contribution: Pick<FastifyHttpContributionRoute, "moduleId" | "contributionId" | "effect" | "access" | "relativePath">,
+    mcpStreamableRoute: boolean,
+  ): Handler => async ({ request, reply, response, params, projectId, admittedMcpClient, isBearer, requireMcpEffect,
+    mcpAllowedEffects, authorizeActionProposal, resolveNativeProposalActor, canReviewPrivateChangeSets, resolvePublishingAuthor, signal, parsedBody }) => {
+    const { moduleId, contributionId, effect } = contribution;
+    const relativePath = contribution.relativePath.split("/").map(segment => {
+      if (!segment.startsWith(":")) return segment;
+      const param = params[segment.slice(1)];
+      if (!param || !/^[A-Za-z0-9._~-]{1,256}$/u.test(param)) throw httpFailure(404, "MODULE_ROUTE_UNAVAILABLE", "Module route is unavailable");
+      return param;
+    }).join("/");
+    try { await runtime.activate(moduleId); }
+    catch (error) {
+      const code = (error as { code?: unknown })?.code;
+      if (code === "module_disabled" || code === "redeployment_required" || code === "unknown_module_id") {
+        throw httpFailure(404, "MODULE_ROUTE_UNAVAILABLE", "Module route is unavailable");
+      }
+      throw error;
+    }
+    if (contribution.access === "public") {
+      if (!(await findAuthorizedProject(projectId))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Public project was not found");
       if (!runtime.invokeHttp) throw httpFailure(503, "MODULE_HTTP_UNAVAILABLE", "The runtime does not support HTTP module contributions");
       const reader = await freshReader(projectId);
       const host = actionHost(projectId, reader, signal, "module", "public");
-      const moduleResponse = await runtime.invokeHttp(moduleId, contribution.id, makeWebRequest(request, parsedBody, signal, publicMatch[3] ?? ""), host);
-      await serveModuleResponse(moduleResponse, response, signal, true); return;
+      const result = await runtime.invokeHttp(moduleId, contributionId, makeWebRequest(request, parsedBody, signal, relativePath), host);
+      reply.hijack();
+      await serveModuleResponse(result, response, signal, true);
+      return;
     }
-
-    if (routePath.startsWith("/api/")) { fail(response, 404, "NOT_FOUND", "API route not found"); return; }
-    if (await serveStatic(request, response, staticDir, styleNonce)) return;
-    fail(response, 404, "NOT_FOUND", "Page not found");
-  };
-
-  const routeHandler = async (request: FastifyRequest, reply: import("fastify").FastifyReply): Promise<void> => {
+    if (admittedMcpClient && moduleId !== "mcp") {
+      throw httpFailure(403, "OAUTH_MCP_MODULE_DENIED", "Standalone MCP clients may only use the MCP transport route");
+    }
+    if (!runtime.invokeHttp) throw httpFailure(503, "MODULE_HTTP_UNAVAILABLE", "The runtime does not support HTTP module contributions");
+    if (admittedMcpClient && !mcpStreamableRoute) requireMcpEffect(effect);
+    const reader = await freshReader(projectId);
+    let domainJobId: string | undefined;
+    const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner",
+      (id) => { domainJobId = id; }, authorizeActionProposal, "owner", mcpAllowedEffects, admittedMcpClient?.projectIds,
+      resolveNativeProposalActor, canReviewPrivateChangeSets, resolvePublishingAuthor);
+    if (mcpStreamableRoute && admittedMcpClient) {
+      const { issuer, clientId, userId } = admittedMcpClient;
+      host.mcpSessionIdentity = JSON.stringify([issuer, clientId, userId]);
+    }
+    const result = await runtime.invokeHttp(moduleId, contributionId, makeWebRequest(request, parsedBody, signal, relativePath), host);
+    if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
     reply.hijack();
-    activeRequests += 1;
-    try { await handle(request.raw, reply.raw, request.body); }
-    catch (error) { if (!reply.raw.headersSent) sendError(reply.raw, error); else reply.raw.destroy(error instanceof Error ? error : undefined); }
-    finally {
-      activeRequests = Math.max(0, activeRequests - 1);
-    }
+    await serveModuleResponse(result, response, signal);
   };
-  const methods = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
-  app.route({ method: [...methods], url: "/", handler: routeHandler });
-  app.route({ method: [...methods], url: "/*", handler: routeHandler });
+  const moduleHttpRoutes = deriveModuleHttpRoutes(runtime.httpRegistrationManifests());
+  const contractByRoute = new Map(httpContract.routes.map(route => [`${route.method} ${route.url}`, route]));
+  const standaloneMcp = invokeContribution({ moduleId: "mcp", contributionId: "streamable", effect: "propose", access: "owner", relativePath: "streamable" }, true);
+
+  const persistenceHandler = (route: (typeof httpContract.routes)[number]): Handler => async (context) => {
+    const result = await handlePersistenceOperation(route.operationId, {
+      persistence: options.persistence,
+      params: context.params,
+      query: context.query,
+      body: context.parsedBody,
+      requestHeaders: context.request.headers,
+      canReviewPrivateChangeSets: context.canReviewPrivateChangeSets,
+      requireAuthor: context.requireAuthorSession,
+    });
+    context.json(result.status, result.body);
+  };
+  for (const route of httpContract.routes) {
+    if (route.contractStatus === "target" || ownerSetupOnly.has(route.operationId) || authAdapters.has(route.operationId)) continue;
+    if (route.operationId.startsWith("project_mcp_") || route.operationId.startsWith("public_share_")) continue;
+    const policy = route.url === "/mcp" ? "mcp" : publicHealth.has(route.url) ? "public" :
+      route.operationId.startsWith("persistence_") ? "persistence" : "api";
+    const handler = policy === "mcp" ? standaloneMcp : policy === "persistence" ? persistenceHandler(route) :
+      handlers[route.operationId] ?? (route.method === "HEAD" ? handlers[route.operationId.replace(/_head$/u, "_get")] : undefined);
+    if (!handler) throw new Error(`No handler registered for ${route.operationId}`);
+    register(app, route.method, route.url, handler, route, policy);
+  }
+
+  app.register(async (auth) => {
+    if (!options.betterAuth) return;
+    auth.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_request, body, done) => done(null, body));
+    for (const route of httpContract.routes) {
+      if (authAdapters.has(route.operationId)) register(auth, route.method, route.url, handlers[route.operationId]!, route);
+    }
+    register(auth, "GET", "/.well-known/oauth-authorization-server/api/auth", handlers.authorizationServerMetadata!);
+    register(auth, "GET", "/.well-known/openid-configuration/api/auth", handlers.openIdConfigMetadata!);
+    for (const [method, url] of BETTER_AUTH_HTTP_ROUTES) register(auth, method, url, handlers.betterAuthWeb!);
+  });
+  if (oauthMcpMetadataUrl && oauthMcpMetadata) {
+    register(app, "GET", new URL(oauthMcpMetadataUrl).pathname, handlers.protectedResourceMetadata!);
+  }
+  for (const route of moduleHttpRoutes) {
+    const contract = contractByRoute.get(`${route.method} ${route.url}`);
+    const mcp = route.moduleId === "mcp" && route.relativePath === "streamable";
+    register(app, route.method, route.url, invokeContribution(route, mcp), contract,
+      route.access === "public" ? "public" : mcp ? "mcp-module" : "api");
+  }
+
+  app.after(() => {
+    for (const [url, methods] of pathMethods) {
+      if (!(url.startsWith("/api/") || url === "/mcp")) continue;
+      app.options(url, async (request, reply) => {
+        const mcp = url === "/mcp" || url === "/api/projects/:projectId/modules/mcp/streamable";
+        const crossOrigin = checkOrigin(request.raw, reply.raw, true, mcp);
+        const allow = [...methods, "OPTIONS"].join(", ");
+        if (crossOrigin) {
+          const requestedMethod = request.headers["access-control-request-method"];
+          if (typeof requestedMethod !== "string" || !methods.has(requestedMethod.toUpperCase() as HTTPMethods)) {
+            throw httpFailure(403, "CORS_METHOD_DENIED", "Cross-origin API method is not allowed");
+          }
+          const rawHeaders = request.headers["access-control-request-headers"];
+          const requestedHeaders = typeof rawHeaders === "string" && rawHeaders.trim()
+            ? rawHeaders.split(",").map((header) => header.trim().toLowerCase()) : [];
+          const available = (header: string) => CORS_HEADERS.get(header) ?? (mcp ? MCP_CORS_HEADERS.get(header) : undefined);
+          if (requestedHeaders.some(header => !available(header))) {
+            throw httpFailure(403, "CORS_HEADER_DENIED", "Cross-origin API request headers are not allowed");
+          }
+          reply.header("Access-Control-Allow-Methods", requestedMethod.toUpperCase());
+          if (requestedHeaders.length) reply.header("Access-Control-Allow-Headers", [...new Set(requestedHeaders)].map(available).join(", "));
+        }
+        return reply.code(204).header("Allow", allow).send();
+      });
+    }
+  });
+  app.setNotFoundHandler(async (request, reply) => {
+    const isMcp = request.url.split("?", 1)[0] === "/mcp";
+    checkOrigin(request.raw, reply.raw, request.url.startsWith("/api/") || isMcp, isMcp);
+    const methods = [...knownMethods].filter(method => app.findRoute({ method, url: request.url }));
+    if (methods.length > 0) {
+      reply.header("Allow", methods.join(", "));
+      throw httpFailure(405, "METHOD_NOT_ALLOWED", "Method not allowed");
+    }
+    const path = requestPath(request.raw);
+    if (["GET", "HEAD"].includes(request.method) && !path.startsWith("/api/") && path !== "/mcp") {
+      if (await serveStatic(request.raw, reply.raw, staticDir, STYLE_NONCES.get(request.raw)!)) {
+        reply.hijack();
+        return;
+      }
+    }
+    throw httpFailure(404, "NOT_FOUND", "Route not found");
+  });
 
   // Keep the historical synchronous Node server factory while routing every request through Fastify.
   const server = createHttpServer((request, response) => {
-    void Promise.resolve(app.ready()).then(() => { app.server.emit("request", request, response); }).catch((error: unknown) => sendError(response, error));
+    void Promise.resolve(app.ready()).then(() => { app.routing(request, response); }).catch((error: unknown) => sendError(response, error));
   });
   server.once("listening", () => { started = true; });
   const nodeClose = server.close.bind(server);
