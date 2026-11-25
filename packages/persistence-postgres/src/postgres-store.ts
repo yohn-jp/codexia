@@ -1849,6 +1849,31 @@ class PostgresTransaction implements PersistenceTransaction {
     }, true);
   }
 
+  private async assertChangeSetApplicable(changeSet: ChangeSet): Promise<void> {
+    if (changeSet.provenance.source === "native-knowledge-service") {
+      const sourceVersion = changeSet.provenance.details.projectVersion;
+      if (typeof sourceVersion !== "number" || !Number.isInteger(sourceVersion)) throw validationError("Native ChangeSet is missing its project snapshot fence");
+      await this.assertProjectVersion(changeSet.projectId, sourceVersion);
+    }
+    if (changeSet.provenance.source === "native-knowledge-merge") {
+      const sourceVersion = changeSet.provenance.details.projectVersion;
+      if (typeof sourceVersion !== "number" || !Number.isSafeInteger(sourceVersion)) throw validationError("Native merge ChangeSet is missing its project snapshot fence");
+      await this.assertProjectVersion(changeSet.projectId, sourceVersion);
+    }
+
+    validateChangeSetOperations(
+      changeSet.projectId,
+      changeSet.operations,
+      changeSet.readSet,
+      changeSet.writeSet,
+      changeSet.provenance,
+      changeSet.operations.some(operation => operation.type === "knowledge.merge"),
+    );
+    if (changeSet.provenance.source === HIERARCHY_REORDER_SOURCE) await this.assertHierarchyReorderScope(changeSet);
+    if (changeSet.provenance.source === HIERARCHY_DELETE_SOURCE) await this.assertHierarchyDeleteScope(changeSet);
+    await this.assertChangeSetReadSet(changeSet.projectId, changeSet.readSet);
+  }
+
   private async transitionChangeSet(command: {
     projectId: ProjectId;
     changeSetId: ChangeSetId;
@@ -1859,7 +1884,21 @@ class PostgresTransaction implements PersistenceTransaction {
     this.ensureWritable();
     await this.lockProject(command.projectId);
     assertNonEmpty(command.actorId, `${command.transition === "approve" ? "Approver" : "Rejector"} id`);
-    const status = command.transition === "approve" ? "approved" : "rejected";
+    const current = await this.getChangeSet(command.projectId, command.changeSetId);
+    if (!current) throw notFound("change set", command.changeSetId);
+    if (current.status !== "proposed") {
+      throw new PersistenceError("invalid_change_set_state", `Cannot ${command.transition} a ${current.status} ChangeSet`, {
+        resource: "change_set",
+        id: command.changeSetId,
+        expected: "proposed",
+        actual: current.status,
+      });
+    }
+    if (current.version !== command.expectedVersion) {
+      throw conflict("change_set", command.changeSetId, command.expectedVersion, current.version);
+    }
+    if (command.transition === "approve") await this.assertChangeSetApplicable(current);
+
     const result = command.transition === "approve"
       ? await this.query(
         `UPDATE change_set SET status = 'approved', version = version + 1, approved_at = clock_timestamp(), approved_by = $4
@@ -1871,19 +1910,7 @@ class PostgresTransaction implements PersistenceTransaction {
          WHERE project_id = $1 AND id = $2 AND version = $3 AND status = 'proposed' RETURNING *`,
         [command.projectId, command.changeSetId, command.expectedVersion, command.actorId],
       );
-    if (!result.rows[0]) {
-      const current = await this.getChangeSet(command.projectId, command.changeSetId);
-      if (!current) throw notFound("change set", command.changeSetId);
-      if (current.status !== "proposed") {
-        throw new PersistenceError("invalid_change_set_state", `Cannot ${command.transition} a ${current.status} ChangeSet`, {
-          resource: "change_set",
-          id: command.changeSetId,
-          expected: "proposed",
-          actual: current.status,
-        });
-      }
-      throw conflict("change_set", command.changeSetId, command.expectedVersion, current.version);
-    }
+    if (!result.rows[0]) throw conflict("change_set", current.id, command.expectedVersion, null);
     return mapChangeSet(result.rows[0]!);
   }
 
@@ -2281,28 +2308,7 @@ class PostgresTransaction implements PersistenceTransaction {
       throw conflict("change_set", changeSet.id, command.expectedVersion, changeSet.version);
     }
 
-    if (changeSet.provenance.source === "native-knowledge-service") {
-      const sourceVersion = changeSet.provenance.details.projectVersion;
-      if (typeof sourceVersion !== "number" || !Number.isInteger(sourceVersion)) throw validationError("Native ChangeSet is missing its project snapshot fence");
-      await this.assertProjectVersion(command.projectId, sourceVersion);
-    }
-    if (changeSet.provenance.source === "native-knowledge-merge") {
-      const sourceVersion = changeSet.provenance.details.projectVersion;
-      if (typeof sourceVersion !== "number" || !Number.isSafeInteger(sourceVersion)) throw validationError("Native merge ChangeSet is missing its project snapshot fence");
-      await this.assertProjectVersion(command.projectId, sourceVersion);
-    }
-
-    validateChangeSetOperations(
-      changeSet.projectId,
-      changeSet.operations,
-      changeSet.readSet,
-      changeSet.writeSet,
-      changeSet.provenance,
-      changeSet.operations.some(operation => operation.type === "knowledge.merge"),
-    );
-    if (changeSet.provenance.source === HIERARCHY_REORDER_SOURCE) await this.assertHierarchyReorderScope(changeSet);
-    if (changeSet.provenance.source === HIERARCHY_DELETE_SOURCE) await this.assertHierarchyDeleteScope(changeSet);
-    await this.assertChangeSetReadSet(command.projectId, changeSet.readSet);
+    await this.assertChangeSetApplicable(changeSet);
     const results: ChangeSetOperationResult[] = [];
     for (const operation of changeSet.operations) results.push(await this.applyOperation(operation, changeSet.approvedBy));
     const updated = await this.query(

@@ -741,20 +741,16 @@ test("ChangeSet application is atomic, versioned and idempotent", async () => {
     writeSet: [{ resource: "knowledge_node", id: staleReadNodeId }],
     provenance: { source: "author", actorId: "author", details: {} },
   }));
-  const approvedStaleRead = await persistence.transaction((transaction) => transaction.approveChangeSet({
-    projectId: project.id,
-    changeSetId: staleReadChange.changeSet.id,
-    expectedVersion: staleReadChange.changeSet.version,
-    approvedBy: "author",
-  }));
   await assert.rejects(
-    persistence.transaction((transaction) => transaction.applyChangeSet({
+    persistence.transaction((transaction) => transaction.approveChangeSet({
       projectId: project.id,
-      changeSetId: approvedStaleRead.id,
-      expectedVersion: approvedStaleRead.version,
+      changeSetId: staleReadChange.changeSet.id,
+      expectedVersion: staleReadChange.changeSet.version,
+      approvedBy: "author",
     })),
     (error: unknown) => error instanceof PersistenceError && error.code === "conflict",
   );
+  assert.equal((await persistence.read((reader) => reader.getChangeSet(project.id, staleReadChange.changeSet.id)))?.status, "proposed");
   assert.equal(await persistence.read((reader) => reader.getKnowledgeNode(project.id, staleReadNodeId)), undefined);
 
   const nodeId = randomUUID() as KnowledgeNodeId;
