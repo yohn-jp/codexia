@@ -1102,6 +1102,7 @@ test("a root-only public share renders selectable scenes without an owner sessio
   const token = "share_" + "r".repeat(43);
   const base = `/api/public/projects/${projectId}/modules/publishing/share/${token}`;
   const requests: string[] = [];
+  const publicRequestHeaders: Record<string, string>[] = [];
   const ownerSessionRequests: string[] = [];
   page.on("request", (request) => {
     const pathname = new URL(request.url()).pathname;
@@ -1110,13 +1111,16 @@ test("a root-only public share renders selectable scenes without an owner sessio
   await page.route(`**${base}**`, async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     requests.push(pathname);
+    publicRequestHeaders.push(await route.request().allHeaders());
     if (pathname === base) {
       await route.fulfill({ status: 200, json: {
         label: "Root scene preview", expiresAt: "2030-01-01T00:00:00Z",
+        snapshot: { projectId, projectVersion: 1 }, scope: { kind: "project", id: projectId },
         sceneCount: 1, rootScenes: [{ id: "root-scene", title: "作品直下のシーン" }], tree: [],
       } });
     } else if (pathname === `${base}/scenes/root-scene`) {
       await route.fulfill({ status: 200, json: {
+        snapshot: { projectId, projectVersion: 1 },
         id: "root-scene", title: "作品直下のシーン", body: "作品直下の本文を表示します。",
       } });
     } else {
@@ -1129,6 +1133,7 @@ test("a root-only public share renders selectable scenes without an owner sessio
   await page.getByRole("button", { name: "作品直下のシーン" }).click();
   await expect(page.getByText("作品直下の本文を表示します。")).toBeVisible();
   expect(requests).toEqual([base, `${base}/scenes/root-scene`]);
+  expect(publicRequestHeaders.every((headers) => !headers.cookie && !headers.authorization)).toBe(true);
   expect(ownerSessionRequests).toEqual([]);
 });
 

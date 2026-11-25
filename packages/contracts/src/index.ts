@@ -718,7 +718,30 @@ export interface BrowserModuleContext {
 export interface BrowserModuleDefinition {
   mount(contributionId: string, element: HTMLElement, context: BrowserModuleContext): Promise<() => void>;
   /** Public read-only source views receive no author or private-work capability. */
-  mountPublic?(viewId: string, element: HTMLElement, request: Request): Promise<() => void>;
+  mountPublic?(viewId: string, element: HTMLElement, request: Request, source?: PublicShareReaderSource): Promise<() => void>;
+}
+
+/** Minimal rendering data supplied to the public share reader, independent of HTTP wire DTOs. */
+export interface PublicShareReaderSource {
+  loadIndex(): Promise<PublicShareReaderIndex>;
+  loadScene(sceneId: string): Promise<PublicShareReaderScene>;
+}
+export interface PublicShareReaderSceneLink {
+  id: string;
+  title: string;
+}
+export interface PublicShareReaderIndex {
+  label: string;
+  expiresAt: string;
+  rootScenes: PublicShareReaderSceneLink[];
+  tree: Array<{
+    volume: { title: string };
+    chapters: Array<{ chapter: { title: string }; scenes: PublicShareReaderSceneLink[] }>;
+  }>;
+}
+export interface PublicShareReaderScene {
+  title: string;
+  body: string;
 }
 
 /** Private owner state for continuing a work on another device; never manuscript content. */

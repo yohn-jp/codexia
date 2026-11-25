@@ -1,6 +1,6 @@
-import { createElement, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createElement, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import type { BrowserModuleContext, BrowserModuleDefinition } from "@codexia/contracts";
+import type { BrowserModuleContext, BrowserModuleDefinition, PublicShareReaderIndex, PublicShareReaderScene, PublicShareReaderSource } from "@codexia/contracts";
 import { publicReaderOrigin, publicReaderUrl } from "./share-url.js";
 
 interface SceneItem { id: string; title: string }
@@ -550,13 +550,12 @@ function SettingsView({ contributionId, context }: { contributionId: string; con
   </div>;
 }
 
-function ShareReaderView({ projectId, token }: { projectId: string; token: string }) {
-  const [metadata, setMetadata] = useState<Record<string, unknown> | null>(null);
-  const [scene, setScene] = useState<Record<string, unknown> | null>(null);
+function ShareReaderView({ source }: { source: PublicShareReaderSource }) {
+  const [metadata, setMetadata] = useState<PublicShareReaderIndex | null>(null);
+  const [scene, setScene] = useState<PublicShareReaderScene | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const base = "/api/public/projects/" + encodeURIComponent(projectId) +
-    "/modules/publishing/share/" + encodeURIComponent(token);
+  const alive = useRef(true);
   useEffect(() => {
     const robots = document.createElement("meta");
     robots.name = "robots";
@@ -573,23 +572,24 @@ function ShareReaderView({ projectId, token }: { projectId: string; token: strin
   }, []);
   useEffect(() => {
     let alive = true;
-    void fetch(base, { headers: { accept: "application/json" }, cache: "no-store" }).then(async (response) => {
-      if (!response.ok) throw new Error("共有リンクは無効か、期限切れです。");
-      return response.json() as Promise<Record<string, unknown>>;
-    }).then((data) => { if (alive) setMetadata(data); }).catch((cause) => { if (alive) setError(messageOf(cause)); });
+    void source.loadIndex().then((data) => { if (alive) setMetadata(data); }).catch(() => {
+      if (alive) setError("共有リンクは無効か、期限切れです。");
+    });
     return () => { alive = false; };
-  }, [base]);
+  }, [source]);
   async function openScene(id: string) {
     setBusy(true); setError("");
     try {
-      const response = await fetch(base + "/scenes/" + encodeURIComponent(id), { headers: { accept: "application/json" }, cache: "no-store" });
-      if (!response.ok) throw new Error("このシーンは共有範囲にありません。");
-      setScene(await response.json() as Record<string, unknown>);
-    } catch (cause) { setError(messageOf(cause)); }
-    finally { setBusy(false); }
+      setScene(await source.loadScene(id));
+    } catch { if (alive.current) setError("このシーンは共有範囲にありません。"); }
+    finally { if (alive.current) setBusy(false); }
   }
-  const tree = (metadata?.tree as Array<{ volume: { title: string }; chapters: Array<{ chapter: { title: string }; scenes: SceneItem[] }> }> | undefined) ?? [];
-  const rootScenes = (metadata?.rootScenes as SceneItem[] | undefined) ?? [];
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+  const tree = metadata?.tree ?? [];
+  const rootScenes = metadata?.rootScenes ?? [];
   return <main style={{ maxWidth: 760, margin: "2rem auto", padding: "0 1rem", lineHeight: 1.8 }}>
     <h1>{String(metadata?.label ?? "共有された原稿")}</h1>
     <p>読み取り専用の共有です。期限: {metadata?.expiresAt ? new Date(String(metadata.expiresAt)).toLocaleString("ja-JP") : ""}</p>
@@ -609,7 +609,7 @@ function ShareReaderView({ projectId, token }: { projectId: string; token: strin
       </div>)}
     </section>)}
     {scene && <article style={{ whiteSpace: "pre-wrap", borderTop: "1px solid #aaa", paddingTop: 16 }}>
-      <h2>{String(scene.title)}</h2>{String(scene.body ?? "")}
+      <h2>{scene.title}</h2>{scene.body}
     </article>}
     <Status error={error} status="" />
   </main>;
@@ -619,30 +619,17 @@ function MountView({ contributionId, context }: { contributionId: string; contex
   return <SettingsView contributionId={contributionId} context={context} />;
 }
 
-function publicRouteParts(request: Request): { projectId: string; token: string } | null {
-  const segments = new URL(request.url).pathname.split("/").filter(Boolean);
-  const routeIndex = segments.indexOf("r");
-  if (routeIndex < 0 || segments[routeIndex + 1] !== "publishing" || !segments[routeIndex + 2] || !segments[routeIndex + 3]) return null;
-  try {
-    return {
-      projectId: decodeURIComponent(segments[routeIndex + 2]!),
-      token: decodeURIComponent(segments[routeIndex + 3]!),
-    };
-  } catch { return null; }
-}
-
 export const browserModule: BrowserModuleDefinition = {
   async mount(contributionId: string, element: HTMLElement, context: BrowserModuleContext): Promise<() => void> {
     const root = createRoot(element);
     root.render(createElement(MountView, { contributionId, context }));
     return () => root.unmount();
   },
-  async mountPublic(viewId: string, element: HTMLElement, request: Request): Promise<() => void> {
+  async mountPublic(viewId: string, element: HTMLElement, _request: Request, source?: PublicShareReaderSource): Promise<() => void> {
     if (viewId !== "share") throw new Error("Unknown public publishing view");
-    const route = publicRouteParts(request);
-    if (!route) throw new Error("Invalid publication share route");
+    if (!source) throw new Error("Invalid publication share route");
     const root = createRoot(element);
-    root.render(createElement(ShareReaderView, route));
+    root.render(createElement(ShareReaderView, { source }));
     return () => root.unmount();
   },
 };

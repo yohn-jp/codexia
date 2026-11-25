@@ -1,8 +1,54 @@
 import { useEffect, useRef, useState } from "react";
 import type { ModuleId } from "@codexia/contracts";
+import type { PublicShareReaderIndex, PublicShareReaderScene, PublicShareReaderSource } from "@codexia/contracts";
 import { ThemeControl } from "../components/ThemeControl";
 import type { ThemeMode } from "../theme";
 import { moduleBrowserLoaders } from "../generated/browser-modules";
+import { publicShareGet, publicShareSceneGet } from "../generated/http/client";
+
+function publicShareSource(request: Request): PublicShareReaderSource | undefined {
+  const segments = new URL(request.url).pathname.split("/").filter(Boolean);
+  const routeIndex = segments.indexOf("r");
+  if (routeIndex < 0 || segments[routeIndex + 1] !== "publishing" ||
+      !segments[routeIndex + 2] || !segments[routeIndex + 3] || routeIndex + 4 !== segments.length) return undefined;
+  let projectId: string;
+  let token: string;
+  try {
+    projectId = decodeURIComponent(segments[routeIndex + 2]!);
+    token = decodeURIComponent(segments[routeIndex + 3]!);
+  } catch {
+    return undefined;
+  }
+  const options = {
+    credentials: "omit",
+    cache: "no-store",
+    redirect: "error",
+    headers: { accept: "application/json" },
+    signal: request.signal,
+    transport: { auth: "anonymous" },
+  } as const;
+  return {
+    async loadIndex(): Promise<PublicShareReaderIndex> {
+      const body = await publicShareGet(projectId, token, options);
+      return {
+        label: body.label,
+        expiresAt: body.expiresAt,
+        rootScenes: body.rootScenes.map(({ id, title }) => ({ id, title })),
+        tree: body.tree.map(({ volume, chapters }) => ({
+          volume: { title: volume.title },
+          chapters: chapters.map(({ chapter, scenes }) => ({
+            chapter: { title: chapter.title },
+            scenes: scenes.map(({ id, title }) => ({ id, title })),
+          })),
+        })),
+      };
+    },
+    async loadScene(sceneId: string): Promise<PublicShareReaderScene> {
+      const body = await publicShareSceneGet(projectId, token, sceneId, options);
+      return { title: body.title, body: body.body };
+    },
+  };
+}
 
 const MODULE_IDS = new Set<ModuleId>([
   "story",
@@ -67,7 +113,8 @@ export function PublicModuleView({
           credentials: "omit",
           signal: controller.signal,
         });
-        const cleanup = await definition.mountPublic("share", element, request);
+        const source = moduleId === "publishing" ? publicShareSource(request) : undefined;
+        const cleanup = await definition.mountPublic("share", element, request, source);
         if (cancelled) cleanup?.();
         else dispose = cleanup;
       } catch (cause) {
