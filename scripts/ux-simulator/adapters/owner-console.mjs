@@ -13,17 +13,47 @@ const setupRefreshHandler = `onClick={() => {
                 });
               }}`;
 
+const SETTINGS_REGION = 'console-settings';
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function sourceAtPattern(source, path, pattern) {
+  if (!source.exists(path)) return null;
+  const match = pattern.exec(source.read(path));
+  return match ? source.location(path, match[0]) : null;
+}
+
+function sectionEntry(source, target) {
+  const route = escapeRegExp(target);
+  return sourceAtPattern(source, entry, new RegExp(
+    `^\\s*\\{\\s*path:\\s*(['"])${route}\\1,\\s*title:\\s*(['"])([^'"]*)\\2,\\s*description:\\s*(['"])([^'"]*)\\4\\s*\\},?\\s*$`,
+    'mu',
+  ));
+}
+
+function navigationLandmark(source, label) {
+  const escapedLabel = escapeRegExp(label);
+  return sourceAtPattern(source, entry, new RegExp(
+    `<nav\\b(?=[^>]*\\baria-label\\s*=\\s*(['"])${escapedLabel}\\1)[^>]*>`,
+    'u',
+  ));
+}
+
 function routeEntries(source) {
   if (!source.exists(entry)) return [];
   const text = source.read(entry);
-  return [...text.matchAll(/^\s*("\/console[^"]*"):\s*"([a-z-]+)",?\s*$/gm)].map((match) => ({
-    route: match[1].slice(1, -1), value: match[2], source: source.location(entry, match[0].trim()),
+  return [...text.matchAll(/^\s*(['"])(\/console[^'"]*)\1:\s*(['"])([a-z-]+)\3,?\s*$/gmu)].map((match) => ({
+    route: match[2], value: match[4], source: source.location(entry, match[0].trim()),
   }));
 }
 
 function screen(source, routes, id, path, componentNeedle, regions, route) {
   const routeSource = routes.find((item) => item.route === route)?.source;
-  const componentSource = sourceAt(source, path, componentNeedle);
+  const componentSource = componentNeedle instanceof RegExp
+    ? sourceAtPattern(source, path, componentNeedle)
+    : sourceAt(source, path, componentNeedle);
   if (!routeSource || !componentSource) return null;
   return { id, platform: 'console', source: sourceRef(componentSource), route, regions };
 }
@@ -35,13 +65,13 @@ function combinedControl(source, { id, label, region, handlers, path = identity 
   return { id, platform: 'console', label, role: 'button', handler: handlers.join(' · '), region, source: sourceRef(locations[0]) };
 }
 
-function homeNavigation(source, route, target, label, canonicalControl, sectionNeedle) {
+function homeNavigation(source, route, target, label, canonicalControl) {
   const handler = sourceAt(source, entry, 'href={consoleHref(section.path)}');
-  const section = sourceAt(source, entry, sectionNeedle);
+  const section = sectionEntry(source, target);
   const id = canonicalControl;
   const controlRecord = handler && section ? {
-    id, platform: 'console', source: sourceRef(handler), label, role: 'link', handler: sectionNeedle,
-    region: 'console-navigation',
+    id, platform: 'console', source: sourceRef(handler), label, role: 'link', handler: section.symbol,
+    region: SETTINGS_REGION,
   } : null;
   const routeTarget = routeEntries(source).find((item) => item.route === target);
   const edge = routeTarget && handler && section && transition({
@@ -58,15 +88,15 @@ function homeSecurityControl(source, routes) {
   const path = '/console/security';
   const identityPath = '/console/identity';
   const sourceLink = sourceAt(source, entry, 'href={consoleHref(section.path)}');
-  const security = sourceAt(source, entry, 'path: "/console/security", title: "セキュリティ"');
-  const identitySource = sourceAt(source, entry, 'path: "/console/identity", title: "連携ID"');
+  const security = sectionEntry(source, path);
+  const identitySource = sectionEntry(source, identityPath);
   if (!sourceLink || !security || !identitySource
     || !routes.some((item) => item.route === path) || !routes.some((item) => item.route === identityPath)) return null;
   return {
     id: 'CON-00.A', platform: 'console', source: sourceRef(sourceLink),
     label: 'セキュリティ・連携IDを開く', role: 'link',
     handler: 'SECTIONS[' + path + ' · ' + identityPath + '] → href={consoleHref(section.path)}',
-    region: 'console-navigation',
+    region: SETTINGS_REGION,
   };
 }
 
@@ -79,8 +109,9 @@ export function projectConsole(source) {
   const backupRoute = routeLocation('/console/backups');
   const setupAuthor = sourceAt(source, catalog, '| CON-01 |');
   const screens = records(
-    screen(source, routes, 'CON-00', entry, 'route === "home" ? <>', [
+    screen(source, routes, 'CON-00', entry, /\bif\s*\(\s*route\s*===\s*(['"])home\1\s*\)/u, [
       { id: 'console-navigation', role: 'navigation', label: '管理コンソール', source: sourceRef(sourceAt(source, entry, '<nav aria-label="管理コンソール">')) },
+      { id: SETTINGS_REGION, role: 'navigation', label: '設定項目', source: sourceRef(navigationLandmark(source, '設定項目')) },
       { id: 'console-session-state', role: 'status', label: '所有者セッションの状態', source: sourceRef(sourceAt(source, entry, 'const [access, setAccess]')) },
     ], '/console'),
     setupRoute && sourceAt(source, setup, 'onSubmit={submitKey}') && {
@@ -124,7 +155,7 @@ export function projectConsole(source) {
 
   const controls = records(
     homeSecurityControl(source, routes),
-    homeNavigation(source, '/console', '/console/backups', 'バックアップ', 'CON-00.B', 'path: "/console/backups", title: "バックアップ"').control,
+    homeNavigation(source, '/console', '/console/backups', 'バックアップ', 'CON-00.B').control,
     control(source, { id: 'CON-01.A', platform: 'console', path: setup, label: 'キーを確認', handler: 'onSubmit={submitKey}', role: 'submit', region: 'setup-key-form' }),
     control(source, { id: 'CON-02.A', platform: 'console', path: setup, label: 'Passkeyを作成', handler: 'onClick={createPasskey}', region: 'setup-passkey' }),
     control(source, { id: 'CON-03.A', platform: 'console', path: setup, label: '登録状況を更新', handler: 'await refresh();', region: 'setup-refresh' }),
@@ -134,10 +165,10 @@ export function projectConsole(source) {
 
   const transitions = records(
     ...[
-      ['/console/security', 'CON-00.A', 'CON-10', 'path: "/console/security", title: "セキュリティ"'],
-      ['/console/identity', 'CON-00.A', 'CON-20', 'path: "/console/identity", title: "連携ID"'],
-      ['/console/backups', 'CON-00.B', 'CON-30', 'path: "/console/backups", title: "バックアップ"'],
-    ].map(([target, controlId, screenId, sectionNeedle]) => homeNavigation(source, '/console', target, '', controlId, sectionNeedle).transition),
+      ['/console/security', 'CON-00.A'],
+      ['/console/identity', 'CON-00.A'],
+      ['/console/backups', 'CON-00.B'],
+    ].map(([target, controlId]) => homeNavigation(source, '/console', target, '', controlId).transition),
     transition({ id: 'setup-key-authorized', platform: 'console', from: 'CON-01/key', to: 'CON-02/profile', event: 'submitKey', screen: 'CON-01', control: 'CON-01.A', condition: 'setStep("profile")', location: sourceAt(source, setup, 'setStep("profile");') }),
     transition({ id: 'setup-profile-confirmed', platform: 'console', from: 'CON-02/profile', to: 'CON-02/passkey', event: 'submitProfile', screen: 'CON-02', condition: 'setStep("passkey")', location: sourceAt(source, setup, 'setStep("passkey");') }),
     sourceAt(source, setup, 'onClick={createPasskey}') && transition({ id: 'setup-owner-enrolled', platform: 'console', from: 'CON-02/passkey', to: 'CON-03/owner-enrolled', event: 'refresh', screen: 'CON-02', control: 'CON-02.A', condition: "state.state === 'owner-enrolled' && token", location: sourceAt(source, setup, "if (state.state === 'owner-enrolled' && token) {") }),

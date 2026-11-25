@@ -48,10 +48,26 @@ const withFileEdit = (path, edit) => {
   return sourceWith(overrides);
 };
 
+function removeConsoleSection(text, route) {
+  const quotedRoute = route.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const changed = text.replace(new RegExp(`^\\s*\\{\\s*path:\\s*(['"])${quotedRoute}\\1,[^\\n]*\\n`, 'mu'), '');
+  assert.notEqual(changed, text, `Expected the ${route} section declaration to be removed`);
+  return changed;
+}
+
+function removeConsoleRoute(text, route, value) {
+  const quotedRoute = route.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const quotedValue = value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const changed = text.replace(new RegExp(`^\\s*(['"])${quotedRoute}\\1:\\s*(['"])${quotedValue}\\2,?\\s*\\n`, 'mu'), '');
+  assert.notEqual(changed, text, `Expected the ${route} route entry to be removed`);
+  return changed;
+}
+
 test('owner projection points to canonical screens, controls, and static source transitions', () => {
   const projection = project(sourceWith());
   const screenIds = new Set(projection.screens.map(({ id }) => id));
   const controlIds = projection.controls.map(({ id }) => id);
+  const consoleHome = projection.screens.find(({ id }) => id === 'CON-00');
   assert.ok(screenIds.has('AUTH-01') && screenIds.has('AUTH-02'));
   assert.ok(screenIds.has('CON-00') && screenIds.has('CON-01') && screenIds.has('CON-03'));
   assert.ok(screenIds.has('CON-10') && screenIds.has('CON-11') && screenIds.has('CON-20') && screenIds.has('CON-21'));
@@ -60,6 +76,14 @@ test('owner projection points to canonical screens, controls, and static source 
   assert.ok(controlIds.includes('AUTH-01.A') && controlIds.includes('AUTH-02.A'));
   assert.ok(controlIds.includes('CON-00.B') && controlIds.includes('CON-10.A') && controlIds.includes('CON-11.A'));
   assert.ok(controlIds.includes('CON-01.A') && controlIds.includes('CON-02.A') && controlIds.includes('CON-03.A'));
+  assert.ok(consoleHome?.regions.some(({ id, role, label, source }) =>
+    id === 'console-settings' && role === 'navigation' && label === '設定項目' &&
+    source?.path === 'app/src/console/ConsoleEntry.tsx' &&
+    /<nav\b(?=[^>]*\baria-label=(['"])設定項目\1)[^>]*>/u.test(source.symbol)),
+  'The home settings cards must be sourced from their labeled navigation landmark');
+  assert.ok(projection.controls.filter(({ id }) => ['CON-00.A', 'CON-00.B'].includes(id))
+    .every(({ region }) => region === 'console-settings'),
+  'The home settings links must belong to the labeled settings navigation landmark');
   assert.ok(controlIds.includes('PUB-01.A'));
   assert.ok(projection.transitions.length > 0);
   assert.ok(projection.transitions.every(({ method, source }) => method === 'static' && source.line > 0 && source.path));
@@ -104,7 +128,7 @@ test('initial public metadata expiry transitions from loading, before content ex
 
 test('removing a console section target removes its navigation transition and grouped control', () => {
   const path = 'app/src/console/ConsoleEntry.tsx';
-  const changed = withFileEdit(path, (text) => text.replace('  { path: "/console/security", title: "セキュリティ", description: "Passkeyとセッションを管理します。" },\n', ''));
+  const changed = withFileEdit(path, (text) => removeConsoleSection(text, '/console/security'));
   const projection = project(changed);
   assert.ok(project(sourceWith()).controls.some(({ id }) => id === 'CON-00.A'));
   assert.ok(!projection.controls.some(({ id }) => id === 'CON-00.A'));
@@ -114,7 +138,7 @@ test('removing a console section target removes its navigation transition and gr
 
 test('removing the identity section declaration removes the grouped navigation record', () => {
   const path = 'app/src/console/ConsoleEntry.tsx';
-  const changed = withFileEdit(path, (text) => text.replace('  { path: "/console/identity", title: "連携ID", description: "外部IDプロバイダーとアプリのアクセスを確認します。" },\n', ''));
+  const changed = withFileEdit(path, (text) => removeConsoleSection(text, '/console/identity'));
   const projection = project(changed);
   assert.ok(project(sourceWith()).transitions.some(({ id }) => id === 'console-route-console-to-console-identity'));
   assert.ok(!projection.transitions.some(({ id }) => id === 'console-route-console-to-console-identity'));
@@ -123,7 +147,7 @@ test('removing the identity section declaration removes the grouped navigation r
 
 test('removing the backup section declaration removes its navigation transition and control', () => {
   const path = 'app/src/console/ConsoleEntry.tsx';
-  const changed = withFileEdit(path, (text) => text.replace('  { path: "/console/backups", title: "バックアップ", description: "保管先と保全状況を確認します。" },\n', ''));
+  const changed = withFileEdit(path, (text) => removeConsoleSection(text, '/console/backups'));
   const projection = project(changed);
   assert.ok(project(sourceWith()).transitions.some(({ id }) => id === 'console-route-console-to-console-backups'));
   assert.ok(!projection.transitions.some(({ id }) => id === 'console-route-console-to-console-backups'));
@@ -132,7 +156,7 @@ test('removing the backup section declaration removes its navigation transition 
 
 test('deleting the canonical route entry removes its route transition even while the JSX href binding remains', () => {
   const path = 'app/src/console/ConsoleEntry.tsx';
-  const changed = withFileEdit(path, (text) => text.replace('  "/console/backups": "backups",\n', ''));
+  const changed = withFileEdit(path, (text) => removeConsoleRoute(text, '/console/backups', 'backups'));
   const projection = project(changed);
   assert.ok(project(sourceWith()).transitions.some(({ id }) => id === 'console-route-console-to-console-backups'));
   assert.ok(!projection.transitions.some(({ id }) => id === 'console-route-console-to-console-backups'));
