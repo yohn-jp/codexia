@@ -21,8 +21,8 @@ jobs:
       fail-fast: false
       matrix:
         lane: [keychain-simulator, transport-simulator]
-        variant: [control, git-cache]
-        repeat: [1, 2, 3]
+        variant: [control, system-scm]
+        repeat: [1, 2]
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -52,13 +52,16 @@ jobs:
         run: |
           set -euo pipefail
           git --version
-          if [[ "$VARIANT" == git-cache ]]; then
+          if [[ "$VARIANT" == system-scm ]]; then
             git config --global core.fsmonitor true
             git config --global core.untrackedCache true
             git fsmonitor--daemon start
           else
             git config --global core.fsmonitor false
             git config --global core.untrackedCache false
+          fi
+          if [[ "$VARIANT" == system-scm ]]; then
+            echo 'SCM_FLAGS=-scmProvider system -skipPackageUpdates -disableAutomaticPackageResolution' >> "$GITHUB_ENV"
           fi
           git config --show-origin --get-regexp '^core\.(fsmonitor|untrackedcache)$' || true
       - name: Select iOS 27 iPhone Simulator without booting
@@ -94,7 +97,8 @@ jobs:
               ;;
             *) exit 1 ;;
           esac
-          xcodebuild "${args[@]}" build-for-testing 2>&1 | tee "$evidence/build.log"
+          read -r -a scm_flags <<< "${SCM_FLAGS:-}"
+          xcodebuild "${scm_flags[@]}" "${args[@]}" build-for-testing 2>&1 | tee "$evidence/build.log"
           git diff --exit-code -- Package.resolved
           if [[ "$LANE" == keychain-simulator ]]; then
             cmp Package.resolved "$workspace/Package.resolved"
@@ -138,13 +142,18 @@ jobs:
           ) > "$evidence/host-samples.log" 2>&1 &
           observer=$!
           trap 'kill "$observer" 2>/dev/null || true' EXIT
+          export NSUnbufferedIO=YES
           export GIT_TRACE2_EVENT="$evidence/git-trace.jsonl"
           date -u '+launch-start %Y-%m-%dT%H:%M:%SZ'
-          xcodebuild -xctestrun "$NATIVE_TEST_RUN" \
+          read -r -a scm_flags <<< "${SCM_FLAGS:-}"
+          xcodebuild "${scm_flags[@]}" -xctestrun "$NATIVE_TEST_RUN" \
             -destination "platform=iOS Simulator,id=$CODEXIA_SIMULATOR_ID" \
             -parallel-testing-enabled NO -resultBundlePath "$evidence/tests.xcresult" \
             test-without-building 2>&1 | tee "$evidence/tests.log"
           date -u '+launch-end %Y-%m-%dT%H:%M:%SZ'
+          if [[ -f "$evidence/git-trace.jsonl" ]]; then
+            python3 -c 'import json,sys,collections; rows=[json.loads(l) for l in open(sys.argv[1])]; print(collections.Counter(r.get("event") for r in rows)); print("git exit durations:", [r.get("t_abs") for r in rows if r.get("event")=="exit"])' "$evidence/git-trace.jsonl"
+          fi
           kill "$observer" 2>/dev/null || true
           test -d "$evidence/tests.xcresult"
           xcrun xcresulttool get test-results summary --path "$evidence/tests.xcresult" > "$evidence/test-summary.json"
