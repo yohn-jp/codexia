@@ -52,6 +52,12 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     assert.ok(trace.summary.requirementCount > 0 && trace.summary.obligationCount > 0);
     assert.ok(trace.summary.obligationGapCount + trace.summary.reverseGapCount > 0, 'Known gaps must remain visible in the Pages projection');
     assert.ok(trace.requirements.some(item => item.requirementId === 'REQ-TRACE-001'));
+    await page.addInitScript(() => {
+      window.cspViolations = [];
+      document.addEventListener('securitypolicyviolation', event => {
+        window.cspViolations.push(event.violatedDirective + ' ' + event.blockedURI);
+      });
+    });
     const remoteRequests = [];
     page.on('request', request => {
       if (!request.url().startsWith(base + '/') && !request.url().startsWith('data:')) remoteRequests.push(request.url());
@@ -63,6 +69,7 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
       const diagram = page.locator(`likec4-view[view-id="${viewId}"]`);
       await diagram.waitFor();
       await diagram.locator('.react-flow__node').first().waitFor();
+      assert.deepEqual(await page.evaluate(() => window.cspViolations), [], 'LikeC4 must satisfy the Atlas CSP');
     }
     assert.deepEqual(errors, [], 'LikeC4 must render without browser errors');
     assert.deepEqual(remoteRequests, [], 'LikeC4 must load without external requests');

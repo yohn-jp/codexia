@@ -368,6 +368,14 @@ try {
       await page.waitForURL(base);
     }
 
+    const previousRequestCount = externalRequests.length;
+    await page.goto(base + 'architecture/#system-1');
+    const nativeView = page.locator('likec4-view[view-id="architecture"]');
+    await nativeView.locator('.react-flow__node').first().waitFor();
+    await assertReflow(page, 'Atlas LikeC4');
+    assert.deepEqual(externalRequests.slice(previousRequestCount), [], 'Atlas LikeC4 must stay on the Pages origin');
+    await capture('atlas-likec4');
+
     await page.goto(base + 'architecture/#admin-5');
     await page.reload();
     await page.locator('#svg-image:not([hidden])').waitFor();
