@@ -110,7 +110,9 @@ try {
     await page.route('**/api/browser/version',route=>route.fulfill({
       status:200,
       contentType:'application/json',
-      body:JSON.stringify({name:'codexia',version:'0.1.0',profile:'full'}),
+      body:JSON.stringify({
+        name:'codexia',version:'0.1.0',contractVersion:1,profile:'full',auth:[],runtime:{},modules:[],
+      }),
     }));
     await page.route('**/api/session',route=>route.fulfill({
       status:401,
