@@ -148,8 +148,7 @@ model PublicJobBody {
   id: string;
   type: string;
   status: "queued" | "running" | "done" | "error";
-  @minValue(0.0) @maxValue(1.0)
-  progress: float64 | null;
+  progress: JobProgress | null;
   result: unknown;
   error: string | null;
   errorCode?: string;
@@ -159,6 +158,9 @@ model PublicJobBody {
   finishedAt: utcDateTime | null;
   ...Record<unknown>;
 }
+
+@minValue(0.0) @maxValue(1.0)
+scalar JobProgress extends float64;
 
 model InboxItemBody {
   id: string;
@@ -556,10 +558,10 @@ model GlobalReviewQueueBody {
 }
 
 model ProjectActionDescriptorBody {
-  id: string;
-  module: string;
-  effect: "read" | "compute" | "propose";
-  job: boolean;
+  id?: string;
+  module?: string;
+  effect?: "read" | "compute" | "propose";
+  job?: boolean;
   ...Record<unknown>;
 }
 
@@ -699,6 +701,29 @@ model ActionResultBody {
   proposals?: JsonObject[];
   error?: JsonObject;
   ...Record<unknown>;
+}
+
+// Desktop Web requests the synchronous result variant only. Async 202 job
+// responses remain an explicit operation result, but are rejected by its
+// generated client schema and handled through the job APIs.
+model DesktopActionSuccessBody {
+  ok: true;
+  snapshot: SnapshotIdBody;
+  data: unknown;
+  proposals?: CoreChangeProposalBody[];
+  ...Record<unknown>;
+}
+
+model DesktopActionFailureBody {
+  ok: false;
+  snapshot: SnapshotIdBody;
+  error: { code: string; message: string; retryable: boolean; ...Record<unknown>; };
+  ...Record<unknown>;
+}
+
+union DesktopActionResultBody {
+  success: DesktopActionSuccessBody;
+  failure: DesktopActionFailureBody;
 }
 
 model CoreProjectCreateRequest {
