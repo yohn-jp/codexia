@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./author-oauth-fixture";
 import { expectServerSaved, manuscriptEditor, openRevisionHistory } from "./postgres-fixture";
-import { buildManuscript } from "./visual-manuscript-fixture";
+import { buildManuscript, createDocument, type CreatedDocument } from "./visual-manuscript-fixture";
 
 async function selectTheme(page: Page, mode: "light" | "dark" | "paper"): Promise<void> {
   await page.getByLabel("外観").selectOption(mode);

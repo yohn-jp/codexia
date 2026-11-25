@@ -19,11 +19,11 @@ export const visualManuscript = [
   "", "### 三　地下書庫の入口", "", prose.replace("灯台の階段", "石造りの回廊"),
 ].join("\n");
 
-interface CreatedDocument { id: string; headRevisionId: string; version: number }
+export interface CreatedDocument { id: string; headRevisionId: string; version: number }
 interface VisualProject { id: string; title: string }
 export interface VisualManuscript { project: VisualProject; firstScene: CreatedDocument & { title: string } }
 
-async function createDocument(author: AuthorSession, projectId: string, input: {
+export async function createDocument(author: AuthorSession, projectId: string, input: {
   kind: "volume" | "chapter" | "scene";
   title: string;
   orderKey: string;
