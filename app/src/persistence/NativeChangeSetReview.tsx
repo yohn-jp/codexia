@@ -3,6 +3,9 @@ import type { ChangeSet, ChangeSetApplicationResult, ChangeSetOperation, SaveEvi
 import { ApiError } from "../api-error";
 import { api, type AuthorReviewFeedItem } from "../api";
 import "./NativeChangeSetReview.css";
+import { buttonRecipe } from "../components/button.css";
+
+const quietButtonClass = `quiet-button ${buttonRecipe({ tone: "quiet" })}`;
 
 type Detail = { changeSet: ChangeSet; receipt?: ChangeSetApplicationResult };
 
@@ -606,8 +609,8 @@ export function NativeChangeSetReview({ projectId, canWrite = true, showCoreRevi
                     <details><summary>統合計画と対象リソースを確認</summary><pre role="region" aria-label="Knowledge統合計画" tabIndex={0}>{JSON.stringify(operation.command.plan, null, 2)}</pre></details>
                   </section>}
                   {operation.type === "evidence.anchor.save" && <div className="native-review-evidence">
-                    <button type="button" className="quiet-button" disabled={busy || loading} onClick={() => void inspectSource(operation.command, current.id + ":" + index)}>引用元Revisionを確認</button>
-                    {sourceQuote?.key === current.id + ":" + index && <div className="native-review-quote"><q>{sourceQuote.quote}</q><p>Revision: <code>{operation.command.revisionId}</code> · {operation.command.status}</p>{onOpenSource && <button type="button" className="quiet-button" onClick={() => void onOpenSource(operation.command, sourceQuote.quote).catch(error => setMessage(errorText(error)))}>原稿で確認</button>}</div>}
+                    <button type="button" className={quietButtonClass} disabled={busy || loading} onClick={() => void inspectSource(operation.command, current.id + ":" + index)}>引用元Revisionを確認</button>
+                    {sourceQuote?.key === current.id + ":" + index && <div className="native-review-quote"><q>{sourceQuote.quote}</q><p>Revision: <code>{operation.command.revisionId}</code> · {operation.command.status}</p>{onOpenSource && <button type="button" className={quietButtonClass} onClick={() => void onOpenSource(operation.command, sourceQuote.quote).catch(error => setMessage(errorText(error)))}>原稿で確認</button>}</div>}
                   </div>}
                   <details className="native-review-operation-payload"><summary>操作payloadと期待versionを確認</summary><pre role="region" aria-label="操作payloadと期待version" tabIndex={0}>{JSON.stringify(operation.command, null, 2)}</pre></details>
                 </section>)}
@@ -644,7 +647,7 @@ export function NativeChangeSetReview({ projectId, canWrite = true, showCoreRevi
                 {current.status === "proposed" && <>
                   <p>承認後も正本は変わりません。適用前に同じ提案の内容とversionを再確認します。</p>
                   <button type="button" data-ux-control="REV-02.A" disabled={!canWrite || busy || loading} onClick={() => void updateAfterAction(current.id, "approve")}>{!canWrite ? "閲覧専用" : busy ? "処理中…" : "承認する"}</button>
-                  <button type="button" data-ux-control="REV-02.A" className="quiet-button" disabled={!canWrite || busy || loading} onClick={() => void updateAfterAction(current.id, "reject")}>却下する</button>
+                  <button type="button" data-ux-control="REV-02.A" className={quietButtonClass} disabled={!canWrite || busy || loading} onClick={() => void updateAfterAction(current.id, "reject")}>却下する</button>
                 </>}
                 {current.status === "approved" && <>
                   <p>承認済みです。適用まではPostgreSQLの正本は変更されません。</p>

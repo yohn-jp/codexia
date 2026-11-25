@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api, type InboxItem, type JobEvent, type PublicJob } from '../api';
-import { buttonSize } from './button.css';
+import { buttonRecipe } from './button.css';
+import {
+  dialog,
+  footer,
+  header,
+  jobProgress,
+  notificationBody,
+  notificationContent,
+  notificationHeader,
+  notificationItem,
+  notificationRow,
+  resultContent,
+  title,
+  unreadCountBadge,
+} from './JobInbox.css';
 
 type StreamState = 'connected' | 'reconnecting' | 'unavailable';
 
@@ -69,9 +83,7 @@ function JobResult({ result }: { result: unknown }) {
   return (
     <details onToggle={event => setExpanded(event.currentTarget.open)}>
       <summary>結果を表示</summary>
-      {expanded ? (
-        <pre style={{ maxHeight: '24rem', overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{formatted ?? ''}</pre>
-      ) : null}
+      {expanded ? <pre className={resultContent}>{formatted ?? ''}</pre> : null}
     </details>
   );
 }
@@ -93,7 +105,7 @@ function JobRecord({ job }: { job: PublicJob }) {
       <small>{formatWhen(job.updatedAt)}</small>
       {job.status === 'running' || job.status === 'queued' ? (
         typeof progress === 'number' ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div className={jobProgress}>
             <progress max={1} value={progress} aria-label={`${job.type} の進行状況`} />
             <span>{Math.round(progress * 100)}%</span>
           </div>
@@ -342,7 +354,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
     <>
       <button
         type="button"
-        className={`quiet-button ${buttonSize({ size: 'compact' })}`}
+        className={`quiet-button ${buttonRecipe({ size: 'compact', tone: 'quiet' })}`}
         onClick={() => {
           setOpen(true);
           void refresh();
@@ -351,36 +363,17 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
         aria-label={unreadCount > 0 ? `受信箱（未読 ${unreadCount}）` : '受信箱'}
       >
         受信箱
-        {unreadCount > 0 ? (
-          <span className="durability-badge is-current" style={{ marginLeft: '0.35rem' }}>
-            {unreadCount}
-          </span>
-        ) : null}
+        {unreadCount > 0 ? <span className={`durability-badge is-current ${unreadCountBadge}`}>{unreadCount}</span> : null}
       </button>
-      <dialog
-        ref={dialogRef}
-        aria-labelledby="job-inbox-title"
-        onClose={() => setOpen(false)}
-        style={{
-          width: 'min(54rem, calc(100vw - 2rem))',
-          maxHeight: 'min(84vh, 52rem)',
-          margin: 'auto',
-          padding: '1rem',
-          overflow: 'auto',
-          border: '1px solid var(--line)',
-          borderRadius: '0.6rem',
-          color: 'var(--ink)',
-          background: 'var(--paper)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
-          <h2 id="job-inbox-title" style={{ margin: 0 }}>
+      <dialog ref={dialogRef} aria-labelledby="job-inbox-title" onClose={() => setOpen(false)} className={dialog}>
+        <div className={header}>
+          <h2 className={title} id="job-inbox-title">
             受信箱とジョブ履歴
           </h2>
           <button
             type="button"
             data-ux-control="JOB-01.A"
-            className={`quiet-button ${buttonSize({ size: 'compact' })}`}
+            className={`quiet-button ${buttonRecipe({ size: 'compact', tone: 'quiet' })}`}
             onClick={() => void refresh()}
             disabled={loading}
           >
@@ -423,7 +416,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
         </section>
 
         <section className="recovery-panel" aria-labelledby="job-notifications-title">
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1rem' }}>
+          <div className={notificationHeader}>
             <h3 id="job-notifications-title">通知</h3>
             <span className="eyebrow">未読 {unreadCount} 件</span>
           </div>
@@ -432,21 +425,21 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
           ) : (
             <ul className="recovery-list">
               {items.map(item => (
-                <li key={item.id} style={item.read ? { opacity: 0.72 } : undefined}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem' }}>
-                    <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                <li className={notificationItem({ read: item.read })} key={item.id}>
+                  <div className={notificationRow}>
+                    <div className={notificationContent}>
                       <strong>{item.title}</strong>{' '}
                       <span className={`durability-badge${item.status === 'error' ? '' : ' is-current'}`}>
                         {item.status === 'error' ? '失敗' : '完了'}
                       </span>{' '}
                       {!item.read ? <span className="durability-badge">未読</span> : null}
-                      <p style={{ margin: '0.35rem 0', whiteSpace: 'pre-wrap' }}>{item.body}</p>
+                      <p className={notificationBody}>{item.body}</p>
                       <small>{formatWhen(item.createdAt)}</small>
                     </div>
                     {!item.read ? (
                       <button
                         type="button"
-                        className={`quiet-button ${buttonSize({ size: 'compact' })}`}
+                        className={`quiet-button ${buttonRecipe({ size: 'compact', tone: 'quiet' })}`}
                         onClick={() => void markRead(item.id)}
                         disabled={!canWrite || busyInboxAction !== null}
                       >
@@ -460,16 +453,16 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
           )}
         </section>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', marginTop: '1rem' }}>
+        <div className={footer}>
           <button
             type="button"
-            className={`quiet-button ${buttonSize({ size: 'compact' })}`}
+            className={`quiet-button ${buttonRecipe({ size: 'compact', tone: 'quiet' })}`}
             onClick={() => void markAllRead()}
             disabled={!canWrite || unreadCount === 0 || busyInboxAction !== null}
           >
             すべて既読
           </button>
-          <button type="button" className={buttonSize({ size: 'compact' })} onClick={() => dialogRef.current?.close()}>
+          <button type="button" className={buttonRecipe({ size: 'compact' })} onClick={() => dialogRef.current?.close()}>
             閉じる
           </button>
         </div>

@@ -1,4 +1,5 @@
-import { type CSSProperties, globalStyle } from '@vanilla-extract/css';
+import { type CSSProperties } from '@vanilla-extract/css';
+import { scopedGlobalStyle as globalStyle } from '../styles/scoped-global-style.css';
 
 globalStyle(':is(.st-studio-shell, .mobile-shell)', {
   vars: { '--authoring-control-height': '2.75rem', '--authoring-status-height': '2.25rem' },

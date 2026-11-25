@@ -1,4 +1,4 @@
-import { globalStyle } from '@vanilla-extract/css';
+import { scopedGlobalStyle as globalStyle } from '../styles/scoped-global-style.css';
 
 globalStyle('.identity-management', { minWidth: '0', color: 'var(--ink)' });
 globalStyle('.identity-management h2,\n.identity-management h3,\n.identity-management h4,\n.identity-management h5', {

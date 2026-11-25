@@ -1,4 +1,4 @@
-import { globalStyle } from '@vanilla-extract/css';
+import { scopedGlobalStyle as globalStyle } from '../styles/scoped-global-style.css';
 
 globalStyle('.proposal-review.module-proposal-review', {
   container: 'module-review / inline-size',

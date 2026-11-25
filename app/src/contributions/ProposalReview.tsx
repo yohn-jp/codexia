@@ -1,8 +1,11 @@
 import type { ChangeOperation, ProposalStatus } from '@codexia/contracts';
 import { useState } from 'react';
 import { api } from '../api';
+import { buttonRecipe } from '../components/button.css';
 import { type BrowserJournal, type JournalEntry, type JournalProposal, proposalOperationEntry, stableJson } from '../storage/journal';
 import './ProposalReview.css';
+
+const quietButtonClass = `quiet-button ${buttonRecipe({ tone: 'quiet' })}`;
 
 function operationKey(operation: ChangeOperation): string {
   return operation.id + '\u0000' + operation.generation;
@@ -446,7 +449,7 @@ export function ProposalReview({
                   <button
                     type="button"
                     data-ux-control="REV-02.B"
-                    className="quiet-button"
+                    className={quietButtonClass}
                     onClick={() => void dismiss(record)}
                     disabled={
                       Boolean(busyId) ||

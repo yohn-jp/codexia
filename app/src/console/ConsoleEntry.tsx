@@ -6,7 +6,10 @@ import { OwnerIdentityPanel } from "../settings/OwnerIdentityPanel";
 import { checkOwnerSession, type OwnerSessionState } from "./console-session";
 import { consumeConsoleReturnLocation, resolveConsoleReturnLocation } from "./console-return";
 import { ConsoleSetup } from "./ConsoleSetup";
+import { buttonRecipe } from "../components/button.css";
 import "./console.css";
+
+const quietButtonClass = `quiet-button ${buttonRecipe({ tone: "quiet" })}`;
 
 const SECTIONS = [
   { path: "/console/security", title: "セキュリティ", description: "Passkeyとセッションを管理します。" },
@@ -143,7 +146,7 @@ export function ConsoleEntry() {
     <div className="codexia-console__wrap">
       <header className="codexia-console__masthead">
         <a className="codexia-console__brand" href="/desktop/" aria-label="Codexiaへ戻る">Codexia<span aria-hidden="true">.</span></a>
-        <button className="codexia-console__return quiet-button" type="button" onClick={returnToAuthoring}>執筆画面へ戻る</button>
+        <button className={`codexia-console__return ${quietButtonClass}`} type="button" onClick={returnToAuthoring}>執筆画面へ戻る</button>
       </header>
       <ConsoleSetup consoleUrl={consoleHref("/console")}/>
     </div>
@@ -165,18 +168,18 @@ export function ConsoleEntry() {
 
   if (access === "unavailable") return <main className="codexia-console" aria-labelledby="console-title">
     <div className="codexia-console__wrap"><header className="codexia-console__masthead"><a className="codexia-console__brand" href="/desktop/">Codexia<span aria-hidden="true">.</span></a>
-      <button className="codexia-console__return quiet-button" type="button" onClick={returnToAuthoring}>執筆画面へ戻る</button></header>
+      <button className={`codexia-console__return ${quietButtonClass}`} type="button" onClick={returnToAuthoring}>執筆画面へ戻る</button></header>
       <section className="codexia-console__panel"><p className="codexia-console__eyebrow">接続を確認</p><h1 id="console-title">管理コンソールを利用できません</h1>
         <p role="alert">所有者セッションを確認できません。APIの接続状態を確認して、もう一度お試しください。</p>
         <div className="codexia-console__actions"><button type="button" disabled={busy} onClick={() => void inspect()}>再試行</button>
-          <button type="button" className="quiet-button" onClick={returnToAuthoring}>執筆画面へ戻る</button></div>
+          <button type="button" className={quietButtonClass} onClick={returnToAuthoring}>執筆画面へ戻る</button></div>
       </section></div>
   </main>;
 
   if (access === "unauthorized") return <main className="codexia-console" aria-labelledby="console-title">
     <div className="codexia-console__wrap">
       <header className="codexia-console__masthead"><a className="codexia-console__brand" href="/desktop/">Codexia<span aria-hidden="true">.</span></a>
-        <button className="codexia-console__return quiet-button" type="button" onClick={returnToAuthoring}>執筆画面へ戻る</button></header>
+        <button className={`codexia-console__return ${quietButtonClass}`} type="button" onClick={returnToAuthoring}>執筆画面へ戻る</button></header>
       <section className="codexia-console__panel codexia-console__sign-in" aria-labelledby="console-title">
         <p className="codexia-console__eyebrow">OWNER-SESSION</p>
         <h1 id="console-title">所有者としてサインイン</h1>
@@ -185,7 +188,7 @@ export function ConsoleEntry() {
         {methodsFailed ? <><p role="alert">サインイン方法を読み込めません。APIの接続を確認してください。</p>
           <button type="button" disabled={busy} onClick={() => void inspect()}>再試行</button></> : methods ? <div className="codexia-console__actions">
           {methods.passkey && <button type="button" disabled={busy} onClick={() => void signInWithPasskey()}>{busy ? "認証を確認しています…" : "Passkeyでサインイン"}</button>}
-          {methods.upstreamOidc && <button type="button" className="quiet-button" disabled={busy} onClick={() => void signInWithProvider()}>IDプロバイダーでサインイン</button>}
+          {methods.upstreamOidc && <button type="button" className={quietButtonClass} disabled={busy} onClick={() => void signInWithProvider()}>IDプロバイダーでサインイン</button>}
         </div> : <p role="status">サインイン方法を確認しています。</p>}
       </section>
     </div>
@@ -193,10 +196,10 @@ export function ConsoleEntry() {
 
   if (access === "forbidden") return <main className="codexia-console" aria-labelledby="console-title">
     <div className="codexia-console__wrap"><header className="codexia-console__masthead"><a className="codexia-console__brand" href="/desktop/">Codexia<span aria-hidden="true">.</span></a>
-      <button className="codexia-console__return quiet-button" type="button" onClick={returnToAuthoring}>執筆画面へ戻る</button></header>
+      <button className={`codexia-console__return ${quietButtonClass}`} type="button" onClick={returnToAuthoring}>執筆画面へ戻る</button></header>
       <section className="codexia-console__panel"><p className="codexia-console__eyebrow">403 · FORBIDDEN</p><h1 id="console-title">管理権限がありません</h1>
         <p role="alert">このセッションは管理コンソールの所有者として確認されませんでした。管理情報は表示していません。</p>
-        <button type="button" className="quiet-button" onClick={returnToAuthoring}>執筆画面へ戻る</button></section></div>
+        <button type="button" className={quietButtonClass} onClick={returnToAuthoring}>執筆画面へ戻る</button></section></div>
   </main>;
 
   return <main className="codexia-console" aria-labelledby="console-title">
@@ -204,7 +207,7 @@ export function ConsoleEntry() {
       <header className="codexia-console__masthead">
         <a className="codexia-console__brand" href="/desktop/" aria-label="Codexiaへ戻る">Codexia<span aria-hidden="true">.</span></a>
         <div className="codexia-console__masthead-actions"><span className="codexia-console__session" role="status">所有者セッションを確認済み</span>
-          <button className="codexia-console__return quiet-button" type="button" onClick={returnToAuthoring}>執筆画面へ戻る</button></div>
+          <button className={`codexia-console__return ${quietButtonClass}`} type="button" onClick={returnToAuthoring}>執筆画面へ戻る</button></div>
       </header>
       <div className="codexia-console__layout">
         <aside className="codexia-console__sidebar" aria-label="管理メニュー">
@@ -236,7 +239,7 @@ export function ConsoleEntry() {
             <a className="codexia-console__link" href={consoleHref("/console")}>ホームへ戻る</a></div>}
           <div className="codexia-console__auth-actions">
             <button type="button" disabled={busy} onClick={() => void inspect()}>セッションを再確認</button>
-            <button type="button" className="quiet-button" onClick={returnToAuthoring}>執筆画面へ戻る</button>
+            <button type="button" className={quietButtonClass} onClick={returnToAuthoring}>執筆画面へ戻る</button>
           </div>
         </section>
       </div>

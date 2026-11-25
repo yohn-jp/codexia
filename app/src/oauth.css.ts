@@ -1,5 +1,5 @@
 import './oauth-theme.css';
-import { globalStyle } from '@vanilla-extract/css';
+import { scopedGlobalStyle as globalStyle } from './styles/scoped-global-style.css';
 
 globalStyle(':root', {
   fontFamily: 'var(--manuscript-sans)',

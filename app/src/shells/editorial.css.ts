@@ -1,4 +1,5 @@
-import { type CSSProperties, globalStyle } from '@vanilla-extract/css';
+import { type CSSProperties } from '@vanilla-extract/css';
+import { scopedGlobalStyle as globalStyle } from '../styles/scoped-global-style.css';
 
 globalStyle('.st-desktop-shell .st-desktop-chrome', { borderBottomColor: 'var(--line)', boxShadow: '0 1px 0 rgb(0 0 0 / 2%)' });
 globalStyle('.st-desktop-shell .topbar', {

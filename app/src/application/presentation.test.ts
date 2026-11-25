@@ -14,6 +14,31 @@ try {
 } finally {
   endFileScope();
 }
+const buttonStyles = (await import('../components/button.css')) as unknown as {
+  buttonRecipe?: (options: { size?: 'compact'; tone?: 'quiet' }) => string;
+};
+let sessionContent: ((options: { state: 'active' | 'blocked' }) => string) | undefined;
+setFileScope('src/persistence/PersistenceEntry.css.ts', '@codexia/app');
+try {
+  const persistenceStyles = (await import('../persistence/PersistenceEntry.css')) as unknown as { sessionContent?: typeof sessionContent };
+  sessionContent = persistenceStyles.sessionContent;
+} catch {
+  // Keep the red test assertion focused on the missing state recipe.
+} finally {
+  endFileScope();
+}
+let scopeGlobalSelector: ((selector: string) => string) | undefined;
+setFileScope('src/styles/scoped-global-style.css.ts', '@codexia/app');
+try {
+  const scopedStyles = (await import('../styles/scoped-global-style.css')) as unknown as {
+    scopeGlobalSelector?: typeof scopeGlobalSelector;
+  };
+  scopeGlobalSelector = scopedStyles.scopeGlobalSelector;
+} catch {
+  // Keep the red test assertion focused on the missing scoping contract.
+} finally {
+  endFileScope();
+}
 const { ApplicationStatus, hasApplicationStatus } = await import('./ApplicationStatus');
 const { availableModulePanels } = await import('./AvailableModulePanels');
 const { DocumentInspector } = await import('./DocumentInspector');
@@ -29,6 +54,28 @@ const tree = {
     },
   ],
 };
+
+test('shared button recipe exposes distinct compact and quiet variants', () => {
+  assert.equal(typeof buttonStyles.buttonRecipe, 'function');
+  assert.notEqual(buttonStyles.buttonRecipe?.({ size: 'compact' }), buttonStyles.buttonRecipe?.({ size: 'compact', tone: 'quiet' }));
+});
+
+test('session visibility uses distinct active and blocked recipe variants', () => {
+  assert.equal(typeof sessionContent, 'function');
+  assert.notEqual(sessionContent?.({ state: 'active' }), sessionContent?.({ state: 'blocked' }));
+});
+
+test('global component selectors stay inside the React root while document and theme roots remain global', () => {
+  assert.equal(typeof scopeGlobalSelector, 'function');
+  assert.equal(
+    scopeGlobalSelector?.('.panel, body, :root[data-zp-theme="dark"] .panel'),
+    ':where(#root) :is(.panel),\nbody,\n:root[data-zp-theme="dark"] :where(#root) :is(.panel)',
+  );
+  assert.equal(
+    scopeGlobalSelector?.('.shell :is(.a, .b), .shell[data-label="a,b"] .item'),
+    ':where(#root) :is(.shell :is(.a, .b)),\n:where(#root) :is(.shell[data-label="a,b"] .item)',
+  );
+});
 
 test('status presentation hides an empty state and exposes current errors and recovery visibility', () => {
   const emptyProps = {

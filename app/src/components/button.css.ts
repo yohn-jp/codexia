@@ -1,11 +1,24 @@
 import { recipe } from '@vanilla-extract/recipes';
 
-export const buttonSize = recipe({
+export const buttonRecipe = recipe({
   variants: {
     size: {
       compact: {
         minHeight: '2.4rem',
-        padding: '0.35rem 0.55rem',
+        paddingBlock: '0.35rem',
+        paddingInline: '0.55rem',
+      },
+    },
+    tone: {
+      quiet: {
+        borderColor: 'var(--input-border)',
+        color: 'var(--accent-strong)',
+        background: 'transparent',
+        selectors: {
+          '&:hover:not(:disabled)': {
+            color: 'var(--button-foreground)',
+          },
+        },
       },
     },
   },
