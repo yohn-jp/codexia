@@ -25,21 +25,6 @@ interface WorkspaceProps {
   onActivePanelChange?: (panelId: string) => void;
   beforeLayoutChange?: () => Promise<boolean>;
   requestedPanel?: WorkspacePanelRequest;
-  selectedPanelId?: string;
-  routeTransitionSequence?: number;
-  isPanelRequestCurrent?: (sequence: number) => boolean;
-  onPanelRequestResult?: (sequence: number, allowed: boolean) => void;
-  routeSelectionKey?: string;
-  isRouteSelectionCurrent?: (key: string) => boolean;
-  onRouteSelectionResult?: (key: string, allowed: boolean) => void;
-}
-
-interface PendingPanelTransitionCommit {
-  sequence: number;
-  panelId: string;
-  scope: string;
-  mode: UiMode;
-  isCurrent(): boolean;
 }
 
 type Placement = "tab" | DockSide;
@@ -62,10 +47,6 @@ function firstActivePanel(node: WorkspaceNode): string {
   if (node.type === "leaf") return node.panelId;
   if (node.type === "stack") return node.activePanelId;
   return firstActivePanel(node.children[0]!);
-}
-
-function initialMobilePanel(layout: WorkspaceLayout): string {
-  return visiblePanelIds(layout.root).includes("outline") ? "outline" : firstActivePanel(layout.root);
 }
 
 function domId(prefix: string, panelId: string): string {
@@ -147,7 +128,7 @@ function PanelFrame({ panelId, panel, mode, layoutEditing, canHide, onHide, onDr
   return (
     <section className={"st-workspace-panel" + (maximized ? " is-maximized" : "")} tabIndex={-1} data-workspace-panel={panelId} aria-labelledby={domId("st-workspace-heading", panelId)}>
       <header className="st-workspace-panel-heading">
-        {mode === "desktop" && layoutEditing ? (
+        {layoutEditing ? (
           <div
             className="st-workspace-drag-grip"
             draggable
@@ -157,7 +138,7 @@ function PanelFrame({ panelId, panel, mode, layoutEditing, canHide, onHide, onDr
           >⠿</div>
         ) : null}
         <h2 id={domId("st-workspace-heading", panelId)}>{title}</h2>
-        {mode === "desktop" && layoutEditing ? (
+        {layoutEditing ? (
           <div className="st-workspace-drop-zones" aria-hidden="true" onDragOver={acceptDrop} onDrop={dock}>
             {placementTitles.map(({ placement, mark }) => (
               <div
@@ -168,7 +149,7 @@ function PanelFrame({ panelId, panel, mode, layoutEditing, canHide, onHide, onDr
             ))}
           </div>
         ) : null}
-        {mode === "desktop" ? <div className="st-workspace-frame-actions">
+        <div className="st-workspace-frame-actions">
           <button type="button" className="st-workspace-float-button" title={`${title}を別ウィンドウにする`}
             aria-label={`${title}を別ウィンドウにする`} disabled={!canHide} onClick={() => onFloat(panelId)}>◱</button>
           <button type="button" className="st-workspace-maximize" title={maximized ? `${title}を元に戻す` : `${title}を最大化`}
@@ -181,7 +162,7 @@ function PanelFrame({ panelId, panel, mode, layoutEditing, canHide, onHide, onDr
             disabled={!canHide}
             onClick={() => onHide(panelId)}
           >×</button> : null}
-        </div> : null}
+        </div>
       </header>
       <div className="st-workspace-panel-body"><PanelContent panel={panel} /></div>
     </section>
@@ -255,7 +236,7 @@ function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount
                 role="tab"
                 aria-selected={selected}
                 tabIndex={selected ? 0 : -1}
-                draggable={mode === "desktop"}
+                draggable
                 onDragStart={(event) => {
                   event.dataTransfer.setData("text/plain", child.panelId);
                   event.dataTransfer.effectAllowed = "move";
@@ -413,7 +394,7 @@ function FloatingFrame({ record, panel, onMove, onDock, onMaximize, maximized }:
   </section>;
 }
 
-export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayoutChange, requestedPanel, selectedPanelId, routeTransitionSequence, isPanelRequestCurrent, onPanelRequestResult, routeSelectionKey, isRouteSelectionCurrent, onRouteSelectionResult }: WorkspaceProps): ReactNode {
+export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayoutChange, requestedPanel }: WorkspaceProps): ReactNode {
   const panelIds = useMemo(() => [...new Set(panels.map((panel) => panel.id))], [panels]);
   const catalog = useMemo(() => new Map(panels.map((panel) => [panel.id, panel])), [panels]);
   const [initial] = useState(() => loadFor(scope, mode, panelIds));
@@ -421,7 +402,6 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   const [floating, setFloating] = useState<FloatingPanelLayout[]>(initial.floating);
   const [maximizedPanelId, setMaximizedPanelId] = useState<string | null>(null);
   const [persistenceState, setPersistenceState] = useState<WorkspaceLoad["state"]>(initial.state);
-  const [mobilePanelId, setMobilePanelId] = useState<string>(() => initialMobilePanel(initial.layout));
   const [moveSource, setMoveSource] = useState<string>(() => firstActivePanel(initial.layout.root));
   const [moveTarget, setMoveTarget] = useState<string>(() => panelIds.find((id) => id !== "editor") ?? "");
   const [placement, setPlacement] = useState<Placement>("tab");
@@ -430,15 +410,10 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   const [message, setMessage] = useState("");
   const [panelQuery, setPanelQuery] = useState("");
   const [changing, setChanging] = useState(false);
-  const [committingPanelRequest, setCommittingPanelRequest] = useState<number>();
-  const [routeSelectionRevision, setRouteSelectionRevision] = useState(0);
   const changingRef = useRef(false);
   const workspaceRef = useRef<HTMLElement | null>(null);
   const panelMenuRef = useRef<HTMLDetailsElement | null>(null);
   const handledRequestRef = useRef("");
-  const routeSuppressedByPanelRequestRef = useRef("");
-  const pendingRouteSelectionRef = useRef(false);
-  const pendingPanelTransitionRef = useRef<PendingPanelTransitionCommit | null>(null);
   const workspaceIdentityRef = useRef({ scope, mode });
   useLayoutEffect(() => { workspaceIdentityRef.current = { scope, mode }; }, [scope, mode]);
   const visibleIds = useMemo(() => visiblePanelIds(layout.root), [layout.root]);
@@ -447,19 +422,12 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
     return query ? panels.filter((panel) => panel.title.toLocaleLowerCase("ja-JP").includes(query)) : panels;
   }, [panels, panelQuery]);
 
-  const retryPendingRouteSelection = useCallback((): void => {
-    if (!pendingRouteSelectionRef.current) return;
-    pendingRouteSelectionRef.current = false;
-    setRouteSelectionRevision((revision) => revision + 1);
-  }, []);
-
   useEffect(() => {
     const loaded = loadFor(scope, mode, panelIds);
     setLayout(loaded.layout);
     setFloating(loaded.floating);
     setMaximizedPanelId(null);
     setPersistenceState(loaded.state);
-    setMobilePanelId(initialMobilePanel(loaded.layout));
     setMoveSource(firstActivePanel(loaded.layout.root));
     setMoveTarget(panelIds.find((id) => id !== "editor") ?? "");
     setLayoutEditing(false);
@@ -469,12 +437,11 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   }, [scope, mode, onActivePanelChange]);
 
   useEffect(() => {
-    if (!visibleIds.includes(mobilePanelId)) setMobilePanelId(visibleIds[0] ?? "editor");
     if (!visibleIds.includes(moveSource)) setMoveSource(visibleIds[0] ?? "editor");
     if (!visibleIds.includes(moveTarget) || moveTarget === moveSource) {
       setMoveTarget(visibleIds.find((id) => id !== moveSource) ?? "");
     }
-  }, [visibleIds, mobilePanelId, moveSource, moveTarget]);
+  }, [visibleIds, moveSource, moveTarget]);
 
   const changeLayout = useCallback(async (change: (current: WorkspaceLayout) => WorkspaceLayout, success = "配置を変更しました。次回も使うには配置を保存してください。", runPreflight = true, isCurrent: () => boolean = () => true): Promise<boolean> => {
     if (changingRef.current) return false;
@@ -497,89 +464,39 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
     } finally {
       changingRef.current = false;
       setChanging(false);
-      retryPendingRouteSelection();
     }
-  }, [beforeLayoutChange, retryPendingRouteSelection]);
+  }, [beforeLayoutChange]);
 
   useEffect(() => {
     const panelId = requestedPanel?.id;
     const sequence = requestedPanel?.sequence;
     if (!panelId || !sequence) return;
     const requestKey = `${scope}:${mode}:${panelId}:${sequence}`;
-    if (handledRequestRef.current === requestKey) return;
-    if (changingRef.current) return;
+    if (handledRequestRef.current === requestKey || changingRef.current) return;
     handledRequestRef.current = requestKey;
-    const isRouteTransition = routeTransitionSequence === sequence;
-    const isCurrent = () => isPanelRequestCurrent ? isPanelRequestCurrent(sequence) : true;
+    const isCurrent = () => workspaceIdentityRef.current.scope === scope &&
+      workspaceIdentityRef.current.mode === mode && handledRequestRef.current === requestKey;
     if (!catalog.has(panelId)) {
       setMessage(`${panelId}パネルを利用できません。`);
-      if (isRouteTransition) onPanelRequestResult?.(sequence, false);
       return;
-    }
-    if (!isCurrent()) {
-      if (isRouteTransition) onPanelRequestResult?.(sequence, false);
-      return;
-    }
-    if (mode === "mobile" && selectedPanelId) {
-      routeSuppressedByPanelRequestRef.current = `${scope}:${mode}:${isRouteTransition ? panelId : selectedPanelId}`;
     }
     const reveal = async (): Promise<void> => {
-      if (!isCurrent()) {
-        if (isRouteTransition) onPanelRequestResult?.(sequence, false);
-        return;
-      }
       const change = visibleIds.includes(panelId)
         ? (current: WorkspaceLayout) => activateWorkspacePanel(current, panelId)
         : (current: WorkspaceLayout) => showWorkspacePanel(current, panelId);
       const allowed = await changeLayout(change, "パネルを開きました。次回も使うには配置を保存してください。", true, isCurrent);
-      if (!isCurrent()) {
-        if (isRouteTransition) onPanelRequestResult?.(sequence, false);
-        return;
-      }
-      if (!allowed) {
-        if (isRouteTransition && routeSuppressedByPanelRequestRef.current === `${scope}:${mode}:${panelId}`) {
-          routeSuppressedByPanelRequestRef.current = "";
-        }
-        if (isRouteTransition) onPanelRequestResult?.(sequence, false);
-        return;
-      }
+      if (!allowed || !isCurrent()) return;
       setFloating((current) => isCurrent() ? current.filter((item) => item.panelId !== panelId) : current);
-      if (mode === "mobile") setMobilePanelId((current) => isCurrent() ? panelId : current);
       onActivePanelChange?.(panelId);
       window.requestAnimationFrame(() => {
-        if (isPanelRequestCurrent && !isPanelRequestCurrent(sequence)) return;
+        if (!isCurrent()) return;
         const element = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>("[data-workspace-panel]") ?? [])
           .find((candidate) => candidate.dataset.workspacePanel === panelId);
         element?.focus();
       });
-      if (isRouteTransition) {
-        pendingPanelTransitionRef.current = { sequence, panelId, scope, mode, isCurrent };
-        setCommittingPanelRequest(sequence);
-      }
     };
     void reveal();
-  }, [requestedPanel?.id, requestedPanel?.sequence, scope, mode, catalog, visibleIds, changeLayout, changing, routeTransitionSequence, isPanelRequestCurrent, onPanelRequestResult, onActivePanelChange, selectedPanelId]);
-
-  useLayoutEffect(() => {
-    const pending = pendingPanelTransitionRef.current;
-    if (!pending || pending.sequence !== committingPanelRequest) return;
-    if (!pending.isCurrent() || pending.scope !== scope || pending.mode !== mode) {
-      pendingPanelTransitionRef.current = null;
-      setCommittingPanelRequest((sequence) => sequence === pending.sequence ? undefined : sequence);
-      onPanelRequestResult?.(pending.sequence, false);
-      return;
-    }
-    if (mobilePanelId !== pending.panelId || !visibleIds.includes(pending.panelId)) return;
-    // Only focus after the destination panel is committed to the live DOM.
-    // A requestAnimationFrame issued before a route/scope transition can run
-    // before the panel mounts and silently lose keyboard focus.
-    const target = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>("[data-workspace-panel]") ?? [])
-      .find((element) => element.dataset.workspacePanel === pending.panelId);
-    target?.focus({ preventScroll: true });
-    pendingPanelTransitionRef.current = null;
-    setCommittingPanelRequest((sequence) => sequence === pending.sequence ? undefined : sequence);
-    onPanelRequestResult?.(pending.sequence, true);
-  }, [committingPanelRequest, scope, mode, mobilePanelId, visibleIds, onPanelRequestResult]);
+  }, [requestedPanel?.id, requestedPanel?.sequence, scope, mode, catalog, visibleIds, changeLayout, changing, onActivePanelChange]);
 
   const changePreset = (preset: Exclude<WorkspacePreset, "custom">): void => {
     void changeLayout(() => createWorkspacePreset(preset, panelIds), `${presetTitle(preset)}の作業面を開きました。次回も使うには配置を保存してください。`)
@@ -595,7 +512,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
     });
     const saved = storage ? saveWorkspaceSnapshot(storage, scope, mode, {
       layout,
-      floating: mode === "desktop" ? measuredFloating : [],
+      floating: measuredFloating,
     }) : false;
     if (saved) {
       setPersistenceState("valid");
@@ -617,7 +534,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       .then((allowed) => { if (allowed) setFloating((current) => current.filter((item) => item.panelId !== panelId)); });
   };
   const floatPanel = (panelId: string): void => {
-    if (mode !== "desktop" || !visibleIds.includes(panelId) || visibleIds.length < 2) return;
+    if (!visibleIds.includes(panelId) || visibleIds.length < 2) return;
     void changeLayout((current) => hideWorkspacePanel(current, panelId), "パネルを別ウィンドウにしました。次回も使うには配置を保存してください。")
       .then((allowed) => {
         if (!allowed) return;
@@ -653,85 +570,6 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       .then((allowed) => { if (allowed) onActivePanelChange?.(panelId); return allowed; });
   };
 
-  const activateMobilePanel = (panelId: string): Promise<boolean> => {
-    if (panelId === mobilePanelId || changingRef.current) return Promise.resolve(false);
-    changingRef.current = true;
-    setChanging(true);
-    setMessage("");
-    return (async () => {
-      try {
-        const allowed = beforeLayoutChange ? await beforeLayoutChange() : true;
-        if (!allowed) {
-          setMessage("回復Journalの状態を確認できないため、パネルは変更していません。");
-          return false;
-        }
-        setMobilePanelId(panelId);
-        return true;
-      } catch (error) {
-        setMessage(error instanceof Error && error.message ? error.message : "入力状態を保護できず、パネルを変更できませんでした。");
-        return false;
-      } finally {
-        changingRef.current = false;
-        setChanging(false);
-        retryPendingRouteSelection();
-      }
-    })();
-  };
-
-  const routeSelectionRef = useRef("");
-  const routeFocusPendingRef = useRef<string | null>(null);
-  useLayoutEffect(() => {
-    const key = `${scope}:${mode}:${selectedPanelId}`;
-    if (mode !== "mobile" || !selectedPanelId || mobilePanelId !== selectedPanelId ||
-        routeFocusPendingRef.current !== key || routeSelectionRef.current !== key) return;
-    const target = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>("[data-workspace-panel]") ?? [])
-      .find((element) => element.dataset.workspacePanel === selectedPanelId);
-    if (!target) return;
-    target.focus({ preventScroll: true });
-    routeFocusPendingRef.current = null;
-  }, [scope, mode, selectedPanelId, mobilePanelId, layout]);
-  useEffect(() => {
-    if (mode !== "mobile" || !selectedPanelId || !catalog.has(selectedPanelId)) return;
-    if (changingRef.current) {
-      pendingRouteSelectionRef.current = true;
-      return;
-    }
-    pendingRouteSelectionRef.current = false;
-    const selectionKey = `${scope}:${mode}:${selectedPanelId}`;
-    if (routeSuppressedByPanelRequestRef.current === selectionKey) {
-      routeSuppressedByPanelRequestRef.current = "";
-      routeSelectionRef.current = selectionKey;
-      return;
-    }
-    if (routeSuppressedByPanelRequestRef.current) {
-      if (routeSelectionRef.current === selectionKey) return;
-      routeSuppressedByPanelRequestRef.current = "";
-    }
-    if (routeSelectionRef.current === selectionKey) return;
-    routeSelectionRef.current = selectionKey;
-    const change = visibleIds.includes(selectedPanelId)
-      ? (current: WorkspaceLayout) => current
-      : (current: WorkspaceLayout) => showWorkspacePanel(current, selectedPanelId);
-    const currentRouteKey = routeSelectionKey ?? selectionKey;
-    const isCurrent = () => isRouteSelectionCurrent ? isRouteSelectionCurrent(currentRouteKey) : routeSelectionRef.current === selectionKey;
-    void changeLayout(change, "この画面のパネルを開きました。次回も使うには配置を保存してください。", true, isCurrent)
-      .then((allowed) => {
-        if (!isCurrent()) {
-          onRouteSelectionResult?.(currentRouteKey, false);
-          return;
-        }
-        if (!allowed) {
-          onRouteSelectionResult?.(currentRouteKey, false);
-          return;
-        }
-        // Wait for React to commit the selected panel before restoring focus.
-        // requestAnimationFrame can run against the previous route's DOM.
-        routeFocusPendingRef.current = selectionKey;
-        setMobilePanelId(selectedPanelId);
-        onRouteSelectionResult?.(currentRouteKey, true);
-      });
-  }, [mode, scope, selectedPanelId, visibleIds, catalog, changeLayout, changing, routeSelectionKey, routeSelectionRevision, isRouteSelectionCurrent, onRouteSelectionResult]);
-
   const resize = (splitId: string, sizes: number[]): void => {
     setLayout((current) => resizeWorkspaceSplit(current, splitId, sizes));
   };
@@ -745,14 +583,13 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   const openPanelFromMenu = (panelId: string): void => {
     const wasVisible = visibleIds.includes(panelId);
     const operation = wasVisible
-      ? (mode === "mobile" ? activateMobilePanel(panelId) : activateTab(panelId))
+      ? activateTab(panelId)
       : changeLayout((current) => showWorkspacePanel(current, panelId),
           "パネルを開きました。次回も使うには配置を保存してください。");
     void operation.then((allowed) => {
       if (!allowed) return;
       if (!wasVisible) {
         setFloating((current) => current.filter((item) => item.panelId !== panelId));
-        if (mode === "mobile") setMobilePanelId(panelId);
         onActivePanelChange?.(panelId);
       }
       if (panelMenuRef.current) panelMenuRef.current.open = false;
@@ -785,7 +622,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
         className="st-workspace-panel-menu"
         ref={panelMenuRef}
         onToggle={(event) => {
-          if (mode === "desktop" && event.currentTarget.open) setLayoutEditing(false);
+          if (event.currentTarget.open) setLayoutEditing(false);
           if (!event.currentTarget.open) setPanelQuery("");
         }}
       >
@@ -806,7 +643,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
                 </button>
                 {visible && <button type="button" disabled={changing || visibleIds.length <= 1}
                   onClick={() => hidePanel(panel.id)}>{`${panel.title}を隠す`}</button>}
-                {mode === "desktop" && visible && visibleIds.length > 1
+                {visible && visibleIds.length > 1
                   ? <button type="button" disabled={changing} onClick={() => floatPanel(panel.id)}>{`${panel.title}を別ウィンドウにする`}</button> : null}
               </div>
             );
@@ -819,9 +656,9 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   const layoutMoveMenu = (
     <details
       className="st-workspace-move-menu"
-      open={mode === "desktop" ? layoutEditing : undefined}
+      open={layoutEditing}
       onToggle={(event) => {
-        const open = mode === "desktop" && event.currentTarget.open;
+        const open = event.currentTarget.open;
         setLayoutEditing(open);
         if (open && panelMenuRef.current?.open) panelMenuRef.current.open = false;
       }}
@@ -865,92 +702,38 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       ref={workspaceRef}
       className={`st-workspace st-workspace-${mode}`}
       data-preset={layout.preset}
-      data-layout-editing={mode === "desktop" && layoutEditing ? "true" : "false"}
+      data-layout-editing={layoutEditing ? "true" : "false"}
       data-maximized-panel={maximizedPanelId ?? undefined}
       aria-label="可変ワークスペース"
       onFocusCapture={(event) => noteActivePanel(event.target)}
       onPointerDownCapture={(event) => noteActivePanel(event.target)}
     >
-      {mode === "desktop" ? (
-        <div className="st-workspace-desktop-controls">
-          {workspaceToolbar}
-          {layoutMoveMenu}
-        </div>
-      ) : (
-        <details className="st-workspace-configuration">
-          <summary>ワークスペース配置</summary>
-          {workspaceToolbar}
-          {layoutMoveMenu}
-        </details>
-      )}
+      <div className="st-workspace-desktop-controls">
+        {workspaceToolbar}
+        {layoutMoveMenu}
+      </div>
 
       {persistenceState === "invalid" ? <p className="st-workspace-warning" role="alert">{storageLabel}</p> : null}
       {message ? <p className="st-workspace-message" tabIndex={0} role="status" aria-live="polite">{message}</p> : null}
       {!message && persistenceState === "unavailable" ? <p className="st-workspace-storage-state" role="status">{storageLabel}</p> : null}
 
-      {mode === "mobile" ? (
-        <div className="st-workspace-mobile-layout">
-          <nav className="st-workspace-mobile-tabs" role="tablist" aria-label="パネル">
-            {visibleIds.map((panelId) => {
-              const selected = panelId === mobilePanelId;
-              const tabId = domId("st-workspace-mobile-tab", panelId);
-              return (
-                <button
-                  type="button"
-                  role="tab"
-                  id={tabId}
-                  key={panelId}
-                  aria-selected={selected}
-                  aria-controls={domId("st-workspace-mobile-pane", panelId)}
-                  disabled={changing}
-                  tabIndex={selected ? 0 : -1}
-                  onClick={() => { void activateMobilePanel(panelId); }}
-                  onKeyDown={(event) => {
-                    const currentIndex = visibleIds.indexOf(panelId);
-                    let nextIndex = currentIndex;
-                    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % visibleIds.length;
-                    else if (event.key === "ArrowLeft") nextIndex = (currentIndex + visibleIds.length - 1) % visibleIds.length;
-                    else if (event.key === "Home") nextIndex = 0;
-                    else if (event.key === "End") nextIndex = visibleIds.length - 1;
-                    else return;
-                    event.preventDefault();
-                    const nextPanelId = visibleIds[nextIndex]!;
-                    const trigger = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("[role=tab]")[nextIndex];
-                    void activateMobilePanel(nextPanelId).then((allowed) => { if (allowed) trigger?.focus(); });
-                  }}
-                >{titleOf(panelId)}</button>
-              );
-            })}
-          </nav>
-          <div
-            className="st-workspace-mobile-pane"
-            id={domId("st-workspace-mobile-pane", mobilePanelId)}
-            role="tabpanel"
-            aria-labelledby={domId("st-workspace-mobile-tab", mobilePanelId)}
-            tabIndex={0}
-          >
-            <PanelFrame panelId={mobilePanelId} panel={catalog.get(mobilePanelId)} mode="mobile" layoutEditing={false} canHide={false} onHide={hidePanel} onDrop={handleDrop} onFloat={floatPanel} onMaximize={toggleMaximize} maximized={false} />
-          </div>
-        </div>
-      ) : (
-        <div className="st-workspace-layout" aria-label="Workspace panels">
-          <WorkspaceTree
-            node={layout.root}
-            mode={mode}
-            layoutEditing={mode === "desktop" && layoutEditing}
-            depth={0}
-            catalog={catalog}
-            visibleCount={visibleIds.length}
-            onActivate={activateTab}
-            onHide={hidePanel}
-            onDrop={handleDrop}
-            onResize={resize}
-            onFloat={floatPanel} onMaximize={toggleMaximize} maximizedPanelId={maximizedPanelId}
-            presetRevision={presetRevision}
-          />
-        </div>
-      )}
-      {mode === "desktop" && floating.map((item) => (
+      <div className="st-workspace-layout" aria-label="Workspace panels">
+        <WorkspaceTree
+          node={layout.root}
+          mode={mode}
+          layoutEditing={layoutEditing}
+          depth={0}
+          catalog={catalog}
+          visibleCount={visibleIds.length}
+          onActivate={activateTab}
+          onHide={hidePanel}
+          onDrop={handleDrop}
+          onResize={resize}
+          onFloat={floatPanel} onMaximize={toggleMaximize} maximizedPanelId={maximizedPanelId}
+          presetRevision={presetRevision}
+        />
+      </div>
+      {floating.map((item) => (
         <FloatingFrame key={item.panelId} record={item} panel={catalog.get(item.panelId)}
           onMove={moveFloatingPanel} onDock={dockFloatingPanel} maximized={maximizedPanelId === item.panelId}
           onMaximize={toggleMaximize}/>

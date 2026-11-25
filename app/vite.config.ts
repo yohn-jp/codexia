@@ -16,7 +16,7 @@ const generatedBrowserModules = browserModuleProfilePath
   : resolve(workspaceRoot, 'profiles', profile, 'generated', 'browser.mjs');
 
 const ui = process.env.CODEXIA_UI ?? 'launcher';
-if (!['launcher', 'desktop', 'mobile', 'oauth', 'owner-setup'].includes(ui)) throw new Error('Invalid CODEXIA_UI');
+if (!['launcher', 'desktop', 'oauth', 'owner-setup'].includes(ui)) throw new Error('Invalid CODEXIA_UI');
 const uiDirectory = ui === 'launcher' ? '' : ui === 'owner-setup' ? 'console/setup' : ui;
 
 // OAuth browser fixture assets must not overwrite app/dist while other shards

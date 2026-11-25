@@ -13,25 +13,24 @@ export interface OAuthWebConfig {
   scopes: string[];
 }
 
-export type WebShell = 'desktop' | 'mobile';
+export type WebShell = 'desktop';
 
 type ViteOAuthEnvironment = {
   VITE_CODEXIA_OAUTH_ISSUER?: string;
   VITE_CODEXIA_OAUTH_CLIENT_ID?: string;
   VITE_CODEXIA_API_AUDIENCE?: string;
   VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI?: string;
-  VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI?: string;
   VITE_CODEXIA_OAUTH_SCOPES?: string;
 };
 
 /** Read only public, non-secret build configuration. */
-export function webOAuthConfig(shell: WebShell): OAuthWebConfig | null {
+export function webOAuthConfig(): OAuthWebConfig | null {
   const env = (import.meta as ImportMeta & { env?: ViteOAuthEnvironment }).env;
   if (!env) return null;
   const issuer = env.VITE_CODEXIA_OAUTH_ISSUER;
   const clientId = env.VITE_CODEXIA_OAUTH_CLIENT_ID;
   const apiAudience = env.VITE_CODEXIA_API_AUDIENCE;
-  const redirectUri = shell === 'desktop' ? env.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI : env.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI;
+  const redirectUri = env.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI;
   if (!issuer && !clientId && !apiAudience && !redirectUri) return null;
   if (!issuer?.trim() || !clientId?.trim() || !apiAudience?.trim() || !redirectUri?.trim()) {
     throw new Error('OAuth Web configuration is incomplete.');

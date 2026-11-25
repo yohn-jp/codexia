@@ -72,7 +72,7 @@ export function PersistenceEntry() {
     let mounted = true;
     void (async () => {
       try {
-        const config = webOAuthConfig(mode);
+        const config = webOAuthConfig();
         if (mounted) setOAuthConfig(config);
         if (config) {
           const authorization = await completeOAuthAuthorization(config);

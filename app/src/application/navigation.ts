@@ -26,7 +26,7 @@ function browserStorage(): Storage | null {
 }
 
 export function isUiMode(value: unknown): value is UiMode {
-  return value === "desktop" || value === "mobile";
+  return value === "desktop";
 }
 
 export function readUiModePreference(storage: StorageReader | null = browserStorage()): UiMode | null {
@@ -92,18 +92,4 @@ export function applicationPath(mode: UiMode, resource: ApplicationResource | nu
   if (resource?.chapterId) query.set("chapter", resource.chapterId);
   const search = query.toString();
   return search ? `${path}?${search}` : path;
-}
-
-export function switchApplicationPath(pathname: string, mode: UiMode): string {
-  let search = "";
-  const resource = parseApplicationLocation(pathname)?.resource ?? null;
-  try {
-    const params = new URL(pathname, "http://codexia.invalid").searchParams;
-    if (mode === "mobile") params.set("view", resource?.sceneId ? "writing" : "library");
-    else params.delete("view");
-    search = params.toString();
-  } catch {
-    // The pathname parser below will return no resource for malformed input.
-  }
-  return applicationPath(mode, resource, search);
 }

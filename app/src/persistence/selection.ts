@@ -9,7 +9,7 @@ export function readWorkspaceSelection(storage: Pick<Storage, "getItem">, author
 export function readWorkspaceSelectionForLocation(
   storage: Pick<Storage, "getItem">,
   authorScope: string,
-  mode: "desktop" | "mobile",
+  mode: "desktop",
   locationHref: string,
 ): WorkspaceSelection | null {
   const stored = readWorkspaceSelection(storage, authorScope);
@@ -22,7 +22,7 @@ export function readWorkspaceSelectionForLocation(
 }
 
 export function workspaceSelectionPath(
-  mode: "desktop" | "mobile",
+  mode: "desktop",
   selection: WorkspaceSelection | null,
   currentSearch = "",
 ): string {

@@ -55,10 +55,6 @@ test("a workspace save commits dock layout and floating geometry together for on
   assert.deepEqual(reloaded, { ...snapshot, state: "valid" });
 
   assert.equal(loadWorkspaceSnapshot(storage, "author:two", "desktop", panelIds).state, "missing");
-  assert.equal(loadWorkspaceSnapshot(storage, "author:one", "mobile", panelIds).state, "missing");
-  assert.equal(saveWorkspaceSnapshot(storage, "author:one", "mobile", snapshot), false);
-  assert.equal(saveWorkspaceSnapshot(storage, "author:one", "mobile", { layout: desktop, floating: [] }), true);
-  assert.deepEqual(loadWorkspaceSnapshot(storage, "author:one", "mobile", panelIds), { layout: desktop, floating: [], state: "valid" });
   assert.deepEqual(loadWorkspaceSnapshot(storage, "author:one", "desktop", panelIds), { ...snapshot, state: "valid" });
 });
 
@@ -167,11 +163,9 @@ test("storage errors fall back without pretending that persistence succeeded", (
   };
   const desktop = loadWorkspaceSnapshot(inaccessible, "author:one", "desktop", panelIds);
   assertWritingFallback(desktop, "unavailable");
-  const mobile = loadWorkspaceSnapshot(inaccessible, "author:one", "mobile", panelIds);
-  assertWritingFallback(mobile, "unavailable");
   assert.deepEqual(writes, []);
 
-  const { layout, floating } = mobile;
-  assert.equal(saveWorkspaceSnapshot(inaccessible, "author:one", "mobile", { layout, floating }), false);
-  assert.deepEqual(writes, [workspaceSnapshotStorageKey("author:one", "mobile")]);
+  const { layout, floating } = desktop;
+  assert.equal(saveWorkspaceSnapshot(inaccessible, "author:one", "desktop", { layout, floating }), false);
+  assert.deepEqual(writes, [workspaceSnapshotStorageKey("author:one", "desktop")]);
 });
