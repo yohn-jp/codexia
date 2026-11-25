@@ -64,6 +64,9 @@ export function selectRoute(state, intent, frontendAdmission, bootstrapResume = 
   if (D === 'lost') return intent === 'restore' ? 'R2' : 'R0';
   if (axes.some(key => state[key] === 'unknown')) return 'R0';
   if (intent === 'restore') return 'R0'; // Never reinterpret a restore as a fresh install.
+  // A positively absent database has no prior schema or owner to migrate.
+  if (intent === 'install' && D === 'absent' && A === 'absent' &&
+      ['ready', 'partial'].includes(H) && ['absent', 'fault'].includes(B) && F !== 'fault') return 'R4';
   if (H === 'absent' && (['compatible', 'incompatible'].includes(D) || B !== 'absent')) return 'R0';
   // A clean database cannot substantiate an existing installed writer or owner.
   if (['absent', 'pristine'].includes(D) &&

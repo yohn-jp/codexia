@@ -88,7 +88,7 @@ Access に加えてセットアップキーによる認可を要求し、キー�
 
 ## 宣言的な初期化と公開の責務分離
 
-**採用済み設計:** 宣言的inventoryと承認で新規VMへ`bootstrap`一操作で`host → secrets → base → auth-runtime`を順序どおり収束させる。初回キーはAnsible管理下で安全に生成・配送するが、ownerをAnsibleは作成しない。本人によるWorkers上のセットアップUI/Better AuthでのPasskey登録を経て、保護されたactivation preparationでowner/clientを照合しsetup-onlyを停止した後、別途承認された本番activationに進む。新規・復旧・通常更新を混同せず、再適用は冪等。秘密情報や既存データを無条件に初期化しない。
+**採用済み設計:** 宣言的inventoryと承認で新規VMへ`bootstrap`一操作で`host → secrets → base → auth-runtime`を順序どおり収束させる。初回キーはAnsible管理下で安全に生成・配送するが、ownerをAnsibleは作成しない。本人によるWorkers上のセットアップUI/Better AuthでのPasskey登録を経て、保護されたactivation preparationでowner/clientを照合しsetup-onlyを停止した後、別途承認された本番activationに進む。新規・復旧・通常更新を混同せず、再適用は冪等。秘密情報や既存データを無条件に初期化しない。既存VMで専用DBの不在が確認された場合も、[R4のDB不在時再初期化](DEPLOYMENT-LIFECYCLE.md#db不在時の再初期化r4) に従い同じ新規導入を実行する。
 
 **運用受入:** `bootstrap` は `host`、`secrets`、`base`、承認済みの `auth-runtime` を順に実行する。新規導入で承認を明示すると、同一オリジンの setup-only API と暗号化した一回限りのキー配送を構成できる。[認証運用手順](../../deploy/ansible/AUTH-RUNTIME.md)に従い、Cloudflare 経路、使い捨て VM と実ブラウザーで受入を確認する。SSH ポートフォワード方式は移行中の既存手順として維持する。`inspect`、個別ステージ、`deploy-lifecycle-fixture`、`restore-drill` は引き続き利用できる。
 

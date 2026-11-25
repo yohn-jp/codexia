@@ -53,7 +53,7 @@ CONTROLLER_VARS = frozenset({
     "codexia_stage", "codexia_bootstrap_stages", "codexia_auth_bootstrap_image",
     "codexia_expected_bootstrap_resume", "codexia_expected_owner_setup_checkpoint",
     "codexia_owner_setup_install_intent", "codexia_owner_setup_operation", "codexia_database_initialization_approved",
-    "codexia_recreate_missing_app_database_approved", "codexia_initial_install_approved",
+    "codexia_recreate_missing_app_database_approved", "codexia_expected_absent_database", "codexia_initial_install_approved",
 })
 
 
