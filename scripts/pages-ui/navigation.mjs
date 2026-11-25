@@ -18,11 +18,13 @@ const CORE_PAGES = new Map([
   ['security/index.html', { id: 'security', title: 'Code scanning export', section: 'Security', mode: 'authorized on-demand', source: 'GitHub Code scanning API (authorized locally)' }],
   ['graph/index.html', { id: 'graph', title: 'Code Map', section: 'Code Map', mode: 'build snapshot', source: 'Graphify static analysis' }],
   ['architecture/index.html', { id: 'architecture', title: 'Architecture Atlas', section: 'Architecture', mode: 'build snapshot', source: 'LikeC4 model and canonical design documents' }],
+  ['requirements/traceability/index.html', { id: 'requirements', title: 'Implementation Traceability', section: 'Requirements', mode: 'source-bound status', source: 'StrictDoc and source inventory' }],
 ]);
 
 const NAV_ITEMS = [
   ['overview', '概要', ''],
   ['architecture', 'Architecture', 'architecture/'],
+  ['requirements', 'Requirements', 'requirements/traceability/'],
   ['graph', 'Code Map', 'graph/'],
   ['ux', 'UX Simulator', 'ux/'],
   ['ci', 'CI', 'ci/'],

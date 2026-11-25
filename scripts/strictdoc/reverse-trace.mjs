@@ -139,7 +139,7 @@ export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, b
     for (const route of generated.routes ?? []) {
       const id = `${route.method} ${route.url.replace(/:([A-Za-z][A-Za-z0-9_]*)/gu, '{$1}')}`;
       if (route.contractStatus === 'target') continue;
-      surfaces.push({ kind: 'httpRuntimeRoute', id, source: { path: generatedContractPath }, provenance: `Generated Fastify registration with operationId ${route.operationId}; server registration resolves handlers by operationId and fails closed when a handler is missing.` });
+      surfaces.push({ kind: 'httpRuntimeRoute', id, operationId: route.operationId, contractStatus: route.contractStatus, source: { path: generatedContractPath }, provenance: `Generated Fastify registration with operationId ${route.operationId}; server registration resolves handlers by operationId and fails closed when a handler is missing.` });
     }
   } catch {
     limitations.push({ area: 'http', reason: `Generated Fastify HTTP contract is missing or invalid: ${generatedContractPath}` });
@@ -180,15 +180,16 @@ export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, b
   for (const file of appFiles) surfaces.push(...implementationControlReferences(await readRegularFile(path.join(root, file)), file));
   limitations.push({ area: 'ui-runtime', reason: 'A source control-ID reference does not prove rendered UI behavior; browser acceptance and explicit control bindings are required for runtime UI evidence.' });
 
+  const workflowFiles = (await walkFiles(root, '.github/workflows')).filter((file) => file.endsWith('.yml') || file.endsWith('.yaml'));
+  for (const file of workflowFiles) surfaces.push({ kind: 'ciWorkflow', id: file, source: { path: file }, provenance: 'Checked-in GitHub Actions workflow definition; source presence does not prove a job ran, passed, or certified an obligation.' });
+  if (workflowFiles.length === 0) limitations.push({ area: 'ci', reason: 'GitHub Actions workflow directory is unavailable.' });
+  else limitations.push({ area: 'ci-runtime', reason: 'Workflow source is not a run result. The exact-source task, job, attempt, and artifact certification remain in the existing execution evidence.' });
+
   const platform = await discoverPlatformSurfaces({ repositoryRoot: root });
   surfaces.push(...platform.surfaces);
   limitations.push(...platform.limitations);
 
-  const operationalFiles = [
-    'deploy/backup/backup.sh', 'deploy/backup/s3_transfer.py',
-    'deploy/ansible/deploy.yml', 'deploy/ansible/deploy-transaction.yml', 'deploy/ansible/restore-drill.yml',
-    '.github/workflows/backend-release.yml', '.github/workflows/backend-deployment-handoff.yml', '.github/workflows/push-backup.yml',
-  ];
+  const operationalFiles = ['deploy/backup/backup.sh', 'deploy/backup/s3_transfer.py'];
   for (const file of operationalFiles) {
     try {
       await readRegularFile(path.join(root, file));
@@ -220,6 +221,7 @@ function surfaceKindMatches(referenceKind, surfaceKind) {
   if (referenceKind === 'nativeIosView') return surfaceKind === 'nativeIosView';
   if (referenceKind === 'iacResource') return surfaceKind === 'iacResource';
   if (referenceKind === 'ansibleSource') return surfaceKind === 'ansibleSource';
+  if (referenceKind === 'ciWorkflow') return surfaceKind === 'ciWorkflow';
   if (referenceKind === 'surfaceId') return true;
   if (referenceKind === 'identifier') return true;
   return false;
@@ -236,6 +238,16 @@ function isExactSurfaceReference(value, surface) {
     ['objectId', 'objectId'], ['controlId', 'controlId'], ['surfaceId', 'surfaceId'],
   ];
   return typedKeys.some(([key, kind]) => value[key] === surface.id && surfaceKindMatches(kind, surface.kind));
+}
+
+function inventoryKindMatches(surfaceKind, inventoryKind) {
+  if (['httpOperation', 'httpRuntimeRoute', 'httpBoundedRoute', 'httpExternalOperation'].includes(surfaceKind)) return inventoryKind === 'route';
+  if (['mcpTool', 'mcpRuntimeTool'].includes(surfaceKind)) return inventoryKind === 'tool';
+  if (['databaseObject', 'databaseCatalogObject', 'databaseMigrationObject'].includes(surfaceKind)) return inventoryKind === 'databaseObject';
+  if (surfaceKind === 'nativeIosView') return inventoryKind === 'nativeIosView';
+  if (surfaceKind === 'iacResource') return inventoryKind === 'iacResource';
+  if (surfaceKind === 'ansibleSource') return inventoryKind === 'ansibleSource';
+  return false;
 }
 
 /** Relate discovered runtime/design surfaces to registered obligations without promoting conformance. */
@@ -258,7 +270,13 @@ export function buildReverseTrace({ discovered = [], inventory = [], obligations
       return [...(obligation.designRefs ?? []), ...(obligation.sourceRefs ?? []), ...(obligation.surfaceIdentifiers ?? [])]
         .some((reference) => isExactSurfaceReference(reference, surface));
     });
-    const kindMatches = inventoryEntries.filter((entry) => entry.id === surface.id || entry.id === `${surface.kind} ${surface.id}` || (surface.kind === 'httpRuntimeRoute' && entry.id === surface.id));
+    const kindMatches = inventoryEntries.filter((entry) => inventoryKindMatches(surface.kind, entry.kind) && (entry.id === surface.id || entry.id === `${surface.kind} ${surface.id}`));
+    const inventoryClassification = kindMatches[0]?.classification;
+    const candidateRequirementIds = [...new Set((inventoryClassification?.match(/REQ-[A-Z]+-\d{3}/gu) ?? []))];
+    const classificationFields = {
+      ...(inventoryClassification ? { inventoryClassification } : {}),
+      ...(candidateRequirementIds.length ? { candidateRequirementIds } : {}),
+    };
     const provenance = surface.provenance ?? 'Source discovery provided without provenance.';
     if (surface.kind === 'httpRuntimeRoute' && (surface.classification === 'unadmitted' || !admittedHttpOperations.has(surface.id))) {
       violations.push(`Runtime HTTP operation is absent from the admitted HTTP inventory: ${surface.id} (${surface.source?.path ?? 'source unknown'})`);
@@ -272,20 +290,28 @@ export function buildReverseTrace({ discovered = [], inventory = [], obligations
     }
     if (references.length === 0) {
       const state = surface.classification === 'target' || surface.classification?.startsWith('missing-from-') ? 'BLOCKED' : 'UNMAPPED';
-      const gap = { kind: state, surface: { kind: surface.kind, id: surface.id }, provenance, source: surface.source, classification: surface.classification };
+      const gap = { kind: state, surface: { kind: surface.kind, id: surface.id }, provenance, source: surface.source, ...classificationFields, classification: surface.classification };
       gaps.push(gap);
-      rows.push({ ...gap, obligationIds: [], status: state });
+      rows.push({ ...gap, ...classificationFields, ...(surface.operationId ? { operationId: surface.operationId } : {}), ...(surface.contractStatus ? { contractStatus: surface.contractStatus } : {}), obligationIds: [], status: state });
       continue;
     }
     for (const obligation of references) {
       const ids = obligation.testIds ?? [];
       const exactRuns = obligation.exactRuns ?? [];
       const status = surface.classification === 'target' ? 'BLOCKED' : ids.length === 0 ? 'UNVERIFIED' : 'MAPPED_UNVERIFIED';
-      rows.push({ surface: { kind: surface.kind, id: surface.id }, obligationId: obligation.obligationId, requirementId: obligation.requirementId, provenance, source: surface.source, testIds: ids, exactRuns, status });
+      rows.push({ surface: { kind: surface.kind, id: surface.id }, obligationId: obligation.obligationId, requirementId: obligation.requirementId, provenance, source: surface.source, ...classificationFields, ...(surface.operationId ? { operationId: surface.operationId } : {}), ...(surface.contractStatus ? { contractStatus: surface.contractStatus } : {}), testIds: ids, exactRuns, status });
       if (surface.classification === 'target') gaps.push({ kind: 'BLOCKED', surface: { kind: surface.kind, id: surface.id }, obligationId: obligation.obligationId, provenance, source: surface.source, reason: 'Contract marks this operation as a target, not a current runtime obligation.' });
       if (ids.length === 0) gaps.push({ kind: 'UNVERIFIED', surface: { kind: surface.kind, id: surface.id }, obligationId: obligation.obligationId, provenance, source: surface.source, reason: 'No verification scenario is registered for this linked obligation.' });
-      if (kindMatches.some((item) => /DEVIATION|UNMAPPED|BLOCKED/u.test(item.classification ?? ''))) {
-        gaps.push({ kind: 'DEVIATION', surface: { kind: surface.kind, id: surface.id }, obligationId: obligation.obligationId, provenance, classification: kindMatches.find((item) => /DEVIATION|UNMAPPED|BLOCKED/u.test(item.classification ?? '')).classification });
+      const inventoryGap = kindMatches.find((item) => /\b(?:DEVIATION|UNMAPPED|BLOCKED)\b/iu.test(item.classification ?? ''));
+      if (inventoryGap) {
+        const classification = inventoryGap.classification;
+        const kind = /\bDEVIATION\b/iu.test(classification) ? 'DEVIATION' : /\bBLOCKED\b/iu.test(classification) ? 'BLOCKED' : 'UNMAPPED';
+        const reason = kind === 'DEVIATION'
+          ? 'Source inventory explicitly classifies this relation as a specification deviation.'
+          : kind === 'BLOCKED'
+            ? 'Source inventory explicitly classifies this relation as blocked.'
+            : 'Source inventory records that the detailed obligation mapping remains unassigned.';
+        gaps.push({ kind, surface: { kind: surface.kind, id: surface.id }, obligationId: obligation.obligationId, provenance, classification, reason });
       }
     }
   }

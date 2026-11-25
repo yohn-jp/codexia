@@ -36,6 +36,27 @@ test('projects explicit obligation links and retains missing trace stages as gap
   assert.match(result.gaps.join('\n'), /no exact-source run evidence/);
 });
 
+test('accepts an explicit CI workflow surface identifier without implying execution', () => {
+  const result = buildObligationTrace({
+    requirements: [requirement], scenarios: [scenario], obligations: [{
+      ...obligation, 'Surface identifiers': 'ciWorkflow=.github/workflows/verify.yml',
+    }],
+  });
+  assert.deepEqual(result.violations, []);
+  assert.deepEqual(result.rows[0].surfaceIdentifiers, [{ kind: 'ciWorkflow', id: '.github/workflows/verify.yml' }]);
+  assert.deepEqual(result.rows[0].exactRuns, []);
+});
+
+test('retains requirement-level implementation declarations without changing conformance', () => {
+  const result = buildObligationTrace({
+    requirements: [{ ...requirement, 'Conformance status': 'UNMAPPED', 'Implementation identifiers': 'XState actor 未導入; transition registry', Comment: '目標・未実装' }],
+    scenarios: [scenario], obligations: [obligation],
+  });
+  assert.equal(result.rows[0].conformanceStatus, 'UNMAPPED');
+  assert.deepEqual(result.rows[0].requirementImplementationIdentifiers, ['XState actor 未導入', 'transition registry']);
+  assert.equal(result.rows[0].requirementComment, '目標・未実装');
+});
+
 test('attaches exact-source candidate data without certifying conformance', () => {
   const result = buildObligationTrace({
     requirements: [requirement], obligations: [obligation], scenarios: [scenario], runEvidence: [candidate],

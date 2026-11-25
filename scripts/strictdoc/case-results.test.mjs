@@ -42,6 +42,22 @@ test('matches a TEST ID only to one execution of the exact case in its declared 
   ]);
 });
 
+test('preserves declared test source details when execution is absent or ambiguous', () => {
+  const scenarios = [
+    { UID: 'TEST-ABSENT-001', 'Case name': 'not run case', RELATIONS: [{ TYPE: 'File', VALUE: 'tests/not-run.test.mjs', LINE_RANGE: '15, 21' }] },
+    { UID: 'TEST-AMBIGUOUS-001', 'Case name': 'duplicate case', RELATIONS: [{ TYPE: 'File', PATH: 'tests/duplicate.test.mjs', LINE_RANGE: '30, 38' }] },
+  ];
+  const result = associateTraceCases(scenarios, [
+    { name: 'duplicate case', file: 'tests/duplicate.test.mjs', line: 32, result: 'PASSED' },
+    { name: 'duplicate case', file: 'tests/duplicate.test.mjs', line: 36, result: 'PASSED' },
+  ]);
+
+  assert.deepEqual(result.map(({ testId, name, sourceRefs, result: status }) => ({ testId, name, sourceRefs, result: status })), [
+    { testId: 'TEST-ABSENT-001', name: 'not run case', sourceRefs: [{ path: 'tests/not-run.test.mjs', range: '15, 21' }], result: 'NOT_RUN' },
+    { testId: 'TEST-AMBIGUOUS-001', name: 'duplicate case', sourceRefs: [{ path: 'tests/duplicate.test.mjs', range: '30, 38' }], result: 'AMBIGUOUS' },
+  ]);
+});
+
 test('does not observe an empty Node suite as a passing test case', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'codexia-case-results-'));
   t.after(() => rm(root, { recursive: true, force: true }));

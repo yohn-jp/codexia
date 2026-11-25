@@ -11,7 +11,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 test('reverse discovery records authority and provenance for HTTP, MCP, DB, UI and operational surfaces', async () => {
   const { surfaces, limitations } = await discoverReverseSurfaces({ repositoryRoot });
   assert.ok(surfaces.some((item) => item.kind === 'httpOperation' && item.id === 'GET /api/projects'));
-  assert.ok(surfaces.some((item) => item.kind === 'httpRuntimeRoute' && item.id === 'GET /api/projects' && item.source.path === 'packages/api/src/generated/http-contract.json'));
+  assert.ok(surfaces.some((item) => item.kind === 'httpRuntimeRoute' && item.id === 'GET /api/projects' && item.operationId === 'projects_list_get' && item.source.path === 'packages/api/src/generated/http-contract.json'));
   assert.ok(surfaces.some((item) => item.kind === 'mcpTool' && item.id === 'list_projects'));
   const publicMcpTools = surfaces.filter((item) => item.kind === 'mcpTool');
   assert.equal(publicMcpTools.length, 53, 'all public MCP tools remain discoverable across SDK v1/v2 registration shapes');
@@ -19,8 +19,9 @@ test('reverse discovery records authority and provenance for HTTP, MCP, DB, UI a
   assert.ok(surfaces.some((item) => item.kind === 'databaseCatalogObject' && item.id === 'public.project'));
   assert.ok(surfaces.some((item) => item.kind === 'uiControl' && item.id === 'WRT-01.A'));
   assert.ok(surfaces.some((item) => item.kind === 'backupInterface' && item.id === 'deploy/backup/backup.sh'));
+  assert.ok(surfaces.some((item) => item.kind === 'ciWorkflow' && item.id === '.github/workflows/repository-audit.yml'));
   assert.ok(surfaces.every((item) => item.provenance && item.source?.path));
-  assert.deepEqual(new Set(limitations.map((item) => item.area)), new Set(['mcp-effect', 'database-live', 'ui-runtime', 'native-ios-runtime', 'iac-runtime', 'ansible-runtime', 'deployment-runtime', 'backup-receipt']));
+  assert.deepEqual(new Set(limitations.map((item) => item.area)), new Set(['mcp-effect', 'database-live', 'ui-runtime', 'ci-runtime', 'native-ios-runtime', 'iac-runtime', 'ansible-runtime', 'deployment-runtime', 'backup-receipt']));
 });
 
 test('reverse discovery inventories SDK v2 registerTool names with source coordinates', async t => {
@@ -128,6 +129,47 @@ test('reverse trace leaves new runtime surface unmapped and does not infer VERIF
   assert.equal(result.violations.length, 1);
 });
 
+test('preserves source inventory classification and candidate requirements without accepting a link', () => {
+  const result = buildReverseTrace({
+    discovered: [{ kind: 'mcpTool', id: 'draft.export', source: { path: 'modules/mcp/src/tools/draft.ts', line: 18 }, provenance: 'literal tool registration' }],
+    inventory: [{ kind: 'tool', id: 'draft.export', classification: 'candidate REQ-MCP-002 / REQ-OPS-003; effect remains unverified' }],
+  });
+
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].status, 'UNMAPPED');
+  assert.equal(result.rows[0].requirementId, undefined);
+  assert.equal(result.rows[0].obligationIds.length, 0);
+  assert.equal(result.rows[0].inventoryClassification, 'candidate REQ-MCP-002 / REQ-OPS-003; effect remains unverified');
+  assert.deepEqual(result.rows[0].candidateRequirementIds, ['REQ-MCP-002', 'REQ-OPS-003']);
+  assert.equal(result.rows[0].source.line, 18);
+});
+
+test('does not borrow classification from a different inventory surface kind', () => {
+  const result = buildReverseTrace({
+    discovered: [{ kind: 'mcpTool', id: 'same-name', source: { path: 'modules/mcp/src/tools.ts' }, provenance: 'tool registration' }],
+    inventory: [{ kind: 'route', id: 'same-name', classification: 'candidate REQ-API-001' }],
+  });
+
+  assert.equal(result.rows[0].inventoryClassification, undefined);
+  assert.deepEqual(result.rows[0].candidateRequirementIds, undefined);
+  assert.equal(result.rows[0].status, 'UNMAPPED');
+});
+
+test('keeps an unassigned inventory mapping distinct from an explicit specification deviation', () => {
+  const result = buildReverseTrace({
+    discovered: [{ kind: 'httpOperation', id: 'PATCH /api/example', classification: 'current', source: { path: 'packages/api/src/routes.ts' }, provenance: 'admitted operation' }],
+    inventory: [{ kind: 'route', id: 'PATCH /api/example', classification: 'UNMAPPED: detailed obligation mapping remains unassigned' }],
+    obligations: [{
+      requirementId: 'REQ-API-001', obligationId: 'OBL-REQ-API-001-O01',
+      surfaceIdentifiers: [{ kind: 'httpOperation', id: 'PATCH /api/example' }], testIds: [],
+    }],
+  });
+
+  assert.equal(result.rows[0].status, 'UNVERIFIED');
+  assert.ok(result.gaps.some(gap => gap.kind === 'UNMAPPED' && gap.obligationId === 'OBL-REQ-API-001-O01'));
+  assert.ok(!result.gaps.some(gap => gap.kind === 'DEVIATION'));
+});
+
 test('generic file provenance does not silently map every discovered surface to an obligation', () => {
   const result = buildReverseTrace({
     discovered: [{ kind: 'mcpTool', id: 'knowledge.propose', source: { path: 'modules/mcp/src/tools/knowledge.ts' }, provenance: 'fixture' }],
@@ -164,6 +206,19 @@ test('typed A1 surface identifiers join exact HTTP, DB and UI surfaces only', as
     obligations: [{ requirementId: 'REQ-MCP-001', obligationId: 'OBL-REQ-MCP-001-O01', surfaceIdentifiers: [{ kind: 'toolName', id: selected[0].id }], testIds: ['TEST-MCP-001'] }],
   });
   assert.equal(wrongKind.rows[0].status, 'UNMAPPED');
+});
+
+test('CI workflow surface links to the requirement only through an explicit typed identifier', async () => {
+  const { surfaces } = await discoverReverseSurfaces({ repositoryRoot });
+  const workflow = surfaces.find(item => item.kind === 'ciWorkflow' && item.id === '.github/workflows/verify.yml');
+  assert.ok(workflow);
+  const result = buildReverseTrace({
+    discovered: [workflow],
+    obligations: [{ requirementId: 'REQ-QUAL-002', obligationId: 'OBL-REQ-QUAL-002-O01', surfaceIdentifiers: [{ kind: 'ciWorkflow', id: workflow.id }], testIds: [], exactRuns: [] }],
+  });
+  assert.equal(result.rows[0].requirementId, 'REQ-QUAL-002');
+  assert.equal(result.rows[0].status, 'UNVERIFIED');
+  assert.equal(result.rows[0].exactRuns.length, 0);
 });
 
 test('openAPI deviations and unavailable discovery inputs stay visible', () => {
