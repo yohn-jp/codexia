@@ -23,6 +23,7 @@ createApiReference('#scalar-api-reference', {
     #scalar-api-reference .scalar-api-reference,
     #scalar-api-reference .dark-mode {
       --scalar-color-3: #a0a0a0;
+      --scalar-sidebar-search-color: #a0a0a0;
       --scalar-color-red: #ff7373;
     }
   `,
