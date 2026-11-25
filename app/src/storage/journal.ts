@@ -9,9 +9,10 @@ import {
 import type { TextChange } from "../editor/evidence";
 
 const DATABASE_NAME = "scriptorium-recovery";
-const DATABASE_VERSION = 5;
+const DATABASE_VERSION = 6;
 const ENTRY_STORE = "pgOperations";
 const SCRATCH_STORE = "pgScratch";
+const SCRATCH_PAYLOAD_STORE = "pgScratchPayloads";
 const PROPOSAL_STORE = "pgProposals";
 const APPLICATION_STORE = "pgApplications";
 const PERSISTENCE_DRAFT_STORE = "persistenceDrafts";
@@ -116,7 +117,30 @@ export function persistenceDraftKey(projectId: string, documentId: string, autho
 interface ScratchRecord {
   key: string;
   text: string;
+  revision?: string;
   updatedAt: number;
+}
+
+export interface ScratchPayloadReference {
+  kind: "image" | "pending-note";
+  id: string;
+}
+
+export interface ScratchPayloadWrite extends ScratchPayloadReference {
+  value: string;
+}
+
+interface ScratchPayloadRecord extends ScratchPayloadWrite {
+  key: string;
+  scratchKey: string;
+}
+
+export interface ScratchSnapshot {
+  /** Compact JSON metadata; legacy v1 snapshots may still include inline image data. */
+  text: string;
+  /** Opaque CAS token. Legacy records use their exact serialized value. */
+  revision: string;
+  payloads: ScratchPayloadWrite[];
 }
 
 export class JournalError extends Error {
@@ -271,6 +295,10 @@ export class BrowserJournal {
         }
         if (!database.objectStoreNames.contains(SCRATCH_STORE)) {
           database.createObjectStore(SCRATCH_STORE, { keyPath: "key" });
+        }
+        if (!database.objectStoreNames.contains(SCRATCH_PAYLOAD_STORE)) {
+          const payloads = database.createObjectStore(SCRATCH_PAYLOAD_STORE, { keyPath: "key" });
+          payloads.createIndex("scratchKey", "scratchKey", { unique: false });
         }
         if (!database.objectStoreNames.contains(PROPOSAL_STORE)) {
           const proposals = database.createObjectStore(PROPOSAL_STORE, { keyPath: "key" });
@@ -847,35 +875,71 @@ export class BrowserJournal {
     }
   }
 
-  async getScratch(projectId: string, path: string, authorScope: string): Promise<string> {
+  async getScratch(projectId: string, path: string, authorScope: string): Promise<ScratchSnapshot | null> {
     if (!authorScope) throw new JournalError("The scratch note has no author identity scope.");
     const key = JSON.stringify([documentKey(projectId, path), authorScope]);
     try {
-      const transaction = this.database.transaction(SCRATCH_STORE, "readonly");
+      const transaction = this.database.transaction([SCRATCH_STORE, SCRATCH_PAYLOAD_STORE], "readonly");
       const done = transactionDone(transaction);
       const record = await requestValue(transaction.objectStore(SCRATCH_STORE).get(key)) as ScratchRecord | undefined;
+      if (!record) {
+        await done;
+        return null;
+      }
+      const payloads = await requestValue(transaction.objectStore(SCRATCH_PAYLOAD_STORE).index("scratchKey").getAll(key)) as ScratchPayloadRecord[];
       await done;
-      return record?.text ?? "";
+      return {
+        text: record.text,
+        revision: record.revision ?? record.text,
+        payloads: payloads.map(({ kind, id, value }) => ({ kind, id, value })),
+      };
     } catch (error) {
       throw storageMessage(error, "scratch note");
     }
   }
 
-  async putScratch(projectId: string, path: string, text: string, authorScope: string, expectedText: string): Promise<boolean> {
+  async putScratch(
+    projectId: string,
+    path: string,
+    text: string,
+    authorScope: string,
+    expectedRevision: string,
+    payloadsToWrite: readonly ScratchPayloadWrite[] = [],
+    payloadsToDelete: readonly ScratchPayloadReference[] = [],
+  ): Promise<string | null> {
     if (!authorScope) throw new JournalError("The scratch note has no author identity scope.");
-    const record: ScratchRecord = { key: JSON.stringify([documentKey(projectId, path), authorScope]), text, updatedAt: Date.now() };
+    for (const payload of payloadsToWrite) {
+      if ((payload.kind !== "image" && payload.kind !== "pending-note") || !payload.id || !payload.value) {
+        throw new JournalError("The scratch recovery payload is invalid.");
+      }
+    }
+    for (const payload of payloadsToDelete) {
+      if ((payload.kind !== "image" && payload.kind !== "pending-note") || !payload.id) {
+        throw new JournalError("The scratch recovery payload is invalid.");
+      }
+    }
+    const key = JSON.stringify([documentKey(projectId, path), authorScope]);
+    const record: ScratchRecord = { key, text, revision: crypto.randomUUID(), updatedAt: Date.now() };
     try {
-      const transaction = this.database.transaction(SCRATCH_STORE, "readwrite", { durability: "strict" });
+      const transaction = this.database.transaction([SCRATCH_STORE, SCRATCH_PAYLOAD_STORE], "readwrite", { durability: "strict" });
       const done = transactionDone(transaction);
       const store = transaction.objectStore(SCRATCH_STORE);
-      const existing = await requestValue(store.get(record.key)) as ScratchRecord | undefined;
-      if ((existing?.text ?? "") !== expectedText) {
+      const existing = await requestValue(store.get(key)) as ScratchRecord | undefined;
+      if ((existing?.revision ?? existing?.text ?? "") !== expectedRevision) {
         await done;
-        return false;
+        return null;
+      }
+      const payloadStore = transaction.objectStore(SCRATCH_PAYLOAD_STORE);
+      for (const payload of payloadsToWrite) {
+        const payloadKey = JSON.stringify([key, payload.kind, payload.id]);
+        payloadStore.put({ ...payload, key: payloadKey, scratchKey: key } satisfies ScratchPayloadRecord);
+      }
+      for (const payload of payloadsToDelete) {
+        payloadStore.delete(JSON.stringify([key, payload.kind, payload.id]));
       }
       store.put(record);
       await done;
-      return true;
+      return record.revision ?? null;
     } catch (error) {
       throw storageMessage(error, "scratch note");
     }

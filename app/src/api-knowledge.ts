@@ -280,7 +280,7 @@ export const knowledgeApi = {
       documentId,
       {
         ...(revisionId ? { revision: revisionId } : {}),
-        ...(signal ? { limit: 500 } : {}),
+        limit: 500,
       },
       options(signal),
     )) as unknown as PersistenceDocumentAnchors,

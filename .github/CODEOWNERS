@@ -1,7 +1,8 @@
 # Default ownership for all repository changes.
 * @yohnark
 
-# Explicit ownership for security-sensitive configuration.
+# Explicit ownership for deployment and edge runtime paths.
 /.github/ @yohnark
-/infra/ @yohnark
+/deploy/ @yohnark
+/edge/ @yohnark
 /scripts/ @yohnark

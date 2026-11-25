@@ -216,7 +216,7 @@ export function ConsoleEntry() {
           <p className="codexia-console__sidebar-note">本人の認証と設定を行います。VMや本番環境の操作は提供しません。</p>
         </aside>
         <section className="codexia-console__content" aria-labelledby="console-title">
-          <p className="codexia-console__eyebrow">CODExIA · OWNER-SESSION</p>
+          <p className="codexia-console__eyebrow">CODEXIA · OWNER-SESSION</p>
           <h1 id="console-title">{routeTitle(route)}</h1>
           {message && <p className="codexia-console__alert" role="alert">{message}</p>}
           {route === "home" ? <>

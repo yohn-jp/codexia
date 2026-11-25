@@ -40,6 +40,7 @@ UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9+/=_-]{1,2048}$")
 MIN_MULTIPART_PART_BYTES = 5 * 1024 * 1024
 DEFAULT_MULTIPART_THRESHOLD_BYTES = 16 * 1024 * 1024
 DEFAULT_MULTIPART_PART_BYTES = 8 * 1024 * 1024
+MAX_COMMIT_MARKER_BYTES = 64 * 1024
 
 
 class TransferError(Exception):
@@ -459,6 +460,38 @@ def _read_stream(body: BinaryIO, *, output: BinaryIO | None = None) -> tuple[str
     return digest.hexdigest(), size
 
 
+def _encode_commit_marker(value: dict[str, Any]) -> bytes:
+    encoded = (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
+    if len(encoded) > MAX_COMMIT_MARKER_BYTES:
+        _fail("S3 commit marker exceeds the supported format size")
+    return encoded
+
+
+def _read_commit_marker(response: dict[str, Any]) -> bytes:
+    body = response.get("Body")
+    if body is None:
+        _fail("S3 commit marker response has no body")
+    try:
+        content_length = response.get("ContentLength")
+        if content_length is not None and (
+            not isinstance(content_length, int)
+            or isinstance(content_length, bool)
+            or content_length < 0
+            or content_length > MAX_COMMIT_MARKER_BYTES
+        ):
+            _fail("S3 commit marker exceeds the supported format size")
+        marker_bytes = body.read(MAX_COMMIT_MARKER_BYTES + 1)
+        if not isinstance(marker_bytes, bytes) or len(marker_bytes) > MAX_COMMIT_MARKER_BYTES:
+            _fail("S3 commit marker exceeds the supported format size")
+        if content_length is not None and len(marker_bytes) != content_length:
+            _fail("S3 commit marker size differs from its declared content length")
+        return marker_bytes
+    finally:
+        close = getattr(body, "close", None)
+        if callable(close):
+            close()
+
+
 class S3BackupTransfer:
     def __init__(
         self,
@@ -757,7 +790,7 @@ class S3BackupTransfer:
             "sha256sumsSha256": inventory["sha256sumsSha256"],
             "capabilities": capabilities,
         }
-        marker_bytes = (json.dumps(marker, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
+        marker_bytes = _encode_commit_marker(marker)
         marker_digest = hashlib.sha256(marker_bytes).hexdigest()
         if prior is not None and prior["markerSha256"] != marker_digest:
             _fail("S3 commit marker differs from the protected backup record")
@@ -837,8 +870,9 @@ class S3BackupTransfer:
                 Bucket=self.profile["bucket"], Key=marker_key,
                 **({"VersionId": receipt["markerVersionId"]} if receipt.get("markerVersionId") else {}),
             )
-            marker_bytes = marker_response["Body"].read()
-            marker_response["Body"].close()
+            marker_bytes = _read_commit_marker(marker_response)
+        except TransferError:
+            raise
         except Exception as error:
             raise TransferError("S3 commit marker retrieval failed") from error
         marker_digest = hashlib.sha256(marker_bytes).hexdigest()
@@ -921,9 +955,66 @@ def _make_client(profile: dict[str, Any], *, _allow_private_test_addresses: bool
         client.meta.endpoint_url,
         _allow_private_test_addresses=_allow_private_test_addresses,
     )
+    _install_pinned_https_transport(client, guard)
     client.meta.events.register_first("before-send.s3", guard.before_send)
     client.meta.events.register_first("needs-retry.s3", guard.needs_retry)
     return client
+
+
+def _install_pinned_https_transport(client: Any, guard: "EndpointGuard") -> None:
+    """Pin each HTTPS socket to the public DNS answer validated for that connection."""
+    try:
+        import botocore.awsrequest
+        from urllib3.exceptions import ConnectTimeoutError, NewConnectionError
+        from urllib3.util import connection
+
+        session = client._endpoint.http_session
+        pool_classes = session._pool_classes_by_scheme
+        manager = session._manager
+        original_https_pool = pool_classes["https"]
+        if original_https_pool is not botocore.awsrequest.AWSHTTPSConnectionPool:
+            _fail("Pinned Boto3 HTTPS connection pool is unsupported")
+    except TransferError:
+        raise
+    except Exception as error:
+        raise TransferError("Pinned Boto3 HTTPS transport is unsupported") from error
+
+    class PinnedAWSHTTPSConnection(botocore.awsrequest.AWSHTTPSConnection):
+        endpoint_guard = guard
+
+        def _new_conn(self):
+            if self.proxy is not None:
+                _fail("S3 endpoint proxies are not supported")
+            port = self.port or 443
+            addresses = self.endpoint_guard._resolve_public_addresses(self.host, port)
+            last_error: OSError | None = None
+            for address in addresses:
+                try:
+                    # The IP literal prevents urllib3 or the OS from resolving the
+                    # hostname again. self.host remains the original DNS name for
+                    # TLS SNI, certificate verification, and the HTTP Host header.
+                    return connection.create_connection(
+                        (address, port), self.timeout,
+                        source_address=self.source_address,
+                        socket_options=self.socket_options,
+                    )
+                except OSError as error:
+                    last_error = error
+            if last_error is None:
+                _fail("S3 endpoint resolved to no addresses")
+            if isinstance(last_error, (TimeoutError, socket.timeout)):
+                raise ConnectTimeoutError(
+                    self, f"Connection to {self.host} timed out (connect timeout={self.timeout})"
+                ) from last_error
+            raise NewConnectionError(
+                self, f"Failed to connect to validated S3 endpoint address: {last_error}"
+            ) from last_error
+
+    class PinnedAWSHTTPSConnectionPool(botocore.awsrequest.AWSHTTPSConnectionPool):
+        ConnectionCls = PinnedAWSHTTPSConnection
+
+    pool_classes["https"] = PinnedAWSHTTPSConnectionPool
+    manager.pool_classes_by_scheme = pool_classes
 
 
 class EndpointGuard:
@@ -957,20 +1048,33 @@ class EndpointGuard:
         port = parsed.port or 443
         return parsed.hostname or "", port
 
-    def _check_dns(self, host: str, port: int) -> None:
+    def _resolve_public_addresses(self, host: str, port: int) -> tuple[str, ...]:
         try:
-            addresses = {result[4][0].split("%", 1)[0] for result in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)}
+            results = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
         except OSError as error:
             raise TransferError("S3 endpoint DNS lookup failed") from error
-        if not addresses:
+        if not results:
             _fail("S3 endpoint resolved to no addresses")
-        for address in addresses:
+        addresses: list[str] = []
+        for result in results:
             try:
+                address = result[4][0]
+                if not isinstance(address, str):
+                    _fail("S3 endpoint returned an invalid IP address")
+                if "%" in address:
+                    _fail("S3 endpoint returned a scoped IP address")
                 parsed = ipaddress.ip_address(address)
-            except ValueError as error:
+            except (IndexError, TypeError, ValueError) as error:
                 raise TransferError("S3 endpoint returned an invalid IP address") from error
             if not parsed.is_global and not self._allow_private_test_addresses:
                 _fail("S3 endpoint resolved to a private, local, or reserved address")
+            normalized = parsed.compressed
+            if normalized not in addresses:
+                addresses.append(normalized)
+        return tuple(addresses)
+
+    def _check_dns(self, host: str, port: int) -> None:
+        self._resolve_public_addresses(host, port)
 
     def before_send(self, request: Any, **_: Any) -> None:
         host, port = self._approved_host(request.url)
