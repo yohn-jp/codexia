@@ -1,25 +1,22 @@
-import {
-  ownerSetupAuthorizePost,
-  ownerSetupCompletePost,
-  ownerSetupProfilePost,
-  ownerSetupStatusGet,
-} from "../generated/http/client";
-import { ApiError } from "../api-error";
+import { ApiError } from '../api-error';
+import { ownerSetupAuthorizePost, ownerSetupCompletePost, ownerSetupProfilePost, ownerSetupStatusGet } from '../generated/http/client';
 
 const SETUP_REQUEST = {
-  credentials: "same-origin",
-  cache: "no-store",
-  redirect: "error",
-  transport: { auth: "same-origin" },
+  credentials: 'same-origin',
+  cache: 'no-store',
+  redirect: 'error',
+  transport: { auth: 'same-origin' },
 } as const;
-const TRANSACTION_HEADER = "x-codexia-setup-transaction";
+const TRANSACTION_HEADER = 'x-codexia-setup-transaction';
 
 export type OwnerSetupStatus =
-  | { state: "setup-pending" | "waiting" | "expired" | "blocked" | "active" }
-  | { state: "owner-enrolled"; clientsReady: boolean; sessionConfirmed?: boolean };
+  | { state: 'setup-pending' | 'waiting' | 'expired' | 'blocked' | 'active' }
+  | { state: 'owner-enrolled'; clientsReady: boolean; sessionConfirmed?: boolean };
 
 export class SetupError extends Error {
-  constructor(readonly status: number) { super("Owner setup request failed"); }
+  constructor(readonly status: number) {
+    super('Owner setup request failed');
+  }
 }
 
 function statusOf(error: unknown): never {
@@ -33,23 +30,23 @@ export async function getOwnerSetupStatus(fetcher: typeof fetch = fetch, signal?
   try {
     value = await ownerSetupStatusGet({
       ...SETUP_REQUEST,
-      headers: { accept: "application/json" },
+      headers: { accept: 'application/json' },
       ...(signal ? { signal } : {}),
       fetcher,
     });
   } catch (error) {
     statusOf(error);
   }
-  if (!value || typeof value !== "object" || !("state" in value)) throw new SetupError(503);
+  if (!value || typeof value !== 'object' || !('state' in value)) throw new SetupError(503);
   switch (value.state) {
-    case "setup-pending":
-    case "waiting":
-    case "expired":
-    case "blocked":
-    case "active":
+    case 'setup-pending':
+    case 'waiting':
+    case 'expired':
+    case 'blocked':
+    case 'active':
       return { state: value.state };
-    case "owner-enrolled":
-      if ("clientsReady" in value && typeof value.clientsReady === "boolean") {
+    case 'owner-enrolled':
+      if ('clientsReady' in value && typeof value.clientsReady === 'boolean') {
         return { state: value.state, clientsReady: value.clientsReady };
       }
   }
@@ -57,7 +54,7 @@ export async function getOwnerSetupStatus(fetcher: typeof fetch = fetch, signal?
 }
 
 async function transactionResult(value: unknown): Promise<string> {
-  if (value && typeof value === "object" && "transaction" in value && typeof value.transaction === "string") {
+  if (value && typeof value === 'object' && 'transaction' in value && typeof value.transaction === 'string') {
     return value.transaction;
   }
   throw new SetupError(503);
@@ -67,11 +64,14 @@ async function transactionResult(value: unknown): Promise<string> {
 export async function authorizeOwnerSetup(key: string, fetcher: typeof fetch = fetch): Promise<string> {
   let value: unknown;
   try {
-    value = await ownerSetupAuthorizePost({ key }, {
-      ...SETUP_REQUEST,
-      headers: { accept: "application/json" },
-      fetcher,
-    });
+    value = await ownerSetupAuthorizePost(
+      { key },
+      {
+        ...SETUP_REQUEST,
+        headers: { accept: 'application/json' },
+        fetcher,
+      },
+    );
   } catch (error) {
     statusOf(error);
   }
@@ -88,7 +88,7 @@ export async function setOwnerSetupProfile(
   try {
     value = await ownerSetupProfilePost(input, {
       ...SETUP_REQUEST,
-      headers: { accept: "application/json", [TRANSACTION_HEADER]: transaction },
+      headers: { accept: 'application/json', [TRANSACTION_HEADER]: transaction },
       fetcher,
     });
   } catch (error) {
@@ -100,13 +100,15 @@ export async function setOwnerSetupProfile(
 /** Confirm the committed owner enrollment; the SETUP transaction stays short-lived. */
 export async function completeOwnerSetup(transaction: string, fetcher: typeof fetch = fetch): Promise<unknown> {
   try {
-    return await ownerSetupCompletePost({}, {
-      ...SETUP_REQUEST,
-      headers: { accept: "application/json", [TRANSACTION_HEADER]: transaction },
-      fetcher,
-    });
+    return await ownerSetupCompletePost(
+      {},
+      {
+        ...SETUP_REQUEST,
+        headers: { accept: 'application/json', [TRANSACTION_HEADER]: transaction },
+        fetcher,
+      },
+    );
   } catch (error) {
     statusOf(error);
   }
 }
-

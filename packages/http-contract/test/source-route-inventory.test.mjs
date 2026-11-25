@@ -305,6 +305,8 @@ test('generated owner-session request, response, header, error and security sema
   assert.equal(consentRow.properties.clientId.type, 'string');
   assert.equal(consentRow.properties.scopes.type, 'array');
   assert.deepEqual(contract.components.schemas.OAuthConsentRowList.items.$ref, '#/components/schemas/OAuthConsentRow');
-  assert.equal(contract.paths['/api/auth/codexia/setup/status'].get.responses['200'].content['application/json'].schema.$ref,
-    '#/components/schemas/OwnerSetupStatusResponse');
+  assert.equal(
+    contract.paths['/api/auth/codexia/setup/status'].get.responses['200'].content['application/json'].schema.$ref,
+    '#/components/schemas/OwnerSetupStatusResponse',
+  );
 });

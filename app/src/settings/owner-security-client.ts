@@ -1,4 +1,4 @@
-import { authListConsentsGet } from "../generated/http/client";
+import { authListConsentsGet } from '../generated/http/client';
 
 export interface OwnerConsent {
   readonly id: string;
@@ -10,23 +10,33 @@ export async function fetchOwnerConsents(fetcher: typeof fetch = fetch, signal?:
   let rows: unknown;
   try {
     rows = await authListConsentsGet({
-      credentials: "same-origin",
-      cache: "no-store",
-      redirect: "error",
-      headers: { accept: "application/json" },
+      credentials: 'same-origin',
+      cache: 'no-store',
+      redirect: 'error',
+      headers: { accept: 'application/json' },
       ...(signal ? { signal } : {}),
-      transport: { auth: "same-origin" },
+      transport: { auth: 'same-origin' },
       fetcher,
     });
   } catch {
-    throw new Error("Owner consents could not be loaded");
+    throw new Error('Owner consents could not be loaded');
   }
-  if (!Array.isArray(rows)) throw new Error("Invalid owner consents");
+  if (!Array.isArray(rows)) throw new Error('Invalid owner consents');
   return rows.map((row: unknown) => {
-    if (!row || typeof row !== "object" || !("id" in row) || !("clientId" in row) || !("scopes" in row) ||
-        typeof row.id !== "string" || !row.id || typeof row.clientId !== "string" || !row.clientId ||
-        !Array.isArray(row.scopes) || !row.scopes.every((scope: unknown) => typeof scope === "string" && scope.length > 0)) {
-      throw new Error("Invalid owner consent");
+    if (
+      !row ||
+      typeof row !== 'object' ||
+      !('id' in row) ||
+      !('clientId' in row) ||
+      !('scopes' in row) ||
+      typeof row.id !== 'string' ||
+      !row.id ||
+      typeof row.clientId !== 'string' ||
+      !row.clientId ||
+      !Array.isArray(row.scopes) ||
+      !row.scopes.every((scope: unknown) => typeof scope === 'string' && scope.length > 0)
+    ) {
+      throw new Error('Invalid owner consent');
     }
     return { id: row.id, clientId: row.clientId, scopes: row.scopes as string[] };
   });
@@ -34,15 +44,15 @@ export async function fetchOwnerConsents(fetcher: typeof fetch = fetch, signal?:
 
 export function outcomeWasUnconfirmed(error: unknown): boolean {
   if (error instanceof TypeError || error instanceof SyntaxError) return true;
-  if (error instanceof Error && ["AbortError", "TimeoutError", "NetworkError"].includes(error.name)) return true;
-  if (!error || typeof error !== "object" || !("status" in error) || typeof error.status !== "number") return false;
+  if (error instanceof Error && ['AbortError', 'TimeoutError', 'NetworkError'].includes(error.name)) return true;
+  if (!error || typeof error !== 'object' || !('status' in error) || typeof error.status !== 'number') return false;
   return error.status === 408 || error.status >= 500;
 }
 
 export function confirmAuthMutation(result: unknown, matches: (data: unknown) => boolean): void {
-  if (result && typeof result === "object") {
-    if ("error" in result && result.error) throw result.error;
-    if ("data" in result && matches(result.data)) return;
+  if (result && typeof result === 'object') {
+    if ('error' in result && result.error) throw result.error;
+    if ('data' in result && matches(result.data)) return;
   }
-  throw new TypeError("Better Auth did not confirm the mutation");
+  throw new TypeError('Better Auth did not confirm the mutation');
 }
