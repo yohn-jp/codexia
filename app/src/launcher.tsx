@@ -29,7 +29,7 @@ if (isOAuthLogin) {
 } else if (!isReader && (remembered === 'desktop' || remembered === 'mobile')) {
   const search = new URLSearchParams(window.location.search);
   search.delete('store');
-  window.location.replace(`/${remembered}${search.size ? `?${search}` : ''}${window.location.hash}`);
+  window.location.replace(`/desktop${search.size ? `?${search}` : ''}${window.location.hash}`);
 } else {
   createRoot(root).render(isReader ? <PublicReader initialTheme={theme} /> : <InterfaceChoice />);
 }
@@ -58,15 +58,15 @@ function PublicReader({ initialTheme }: { initialTheme: ThemeMode }) {
 }
 
 function InterfaceChoice() {
-  const choose = (mode: 'desktop' | 'mobile') => {
+  const choose = () => {
     try {
-      localStorage.setItem('scriptorium:ui-mode', mode);
+      localStorage.setItem('scriptorium:ui-mode', 'desktop');
     } catch {
       /* Direct links remain usable. */
     }
     const search = new URLSearchParams(window.location.search);
     search.delete('store');
-    window.location.assign(`/${mode}${search.size ? `?${search}` : ''}${window.location.hash}`);
+    window.location.assign(`/desktop${search.size ? `?${search}` : ''}${window.location.hash}`);
   };
   return (
     <section className="empty-state" aria-labelledby="interface-title">
@@ -74,13 +74,8 @@ function InterfaceChoice() {
       <h1 id="interface-title">執筆画面を選ぶ</h1>
       <p>作品はPostgreSQLへ保存されます。</p>
       <p>
-        <button type="button" onClick={() => choose('desktop')}>
+        <button type="button" onClick={choose}>
           Desktop — キーボードで執筆
-        </button>
-      </p>
-      <p>
-        <button type="button" onClick={() => choose('mobile')}>
-          Mobile — タッチで執筆
         </button>
       </p>
     </section>

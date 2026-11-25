@@ -12,20 +12,11 @@ import "./studio.css";
 import "../authoring.css";
 import "./desktop-refinement.css";
 
-function describeFailure(reason: unknown): string {
-  return reason instanceof Error && reason.message.trim()
-    ? reason.message
-    : "下書きの保存状態を確認してから、もう一度お試しください。";
-}
-
 /** Desktop manuscript surface; panels and commands remain owned by the shared workspace. */
 export function DesktopShell({
   header, desktopActions, documentTitle, documentContext, library, editor, tools, status, renderStatus,
-  onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel,
+  workspaceScope, panels, beforeLayoutChange, requestedPanel,
 }: ApplicationShellProps) {
-  const [switching, setSwitching] = useState(false);
-  const [switchError, setSwitchError] = useState("");
-  const switchInFlight = useRef(false);
   const requestSeq = useRef(0);
   const [effectiveRequest, setEffectiveRequest] = useState<WorkspacePanelRequest>();
 
@@ -34,21 +25,6 @@ export function DesktopShell({
     setEffectiveRequest({ id: requestedPanel.id, sequence: ++requestSeq.current });
   }, [requestedPanel?.id, requestedPanel?.sequence]);
 
-  async function switchToMobile(): Promise<void> {
-    if (switchInFlight.current) return;
-    switchInFlight.current = true;
-    setSwitching(true);
-    setSwitchError("");
-    try {
-      const switched = await onSwitchMode();
-      if (!switched) setSwitchError("モバイル画面へ切り替えられませんでした。保存状態を確認してから再試行してください。");
-    } catch (reason) {
-      setSwitchError("モバイル画面へ切り替えられませんでした。" + describeFailure(reason));
-    } finally {
-      switchInFlight.current = false;
-      setSwitching(false);
-    }
-  }
   return (
     <div className="st-desktop-shell st-studio-shell">
       <div className="st-studio-main">
@@ -67,9 +43,6 @@ export function DesktopShell({
             </button>
             <IdentityManagementPanel placement="desktop" />
             <div className="st-studio-header-slot">{header}</div>
-            <button type="button" className="st-studio-mobile-link" onClick={() => void switchToMobile()} disabled={switching}>
-              {switching ? "切替中" : "モバイル ↗"}
-            </button>
           </div>
         </div>
 
@@ -105,7 +78,7 @@ export function DesktopShell({
           左右矢印キーでパネル幅を変更できます。
         </span>
         <div className="st-desktop-status" role="region" aria-label="保存と接続の状態">
-          {renderStatus ? renderStatus(switchError) : status}
+          {renderStatus ? renderStatus("") : status}
         </div>
       </div>
     </div>

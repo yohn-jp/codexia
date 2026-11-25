@@ -72,6 +72,8 @@ flowchart TD
 
 ## 7. Implementation slices and acceptance gates
 
+**Desktop-only interim product decision.** Mobile Web retirement is independent of native release readiness: during the iOS freeze, the supported authoring product is Desktop Web only. Execute N5 without waiting for N1–N4 physical-device acceptance. This does not waive any native acceptance evidence or enable native release; keep Swift sources and manual native CI. Do not delete or rewrite existing author drafts, and do not revoke live credentials or change production configuration as part of source retirement.
+
 | Gate | Deliverable | Evidence required |
 | --- | --- | --- |
 | N0: API contract dependency | TypeSpec source, OpenAPI version and epoch, scope, errors and receipts | Regeneration matches the committed client and every generated operation ID |

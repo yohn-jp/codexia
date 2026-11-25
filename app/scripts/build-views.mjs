@@ -9,7 +9,7 @@ const appRoot = fileURLToPath(new URL('../', import.meta.url));
 const viteCli = fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url));
 
 export function buildViews({ viteConfig } = {}) {
-  for (const ui of ['launcher', 'desktop', 'mobile', 'oauth', 'owner-setup']) {
+  for (const ui of ['launcher', 'desktop', 'oauth', 'owner-setup']) {
     const result = spawnSync(process.execPath, [viteCli, 'build', ...(viteConfig ? ['--config', viteConfig] : [])], {
       cwd: appRoot,
       env: { ...process.env, CODEXIA_UI: ui },
