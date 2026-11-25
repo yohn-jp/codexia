@@ -119,7 +119,7 @@ export function signalAwareClient(client: McpActionClient): McpActionClient {
     forProject(projectId) {
       if (!client.forProject) {
         if (client.projectId && client.projectId !== projectId)
-          throw new ToolFailure('PROJECT_SCOPE_MISMATCH', 'The requested project does not match this MCP session');
+          throw new ToolFailure('PROJECT_SCOPE_MISMATCH', 'The requested project does not match the selected MCP project');
         return wrapped;
       }
       return signalAwareClient(client.forProject(projectId));
@@ -134,7 +134,7 @@ export function scopedClient(client: McpActionClient, requestedProjectId?: strin
   if (!projectId) throw new ToolFailure('INVALID_PROJECT', 'Pass project_id or set CODEXIA_PROJECT_ID');
   if (client.forProject) return client.forProject(projectId);
   if (client.projectId && client.projectId !== projectId)
-    throw new ToolFailure('PROJECT_SCOPE_MISMATCH', 'The requested project does not match this MCP session');
+    throw new ToolFailure('PROJECT_SCOPE_MISMATCH', 'The requested project does not match the selected MCP project');
   return client;
 }
 

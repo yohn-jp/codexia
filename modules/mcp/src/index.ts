@@ -1,4 +1,4 @@
-import type { ModuleDefinition, ModuleManifest } from '@codexia/contracts';
+import type { ModuleContext, ModuleDefinition, ModuleManifest } from '@codexia/contracts';
 import { createMcpHttpContribution } from './http.js';
 
 export const mcpManifest: ModuleManifest = {
@@ -15,7 +15,7 @@ export const mcpManifest: ModuleManifest = {
 };
 
 /** Register the external MCP transports without allocating models or persistent storage. */
-export async function createModule(): Promise<ModuleDefinition> {
+export async function createModule(_context: ModuleContext): Promise<ModuleDefinition> {
   return {
     manifest: mcpManifest,
     actions: [],

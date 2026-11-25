@@ -161,7 +161,7 @@ test('authorized Core action client preserves the SDK request cancellation signa
     },
     async invoke(_actionId, _input, receivedSignal) {
       seen.push(receivedSignal!);
-      return { ok: true, data: {} };
+      return { ok: true, snapshot, data: {} };
     },
     async propose(_operations, _evidence, _proposalId, receivedSignal) {
       seen.push(receivedSignal!);

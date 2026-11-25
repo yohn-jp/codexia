@@ -707,7 +707,7 @@ APIの入口、body/query、レスポンス、エラー、認可、競合、冪�
 **Design owner**: [MCP-first](../architecture/MCP-FIRST.md)、[Modules](../architecture/MODULES.md)、[MCP v2 migration](../architecture/MCP-V2-MIGRATION.md)
 **Implementation identifiers**: modules/mcp/src/http.ts; modules/mcp/src/stdio.ts; modules/mcp/src/tools.ts; modules/mcp/src/tools/shared.ts; modules/mcp/src/tools/project.ts; modules/mcp/src/tools/knowledge.ts
 **Verification identifiers**: MCPV-001..008; tests/integration/mcp-acceptance.test.mjs; modules/mcp/src/tools.test.ts
-**Test IDs**: TEST-MCPV-001-001, TEST-MCPV-004-001, TEST-MCPV-004-002, TEST-MCPV-006-001
+**Test IDs**: TEST-MCPV-001-001, TEST-MCPV-001-002, TEST-MCPV-004-001, TEST-MCPV-004-002, TEST-MCPV-006-001, TEST-MCPV-006-002, TEST-MCPV-006-003, TEST-MCPV-006-004, TEST-MCPV-007-001, TEST-MCPV-007-002, TEST-MCPV-007-003, TEST-MCPV-007-004
 **Exact-run reference**: NOT_RUN
 **Comment**: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
@@ -735,7 +735,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **UID**: OBL-REQ-MCP-001-O01
 **Design reference**: [MCP-first](../architecture/MCP-FIRST.md)、[Modules](../architecture/MODULES.md)
 **Implementation identifiers**: modules/mcp/src/http.ts; modules/mcp/src/stdio.ts; modules/mcp/src/tools.ts
-**Test IDs**: TEST-MCPV-004-001; TEST-MCPV-004-002; TEST-MCPV-006-001
+**Test IDs**: TEST-MCPV-004-001; TEST-MCPV-004-002; TEST-MCPV-006-001; TEST-MCPV-006-002; TEST-MCPV-006-003; TEST-MCPV-006-004
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
 
@@ -781,7 +781,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **Path**: modules/mcp/src/tools.ts
 - **Type**: File
   **Path**: tests/integration/mcp-acceptance.test.mjs
-  **Lines**: 808, 886
+  **Lines**: 888, 966
 - **Type**: File
   **Path**: docs/architecture/MCP-V2-MIGRATION.md
   **Lines**: 78, 85
@@ -811,7 +811,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **Lines**: 12, 80
 - **Type**: File
   **Path**: tests/integration/mcp-acceptance.test.mjs
-  **Lines**: 808, 886
+  **Lines**: 888, 966
 - **Type**: File
   **Path**: docs/architecture/MCP-V2-MIGRATION.md
   **Lines**: 78, 85
@@ -2108,7 +2108,7 @@ Verify the configured external Assistant admission boundary and that MCP dispatc
   **ID**: REQ-MCP-002
 - **Type**: File
   **Path**: tests/integration/mcp-acceptance.test.mjs
-  **Lines**: 808, 886
+  **Lines**: 888, 966
 
 ## TEST-MCPV-004-001
 
@@ -2126,7 +2126,7 @@ Exercise selected-project scope, proposal-only MCP writes, replay handling, auth
   **ID**: REQ-MCP-001
 - **Type**: File
   **Path**: tests/integration/mcp-acceptance.test.mjs
-  **Lines**: 408, 779
+  **Lines**: 438, 779
 
 ## TEST-MCPV-006-001
 
@@ -2136,7 +2136,7 @@ Exercise selected-project scope, proposal-only MCP writes, replay handling, auth
 **Case name**: MCP cancellation stops real NLP worker jobs through stdio and Streamable HTTP
 **Exact-run reference**: NOT_RUN
 
-Exercise cancellation through both transports. This case covers only the cancellation slice of MCPV-006; invalid headers, oversized inputs, shutdown/drain, and cross-request isolation require separate evidence.
+Exercise cancellation of real NLP jobs over both transports. HTTP shutdown and drain are exercised by the same test through `verifyHttpDrain`; protocol header limits and cross-request isolation still need separate evidence.
 
 **Relations**:
 
@@ -2144,7 +2144,7 @@ Exercise cancellation through both transports. This case covers only the cancell
   **ID**: REQ-MCP-001
 - **Type**: File
   **Path**: tests/integration/mcp-acceptance.test.mjs
-  **Lines**: 780, 807
+  **Lines**: 859, 886
 
 ## TEST-MCPV-004-002
 
@@ -2162,4 +2162,148 @@ Exercise signed MCP bearer admission for exact client, scope, assigned-project, 
   **ID**: REQ-MCP-001
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 2115, 2448
+  **Lines**: 2110, 2448
+
+## TEST-MCPV-001-002
+
+**Type**: TEST
+**MID**: e8177bf3a4aebd82fd6d5542fc959d82
+**UID**: TEST-MCPV-001-002
+**Case name**: MCP tools/list publishes the compatible tool names and object input schemas
+**Exact-run reference**: NOT_RUN
+
+Check the SDK tools/list catalog against the 53 public tool names and ensure every advertised input schema is an object with valid required fields and expected defaults. This is catalog coverage, not a protocol conformance result.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/tool-catalog.test.ts
+  **Lines**: 96, 120
+
+## TEST-MCPV-006-002
+
+**Type**: TEST
+**MID**: 648436169a722ca028a296e5a785b465
+**UID**: TEST-MCPV-006-002
+**Case name**: aborting the host Web Request closes the modern SDK exchange
+**Exact-run reference**: NOT_RUN
+
+Check that aborting the host Web Request cancels the SDK exchange, propagates the abort signal, closes the exchange with 499, and releases the pending action. It complements the real worker cancellation and shutdown drain integration case.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/http.test.ts
+  **Lines**: 953, 1009
+
+## TEST-MCPV-007-001
+
+**Type**: TEST
+**MID**: bc85b804bdf4f21c36706b3fd4b4b81f
+**UID**: TEST-MCPV-007-001
+**Case name**: MCP HTTP serves modern per-request envelopes through the official v2 client
+**Exact-run reference**: NOT_RUN
+
+Exercise the official v2 client against the modern pinned protocol version and confirm per-request Streamable HTTP tool listing.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/http.test.ts
+  **Lines**: 227, 240
+
+## TEST-MCPV-007-002
+
+**Type**: TEST
+**MID**: 184f741818cfa72a7be4d7de0603bf08
+**UID**: TEST-MCPV-007-002
+**Case name**: MCP HTTP accepts the temporary stateless 2025 fallback
+**Exact-run reference**: NOT_RUN
+
+Exercise the temporary legacy stateless JSON-RPC tools/list fallback while that compatibility window remains open.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/http.test.ts
+  **Lines**: 242, 249
+
+## TEST-MCPV-007-003
+
+**Type**: TEST
+**MID**: 1169579fc2155d97d587f1edeb82d3ee
+**UID**: TEST-MCPV-007-003
+**Case name**: strict MCP HTTP rejects legacy traffic and delegates invalid methods
+**Exact-run reference**: NOT_RUN
+
+Check strict mode rejects legacy stateless traffic and delegates unsupported GET/DELETE methods with 405.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/http.test.ts
+  **Lines**: 251, 259
+
+## TEST-MCPV-007-004
+
+**Type**: TEST
+**MID**: 01551c49fc512cac6bef9515c2d86fef
+**UID**: TEST-MCPV-007-004
+**Case name**: 2025 protocol compatibility ends at the six-month cutoff
+**Exact-run reference**: NOT_RUN
+
+Check the compatibility predicate immediately before, at, and after the six-month protocol cutoff.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/protocol-version.test.ts
+  **Lines**: 5, 9
+
+## TEST-MCPV-006-003
+
+**Type**: TEST
+**MID**: 7e194994663116ff2e6509e25a9b37b4
+**UID**: TEST-MCPV-006-003
+**Case name**: modern Mcp-Method and Mcp-Name mismatches are rejected before tool dispatch
+**Exact-run reference**: NOT_RUN
+
+Check mismatched modern MCP method/name headers are rejected before any tool dispatch.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/http.test.ts
+  **Lines**: 261, 309
+
+## TEST-MCPV-006-004
+
+**Type**: TEST
+**MID**: cb127df399b9b085e9ffc9c5f05af3dd
+**UID**: TEST-MCPV-006-004
+**Case name**: oversized MCP request body is refused before creating the SDK action context
+**Exact-run reference**: NOT_RUN
+
+Check an oversized request body receives 413 before the SDK action context is accessed.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/http.test.ts
+  **Lines**: 311, 330

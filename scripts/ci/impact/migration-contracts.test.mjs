@@ -71,14 +71,14 @@ test('certification requires each selected migration proof once at the normal so
 
 test('shared host and edge guards select all proof while the historical driver selects its own fixture', () => {
   const ids = files => deploymentFixtureImpact({ files }).map(row => row.id);
-  assert.deepEqual(ids(['deploy/ansible/require-clean-api-target.sh']), ['shared', 'full-persistence-1-to-2']);
-  assert.deepEqual(ids(['scripts/verification/infrastructure/identity-probe-client.mjs']), ['shared', 'full-persistence-1-to-2']);
+  assert.deepEqual(ids(['deploy/ansible/require-clean-api-target.sh']), ['shared', 'full-persistence-1-to-2', 'mcp-v2-api-2-to-3']);
+  assert.deepEqual(ids(['scripts/verification/infrastructure/identity-probe-client.mjs']), ['shared', 'full-persistence-1-to-2', 'mcp-v2-api-2-to-3']);
   assert.deepEqual(ids(['deploy/ansible/epoch-cutover-rootless-fixture.sh']), ['full-persistence-1-to-2']);
 });
 
 test('the registration catalog and shared frontend certifier select all migration proofs', () => {
   for (const file of ['scripts/deployment/cutover/migrations/catalog.mjs', 'scripts/verification/artifacts/frontend.mjs']) {
-    assert.deepEqual(deploymentFixtureImpact({ files: [file] }).map(row => row.id), ['shared', 'full-persistence-1-to-2']);
+    assert.deepEqual(deploymentFixtureImpact({ files: [file] }).map(row => row.id), ['shared', 'full-persistence-1-to-2', 'mcp-v2-api-2-to-3']);
   }
   assert.deepEqual(deploymentFixtureImpact({ files: ['app/src/App.tsx'] }), []);
 });

@@ -2,7 +2,7 @@ import type { ActionDescriptor, ActionResult, ChangeProposal, ProjectObservation
 
 export interface McpActionClient {
   readonly projectId?: string;
-  /** Available on the standalone bearer transport; an in-process MCP session is project-bound. */
+  /** Available on the standalone bearer transport; an in-process HTTP request is project-bound. */
   listProjectPage?(limit: number, cursor?: string, signal?: AbortSignal): Promise<ProjectInfoPage>;
   listActions(signal?: AbortSignal): Promise<ActionDescriptor[]>;
   invoke(actionId: string, input: unknown, signal?: AbortSignal): Promise<ActionResult>;
@@ -204,7 +204,7 @@ export function actionClientFromContext(context: {
     propose: (operations, evidence, proposalId, signal) => context.propose(operations, evidence, proposalId, signal),
     forProject(projectId) {
       if (projectId !== context.projectId) {
-        throw new McpApiError(403, 'PROJECT_SCOPE_MISMATCH', 'The requested project does not match this MCP session');
+        throw new McpApiError(403, 'PROJECT_SCOPE_MISMATCH', 'The requested project does not match the selected MCP project');
       }
       return this;
     },

@@ -436,7 +436,9 @@ test("direct-root Story scenes keep PostgreSQL positions and context through Act
 });
 
 test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, review and receipt over both transports", {
-  timeout: 120_000,
+  timeout: process.env.CODEXIA_MCP_EXTERNAL_CLIENT_TIMEOUT_MS
+    ? Number(process.env.CODEXIA_MCP_EXTERNAL_CLIENT_TIMEOUT_MS)
+    : 120_000,
 }, async (t) => {
   const databaseUrl = DATABASE_URL;
   const rootDir = await mkdtemp(resolve(tmpdir(), "codexia-native-mcp-postgres-"));
@@ -822,7 +824,7 @@ async function verifyCancellation(connection, host, projectId, label) {
   const request = connection.client.callTool({
     name: "invoke_action",
     arguments: { project_id: projectId, action_id: "nlp.analyze", input: { text: inputText } },
-  }, undefined, { signal: controller.signal });
+  }, { signal: controller.signal });
   await waitUntil(() => host.runtime.status("nlp").activeJobs > 0, 20_000, `${label} never reached the real NLP worker`);
   controller.abort(new Error("P08 integration cancellation"));
   const completed = await Promise.race([
@@ -832,6 +834,26 @@ async function verifyCancellation(connection, host, projectId, label) {
   assert.equal("timeout" in completed, false, `${label} cancellation did not settle the MCP request`);
   assert.ok("error" in completed || completed.result.isError === true, `${label} cancellation returned a successful result`);
   await waitUntil(() => host.runtime.status("nlp").activeJobs === 0, 15_000, `${label} cancellation did not stop the real worker job`);
+}
+
+async function verifyHttpDrain(connection, host, projectId) {
+  const request = connection.client.callTool({
+    name: "invoke_action",
+    arguments: { project_id: projectId, action_id: "nlp.analyze", input: { text: "あ".repeat(300_000) } },
+  });
+  const requestOutcome = request.then(result => ({ result }), error => ({ error }));
+  await waitUntil(() => host.runtime.status("nlp").activeJobs > 0, 20_000, "HTTP drain case never reached the real NLP worker");
+  const close = host.close();
+  await Promise.race([
+    close,
+    delay(15_000).then(() => { throw new Error("host shutdown did not drain the in-flight MCP request"); }),
+  ]);
+  const outcome = await Promise.race([
+    requestOutcome,
+    delay(15_000).then(() => { throw new Error("host shutdown did not settle the in-flight HTTP MCP request"); }),
+  ]);
+  assert.ok("error" in outcome || outcome.result.isError === true, "shutdown must not return a successful in-flight result");
+  assert.equal(host.runtime.status("nlp").activeJobs, 0, "shutdown must leave no real worker jobs active");
 }
 
 test("MCP cancellation stops real NLP worker jobs through stdio and Streamable HTTP", {
@@ -860,6 +882,7 @@ test("MCP cancellation stops real NLP worker jobs through stdio and Streamable H
 
   await verifyCancellation(stdio, host, projectId, "stdio");
   await verifyCancellation(http, host, projectId, "Streamable HTTP");
+  await verifyHttpDrain(http, host, projectId);
 });
 
 test("stdio and Streamable HTTP enforce external Assistant admission with a configured provider", {

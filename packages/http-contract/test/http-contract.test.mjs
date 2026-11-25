@@ -102,7 +102,10 @@ test('TypeSpec emits deterministic OpenAPI 3.1 and explicit operation IDs', t =>
   assert.deepEqual(readFileSync(path.join(packageRoot, 'openapi', 'codexia.openapi.yaml')), firstBytes);
   assert.equal(openapi.openapi, '3.1.0');
   assert.equal(openapi.info.version, '2.0.0');
-  assert.equal(openapi['x-codexia-api-epoch'], 2);
+  const backendCompatibility = JSON.parse(readFileSync(new URL('../../../deploy/update-compatibility.json', import.meta.url), 'utf8'));
+  const frontendCompatibility = JSON.parse(readFileSync(new URL('../../../deploy/frontend-compatibility.json', import.meta.url), 'utf8'));
+  assert.equal(openapi['x-codexia-api-epoch'], backendCompatibility.apiEpoch);
+  assert.equal(openapi['x-codexia-api-epoch'], frontendCompatibility.apiEpoch);
   assert.equal(openapi['x-codexia-cors'].credentials, false);
   assert.match(openapi['x-codexia-cors'].preflight.route, /explicit OPTIONS for registered API and MCP paths/u);
   assert.equal(openapi['x-codexia-cors'].preflight.successStatus, 204);

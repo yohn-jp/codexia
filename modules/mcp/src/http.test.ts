@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ActionDescriptor, ActionResult, ChangeProposal, ModuleActionContext, SnapshotId } from '@codexia/contracts';
 import { Client, type FetchLike, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server';
 import { createMcpHttpContribution } from './http.js';
 import { MCP_2025_PROTOCOL_CUTOFF } from './protocol-version.js';
 
@@ -228,7 +229,7 @@ test('MCP HTTP serves modern per-request envelopes through the official v2 clien
   const contribution = createMcpHttpContribution();
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/mcp/streamable'), { fetch });
-  const client = new Client({ name: 'mcp-modern-smoke', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-modern-smoke', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
   try {
     await client.connect(transport);
     const result = await client.listTools();
@@ -257,6 +258,77 @@ test('strict MCP HTTP rejects legacy traffic and delegates invalid methods', asy
   assert.equal(deleteResponse.status, 405);
 });
 
+test('modern Mcp-Method and Mcp-Name mismatches are rejected before tool dispatch', async () => {
+  const cases = [
+    { header: 'mcp-method', value: 'tools/list' },
+    { header: 'mcp-name', value: 'different_tool' },
+  ];
+  for (const mismatch of cases) {
+    const contribution = createMcpHttpContribution({ strict: true });
+    const dispatches: string[] = [];
+    const host = actionContext([]);
+    const listActions = host.listActions;
+    const invoke = host.invoke;
+    host.listActions = async (...args) => {
+      dispatches.push('listActions');
+      return listActions(...args);
+    };
+    host.invoke = async (...args) => {
+      dispatches.push('invoke');
+      return invoke(...args);
+    };
+    const response = await contribution.handle(
+      request(
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: {
+            name: 'get_status',
+            arguments: { project_id: 'project-one' },
+            _meta: {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientInfo': { name: 'mismatch-test', version: '1.0.0' },
+              'io.modelcontextprotocol/clientCapabilities': {},
+            },
+          },
+        },
+        {
+          'mcp-protocol-version': '2026-07-28',
+          'mcp-method': mismatch.header === 'mcp-method' ? mismatch.value : 'tools/call',
+          'mcp-name': mismatch.header === 'mcp-name' ? mismatch.value : 'get_status',
+        },
+      ),
+      host,
+    );
+    assert.equal(response.status, 400, mismatch.header);
+    const payload = (await response.json()) as { error?: { code?: number } };
+    assert.equal(payload.error?.code, -32020, mismatch.header);
+    assert.deepEqual(dispatches, [], mismatch.header);
+  }
+});
+
+test('oversized MCP request body is refused before creating the SDK action context', async () => {
+  const contribution = createMcpHttpContribution({ strict: true });
+  let contextAccesses = 0;
+  const host = new Proxy(actionContext([]), {
+    get(target, property, receiver) {
+      if (property === 'projectId') contextAccesses++;
+      return Reflect.get(target, property, receiver);
+    },
+  }) as ModuleActionContext;
+  const response = await contribution.handle(
+    new Request('http://localhost/mcp/streamable', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: 'x'.repeat(DEFAULT_MAX_REQUEST_BODY_SIZE + 1),
+    }),
+    host,
+  );
+  assert.equal(response.status, 413);
+  assert.equal(contextAccesses, 0);
+});
+
 test('production HTTP mode switches from stateless fallback to strict at the cutoff', async () => {
   const before = await createMcpHttpContribution({ now: () => MCP_2025_PROTOCOL_CUTOFF - 1 }).handle(
     request({ jsonrpc: '2.0', id: 7, method: 'tools/list', params: {} }),
@@ -278,7 +350,7 @@ test('SDK Streamable HTTP transport lists and invokes tools through the host act
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-module-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-module-test', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
 
   try {
     await client.connect(transport);
@@ -361,7 +433,10 @@ test('writing context and its metadata-only manifest expose saved-scene provenan
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-writing-context-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client(
+    { name: 'mcp-writing-context-test', version: '1.0.0' },
+    { versionNegotiation: { mode: { pin: '2026-07-28' } } },
+  );
 
   const sceneIdentity = { project_id: 'project-one', scene_id: 'scene-one' };
   const expectedParts = [
@@ -456,7 +531,7 @@ test('the canonical Story materializer is discoverable and reads the selected sn
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-module-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-module-test', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
 
   try {
     await client.connect(transport);
@@ -490,7 +565,7 @@ test('MCP refuses action names that could approve or publish author changes', as
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-module-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-module-test', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
 
   try {
     await client.connect(transport);
@@ -513,7 +588,7 @@ test('compute_cooccurrence maps to the Story co-occurrence action without extra 
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-module-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-module-test', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
 
   try {
     await client.connect(transport);
@@ -540,7 +615,7 @@ test('consistency and continuity use their exact project-level diagnostics actio
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-module-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-module-test', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
 
   try {
     await client.connect(transport);
@@ -571,7 +646,7 @@ test('submit_change_set returns a source ChangeSetRecord with its source ID', as
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-module-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-module-test', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
   const changeSet = {
     schemaVersion: 1,
     id: 'cs-one',
@@ -660,7 +735,7 @@ test('ChangeSet readback preserves approved IDs while selected applications are 
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-module-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-module-test', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
   const changeSet = {
     schemaVersion: 1,
     id: 'cs-two-operations',
@@ -814,7 +889,7 @@ test("submit_change_set maps source IDs outside Core's proposal ID alphabet and 
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-module-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-module-test', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
   const changeSet = {
     schemaVersion: 1,
     id: `legacy:${'a'.repeat(140)}`,
@@ -859,7 +934,7 @@ test('per-request project scope rejects cross-project tool calls with a machine 
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-module-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-module-test', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
 
   try {
     await client.connect(transport);
@@ -890,7 +965,7 @@ test('aborting the host Web Request closes the modern SDK exchange', async () =>
     return contribution.handle(incoming, seedHost);
   };
   const seedTransport = new StreamableHTTPClientTransport(new URL('http://codexia.test/mcp/streamable'), { fetch: seedFetch });
-  const seedClient = new Client({ name: 'mcp-abort-seed', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const seedClient = new Client({ name: 'mcp-abort-seed', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
   await seedClient.connect(seedTransport);
   await seedClient.callTool({ name: 'get_status', arguments: { project_id: 'project-one' } });
   await seedClient.close();
@@ -929,19 +1004,7 @@ test('aborting the host Web Request closes the modern SDK exchange', async () =>
     pending,
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error('SDK exchange did not close after Request.signal abort')), 2_000)),
   ]);
-  assert.equal(response.status, 200);
-  assert.ok(response.headers.get('content-type')?.startsWith('text/event-stream'));
-  const responseBody = response.body;
-  assert.ok(responseBody);
-  const reader = responseBody.getReader();
-  await Promise.race([
-    (async () => {
-      while (!(await reader.read()).done) {
-        /* drain events until the aborted exchange closes */
-      }
-    })(),
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('aborted response stream remained open')), 2_000)),
-  ]);
+  assert.equal(response.status, 499);
   releaseAction();
 });
 
@@ -953,7 +1016,7 @@ test('submit_change_set rejects source records that are not proposed before host
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-module-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-module-test', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
   const changeSet = {
     schemaVersion: 1,
     id: 'cs-one',
@@ -998,7 +1061,7 @@ test('source tools fail with a module availability error when their producer is 
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-module-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-module-test', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
 
   try {
     await client.connect(transport);
@@ -1050,7 +1113,7 @@ test('hybrid search stays unavailable while full diagnostics invoke the canonica
   const transport = new StreamableHTTPClientTransport(new URL('http://codexia.test/api/projects/project-one/modules/mcp/streamable'), {
     fetch,
   });
-  const client = new Client({ name: 'mcp-module-test', version: '1.0.0', versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'mcp-module-test', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
 
   try {
     await client.connect(transport);

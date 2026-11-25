@@ -30,7 +30,7 @@ export function registerProjectTools(server: McpServer, baseClient: McpActionCli
   server.registerTool(
     'discover_actions',
     {
-      description: 'List enabled project actions available through this authenticated MCP session',
+      description: 'List enabled actions available for the selected project',
       inputSchema: z.object({
         project_id: projectIdSchema,
       }),

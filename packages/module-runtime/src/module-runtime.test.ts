@@ -2114,31 +2114,7 @@ test('owner compute HTTP contributions cannot use GET or HEAD', async () => {
   }
 });
 
-async function readMcpSseResult(response: Response): Promise<{
-  result: { serverInfo?: { name: string }; tools?: Array<{ name: string }> };
-}> {
-  const reader = response.body?.getReader();
-  assert.ok(reader, 'MCP request should return an event stream');
-  const decoder = new TextDecoder();
-  let event = '';
-  try {
-    while (!event.includes('\n\n')) {
-      const chunk = await reader.read();
-      assert.equal(chunk.done, false, 'MCP event stream ended before returning the request result');
-      event += decoder.decode(chunk.value, { stream: true });
-    }
-    const data = event
-      .split('\n')
-      .find(line => line.startsWith('data: '))
-      ?.slice(6);
-    assert.ok(data, 'MCP event stream should contain a JSON-RPC result');
-    return JSON.parse(data);
-  } finally {
-    await reader.cancel().catch(() => undefined);
-  }
-}
-
-test('the production MCP module activates and serves tools through Streamable HTTP', async () => {
+test('the production MCP module activates and serves modern stateless tools through HTTP', async () => {
   const metadata = manifest('mcp', {
     serverEntry: './dist/index.js',
     http: [{ id: 'streamable', path: 'streamable', methods: ['GET', 'POST', 'DELETE'], access: 'owner', effect: 'propose' }],
@@ -2167,55 +2143,36 @@ test('the production MCP module activates and serves tools through Streamable HT
       },
     ]);
     const endpoint = 'http://codexia.test/api/projects/project-1/modules/mcp/streamable';
-    const post = (message: unknown, sessionId?: string) =>
-      runtime.invokeHttp(
-        'mcp',
-        'streamable',
-        new Request(endpoint, {
-          method: 'POST',
-          headers: {
-            accept: 'application/json, text/event-stream',
-            'content-type': 'application/json',
-            ...(sessionId ? { 'mcp-session-id': sessionId, 'mcp-protocol-version': '2025-03-26' } : {}),
-          },
-          body: JSON.stringify(message),
-        }),
-        host,
-      );
-    const initialize = await post({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'module-runtime-test', version: '0.1.0' } },
-    });
-    assert.equal(initialize.status, 200);
-    const sessionId = initialize.headers.get('mcp-session-id');
-    assert.ok(sessionId);
-    const initialization = await readMcpSseResult(initialize);
-    assert.equal(initialization.result.serverInfo?.name, 'codexia-mcp');
-
-    const initialized = await post({ jsonrpc: '2.0', method: 'notifications/initialized' }, sessionId);
-    assert.equal(initialized.status, 202);
-    const listed = await post({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }, sessionId);
-    assert.equal(listed.status, 200);
-    const toolList = await readMcpSseResult(listed);
-    assert.ok(toolList.result.tools?.some(({ name }) => name === 'get_status'));
-
-    const eventStream = await runtime.invokeHttp(
+    const response = await runtime.invokeHttp(
       'mcp',
       'streamable',
       new Request(endpoint, {
-        method: 'GET',
+        method: 'POST',
         headers: {
-          accept: 'text/event-stream',
-          'mcp-session-id': sessionId,
-          'mcp-protocol-version': '2025-03-26',
+          accept: 'application/json, text/event-stream',
+          'content-type': 'application/json',
+          'mcp-protocol-version': '2026-07-28',
+          'mcp-method': 'tools/list',
         },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/list',
+          params: {
+            _meta: {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientInfo': { name: 'module-runtime-test', version: '0.1.0' },
+              'io.modelcontextprotocol/clientCapabilities': {},
+            },
+          },
+        }),
       }),
       host,
     );
-    assert.equal(eventStream.status, 200);
-    await eventStream.body?.cancel();
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('mcp-session-id'), null);
+    const result = (await response.json()) as { result?: { tools?: Array<{ name: string }> } };
+    assert.ok(result.result?.tools?.some(({ name }) => name === 'get_status'));
   } finally {
     await runtime.shutdown();
   }
