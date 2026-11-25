@@ -9,9 +9,18 @@ function splitSelectorList(selector: string): string[] {
   let brackets = 0;
   let quote: '"' | "'" | null = null;
   let escaped = false;
+  let comment = false;
 
   for (let index = 0; index < selector.length; index += 1) {
     const character = selector[index];
+    const next = selector[index + 1];
+    if (comment) {
+      if (character === '*' && next === '/') {
+        comment = false;
+        index += 1;
+      }
+      continue;
+    }
     if (escaped) {
       escaped = false;
       continue;
@@ -22,6 +31,11 @@ function splitSelectorList(selector: string): string[] {
     }
     if (quote) {
       if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '/' && next === '*') {
+      comment = true;
+      index += 1;
       continue;
     }
     if (character === '"' || character === "'") {
@@ -46,10 +60,10 @@ function scopeSelector(selector: string): string {
   if (documentSelectors.has(selector) || /^:root(?:\[[^\]]+\])+$/u.test(selector)) return selector;
 
   const rootDescendant = /^(:root(?:\[[^\]]+\])*)\s+(.+)$/u.exec(selector);
-  if (rootDescendant) return `${rootDescendant[1]} :where(#root) :is(${rootDescendant[2]})`;
+  if (rootDescendant) return `${rootDescendant[1]} :where(#root) ${rootDescendant[2]}`;
 
   if (/^(?:html|body)(?:\b|[#.:]|[>+~]|\[)/u.test(selector)) return selector;
-  return `:where(#root) :is(${selector})`;
+  return `:where(#root) ${selector}`;
 }
 
 export function scopeGlobalSelector(selector: string): string {

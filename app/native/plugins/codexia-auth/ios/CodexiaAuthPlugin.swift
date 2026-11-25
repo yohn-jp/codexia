@@ -297,7 +297,18 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
                     guard let key = name as? String, key.lowercased() != "set-cookie" else { continue }
                     responseHeaders[key] = String(describing: value)
                 }
-                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                let body: String
+                if let data {
+                    guard let decodedBody = String(data: data, encoding: .utf8) else {
+                        DispatchQueue.main.async {
+                            call.reject("Native API returned a non-UTF-8 response", "nativeApiResponseInvalid")
+                        }
+                        return
+                    }
+                    body = decodedBody
+                } else {
+                    body = ""
+                }
                 DispatchQueue.main.async {
                     call.resolve(["status": response.statusCode, "headers": responseHeaders, "body": body])
                 }

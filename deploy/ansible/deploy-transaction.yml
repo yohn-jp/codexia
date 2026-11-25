@@ -653,7 +653,7 @@
           systemctl --user stop codexia-api.service >/dev/null 2>&1 || restore_status=1
         fi
         if [[ "$restore_status" == 0 && "$had_unit" == true ]]; then
-          install -m 0644 "$state_dir/rollback-api.container" "$active_unit" || restore_status=1
+          install -m 0600 "$state_dir/rollback-api.container" "$active_unit" || restore_status=1
           systemctl --user daemon-reload || restore_status=1
           # Candidate startup failures can exhaust the unit start limit. Clear
           # that failure state only after restoring the known-good Quadlet.
@@ -727,7 +727,7 @@
         fi
       fi
       require_activation_window_or_restore
-      if ! install -m 0644 "$candidate_unit" "$active_unit" ||
+      if ! install -m 0600 "$candidate_unit" "$active_unit" ||
          ! systemctl --user daemon-reload ||
          ! systemctl --user start codexia-api.service; then
         restore_previous || echo 'Previous API recovery failed after candidate start failure' >&2

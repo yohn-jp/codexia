@@ -101,6 +101,20 @@ const memo = (page: Page) => page.getByLabel("本文に含まれないメモ");
 const image = (page: Page) => page.getByLabel("スクラッチ画像を添付");
 const png = { name: "capture.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5RkAAAAASUVORK5CYII=", "base64") };
 async function scratchRecords(page: Page): Promise<Array<{ key: string; text: string }>> { return drafts(page, "pgScratch") as unknown as Promise<Array<{ key: string; text: string }>>; }
+async function scratchPayloads(page: Page): Promise<Array<{ key: string; scratchKey: string; kind: string; id: string; value: string }>> { return drafts(page, "pgScratchPayloads") as unknown as Promise<Array<{ key: string; scratchKey: string; kind: string; id: string; value: string }>>; }
+
+preparedAuthorTest("scoped CSS preserves desktop pseudo elements under reduced motion", async ({ page, authorizeAuthor }) => {
+  await fixture(page, authorizeAuthor);
+  const wordmark = page.locator(".st-studio-shell .st-studio-wordmark");
+  await expect(wordmark).toBeVisible();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const durations = await wordmark.evaluate((element) => {
+    const seconds = (value: string) => Number.parseFloat(value) / (value.endsWith("ms") ? 1000 : 1);
+    return ["::before", "::after"].map((pseudo) => seconds(getComputedStyle(element, pseudo).animationDuration));
+  });
+  for (const duration of durations) expect(duration).toBeCloseTo(0.00001, 8);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+});
 
 // Each former Git lifecycle scenario below now exercises the corresponding PostgreSQL
 // revision, browser recovery, or explicit removal boundary. No Git fixture is created.
@@ -710,8 +724,60 @@ preparedAuthorTest("a pending scratch image read is flushed to its captured docu
   await memo(page).fill("Attachment belongs to Scene One."); await image(page).setInputFiles(png);
   await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
-  await expect.poll(async () => (await scratchRecords(page)).some((r) => r.key.includes(f.one.document.id) && r.text.includes("Attachment belongs to Scene One.") && r.text.includes("data:image/png;base64"))).toBe(true);
+  await expect.poll(async () => (await scratchRecords(page)).some((r) => r.key.includes(f.one.document.id) && r.text.includes("Attachment belongs to Scene One."))).toBe(true);
+  await expect.poll(async () => (await scratchPayloads(page)).some((r) => r.scratchKey.includes(f.one.document.id) && r.kind === "image" && r.value.startsWith("data:image/png;base64,"))).toBe(true);
   expect((await scratchRecords(page)).some((r) => r.key.includes(f.two.document.id) && r.text.includes("Attachment belongs to Scene One."))).toBe(false);
+});
+
+preparedAuthorTest("typing beside a scratch image writes compact metadata without serializing or rewriting its payload", async ({ page, authorizeAuthor }) => {
+  await page.addInitScript(() => {
+    type MetricWindow = Window & { __scratchPerf?: { metadataWrites: number; metadataBytes: number; imageWrites: number; imageBytes: number; imageStringifyCount: number; imageStringifyChars: number; imageStringifyMs: number } };
+    const state = window as MetricWindow;
+    const metrics = state.__scratchPerf = { metadataWrites: 0, metadataBytes: 0, imageWrites: 0, imageBytes: 0, imageStringifyCount: 0, imageStringifyChars: 0, imageStringifyMs: 0 };
+    const originalStringify = JSON.stringify.bind(JSON);
+    JSON.stringify = ((value: unknown, replacer?: ((this: unknown, key: string, value: unknown) => unknown) | (number | string)[] | null, space?: string | number) => {
+      const started = performance.now();
+      const result = originalStringify(value, replacer as never, space);
+      if (result?.includes("data:image/")) {
+        metrics.imageStringifyCount += 1;
+        metrics.imageStringifyChars += result.length;
+        metrics.imageStringifyMs += performance.now() - started;
+      }
+      return result;
+    }) as typeof JSON.stringify;
+    const originalPut = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
+      if (value && typeof value === "object" && "text" in value && typeof value.text === "string" && this.name === "pgScratch") {
+        metrics.metadataWrites += 1;
+        metrics.metadataBytes += new TextEncoder().encode(value.text).byteLength;
+      }
+      if (value && typeof value === "object" && "value" in value && typeof value.value === "string" && this.name === "pgScratchPayloads" && (value as { kind?: unknown }).kind === "image") {
+        metrics.imageWrites += 1;
+        metrics.imageBytes += new TextEncoder().encode(value.value).byteLength;
+      }
+      return key === undefined ? originalPut.call(this, value) : originalPut.call(this, value, key);
+    };
+  });
+  const f = await fixture(page, authorizeAuthor);
+  await scratch(page);
+  const attached = { name: "large-capture.png", mimeType: "image/png", buffer: Buffer.alloc(1024 * 1024, 37) };
+  await image(page).setInputFiles(attached);
+  await expect.poll(async () => (await scratchPayloads(page)).find((record) => record.kind === "image")?.value.length).toBeGreaterThan(1_300_000);
+  const attachmentMetrics = await page.evaluate(() => (window as Window & { __scratchPerf?: { imageWrites: number; imageBytes: number } }).__scratchPerf);
+  expect(attachmentMetrics?.imageWrites).toBe(1);
+  expect(attachmentMetrics?.imageBytes).toBeGreaterThan(1_300_000);
+  await page.evaluate(() => {
+    const metrics = (window as Window & { __scratchPerf?: { metadataWrites: number; metadataBytes: number; imageWrites: number; imageBytes: number; imageStringifyCount: number; imageStringifyChars: number; imageStringifyMs: number } }).__scratchPerf!;
+    metrics.metadataWrites = 0; metrics.metadataBytes = 0; metrics.imageWrites = 0; metrics.imageBytes = 0; metrics.imageStringifyCount = 0; metrics.imageStringifyChars = 0; metrics.imageStringifyMs = 0;
+  });
+  const typed = "0123456789abcdefghijklmnopqr";
+  await memo(page).pressSequentially(typed, { delay: 0 });
+  await expect.poll(async () => (await scratchRecords(page)).find((record) => record.key.includes(f.one.document.id))?.text).toContain(typed);
+  const metrics = await page.evaluate(() => (window as Window & { __scratchPerf?: { metadataWrites: number; metadataBytes: number; imageWrites: number; imageBytes: number; imageStringifyCount: number; imageStringifyChars: number; imageStringifyMs: number } }).__scratchPerf);
+  expect(metrics?.metadataWrites).toBeGreaterThan(0);
+  expect(metrics?.imageWrites).toBe(0);
+  expect(metrics?.imageStringifyCount).toBe(0);
+  expect(metrics?.metadataBytes).toBeLessThan(1024 * 1024);
 });
 
 preparedAuthorTest("saving a scratch note replays the same request after its committed response is lost", async ({ page, authorizeAuthor }) => {
@@ -1027,7 +1093,8 @@ preparedAuthorTest("resuming an older scratch entry waits for its pending image 
   await memo(page).fill("Latest scratch with attachment."); await image(page).setInputFiles(png);
   await page.locator(".scratch-panel").getByRole("button", { name: "続ける", exact: true }).click();
   await expect(memo(page)).toHaveValue("Latest scratch with attachment.");
-  await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Latest scratch with attachment.") && r.text.includes("data:image/png;base64"))).toBe(true);
+  await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Latest scratch with attachment."))).toBe(true);
+  await expect.poll(async () => (await scratchPayloads(page)).some((r) => r.kind === "image" && r.value.startsWith("data:image/png;base64,"))).toBe(true);
 });
 
 preparedAuthorTest("scratch text and image input survive while navigation waits for protection", async ({ page, authorizeAuthor }) => {
@@ -1081,7 +1148,8 @@ preparedAuthorTest("scratch text and image input survive while navigation waits 
   await image(page).setInputFiles(png);
   await page.waitForFunction(() => (window as Window & { __scratchImageReadStarted?: boolean }).__scratchImageReadStarted === true);
   await page.evaluate(() => (window as Window & { __scratchProtectionGate?: { release?: () => void } }).__scratchProtectionGate!.release?.());
-  await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Latest scratch input during protection.") && r.text.includes("data:image/png;base64"))).toBe(true);
+  await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Latest scratch input during protection."))).toBe(true);
+  await expect.poll(async () => (await scratchPayloads(page)).some((r) => r.kind === "image" && r.value.startsWith("data:image/png;base64,"))).toBe(true);
   await sceneTwo.click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
 });

@@ -177,7 +177,7 @@ if [[ "$had_unit" == true ]]; then
     echo 'Interrupted deployment has no safe prior API unit snapshot' >&2
     exit 1
   }
-  install -m 0644 -- "$state_dir/rollback-api.container" "$active_unit"
+  install -m 0600 -- "$state_dir/rollback-api.container" "$active_unit"
   systemctl --user daemon-reload
   # A failed candidate may have exhausted systemd\x27s start limit. Reset only
   # after restoring the prior unit, so recovery can start the known-good API.

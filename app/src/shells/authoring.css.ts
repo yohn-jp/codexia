@@ -258,17 +258,6 @@ globalStyle('.st-studio-header-slot button:last-child', {
   fontSize: '11px',
 });
 globalStyle('.st-studio-header-slot button:last-child:hover', { color: 'var(--ink)', background: 'var(--surface-hover)' });
-globalStyle('.st-studio-durability', {
-  gap: '6px',
-  padding: '4px 0',
-  border: '0',
-  borderRadius: '0',
-  color: 'var(--muted)',
-  background: 'transparent',
-  fontSize: '11px',
-  fontWeight: '500',
-});
-globalStyle('.st-studio-durability::before', { inlineSize: '6px', blockSize: '6px' });
 globalStyle('.st-studio-real-actions button', { minBlockSize: '34px' });
 globalStyle('.st-studio-header-slot .theme-control', { fontSize: '0' });
 globalStyle('.st-studio-header-slot .theme-control select', {
@@ -783,9 +772,6 @@ globalStyle('.pg-workspace .pg-revision-diff-metadata,\n  .pg-workspace .pg-revi
 });
 globalStyle('.st-studio-breadcrumb', { '@container': { 'st-main (inline-size < 62rem)': { maxInlineSize: '35vw' } } });
 globalStyle('.st-studio-masthead-actions', { '@container': { 'st-main (inline-size < 62rem)': { gap: '5px' } } });
-globalStyle('.st-studio-durability', {
-  '@container': { 'st-main (inline-size < 62rem)': { maxInlineSize: '10rem', whiteSpace: 'normal' } },
-});
 globalStyle('.st-studio-main', { '@media': { '(max-width: 900px)': { gridTemplateRows: 'auto minmax(0, 1fr) 30px' } } });
 globalStyle('.st-studio-topbar', { '@media': { '(max-width: 900px)': { flexWrap: 'wrap', paddingBlock: '8px' } } });
 globalStyle('.st-studio-identity', { '@media': { '(max-width: 900px)': { flex: '1 1 100%' } } });

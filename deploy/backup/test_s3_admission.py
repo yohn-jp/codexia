@@ -8,6 +8,7 @@ from importlib.util import find_spec
 import os
 from pathlib import Path
 import ssl
+import socket
 import subprocess
 import sys
 import tempfile
@@ -88,13 +89,14 @@ class ProxyAdmissionTests(unittest.TestCase):
         sdk_config = Mock()
         sdk_client = SimpleNamespace(meta=SimpleNamespace(endpoint_url=profile()["endpointUrl"], events=Mock()))
         fake_session = Mock(return_value=SimpleNamespace(client=Mock(return_value=sdk_client)))
-        with patch.dict(sys.modules, {
+        with patch.object(s3_transfer, "_install_pinned_https_transport") as install_transport, patch.dict(sys.modules, {
             "boto3": SimpleNamespace(session=SimpleNamespace(Session=fake_session)),
             "botocore.config": SimpleNamespace(Config=sdk_config),
         }):
             s3_transfer.S3BackupTransfer(profile())
 
         self.assertEqual(sdk_config.call_args.kwargs.get("proxies"), {})
+        install_transport.assert_called_once()
 
     @unittest.skipUnless(find_spec("boto3"), "install the pinned S3 runtime for the real SDK test")
     def test_pinned_sdk_uses_direct_tls_with_ambient_proxies_set(self):
@@ -104,14 +106,17 @@ class ProxyAdmissionTests(unittest.TestCase):
             key = directory / "fixture.key"
             subprocess.run([
                 "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
-                "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1",
+                "-subj", "/CN=objects.example.test", "-addext", "subjectAltName=DNS:objects.example.test",
                 "-out", str(certificate), "-keyout", str(key),
             ], check=True, capture_output=True)
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(certificate, key)
+            sni_hosts = []
+            context.sni_callback = lambda _socket, server_name, _context: sni_hosts.append(server_name)
             with serve_loopback(EndpointHandler, tls_context=context) as (endpoint, direct_requests):
                 with serve_loopback(ProxyTrapHandler) as (trap, proxy_requests):
-                    origin = f"https://{endpoint}"
+                    port = endpoint.rsplit(":", 1)[1]
+                    origin = f"https://objects.example.test:{port}"
                     proxy = f"http://{trap}"
                     environment = {
                         "AWS_ACCESS_KEY_ID": "synthetic-fixture-id",
@@ -124,19 +129,62 @@ class ProxyAdmissionTests(unittest.TestCase):
                         "NO_PROXY": "", "no_proxy": "",
                     }
                     with patch.dict(os.environ, environment, clear=True):
-                        transfer = s3_transfer.S3BackupTransfer(
-                            profile(endpointUrl=origin, allowedOrigins=[origin], caBundle=str(certificate)),
-                            _allow_private_test_addresses=True,
-                        )
-                        try:
-                            result = transfer.client.head_bucket(Bucket="codexia-fixture")
-                        except Exception as error:
-                            raise AssertionError(
-                                f"Direct TLS request failed ({type(error).__name__}), "
-                                f"proxy connections: {len(proxy_requests)}"
-                            ) from None
-                        finally:
-                            transfer.client.close()
+                        original_getaddrinfo = s3_transfer.socket.getaddrinfo
+
+                        def resolve_test_endpoint(host, target_port, *args, **kwargs):
+                            if host == "objects.example.test":
+                                return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", target_port))]
+                            return original_getaddrinfo(host, target_port, *args, **kwargs)
+
+                        with patch("s3_transfer.socket.getaddrinfo", side_effect=resolve_test_endpoint):
+                            transfer = s3_transfer.S3BackupTransfer(
+                                profile(endpointUrl=origin, allowedOrigins=[origin], caBundle=str(certificate)),
+                                _allow_private_test_addresses=True,
+                            )
+                            try:
+                                result = transfer.client.head_bucket(Bucket="codexia-fixture")
+                            except Exception as error:
+                                raise AssertionError(
+                                    f"Direct TLS request failed ({type(error).__name__}), "
+                                    f"proxy connections: {len(proxy_requests)}"
+                                ) from None
+                            finally:
+                                transfer.client.close()
                     self.assertEqual(result["ResponseMetadata"]["HTTPStatusCode"], 200)
                     self.assertEqual(proxy_requests, [])
                     self.assertEqual(direct_requests, ["/codexia-fixture"])
+                    self.assertEqual(sni_hosts, ["objects.example.test"])
+
+    @unittest.skipUnless(find_spec("boto3"), "install the pinned S3 runtime for the real SDK test")
+    def test_pinned_sdk_rejects_dns_rebinding_before_socket_connect(self):
+        with tempfile.TemporaryDirectory(prefix="codexia-dns-rebinding-") as temporary:
+            environment = {
+                "AWS_ACCESS_KEY_ID": "synthetic-fixture-id",
+                "AWS_SECRET_ACCESS_KEY": "synthetic-fixture-key",
+                "AWS_EC2_METADATA_DISABLED": "true",
+                "AWS_CONFIG_FILE": str(Path(temporary) / "unused-config"),
+                "AWS_SHARED_CREDENTIALS_FILE": str(Path(temporary) / "unused-credentials"),
+            }
+            origin = "https://objects.example.test"
+            public_answer = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", 443))]
+            private_answer = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 443))]
+            answers = [public_answer]
+            dns_hosts = []
+
+            def resolve_rebinding(host, _port, **_kwargs):
+                dns_hosts.append(host)
+                return answers.pop(0) if answers else private_answer
+
+            with patch.dict(os.environ, environment, clear=True):
+                with patch("s3_transfer.socket.getaddrinfo", side_effect=resolve_rebinding):
+                    transfer = s3_transfer.S3BackupTransfer(
+                        profile(endpointUrl=origin, allowedOrigins=[origin])
+                    )
+                    try:
+                        with patch("urllib3.util.connection.create_connection") as connect:
+                            with self.assertRaisesRegex(s3_transfer.TransferError, "private"):
+                                transfer.client.head_bucket(Bucket="codexia-fixture")
+                        connect.assert_not_called()
+                        self.assertGreaterEqual(dns_hosts.count("objects.example.test"), 2)
+                    finally:
+                        transfer.client.close()
