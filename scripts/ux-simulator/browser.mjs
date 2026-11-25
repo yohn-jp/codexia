@@ -15,10 +15,10 @@ const stage = h('section', { class: 'ux-stage', 'aria-label': '画面と遷移' 
 const main = h('section', { class: 'ux-player', 'aria-label': '操作画面', tabindex: '-1' }, notice, stage);
 const inspectorBody = h('div');
 const inspector = h('details', { class: 'ux-inspector', open: matchMedia('(min-width: 1100px)').matches },
-  h('summary', {}, 'インスペクター'), inspectorBody);
+  h('summary', {}, '現在の状態・根拠・履歴'), inspectorBody);
 const catalogBody = h('div');
 const catalog = h('details', { class: 'ux-catalog', open: matchMedia('(min-width: 900px)').matches },
-  h('summary', {}, '画面・シナリオ'), catalogBody);
+  h('summary', {}, '探索するシナリオ'), catalogBody);
 const comparePanel = h('section', { class: 'ux-comparison', hidden: true, 'aria-label': '版比較' });
 const layout = h('div', { class: 'ux-layout' }, catalog, main, inspector);
 const compareTab = button('比較', () => showCompare(true), { 'aria-pressed': 'false' });
@@ -114,6 +114,7 @@ function apply(next) {
   selectedControl = null;
   paintStage();
   paintInspector();
+  paintCatalog();
   (stage.querySelector('[data-current-state]') ?? main).focus();
 }
 
@@ -149,12 +150,18 @@ function paintStage() {
   stage.dataset.screen = screenId ?? '';
   stage.dataset.projection = state.projection;
   const heading = h('h2', { tabindex: '-1', 'data-current-state': true }, item?.label ?? state.at);
-  const graphStates = state.projection === 'expected'
-    ? graph.states.filter(({ id, platforms }) => id.startsWith(flow.id + '/') && (!platforms || platforms.includes(state.platform)))
-    : graph.states.filter(({ id, platform, screen }) => platform === state.platform && (screen === screenId || id === state.at));
+  const platformStates = graph.states.filter(({ platform, platforms }) =>
+    (!platform || platform === state.platform) && (!platforms || platforms.includes(state.platform)));
+  const graphStates = platformStates.filter(({ id, screen }) => id === state.at || (state.projection === 'expected'
+    ? id.startsWith(flow.id + '/') : flow.screens.includes(screen)));
+  const stateLabels = new Map(platformStates.map(({ id, label }) => [id, label ?? id]));
+  const stateLabel = (id) => stateLabels.get(id) ?? id ?? '遷移先未取得';
+  const edgeEvidence = (edge) => !edge.source ? '根拠なし・遷移できません' : edge.method === 'static' ? '静的結線 · 実行未観測'
+    : edge.method === 'trace' ? '実行証拠あり' : '設計正本';
   replace(stage,
     h('p', { class: 'ux-source' }, [labels[state.platform], modeLabels[state.projection], flow.label].join(' · ')),
     h('div', { class: 'ux-wireframe', 'data-form': variant },
+      h('p', { class: 'ux-current-label' }, '現在の状態 · ' + (state.history.filter(({ edge }) => edge).length) + ' 回の遷移操作'),
       heading,
       memberFields(screen).map((region) => h('section', { class: 'ux-region' },
         h('h3', {}, region.label ?? region.id), h('small', {}, region.role ?? '領域'))),
@@ -165,10 +172,15 @@ function paintStage() {
             paintInspector();
             inspector.open = true;
           })))))),
-    h('h3', {}, '選べる操作・分岐'),
-    menu.length ? h('ol', { class: 'ux-branches' }, menu.map((edge) => h('li', {},
-      button(edge.event ?? edge.id, () => apply(step(state, edge.id))), h('small', {}, edge.method === 'static' ? '静的結線 · 実行未観測'
-        : edge.method === 'trace' ? '実行証拠あり' : '設計正本'))))
+    h('h3', { class: 'ux-next-heading' }, '次の操作を選ぶ'),
+    menu.length ? h('ol', { class: 'ux-branches' }, menu.map((edge, index) => h('li', {},
+      button(edge.event ?? edge.id, () => apply(step(state, edge.id)), {
+        class: menu.length === 1 && edge.source ? 'primary' : '', 'aria-describedby': 'ux-branch-' + index,
+      }),
+      h('div', { id: 'ux-branch-' + index, class: 'ux-branch-destination' },
+        h('strong', {}, '遷移先: ' + stateLabel(edge.to)),
+        edge.condition && h('small', {}, '条件: ' + edge.condition),
+        h('small', {}, edgeEvidence(edge))))))
       : h('p', {}, state.projection === 'expected' ? 'この図の終端です。' : 'この位置から辿れる正規ソースの遷移がありません。'),
     h('div', { class: 'actions' },
       button('一つ戻る', () => apply(back(state)), { disabled: !state.stack.length }),
@@ -176,13 +188,23 @@ function paintStage() {
         apply(visit(state, linked.platforms.includes(state.platform) ? state.platform : linked.platforms[0], linked.id)))),
     linked && !linked.platforms.includes(state.platform) && h('p', { class: 'ux-source' },
       '外部画面の根拠を参照 · ' + labels[linked.platforms[0]]),
-    h('details', { class: 'ux-route-map' }, h('summary', {}, '遷移の全体図'),
-      h('ul', {}, graphStates.map((node) => {
-        const outgoing = graph.transitions.filter(({ from, platform }) => from === node.id && (!platform || platform === state.platform));
-        return h('li', { 'aria-current': node.id === state.at ? 'step' : null }, h('strong', {}, node.label),
-          outgoing.length ? h('span', {}, ' → ' + outgoing.map(({ to }) =>
-            graphStates.find(({ id }) => id === to)?.label ?? to).join(' / ')) : null);
-      }))));
+    h('section', { class: 'ux-route-map', 'aria-labelledby': 'ux-route-title' },
+      h('h3', { id: 'ux-route-title' }, '遷移の全体図'),
+      h('p', { class: 'ux-source' }, '状態と分岐を確認できます。現在位置は強調表示され、操作は上の「次の操作を選ぶ」から行います。'),
+      h('div', { class: 'ux-route-scroll', role: 'region', tabindex: '0', 'aria-label': 'シナリオの状態と遷移' },
+        h('ul', { class: 'ux-route-states' }, graphStates.map((node) => {
+          const outgoing = graph.transitions.filter(({ from, platform }) => from === node.id && (!platform || platform === state.platform));
+          const isCurrent = node.id === state.at;
+          return h('li', { 'aria-current': isCurrent ? 'step' : null },
+            h('div', { class: 'ux-route-state' }, isCurrent && h('span', { class: 'ux-current-label' }, '現在位置'), h('strong', {}, node.label ?? node.id)),
+            outgoing.length ? h('ul', { class: 'ux-route-edges' }, outgoing.map((edge) => h('li', {},
+              h('span', { class: 'ux-route-event' }, edge.event ?? edge.id),
+              h('span', { 'aria-hidden': 'true', class: 'ux-route-arrow' }, '→'),
+              h('span', {}, stateLabel(edge.to))))) : h('small', { class: 'ux-source' }, 'この範囲に出る遷移はありません。'));
+        })))));
+  const map = stage.querySelector('.ux-route-scroll');
+  const selectedState = map?.querySelector('[aria-current="step"]');
+  if (map && selectedState) map.scrollTop = selectedState.getBoundingClientRect().top - map.getBoundingClientRect().top;
 }
 
 function readout() {
@@ -264,13 +286,17 @@ function paintCatalog() {
   const coverage = (rows) => rows.map((entry) => h('small', { class: 'ux-coverage-label' },
     [labels[entry.platform], statusLabels[entry.status], entry.reason].filter(Boolean).join(' · ')));
   results.replaceChildren(
+    h('p', { class: 'ux-source' }, '設計投影または実装投影を選び、シナリオと対象環境を選択します。'),
     h('div', { class: 'actions', 'aria-label': '投影の切替' },
       ...Object.entries(modeLabels).map(([mode, label]) => button(label, () => changeMode(mode), { 'aria-pressed': String(activeMode === mode) }))),
+    h('p', { class: 'ux-source' }, activeMode === 'expected' ? '設計投影: 正本の期待経路を探索します。' : '実装投影: 正規コードから得られた経路を探索します。実行未観測の経路も含みます。'),
     h('h2', {}, '経路'),
     scenarios.length ? h('ul', { class: 'ux-scenarios' }, scenarios.map((flow) =>
       h('li', {}, h('strong', {}, flow.label),
         h('div', { class: 'actions' }, flow.platforms.filter((value) => !platform.value || value === platform.value).map((value) =>
-          button(labels[value], () => open(activeMode, value, flow.id)))),
+          button(labels[value], () => open(activeMode, value, flow.id), {
+            'aria-current': state?.scenario === flow.id && state.platform === value && state.projection === activeMode ? 'true' : null,
+          })))),
         activeMode === 'expected' && h('details', {}, h('summary', {}, '状態を直接表示'),
           h('ul', {}, snapshot.expected.states.filter(({ id, platforms }) => id.startsWith(flow.id + '/')
             && (!platform.value || !platforms || platforms.includes(platform.value))).map((node) => {

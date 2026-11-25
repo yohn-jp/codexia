@@ -69,12 +69,12 @@ button:disabled { cursor: not-allowed; opacity: 0.52; }
   gap: var(--atlas-space-8);
   max-width: var(--atlas-content-width);
   margin-inline: auto;
-  padding: 1.5rem clamp(1rem, 3vw, 2.75rem) 1.75rem;
+  padding: 0.9rem clamp(1rem, 3vw, 2.75rem) 1rem;
 }
 h1 {
   max-width: 18ch;
   margin: 0;
-  font: 600 clamp(2rem, 3.2vw, 2.75rem)/1.12 Georgia, "Noto Serif CJK JP", serif;
+  font: 650 1.75rem/1.2 system-ui, "Noto Sans CJK JP", sans-serif;
   letter-spacing: -0.025em;
 }
 .intro {
@@ -106,7 +106,7 @@ h1 {
 #diagram-total { font-variant-numeric: tabular-nums; }
 .workspace {
   display: grid;
-  grid-template-columns: clamp(17rem, 27vw, 21rem) minmax(0, 1fr);
+  grid-template-columns: clamp(15rem, 23vw, 19rem) minmax(0, 1fr);
   max-width: var(--atlas-content-width);
   min-height: calc(100vh - 10rem);
   margin-inline: auto;
@@ -425,7 +425,6 @@ h1 {
   width: 100%;
   max-width: none;
   height: auto;
-  min-height: 8rem;
 }
 .canvas img[hidden] { display: none; }
 .loading {

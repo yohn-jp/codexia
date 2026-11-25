@@ -57,6 +57,9 @@ try {
     const fits = async () => assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.goto(link('desktop', 'atlas-entry-01'));
     await assertHeading('Web /desktop/');
+    assert.equal(await stage.locator('.ux-route-map').isVisible(), true, 'The transition overview is visible without opening a disclosure');
+    assert.equal(await stage.locator('.ux-route-states > [aria-current="step"]').count(), 1);
+    assert.match(await stage.locator('.ux-branch-destination').first().innerText(), /遷移先: APIと認証を照合/u);
     const readability = await stage.evaluate((stage) => {
       const luminance = (color) => {
         const rgb = color.match(/[^(), ]+/g).slice(1, 4).map(Number).map((value) => value / 255);
@@ -76,6 +79,7 @@ try {
     await button('APIと認証を照合').focus();
     await page.keyboard.press('Enter');
     await assertHeading('APIと認証を照合');
+    assert.match(await stage.locator('.ux-route-states > [aria-current="step"]').innerText(), /APIと認証を照合/u);
     await button('DB/認証不明').click();
     await assertHeading('接続と認可を再確認');
     await button('一つ戻る').click();

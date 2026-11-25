@@ -103,6 +103,12 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   });
   await page.goto((await serveFixture(fixture, t))+'?file=packages/a.ts', { waitUntil: 'domcontentloaded' });
   assert.equal(await page.locator('#selected-path').textContent(), 'packages/a.ts');
+  assert.equal(await page.locator('#graph-target').inputValue(), '');
+  await page.locator('#graph-target').selectOption('a-symbol');
+  assert.equal(await page.locator('#selected-symbol').textContent(), 'alpha');
+  assert.match(await page.locator('#graph-scope').innerText(), /シンボル間関係/);
+  await page.locator('#graph-target').selectOption('');
+  assert.match(await page.locator('#graph-scope').innerText(), /ファイル間関係/);
   assert.equal(await page.locator('#stat-symbol-links').textContent(), '6');
   assert.match(await page.locator('#coverage').innerText(), /解析範囲/);
   await page.locator('#coverage-panel > summary').click();

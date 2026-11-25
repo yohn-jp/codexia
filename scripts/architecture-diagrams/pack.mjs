@@ -179,11 +179,30 @@ export async function buildAtlas(siteDir, sha, rendererPath, root = ROOT) {
   const stage = await mkdtemp(join(tmpdir(), 'codexia-mermaid-'));
   try {
     await mkdir(join(output, 'svg'), { recursive: true });
+    const themeConfig = join(stage, 'mermaid-theme.json');
+    await writeFile(themeConfig, JSON.stringify({
+      theme: 'base',
+      themeVariables: {
+        background: '#ffffff',
+        primaryColor: '#dbeafe',
+        primaryTextColor: '#10213e',
+        primaryBorderColor: '#5172a4',
+        secondaryColor: '#e9f2ff',
+        tertiaryColor: '#f1f5f9',
+        lineColor: '#475569',
+        textColor: '#172033',
+        edgeLabelBackground: '#ffffff',
+        clusterBkg: '#f8fafc',
+        clusterBorder: '#71839c',
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '16px',
+      },
+    }));
     for (const diagram of diagrams) {
       const input = join(stage, diagram.id + '.mmd');
       const dest = join(output, diagram.image);
       await writeFile(input, diagram.source + '\n');
-      const rendererArgs = ['-i', input, '-o', dest, '-t', 'neutral', '-b', 'white'];
+      const rendererArgs = ['-i', input, '-o', dest, '-c', themeConfig, '-t', 'base', '-b', 'white'];
       execFileSync(rendererPath.endsWith('.mjs') ? process.execPath : rendererPath,
         rendererPath.endsWith('.mjs') ? [rendererPath, ...rendererArgs] : rendererArgs, {
         stdio: 'pipe', timeout: 90000, maxBuffer: 2 * 1024 * 1024,
