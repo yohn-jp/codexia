@@ -1,4 +1,4 @@
-import { authMethodsGet } from './generated/http/client';
+import { authMethodsGet } from './generated/auth-methods/client';
 
 const UPSTREAM_PROVIDER_ID = 'workspace-oidc';
 
@@ -73,15 +73,7 @@ export interface AuthMethodAvailability {
 export async function fetchAuthMethodAvailability(fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<AuthMethodAvailability> {
   let value: unknown;
   try {
-    value = await authMethodsGet({
-      credentials: 'same-origin',
-      cache: 'no-store',
-      redirect: 'error',
-      headers: { accept: 'application/json' },
-      ...(signal ? { signal } : {}),
-      transport: { auth: 'same-origin' },
-      fetcher,
-    });
+    value = await authMethodsGet({ ...(signal ? { signal } : {}), fetcher });
   } catch {
     throw new Error('Sign-in methods could not be loaded.');
   }
