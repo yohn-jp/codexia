@@ -124,6 +124,25 @@ test('reports discovered runtime surfaces that lack an explicit classification',
   assert.match(violations.join('\n'), /public\.document_revision/);
 });
 
+test('requires explicit inventory classifications for native iOS and IaC surfaces', () => {
+  const discovered = {
+    routes: [], tools: [], databaseObjects: [],
+    nativeIosViews: ['AuthoringView'],
+    iacResources: ['cloudflare_workers_route.frontend'],
+    ansibleFiles: ['deploy/ansible/site.yml'],
+  };
+  const missing = validateInventory(discovered, []);
+  assert.ok(missing.some(item => item === 'Unclassified nativeIosView AuthoringView'));
+  assert.ok(missing.some(item => item === 'Unclassified iacResource cloudflare_workers_route.frontend'));
+  assert.ok(missing.some(item => item === 'Unclassified ansibleSource deploy/ansible/site.yml'));
+  const complete = validateInventory(discovered, [
+    { kind: 'nativeIosView', id: 'AuthoringView', classification: 'candidate REQ-UI-001; behavior unverified' },
+    { kind: 'iacResource', id: 'cloudflare_workers_route.frontend', classification: 'candidate REQ-EXT-001; applied state unverified' },
+    { kind: 'ansibleSource', id: 'deploy/ansible/site.yml', classification: 'candidate REQ-OPS-001; host execution unverified' },
+  ]);
+  assert.deepEqual(complete, []);
+});
+
 test('discovers an unclassified SQL object from source instead of trusting cached inventory data', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-inventory-source-'));
   t.after(() => rm(root, { recursive: true, force: true }));

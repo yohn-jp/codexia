@@ -1,6 +1,6 @@
 # StrictDocによる要求・実装・検証追跡の詳細設計
 
-**種別: 導入済み追跡基盤・部分適用。** [Requirements governance](README.md) と [Requirement register](REQUIREMENT-REGISTER.md) の既存採用REQ-ID 33件をStrictDoc Markdown nodeへ移行し、HTML/JSON生成・relation検査・CI taskを実装した。要求の正しさや製品適合をStrictDoc単独で証明するものではない。現状のgateと残件を末尾の表に記録する。ツール選定は [Toolchain](../architecture/SPECIFICATION-TOOLCHAIN.md)。
+**種別: 採用済み追跡設計・部分適用。** [Requirements governance](README.md) と [Requirement register](REQUIREMENT-REGISTER.md) の既存採用REQ-ID 33件をStrictDoc Markdown nodeへ移行し、HTML/JSON生成・relation検査・CI taskを実装した。要求の正しさや製品適合をStrictDoc単独で証明するものではない。現状のgateと残件を末尾の表に記録する。ツール選定は [Toolchain](../architecture/SPECIFICATION-TOOLCHAIN.md)。
 
 ## 二択の結論と適用範囲
 
@@ -67,13 +67,15 @@ StrictDocが直接扱えるsource-file/range relationを優先し、正本内に
 | --- | --- | --- |
 | TRC-01 | 登録済み全REQ-IDを一度だけ変換 | **LOCAL_PASS**: main baselineの33 IDをStrictDoc requirement nodeと照合し、欠落・重複・余分なIDを検査 |
 | TRC-02 | Markdown parse→HTML/JSON→同一入力から再生成 | **LOCAL_PASS**: StrictDoc 0.32.1のHTML/JSONを2回生成し比較。HTML検索timestamp、確認済みMarkdown document MID、検索index key順とunordered membership順のみを正規化し、membership値と他の出力を保持 |
-| TRC-03 | REQ→TS/TSX/SQL source | **PARTIAL**: File relationの存在と範囲を検査。symbol AST coverageと全obligationへの網羅は未証明 |
-| TRC-04 | 実装側の逆引き | **PARTIAL**: 既存の限定走査に加え、HTTPの許可済みmethod/pathと一部dispatcher、MCPのliteral登録、migrationの名前付きDDLとDBカタログ契約、UI control識別子、配備・バックアップの入口を `reverseTrace` に記録する。動的登録、live DB、UIの操作結果、hostと隔離復元の証拠は #671 の対象。 |
+| TRC-03 | REQ→設計→実装surface→obligation | **PARTIAL**: File relationの存在と範囲、明示したtyped surface identifierを検査する。意味的な実装適合、symbol AST coverage、全obligationへの網羅は未証明 |
+| TRC-04 | 実装側の逆引き | **PARTIAL**: bounded scanからHTTP method/path、MCP登録、DB object、Desktop UI control、Native iOS SwiftUI view、Terraform resource、Ansible sourceを `reverseTrace` に記録する。未分類・未対応surfaceは残件として出力する。動的登録、全migration/live DB、実画面・実機挙動、適用済みIaC、host実行、隔離復元は静的source scanでは証明しない。 |
 | TRC-05 | TEST→CI exact source evidence | Node fault-injectionとPlaywright static-page testはローカル実測済み。GitHub run/source SHA/task/artifact identityをreportに記録し、hosted resultは当該PRの実際のVerify runで判定 |
 | TRC-06 | 重複UID・切れた参照・inventory欠落・不正MIDへの故障注入 | **LOCAL_PASS**: `verify.test.mjs`の負例を実行。legacy product behaviorの適合試験とは区別 |
-| TRC-07 | Repository Audit Pagesに静的サイトを公開 | [#713](https://github.com/yohn-jp/codexia/pull/713) が既存publisherにStrictDoc HTMLとJSONを統合済み。PRは公開用の出力をChromiumで検査してプレビューに格納し、mainの公開ジョブが配信する。今回の義務ノードの公開先での確認と、API契約・全域追跡の残件は #669 で扱う。 |
+| TRC-07 | Repository Audit Pagesに静的サイトを公開 | StrictDoc HTML/JSONと `/requirements/traceability/` のstatus HTML/JSONを既存の唯一のpublisherが生成する。PR artifactをChromiumで検査し、mainの同じpublisherが公開する。公開URLとsource SHAが一致するまで `PENDING_PAGES_PUBLISH` を維持する。 |
 
-StrictDoc導入の範囲は、要求nodeと局所的な自動trace verifier、正直な残件表示まで。部分的なFile relationやsource-scoped inventoryを要求適合と読み替えない。symbol coverageと完全runtime inventoryはIssue #671の残件である。hosted green resultはexact source SHAごとにreportへ記録し、公開証跡はIssue #669のpublisherが確認する。
+## 現段階での実装範囲と残件
+
+StrictDoc 0.32.1による要求HTML/JSON生成、REQ-IDとsource relationの検査、boundedなHTTP/MCP/DB/Desktop UI/Native iOS/IaC reverse inventory、Node fault-injection、Playwright表示検査を既存CI taskと単一Repository Audit Pages publisherに統合する。`/requirements/traceability/` は要求・義務・reverse surface・exact-source観測・未解決gapを同じbuild SHAで表示する。部分的なFile relationやsource-scoped inventoryを要求適合と読み替えない。動的route/tool、全migration/live catalog、semantic symbol mapping、実画面/実機挙動、適用済みIaC/host実行の確認はこのscanで証明せず、実行証拠を得るまでPARTIALまたはBLOCKEDとして残す。
 
 ## 個別義務trace projection
 

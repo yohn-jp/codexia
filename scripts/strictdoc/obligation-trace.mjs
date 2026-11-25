@@ -77,7 +77,7 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
       const separator = item.indexOf('=');
       const kind = separator > 0 ? item.slice(0, separator) : '';
       const id = separator > 0 ? item.slice(separator + 1) : '';
-      if (!['httpOperation', 'routeId', 'toolName', 'objectId', 'controlId', 'surfaceId', 'identifier'].includes(kind) || !id) {
+      if (!['httpOperation', 'routeId', 'toolName', 'objectId', 'controlId', 'nativeIosView', 'iacResource', 'ansibleSource', 'surfaceId', 'identifier'].includes(kind) || !id) {
         violations.push(`${obligation.UID} has invalid surface identifier ${item}`);
         return null;
       }
@@ -115,6 +115,9 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
     }
     rows.push({
       requirementId, obligationId: obligation.UID, obligationText: obligation.STATEMENT ?? obligation.TITLE ?? '',
+      decisionStatus: requirement?.['Decision status'] ?? 'UNKNOWN',
+      conformanceStatus: requirement?.['Conformance status'] ?? 'UNMAPPED',
+      applicability: requirement?.Applicability ?? 'UNKNOWN',
       designRefs, sourceRefs,
       implementationIdentifiers: String(obligation['Implementation identifiers'] ?? '').split(/\s*;\s*/u).filter(Boolean),
       surfaceIdentifiers, testIds, exactRuns, status,

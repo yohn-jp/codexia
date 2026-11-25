@@ -72,11 +72,12 @@ function makeRoutes(site, sourceSha, origin, audit) {
   const snapshotBranches = [...new Set((audit.branches ?? []).map(branch => branch.sha))].filter(sha => audit.snapshots?.[sha]?.status !== 'blocked').sort();
   const reviewBranches = Object.entries(audit.reviews ?? {}).filter(([, review]) => ['ready','partial'].includes(review.status)).map(([sha]) => sha).sort();
   const uxAvailable = existsSync(join(site, 'ux', 'manifest.json'));
-  const rootLinks = ['requirements/html/',...(existsSync(page(site,'/api/')) ? ['api/'] : []),...(uxAvailable ? ['ux/'] : []),'architecture/','graph/','ci/','security/','audit/','manifest.json',
+  const rootLinks = ['requirements/html/',...(existsSync(page(site,'/requirements/traceability/')) ? ['requirements/traceability/'] : []),...(existsSync(page(site,'/api/')) ? ['api/'] : []),...(uxAvailable ? ['ux/'] : []),'architecture/','graph/','ci/','security/','audit/','manifest.json',
     ...snapshotBranches.flatMap(sha => [`snapshots/${sha}/`,`snapshots/${sha}/repomix.json`]), ...reviewBranches.map(sha => `reviews/${sha}/index.html`)];
   const routes = [
     { route:'/', label:'Development Portal', description:'Site map for Codexia design, code structure, CI observation and source audit.', category:'Overview', sourceSha, generationStatus:'ready', coverageStatus:'site-routes', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs', internalLinks:rootLinks },
     { route:'/requirements/html/', label:'Requirements and traceability', description:'StrictDoc requirements and trace matrix; source references are not test results.', category:'Verification', sourceSha, generationStatus:existsSync(page(site,'/requirements/html/')) ? 'ready':'unavailable', coverageStatus:'see-manifest', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs/requirements', internalLinks:existsSync(page(site,'/requirements/html/')) ? ['../../','requirements/REQUIREMENT-REGISTER.md-TRACE.html'] : ['../../'] },
+    { route:'/requirements/traceability/', label:'Traceability status', description:'Requirement conformance, obligations, reverse source inventory, exact-source observations and visible gaps for this Pages build.', category:'Verification', sourceSha, generationStatus:existsSync(page(site,'/requirements/traceability/')) ? 'ready':'unavailable', coverageStatus:'obligation-and-surface-status', dataKind:'build-snapshot', externalDocumentationUrl:`https://github.com/yohn-jp/codexia/tree/${sourceSha}/docs/verification/TRACEABILITY-REGISTER.md`, internalLinks:existsSync(page(site,'/requirements/traceability/')) ? ['../../','../html/','traceability.json'] : ['../../'] },
     ...(existsSync(page(site,'/api/')) ? [{ route:'/api/', label:'API Reference', description:'Static Scalar view of the TypeSpec-generated target OpenAPI contract. Runtime implementation and verification state are reported separately.', category:'Contracts', sourceSha, generationStatus:'ready', coverageStatus:'generated-target-contract', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/packages/http-contract/openapi', internalLinks:['../','codexia.openapi.yaml','manifest.json'] }] : []),
     ...(uxAvailable ? [{ route:'/ux/', label:'UX Simulator', description:'Source-bound design and implementation projections with explicit coverage gaps.', category:'Design', sourceSha, generationStatus:'ready', coverageStatus:JSON.parse(readPageFile(join(site,'ux','manifest.json'),'utf8')).status, dataKind:'build-snapshot', externalDocumentationUrl:`https://github.com/yohn-jp/codexia/tree/${sourceSha}/docs/design/UX-SIMULATOR-CONTRACT.md`, internalLinks:['../','manifest.json','snapshot.json'] }] : []),
     { route:'/architecture/', label:'Architecture Atlas', description:'Rendered views of canonical Mermaid design documents.', category:'Architecture', sourceSha, generationStatus: existsSync(page(site,'/architecture/')) ? 'ready':'unavailable', coverageStatus:'see-manifest', dataKind:'build-snapshot', externalDocumentationUrl:'https://github.com/yohn-jp/codexia/tree/main/docs', internalLinks:['../'] },
@@ -116,7 +117,7 @@ function renderPortal(manifest,audit) {
     'branch-head-snapshots':'Observed branch heads',
   };
   const label=value=>esc(labels[value]??value);
-  const cards = manifest.routes.filter(x => ['/requirements/html/','/api/','/architecture/','/graph/','/ci/','/security/','/audit/'].includes(x.route)).map(item => {
+  const cards = manifest.routes.filter(x => ['/requirements/html/','/requirements/traceability/','/api/','/architecture/','/graph/','/ci/','/security/','/audit/'].includes(x.route)).map(item => {
     const available = item.generationStatus === 'ready';
     const target = item.route.slice(1);
     const detail=item.route==='/audit/'?`<details class="cx-pages-disclosure"><summary>${(audit.branches??[]).length} observed branches · snapshot and review status</summary><div class="cx-pages-disclosure-content"><ul class="cx-pages-branch-list">${(audit.branches??[]).map(branch=>{
@@ -330,7 +331,7 @@ function verifyAuditArtifacts(site,audit) {
 }
 
 function validateRegistry(site,manifest,audit,origin) {
-  const base=['/','/requirements/html/',...(existsSync(page(site,'/api/'))?['/api/']:[]),...(existsSync(join(site,'ux','manifest.json'))?['/ux/']:[]),'/architecture/','/graph/','/ci/','/security/','/audit/','/graph/communities.html'];
+  const base=['/','/requirements/html/','/requirements/traceability/',...(existsSync(page(site,'/api/'))?['/api/']:[]),...(existsSync(join(site,'ux','manifest.json'))?['/ux/']:[]),'/architecture/','/graph/','/ci/','/security/','/audit/','/graph/communities.html'];
   const snapshotRoutes=Object.keys(audit.snapshots).filter(sha=>audit.snapshots[sha].status!=='blocked').sort().map(sha=>`/snapshots/${sha}/`);
   const reviewRoutes=Object.entries(audit.reviews??{}).filter(([,review])=>['ready','partial'].includes(review.status)).map(([sha])=>sha).sort().map(sha=>`/reviews/${sha}/`);
   const expected=[...base,...snapshotRoutes,...reviewRoutes];
@@ -372,6 +373,13 @@ function validateRegistry(site,manifest,audit,origin) {
   }
   const requirements=manifest.routes.find(item=>item.route==='/requirements/html/');
   if (requirements.generationStatus === 'ready') verifySpecifications(site, sourceSha);
+  const traceability=manifest.routes.find(item=>item.route==='/requirements/traceability/');
+  if (traceability.generationStatus==='ready') {
+    const trace=JSON.parse(readPageFile(join(site,'requirements','traceability','traceability.json'),'utf8','Requirements traceability JSON is missing'));
+    assert.equal(trace.schemaVersion,1,'Requirements traceability schema version mismatch');
+    assert.equal(trace.sourceSha,sourceSha,'Requirements traceability source mismatch');
+    assert.ok(Array.isArray(trace.requirements) && Array.isArray(trace.obligations) && Array.isArray(trace.reverseTrace),'Requirements traceability projection is incomplete');
+  }
   const apiRoute=manifest.routes.find(item=>item.route==='/api/');
   if (apiRoute) {
     assert.equal(apiRoute.generationStatus,'ready','API reference generation must be complete before publication');

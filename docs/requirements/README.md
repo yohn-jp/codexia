@@ -59,4 +59,4 @@
 
 ## 現段階での完了範囲
 
-StrictDoc 0.32.1による要求HTML/JSON生成、REQ-IDとsource relationの検査、独立source scanに基づくbounded route/tool/DB surface inventory、Node fault-injectionとPlaywright static-page checkをCI taskへ追加した。シンボル単位の完全traceと全runtime surfaceの完全reverse inventoryはIssue #671の残件であり、Repository Audit Pagesへの公開はIssue #669のpublisherが所有する。該当statusは証拠取得までPARTIALまたはPENDINGのまま保つ。
+StrictDoc 0.32.1による要求HTML/JSON生成、REQ-IDとsource relationの検査、独立source scanに基づくboundedなHTTP/MCP/DB/Desktop UI/Native iOS/IaC reverse inventory、Node fault-injection、Playwright static-page checkを既存CIとRepository Audit Pagesへ統合する。source参照、意味的適合、TEST-IDの存在、exact-source実行証拠を分けて表示し、未対応の要求・surface・検証義務を生成された残件として保持する。動的route/tool、全migration/live catalog、実画面/実機挙動、適用済みIaC/host状態の未観測範囲は引き続きPARTIALまたはBLOCKEDとして扱う。

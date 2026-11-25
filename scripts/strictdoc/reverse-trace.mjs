@@ -66,6 +66,60 @@ function implementationControlReferences(source, file) {
     .map((match) => ({ kind: 'uiControlBindingReference', id: match[0], source: { path: file, line: source.slice(0, match.index).split('\n').length }, provenance: 'Literal control identifier reference in application source; this is a code link only, not proof of rendered behavior or acceptance.' }));
 }
 
+function nativeIosViews(source, file) {
+  const surfaces = [];
+  const code = source.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/^\s*\/\/.*$/gmu, '');
+  const pattern = /^\s*(?:public\s+|internal\s+|private\s+|fileprivate\s+)?(?:struct|class)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:[^\n{]*\bView\b/gmu;
+  for (const match of code.matchAll(pattern)) {
+    surfaces.push({
+      kind: 'nativeIosView', id: match[1], source: { path: file, line: code.slice(0, match.index).split('\n').length },
+      provenance: 'SwiftUI type declaration conforming to View; declaration presence is not physical-device or behavior acceptance.',
+    });
+  }
+  return surfaces;
+}
+
+function terraformResources(source, file) {
+  const surfaces = [];
+  source = source.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/^\s*(?:#|\/\/).*$/gmu, '');
+  const pattern = /^\s*resource\s+"([A-Za-z_][A-Za-z0-9_]*)"\s+"([A-Za-z_][A-Za-z0-9_-]*)"\s*\{/gmu;
+  for (const match of source.matchAll(pattern)) {
+    surfaces.push({
+      kind: 'iacResource', id: `${match[1]}.${match[2]}`, source: { path: file, line: source.slice(0, match.index).split('\n').length },
+      provenance: 'Terraform resource declaration in the canonical Cloudflare IaC tree; source declaration does not prove applied infrastructure state.',
+    });
+  }
+  return surfaces;
+}
+
+export async function discoverPlatformSurfaces({
+  repositoryRoot = DEFAULT_ROOT,
+  nativeIosRoot = 'ios',
+  iacRoot = 'deploy/cloudflare/terraform',
+  ansibleRoot = 'deploy/ansible',
+} = {}) {
+  const root = path.resolve(repositoryRoot);
+  const surfaces = [];
+  const limitations = [];
+  const iosFiles = (await walkFiles(root, nativeIosRoot)).filter(file => file.includes('/Sources/') && file.endsWith('.swift'));
+  for (const file of iosFiles) surfaces.push(...nativeIosViews(await readRegularFile(path.join(root, file)), file));
+  if (iosFiles.length === 0) limitations.push({ area: 'native-ios', reason: `Canonical Native iOS source tree is empty: ${nativeIosRoot}` });
+  limitations.push({ area: 'native-ios-runtime', reason: 'SwiftUI source declarations do not prove iOS build, physical-device behavior, IME, or acceptance execution.' });
+
+  const terraformFiles = (await walkFiles(root, iacRoot)).filter(file => file.endsWith('.tf'));
+  for (const file of terraformFiles) surfaces.push(...terraformResources(await readRegularFile(path.join(root, file)), file));
+  if (terraformFiles.length === 0) limitations.push({ area: 'iac', reason: `Canonical Terraform source tree is empty: ${iacRoot}` });
+  limitations.push({ area: 'iac-runtime', reason: 'Terraform declarations do not prove a plan, applied provider state, or live routing configuration.' });
+  const ansibleFiles = (await walkFiles(root, ansibleRoot)).filter(file => /\.ya?ml$/u.test(file));
+  for (const file of ansibleFiles) surfaces.push({
+    kind: 'ansibleSource', id: file, source: { path: file },
+    provenance: 'Canonical Ansible playbook or inventory source under the repository IaC tree; source presence does not prove host execution or desired-state convergence.',
+  });
+  if (ansibleFiles.length === 0) limitations.push({ area: 'ansible', reason: `Canonical Ansible source tree is empty: ${ansibleRoot}` });
+  limitations.push({ area: 'ansible-runtime', reason: 'Ansible playbook declarations do not prove execution against a host or resulting system state.' });
+  return { surfaces, limitations };
+}
+
 /** Discover source-declared surfaces from domain authorities. The output is an inventory, never a certification. */
 export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, boundedDiscovery } = {}) {
   const root = path.resolve(repositoryRoot);
@@ -128,6 +182,10 @@ export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, b
   for (const file of appFiles) surfaces.push(...implementationControlReferences(await readRegularFile(path.join(root, file)), file));
   limitations.push({ area: 'ui-runtime', reason: 'A source control-ID reference does not prove rendered UI behavior; browser acceptance and explicit control bindings are required for runtime UI evidence.' });
 
+  const platform = await discoverPlatformSurfaces({ repositoryRoot: root });
+  surfaces.push(...platform.surfaces);
+  limitations.push(...platform.limitations);
+
   const operationalFiles = [
     'deploy/backup/backup.sh', 'deploy/backup/s3_transfer.py',
     'deploy/ansible/deploy.yml', 'deploy/ansible/deploy-transaction.yml', 'deploy/ansible/restore-drill.yml',
@@ -161,6 +219,9 @@ function surfaceKindMatches(referenceKind, surfaceKind) {
   if (referenceKind === 'toolName') return ['mcpTool', 'mcpRuntimeTool'].includes(surfaceKind);
   if (referenceKind === 'objectId') return ['databaseObject', 'databaseCatalogObject', 'databaseMigrationObject'].includes(surfaceKind);
   if (referenceKind === 'controlId') return ['uiControl', 'uiControlBindingReference'].includes(surfaceKind);
+  if (referenceKind === 'nativeIosView') return surfaceKind === 'nativeIosView';
+  if (referenceKind === 'iacResource') return surfaceKind === 'iacResource';
+  if (referenceKind === 'ansibleSource') return surfaceKind === 'ansibleSource';
   if (referenceKind === 'surfaceId') return true;
   if (referenceKind === 'identifier') return true;
   return false;
@@ -233,6 +294,11 @@ export function buildReverseTrace({ discovered = [], inventory = [], obligations
   for (const limitation of reportedLimitations) gaps.push({ kind: 'BLOCKED', provenance: 'Discovery limitation', ...limitation });
   for (const obligation of registered) {
     if (!obligation.requirementId || !obligation.obligationId) violations.push(`Obligation row lacks requirementId or obligationId: ${JSON.stringify(obligation)}`);
+    for (const reference of obligation.surfaceIdentifiers ?? []) {
+      if (!surfaces.some(surface => surface.id === reference.id && surfaceKindMatches(reference.kind, surface.kind))) {
+        violations.push(`Obligation surface identifier has no discovered source: ${reference.kind} ${reference.id}`);
+      }
+    }
   }
   if (rows.some((row) => row.status === 'VERIFIED')) violations.push('Reverse trace cannot certify VERIFIED; only the project certifier may assign that status.');
   return { rows, gaps, violations };

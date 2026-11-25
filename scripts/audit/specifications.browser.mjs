@@ -13,6 +13,7 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
   assert.equal(registry.likec4?.sourceSha, registry.sourceSha);
   assert.equal(registry.likec4?.publication, 'public');
   assert.equal(registry.routes.find(item => item.route === '/requirements/html/')?.generationStatus, 'ready');
+  assert.equal(registry.routes.find(item => item.route === '/requirements/traceability/')?.generationStatus, 'ready');
   const types = {'.html':'text/html', '.css':'text/css', '.js':'text/javascript', '.json':'application/json', '.svg':'image/svg+xml'};
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -36,6 +37,21 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     assert.ok(await page.getByRole('link', {name:'Development Portal'}).isVisible());
     assert.equal((await page.goto(`${base}/requirements/html/requirements/REQUIREMENT-REGISTER.md-TRACE.html`)).status(), 200);
     assert.match(await page.locator('body').innerText(), /REQ-CORE-001/u);
+    assert.equal((await page.goto(`${base}/`)).status(), 200);
+    const traceLink = page.locator('a[href="requirements/traceability/"]').first();
+    await traceLink.click();
+    assert.match(page.url(), /\/requirements\/traceability\/$/u);
+    assert.equal((await page.goto(`${base}/requirements/traceability/`)).status(), 200);
+    assert.match(await page.getByRole('heading', { name: 'Requirements traceability status' }).innerText(), /Requirements traceability status/u);
+    assert.match(await page.locator('body').innerText(), /Reverse surface inventory/u);
+    assert.match(await page.locator('body').innerText(), /UNMAPPED|No exact-source run/u);
+    const traceResponse = await page.request.get(`${base}/requirements/traceability/traceability.json`);
+    assert.equal(traceResponse.status(), 200);
+    const trace = await traceResponse.json();
+    assert.equal(trace.sourceSha, registry.sourceSha);
+    assert.ok(trace.summary.requirementCount > 0 && trace.summary.obligationCount > 0);
+    assert.ok(trace.summary.obligationGapCount + trace.summary.reverseGapCount > 0, 'Known gaps must remain visible in the Pages projection');
+    assert.ok(trace.requirements.some(item => item.requirementId === 'REQ-TRACE-001'));
     assert.equal((await page.goto(`${base}/architecture/#system-1`)).status(), 200);
     const image = page.locator('#svg-image:not([hidden])');
     await image.waitFor();
