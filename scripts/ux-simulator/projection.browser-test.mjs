@@ -59,7 +59,13 @@ try {
     await assertHeading('Web /desktop/');
     assert.equal(await stage.locator('.ux-route-map').isVisible(), true, 'The transition overview is visible without opening a disclosure');
     assert.equal(await stage.locator('.ux-route-states > [aria-current="step"]').count(), 1);
-    assert.match(await stage.locator('.ux-branch-destination').first().innerText(), /遷移先: APIと認証を照合/u);
+    assert.match(await stage.locator('.ux-route-edges').first().innerText(), /APIと認証を照合/u);
+    assert.ok(await stage.locator('.ux-route-action').count() > 0, 'The transition graph exposes current evidenced edges as operation buttons');
+    const projectedEdge = stage.getByRole('button', { name: 'APIと認証を照合', exact: true });
+    const edgeDescription = await projectedEdge.getAttribute('aria-describedby');
+    assert.ok(edgeDescription.split(' ').length >= 2, 'The graph action describes its target and evidence');
+    for (const id of edgeDescription.split(' ')) assert.equal(await page.locator('[id="' + id + '"]').count(), 1);
+    assert.match(await Promise.all(edgeDescription.split(' ').map((id) => page.locator('[id="' + id + '"]').innerText())).then((values) => values.join(' ')), /遷移先: APIと認証を照合/u);
     const readability = await stage.evaluate((stage) => {
       const luminance = (color) => {
         const rgb = color.match(/[^(), ]+/g).slice(1, 4).map(Number).map((value) => value / 255);
@@ -76,7 +82,7 @@ try {
     });
     assert.ok(readability.ratio >= 4.5, 'UX wireframe heading must retain contrast under the Pages shell');
     assert.equal(readability.stray, false, 'Absent projection data must not render as text');
-    await button('APIと認証を照合').focus();
+    await projectedEdge.focus();
     await page.keyboard.press('Enter');
     await assertHeading('APIと認証を照合');
     assert.match(await stage.locator('.ux-route-states > [aria-current="step"]').innerText(), /APIと認証を照合/u);

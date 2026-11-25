@@ -173,16 +173,8 @@ function paintStage() {
             paintInspector();
             inspector.open = true;
           })))))),
-    h('h3', { class: 'ux-next-heading' }, '次の操作を選ぶ'),
-    menu.length ? h('ol', { class: 'ux-branches' }, menu.map((edge, index) => h('li', {},
-      button(edge.event ?? edge.id, () => apply(step(state, edge.id)), {
-        class: menu.length === 1 && edge.source ? 'primary' : '', 'aria-describedby': 'ux-branch-' + index,
-      }),
-      h('div', { id: 'ux-branch-' + index, class: 'ux-branch-destination' },
-        h('strong', {}, '遷移先: ' + stateLabel(edge.to)),
-        edge.condition && h('small', {}, '条件: ' + edge.condition),
-        h('small', {}, edgeEvidence(edge))))))
-      : h('p', {}, state.projection === 'expected' ? 'この図の終端です。' : 'この位置から辿れる正規ソースの遷移がありません。'),
+    h('p', { class: 'ux-source' }, '現在位置から出る遷移を図の中で選択できます。根拠のない遷移は操作できません。'),
+    !menu.length && h('p', {}, state.projection === 'expected' ? 'この図の終端です。' : 'この位置から辿れる正規ソースの遷移がありません。'),
     h('div', { class: 'actions' },
       button('一つ戻る', () => apply(back(state)), { disabled: !state.stack.length }),
       linked && button('参照先 ' + item.linkedScreen + ' の図', () =>
@@ -191,7 +183,7 @@ function paintStage() {
       '外部画面の根拠を参照 · ' + labels[linked.platforms[0]]),
     h('section', { class: 'ux-route-map', 'aria-labelledby': 'ux-route-title' },
       h('h3', { id: 'ux-route-title' }, '遷移の全体図'),
-      h('p', { class: 'ux-source' }, '状態と分岐を確認できます。現在位置は強調表示され、操作は上の「次の操作を選ぶ」から行います。'),
+      h('p', { class: 'ux-source' }, '状態と条件の分岐を一覧できます。現在位置から出る根拠付きの操作は図の中で選択できます。'),
       h('div', { class: 'ux-route-scroll', role: 'region', tabindex: '0', 'aria-label': 'シナリオの状態と遷移' },
         h('ul', { class: 'ux-route-states' }, graphStates.map((node) => {
           const outgoing = graph.transitions.filter(({ from, platform }) => from === node.id && (!platform || platform === state.platform));
@@ -199,9 +191,18 @@ function paintStage() {
           return h('li', { 'aria-current': isCurrent ? 'step' : null },
             h('div', { class: 'ux-route-state' }, isCurrent && h('span', { class: 'ux-current-label' }, '現在位置'), h('strong', {}, node.label ?? node.id)),
             outgoing.length ? h('ul', { class: 'ux-route-edges' }, outgoing.map((edge) => h('li', {},
-              h('span', { class: 'ux-route-event' }, edge.event ?? edge.id),
+              edge.from === state.at && edge.source
+                ? button(edge.event ?? edge.id, () => apply(step(state, edge.id)), {
+                    class: 'ux-route-event ux-route-action',
+                    'aria-describedby': ['ux-route-target-' + edge.id,
+                      edge.condition && 'ux-route-condition-' + edge.id, 'ux-route-evidence-' + edge.id]
+                      .filter(Boolean).join(' '),
+                  })
+                : h('span', { class: 'ux-route-event' }, edge.event ?? edge.id),
               h('span', { 'aria-hidden': 'true', class: 'ux-route-arrow' }, '→'),
-              h('span', {}, stateLabel(edge.to))))) : h('small', { class: 'ux-source' }, 'この範囲に出る遷移はありません。'));
+              h('span', { id: 'ux-route-target-' + edge.id }, '遷移先: ' + stateLabel(edge.to)),
+              edge.condition && h('small', { id: 'ux-route-condition-' + edge.id, class: 'ux-route-condition' }, '条件: ' + edge.condition),
+              h('small', { id: 'ux-route-evidence-' + edge.id, class: 'ux-route-evidence' }, edgeEvidence(edge))))) : h('small', { class: 'ux-source' }, 'この範囲に出る遷移はありません。'));
         })))));
   const map = stage.querySelector('.ux-route-scroll');
   const selectedState = map?.querySelector('[aria-current="step"]');
