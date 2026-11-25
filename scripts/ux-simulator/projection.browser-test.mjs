@@ -43,7 +43,7 @@ try {
   });
   browser = await chromium.launch({ executablePath, args: ['--no-sandbox'] });
   for (const width of [1440, 768, 390, 320]) {
-    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 900 } });
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.route('**/*', (route) => {
@@ -61,6 +61,11 @@ try {
     assert.equal(await stage.locator('.ux-route-states > [aria-current="step"]').count(), 1);
     assert.match(await stage.locator('.ux-route-edges').first().innerText(), /APIと認証を照合/u);
     assert.ok(await stage.locator('.ux-route-action').count() > 0, 'The transition graph exposes current evidenced edges as operation buttons');
+    if (width === 390) {
+      const firstTransition = await stage.locator('.ux-route-action').first().boundingBox();
+      assert.ok(firstTransition && firstTransition.y + firstTransition.height <= 844,
+        'The first graph transition is visible in the initial 390×844 viewport');
+    }
     const projectedEdge = stage.getByRole('button', { name: 'APIと認証を照合', exact: true });
     const edgeDescription = await projectedEdge.getAttribute('aria-describedby');
     assert.ok(edgeDescription.split(' ').length >= 2, 'The graph action describes its target and evidence');

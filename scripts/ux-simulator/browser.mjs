@@ -173,17 +173,10 @@ function paintStage() {
             paintInspector();
             inspector.open = true;
           })))))),
-    h('p', { class: 'ux-source' }, '現在位置から出る遷移を図の中で選択できます。根拠のない遷移は操作できません。'),
     !menu.length && h('p', {}, state.projection === 'expected' ? 'この図の終端です。' : 'この位置から辿れる正規ソースの遷移がありません。'),
-    h('div', { class: 'actions' },
-      button('一つ戻る', () => apply(back(state)), { disabled: !state.stack.length }),
-      linked && button('参照先 ' + item.linkedScreen + ' の図', () =>
-        apply(visit(state, linked.platforms.includes(state.platform) ? state.platform : linked.platforms[0], linked.id)))),
-    linked && !linked.platforms.includes(state.platform) && h('p', { class: 'ux-source' },
-      '外部画面の根拠を参照 · ' + labels[linked.platforms[0]]),
     h('section', { class: 'ux-route-map', 'aria-labelledby': 'ux-route-title' },
       h('h3', { id: 'ux-route-title' }, '遷移の全体図'),
-      h('p', { class: 'ux-source' }, '状態と条件の分岐を一覧できます。現在位置から出る根拠付きの操作は図の中で選択できます。'),
+      h('p', { class: 'ux-source' }, '現在位置の根拠付き遷移を選択できます。'),
       h('div', { class: 'ux-route-scroll', role: 'region', tabindex: '0', 'aria-label': 'シナリオの状態と遷移' },
         h('ul', { class: 'ux-route-states' }, graphStates.map((node) => {
           const outgoing = graph.transitions.filter(({ from, platform }) => from === node.id && (!platform || platform === state.platform));
@@ -203,7 +196,13 @@ function paintStage() {
               h('span', { id: 'ux-route-target-' + edge.id }, '遷移先: ' + stateLabel(edge.to)),
               edge.condition && h('small', { id: 'ux-route-condition-' + edge.id, class: 'ux-route-condition' }, '条件: ' + edge.condition),
               h('small', { id: 'ux-route-evidence-' + edge.id, class: 'ux-route-evidence' }, edgeEvidence(edge))))) : h('small', { class: 'ux-source' }, 'この範囲に出る遷移はありません。'));
-        })))));
+        })))),
+    h('div', { class: 'actions' },
+      button('一つ戻る', () => apply(back(state)), { disabled: !state.stack.length }),
+      linked && button('参照先 ' + item.linkedScreen + ' の図', () =>
+        apply(visit(state, linked.platforms.includes(state.platform) ? state.platform : linked.platforms[0], linked.id)))),
+    linked && !linked.platforms.includes(state.platform) && h('p', { class: 'ux-source' },
+      '外部画面の根拠を参照 · ' + labels[linked.platforms[0]]));
   const map = stage.querySelector('.ux-route-scroll');
   const selectedState = map?.querySelector('[aria-current="step"]');
   if (map && selectedState) map.scrollTop = selectedState.getBoundingClientRect().top - map.getBoundingClientRect().top;
