@@ -146,7 +146,8 @@ function checkedProjectChangeSet<T extends { changeSet: ChangeSet }>(envelope: T
   if (
     'receipt' in envelope &&
     envelope.receipt &&
-    record(envelope.receipt) && record(envelope.receipt.changeSet) &&
+    record(envelope.receipt) &&
+    record(envelope.receipt.changeSet) &&
     (envelope.receipt.changeSet.id !== changeSet.id || envelope.receipt.changeSet.projectId !== changeSet.projectId)
   ) {
     return invalidResponse();
