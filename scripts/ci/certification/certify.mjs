@@ -10,7 +10,8 @@ import { assertProfileArtifactEvidence } from '../evidence/profile-artifact.mjs'
 import { resolveProducerJobAttempts } from '../evidence/artifact-selection.mjs';
 import { deploymentImpactForSource } from '../impact/migration-contracts.mjs';
 import { assertReusedCoverageProof } from '../evidence/proof-reuse.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
+import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
 const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, CODEXIA_EXPECTED_SHA, CODEXIA_REQUIRED_RESULTS } = process.env;
 assert.match(GITHUB_REPOSITORY ?? '', /^[\w.-]+\/[\w.-]+$/);
@@ -25,13 +26,9 @@ assert.ok(Object.values(outcomes).every(value => ['success', 'skipped'].includes
 const plan = validateVerificationPlan(JSON.parse(await readFile(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
 assert.equal(plan.sha, CODEXIA_EXPECTED_SHA);
 assert.equal(GITHUB_REPOSITORY, 'yohn-jp/codexia', 'Unexpected repository');
-const github = createGitHubRestClient({ token: GH_TOKEN });
-const request = async endpoint => {
-  const response = await github.request('GET', `/repos/${GITHUB_REPOSITORY}/${endpoint}`);
-  assert.ok(response.status >= 200 && response.status < 300, `GitHub evidence unavailable: HTTP ${response.status}`);
-  return response.data;
-};
-const run = await request(`actions/runs/${GITHUB_RUN_ID}`);
+const github = createGitHubOctokit({ token: GH_TOKEN });
+const [owner, repo] = GITHUB_REPOSITORY.split('/');
+const run = (await github.rest.actions.getWorkflowRun({ owner, repo, run_id: Number(GITHUB_RUN_ID) })).data;
 assert.equal(run.head_sha, CODEXIA_EXPECTED_SHA, 'Workflow run must bind exact source');
 assert.equal(run.event, plan.event, 'Impact plan event mismatch');
 if (run.event !== 'pull_request') assert.equal(plan.mode, 'full', 'Main/manual verification must execute all validations');
@@ -43,7 +40,8 @@ if (run.event === 'pull_request') {
     : null;
   assertExactPrImpact(plan, process.env.CODEXIA_EXPECTED_BASE, changed);
 }
-const jobs = await github.paginate(`/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs`, { filter: 'latest' }, 'jobs');
+const jobs = await paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRun,
+  { owner, repo, run_id: Number(GITHUB_RUN_ID), filter: 'latest' }, 'jobs');
 const directory = process.env.CODEXIA_CI_EVIDENCE_DIR;
 assert.ok(directory, 'Execution evidence directory is required');
 const reports = [];
@@ -70,7 +68,8 @@ if (reusedCoverageReports.length === 1) {
   await assertReusedCoverageProof({ plan, report: reusedCoverageReports[0], current: run,
     repository: GITHUB_REPOSITORY, token: GH_TOKEN });
 }
-const artifacts = await github.paginate(`/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts`, {}, 'artifacts');
+const artifacts = await paginateActionsInventory(github, github.rest.actions.listWorkflowRunArtifacts,
+  { owner, repo, run_id: Number(GITHUB_RUN_ID) }, 'artifacts');
 const producerJobs = await resolveProducerJobAttempts(jobs, run, github, ['build-core', 'build-full', 'types-trace']);
 if (plan.tasks.includes('requirements-trace')) {
   const traceReport = reports.find(report => report.group === 'types-trace');

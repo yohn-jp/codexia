@@ -5,6 +5,7 @@ import { lstat, mkdir, open, readFile, readdir, unlink, writeFile } from 'node:f
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Uint8ArrayReader, ZipReader } from '@zip.js/zip.js';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
 
 const MAX_ARCHIVE = 16 * 1024 * 1024;
 const MAX_JSON = 4 * 1024 * 1024;
@@ -42,12 +43,13 @@ export async function downloadArtifact(artifact, repository, token, request = fe
   assert.ok(Number.isSafeInteger(artifact.id) && artifact.id > 0);
   assert.match(artifact.digest, /^sha256:[a-f0-9]{64}$/u);
   assert.ok(Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 && artifact.size_in_bytes <= maxArchive);
-  const response = await request(`https://api.github.com/repos/${repository}/actions/artifacts/${artifact.id}/zip`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-    redirect: 'manual', signal: AbortSignal.timeout(15_000),
+  const [owner, repo] = repository.split('/');
+  const octokit = createGitHubOctokit({ token, fetchImpl: request, timeout: 15_000 });
+  const response = await octokit.rest.actions.downloadArtifact({
+    owner, repo, artifact_id: artifact.id, archive_format: 'zip', request: { signal: AbortSignal.timeout(15_000) },
   });
   assert.equal(response.status, 302, `Artifact ${artifact.id} redirect unavailable`);
-  const location = new URL(response.headers.get('location') ?? '');
+  const location = new URL(response.headers.location ?? '');
   assert.ok(location.protocol === 'https:' && !location.username && !location.password, 'Invalid artifact download redirect');
   // The GitHub token belongs only at api.github.com, never the signed storage URL.
   assert.ok(Number.isSafeInteger(downloadTimeoutMs) && downloadTimeoutMs > 0 && downloadTimeoutMs <= 300_000, 'Invalid artifact download timeout');

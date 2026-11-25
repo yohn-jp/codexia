@@ -9,8 +9,29 @@ import { VERIFICATION_GROUPS } from '../impact/contract.mjs';
 import { createVerificationPlan, planDigest } from '../impact/plan.mjs';
 import { assertPlanEvidence } from './validation.mjs';
 import { resolveProducerJobAttempts, selectLatestEvidenceArtifacts, selectLatestJobArtifact, selectLatestPlanArtifact } from './artifact-selection.mjs';
-import { collectGitHubArrayPages, collectGitHubPages } from '../../release/components/policy.mjs';
 import { listProducerArtifacts, waitForProducerJob } from './producer-artifact.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
+import { paginateGitHubArray } from '../../github/paginate-actions.mjs';
+
+function octokitForPages(readRows, requested = []) {
+  return createGitHubOctokit({ token: 'fixture-token', fetchImpl: async input => {
+    const url = new URL(String(input));
+    const page = Number(url.searchParams.get('page') ?? '1');
+    requested.push({ path: url.pathname, page });
+    const rows = readRows(url);
+    const start = (page - 1) * 100;
+    const body = { total_count: rows.length, [url.pathname.endsWith('/jobs') ? 'jobs' : 'artifacts']: rows.slice(start, start + 100) };
+    const headers = {};
+    if (start + 100 < rows.length) {
+      const next = new URL(url);
+      next.searchParams.set('page', String(page + 1));
+      headers.link = `<${next.href}>; rel="next"`;
+    }
+    const response = Response.json(body, { headers });
+    Object.defineProperty(response, 'url', { value: url.href });
+    return response;
+  } });
+}
 
 const sourceSha = 'a'.repeat(40);
 const runId = '40127302099';
@@ -94,7 +115,7 @@ test('selects plan and evidence by latest successful job window and artifact cre
   assert.equal(staleOci.created_at < successfulJobs.find(item => item.name === 'oci-core').started_at, true);
 });
 
-test('selection sees latest artifacts on later complete REST pages', async () => {
+test('selection sees latest artifacts on later Octokit pages', async () => {
   const artifacts = ordinaryArtifacts().filter(item => item.name !== 'ci-evidence-oci-core');
   artifacts.push(...Array.from({ length: 100 - artifacts.length }, (_, index) => ({ name: `diagnostic-${index}` })));
   artifacts.push(
@@ -102,45 +123,32 @@ test('selection sees latest artifacts on later complete REST pages', async () =>
     artifact(12_572_824_349, 'ci-evidence-oci-core', '2026-10-24T20:00:04Z'),
   );
   assert.equal(artifacts.length, 102);
-  const paginated = await collectGitHubPages({ paginate: async (endpoint, parameters, key) => {
-    assert.equal(endpoint, '/repos/yohn-jp/codexia/actions/runs/123/artifacts');
-    assert.deepEqual(parameters, {});
-    assert.equal(key, 'artifacts');
-    return artifacts;
-  } }, '/repos/yohn-jp/codexia/actions/runs/123/artifacts', 'artifacts');
+  const requested = [];
+  const octokit = octokitForPages(() => artifacts, requested);
+  const paginated = await paginateGitHubArray(octokit, octokit.rest.actions.listWorkflowRunArtifacts,
+    { owner: 'yohn-jp', repo: 'codexia', run_id: 123 });
+  assert.deepEqual(requested.map(item => item.page), [1, 2]);
   const selected = selectLatestEvidenceArtifacts(plan, paginated, successfulJobs, identity);
   assert.equal(selected.find(item => item.name === 'ci-evidence-oci-core').id, 12_572_824_349);
 });
 
-test('array-style GitHub REST inventories use the Octokit paginator', async () => {
+test('array-style inventories use Octokits standard paginator', async () => {
   const releases = Array.from({ length: 201 }, (_, index) => ({ id: index + 1 }));
   const requested = [];
-  const actual = await collectGitHubArrayPages({ paginate: async (endpoint, parameters, key) => {
-    requested.push({ endpoint, parameters, key });
-    return releases;
-  } }, '/repos/yohn-jp/codexia/releases');
+  const octokit = octokitForPages(() => releases, requested);
+  const actual = await paginateGitHubArray(octokit, octokit.rest.actions.listWorkflowRunArtifacts,
+    { owner: 'yohn-jp', repo: 'codexia', run_id: 123 });
   assert.deepEqual(actual, releases);
-  assert.deepEqual(requested, [{ endpoint: '/repos/yohn-jp/codexia/releases', parameters: {}, key: null }]);
-  await assert.rejects(collectGitHubArrayPages({}, '/repos/yohn-jp/codexia/releases'), /Invalid GitHub array pagination request/u);
+  assert.deepEqual(requested.map(item => item.page), [1, 2, 3]);
 });
 
 test('producer restore inventories only the exact artifact name and still rejects incomplete pages', async () => {
   const artifactName='ci-profile-build-core';
   const records=Array.from({length:101},(_,index)=>artifact(index+1,artifactName,'2026-10-24T19:50:00Z'));
   const requested=[];
-  const github={async paginate(endpoint,parameters,key){
-    assert.equal(endpoint,`/repos/yohn-jp/codexia/actions/runs/${runId}/artifacts`);
-    assert.deepEqual(parameters,{name:artifactName});
-    assert.equal(key,'artifacts');
-    requested.push(endpoint);
-    return records;
-  }};
+  const github=octokitForPages(()=>records,requested);
   assert.deepEqual(await listProducerArtifacts(github,runId,artifactName),records);
-  assert.equal(requested.length,1);
-  await assert.rejects(
-    listProducerArtifacts({paginate:async()=>{throw new Error('Incomplete GitHub pagination');}},runId,artifactName),
-    /Incomplete GitHub pagination/u,
-  );
+  assert.deepEqual(requested.map(item=>item.page),[1,2]);
 });
 
 test('a latest failed artifact remains selected and cannot certify', () => {
@@ -210,15 +218,15 @@ test('partial rerun resolves a carried-over producer to its original execution a
   const fresh = {...job('build-full', '2026-11-17T03:37:00Z', '2026-11-17T03:38:00Z'), id: 201, run_attempt: 2};
   const failed = {...fresh, name: 'oci-core', conclusion: 'failure'};
   const run = {id: Number(runId), run_attempt: 2};
-  const github = { paginate: async endpoint => {
-    const attempt = Number(/attempts\/(\d+)\/jobs/u.exec(endpoint)[1]);
-    const rows = attempt === 1 ? [old, {...fresh, id: 101, run_attempt: 1, started_at: old.started_at, completed_at: old.completed_at}] : [carried, fresh, failed];
-    return rows;
-  } };
+  const github = octokitForPages(url => {
+    const attempt = Number(/attempts\/(\d+)\/jobs/u.exec(url.pathname)[1]);
+    return attempt === 1 ? [old, {...fresh, id: 101, run_attempt: 1, started_at: old.started_at, completed_at: old.completed_at}] : [carried, fresh, failed];
+  });
   const resolved = await resolveProducerJobAttempts([carried, fresh, failed], run, github, ['build-core','build-full','oci-core']);
   assert.deepEqual(resolved.map(item => item.run_attempt), [1,2,2]);
   assert.equal(resolved[2].conclusion, 'failure');
-  await assert.rejects(resolveProducerJobAttempts([carried], run, { paginate: async () => { throw new Error('history unavailable'); } }, ['build-core']), /history unavailable/u);
+  const failing = createGitHubOctokit({ token:'fixture-token', fetchImpl:async()=>{throw new Error('history unavailable');} });
+  await assert.rejects(resolveProducerJobAttempts([carried], run, failing, ['build-core']), /history unavailable/u);
 });
 
 test('early browser waits only for its exact same-profile successful producer', async () => {

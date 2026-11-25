@@ -5,7 +5,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { backendPublicationFromEnvironment, buildComponentReleaseRecord, publicationInWorkflowWindow } from '../components/record-model.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
+import { paginateActionsInventory, paginateGitHubArray } from '../../github/paginate-actions.mjs';
 
 const REPOSITORY='yohn-jp/codexia';
 const digestImage=/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
@@ -46,16 +47,25 @@ async function request(github,resource){
     /^actions\/runs\/[1-9]\d{0,15}\/jobs$/u.test(resource) ||
     resource === 'actions/workflows/backend-release.yml/runs';
   assert.ok(safeResource, 'Unapproved backend release proof API resource');
-  const response=await github.request('GET',`/repos/${REPOSITORY}/${resource}`,{headers:{'X-GitHub-Api-Version':'2022-11-28'}});
-  if(response.status<200||response.status>=300)throw new Error('Existing backend release proof lookup failed (HTTP '+response.status+')');
-  return response.data;
+  const run=/^actions\/runs\/([1-9]\d{0,15})$/u.exec(resource);
+  assert.ok(run,'Unapproved backend release proof API resource');
+  return (await github.rest.actions.getWorkflowRun({owner:'yohn-jp',repo:'codexia',run_id:Number(run[1])})).data;
 }
 async function pages(github,resource,key,parameters={},options={}){
   const safeResource=resource==='releases'||resource==='git/matching-refs/tags/backend-v'||
     resource==='actions/workflows/backend-release.yml/runs'||/^actions\/runs\/[1-9]\d{0,15}\/jobs$/u.test(resource);
   assert.ok(safeResource,'Unapproved backend release pagination resource');
-  return github.paginate(`/repos/${REPOSITORY}/${resource}`,parameters,key,
-    key===null?{maxItems:1_000_000,...options}:options);
+  const [owner,repo]=REPOSITORY.split('/');
+  if(resource==='releases') return paginateGitHubArray(github,github.rest.repos.listReleases,
+    {owner,repo,...parameters},{maxItems:options.maxItems ?? 1_000_000});
+  if(resource==='git/matching-refs/tags/backend-v') return paginateGitHubArray(github,github.rest.git.listMatchingRefs,
+    {owner,repo,ref:'tags/backend-v',...parameters},{maxItems:options.maxItems ?? 1_000_000});
+  if(resource==='actions/workflows/backend-release.yml/runs') return paginateActionsInventory(github,
+    github.rest.actions.listWorkflowRuns,{owner,repo,workflow_id:'backend-release.yml',...parameters},key,options);
+  const jobs=/^actions\/runs\/([1-9]\d{0,15})\/jobs$/u.exec(resource);
+  if(jobs) return paginateActionsInventory(github,github.rest.actions.listJobsForWorkflowRun,
+    {owner,repo,run_id:Number(jobs[1]),...parameters},key,options);
+  throw new Error('Unapproved backend release pagination resource');
 }
 async function listBackendReleases(github){
   const releases=await pages(github,'releases',null,{}, {maxItems:1999});
@@ -100,7 +110,7 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
   const publicationEvent=env.GITHUB_EVENT_NAME;
   assert.ok(['push','workflow_run'].includes(publicationEvent),'Invalid main publication event');
   const token=env.GH_TOKEN;assert.ok(typeof token==='string'&&token.length>0,'GitHub Actions read token required');
-  const github=createGitHubRestClient({token});
+  const github=createGitHubOctokit({token});
   const tag='backend-v'+version;
   const releaseMatches=(await listBackendReleases(github)).filter(item=>item?.tag_name===tag);
   assert.equal(releaseMatches.length,1,'Expected one exact backend release record');

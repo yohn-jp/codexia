@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { validateVerificationPlan } from '../impact/plan.mjs';
+import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
 /**
  * Select one artifact produced inside the latest successful job attempt window.
@@ -82,15 +83,18 @@ export function selectLatestPlanArtifact(artifacts, jobs, identity) {
  * its exact execution window in the attempt-specific REST inventories.
  * A fresh failed producer is never replaced by an older success.
  */
-export async function resolveProducerJobAttempts(jobs, run, github, producerNames) {
+export async function resolveProducerJobAttempts(jobs, run, octokit, producerNames) {
   assert.ok(Number.isSafeInteger(run.run_attempt) && run.run_attempt > 0, 'Invalid workflow run attempt');
   const producers = new Set(producerNames);
   const successful = jobs.filter(job => producers.has(job.name) && job.status === 'completed' && job.conclusion === 'success');
   if (run.run_attempt === 1 || successful.length === 0) return jobs;
-  assert.ok(typeof github?.paginate === 'function', 'GitHub REST client is required for producer attempt history');
+  assert.ok(typeof octokit?.rest?.actions?.listJobsForWorkflowRunAttempt === 'function',
+    'Octokit is required for producer attempt history');
+  const [owner, repo] = 'yohn-jp/codexia'.split('/');
   const windows = new Map();
   for (let attempt = 1; attempt <= run.run_attempt; attempt++) {
-    const history = await github.paginate(`/repos/yohn-jp/codexia/actions/runs/${run.id}/attempts/${attempt}/jobs`, {}, 'jobs');
+    const history = await paginateActionsInventory(octokit, octokit.rest.actions.listJobsForWorkflowRunAttempt,
+      { owner, repo, run_id: run.id, attempt_number: attempt }, 'jobs');
     for (const job of successful) {
       const matches = history.filter(old => old.name === job.name && old.head_sha === job.head_sha &&
         String(old.run_id) === String(job.run_id) && old.status === job.status && old.conclusion === job.conclusion &&

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateVerificationPlan, verificationPlanOutputs } from '../impact/plan.mjs';
 import { resolveExactMainCoverageProof } from './proof-reuse.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
 
 async function publishPlan(plan, planPath) {
   const temporaryPath = `${planPath}.${process.env.GITHUB_RUN_ID ?? 'local'}.tmp`;
@@ -33,10 +33,9 @@ async function main() {
     } else {
       try {
         assert.equal(GITHUB_REPOSITORY, 'yohn-jp/codexia', 'Unexpected repository');
-        const github = createGitHubRestClient({ token: GH_TOKEN });
-        const response = await github.request('GET', `/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`);
-        if (response.status < 200 || response.status >= 300) throw new Error(`Current workflow identity lookup returned HTTP ${response.status}`);
-        const current = response.data;
+        const github = createGitHubOctokit({ token: GH_TOKEN });
+        const [owner, repo] = GITHUB_REPOSITORY.split('/');
+        const { data: current } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: Number(GITHUB_RUN_ID) });
         const coverageReuse = await resolveExactMainCoverageProof({
           plan, current, repository: GITHUB_REPOSITORY, token: GH_TOKEN,
         });

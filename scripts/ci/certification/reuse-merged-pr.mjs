@@ -13,7 +13,7 @@ import { assertProfileArtifactEvidence } from '../evidence/profile-artifact.mjs'
 import { selectLatestPlanArtifact, selectLatestEvidenceArtifacts, resolveProducerJobAttempts } from '../evidence/artifact-selection.mjs';
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from '../evidence/download-artifacts.mjs';
 import { REUSED_MAIN_SKIPPED_JOBS } from '../../release/components/policy.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubProofClient } from '../evidence/proof-client.mjs';
 
 const WORKFLOW = '.github/workflows/verify.yml';
 const FULL_MODEL_JOB = 'full-model-oci / Run pinned Full model lifecycle on rootless Podman';
@@ -146,8 +146,8 @@ function assertFullModelJob(plan, jobs) {
   }
 }
 
-function apiList(request, endpoint, key) {
-  return request.paginate(endpoint, {}, key);
+function apiList(request, endpoint, key, parameters = {}) {
+  return request.paginate(endpoint, parameters, key);
 }
 
 function mainContext(repository, currentRun, sourceSha, workflowPath) {
@@ -160,8 +160,8 @@ function mainContext(repository, currentRun, sourceSha, workflowPath) {
 }
 
 async function mergedPrRun({ context, candidate, request }) {
-  const runs = await apiList(request, 'actions/workflows/' + context.workflowId + '/runs?head_sha=' +
-    candidate.head + '&event=pull_request', 'workflow_runs');
+  const runs = await apiList(request, 'actions/workflows/' + context.workflowId + '/runs', 'workflow_runs',
+    { head_sha: candidate.head, event: 'pull_request' });
   const run = newest(runs.filter(value => value?.head_sha === candidate.head && value.event === 'pull_request' &&
     value.workflow_id === context.workflowId && value.path === context.workflowPath &&
     sameRepo(value.repository, context.repoId) && sameRepo(value.head_repository, context.repoId)));
@@ -171,7 +171,7 @@ async function mergedPrRun({ context, candidate, request }) {
   const pr = await request('pulls/' + prNumber);
   const mergedAt = assertMergedPull(pr, prNumber, candidate, context.repoId);
   assert.equal(run.head_branch, pr.head.ref, 'Workflow branch does not identify the merged PR head');
-  const jobs = await apiList(request, 'actions/runs/' + run.id + '/jobs?filter=latest', 'jobs');
+  const jobs = await apiList(request, 'actions/runs/' + run.id + '/jobs', 'jobs', { filter: 'latest' });
   assertJobRunBindings(jobs, run);
   for (const job of jobs.filter(success)) {
     const completed = Date.parse(job.completed_at);
@@ -306,14 +306,9 @@ async function main() {
   assert.match(runId ?? '', /^[1-9]\d*$/u);
   assert.ok(token && eventPath);
   assert.equal(repository, 'yohn-jp/codexia', 'Unexpected repository');
-  const github = createGitHubRestClient({ token });
-  const request = async endpoint => {
-    const response = await github.request('GET', `/repos/${repository}/${endpoint}`);
-    assert.ok(response.status >= 200 && response.status < 300, 'GitHub proof lookup failed (HTTP ' + response.status + ')');
-    return response.data;
-  };
-  request.paginate = (endpoint, parameters, key) => github.paginate(
-    endpoint.startsWith(`/repos/${repository}/`) ? endpoint : `/repos/${repository}/${endpoint}`, parameters, key);
+  const client = createGitHubProofClient({ repository, token });
+  const request = client.get;
+  request.paginate = client.paginate;
   const resolve = async () => {
     const payload = JSON.parse(await readFile(eventPath, 'utf8'));
     assert.equal(payload.ref, ref);

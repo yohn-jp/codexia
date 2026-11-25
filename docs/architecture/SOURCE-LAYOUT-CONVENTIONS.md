@@ -34,6 +34,7 @@ Use lowercase ASCII for new first-party paths unless a language/tool contract ex
 
 ```text
 scripts/
+├── github/               # Octokit setup and evidence pagination validation for automation scripts
 ├── ci/
 │   ├── impact/            # canonical task inventory, diff analysis and affected plan
 │   ├── execution/         # workspace preparation, bounded group execution, test-type checks

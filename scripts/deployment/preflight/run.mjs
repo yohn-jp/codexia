@@ -5,6 +5,7 @@ import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { readPreservationEvidence } from '../cutover/preservation.mjs';
 import { digestEvidence } from '../cutover/coordinator.mjs';
 import { authSchemaFingerprint, CODEXIA_AUTH_SCHEMA } from '../../../packages/api/src/auth-schema.ts';
@@ -96,9 +97,12 @@ async function hostObservation({ bootstrap = false } = {}) {
 }
 
 async function mainSource() {
-  const { stdout } = await run('gh', ['api', 'repos/yohn-jp/codexia/git/ref/heads/main', '--jq', '.object.sha'],
-    { timeout: 30_000 });
-  const main = stdout.trim();
+  const token = env.GH_TOKEN || env.GITHUB_TOKEN;
+  assert.ok(token, 'Protected source check requires GitHub Actions read access');
+  const { data: reference } = await createGitHubOctokit({ token, timeout: 30_000 }).rest.git.getRef({
+    owner: 'yohn-jp', repo: 'codexia', ref: 'heads/main',
+  });
+  const main = reference.object?.sha;
   assert.equal(main, env.GITHUB_SHA, 'Main changed after protected dispatch');
   return main;
 }

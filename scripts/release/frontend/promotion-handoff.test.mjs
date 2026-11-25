@@ -29,9 +29,9 @@ test('verified PR artifact digest and identity flow through extraction into a ma
   const artifact={id:456,name:'codexia-frontend-pr-17-123-'+sourceSha+'-attempt-2',digest:archiveDigest,size_in_bytes:archive.length,created_at:'2026-10-31T22:20:00Z',expired:false,workflow_run:{id:123,head_sha:sourceSha,head_branch:proof.headRef}};
   const selected=assertFrontendPromotionArtifactEvidence(run,[job],[artifact],proof,{repositoryId:9,workflowId:72,sourceSha,mainSha,mainTree:tree,baseSha,headBranch:proof.headRef,prNumber:17,mergedAt:proof.mergedAt,artifactName:artifact.name});
   let calls=0;
-  const bytes=await downloadArtifact(selected,'owner/repo','read-token',async(url,options)=>{
+  const bytes=await downloadArtifact(selected,'yohn-jp/codexia','read-token',async(url,options)=>{
     calls++;
-    if(calls===1){assert.equal(url,'https://api.github.com/repos/owner/repo/actions/artifacts/456/zip');assert.equal(options.headers.Authorization,'Bearer read-token');return new Response(null,{status:302,headers:{location:'https://storage.example/archive'}});}
+    if(calls===1){assert.equal(url,'https://api.github.com/repos/yohn-jp/codexia/actions/artifacts/456/zip');assert.equal(new Headers(options.headers).get('authorization'),'token read-token');return new Response(null,{status:302,headers:{location:'https://storage.example/archive'}});}
     return new Response(archive);
   },{maxArchive:1024*1024});
   const output=path.join(dir,'promoted');

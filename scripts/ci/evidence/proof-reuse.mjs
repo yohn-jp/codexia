@@ -10,10 +10,10 @@ import { captureCoverageInputClosure, coverageInvocation } from './coverage-inpu
 import { readReusableMainEvidence } from '../certification/reuse-merged-pr.mjs';
 import { assertTrustedCertifiedSourceTaskInputProof } from './input-proof.mjs';
 import { coverageRuntime } from './coverage-inputs.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubProofClient } from './proof-client.mjs';
 
-const PROOF_REPOSITORY = 'yohn-jp/codexia';
 const VERIFY_PATH = '.github/workflows/verify.yml';
+const PROOF_REPOSITORY = 'yohn-jp/codexia';
 const COVERAGE_JOB = 'types-tests';
 const COVERAGE_WORKFLOW_JOB = 'types';
 const COVERAGE_ARTIFACT = 'ci-evidence-types-tests';
@@ -21,55 +21,6 @@ const CERTIFICATION_STEP = 'Certify every required exact-source matrix element';
 const COMPACT_CERTIFICATION_STEP = 'Certify reused merged PR proof';
 
 const positive = value => Number.isSafeInteger(value) && value > 0;
-
-const PROOF_ENDPOINTS = [
-  /^actions\/workflows\/verify\.yml$/u,
-  /^actions\/workflows\/[1-9]\d*\/runs$/u,
-  /^actions\/runs\/[1-9]\d*$/u,
-  /^actions\/runs\/[1-9]\d*\/jobs$/u,
-  /^actions\/runs\/[1-9]\d*\/artifacts$/u,
-  /^actions\/runs\/[1-9]\d*\/attempts\/[1-9]\d*\/jobs$/u,
-  /^commits\/[a-f0-9]{40}\/pulls$/u,
-  /^pulls\/[1-9]\d*$/u,
-];
-
-/** A single read-only transport for trusted GitHub proof identities, never arbitrary file contents. */
-export function createGitHubProofClient({ repository, token, request = fetch }) {
-  assert.equal(repository, PROOF_REPOSITORY, 'Task proof reuse is restricted to the canonical repository');
-  assert.ok(typeof token === 'string' && token.length > 0, 'GitHub read token is required');
-  const github = createGitHubRestClient({ token, fetchImpl: request });
-  const route = (endpoint, parameters = {}) => {
-    if (typeof endpoint !== 'string' || !PROOF_ENDPOINTS.some(pattern => pattern.test(endpoint))) {
-      throw new Error('Unexpected GitHub task proof API endpoint');
-    }
-    const allowed = endpoint.startsWith('actions/workflows/') && endpoint.endsWith('/runs')
-      ? new Set(['head_sha', 'event', 'per_page', 'page'])
-      : endpoint.endsWith('/jobs') && endpoint.startsWith('actions/runs/')
-        ? new Set(['filter', 'per_page', 'page'])
-        : new Set(['per_page', 'page']);
-    for (const [key, value] of Object.entries(parameters)) {
-      if (!allowed.has(key) || (key === 'head_sha' && !/^[a-f0-9]{40}$/u.test(String(value))) ||
-          (key === 'event' && !['push', 'pull_request'].includes(value)) || (key === 'filter' && value !== 'latest') ||
-          (['per_page', 'page'].includes(key) && !/^[1-9]\d*$/u.test(String(value)))) {
-        throw new Error('Unexpected GitHub task proof API endpoint');
-      }
-    }
-    return `/repos/${repository}/${endpoint}`;
-  };
-  const send = async (endpoint, parameters = {}) => github.request('GET', route(endpoint, parameters), parameters);
-  const get = async endpoint => {
-    const response = await send(endpoint);
-    assert.ok(response.status >= 200 && response.status < 300, `GitHub task proof lookup failed: HTTP ${response.status}`);
-    return response.data;
-  };
-  const paginate = async (endpoint, parameters, itemsKey) => {
-    const path = endpoint.startsWith(`/repos/${repository}/`) ? endpoint.slice(`/repos/${repository}/`.length) : endpoint;
-    return github.paginate(route(path, parameters), parameters, itemsKey);
-  };
-  get.paginate = paginate;
-  return { send, get, paginate };
-}
-
 
 function exactJob(jobs, name, run) {
   const matches = jobs.filter(job => job?.name === name);
