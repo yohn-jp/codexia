@@ -1,0 +1,20 @@
+# Local disposable verification only. Never use this service for author work.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: codexia
+      POSTGRES_DB: codexia_test
+      POSTGRES_PASSWORD: ${CODEXIA_CLOUD_DB_PASSWORD:?Run scripts/dev/cloud-db.sh}
+    ports:
+      - "127.0.0.1:${CODEXIA_CLOUD_DB_PORT:?Run scripts/dev/cloud-db.sh}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/10-test-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=\"$$POSTGRES_PASSWORD\" psql -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -tAc 'SELECT 1'"]
+      interval: 2s
+      timeout: 3s
+      retries: 25
+volumes:
+  postgres-data:
