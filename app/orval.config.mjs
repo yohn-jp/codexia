@@ -92,6 +92,7 @@ export const provisionalOperationIds = [
   'persistence_changeset_get',
   'persistence_changeset_reject_post',
   'persistence_changesets_get',
+  'persistence_nodes_get',
   'persistence_review_feed_get',
   'project_action_post',
   'project_apply_post',

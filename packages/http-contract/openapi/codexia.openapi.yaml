@@ -3882,6 +3882,9 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - persistence
+      x-codexia-desktop-response-schema: '#/components/schemas/DesktopPersistenceNodeListBody'
+      x-codexia-runtime-response-deviation: The public route preserves its legacy unfiltered list response with nodes only, while the browsed response includes nextCursor and projectVersion. Desktop only calls the browsed form and validates the strict generated page projection.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/nodes/{nodeId}:
     get:
@@ -5361,6 +5364,25 @@ components:
           anyOf:
             - $ref: '#/components/schemas/PersistenceChangeSetDesktopApplicationBody'
             - type: 'null'
+    DesktopPersistenceNodeListBody:
+      type: object
+      required:
+        - nodes
+        - nextCursor
+        - projectVersion
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeNodeBody'
+        nextCursor:
+          anyOf:
+            - type: string
+            - type: 'null'
+        projectVersion:
+          type: integer
+          format: int32
+      additionalProperties: {}
     DesktopPublicJobBody:
       type: object
       required:
@@ -7786,10 +7808,6 @@ components:
       additionalProperties: {}
     PersistenceNodeListBody:
       type: object
-      required:
-        - nodes
-        - nextCursor
-        - projectVersion
       properties:
         nodes:
           type: array

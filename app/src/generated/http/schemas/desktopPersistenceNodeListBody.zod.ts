@@ -6,7 +6,7 @@
  */
 import * as zod from 'zod';
 
-export const PersistenceNodeListBody = zod.looseObject({
+export const DesktopPersistenceNodeListBody = zod.looseObject({
   "nodes": zod.array(zod.looseObject({
   "id": zod.string().optional(),
   "projectId": zod.string().optional(),
@@ -23,5 +23,5 @@ export const PersistenceNodeListBody = zod.looseObject({
   "projectVersion": zod.int()
 })
 
-export type PersistenceNodeListBody = zod.input<typeof PersistenceNodeListBody>;
-export type PersistenceNodeListBodyOutput = zod.output<typeof PersistenceNodeListBody>;
+export type DesktopPersistenceNodeListBody = zod.input<typeof DesktopPersistenceNodeListBody>;
+export type DesktopPersistenceNodeListBodyOutput = zod.output<typeof DesktopPersistenceNodeListBody>;

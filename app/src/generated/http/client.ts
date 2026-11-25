@@ -12,6 +12,7 @@ import {
   DesktopContributionList,
   DesktopJobList,
   DesktopModuleList,
+  DesktopPersistenceNodeListBody,
   DesktopPublicJobBody,
   DesktopReviewFeedBody,
   DesktopVersionResponse,
@@ -44,7 +45,6 @@ import {
   PersistenceKnowledgeRelationEnvelope,
   PersistenceMentionLink,
   PersistenceNodeBody,
-  PersistenceNodeListBody,
   PersistenceStatusResponse,
   ProjectPageResponse,
   ProjectResponse,
@@ -1464,15 +1464,15 @@ export const getPersistenceNodesGetUrl = (projectId: string,
 }
 
 export const persistenceNodesGet = async (projectId: string,
-    params?: PersistenceNodesGetParams, options?: Parameters<typeof generatedHttpFetch>[1]): Promise<PersistenceNodeListBody> => {
+    params?: PersistenceNodesGetParams, options?: Parameters<typeof generatedHttpFetch>[1]): Promise<DesktopPersistenceNodeListBody> => {
 
-  return generatedHttpFetch<PersistenceNodeListBody>(getPersistenceNodesGetUrl(projectId,params),
+  return generatedHttpFetch<DesktopPersistenceNodeListBody>(getPersistenceNodesGetUrl(projectId,params),
   {
     ...options,
     method: 'GET'
 
     ,
-    schema: PersistenceNodeListBody
+    schema: DesktopPersistenceNodeListBody
   }
 );}
 

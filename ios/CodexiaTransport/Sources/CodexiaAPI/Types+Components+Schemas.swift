@@ -2577,6 +2577,76 @@ extension Components {
                 case receipt
             }
         }
+        /// - Remark: Generated from `#/components/schemas/DesktopPersistenceNodeListBody`.
+        public struct DesktopPersistenceNodeListBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopPersistenceNodeListBody/nodes`.
+            public var nodes: [Components.Schemas.KnowledgeNodeBody]
+            /// - Remark: Generated from `#/components/schemas/DesktopPersistenceNodeListBody/nextCursor`.
+            public var nextCursor: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/DesktopPersistenceNodeListBody/projectVersion`.
+            public var projectVersion: Swift.Int32
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `DesktopPersistenceNodeListBody`.
+            ///
+            /// - Parameters:
+            ///   - nodes:
+            ///   - nextCursor:
+            ///   - projectVersion:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                nodes: [Components.Schemas.KnowledgeNodeBody],
+                nextCursor: Swift.String? = nil,
+                projectVersion: Swift.Int32,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.nodes = nodes
+                self.nextCursor = nextCursor
+                self.projectVersion = projectVersion
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case nodes
+                case nextCursor
+                case projectVersion
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.nodes = try container.decode(
+                    [Components.Schemas.KnowledgeNodeBody].self,
+                    forKey: .nodes
+                )
+                self.nextCursor = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .nextCursor
+                )
+                self.projectVersion = try container.decode(
+                    Swift.Int32.self,
+                    forKey: .projectVersion
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "nodes",
+                    "nextCursor",
+                    "projectVersion"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(
+                    self.nodes,
+                    forKey: .nodes
+                )
+                try container.encodeIfPresent(
+                    self.nextCursor,
+                    forKey: .nextCursor
+                )
+                try container.encode(
+                    self.projectVersion,
+                    forKey: .projectVersion
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody`.
         public struct DesktopPublicJobBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/id`.
@@ -11932,11 +12002,11 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/PersistenceNodeListBody`.
         public struct PersistenceNodeListBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/PersistenceNodeListBody/nodes`.
-            public var nodes: [Components.Schemas.KnowledgeNodeBody]
+            public var nodes: [Components.Schemas.KnowledgeNodeBody]?
             /// - Remark: Generated from `#/components/schemas/PersistenceNodeListBody/nextCursor`.
             public var nextCursor: Swift.String?
             /// - Remark: Generated from `#/components/schemas/PersistenceNodeListBody/projectVersion`.
-            public var projectVersion: Swift.Int32
+            public var projectVersion: Swift.Int32?
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `PersistenceNodeListBody`.
@@ -11947,9 +12017,9 @@ extension Components {
             ///   - projectVersion:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                nodes: [Components.Schemas.KnowledgeNodeBody],
+                nodes: [Components.Schemas.KnowledgeNodeBody]? = nil,
                 nextCursor: Swift.String? = nil,
-                projectVersion: Swift.Int32,
+                projectVersion: Swift.Int32? = nil,
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.nodes = nodes
@@ -11964,7 +12034,7 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.nodes = try container.decode(
+                self.nodes = try container.decodeIfPresent(
                     [Components.Schemas.KnowledgeNodeBody].self,
                     forKey: .nodes
                 )
@@ -11972,7 +12042,7 @@ extension Components {
                     Swift.String.self,
                     forKey: .nextCursor
                 )
-                self.projectVersion = try container.decode(
+                self.projectVersion = try container.decodeIfPresent(
                     Swift.Int32.self,
                     forKey: .projectVersion
                 )
@@ -11984,7 +12054,7 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encode(
+                try container.encodeIfPresent(
                     self.nodes,
                     forKey: .nodes
                 )
@@ -11992,7 +12062,7 @@ extension Components {
                     self.nextCursor,
                     forKey: .nextCursor
                 )
-                try container.encode(
+                try container.encodeIfPresent(
                     self.projectVersion,
                     forKey: .projectVersion
                 )
