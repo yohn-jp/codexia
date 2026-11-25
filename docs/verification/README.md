@@ -1,5 +1,7 @@
 # Verification
 
+For isolated Codex Cloud tasks, use the [Cloud development procedure](CLOUD-DEVELOPMENT.md) rather than a separately maintained application/authentication launcher.
+
 [Pages公開物の機能棚卸し](PAGES-FUNCTION-INVENTORY.md)は単一の公開ワークフローと各画面のデータ出典、観測の限界をまとめる。
 [Pages統合サイトマップと画面UX設計](../design/DEVELOPMENT-PAGES-UX.md)は画面の設計正本を定義する。
 統合ポータルの受入証拠は、対象SHAのRepository Audit Pagesの結果と生成物を参照する。
