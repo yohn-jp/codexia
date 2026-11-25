@@ -27,6 +27,12 @@ export function generateLikeC4Webcomponent(modelDir, outputFile) {
     writeFileSync(join(stage, modelName), model);
     run(['validate', '--max-warnings', '0', stage]);
     run(['gen', 'webcomponent', '--no-app-config', '-o', resolve(outputFile), stage]);
+    // The locked generator injects optional CDN font faces. Use its system font fallback on Pages.
+    const bundle = readFileSync(outputFile, 'utf8').replace(
+      /@font-face\{[^{}]*url\(https:\/\/cdn\.jsdelivr\.net\/fontsource\/fonts\/ibm-plex-sans:[^)]*\)[^{}]*\}/gu, '',
+    );
+    assert.doesNotMatch(bundle, /url\(https?:\/\//u, 'LikeC4 bundle contains remote CSS resources');
+    writeFileSync(outputFile, bundle);
     copyFileSync(license, join(dirname(outputFile), basename(LIKEC4_PUBLIC_LICENSE)));
   } finally {
     rmSync(stage, { recursive: true, force: true });
