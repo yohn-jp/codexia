@@ -11,7 +11,7 @@ test("shared auth-method capability uses the generated anonymous same-origin ada
   assert.deepEqual(methods, { passkey: true, upstreamOidc: false });
   assert.equal(request?.input, "/api/auth/codexia/auth-methods");
   assert.equal(request?.init?.method, "GET");
-  assert.equal(request?.init?.credentials, "same-origin");
+  assert.equal(request?.init?.credentials, "omit");
   assert.equal(request?.init?.cache, "no-store");
   assert.equal(request?.init?.redirect, "error");
   assert.equal(new Headers(request?.init?.headers).get("accept"), "application/json");

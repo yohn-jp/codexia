@@ -65,15 +65,20 @@ export interface AuthMethodAvailability {
 
 /** Reads the server's public sign-in capability without relying on deployment environment assumptions. */
 export async function fetchAuthMethodAvailability(fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<AuthMethodAvailability> {
-  const value: unknown = await authMethodsGet({
-    credentials: "same-origin",
-    cache: "no-store",
-    redirect: "error",
-    headers: { accept: "application/json" },
-    ...(signal ? { signal } : {}),
-    transport: { auth: "anonymous" },
-    fetcher,
-  });
+  let value: unknown;
+  try {
+    value = await authMethodsGet({
+      credentials: "omit",
+      cache: "no-store",
+      redirect: "error",
+      headers: { accept: "application/json" },
+      ...(signal ? { signal } : {}),
+      transport: { auth: "anonymous" },
+      fetcher,
+    });
+  } catch {
+    throw new Error("Sign-in methods could not be loaded.");
+  }
   if (typeof value !== "object" || value === null || Array.isArray(value) ||
       (value as Record<string, unknown>).passkey !== true || typeof (value as Record<string, unknown>).upstreamOidc !== "boolean") {
     throw new Error("Sign-in methods could not be loaded.");
