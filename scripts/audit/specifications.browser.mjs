@@ -65,9 +65,10 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     for (const {id, viewId} of registry.likec4.views) {
-      assert.equal((await page.goto(`${base}/architecture/#${id}`)).status(), 200);
+      const response = await page.goto(`${base}/architecture/#${id}`);
+      if (response) assert.equal(response.status(), 200);
+      assert.equal(new URL(page.url()).hash, '#' + id);
       const diagram = page.locator(`likec4-view[view-id="${viewId}"]`);
-      await diagram.waitFor();
       await diagram.locator('.react-flow__node').first().waitFor();
       assert.deepEqual(await page.evaluate(() => window.cspViolations), [], 'LikeC4 must satisfy the Atlas CSP');
     }
