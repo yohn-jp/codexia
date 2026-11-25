@@ -1,21 +1,33 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { snapshotKey, type BrowserEditorDocument, type BrowserModuleContext, type BrowserModuleDefinition, type ChangeOperation, type ChangeProposal, type ModuleStatus, type SnapshotId, type UiContribution } from "@codexia/contracts";
-import { api } from "../api";
-import { decodeResponse, responseContracts } from "../api-response";
-import { moduleBrowserLoaders } from "../generated/browser-modules";
-import type { BrowserJournal, JournalProposalOwnership } from "../storage/journal";
-import { discoverableContributions, workspaceContributions } from "./catalog";
+import {
+  type BrowserEditorDocument,
+  type BrowserModuleContext,
+  type ChangeOperation,
+  type ChangeProposal,
+  type ModuleStatus,
+  type SnapshotId,
+  snapshotKey,
+  type UiContribution,
+} from '@codexia/contracts';
+import { useEffect, useId, useRef, useState } from 'react';
+import { api } from '../api';
+import { readActionChangeSet } from '../api-knowledge';
+import { moduleBrowserLoaders } from '../generated/browser-modules';
+import type { BrowserJournal, JournalProposalOwnership } from '../storage/journal';
+import { discoverableContributions, workspaceContributions } from './catalog';
 
 const NATIVE_REVIEW_REFERENCE_ACTIONS = new Set([
-  "publishing.episodes.propose", "publishing.shares.create", "publishing.shares.revoke", "nlp.updateExternalConsent",
+  'publishing.episodes.propose',
+  'publishing.shares.create',
+  'publishing.shares.revoke',
+  'nlp.updateExternalConsent',
 ]);
 
 const SLOT_LABELS = {
-  editor: "執筆ツール",
-  dock: "ドック",
-  inspection: "確認",
-  review: "レビュー",
-  settings: "設定",
+  editor: '執筆ツール',
+  dock: 'ドック',
+  inspection: '確認',
+  review: 'レビュー',
+  settings: '設定',
 } as const;
 
 export function ContributionHost({
@@ -33,7 +45,7 @@ export function ContributionHost({
 }: {
   projectId: string;
   authorScope: string;
-  slot: UiContribution["slot"];
+  slot: UiContribution['slot'];
   contributions: UiContribution[];
   modules: ModuleStatus[];
   snapshot: SnapshotId;
@@ -44,12 +56,12 @@ export function ContributionHost({
   readCurrentEditor: () => BrowserEditorDocument | null;
 }) {
   const visible = discoverableContributions(contributions, modules, slot);
-  const [selection, setSelection] = useState("");
+  const [selection, setSelection] = useState('');
   const headingId = useId();
   const selectorId = useId();
-  const selected = visible.find((item) => item.id === selection);
+  const selected = visible.find(item => item.id === selection);
   useEffect(() => {
-    if (selection && !selected) setSelection("");
+    if (selection && !selected) setSelection('');
   }, [selection, selected]);
   if (visible.length === 0) return null;
 
@@ -58,10 +70,12 @@ export function ContributionHost({
       <h2 id={headingId}>{SLOT_LABELS[slot]}</h2>
       <label className="contribution-selector" htmlFor={selectorId}>
         <span>機能を選択</span>
-        <select id={selectorId} value={selected?.id ?? ""} onChange={(event) => setSelection(event.currentTarget.value)}>
+        <select id={selectorId} value={selected?.id ?? ''} onChange={event => setSelection(event.currentTarget.value)}>
           <option value="">選択してください</option>
-          {visible.map((item) => (
-            <option key={item.id} value={item.id}>{item.title}（{item.module}）</option>
+          {visible.map(item => (
+            <option key={item.id} value={item.id}>
+              {item.title}（{item.module}）
+            </option>
           ))}
         </select>
       </label>
@@ -107,7 +121,7 @@ export function MountedContribution({
   navigateDocument?: (path: string) => Promise<void>;
 }) {
   const elementRef = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState('');
   const snapshotId = snapshotKey(snapshot);
   // Callback identities change with workspace render state. Refresh their values
   // without remounting a live module panel or discarding in-flight search results.
@@ -118,10 +132,10 @@ export function MountedContribution({
     let cancelled = false;
     let dispose: (() => void) | undefined;
     const controller = new AbortController();
-    setError("");
+    setError('');
     const loader = moduleBrowserLoaders[item.module];
     if (!loader) {
-      setError("この機能のブラウザーパネルは選択中の Core プロファイルに含まれていません。");
+      setError('この機能のブラウザーパネルは選択中の Core プロファイルに含まれていません。');
       return;
     }
 
@@ -135,25 +149,25 @@ export function MountedContribution({
           snapshot,
           signal: controller.signal,
           readCurrentEditor: () => hostCallbacksRef.current.readCurrentEditor(),
-          navigateDocument: navigateDocument ? async (path) => {
-            if (controller.signal.aborted) throw new DOMException("Panel closed", "AbortError");
-            const navigate = hostCallbacksRef.current.navigateDocument;
-            if (!navigate) throw new Error("Document navigation is unavailable.");
-            await navigate(path);
-          } : undefined,
+          navigateDocument: navigateDocument
+            ? async path => {
+                if (controller.signal.aborted) throw new DOMException('Panel closed', 'AbortError');
+                const navigate = hostCallbacksRef.current.navigateDocument;
+                if (!navigate) throw new Error('Document navigation is unavailable.');
+                await navigate(path);
+              }
+            : undefined,
           invoke: async (actionId, input) => {
             const result = await api.action(projectId, actionId, input, controller.signal, snapshot);
-            if (controller.signal.aborted) throw new DOMException("Panel closed", "AbortError");
-            if (snapshotKey(result.snapshot) !== snapshotId) throw new Error("Action result belongs to a different project revision.");
+            if (controller.signal.aborted) throw new DOMException('Panel closed', 'AbortError');
+            if (snapshotKey(result.snapshot) !== snapshotId) throw new Error('Action result belongs to a different project revision.');
             const nativeReviewReference = NATIVE_REVIEW_REFERENCE_ACTIONS.has(actionId);
-            if (result.ok && (nativeReviewReference || actionId === "core.hierarchy.reorder")) {
-              const { changeSet } = decodeResponse(result.data, nativeReviewReference
-                ? responseContracts.nativeChangeSetReferenceEnvelope
-                : responseContracts.nativeChangeSetEnvelope);
-              if (changeSet.projectId !== projectId) throw new Error("ChangeSet belongs to a different project.");
+            if (result.ok && (nativeReviewReference || actionId === 'core.hierarchy.reorder')) {
+              const changeSet = readActionChangeSet(result.data, nativeReviewReference);
+              if (changeSet.projectId !== projectId) throw new Error('ChangeSet belongs to a different project.');
               hostCallbacksRef.current.onNativeChangeSetProposed(changeSet.projectId, changeSet.id);
             } else if (result.ok && result.proposals?.length) {
-              if (!journal) throw new Error("Browser recovery storage is unavailable; the module proposal was not delivered to its panel.");
+              if (!journal) throw new Error('Browser recovery storage is unavailable; the module proposal was not delivered to its panel.');
               for (const proposal of result.proposals) await journal.putProposal(snapshot.projectId, authorScope, proposal);
               if (result.proposals.length > 0) hostCallbacksRef.current.onProposalStored();
             }
@@ -161,9 +175,9 @@ export function MountedContribution({
           },
           propose: async (operations: ChangeOperation[], evidence) => {
             const isCancelled = () => cancelled || controller.signal.aborted;
-            const abortError = () => new DOMException("Panel closed", "AbortError");
+            const abortError = () => new DOMException('Panel closed', 'AbortError');
             if (isCancelled()) throw abortError();
-            if (!journal) throw new Error("Browser recovery storage is unavailable; the module proposal was not delivered to its panel.");
+            if (!journal) throw new Error('Browser recovery storage is unavailable; the module proposal was not delivered to its panel.');
             const proposalJournal = journal;
             const ownedProposals = new Map<string, JournalProposalOwnership>();
             // A cancelled POST may already be durable in Core even if no reply arrived.
@@ -173,7 +187,7 @@ export function MountedContribution({
               if (submissionMayHaveReachedCore) return;
               let removedAny = false;
               for (const [proposalId, ownership] of ownedProposals) {
-                removedAny = await proposalJournal.removeProposal(snapshot.projectId, authorScope, proposalId, ownership) || removedAny;
+                removedAny = (await proposalJournal.removeProposal(snapshot.projectId, authorScope, proposalId, ownership)) || removedAny;
                 ownedProposals.delete(proposalId);
               }
               if (removedAny) hostCallbacksRef.current.onProposalStored();
@@ -196,7 +210,11 @@ export function MountedContribution({
             const submitted: ChangeProposal = {
               // The cookie-owner proposals endpoint assigns "author" regardless of the browser request's source.
               // Keep the strict local journal identity identical to the server's canonical proposal.
-              id: crypto.randomUUID(), snapshot, operations, source: "author", ...(evidence ? { evidence } : {}),
+              id: crypto.randomUUID(),
+              snapshot,
+              operations,
+              source: 'author',
+              ...(evidence ? { evidence } : {}),
             };
             await persistWhileActive(submitted);
             hostCallbacksRef.current.onProposalStored();
@@ -220,8 +238,8 @@ export function MountedContribution({
             }
 
             await persistWhileActive(proposal);
-            if (proposal.id !== submitted.id && ownedProposals.has(submitted.id)) {
-              const ownership = ownedProposals.get(submitted.id)!;
+            const ownership = ownedProposals.get(submitted.id);
+            if (proposal.id !== submitted.id && ownership) {
               await proposalJournal.removeProposal(snapshot.projectId, authorScope, submitted.id, ownership);
               ownedProposals.delete(submitted.id);
               if (isCancelled()) {
@@ -241,7 +259,7 @@ export function MountedContribution({
           dispose = cleanup;
         }
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "Contribution panel could not be loaded.");
+        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Contribution panel could not be loaded.');
       }
     })();
 
@@ -255,18 +273,25 @@ export function MountedContribution({
   return (
     <article className="contribution-card" aria-label={item.title}>
       <h3>{item.title}</h3>
-      {error && <p className="status" data-kind="error" role="status">{error}</p>}
+      {error && (
+        <p className="status" data-kind="error" role="status">
+          {error}
+        </p>
+      )}
       <div ref={elementRef} data-contribution={item.id} />
     </article>
   );
 }
 
 /** A registered, enabled panel instance; mounting remains subject to the live host catalog. */
-export function WorkspaceContribution(props: Parameters<typeof MountedContribution>[0] & {
-  contributions: UiContribution[];
-  modules: ModuleStatus[];
-}) {
-  const allowed = workspaceContributions(props.contributions, props.modules).some((item) =>
-    item.id === props.item.id && item.module === props.item.module && item.action === props.item.action);
+export function WorkspaceContribution(
+  props: Parameters<typeof MountedContribution>[0] & {
+    contributions: UiContribution[];
+    modules: ModuleStatus[];
+  },
+) {
+  const allowed = workspaceContributions(props.contributions, props.modules).some(
+    item => item.id === props.item.id && item.module === props.item.module && item.action === props.item.action,
+  );
   return allowed ? <MountedContribution {...props} /> : <p role="status">このパネルは利用できません。</p>;
 }

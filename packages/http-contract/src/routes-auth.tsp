@@ -26,6 +26,17 @@ model OAuthConsentContextRequest {
   ...Record<never>;
 }
 
+model OAuthConsentRow {
+  id: string;
+  clientId: string;
+  scopes: string[];
+  createdAt?: utcDateTime;
+  updatedAt?: utcDateTime;
+  ...Record<unknown>;
+}
+
+model OAuthConsentRowList is Array<OAuthConsentRow>;
+
 @tag("auth-adapter")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-principal", "OWNER-SESSION; same-origin request")
@@ -37,7 +48,8 @@ op getOAuthConsentContext(@body body: OAuthConsentContextRequest): OAuthConsentC
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-principal", "OWNER-SESSION; same-origin request")
 @extension("x-codexia-security-deviation", "The approved baseline encodes BearerAuth. Runtime requires the Better Auth owner-session cookie; this security representation remains incomplete pending an approved compatibility baseline correction.")
-@extension("x-codexia-runtime-response-deviation", "Runtime serializes the consent list as a top-level array; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.")
+@extension("x-codexia-runtime-response-deviation", "Runtime serializes the consent list as a top-level array; the approved baseline response body is an object. Keep the published compatibility schema unchanged and use the Codexia desktop response projection metadata for the verified typed array shape until an approved compatibility correction.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/OAuthConsentRowList")
 @route("/api/auth/oauth2/get-consents") @get @operationId("auth_list_consents_get")
 op listOAuthConsents(): JsonResponse | { @statusCode _: 401; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
@@ -72,6 +84,11 @@ model OwnerSetupEnrolled {
   state: "owner-enrolled";
   clientsReady: boolean;
   ...Record<never>;
+}
+
+union OwnerSetupStatusResponse {
+  SetupState: OwnerSetupState,
+  OwnerEnrolled: OwnerSetupEnrolled,
 }
 
 model OwnerSetupCompleted {
@@ -138,7 +155,7 @@ model OwnerSetupReadinessUnavailable {
 @tag("auth-adapter") @useAuth(NoAuth)
 @extension("x-codexia-principal", "ANON; no OAuth bearer; same-origin status")
 @route("/api/auth/codexia/setup/status") @get @operationId("owner_setup_status_get")
-op getOwnerSetupStatus(): OwnerSetupSuccess<OwnerSetupState | OwnerSetupEnrolled> | OwnerSetupDenied | OwnerSetupRateLimited | OwnerSetupUnavailable;
+op getOwnerSetupStatus(): OwnerSetupSuccess<OwnerSetupStatusResponse> | OwnerSetupDenied | OwnerSetupRateLimited | OwnerSetupUnavailable;
 
 @tag("auth-adapter") @useAuth(NoAuth)
 @extension("x-codexia-principal", "SETUP grant; same-origin JSON; setup-only runtime")

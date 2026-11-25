@@ -45,9 +45,18 @@ TypeSpecからの生成、スキーマ変換と検査は `packages/http-contract
   意味を保持できない制約は変換エラーにする。
 - `@codexia/contracts` はCoreの業務契約、TypeSpecはHTTP wire契約。重なるDTOは生成またはadapterで接続し、同じwire DTOを二つの独立編集可能な正本にしない。
 - Desktop WebのOrvalとiOSのSwift OpenAPI Generatorは、同じ生成OpenAPIを入力とする。
-  Orvalは選択したoperationのmethod、pathとIDを比較し、Swiftは全operation IDを比較する。
+  Desktop Webが使用するCodexia所有の操作は、Orvalが生成するfetch関数を通す。
+  [Desktop生成設定](../../app/orval.config.mjs) は利用対象を選び、再生成時にoperation ID、method、pathと成果物を照合する。
+  未実装の目標操作は生成対象外とする。Swiftは全operation IDを比較する。
+  承認済みの公開スキーマと実応答の差が記録されている操作では、TypeSpecの `x-codexia-desktop-response-schema` がDesktop Webで検証する実応答のスキーマを参照する。
+  oasdiffは公開OpenAPIのスキーマを引き続き比較する。
   現行Swift生成のnullable正規化は同じ3.1方言内で型とnullの和を表し、扱えない形では失敗する。
-  OAuth、headers、Idempotency-Key、abort/retry、status別応答、streamingの受入は [iOS SwiftUI正本](IOS-SWIFTUI-ARCHITECTURE.md) に従う。
+  iOSでのOAuth、headers、Idempotency-Key、abort/retry、status別応答、streamingの受入は [iOS SwiftUI正本](IOS-SWIFTUI-ARCHITECTURE.md) に従う。
+- Desktop Webのfetch境界で、OWNER-APIのbearer、Consoleの同一origin cookie、初期セットアップの資格情報ポリシーを適用する。
+  JSON成功応答は生成Zod schemaで検証し、追加フィールドを保持する。Job EventStreamは生成関数から未消費のレスポンスを受け取り、既存のストリーム処理へ渡す。
+  呼び出し側が中断と再送を制御する。保存の再送では最初と同じ冪等性キーを使用する。
+  OAuthログイン画面の認証方式照会は同じOpenAPIから独立して生成し、資格情報を同一originのCookieに限定する。
+  OAuth同意の照会と確定は、署名済み `oauth_query` を引き継ぐBetter AuthのOAuth Providerクライアントを使用する。
 - Fastifyが所有: request lifecycle、content parser、Ajv validation、response serializer、route registration、error handling、streaming/abort、graceful shutdown。schema validationが成功しても認可成功とはみなさない。
 - 既存Core/DBが所有: project/object/revision/effect、author-only approve/apply、idempotency、transaction、receipt。これをHTTP schema/validatorへ移管しない。
 

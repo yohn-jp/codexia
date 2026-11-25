@@ -41,6 +41,11 @@ const oauthSourceFiles = new Set(
     'theme-tokens.ts',
     'entries/oauth-consent.tsx',
     'entries/oauth-login.tsx',
+    'api-error.ts',
+    'generated/auth-methods/client.ts',
+    'generated/auth-methods/schemas/index.ts',
+    'generated/auth-methods/schemas/authMethodsBody.zod.ts',
+    'generated-auth-methods-fetch.ts',
   ].map(file => resolve(appRoot, 'src', file)),
 );
 

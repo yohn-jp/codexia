@@ -325,8 +325,8 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       continue;
     }
     if (HTTP_CONTRACT_ROUTE_SOURCE_PATHS.has(file)) add('unit-http-contract');
-    // API client source is read by the canonical deployment route assertion.
-    if (file === 'app/src/api.ts') add('unit-root');
+    // The canonical deployment route assertion reads the API transport and Orval manifest.
+    if (file === 'app/src/api-transport.ts' || file === 'app/src/generated/http/client.operations.ts') add('unit-root');
     if (file === 'packages/api/test/passkey-bootstrap.acceptance.test.ts' ||
         file === 'packages/api/scripts/run-passkey-acceptance.mjs') {
       add('unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap');

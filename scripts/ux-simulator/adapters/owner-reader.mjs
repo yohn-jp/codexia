@@ -13,7 +13,7 @@ function publicControl(source) {
   const binding = themeSource.match(/onChange\s*=\s*\{\s*(?:\(event\)|event)\s*=>\s*onChange\(event\.currentTarget\.value as ThemeMode\)\s*\}/u)?.[0];
   const themeHandler = binding && sourceAt(source, theme, binding);
   const themeLabel = themeSource.match(/aria-label=["']([^"']+)["']/u)?.[1];
-  const sceneHandler = sourceAt(source, publishing, 'onClick={() => void openScene(item.id)}');
+  const sceneHandler = sourceAt(source, shell, 'const body = await publicShareSceneGet(projectId, token, sceneId, options);');
   const label = sourceAt(source, publishing, '読み取り専用の共有です。期限:');
   const readerBinding = sourceAt(source, shell, 'onChange={onThemeChange}');
   const launcherText = source.read(launcher);
@@ -32,12 +32,12 @@ export function projectReader(source) {
   const appRoute = appRouteText && sourceAt(source, launcher, appRouteText);
   const component = sourceAt(source, shell, 'export function PublicModuleView(');
   const apiRoute = sourceAt(source, server, 'function isPublicReaderPath(pathname: string): boolean {');
-  const shareMount = sourceAt(source, publishing, 'async mountPublic(viewId: string, element: HTMLElement, request: Request): Promise<() => void> {');
+  const shareMount = sourceAt(source, publishing, 'async mountPublic(viewId: string, element: HTMLElement, _request: Request, source?: PublicShareReaderSource): Promise<() => void> {');
   const publicReaderScreen = appRoute && component && apiRoute && shareMount ? {
     id: 'PUB-01', platform: 'reader', source: sourceRef(component), route: '/r/:module/:project/:slug',
     regions: [
       { id: 'public-reader-header', role: 'navigation', label: '公開読書ビューと外観', source: sourceRef(sourceAt(source, shell, '<header className="public-module-header">')) },
-      { id: 'public-content', role: 'content', label: 'share capabilityで公開された内容', source: sourceRef(sourceAt(source, publishing, 'function ShareReaderView({ projectId, token }')) },
+      { id: 'public-content', role: 'content', label: 'share capabilityで公開された内容', source: sourceRef(sourceAt(source, publishing, 'function ShareReaderView({ source }: { source: PublicShareReaderSource })')) },
       { id: 'public-loading-state', role: 'status', label: '公開コンテンツ取得状態', source: sourceRef(sourceAt(source, shell, '公開コンテンツを読み込んでいます…')) },
     ],
   } : null;
@@ -53,7 +53,7 @@ export function projectReader(source) {
     }),
     transition({
       id: 'public-share-expired', platform: 'reader', from: 'PUB-01/loading', to: 'PUB-01/unavailable',
-      event: 'public metadata response', screen: 'PUB-01', condition: 'if (!response.ok)', location: sourceAt(source, publishing, 'if (!response.ok) throw new Error("共有リンクは無効か、期限切れです。");'),
+      event: 'public metadata response', screen: 'PUB-01', condition: 'publicShareGet failure from loadIndex()', location: sourceAt(source, publishing, "if (alive) setError('共有リンクは無効か、期限切れです。');"),
     }),
     transition({
       id: 'public-theme-local-change', platform: 'reader', from: 'PUB-01/content', to: 'PUB-01/content',

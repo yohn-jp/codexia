@@ -58,7 +58,15 @@ test("an unavailable initial version cannot incorrectly offer the standalone tok
 
 test("an unauthenticated standalone browser without Web OAuth configuration cannot submit a static token", async ({ page }) => {
   await page.route("**/api/browser/version", route => route.fulfill({
-    json: { name: "codexia", version: "test", profile: "core" },
+    json: {
+      name: "codexia",
+      version: "test",
+      contractVersion: 2,
+      auth: ["oauth-owner", "oauth-mcp"],
+      profile: "core",
+      runtime: {},
+      modules: [],
+    },
   }));
   await page.route("**/api/session", route => route.fulfill({
     status: 401, json: { error: "Authentication required", code: "UNAUTHORIZED" },

@@ -216,9 +216,9 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/ApiSessionBody`.
         public struct ApiSessionBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ApiSessionBody/authenticated`.
-            public var authenticated: Swift.Bool?
+            public var authenticated: Swift.Bool
             /// - Remark: Generated from `#/components/schemas/ApiSessionBody/authorScope`.
-            public var authorScope: Swift.String?
+            public var authorScope: Swift.String
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `ApiSessionBody`.
@@ -228,8 +228,8 @@ extension Components {
             ///   - authorScope:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                authenticated: Swift.Bool? = nil,
-                authorScope: Swift.String? = nil,
+                authenticated: Swift.Bool,
+                authorScope: Swift.String,
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.authenticated = authenticated
@@ -242,11 +242,11 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.authenticated = try container.decodeIfPresent(
+                self.authenticated = try container.decode(
                     Swift.Bool.self,
                     forKey: .authenticated
                 )
-                self.authorScope = try container.decodeIfPresent(
+                self.authorScope = try container.decode(
                     Swift.String.self,
                     forKey: .authorScope
                 )
@@ -257,11 +257,11 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.authenticated,
                     forKey: .authenticated
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.authorScope,
                     forKey: .authorScope
                 )
@@ -1260,64 +1260,9 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody`.
         public struct CoreChangeProposalBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/id`.
-            public var id: Swift.String?
+            public var id: Swift.String
             /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/snapshot`.
-            public struct snapshotPayload: Codable, Hashable, Sendable {
-                /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/snapshot/projectId`.
-                public var projectId: Swift.String?
-                /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/snapshot/projectVersion`.
-                public var projectVersion: Swift.Int32?
-                /// A container of undocumented properties.
-                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                /// Creates a new `snapshotPayload`.
-                ///
-                /// - Parameters:
-                ///   - projectId:
-                ///   - projectVersion:
-                ///   - additionalProperties: A container of undocumented properties.
-                public init(
-                    projectId: Swift.String? = nil,
-                    projectVersion: Swift.Int32? = nil,
-                    additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
-                ) {
-                    self.projectId = projectId
-                    self.projectVersion = projectVersion
-                    self.additionalProperties = additionalProperties
-                }
-                public enum CodingKeys: String, CodingKey {
-                    case projectId
-                    case projectVersion
-                }
-                public init(from decoder: any Swift.Decoder) throws {
-                    let container = try decoder.container(keyedBy: CodingKeys.self)
-                    self.projectId = try container.decodeIfPresent(
-                        Swift.String.self,
-                        forKey: .projectId
-                    )
-                    self.projectVersion = try container.decodeIfPresent(
-                        Swift.Int32.self,
-                        forKey: .projectVersion
-                    )
-                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
-                        "projectId",
-                        "projectVersion"
-                    ])
-                }
-                public func encode(to encoder: any Swift.Encoder) throws {
-                    var container = encoder.container(keyedBy: CodingKeys.self)
-                    try container.encodeIfPresent(
-                        self.projectId,
-                        forKey: .projectId
-                    )
-                    try container.encodeIfPresent(
-                        self.projectVersion,
-                        forKey: .projectVersion
-                    )
-                    try encoder.encodeAdditionalProperties(additionalProperties)
-                }
-            }
-            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/snapshot`.
-            public var snapshot: Components.Schemas.CoreChangeProposalBody.snapshotPayload?
+            public var snapshot: Components.Schemas.SnapshotIdBody
             /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/operationsPayload`.
             public struct operationsPayloadPayload: Codable, Hashable, Sendable {
                 /// A container of undocumented properties.
@@ -1339,7 +1284,7 @@ extension Components {
             /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/operations`.
             public typealias operationsPayload = [Components.Schemas.CoreChangeProposalBody.operationsPayloadPayload]
             /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/operations`.
-            public var operations: Components.Schemas.CoreChangeProposalBody.operationsPayload?
+            public var operations: Components.Schemas.CoreChangeProposalBody.operationsPayload
             /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/source`.
             @frozen public enum sourcePayload: String, Codable, Hashable, Sendable, CaseIterable {
                 case author = "author"
@@ -1347,29 +1292,9 @@ extension Components {
                 case mcp = "mcp"
             }
             /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/source`.
-            public var source: Components.Schemas.CoreChangeProposalBody.sourcePayload?
-            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/evidencePayload`.
-            public struct evidencePayloadPayload: Codable, Hashable, Sendable {
-                /// A container of undocumented properties.
-                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                /// Creates a new `evidencePayloadPayload`.
-                ///
-                /// - Parameters:
-                ///   - additionalProperties: A container of undocumented properties.
-                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                    self.additionalProperties = additionalProperties
-                }
-                public init(from decoder: any Swift.Decoder) throws {
-                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                }
-                public func encode(to encoder: any Swift.Encoder) throws {
-                    try encoder.encodeAdditionalProperties(additionalProperties)
-                }
-            }
+            public var source: Components.Schemas.CoreChangeProposalBody.sourcePayload
             /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/evidence`.
-            public typealias evidencePayload = [Components.Schemas.CoreChangeProposalBody.evidencePayloadPayload]
-            /// - Remark: Generated from `#/components/schemas/CoreChangeProposalBody/evidence`.
-            public var evidence: Components.Schemas.CoreChangeProposalBody.evidencePayload?
+            public var evidence: [Components.Schemas.CoreProposalEvidenceBody]?
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `CoreChangeProposalBody`.
@@ -1382,11 +1307,11 @@ extension Components {
             ///   - evidence:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                id: Swift.String? = nil,
-                snapshot: Components.Schemas.CoreChangeProposalBody.snapshotPayload? = nil,
-                operations: Components.Schemas.CoreChangeProposalBody.operationsPayload? = nil,
-                source: Components.Schemas.CoreChangeProposalBody.sourcePayload? = nil,
-                evidence: Components.Schemas.CoreChangeProposalBody.evidencePayload? = nil,
+                id: Swift.String,
+                snapshot: Components.Schemas.SnapshotIdBody,
+                operations: Components.Schemas.CoreChangeProposalBody.operationsPayload,
+                source: Components.Schemas.CoreChangeProposalBody.sourcePayload,
+                evidence: [Components.Schemas.CoreProposalEvidenceBody]? = nil,
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.id = id
@@ -1405,24 +1330,24 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.id = try container.decodeIfPresent(
+                self.id = try container.decode(
                     Swift.String.self,
                     forKey: .id
                 )
-                self.snapshot = try container.decodeIfPresent(
-                    Components.Schemas.CoreChangeProposalBody.snapshotPayload.self,
+                self.snapshot = try container.decode(
+                    Components.Schemas.SnapshotIdBody.self,
                     forKey: .snapshot
                 )
-                self.operations = try container.decodeIfPresent(
+                self.operations = try container.decode(
                     Components.Schemas.CoreChangeProposalBody.operationsPayload.self,
                     forKey: .operations
                 )
-                self.source = try container.decodeIfPresent(
+                self.source = try container.decode(
                     Components.Schemas.CoreChangeProposalBody.sourcePayload.self,
                     forKey: .source
                 )
                 self.evidence = try container.decodeIfPresent(
-                    Components.Schemas.CoreChangeProposalBody.evidencePayload.self,
+                    [Components.Schemas.CoreProposalEvidenceBody].self,
                     forKey: .evidence
                 )
                 additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
@@ -1435,19 +1360,19 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.id,
                     forKey: .id
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.snapshot,
                     forKey: .snapshot
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.operations,
                     forKey: .operations
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.source,
                     forKey: .source
                 )
@@ -1473,28 +1398,192 @@ extension Components {
                 case title
             }
         }
+        /// - Remark: Generated from `#/components/schemas/CoreProposalEvidenceBody`.
+        public struct CoreProposalEvidenceBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/CoreProposalEvidenceBody/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CoreProposalEvidenceBody/snapshot`.
+            public var snapshot: Components.Schemas.SnapshotIdBody
+            /// - Remark: Generated from `#/components/schemas/CoreProposalEvidenceBody/module`.
+            @frozen public enum modulePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case story = "story"
+                case diagnostics = "diagnostics"
+                case nlp = "nlp"
+                case semantic = "semantic"
+                case speaker = "speaker"
+                case assistant = "assistant"
+                case publishing = "publishing"
+                case mcp = "mcp"
+                case search = "search"
+            }
+            /// - Remark: Generated from `#/components/schemas/CoreProposalEvidenceBody/module`.
+            public var module: Components.Schemas.CoreProposalEvidenceBody.modulePayload
+            /// - Remark: Generated from `#/components/schemas/CoreProposalEvidenceBody/kind`.
+            public var kind: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CoreProposalEvidenceBody/paths`.
+            public var paths: [Components.Schemas.CoreProposalFileRevisionBody]
+            /// - Remark: Generated from `#/components/schemas/CoreProposalEvidenceBody/details`.
+            public var details: OpenAPIRuntime.OpenAPIValueContainer
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `CoreProposalEvidenceBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - snapshot:
+            ///   - module:
+            ///   - kind:
+            ///   - paths:
+            ///   - details:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String,
+                snapshot: Components.Schemas.SnapshotIdBody,
+                module: Components.Schemas.CoreProposalEvidenceBody.modulePayload,
+                kind: Swift.String,
+                paths: [Components.Schemas.CoreProposalFileRevisionBody],
+                details: OpenAPIRuntime.OpenAPIValueContainer,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.snapshot = snapshot
+                self.module = module
+                self.kind = kind
+                self.paths = paths
+                self.details = details
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case snapshot
+                case module
+                case kind
+                case paths
+                case details
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decode(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.snapshot = try container.decode(
+                    Components.Schemas.SnapshotIdBody.self,
+                    forKey: .snapshot
+                )
+                self.module = try container.decode(
+                    Components.Schemas.CoreProposalEvidenceBody.modulePayload.self,
+                    forKey: .module
+                )
+                self.kind = try container.decode(
+                    Swift.String.self,
+                    forKey: .kind
+                )
+                self.paths = try container.decode(
+                    [Components.Schemas.CoreProposalFileRevisionBody].self,
+                    forKey: .paths
+                )
+                self.details = try container.decode(
+                    OpenAPIRuntime.OpenAPIValueContainer.self,
+                    forKey: .details
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "snapshot",
+                    "module",
+                    "kind",
+                    "paths",
+                    "details"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encode(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encode(
+                    self.module,
+                    forKey: .module
+                )
+                try container.encode(
+                    self.kind,
+                    forKey: .kind
+                )
+                try container.encode(
+                    self.paths,
+                    forKey: .paths
+                )
+                try container.encode(
+                    self.details,
+                    forKey: .details
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/CoreProposalFileRevisionBody`.
+        public struct CoreProposalFileRevisionBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/CoreProposalFileRevisionBody/path`.
+            public var path: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CoreProposalFileRevisionBody/revision`.
+            public var revision: Swift.String?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `CoreProposalFileRevisionBody`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - revision:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                path: Swift.String,
+                revision: Swift.String? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.path = path
+                self.revision = revision
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case path
+                case revision
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.path = try container.decode(
+                    Swift.String.self,
+                    forKey: .path
+                )
+                self.revision = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .revision
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "path",
+                    "revision"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(
+                    self.path,
+                    forKey: .path
+                )
+                try container.encodeIfPresent(
+                    self.revision,
+                    forKey: .revision
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody`.
         public struct CoreProposalStatusBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/proposal`.
-            public struct proposalPayload: Codable, Hashable, Sendable {
-                /// A container of undocumented properties.
-                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                /// Creates a new `proposalPayload`.
-                ///
-                /// - Parameters:
-                ///   - additionalProperties: A container of undocumented properties.
-                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                    self.additionalProperties = additionalProperties
-                }
-                public init(from decoder: any Swift.Decoder) throws {
-                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                }
-                public func encode(to encoder: any Swift.Encoder) throws {
-                    try encoder.encodeAdditionalProperties(additionalProperties)
-                }
-            }
-            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/proposal`.
-            public var proposal: Components.Schemas.CoreProposalStatusBody.proposalPayload?
+            public var proposal: Components.Schemas.CoreChangeProposalBody
             /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/payloadComplete`.
             public var payloadComplete: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/originalDigest`.
@@ -1509,9 +1598,9 @@ extension Components {
                 case applied = "applied"
             }
             /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/state`.
-            public var state: Components.Schemas.CoreProposalStatusBody.statePayload?
+            public var state: Components.Schemas.CoreProposalStatusBody.statePayload
             /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/approvedOperationIds`.
-            public var approvedOperationIds: [Swift.String]?
+            public var approvedOperationIds: [Swift.String]
             /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/approvedByOperationId`.
             public struct approvedByOperationIdPayload: Codable, Hashable, Sendable {
                 /// A container of undocumented properties.
@@ -1532,32 +1621,12 @@ extension Components {
             }
             /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/approvedByOperationId`.
             public var approvedByOperationId: Components.Schemas.CoreProposalStatusBody.approvedByOperationIdPayload?
-            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/applicationsPayload`.
-            public struct applicationsPayloadPayload: Codable, Hashable, Sendable {
-                /// A container of undocumented properties.
-                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                /// Creates a new `applicationsPayloadPayload`.
-                ///
-                /// - Parameters:
-                ///   - additionalProperties: A container of undocumented properties.
-                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                    self.additionalProperties = additionalProperties
-                }
-                public init(from decoder: any Swift.Decoder) throws {
-                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                }
-                public func encode(to encoder: any Swift.Encoder) throws {
-                    try encoder.encodeAdditionalProperties(additionalProperties)
-                }
-            }
             /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/applications`.
-            public typealias applicationsPayload = [Components.Schemas.CoreProposalStatusBody.applicationsPayloadPayload]
-            /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/applications`.
-            public var applications: Components.Schemas.CoreProposalStatusBody.applicationsPayload?
+            public var applications: [Components.Schemas.ProposalApplyReceiptBody]
             /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/appliedOperationIds`.
-            public var appliedOperationIds: [Swift.String]?
+            public var appliedOperationIds: [Swift.String]
             /// - Remark: Generated from `#/components/schemas/CoreProposalStatusBody/stale`.
-            public var stale: Swift.Bool?
+            public var stale: Swift.Bool
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `CoreProposalStatusBody`.
@@ -1575,16 +1644,16 @@ extension Components {
             ///   - stale:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                proposal: Components.Schemas.CoreProposalStatusBody.proposalPayload? = nil,
+                proposal: Components.Schemas.CoreChangeProposalBody,
                 payloadComplete: Swift.Bool? = nil,
                 originalDigest: Swift.String? = nil,
                 operationIds: [Swift.String]? = nil,
-                state: Components.Schemas.CoreProposalStatusBody.statePayload? = nil,
-                approvedOperationIds: [Swift.String]? = nil,
+                state: Components.Schemas.CoreProposalStatusBody.statePayload,
+                approvedOperationIds: [Swift.String],
                 approvedByOperationId: Components.Schemas.CoreProposalStatusBody.approvedByOperationIdPayload? = nil,
-                applications: Components.Schemas.CoreProposalStatusBody.applicationsPayload? = nil,
-                appliedOperationIds: [Swift.String]? = nil,
-                stale: Swift.Bool? = nil,
+                applications: [Components.Schemas.ProposalApplyReceiptBody],
+                appliedOperationIds: [Swift.String],
+                stale: Swift.Bool,
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.proposal = proposal
@@ -1613,8 +1682,8 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.proposal = try container.decodeIfPresent(
-                    Components.Schemas.CoreProposalStatusBody.proposalPayload.self,
+                self.proposal = try container.decode(
+                    Components.Schemas.CoreChangeProposalBody.self,
                     forKey: .proposal
                 )
                 self.payloadComplete = try container.decodeIfPresent(
@@ -1629,11 +1698,11 @@ extension Components {
                     [Swift.String].self,
                     forKey: .operationIds
                 )
-                self.state = try container.decodeIfPresent(
+                self.state = try container.decode(
                     Components.Schemas.CoreProposalStatusBody.statePayload.self,
                     forKey: .state
                 )
-                self.approvedOperationIds = try container.decodeIfPresent(
+                self.approvedOperationIds = try container.decode(
                     [Swift.String].self,
                     forKey: .approvedOperationIds
                 )
@@ -1641,15 +1710,15 @@ extension Components {
                     Components.Schemas.CoreProposalStatusBody.approvedByOperationIdPayload.self,
                     forKey: .approvedByOperationId
                 )
-                self.applications = try container.decodeIfPresent(
-                    Components.Schemas.CoreProposalStatusBody.applicationsPayload.self,
+                self.applications = try container.decode(
+                    [Components.Schemas.ProposalApplyReceiptBody].self,
                     forKey: .applications
                 )
-                self.appliedOperationIds = try container.decodeIfPresent(
+                self.appliedOperationIds = try container.decode(
                     [Swift.String].self,
                     forKey: .appliedOperationIds
                 )
-                self.stale = try container.decodeIfPresent(
+                self.stale = try container.decode(
                     Swift.Bool.self,
                     forKey: .stale
                 )
@@ -1668,7 +1737,7 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.proposal,
                     forKey: .proposal
                 )
@@ -1684,11 +1753,11 @@ extension Components {
                     self.operationIds,
                     forKey: .operationIds
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.state,
                     forKey: .state
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.approvedOperationIds,
                     forKey: .approvedOperationIds
                 )
@@ -1696,19 +1765,1249 @@ extension Components {
                     self.approvedByOperationId,
                     forKey: .approvedByOperationId
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.applications,
                     forKey: .applications
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.appliedOperationIds,
                     forKey: .appliedOperationIds
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.stale,
                     forKey: .stale
                 )
                 try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DesktopActionFailureBody`.
+        public struct DesktopActionFailureBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopActionFailureBody/ok`.
+            public var ok: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/DesktopActionFailureBody/snapshot`.
+            public var snapshot: Components.Schemas.SnapshotIdBody
+            /// - Remark: Generated from `#/components/schemas/DesktopActionFailureBody/error`.
+            public struct errorPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/DesktopActionFailureBody/error/code`.
+                public var code: Swift.String
+                /// - Remark: Generated from `#/components/schemas/DesktopActionFailureBody/error/message`.
+                public var message: Swift.String
+                /// - Remark: Generated from `#/components/schemas/DesktopActionFailureBody/error/retryable`.
+                public var retryable: Swift.Bool
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `errorPayload`.
+                ///
+                /// - Parameters:
+                ///   - code:
+                ///   - message:
+                ///   - retryable:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(
+                    code: Swift.String,
+                    message: Swift.String,
+                    retryable: Swift.Bool,
+                    additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+                ) {
+                    self.code = code
+                    self.message = message
+                    self.retryable = retryable
+                    self.additionalProperties = additionalProperties
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case code
+                    case message
+                    case retryable
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.code = try container.decode(
+                        Swift.String.self,
+                        forKey: .code
+                    )
+                    self.message = try container.decode(
+                        Swift.String.self,
+                        forKey: .message
+                    )
+                    self.retryable = try container.decode(
+                        Swift.Bool.self,
+                        forKey: .retryable
+                    )
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                        "code",
+                        "message",
+                        "retryable"
+                    ])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encode(
+                        self.code,
+                        forKey: .code
+                    )
+                    try container.encode(
+                        self.message,
+                        forKey: .message
+                    )
+                    try container.encode(
+                        self.retryable,
+                        forKey: .retryable
+                    )
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopActionFailureBody/error`.
+            public var error: Components.Schemas.DesktopActionFailureBody.errorPayload
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `DesktopActionFailureBody`.
+            ///
+            /// - Parameters:
+            ///   - ok:
+            ///   - snapshot:
+            ///   - error:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                ok: Swift.Bool,
+                snapshot: Components.Schemas.SnapshotIdBody,
+                error: Components.Schemas.DesktopActionFailureBody.errorPayload,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.ok = ok
+                self.snapshot = snapshot
+                self.error = error
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case ok
+                case snapshot
+                case error
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.ok = try container.decode(
+                    Swift.Bool.self,
+                    forKey: .ok
+                )
+                self.snapshot = try container.decode(
+                    Components.Schemas.SnapshotIdBody.self,
+                    forKey: .snapshot
+                )
+                self.error = try container.decode(
+                    Components.Schemas.DesktopActionFailureBody.errorPayload.self,
+                    forKey: .error
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "ok",
+                    "snapshot",
+                    "error"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(
+                    self.ok,
+                    forKey: .ok
+                )
+                try container.encode(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encode(
+                    self.error,
+                    forKey: .error
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DesktopActionResultBody`.
+        public struct DesktopActionResultBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopActionResultBody/value1`.
+            public var value1: Components.Schemas.DesktopActionSuccessBody?
+            /// - Remark: Generated from `#/components/schemas/DesktopActionResultBody/value2`.
+            public var value2: Components.Schemas.DesktopActionFailureBody?
+            /// Creates a new `DesktopActionResultBody`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            ///   - value2:
+            public init(
+                value1: Components.Schemas.DesktopActionSuccessBody? = nil,
+                value2: Components.Schemas.DesktopActionFailureBody? = nil
+            ) {
+                self.value1 = value1
+                self.value2 = value2
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self.value1 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value2 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                    [
+                        self.value1,
+                        self.value2
+                    ],
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1?.encode(to: encoder)
+                try self.value2?.encode(to: encoder)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DesktopActionSuccessBody`.
+        public struct DesktopActionSuccessBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopActionSuccessBody/ok`.
+            public var ok: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/DesktopActionSuccessBody/snapshot`.
+            public var snapshot: Components.Schemas.SnapshotIdBody
+            /// - Remark: Generated from `#/components/schemas/DesktopActionSuccessBody/data`.
+            public var data: OpenAPIRuntime.OpenAPIValueContainer
+            /// - Remark: Generated from `#/components/schemas/DesktopActionSuccessBody/proposals`.
+            public var proposals: [Components.Schemas.CoreChangeProposalBody]?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `DesktopActionSuccessBody`.
+            ///
+            /// - Parameters:
+            ///   - ok:
+            ///   - snapshot:
+            ///   - data:
+            ///   - proposals:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                ok: Swift.Bool,
+                snapshot: Components.Schemas.SnapshotIdBody,
+                data: OpenAPIRuntime.OpenAPIValueContainer,
+                proposals: [Components.Schemas.CoreChangeProposalBody]? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.ok = ok
+                self.snapshot = snapshot
+                self.data = data
+                self.proposals = proposals
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case ok
+                case snapshot
+                case data
+                case proposals
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.ok = try container.decode(
+                    Swift.Bool.self,
+                    forKey: .ok
+                )
+                self.snapshot = try container.decode(
+                    Components.Schemas.SnapshotIdBody.self,
+                    forKey: .snapshot
+                )
+                self.data = try container.decode(
+                    OpenAPIRuntime.OpenAPIValueContainer.self,
+                    forKey: .data
+                )
+                self.proposals = try container.decodeIfPresent(
+                    [Components.Schemas.CoreChangeProposalBody].self,
+                    forKey: .proposals
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "ok",
+                    "snapshot",
+                    "data",
+                    "proposals"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(
+                    self.ok,
+                    forKey: .ok
+                )
+                try container.encode(
+                    self.snapshot,
+                    forKey: .snapshot
+                )
+                try container.encode(
+                    self.data,
+                    forKey: .data
+                )
+                try container.encodeIfPresent(
+                    self.proposals,
+                    forKey: .proposals
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DesktopContributionList`.
+        public typealias DesktopContributionList = [Components.Schemas.DesktopContributionResponseItem]
+        /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem`.
+        public struct DesktopContributionResponseItem: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/contractVersion`.
+            public var contractVersion: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/kind`.
+            @frozen public enum kindPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case panel = "panel"
+                case editor_hyphen_adornment = "editor-adornment"
+                case context_hyphen_action = "context-action"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/kind`.
+            public var kind: Components.Schemas.DesktopContributionResponseItem.kindPayload?
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/contextsPayload`.
+            @frozen public enum contextsPayloadPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case workspace = "workspace"
+                case editor = "editor"
+                case reading = "reading"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/contexts`.
+            public typealias contextsPayload = [Components.Schemas.DesktopContributionResponseItem.contextsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/contexts`.
+            public var contexts: Components.Schemas.DesktopContributionResponseItem.contextsPayload?
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/multipleInstances`.
+            public var multipleInstances: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/module`.
+            @frozen public enum modulePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case story = "story"
+                case diagnostics = "diagnostics"
+                case nlp = "nlp"
+                case semantic = "semantic"
+                case speaker = "speaker"
+                case assistant = "assistant"
+                case publishing = "publishing"
+                case mcp = "mcp"
+                case search = "search"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/module`.
+            public var module: Components.Schemas.DesktopContributionResponseItem.modulePayload
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/slot`.
+            @frozen public enum slotPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case editor = "editor"
+                case dock = "dock"
+                case inspection = "inspection"
+                case review = "review"
+                case settings = "settings"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/slot`.
+            public var slot: Components.Schemas.DesktopContributionResponseItem.slotPayload
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/title`.
+            public var title: Swift.String
+            /// - Remark: Generated from `#/components/schemas/DesktopContributionResponseItem/action`.
+            public var action: Swift.String
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `DesktopContributionResponseItem`.
+            ///
+            /// - Parameters:
+            ///   - contractVersion:
+            ///   - kind:
+            ///   - contexts:
+            ///   - multipleInstances:
+            ///   - id:
+            ///   - module:
+            ///   - slot:
+            ///   - title:
+            ///   - action:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                contractVersion: Swift.Double? = nil,
+                kind: Components.Schemas.DesktopContributionResponseItem.kindPayload? = nil,
+                contexts: Components.Schemas.DesktopContributionResponseItem.contextsPayload? = nil,
+                multipleInstances: Swift.Bool? = nil,
+                id: Swift.String,
+                module: Components.Schemas.DesktopContributionResponseItem.modulePayload,
+                slot: Components.Schemas.DesktopContributionResponseItem.slotPayload,
+                title: Swift.String,
+                action: Swift.String,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.contractVersion = contractVersion
+                self.kind = kind
+                self.contexts = contexts
+                self.multipleInstances = multipleInstances
+                self.id = id
+                self.module = module
+                self.slot = slot
+                self.title = title
+                self.action = action
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case contractVersion
+                case kind
+                case contexts
+                case multipleInstances
+                case id
+                case module
+                case slot
+                case title
+                case action
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.contractVersion = try container.decodeIfPresent(
+                    Swift.Double.self,
+                    forKey: .contractVersion
+                )
+                self.kind = try container.decodeIfPresent(
+                    Components.Schemas.DesktopContributionResponseItem.kindPayload.self,
+                    forKey: .kind
+                )
+                self.contexts = try container.decodeIfPresent(
+                    Components.Schemas.DesktopContributionResponseItem.contextsPayload.self,
+                    forKey: .contexts
+                )
+                self.multipleInstances = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .multipleInstances
+                )
+                self.id = try container.decode(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.module = try container.decode(
+                    Components.Schemas.DesktopContributionResponseItem.modulePayload.self,
+                    forKey: .module
+                )
+                self.slot = try container.decode(
+                    Components.Schemas.DesktopContributionResponseItem.slotPayload.self,
+                    forKey: .slot
+                )
+                self.title = try container.decode(
+                    Swift.String.self,
+                    forKey: .title
+                )
+                self.action = try container.decode(
+                    Swift.String.self,
+                    forKey: .action
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "contractVersion",
+                    "kind",
+                    "contexts",
+                    "multipleInstances",
+                    "id",
+                    "module",
+                    "slot",
+                    "title",
+                    "action"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(
+                    self.contractVersion,
+                    forKey: .contractVersion
+                )
+                try container.encodeIfPresent(
+                    self.kind,
+                    forKey: .kind
+                )
+                try container.encodeIfPresent(
+                    self.contexts,
+                    forKey: .contexts
+                )
+                try container.encodeIfPresent(
+                    self.multipleInstances,
+                    forKey: .multipleInstances
+                )
+                try container.encode(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encode(
+                    self.module,
+                    forKey: .module
+                )
+                try container.encode(
+                    self.slot,
+                    forKey: .slot
+                )
+                try container.encode(
+                    self.title,
+                    forKey: .title
+                )
+                try container.encode(
+                    self.action,
+                    forKey: .action
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem`.
+        public struct DesktopCoreReviewFeedItem: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/kind`.
+            @frozen public enum kindPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case core_hyphen_proposal = "core-proposal"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/kind`.
+            public var kind: Components.Schemas.DesktopCoreReviewFeedItem.kindPayload
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/projectId`.
+            public var projectId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/createdAt`.
+            public var createdAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/state`.
+            @frozen public enum statePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case partially_approved = "partially_approved"
+                case approved = "approved"
+                case applied = "applied"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/state`.
+            public var state: Components.Schemas.DesktopCoreReviewFeedItem.statePayload
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/approvalModel`.
+            @frozen public enum approvalModelPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case per_hyphen_operation = "per-operation"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/approvalModel`.
+            public var approvalModel: Components.Schemas.DesktopCoreReviewFeedItem.approvalModelPayload
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/applicationModel`.
+            @frozen public enum applicationModelPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case per_hyphen_operation = "per-operation"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/applicationModel`.
+            public var applicationModel: Components.Schemas.DesktopCoreReviewFeedItem.applicationModelPayload
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/status`.
+            public var status: Components.Schemas.CoreProposalStatusBody
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/receipts`.
+            public var receipts: [Components.Schemas.ProposalApplyReceiptBody]
+            /// - Remark: Generated from `#/components/schemas/DesktopCoreReviewFeedItem/stale`.
+            public var stale: Swift.Bool
+            /// Creates a new `DesktopCoreReviewFeedItem`.
+            ///
+            /// - Parameters:
+            ///   - kind:
+            ///   - id:
+            ///   - projectId:
+            ///   - createdAt:
+            ///   - state:
+            ///   - approvalModel:
+            ///   - applicationModel:
+            ///   - status:
+            ///   - receipts:
+            ///   - stale:
+            public init(
+                kind: Components.Schemas.DesktopCoreReviewFeedItem.kindPayload,
+                id: Swift.String,
+                projectId: Swift.String,
+                createdAt: Foundation.Date,
+                state: Components.Schemas.DesktopCoreReviewFeedItem.statePayload,
+                approvalModel: Components.Schemas.DesktopCoreReviewFeedItem.approvalModelPayload,
+                applicationModel: Components.Schemas.DesktopCoreReviewFeedItem.applicationModelPayload,
+                status: Components.Schemas.CoreProposalStatusBody,
+                receipts: [Components.Schemas.ProposalApplyReceiptBody],
+                stale: Swift.Bool
+            ) {
+                self.kind = kind
+                self.id = id
+                self.projectId = projectId
+                self.createdAt = createdAt
+                self.state = state
+                self.approvalModel = approvalModel
+                self.applicationModel = applicationModel
+                self.status = status
+                self.receipts = receipts
+                self.stale = stale
+            }
+            public enum CodingKeys: String, CodingKey {
+                case kind
+                case id
+                case projectId
+                case createdAt
+                case state
+                case approvalModel
+                case applicationModel
+                case status
+                case receipts
+                case stale
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DesktopJobList`.
+        public typealias DesktopJobList = [Components.Schemas.DesktopPublicJobBody]
+        /// - Remark: Generated from `#/components/schemas/DesktopModuleList`.
+        public typealias DesktopModuleList = [Components.Schemas.DesktopModuleResponseItem]
+        /// - Remark: Generated from `#/components/schemas/DesktopModuleResponseItem`.
+        public struct DesktopModuleResponseItem: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopModuleResponseItem/id`.
+            @frozen public enum idPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case story = "story"
+                case diagnostics = "diagnostics"
+                case nlp = "nlp"
+                case semantic = "semantic"
+                case speaker = "speaker"
+                case assistant = "assistant"
+                case publishing = "publishing"
+                case mcp = "mcp"
+                case search = "search"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopModuleResponseItem/id`.
+            public var id: Components.Schemas.DesktopModuleResponseItem.idPayload
+            /// - Remark: Generated from `#/components/schemas/DesktopModuleResponseItem/availability`.
+            @frozen public enum availabilityPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case not_hyphen_included = "not-included"
+                case disabled = "disabled"
+                case enabled_hyphen_idle = "enabled-idle"
+                case active = "active"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopModuleResponseItem/availability`.
+            public var availability: Components.Schemas.DesktopModuleResponseItem.availabilityPayload
+            /// - Remark: Generated from `#/components/schemas/DesktopModuleResponseItem/version`.
+            public var version: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/DesktopModuleResponseItem/activeJobs`.
+            public var activeJobs: Swift.Int32
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `DesktopModuleResponseItem`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - availability:
+            ///   - version:
+            ///   - activeJobs:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Components.Schemas.DesktopModuleResponseItem.idPayload,
+                availability: Components.Schemas.DesktopModuleResponseItem.availabilityPayload,
+                version: Swift.String? = nil,
+                activeJobs: Swift.Int32,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.availability = availability
+                self.version = version
+                self.activeJobs = activeJobs
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case availability
+                case version
+                case activeJobs
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decode(
+                    Components.Schemas.DesktopModuleResponseItem.idPayload.self,
+                    forKey: .id
+                )
+                self.availability = try container.decode(
+                    Components.Schemas.DesktopModuleResponseItem.availabilityPayload.self,
+                    forKey: .availability
+                )
+                self.version = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .version
+                )
+                self.activeJobs = try container.decode(
+                    Swift.Int32.self,
+                    forKey: .activeJobs
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "availability",
+                    "version",
+                    "activeJobs"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encode(
+                    self.availability,
+                    forKey: .availability
+                )
+                try container.encodeIfPresent(
+                    self.version,
+                    forKey: .version
+                )
+                try container.encode(
+                    self.activeJobs,
+                    forKey: .activeJobs
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem`.
+        public struct DesktopNativeReviewFeedItem: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/kind`.
+            @frozen public enum kindPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case native_hyphen_change_hyphen_set = "native-change-set"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/kind`.
+            public var kind: Components.Schemas.DesktopNativeReviewFeedItem.kindPayload
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/projectId`.
+            public var projectId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/createdAt`.
+            public var createdAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/state`.
+            @frozen public enum statePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case approved = "approved"
+                case applied = "applied"
+                case rejected = "rejected"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/state`.
+            public var state: Components.Schemas.DesktopNativeReviewFeedItem.statePayload
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/approvalModel`.
+            @frozen public enum approvalModelPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case whole_hyphen_change_hyphen_set = "whole-change-set"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/approvalModel`.
+            public var approvalModel: Components.Schemas.DesktopNativeReviewFeedItem.approvalModelPayload
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/applicationModel`.
+            @frozen public enum applicationModelPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case transaction = "transaction"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/applicationModel`.
+            public var applicationModel: Components.Schemas.DesktopNativeReviewFeedItem.applicationModelPayload
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/changeSet`.
+            public var changeSet: Components.Schemas.PersistenceChangeSetDesktopBody
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/receipt`.
+            public struct receiptPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/receipt/changeSet`.
+                public var changeSet: Components.Schemas.PersistenceChangeSetDesktopBody
+                /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/receipt/resultsPayload`.
+                public struct resultsPayloadPayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `resultsPayloadPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/receipt/results`.
+                public typealias resultsPayload = [Components.Schemas.DesktopNativeReviewFeedItem.receiptPayload.resultsPayloadPayload]
+                /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/receipt/results`.
+                public var results: Components.Schemas.DesktopNativeReviewFeedItem.receiptPayload.resultsPayload
+                /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/receipt/replayed`.
+                public var replayed: Swift.Bool
+                /// Creates a new `receiptPayload`.
+                ///
+                /// - Parameters:
+                ///   - changeSet:
+                ///   - results:
+                ///   - replayed:
+                public init(
+                    changeSet: Components.Schemas.PersistenceChangeSetDesktopBody,
+                    results: Components.Schemas.DesktopNativeReviewFeedItem.receiptPayload.resultsPayload,
+                    replayed: Swift.Bool
+                ) {
+                    self.changeSet = changeSet
+                    self.results = results
+                    self.replayed = replayed
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case changeSet
+                    case results
+                    case replayed
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopNativeReviewFeedItem/receipt`.
+            public var receipt: Components.Schemas.DesktopNativeReviewFeedItem.receiptPayload?
+            /// Creates a new `DesktopNativeReviewFeedItem`.
+            ///
+            /// - Parameters:
+            ///   - kind:
+            ///   - id:
+            ///   - projectId:
+            ///   - createdAt:
+            ///   - state:
+            ///   - approvalModel:
+            ///   - applicationModel:
+            ///   - changeSet:
+            ///   - receipt:
+            public init(
+                kind: Components.Schemas.DesktopNativeReviewFeedItem.kindPayload,
+                id: Swift.String,
+                projectId: Swift.String,
+                createdAt: Foundation.Date,
+                state: Components.Schemas.DesktopNativeReviewFeedItem.statePayload,
+                approvalModel: Components.Schemas.DesktopNativeReviewFeedItem.approvalModelPayload,
+                applicationModel: Components.Schemas.DesktopNativeReviewFeedItem.applicationModelPayload,
+                changeSet: Components.Schemas.PersistenceChangeSetDesktopBody,
+                receipt: Components.Schemas.DesktopNativeReviewFeedItem.receiptPayload? = nil
+            ) {
+                self.kind = kind
+                self.id = id
+                self.projectId = projectId
+                self.createdAt = createdAt
+                self.state = state
+                self.approvalModel = approvalModel
+                self.applicationModel = applicationModel
+                self.changeSet = changeSet
+                self.receipt = receipt
+            }
+            public enum CodingKeys: String, CodingKey {
+                case kind
+                case id
+                case projectId
+                case createdAt
+                case state
+                case approvalModel
+                case applicationModel
+                case changeSet
+                case receipt
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DesktopPersistenceNodeListBody`.
+        public struct DesktopPersistenceNodeListBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopPersistenceNodeListBody/nodes`.
+            public var nodes: [Components.Schemas.KnowledgeNodeBody]
+            /// - Remark: Generated from `#/components/schemas/DesktopPersistenceNodeListBody/nextCursor`.
+            public var nextCursor: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/DesktopPersistenceNodeListBody/projectVersion`.
+            public var projectVersion: Swift.Int32
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `DesktopPersistenceNodeListBody`.
+            ///
+            /// - Parameters:
+            ///   - nodes:
+            ///   - nextCursor:
+            ///   - projectVersion:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                nodes: [Components.Schemas.KnowledgeNodeBody],
+                nextCursor: Swift.String? = nil,
+                projectVersion: Swift.Int32,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.nodes = nodes
+                self.nextCursor = nextCursor
+                self.projectVersion = projectVersion
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case nodes
+                case nextCursor
+                case projectVersion
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.nodes = try container.decode(
+                    [Components.Schemas.KnowledgeNodeBody].self,
+                    forKey: .nodes
+                )
+                self.nextCursor = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .nextCursor
+                )
+                self.projectVersion = try container.decode(
+                    Swift.Int32.self,
+                    forKey: .projectVersion
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "nodes",
+                    "nextCursor",
+                    "projectVersion"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(
+                    self.nodes,
+                    forKey: .nodes
+                )
+                try container.encodeIfPresent(
+                    self.nextCursor,
+                    forKey: .nextCursor
+                )
+                try container.encode(
+                    self.projectVersion,
+                    forKey: .projectVersion
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody`.
+        public struct DesktopPublicJobBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/type`.
+            public var _type: Swift.String
+            /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case queued = "queued"
+                case running = "running"
+                case done = "done"
+                case error = "error"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/status`.
+            public var status: Components.Schemas.DesktopPublicJobBody.statusPayload
+            /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/result`.
+            public var result: OpenAPIRuntime.OpenAPIValueContainer
+            /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/error`.
+            public var error: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/errorCode`.
+            public var errorCode: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/retryable`.
+            public var retryable: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/createdAt`.
+            public var createdAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/updatedAt`.
+            public var updatedAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/finishedAt`.
+            public var finishedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/DesktopPublicJobBody/progress`.
+            public var progress: Swift.Double?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `DesktopPublicJobBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - _type:
+            ///   - status:
+            ///   - result:
+            ///   - error:
+            ///   - errorCode:
+            ///   - retryable:
+            ///   - createdAt:
+            ///   - updatedAt:
+            ///   - finishedAt:
+            ///   - progress:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String,
+                _type: Swift.String,
+                status: Components.Schemas.DesktopPublicJobBody.statusPayload,
+                result: OpenAPIRuntime.OpenAPIValueContainer,
+                error: Swift.String? = nil,
+                errorCode: Swift.String? = nil,
+                retryable: Swift.Bool? = nil,
+                createdAt: Foundation.Date,
+                updatedAt: Foundation.Date,
+                finishedAt: Foundation.Date? = nil,
+                progress: Swift.Double? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self._type = _type
+                self.status = status
+                self.result = result
+                self.error = error
+                self.errorCode = errorCode
+                self.retryable = retryable
+                self.createdAt = createdAt
+                self.updatedAt = updatedAt
+                self.finishedAt = finishedAt
+                self.progress = progress
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case _type = "type"
+                case status
+                case result
+                case error
+                case errorCode
+                case retryable
+                case createdAt
+                case updatedAt
+                case finishedAt
+                case progress
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decode(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self._type = try container.decode(
+                    Swift.String.self,
+                    forKey: ._type
+                )
+                self.status = try container.decode(
+                    Components.Schemas.DesktopPublicJobBody.statusPayload.self,
+                    forKey: .status
+                )
+                self.result = try container.decode(
+                    OpenAPIRuntime.OpenAPIValueContainer.self,
+                    forKey: .result
+                )
+                self.error = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .error
+                )
+                self.errorCode = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .errorCode
+                )
+                self.retryable = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .retryable
+                )
+                self.createdAt = try container.decode(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                self.updatedAt = try container.decode(
+                    Foundation.Date.self,
+                    forKey: .updatedAt
+                )
+                self.finishedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .finishedAt
+                )
+                self.progress = try container.decodeIfPresent(
+                    Swift.Double.self,
+                    forKey: .progress
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "type",
+                    "status",
+                    "result",
+                    "error",
+                    "errorCode",
+                    "retryable",
+                    "createdAt",
+                    "updatedAt",
+                    "finishedAt",
+                    "progress"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encode(
+                    self._type,
+                    forKey: ._type
+                )
+                try container.encode(
+                    self.status,
+                    forKey: .status
+                )
+                try container.encode(
+                    self.result,
+                    forKey: .result
+                )
+                try container.encodeIfPresent(
+                    self.error,
+                    forKey: .error
+                )
+                try container.encodeIfPresent(
+                    self.errorCode,
+                    forKey: .errorCode
+                )
+                try container.encodeIfPresent(
+                    self.retryable,
+                    forKey: .retryable
+                )
+                try container.encode(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encode(
+                    self.updatedAt,
+                    forKey: .updatedAt
+                )
+                try container.encodeIfPresent(
+                    self.finishedAt,
+                    forKey: .finishedAt
+                )
+                try container.encodeIfPresent(
+                    self.progress,
+                    forKey: .progress
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DesktopReviewFeedBody`.
+        public struct DesktopReviewFeedBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopReviewFeedBody/items`.
+            public var items: [Components.Schemas.DesktopReviewFeedItem]
+            /// Creates a new `DesktopReviewFeedBody`.
+            ///
+            /// - Parameters:
+            ///   - items:
+            public init(items: [Components.Schemas.DesktopReviewFeedItem]) {
+                self.items = items
+            }
+            public enum CodingKeys: String, CodingKey {
+                case items
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DesktopReviewFeedItem`.
+        public struct DesktopReviewFeedItem: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopReviewFeedItem/value1`.
+            public var value1: Components.Schemas.DesktopCoreReviewFeedItem?
+            /// - Remark: Generated from `#/components/schemas/DesktopReviewFeedItem/value2`.
+            public var value2: Components.Schemas.DesktopNativeReviewFeedItem?
+            /// Creates a new `DesktopReviewFeedItem`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            ///   - value2:
+            public init(
+                value1: Components.Schemas.DesktopCoreReviewFeedItem? = nil,
+                value2: Components.Schemas.DesktopNativeReviewFeedItem? = nil
+            ) {
+                self.value1 = value1
+                self.value2 = value2
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self.value1 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value2 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                    [
+                        self.value1,
+                        self.value2
+                    ],
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1?.encode(to: encoder)
+                try self.value2?.encode(to: encoder)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse`.
+        public struct DesktopVersionResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/name`.
+            @frozen public enum namePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case codexia = "codexia"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/name`.
+            public var name: Components.Schemas.DesktopVersionResponse.namePayload
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/version`.
+            public var version: Swift.String
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/apiEpoch`.
+            public var apiEpoch: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/profile`.
+            @frozen public enum profilePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case core = "core"
+                case full = "full"
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/profile`.
+            public var profile: Components.Schemas.DesktopVersionResponse.profilePayload
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/auth`.
+            public var auth: [Swift.String]
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/runtime`.
+            public struct runtimePayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `runtimePayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/runtime`.
+            public var runtime: Components.Schemas.DesktopVersionResponse.runtimePayload
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/modulesPayload`.
+            public struct modulesPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `modulesPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/modules`.
+            public typealias modulesPayload = [Components.Schemas.DesktopVersionResponse.modulesPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/modules`.
+            public var modules: Components.Schemas.DesktopVersionResponse.modulesPayload
+            /// - Remark: Generated from `#/components/schemas/DesktopVersionResponse/contractVersion`.
+            public var contractVersion: Swift.Int32
+            /// Creates a new `DesktopVersionResponse`.
+            ///
+            /// - Parameters:
+            ///   - name:
+            ///   - version:
+            ///   - apiEpoch:
+            ///   - profile:
+            ///   - auth:
+            ///   - runtime:
+            ///   - modules:
+            ///   - contractVersion:
+            public init(
+                name: Components.Schemas.DesktopVersionResponse.namePayload,
+                version: Swift.String,
+                apiEpoch: Swift.Int32? = nil,
+                profile: Components.Schemas.DesktopVersionResponse.profilePayload,
+                auth: [Swift.String],
+                runtime: Components.Schemas.DesktopVersionResponse.runtimePayload,
+                modules: Components.Schemas.DesktopVersionResponse.modulesPayload,
+                contractVersion: Swift.Int32
+            ) {
+                self.name = name
+                self.version = version
+                self.apiEpoch = apiEpoch
+                self.profile = profile
+                self.auth = auth
+                self.runtime = runtime
+                self.modules = modules
+                self.contractVersion = contractVersion
+            }
+            public enum CodingKeys: String, CodingKey {
+                case name
+                case version
+                case apiEpoch
+                case profile
+                case auth
+                case runtime
+                case modules
+                case contractVersion
             }
         }
         /// - Remark: Generated from `#/components/schemas/DocumentChange`.
@@ -2907,36 +4206,36 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/InboxItemBody`.
         public struct InboxItemBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/id`.
-            public var id: Swift.String?
+            public var id: Swift.String
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/kind`.
             @frozen public enum kindPayload: String, Codable, Hashable, Sendable, CaseIterable {
                 case job_hyphen_complete = "job-complete"
             }
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/kind`.
-            public var kind: Components.Schemas.InboxItemBody.kindPayload?
+            public var kind: Components.Schemas.InboxItemBody.kindPayload
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/jobId`.
-            public var jobId: Swift.String?
+            public var jobId: Swift.String
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/jobType`.
-            public var jobType: Swift.String?
+            public var jobType: Swift.String
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/title`.
-            public var title: Swift.String?
+            public var title: Swift.String
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/body`.
-            public var body: Swift.String?
+            public var body: Swift.String
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/status`.
             @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
                 case done = "done"
                 case error = "error"
             }
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/status`.
-            public var status: Components.Schemas.InboxItemBody.statusPayload?
+            public var status: Components.Schemas.InboxItemBody.statusPayload
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/read`.
-            public var read: Swift.Bool?
+            public var read: Swift.Bool
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/userId`.
             public var userId: Swift.String?
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/projectKey`.
-            public var projectKey: Swift.String?
+            public var projectKey: Swift.String
             /// - Remark: Generated from `#/components/schemas/InboxItemBody/createdAt`.
-            public var createdAt: Foundation.Date?
+            public var createdAt: Foundation.Date
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `InboxItemBody`.
@@ -2955,17 +4254,17 @@ extension Components {
             ///   - createdAt:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                id: Swift.String? = nil,
-                kind: Components.Schemas.InboxItemBody.kindPayload? = nil,
-                jobId: Swift.String? = nil,
-                jobType: Swift.String? = nil,
-                title: Swift.String? = nil,
-                body: Swift.String? = nil,
-                status: Components.Schemas.InboxItemBody.statusPayload? = nil,
-                read: Swift.Bool? = nil,
+                id: Swift.String,
+                kind: Components.Schemas.InboxItemBody.kindPayload,
+                jobId: Swift.String,
+                jobType: Swift.String,
+                title: Swift.String,
+                body: Swift.String,
+                status: Components.Schemas.InboxItemBody.statusPayload,
+                read: Swift.Bool,
                 userId: Swift.String? = nil,
-                projectKey: Swift.String? = nil,
-                createdAt: Foundation.Date? = nil,
+                projectKey: Swift.String,
+                createdAt: Foundation.Date,
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.id = id
@@ -2996,35 +4295,35 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.id = try container.decodeIfPresent(
+                self.id = try container.decode(
                     Swift.String.self,
                     forKey: .id
                 )
-                self.kind = try container.decodeIfPresent(
+                self.kind = try container.decode(
                     Components.Schemas.InboxItemBody.kindPayload.self,
                     forKey: .kind
                 )
-                self.jobId = try container.decodeIfPresent(
+                self.jobId = try container.decode(
                     Swift.String.self,
                     forKey: .jobId
                 )
-                self.jobType = try container.decodeIfPresent(
+                self.jobType = try container.decode(
                     Swift.String.self,
                     forKey: .jobType
                 )
-                self.title = try container.decodeIfPresent(
+                self.title = try container.decode(
                     Swift.String.self,
                     forKey: .title
                 )
-                self.body = try container.decodeIfPresent(
+                self.body = try container.decode(
                     Swift.String.self,
                     forKey: .body
                 )
-                self.status = try container.decodeIfPresent(
+                self.status = try container.decode(
                     Components.Schemas.InboxItemBody.statusPayload.self,
                     forKey: .status
                 )
-                self.read = try container.decodeIfPresent(
+                self.read = try container.decode(
                     Swift.Bool.self,
                     forKey: .read
                 )
@@ -3032,11 +4331,11 @@ extension Components {
                     Swift.String.self,
                     forKey: .userId
                 )
-                self.projectKey = try container.decodeIfPresent(
+                self.projectKey = try container.decode(
                     Swift.String.self,
                     forKey: .projectKey
                 )
-                self.createdAt = try container.decodeIfPresent(
+                self.createdAt = try container.decode(
                     Foundation.Date.self,
                     forKey: .createdAt
                 )
@@ -3056,35 +4355,35 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.id,
                     forKey: .id
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.kind,
                     forKey: .kind
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.jobId,
                     forKey: .jobId
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.jobType,
                     forKey: .jobType
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.title,
                     forKey: .title
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.body,
                     forKey: .body
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.status,
                     forKey: .status
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.read,
                     forKey: .read
                 )
@@ -3092,11 +4391,11 @@ extension Components {
                     self.userId,
                     forKey: .userId
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.projectKey,
                     forKey: .projectKey
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.createdAt,
                     forKey: .createdAt
                 )
@@ -3106,9 +4405,9 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/InboxListBody`.
         public struct InboxListBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/InboxListBody/items`.
-            public var items: [Components.Schemas.InboxItemBody]?
+            public var items: [Components.Schemas.InboxItemBody]
             /// - Remark: Generated from `#/components/schemas/InboxListBody/unreadCount`.
-            public var unreadCount: Swift.Int32?
+            public var unreadCount: Swift.Int32
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `InboxListBody`.
@@ -3118,8 +4417,8 @@ extension Components {
             ///   - unreadCount:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                items: [Components.Schemas.InboxItemBody]? = nil,
-                unreadCount: Swift.Int32? = nil,
+                items: [Components.Schemas.InboxItemBody],
+                unreadCount: Swift.Int32,
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.items = items
@@ -3132,11 +4431,11 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.items = try container.decodeIfPresent(
+                self.items = try container.decode(
                     [Components.Schemas.InboxItemBody].self,
                     forKey: .items
                 )
-                self.unreadCount = try container.decodeIfPresent(
+                self.unreadCount = try container.decode(
                     Swift.Int32.self,
                     forKey: .unreadCount
                 )
@@ -3147,11 +4446,11 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.items,
                     forKey: .items
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.unreadCount,
                     forKey: .unreadCount
                 )
@@ -3161,7 +4460,7 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/InboxReadAllBody`.
         public struct InboxReadAllBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/InboxReadAllBody/marked`.
-            public var marked: Swift.Int32?
+            public var marked: Swift.Int32
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `InboxReadAllBody`.
@@ -3170,7 +4469,7 @@ extension Components {
             ///   - marked:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                marked: Swift.Int32? = nil,
+                marked: Swift.Int32,
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.marked = marked
@@ -3181,7 +4480,7 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.marked = try container.decodeIfPresent(
+                self.marked = try container.decode(
                     Swift.Int32.self,
                     forKey: .marked
                 )
@@ -3191,7 +4490,7 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.marked,
                     forKey: .marked
                 )
@@ -3201,7 +4500,7 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/InboxReadItemBody`.
         public struct InboxReadItemBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/InboxReadItemBody/item`.
-            public var item: Components.Schemas.InboxItemBody?
+            public var item: Components.Schemas.InboxItemBody
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `InboxReadItemBody`.
@@ -3210,7 +4509,7 @@ extension Components {
             ///   - item:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                item: Components.Schemas.InboxItemBody? = nil,
+                item: Components.Schemas.InboxItemBody,
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.item = item
@@ -3221,7 +4520,7 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.item = try container.decodeIfPresent(
+                self.item = try container.decode(
                     Components.Schemas.InboxItemBody.self,
                     forKey: .item
                 )
@@ -3231,13 +4530,15 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.item,
                     forKey: .item
                 )
                 try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
+        /// - Remark: Generated from `#/components/schemas/JobProgress`.
+        public typealias JobProgress = Swift.Double
         /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody`.
         public struct KnowledgeAliasBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/KnowledgeAliasBody/id`.
@@ -4923,6 +6224,108 @@ extension Components {
                 case oauth_query
             }
         }
+        /// - Remark: Generated from `#/components/schemas/OAuthConsentRow`.
+        public struct OAuthConsentRow: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OAuthConsentRow/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OAuthConsentRow/clientId`.
+            public var clientId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OAuthConsentRow/scopes`.
+            public var scopes: [Swift.String]
+            /// - Remark: Generated from `#/components/schemas/OAuthConsentRow/createdAt`.
+            public var createdAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/OAuthConsentRow/updatedAt`.
+            public var updatedAt: Foundation.Date?
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `OAuthConsentRow`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - clientId:
+            ///   - scopes:
+            ///   - createdAt:
+            ///   - updatedAt:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                id: Swift.String,
+                clientId: Swift.String,
+                scopes: [Swift.String],
+                createdAt: Foundation.Date? = nil,
+                updatedAt: Foundation.Date? = nil,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.id = id
+                self.clientId = clientId
+                self.scopes = scopes
+                self.createdAt = createdAt
+                self.updatedAt = updatedAt
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case clientId
+                case scopes
+                case createdAt
+                case updatedAt
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.id = try container.decode(
+                    Swift.String.self,
+                    forKey: .id
+                )
+                self.clientId = try container.decode(
+                    Swift.String.self,
+                    forKey: .clientId
+                )
+                self.scopes = try container.decode(
+                    [Swift.String].self,
+                    forKey: .scopes
+                )
+                self.createdAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .createdAt
+                )
+                self.updatedAt = try container.decodeIfPresent(
+                    Foundation.Date.self,
+                    forKey: .updatedAt
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "id",
+                    "clientId",
+                    "scopes",
+                    "createdAt",
+                    "updatedAt"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(
+                    self.id,
+                    forKey: .id
+                )
+                try container.encode(
+                    self.clientId,
+                    forKey: .clientId
+                )
+                try container.encode(
+                    self.scopes,
+                    forKey: .scopes
+                )
+                try container.encodeIfPresent(
+                    self.createdAt,
+                    forKey: .createdAt
+                )
+                try container.encodeIfPresent(
+                    self.updatedAt,
+                    forKey: .updatedAt
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/OAuthConsentRowList`.
+        public typealias OAuthConsentRowList = [Components.Schemas.OAuthConsentRow]
         /// - Remark: Generated from `#/components/schemas/OwnerSessionBody`.
         public struct OwnerSessionBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/OwnerSessionBody/authenticated`.
@@ -5105,6 +6508,51 @@ extension Components {
             }
             public enum CodingKeys: String, CodingKey {
                 case state
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/OwnerSetupStatusResponse`.
+        public struct OwnerSetupStatusResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupStatusResponse/value1`.
+            public var value1: Components.Schemas.OwnerSetupState?
+            /// - Remark: Generated from `#/components/schemas/OwnerSetupStatusResponse/value2`.
+            public var value2: Components.Schemas.OwnerSetupEnrolled?
+            /// Creates a new `OwnerSetupStatusResponse`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            ///   - value2:
+            public init(
+                value1: Components.Schemas.OwnerSetupState? = nil,
+                value2: Components.Schemas.OwnerSetupEnrolled? = nil
+            ) {
+                self.value1 = value1
+                self.value2 = value2
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self.value1 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value2 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                    [
+                        self.value1,
+                        self.value2
+                    ],
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1?.encode(to: encoder)
+                try self.value2?.encode(to: encoder)
             }
         }
         /// - Remark: Generated from `#/components/schemas/OwnerSetupTransaction`.
@@ -6498,6 +7946,2042 @@ extension Components {
                     forKey: .rejectedBy
                 )
                 try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApplicationBody`.
+        public struct PersistenceChangeSetDesktopApplicationBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApplicationBody/changeSet`.
+            public var changeSet: Components.Schemas.PersistenceChangeSetDesktopBody
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApplicationBody/resultsPayload`.
+            public struct resultsPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `resultsPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApplicationBody/results`.
+            public typealias resultsPayload = [Components.Schemas.PersistenceChangeSetDesktopApplicationBody.resultsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApplicationBody/results`.
+            public var results: Components.Schemas.PersistenceChangeSetDesktopApplicationBody.resultsPayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApplicationBody/replayed`.
+            public var replayed: Swift.Bool
+            /// Creates a new `PersistenceChangeSetDesktopApplicationBody`.
+            ///
+            /// - Parameters:
+            ///   - changeSet:
+            ///   - results:
+            ///   - replayed:
+            public init(
+                changeSet: Components.Schemas.PersistenceChangeSetDesktopBody,
+                results: Components.Schemas.PersistenceChangeSetDesktopApplicationBody.resultsPayload,
+                replayed: Swift.Bool
+            ) {
+                self.changeSet = changeSet
+                self.results = results
+                self.replayed = replayed
+            }
+            public enum CodingKeys: String, CodingKey {
+                case changeSet
+                case results
+                case replayed
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApplyBody`.
+        public struct PersistenceChangeSetDesktopApplyBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApplyBody/changeSet`.
+            public var changeSet: Components.Schemas.PersistenceChangeSetDesktopBody
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApplyBody/resultsPayload`.
+            public struct resultsPayloadPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `resultsPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApplyBody/results`.
+            public typealias resultsPayload = [Components.Schemas.PersistenceChangeSetDesktopApplyBody.resultsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApplyBody/results`.
+            public var results: Components.Schemas.PersistenceChangeSetDesktopApplyBody.resultsPayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApplyBody/replayed`.
+            public var replayed: Swift.Bool
+            /// Creates a new `PersistenceChangeSetDesktopApplyBody`.
+            ///
+            /// - Parameters:
+            ///   - changeSet:
+            ///   - results:
+            ///   - replayed:
+            public init(
+                changeSet: Components.Schemas.PersistenceChangeSetDesktopBody,
+                results: Components.Schemas.PersistenceChangeSetDesktopApplyBody.resultsPayload,
+                replayed: Swift.Bool
+            ) {
+                self.changeSet = changeSet
+                self.results = results
+                self.replayed = replayed
+            }
+            public enum CodingKeys: String, CodingKey {
+                case changeSet
+                case results
+                case replayed
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApprovalBody`.
+        public struct PersistenceChangeSetDesktopApprovalBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopApprovalBody/changeSet`.
+            public var changeSet: Components.Schemas.PersistenceChangeSetDesktopBody
+            /// Creates a new `PersistenceChangeSetDesktopApprovalBody`.
+            ///
+            /// - Parameters:
+            ///   - changeSet:
+            public init(changeSet: Components.Schemas.PersistenceChangeSetDesktopBody) {
+                self.changeSet = changeSet
+            }
+            public enum CodingKeys: String, CodingKey {
+                case changeSet
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody`.
+        public struct PersistenceChangeSetDesktopBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/projectId`.
+            public var projectId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/authorId`.
+            public var authorId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case proposed = "proposed"
+                case approved = "approved"
+                case applied = "applied"
+                case rejected = "rejected"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/status`.
+            public var status: Components.Schemas.PersistenceChangeSetDesktopBody.statusPayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/operations`.
+            public var operations: [Components.Schemas.PersistenceChangeSetDesktopOperation]
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/readSet`.
+            public var readSet: [Components.Schemas.PersistenceChangeSetDesktopReadEntry]
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/writeSet`.
+            public var writeSet: [Components.Schemas.PersistenceChangeSetDesktopWriteEntry]
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/provenance`.
+            public var provenance: Components.Schemas.PersistenceChangeSetDesktopProvenance
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/version`.
+            public var version: Swift.Int32
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/idempotencyKey`.
+            public var idempotencyKey: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/createdAt`.
+            public var createdAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/approvedAt`.
+            public var approvedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/approvedBy`.
+            public var approvedBy: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/appliedAt`.
+            public var appliedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/rejectedAt`.
+            public var rejectedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopBody/rejectedBy`.
+            public var rejectedBy: Swift.String?
+            /// Creates a new `PersistenceChangeSetDesktopBody`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - projectId:
+            ///   - authorId:
+            ///   - status:
+            ///   - operations:
+            ///   - readSet:
+            ///   - writeSet:
+            ///   - provenance:
+            ///   - version:
+            ///   - idempotencyKey:
+            ///   - createdAt:
+            ///   - approvedAt:
+            ///   - approvedBy:
+            ///   - appliedAt:
+            ///   - rejectedAt:
+            ///   - rejectedBy:
+            public init(
+                id: Swift.String,
+                projectId: Swift.String,
+                authorId: Swift.String,
+                status: Components.Schemas.PersistenceChangeSetDesktopBody.statusPayload,
+                operations: [Components.Schemas.PersistenceChangeSetDesktopOperation],
+                readSet: [Components.Schemas.PersistenceChangeSetDesktopReadEntry],
+                writeSet: [Components.Schemas.PersistenceChangeSetDesktopWriteEntry],
+                provenance: Components.Schemas.PersistenceChangeSetDesktopProvenance,
+                version: Swift.Int32,
+                idempotencyKey: Swift.String,
+                createdAt: Foundation.Date,
+                approvedAt: Foundation.Date? = nil,
+                approvedBy: Swift.String? = nil,
+                appliedAt: Foundation.Date? = nil,
+                rejectedAt: Foundation.Date? = nil,
+                rejectedBy: Swift.String? = nil
+            ) {
+                self.id = id
+                self.projectId = projectId
+                self.authorId = authorId
+                self.status = status
+                self.operations = operations
+                self.readSet = readSet
+                self.writeSet = writeSet
+                self.provenance = provenance
+                self.version = version
+                self.idempotencyKey = idempotencyKey
+                self.createdAt = createdAt
+                self.approvedAt = approvedAt
+                self.approvedBy = approvedBy
+                self.appliedAt = appliedAt
+                self.rejectedAt = rejectedAt
+                self.rejectedBy = rejectedBy
+            }
+            public enum CodingKeys: String, CodingKey {
+                case id
+                case projectId
+                case authorId
+                case status
+                case operations
+                case readSet
+                case writeSet
+                case provenance
+                case version
+                case idempotencyKey
+                case createdAt
+                case approvedAt
+                case approvedBy
+                case appliedAt
+                case rejectedAt
+                case rejectedBy
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate`.
+        public struct PersistenceChangeSetDesktopDocumentCreate: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case document_period_create = "document.create"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopDocumentCreate._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/command/documentId`.
+                public var documentId: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/command/parentId`.
+                public var parentId: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/command/kind`.
+                public var kind: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/command/title`.
+                public var title: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/command/orderKey`.
+                public var orderKey: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/command/appendToEnd`.
+                public var appendToEnd: Swift.Bool?
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/command/markdown`.
+                public var markdown: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/command/authorId`.
+                public var authorId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/command/idempotencyKey`.
+                public var idempotencyKey: Swift.String
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - documentId:
+                ///   - parentId:
+                ///   - kind:
+                ///   - title:
+                ///   - orderKey:
+                ///   - appendToEnd:
+                ///   - markdown:
+                ///   - authorId:
+                ///   - idempotencyKey:
+                public init(
+                    projectId: Swift.String,
+                    documentId: Swift.String? = nil,
+                    parentId: Swift.String? = nil,
+                    kind: Swift.String,
+                    title: Swift.String,
+                    orderKey: Swift.String,
+                    appendToEnd: Swift.Bool? = nil,
+                    markdown: Swift.String,
+                    authorId: Swift.String,
+                    idempotencyKey: Swift.String
+                ) {
+                    self.projectId = projectId
+                    self.documentId = documentId
+                    self.parentId = parentId
+                    self.kind = kind
+                    self.title = title
+                    self.orderKey = orderKey
+                    self.appendToEnd = appendToEnd
+                    self.markdown = markdown
+                    self.authorId = authorId
+                    self.idempotencyKey = idempotencyKey
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case documentId
+                    case parentId
+                    case kind
+                    case title
+                    case orderKey
+                    case appendToEnd
+                    case markdown
+                    case authorId
+                    case idempotencyKey
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopDocumentCreate.commandPayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentCreate/hierarchy`.
+            public var hierarchy: Components.Schemas.PersistenceChangeSetDesktopHierarchy?
+            /// Creates a new `PersistenceChangeSetDesktopDocumentCreate`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            ///   - hierarchy:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopDocumentCreate._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopDocumentCreate.commandPayload,
+                hierarchy: Components.Schemas.PersistenceChangeSetDesktopHierarchy? = nil
+            ) {
+                self._type = _type
+                self.command = command
+                self.hierarchy = hierarchy
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+                case hierarchy
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentDelete`.
+        public struct PersistenceChangeSetDesktopDocumentDelete: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentDelete/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case document_period_delete = "document.delete"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentDelete/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopDocumentDelete._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentDelete/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentDelete/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentDelete/command/documentId`.
+                public var documentId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentDelete/command/expectedVersion`.
+                public var expectedVersion: Swift.Int32
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - documentId:
+                ///   - expectedVersion:
+                public init(
+                    projectId: Swift.String,
+                    documentId: Swift.String,
+                    expectedVersion: Swift.Int32
+                ) {
+                    self.projectId = projectId
+                    self.documentId = documentId
+                    self.expectedVersion = expectedVersion
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case documentId
+                    case expectedVersion
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentDelete/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopDocumentDelete.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopDocumentDelete`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopDocumentDelete._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopDocumentDelete.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentRestore`.
+        public struct PersistenceChangeSetDesktopDocumentRestore: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentRestore/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case document_period_restore = "document.restore"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentRestore/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopDocumentRestore._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentRestore/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentRestore/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentRestore/command/documentId`.
+                public var documentId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentRestore/command/baseRevisionId`.
+                public var baseRevisionId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentRestore/command/sourceRevisionId`.
+                public var sourceRevisionId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentRestore/command/authorId`.
+                public var authorId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentRestore/command/idempotencyKey`.
+                public var idempotencyKey: Swift.String
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - documentId:
+                ///   - baseRevisionId:
+                ///   - sourceRevisionId:
+                ///   - authorId:
+                ///   - idempotencyKey:
+                public init(
+                    projectId: Swift.String,
+                    documentId: Swift.String,
+                    baseRevisionId: Swift.String,
+                    sourceRevisionId: Swift.String,
+                    authorId: Swift.String,
+                    idempotencyKey: Swift.String
+                ) {
+                    self.projectId = projectId
+                    self.documentId = documentId
+                    self.baseRevisionId = baseRevisionId
+                    self.sourceRevisionId = sourceRevisionId
+                    self.authorId = authorId
+                    self.idempotencyKey = idempotencyKey
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case documentId
+                    case baseRevisionId
+                    case sourceRevisionId
+                    case authorId
+                    case idempotencyKey
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentRestore/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopDocumentRestore.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopDocumentRestore`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopDocumentRestore._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopDocumentRestore.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave`.
+        public struct PersistenceChangeSetDesktopDocumentSave: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case document_period_save = "document.save"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopDocumentSave._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave/command/documentId`.
+                public var documentId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave/command/baseRevisionId`.
+                public var baseRevisionId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave/command/changes`.
+                public var changes: [Components.Schemas.DocumentChange]
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave/command/resultingSha256`.
+                public var resultingSha256: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave/command/authorId`.
+                public var authorId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave/command/clientId`.
+                public var clientId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave/command/idempotencyKey`.
+                public var idempotencyKey: Swift.String
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - documentId:
+                ///   - baseRevisionId:
+                ///   - changes:
+                ///   - resultingSha256:
+                ///   - authorId:
+                ///   - clientId:
+                ///   - idempotencyKey:
+                public init(
+                    projectId: Swift.String,
+                    documentId: Swift.String,
+                    baseRevisionId: Swift.String,
+                    changes: [Components.Schemas.DocumentChange],
+                    resultingSha256: Swift.String,
+                    authorId: Swift.String,
+                    clientId: Swift.String,
+                    idempotencyKey: Swift.String
+                ) {
+                    self.projectId = projectId
+                    self.documentId = documentId
+                    self.baseRevisionId = baseRevisionId
+                    self.changes = changes
+                    self.resultingSha256 = resultingSha256
+                    self.authorId = authorId
+                    self.clientId = clientId
+                    self.idempotencyKey = idempotencyKey
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case documentId
+                    case baseRevisionId
+                    case changes
+                    case resultingSha256
+                    case authorId
+                    case clientId
+                    case idempotencyKey
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentSave/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopDocumentSave.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopDocumentSave`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopDocumentSave._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopDocumentSave.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentUpdate`.
+        public struct PersistenceChangeSetDesktopDocumentUpdate: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentUpdate/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case document_period_update = "document.update"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentUpdate/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopDocumentUpdate._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentUpdate/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentUpdate/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentUpdate/command/documentId`.
+                public var documentId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentUpdate/command/expectedVersion`.
+                public var expectedVersion: Swift.Int32
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentUpdate/command/parentId`.
+                public var parentId: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentUpdate/command/title`.
+                public var title: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentUpdate/command/orderKey`.
+                public var orderKey: Swift.String?
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - documentId:
+                ///   - expectedVersion:
+                ///   - parentId:
+                ///   - title:
+                ///   - orderKey:
+                public init(
+                    projectId: Swift.String,
+                    documentId: Swift.String,
+                    expectedVersion: Swift.Int32,
+                    parentId: Swift.String? = nil,
+                    title: Swift.String? = nil,
+                    orderKey: Swift.String? = nil
+                ) {
+                    self.projectId = projectId
+                    self.documentId = documentId
+                    self.expectedVersion = expectedVersion
+                    self.parentId = parentId
+                    self.title = title
+                    self.orderKey = orderKey
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case documentId
+                    case expectedVersion
+                    case parentId
+                    case title
+                    case orderKey
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopDocumentUpdate/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopDocumentUpdate.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopDocumentUpdate`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopDocumentUpdate._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopDocumentUpdate.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave`.
+        public struct PersistenceChangeSetDesktopEvidenceAnchorSave: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case evidence_period_anchor_period_save = "evidence.anchor.save"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopEvidenceAnchorSave._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/command/id`.
+                public var id: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/command/documentId`.
+                public var documentId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/command/revisionId`.
+                public var revisionId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/command/fromUtf16`.
+                public var fromUtf16: Swift.Int32
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/command/toUtf16`.
+                public var toUtf16: Swift.Int32
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/command/quoteSha256`.
+                public var quoteSha256: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/command/status`.
+                @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case proposed = "proposed"
+                    case confirmed = "confirmed"
+                    case needs_review = "needs_review"
+                    case orphaned = "orphaned"
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/command/status`.
+                public var status: Components.Schemas.PersistenceChangeSetDesktopEvidenceAnchorSave.commandPayload.statusPayload
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/command/expectedVersion`.
+                public var expectedVersion: Swift.Int32?
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - id:
+                ///   - documentId:
+                ///   - revisionId:
+                ///   - fromUtf16:
+                ///   - toUtf16:
+                ///   - quoteSha256:
+                ///   - status:
+                ///   - expectedVersion:
+                public init(
+                    projectId: Swift.String,
+                    id: Swift.String,
+                    documentId: Swift.String,
+                    revisionId: Swift.String,
+                    fromUtf16: Swift.Int32,
+                    toUtf16: Swift.Int32,
+                    quoteSha256: Swift.String,
+                    status: Components.Schemas.PersistenceChangeSetDesktopEvidenceAnchorSave.commandPayload.statusPayload,
+                    expectedVersion: Swift.Int32? = nil
+                ) {
+                    self.projectId = projectId
+                    self.id = id
+                    self.documentId = documentId
+                    self.revisionId = revisionId
+                    self.fromUtf16 = fromUtf16
+                    self.toUtf16 = toUtf16
+                    self.quoteSha256 = quoteSha256
+                    self.status = status
+                    self.expectedVersion = expectedVersion
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case id
+                    case documentId
+                    case revisionId
+                    case fromUtf16
+                    case toUtf16
+                    case quoteSha256
+                    case status
+                    case expectedVersion
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopEvidenceAnchorSave.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopEvidenceAnchorSave`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopEvidenceAnchorSave._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopEvidenceAnchorSave.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionLink`.
+        public struct PersistenceChangeSetDesktopEvidenceAssertionLink: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionLink/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case evidence_period_assertion_period_link = "evidence.assertion.link"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionLink/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionLink._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionLink/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionLink/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionLink/command/assertionId`.
+                public var assertionId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionLink/command/evidenceId`.
+                public var evidenceId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionLink/command/role`.
+                @frozen public enum rolePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case supports = "supports"
+                    case contradicts = "contradicts"
+                    case quotes = "quotes"
+                    case context = "context"
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionLink/command/role`.
+                public var role: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionLink.commandPayload.rolePayload
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - assertionId:
+                ///   - evidenceId:
+                ///   - role:
+                public init(
+                    projectId: Swift.String,
+                    assertionId: Swift.String,
+                    evidenceId: Swift.String,
+                    role: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionLink.commandPayload.rolePayload
+                ) {
+                    self.projectId = projectId
+                    self.assertionId = assertionId
+                    self.evidenceId = evidenceId
+                    self.role = role
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case assertionId
+                    case evidenceId
+                    case role
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionLink/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionLink.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopEvidenceAssertionLink`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionLink._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionLink.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave`.
+        public struct PersistenceChangeSetDesktopEvidenceAssertionSave: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case evidence_period_assertion_period_save = "evidence.assertion.save"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionSave._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command/id`.
+                public var id: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command/proposition`.
+                public struct propositionPayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `propositionPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command/proposition`.
+                public var proposition: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionSave.commandPayload.propositionPayload
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command/modality`.
+                public var modality: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command/perspective`.
+                public var perspective: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command/narrativeTime`.
+                public struct narrativeTimePayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `narrativeTimePayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command/narrativeTime`.
+                public var narrativeTime: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionSave.commandPayload.narrativeTimePayload
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command/confidence`.
+                public var confidence: Swift.Double?
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command/status`.
+                @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case proposed = "proposed"
+                    case confirmed = "confirmed"
+                    case rejected = "rejected"
+                    case retired = "retired"
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command/status`.
+                public var status: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionSave.commandPayload.statusPayload
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command/expectedVersion`.
+                public var expectedVersion: Swift.Int32?
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - id:
+                ///   - proposition:
+                ///   - modality:
+                ///   - perspective:
+                ///   - narrativeTime:
+                ///   - confidence:
+                ///   - status:
+                ///   - expectedVersion:
+                public init(
+                    projectId: Swift.String,
+                    id: Swift.String,
+                    proposition: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionSave.commandPayload.propositionPayload,
+                    modality: Swift.String,
+                    perspective: Swift.String,
+                    narrativeTime: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionSave.commandPayload.narrativeTimePayload,
+                    confidence: Swift.Double? = nil,
+                    status: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionSave.commandPayload.statusPayload,
+                    expectedVersion: Swift.Int32? = nil
+                ) {
+                    self.projectId = projectId
+                    self.id = id
+                    self.proposition = proposition
+                    self.modality = modality
+                    self.perspective = perspective
+                    self.narrativeTime = narrativeTime
+                    self.confidence = confidence
+                    self.status = status
+                    self.expectedVersion = expectedVersion
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case id
+                    case proposition
+                    case modality
+                    case perspective
+                    case narrativeTime
+                    case confidence
+                    case status
+                    case expectedVersion
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionSave.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopEvidenceAssertionSave`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionSave._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionSave.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave`.
+        public struct PersistenceChangeSetDesktopEvidenceMentionSave: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case evidence_period_mention_period_save = "evidence.mention.save"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopEvidenceMentionSave._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave/command/evidenceId`.
+                public var evidenceId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave/command/nodeId`.
+                public var nodeId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave/command/source`.
+                public var source: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave/command/confidence`.
+                public var confidence: Swift.Double?
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave/command/extractorVersion`.
+                public var extractorVersion: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave/command/status`.
+                @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case proposed = "proposed"
+                    case confirmed = "confirmed"
+                    case ambiguous = "ambiguous"
+                    case rejected = "rejected"
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave/command/status`.
+                public var status: Components.Schemas.PersistenceChangeSetDesktopEvidenceMentionSave.commandPayload.statusPayload
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - evidenceId:
+                ///   - nodeId:
+                ///   - source:
+                ///   - confidence:
+                ///   - extractorVersion:
+                ///   - status:
+                public init(
+                    projectId: Swift.String,
+                    evidenceId: Swift.String,
+                    nodeId: Swift.String,
+                    source: Swift.String,
+                    confidence: Swift.Double? = nil,
+                    extractorVersion: Swift.String? = nil,
+                    status: Components.Schemas.PersistenceChangeSetDesktopEvidenceMentionSave.commandPayload.statusPayload
+                ) {
+                    self.projectId = projectId
+                    self.evidenceId = evidenceId
+                    self.nodeId = nodeId
+                    self.source = source
+                    self.confidence = confidence
+                    self.extractorVersion = extractorVersion
+                    self.status = status
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case evidenceId
+                    case nodeId
+                    case source
+                    case confidence
+                    case extractorVersion
+                    case status
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopEvidenceMentionSave.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopEvidenceMentionSave`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopEvidenceMentionSave._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopEvidenceMentionSave.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopHierarchy`.
+        public struct PersistenceChangeSetDesktopHierarchy: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopHierarchy/kind`.
+            @frozen public enum kindPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case volume = "volume"
+                case chapter = "chapter"
+                case scene = "scene"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopHierarchy/kind`.
+            public var kind: Components.Schemas.PersistenceChangeSetDesktopHierarchy.kindPayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopHierarchy/logicalId`.
+            public var logicalId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopHierarchy/volume`.
+            public var volume: Components.Schemas.PersistenceChangeSetDesktopHierarchyParent?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopHierarchy/chapter`.
+            public var chapter: Components.Schemas.PersistenceChangeSetDesktopHierarchyParent?
+            /// Creates a new `PersistenceChangeSetDesktopHierarchy`.
+            ///
+            /// - Parameters:
+            ///   - kind:
+            ///   - logicalId:
+            ///   - volume:
+            ///   - chapter:
+            public init(
+                kind: Components.Schemas.PersistenceChangeSetDesktopHierarchy.kindPayload,
+                logicalId: Swift.String,
+                volume: Components.Schemas.PersistenceChangeSetDesktopHierarchyParent? = nil,
+                chapter: Components.Schemas.PersistenceChangeSetDesktopHierarchyParent? = nil
+            ) {
+                self.kind = kind
+                self.logicalId = logicalId
+                self.volume = volume
+                self.chapter = chapter
+            }
+            public enum CodingKeys: String, CodingKey {
+                case kind
+                case logicalId
+                case volume
+                case chapter
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopHierarchyParent`.
+        public struct PersistenceChangeSetDesktopHierarchyParent: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopHierarchyParent/documentId`.
+            public var documentId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopHierarchyParent/lookupId`.
+            public var lookupId: Swift.String
+            /// Creates a new `PersistenceChangeSetDesktopHierarchyParent`.
+            ///
+            /// - Parameters:
+            ///   - documentId:
+            ///   - lookupId:
+            public init(
+                documentId: Swift.String,
+                lookupId: Swift.String
+            ) {
+                self.documentId = documentId
+                self.lookupId = lookupId
+            }
+            public enum CodingKeys: String, CodingKey {
+                case documentId
+                case lookupId
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave`.
+        public struct PersistenceChangeSetDesktopKnowledgeAliasSave: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case knowledge_period_alias_period_save = "knowledge.alias.save"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopKnowledgeAliasSave._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave/command/id`.
+                public var id: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave/command/nodeId`.
+                public var nodeId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave/command/surface`.
+                public var surface: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave/command/normalized`.
+                public var normalized: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave/command/scope`.
+                public var scope: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave/command/status`.
+                @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case proposed = "proposed"
+                    case confirmed = "confirmed"
+                    case ambiguous = "ambiguous"
+                    case retired = "retired"
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave/command/status`.
+                public var status: Components.Schemas.PersistenceChangeSetDesktopKnowledgeAliasSave.commandPayload.statusPayload
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - id:
+                ///   - nodeId:
+                ///   - surface:
+                ///   - normalized:
+                ///   - scope:
+                ///   - status:
+                public init(
+                    projectId: Swift.String,
+                    id: Swift.String,
+                    nodeId: Swift.String,
+                    surface: Swift.String,
+                    normalized: Swift.String,
+                    scope: Swift.String? = nil,
+                    status: Components.Schemas.PersistenceChangeSetDesktopKnowledgeAliasSave.commandPayload.statusPayload
+                ) {
+                    self.projectId = projectId
+                    self.id = id
+                    self.nodeId = nodeId
+                    self.surface = surface
+                    self.normalized = normalized
+                    self.scope = scope
+                    self.status = status
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case id
+                    case nodeId
+                    case surface
+                    case normalized
+                    case scope
+                    case status
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopKnowledgeAliasSave.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopKnowledgeAliasSave`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopKnowledgeAliasSave._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopKnowledgeAliasSave.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge`.
+        public struct PersistenceChangeSetDesktopKnowledgeMerge: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case knowledge_period_merge = "knowledge.merge"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopKnowledgeMerge._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command/sourceId`.
+                public var sourceId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command/targetId`.
+                public var targetId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command/projectVersion`.
+                public var projectVersion: Swift.Int32
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command/previewDigest`.
+                public var previewDigest: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command/actorId`.
+                public var actorId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command/origin`.
+                @frozen public enum originPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case author = "author"
+                    case external_hyphen_agent = "external-agent"
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command/origin`.
+                public var origin: Components.Schemas.PersistenceChangeSetDesktopKnowledgeMerge.commandPayload.originPayload
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command/auditId`.
+                public var auditId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command/generatedAliasId`.
+                public var generatedAliasId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command/plan`.
+                public struct planPayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `planPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command/plan`.
+                public var plan: Components.Schemas.PersistenceChangeSetDesktopKnowledgeMerge.commandPayload.planPayload
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - sourceId:
+                ///   - targetId:
+                ///   - projectVersion:
+                ///   - previewDigest:
+                ///   - actorId:
+                ///   - origin:
+                ///   - auditId:
+                ///   - generatedAliasId:
+                ///   - plan:
+                public init(
+                    projectId: Swift.String,
+                    sourceId: Swift.String,
+                    targetId: Swift.String,
+                    projectVersion: Swift.Int32,
+                    previewDigest: Swift.String,
+                    actorId: Swift.String,
+                    origin: Components.Schemas.PersistenceChangeSetDesktopKnowledgeMerge.commandPayload.originPayload,
+                    auditId: Swift.String,
+                    generatedAliasId: Swift.String,
+                    plan: Components.Schemas.PersistenceChangeSetDesktopKnowledgeMerge.commandPayload.planPayload
+                ) {
+                    self.projectId = projectId
+                    self.sourceId = sourceId
+                    self.targetId = targetId
+                    self.projectVersion = projectVersion
+                    self.previewDigest = previewDigest
+                    self.actorId = actorId
+                    self.origin = origin
+                    self.auditId = auditId
+                    self.generatedAliasId = generatedAliasId
+                    self.plan = plan
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case sourceId
+                    case targetId
+                    case projectVersion
+                    case previewDigest
+                    case actorId
+                    case origin
+                    case auditId
+                    case generatedAliasId
+                    case plan
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopKnowledgeMerge.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopKnowledgeMerge`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopKnowledgeMerge._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopKnowledgeMerge.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave`.
+        public struct PersistenceChangeSetDesktopKnowledgeNodeSave: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case knowledge_period_node_period_save = "knowledge.node.save"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopKnowledgeNodeSave._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/command/id`.
+                public var id: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/command/type`.
+                public var _type: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/command/name`.
+                public var name: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/command/attributes`.
+                public struct attributesPayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `attributesPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/command/attributes`.
+                public var attributes: Components.Schemas.PersistenceChangeSetDesktopKnowledgeNodeSave.commandPayload.attributesPayload
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/command/status`.
+                @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case proposed = "proposed"
+                    case confirmed = "confirmed"
+                    case retired = "retired"
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/command/status`.
+                public var status: Components.Schemas.PersistenceChangeSetDesktopKnowledgeNodeSave.commandPayload.statusPayload
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/command/expectedVersion`.
+                public var expectedVersion: Swift.Int32?
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - id:
+                ///   - _type:
+                ///   - name:
+                ///   - attributes:
+                ///   - status:
+                ///   - expectedVersion:
+                public init(
+                    projectId: Swift.String,
+                    id: Swift.String,
+                    _type: Swift.String,
+                    name: Swift.String,
+                    attributes: Components.Schemas.PersistenceChangeSetDesktopKnowledgeNodeSave.commandPayload.attributesPayload,
+                    status: Components.Schemas.PersistenceChangeSetDesktopKnowledgeNodeSave.commandPayload.statusPayload,
+                    expectedVersion: Swift.Int32? = nil
+                ) {
+                    self.projectId = projectId
+                    self.id = id
+                    self._type = _type
+                    self.name = name
+                    self.attributes = attributes
+                    self.status = status
+                    self.expectedVersion = expectedVersion
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case id
+                    case _type = "type"
+                    case name
+                    case attributes
+                    case status
+                    case expectedVersion
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopKnowledgeNodeSave.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopKnowledgeNodeSave`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopKnowledgeNodeSave._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopKnowledgeNodeSave.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave`.
+        public struct PersistenceChangeSetDesktopKnowledgeRelationSave: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case knowledge_period_relation_period_save = "knowledge.relation.save"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopKnowledgeRelationSave._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command/id`.
+                public var id: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command/sourceId`.
+                public var sourceId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command/targetId`.
+                public var targetId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command/type`.
+                public var _type: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command/attributes`.
+                public struct attributesPayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `attributesPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command/attributes`.
+                public var attributes: Components.Schemas.PersistenceChangeSetDesktopKnowledgeRelationSave.commandPayload.attributesPayload
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command/validity`.
+                public struct validityPayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `validityPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command/validity`.
+                public var validity: Components.Schemas.PersistenceChangeSetDesktopKnowledgeRelationSave.commandPayload.validityPayload
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command/status`.
+                @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case proposed = "proposed"
+                    case confirmed = "confirmed"
+                    case rejected = "rejected"
+                    case retired = "retired"
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command/status`.
+                public var status: Components.Schemas.PersistenceChangeSetDesktopKnowledgeRelationSave.commandPayload.statusPayload
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command/expectedVersion`.
+                public var expectedVersion: Swift.Int32?
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - id:
+                ///   - sourceId:
+                ///   - targetId:
+                ///   - _type:
+                ///   - attributes:
+                ///   - validity:
+                ///   - status:
+                ///   - expectedVersion:
+                public init(
+                    projectId: Swift.String,
+                    id: Swift.String,
+                    sourceId: Swift.String,
+                    targetId: Swift.String,
+                    _type: Swift.String,
+                    attributes: Components.Schemas.PersistenceChangeSetDesktopKnowledgeRelationSave.commandPayload.attributesPayload,
+                    validity: Components.Schemas.PersistenceChangeSetDesktopKnowledgeRelationSave.commandPayload.validityPayload,
+                    status: Components.Schemas.PersistenceChangeSetDesktopKnowledgeRelationSave.commandPayload.statusPayload,
+                    expectedVersion: Swift.Int32? = nil
+                ) {
+                    self.projectId = projectId
+                    self.id = id
+                    self.sourceId = sourceId
+                    self.targetId = targetId
+                    self._type = _type
+                    self.attributes = attributes
+                    self.validity = validity
+                    self.status = status
+                    self.expectedVersion = expectedVersion
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case id
+                    case sourceId
+                    case targetId
+                    case _type = "type"
+                    case attributes
+                    case validity
+                    case status
+                    case expectedVersion
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopKnowledgeRelationSave.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopKnowledgeRelationSave`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopKnowledgeRelationSave._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopKnowledgeRelationSave.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopListBody`.
+        public struct PersistenceChangeSetDesktopListBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopListBody/changeSets`.
+            public var changeSets: [Components.Schemas.PersistenceChangeSetDesktopBody]
+            /// Creates a new `PersistenceChangeSetDesktopListBody`.
+            ///
+            /// - Parameters:
+            ///   - changeSets:
+            public init(changeSets: [Components.Schemas.PersistenceChangeSetDesktopBody]) {
+                self.changeSets = changeSets
+            }
+            public enum CodingKeys: String, CodingKey {
+                case changeSets
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopModuleRecordSave`.
+        public struct PersistenceChangeSetDesktopModuleRecordSave: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopModuleRecordSave/type`.
+            @frozen public enum _typePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case module_period_record_period_save = "module.record.save"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopModuleRecordSave/type`.
+            public var _type: Components.Schemas.PersistenceChangeSetDesktopModuleRecordSave._typePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopModuleRecordSave/command`.
+            public struct commandPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopModuleRecordSave/command/projectId`.
+                public var projectId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopModuleRecordSave/command/moduleId`.
+                public var moduleId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopModuleRecordSave/command/key`.
+                public var key: Swift.String
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopModuleRecordSave/command/value`.
+                public struct valuePayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `valuePayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopModuleRecordSave/command/value`.
+                public var value: Components.Schemas.PersistenceChangeSetDesktopModuleRecordSave.commandPayload.valuePayload
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopModuleRecordSave/command/expectedVersion`.
+                public var expectedVersion: Swift.Int32?
+                /// Creates a new `commandPayload`.
+                ///
+                /// - Parameters:
+                ///   - projectId:
+                ///   - moduleId:
+                ///   - key:
+                ///   - value:
+                ///   - expectedVersion:
+                public init(
+                    projectId: Swift.String,
+                    moduleId: Swift.String,
+                    key: Swift.String,
+                    value: Components.Schemas.PersistenceChangeSetDesktopModuleRecordSave.commandPayload.valuePayload,
+                    expectedVersion: Swift.Int32? = nil
+                ) {
+                    self.projectId = projectId
+                    self.moduleId = moduleId
+                    self.key = key
+                    self.value = value
+                    self.expectedVersion = expectedVersion
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case projectId
+                    case moduleId
+                    case key
+                    case value
+                    case expectedVersion
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopModuleRecordSave/command`.
+            public var command: Components.Schemas.PersistenceChangeSetDesktopModuleRecordSave.commandPayload
+            /// Creates a new `PersistenceChangeSetDesktopModuleRecordSave`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - command:
+            public init(
+                _type: Components.Schemas.PersistenceChangeSetDesktopModuleRecordSave._typePayload,
+                command: Components.Schemas.PersistenceChangeSetDesktopModuleRecordSave.commandPayload
+            ) {
+                self._type = _type
+                self.command = command
+            }
+            public enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case command
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation`.
+        public struct PersistenceChangeSetDesktopOperation: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value1`.
+            public var value1: Components.Schemas.PersistenceChangeSetDesktopDocumentCreate?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value2`.
+            public var value2: Components.Schemas.PersistenceChangeSetDesktopDocumentUpdate?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value3`.
+            public var value3: Components.Schemas.PersistenceChangeSetDesktopDocumentDelete?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value4`.
+            public var value4: Components.Schemas.PersistenceChangeSetDesktopDocumentSave?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value5`.
+            public var value5: Components.Schemas.PersistenceChangeSetDesktopDocumentRestore?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value6`.
+            public var value6: Components.Schemas.PersistenceChangeSetDesktopModuleRecordSave?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value7`.
+            public var value7: Components.Schemas.PersistenceChangeSetDesktopKnowledgeNodeSave?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value8`.
+            public var value8: Components.Schemas.PersistenceChangeSetDesktopKnowledgeAliasSave?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value9`.
+            public var value9: Components.Schemas.PersistenceChangeSetDesktopKnowledgeRelationSave?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value10`.
+            public var value10: Components.Schemas.PersistenceChangeSetDesktopEvidenceAnchorSave?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value11`.
+            public var value11: Components.Schemas.PersistenceChangeSetDesktopEvidenceMentionSave?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value12`.
+            public var value12: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionSave?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value13`.
+            public var value13: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionLink?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopOperation/value14`.
+            public var value14: Components.Schemas.PersistenceChangeSetDesktopKnowledgeMerge?
+            /// Creates a new `PersistenceChangeSetDesktopOperation`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            ///   - value2:
+            ///   - value3:
+            ///   - value4:
+            ///   - value5:
+            ///   - value6:
+            ///   - value7:
+            ///   - value8:
+            ///   - value9:
+            ///   - value10:
+            ///   - value11:
+            ///   - value12:
+            ///   - value13:
+            ///   - value14:
+            public init(
+                value1: Components.Schemas.PersistenceChangeSetDesktopDocumentCreate? = nil,
+                value2: Components.Schemas.PersistenceChangeSetDesktopDocumentUpdate? = nil,
+                value3: Components.Schemas.PersistenceChangeSetDesktopDocumentDelete? = nil,
+                value4: Components.Schemas.PersistenceChangeSetDesktopDocumentSave? = nil,
+                value5: Components.Schemas.PersistenceChangeSetDesktopDocumentRestore? = nil,
+                value6: Components.Schemas.PersistenceChangeSetDesktopModuleRecordSave? = nil,
+                value7: Components.Schemas.PersistenceChangeSetDesktopKnowledgeNodeSave? = nil,
+                value8: Components.Schemas.PersistenceChangeSetDesktopKnowledgeAliasSave? = nil,
+                value9: Components.Schemas.PersistenceChangeSetDesktopKnowledgeRelationSave? = nil,
+                value10: Components.Schemas.PersistenceChangeSetDesktopEvidenceAnchorSave? = nil,
+                value11: Components.Schemas.PersistenceChangeSetDesktopEvidenceMentionSave? = nil,
+                value12: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionSave? = nil,
+                value13: Components.Schemas.PersistenceChangeSetDesktopEvidenceAssertionLink? = nil,
+                value14: Components.Schemas.PersistenceChangeSetDesktopKnowledgeMerge? = nil
+            ) {
+                self.value1 = value1
+                self.value2 = value2
+                self.value3 = value3
+                self.value4 = value4
+                self.value5 = value5
+                self.value6 = value6
+                self.value7 = value7
+                self.value8 = value8
+                self.value9 = value9
+                self.value10 = value10
+                self.value11 = value11
+                self.value12 = value12
+                self.value13 = value13
+                self.value14 = value14
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self.value1 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value2 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value3 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value4 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value5 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value6 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value7 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value8 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value9 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value10 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value11 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value12 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value13 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value14 = try .init(from: decoder)
+                } catch {
+                    errors.append(error)
+                }
+                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                    [
+                        self.value1,
+                        self.value2,
+                        self.value3,
+                        self.value4,
+                        self.value5,
+                        self.value6,
+                        self.value7,
+                        self.value8,
+                        self.value9,
+                        self.value10,
+                        self.value11,
+                        self.value12,
+                        self.value13,
+                        self.value14
+                    ],
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1?.encode(to: encoder)
+                try self.value2?.encode(to: encoder)
+                try self.value3?.encode(to: encoder)
+                try self.value4?.encode(to: encoder)
+                try self.value5?.encode(to: encoder)
+                try self.value6?.encode(to: encoder)
+                try self.value7?.encode(to: encoder)
+                try self.value8?.encode(to: encoder)
+                try self.value9?.encode(to: encoder)
+                try self.value10?.encode(to: encoder)
+                try self.value11?.encode(to: encoder)
+                try self.value12?.encode(to: encoder)
+                try self.value13?.encode(to: encoder)
+                try self.value14?.encode(to: encoder)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopProvenance`.
+        public struct PersistenceChangeSetDesktopProvenance: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopProvenance/source`.
+            public var source: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopProvenance/actorId`.
+            public var actorId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopProvenance/details`.
+            public struct detailsPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `detailsPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopProvenance/details`.
+            public var details: Components.Schemas.PersistenceChangeSetDesktopProvenance.detailsPayload
+            /// Creates a new `PersistenceChangeSetDesktopProvenance`.
+            ///
+            /// - Parameters:
+            ///   - source:
+            ///   - actorId:
+            ///   - details:
+            public init(
+                source: Swift.String,
+                actorId: Swift.String? = nil,
+                details: Components.Schemas.PersistenceChangeSetDesktopProvenance.detailsPayload
+            ) {
+                self.source = source
+                self.actorId = actorId
+                self.details = details
+            }
+            public enum CodingKeys: String, CodingKey {
+                case source
+                case actorId
+                case details
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopReadEntry`.
+        public struct PersistenceChangeSetDesktopReadEntry: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopReadEntry/resource`.
+            @frozen public enum resourcePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case document = "document"
+                case module_record = "module_record"
+                case knowledge_node = "knowledge_node"
+                case knowledge_alias = "knowledge_alias"
+                case knowledge_relation = "knowledge_relation"
+                case evidence_anchor = "evidence_anchor"
+                case mention_link = "mention_link"
+                case assertion = "assertion"
+                case assertion_evidence = "assertion_evidence"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopReadEntry/resource`.
+            public var resource: Components.Schemas.PersistenceChangeSetDesktopReadEntry.resourcePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopReadEntry/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopReadEntry/expectedVersion`.
+            public var expectedVersion: Swift.Int32?
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopReadEntry/expectedRevisionId`.
+            public var expectedRevisionId: Swift.String?
+            /// Creates a new `PersistenceChangeSetDesktopReadEntry`.
+            ///
+            /// - Parameters:
+            ///   - resource:
+            ///   - id:
+            ///   - expectedVersion:
+            ///   - expectedRevisionId:
+            public init(
+                resource: Components.Schemas.PersistenceChangeSetDesktopReadEntry.resourcePayload,
+                id: Swift.String,
+                expectedVersion: Swift.Int32? = nil,
+                expectedRevisionId: Swift.String? = nil
+            ) {
+                self.resource = resource
+                self.id = id
+                self.expectedVersion = expectedVersion
+                self.expectedRevisionId = expectedRevisionId
+            }
+            public enum CodingKeys: String, CodingKey {
+                case resource
+                case id
+                case expectedVersion
+                case expectedRevisionId
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopResponseBody`.
+        public struct PersistenceChangeSetDesktopResponseBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopResponseBody/changeSet`.
+            public var changeSet: Components.Schemas.PersistenceChangeSetDesktopBody
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopResponseBody/receipt`.
+            public struct receiptPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopResponseBody/receipt/changeSet`.
+                public var changeSet: Components.Schemas.PersistenceChangeSetDesktopBody
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopResponseBody/receipt/resultsPayload`.
+                public struct resultsPayloadPayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `resultsPayloadPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopResponseBody/receipt/results`.
+                public typealias resultsPayload = [Components.Schemas.PersistenceChangeSetDesktopResponseBody.receiptPayload.resultsPayloadPayload]
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopResponseBody/receipt/results`.
+                public var results: Components.Schemas.PersistenceChangeSetDesktopResponseBody.receiptPayload.resultsPayload
+                /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopResponseBody/receipt/replayed`.
+                public var replayed: Swift.Bool
+                /// Creates a new `receiptPayload`.
+                ///
+                /// - Parameters:
+                ///   - changeSet:
+                ///   - results:
+                ///   - replayed:
+                public init(
+                    changeSet: Components.Schemas.PersistenceChangeSetDesktopBody,
+                    results: Components.Schemas.PersistenceChangeSetDesktopResponseBody.receiptPayload.resultsPayload,
+                    replayed: Swift.Bool
+                ) {
+                    self.changeSet = changeSet
+                    self.results = results
+                    self.replayed = replayed
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case changeSet
+                    case results
+                    case replayed
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopResponseBody/receipt`.
+            public var receipt: Components.Schemas.PersistenceChangeSetDesktopResponseBody.receiptPayload?
+            /// Creates a new `PersistenceChangeSetDesktopResponseBody`.
+            ///
+            /// - Parameters:
+            ///   - changeSet:
+            ///   - receipt:
+            public init(
+                changeSet: Components.Schemas.PersistenceChangeSetDesktopBody,
+                receipt: Components.Schemas.PersistenceChangeSetDesktopResponseBody.receiptPayload? = nil
+            ) {
+                self.changeSet = changeSet
+                self.receipt = receipt
+            }
+            public enum CodingKeys: String, CodingKey {
+                case changeSet
+                case receipt
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopResultBody`.
+        public struct PersistenceChangeSetDesktopResultBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopResultBody/changeSet`.
+            public var changeSet: Components.Schemas.PersistenceChangeSetDesktopBody
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopResultBody/replayed`.
+            public var replayed: Swift.Bool
+            /// Creates a new `PersistenceChangeSetDesktopResultBody`.
+            ///
+            /// - Parameters:
+            ///   - changeSet:
+            ///   - replayed:
+            public init(
+                changeSet: Components.Schemas.PersistenceChangeSetDesktopBody,
+                replayed: Swift.Bool
+            ) {
+                self.changeSet = changeSet
+                self.replayed = replayed
+            }
+            public enum CodingKeys: String, CodingKey {
+                case changeSet
+                case replayed
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopWriteEntry`.
+        public struct PersistenceChangeSetDesktopWriteEntry: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopWriteEntry/resource`.
+            @frozen public enum resourcePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case document = "document"
+                case module_record = "module_record"
+                case knowledge_node = "knowledge_node"
+                case knowledge_alias = "knowledge_alias"
+                case knowledge_relation = "knowledge_relation"
+                case evidence_anchor = "evidence_anchor"
+                case mention_link = "mention_link"
+                case assertion = "assertion"
+                case assertion_evidence = "assertion_evidence"
+            }
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopWriteEntry/resource`.
+            public var resource: Components.Schemas.PersistenceChangeSetDesktopWriteEntry.resourcePayload
+            /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetDesktopWriteEntry/id`.
+            public var id: Swift.String
+            /// Creates a new `PersistenceChangeSetDesktopWriteEntry`.
+            ///
+            /// - Parameters:
+            ///   - resource:
+            ///   - id:
+            public init(
+                resource: Components.Schemas.PersistenceChangeSetDesktopWriteEntry.resourcePayload,
+                id: Swift.String
+            ) {
+                self.resource = resource
+                self.id = id
+            }
+            public enum CodingKeys: String, CodingKey {
+                case resource
+                case id
             }
         }
         /// - Remark: Generated from `#/components/schemas/PersistenceChangeSetListBody`.
@@ -8521,6 +12005,8 @@ extension Components {
             public var nodes: [Components.Schemas.KnowledgeNodeBody]?
             /// - Remark: Generated from `#/components/schemas/PersistenceNodeListBody/nextCursor`.
             public var nextCursor: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PersistenceNodeListBody/projectVersion`.
+            public var projectVersion: Swift.Int32?
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `PersistenceNodeListBody`.
@@ -8528,19 +12014,23 @@ extension Components {
             /// - Parameters:
             ///   - nodes:
             ///   - nextCursor:
+            ///   - projectVersion:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
                 nodes: [Components.Schemas.KnowledgeNodeBody]? = nil,
                 nextCursor: Swift.String? = nil,
+                projectVersion: Swift.Int32? = nil,
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.nodes = nodes
                 self.nextCursor = nextCursor
+                self.projectVersion = projectVersion
                 self.additionalProperties = additionalProperties
             }
             public enum CodingKeys: String, CodingKey {
                 case nodes
                 case nextCursor
+                case projectVersion
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -8552,9 +12042,14 @@ extension Components {
                     Swift.String.self,
                     forKey: .nextCursor
                 )
+                self.projectVersion = try container.decodeIfPresent(
+                    Swift.Int32.self,
+                    forKey: .projectVersion
+                )
                 additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
                     "nodes",
-                    "nextCursor"
+                    "nextCursor",
+                    "projectVersion"
                 ])
             }
             public func encode(to encoder: any Swift.Encoder) throws {
@@ -8566,6 +12061,10 @@ extension Components {
                 try container.encodeIfPresent(
                     self.nextCursor,
                     forKey: .nextCursor
+                )
+                try container.encodeIfPresent(
+                    self.projectVersion,
+                    forKey: .projectVersion
                 )
                 try encoder.encodeAdditionalProperties(additionalProperties)
             }
@@ -9644,31 +13143,13 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse`.
         public struct ProjectSnapshotResponse: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse/snapshot`.
-            public struct snapshotPayload: Codable, Hashable, Sendable {
-                /// A container of undocumented properties.
-                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                /// Creates a new `snapshotPayload`.
-                ///
-                /// - Parameters:
-                ///   - additionalProperties: A container of undocumented properties.
-                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                    self.additionalProperties = additionalProperties
-                }
-                public init(from decoder: any Swift.Decoder) throws {
-                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                }
-                public func encode(to encoder: any Swift.Encoder) throws {
-                    try encoder.encodeAdditionalProperties(additionalProperties)
-                }
-            }
-            /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse/snapshot`.
-            public var snapshot: Components.Schemas.ProjectSnapshotResponse.snapshotPayload?
+            public var snapshot: Components.Schemas.SnapshotIdBody
             /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse/document`.
             public struct documentPayload: Codable, Hashable, Sendable {
                 /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse/document/path`.
-                public var path: Swift.String?
+                public var path: Swift.String
                 /// - Remark: Generated from `#/components/schemas/ProjectSnapshotResponse/document/revision`.
-                public var revision: Swift.String?
+                public var revision: Swift.String
                 /// A container of undocumented properties.
                 public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
                 /// Creates a new `documentPayload`.
@@ -9678,8 +13159,8 @@ extension Components {
                 ///   - revision:
                 ///   - additionalProperties: A container of undocumented properties.
                 public init(
-                    path: Swift.String? = nil,
-                    revision: Swift.String? = nil,
+                    path: Swift.String,
+                    revision: Swift.String,
                     additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
                 ) {
                     self.path = path
@@ -9692,11 +13173,11 @@ extension Components {
                 }
                 public init(from decoder: any Swift.Decoder) throws {
                     let container = try decoder.container(keyedBy: CodingKeys.self)
-                    self.path = try container.decodeIfPresent(
+                    self.path = try container.decode(
                         Swift.String.self,
                         forKey: .path
                     )
-                    self.revision = try container.decodeIfPresent(
+                    self.revision = try container.decode(
                         Swift.String.self,
                         forKey: .revision
                     )
@@ -9707,11 +13188,11 @@ extension Components {
                 }
                 public func encode(to encoder: any Swift.Encoder) throws {
                     var container = encoder.container(keyedBy: CodingKeys.self)
-                    try container.encodeIfPresent(
+                    try container.encode(
                         self.path,
                         forKey: .path
                     )
-                    try container.encodeIfPresent(
+                    try container.encode(
                         self.revision,
                         forKey: .revision
                     )
@@ -9729,7 +13210,7 @@ extension Components {
             ///   - document:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                snapshot: Components.Schemas.ProjectSnapshotResponse.snapshotPayload? = nil,
+                snapshot: Components.Schemas.SnapshotIdBody,
                 document: Components.Schemas.ProjectSnapshotResponse.documentPayload? = nil,
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
@@ -9743,8 +13224,8 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.snapshot = try container.decodeIfPresent(
-                    Components.Schemas.ProjectSnapshotResponse.snapshotPayload.self,
+                self.snapshot = try container.decode(
+                    Components.Schemas.SnapshotIdBody.self,
                     forKey: .snapshot
                 )
                 self.document = try container.decodeIfPresent(
@@ -9758,7 +13239,7 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.snapshot,
                     forKey: .snapshot
                 )
@@ -10169,33 +13650,13 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody`.
         public struct ProposalApplyReceiptBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody/operationId`.
-            public var operationId: Swift.String?
+            public var operationId: Swift.String
             /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody/generation`.
-            public var generation: Swift.Int32?
+            public var generation: Swift.Int32
             /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody/projectVersion`.
-            public var projectVersion: Swift.Int32?
-            /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody/revisionsPayload`.
-            public struct revisionsPayloadPayload: Codable, Hashable, Sendable {
-                /// A container of undocumented properties.
-                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
-                /// Creates a new `revisionsPayloadPayload`.
-                ///
-                /// - Parameters:
-                ///   - additionalProperties: A container of undocumented properties.
-                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
-                    self.additionalProperties = additionalProperties
-                }
-                public init(from decoder: any Swift.Decoder) throws {
-                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
-                }
-                public func encode(to encoder: any Swift.Encoder) throws {
-                    try encoder.encodeAdditionalProperties(additionalProperties)
-                }
-            }
+            public var projectVersion: Swift.Int32
             /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody/revisions`.
-            public typealias revisionsPayload = [Components.Schemas.ProposalApplyReceiptBody.revisionsPayloadPayload]
-            /// - Remark: Generated from `#/components/schemas/ProposalApplyReceiptBody/revisions`.
-            public var revisions: Components.Schemas.ProposalApplyReceiptBody.revisionsPayload?
+            public var revisions: [Components.Schemas.CoreProposalFileRevisionBody]
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `ProposalApplyReceiptBody`.
@@ -10207,10 +13668,10 @@ extension Components {
             ///   - revisions:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                operationId: Swift.String? = nil,
-                generation: Swift.Int32? = nil,
-                projectVersion: Swift.Int32? = nil,
-                revisions: Components.Schemas.ProposalApplyReceiptBody.revisionsPayload? = nil,
+                operationId: Swift.String,
+                generation: Swift.Int32,
+                projectVersion: Swift.Int32,
+                revisions: [Components.Schemas.CoreProposalFileRevisionBody],
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.operationId = operationId
@@ -10227,20 +13688,20 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.operationId = try container.decodeIfPresent(
+                self.operationId = try container.decode(
                     Swift.String.self,
                     forKey: .operationId
                 )
-                self.generation = try container.decodeIfPresent(
+                self.generation = try container.decode(
                     Swift.Int32.self,
                     forKey: .generation
                 )
-                self.projectVersion = try container.decodeIfPresent(
+                self.projectVersion = try container.decode(
                     Swift.Int32.self,
                     forKey: .projectVersion
                 )
-                self.revisions = try container.decodeIfPresent(
-                    Components.Schemas.ProposalApplyReceiptBody.revisionsPayload.self,
+                self.revisions = try container.decode(
+                    [Components.Schemas.CoreProposalFileRevisionBody].self,
                     forKey: .revisions
                 )
                 additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
@@ -10252,19 +13713,19 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.operationId,
                     forKey: .operationId
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.generation,
                     forKey: .generation
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.projectVersion,
                     forKey: .projectVersion
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.revisions,
                     forKey: .revisions
                 )
@@ -10274,7 +13735,7 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/ProposalListBody`.
         public struct ProposalListBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ProposalListBody/proposals`.
-            public var proposals: [Components.Schemas.CoreProposalStatusBody]?
+            public var proposals: [Components.Schemas.CoreProposalStatusBody]
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `ProposalListBody`.
@@ -10283,7 +13744,7 @@ extension Components {
             ///   - proposals:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                proposals: [Components.Schemas.CoreProposalStatusBody]? = nil,
+                proposals: [Components.Schemas.CoreProposalStatusBody],
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.proposals = proposals
@@ -10294,7 +13755,7 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.proposals = try container.decodeIfPresent(
+                self.proposals = try container.decode(
                     [Components.Schemas.CoreProposalStatusBody].self,
                     forKey: .proposals
                 )
@@ -10304,7 +13765,7 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.proposals,
                     forKey: .proposals
                 )
@@ -10357,9 +13818,9 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/PublicJobBody`.
         public struct PublicJobBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/PublicJobBody/id`.
-            public var id: Swift.String?
+            public var id: Swift.String
             /// - Remark: Generated from `#/components/schemas/PublicJobBody/type`.
-            public var _type: Swift.String?
+            public var _type: Swift.String
             /// - Remark: Generated from `#/components/schemas/PublicJobBody/status`.
             @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
                 case queued = "queued"
@@ -10368,11 +13829,11 @@ extension Components {
                 case error = "error"
             }
             /// - Remark: Generated from `#/components/schemas/PublicJobBody/status`.
-            public var status: Components.Schemas.PublicJobBody.statusPayload?
+            public var status: Components.Schemas.PublicJobBody.statusPayload
             /// - Remark: Generated from `#/components/schemas/PublicJobBody/progress`.
             public var progress: Swift.Double?
             /// - Remark: Generated from `#/components/schemas/PublicJobBody/result`.
-            public var result: OpenAPIRuntime.OpenAPIValueContainer?
+            public var result: OpenAPIRuntime.OpenAPIValueContainer
             /// - Remark: Generated from `#/components/schemas/PublicJobBody/error`.
             public var error: Swift.String?
             /// - Remark: Generated from `#/components/schemas/PublicJobBody/errorCode`.
@@ -10380,9 +13841,9 @@ extension Components {
             /// - Remark: Generated from `#/components/schemas/PublicJobBody/retryable`.
             public var retryable: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/PublicJobBody/createdAt`.
-            public var createdAt: Foundation.Date?
+            public var createdAt: Foundation.Date
             /// - Remark: Generated from `#/components/schemas/PublicJobBody/updatedAt`.
-            public var updatedAt: Foundation.Date?
+            public var updatedAt: Foundation.Date
             /// - Remark: Generated from `#/components/schemas/PublicJobBody/finishedAt`.
             public var finishedAt: Foundation.Date?
             /// A container of undocumented properties.
@@ -10403,16 +13864,16 @@ extension Components {
             ///   - finishedAt:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                id: Swift.String? = nil,
-                _type: Swift.String? = nil,
-                status: Components.Schemas.PublicJobBody.statusPayload? = nil,
+                id: Swift.String,
+                _type: Swift.String,
+                status: Components.Schemas.PublicJobBody.statusPayload,
                 progress: Swift.Double? = nil,
-                result: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                result: OpenAPIRuntime.OpenAPIValueContainer,
                 error: Swift.String? = nil,
                 errorCode: Swift.String? = nil,
                 retryable: Swift.Bool? = nil,
-                createdAt: Foundation.Date? = nil,
-                updatedAt: Foundation.Date? = nil,
+                createdAt: Foundation.Date,
+                updatedAt: Foundation.Date,
                 finishedAt: Foundation.Date? = nil,
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
@@ -10444,15 +13905,15 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.id = try container.decodeIfPresent(
+                self.id = try container.decode(
                     Swift.String.self,
                     forKey: .id
                 )
-                self._type = try container.decodeIfPresent(
+                self._type = try container.decode(
                     Swift.String.self,
                     forKey: ._type
                 )
-                self.status = try container.decodeIfPresent(
+                self.status = try container.decode(
                     Components.Schemas.PublicJobBody.statusPayload.self,
                     forKey: .status
                 )
@@ -10460,7 +13921,7 @@ extension Components {
                     Swift.Double.self,
                     forKey: .progress
                 )
-                self.result = try container.decodeIfPresent(
+                self.result = try container.decode(
                     OpenAPIRuntime.OpenAPIValueContainer.self,
                     forKey: .result
                 )
@@ -10476,11 +13937,11 @@ extension Components {
                     Swift.Bool.self,
                     forKey: .retryable
                 )
-                self.createdAt = try container.decodeIfPresent(
+                self.createdAt = try container.decode(
                     Foundation.Date.self,
                     forKey: .createdAt
                 )
-                self.updatedAt = try container.decodeIfPresent(
+                self.updatedAt = try container.decode(
                     Foundation.Date.self,
                     forKey: .updatedAt
                 )
@@ -10504,15 +13965,15 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.id,
                     forKey: .id
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self._type,
                     forKey: ._type
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.status,
                     forKey: .status
                 )
@@ -10520,7 +13981,7 @@ extension Components {
                     self.progress,
                     forKey: .progress
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.result,
                     forKey: .result
                 )
@@ -10536,11 +13997,11 @@ extension Components {
                     self.retryable,
                     forKey: .retryable
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.createdAt,
                     forKey: .createdAt
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.updatedAt,
                     forKey: .updatedAt
                 )
@@ -10799,7 +14260,7 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/RecentActivityBody`.
         public struct RecentActivityBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/RecentActivityBody/items`.
-            public var items: [Components.Schemas.RecentActivityItemBody]?
+            public var items: [Components.Schemas.RecentActivityItemBody]
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `RecentActivityBody`.
@@ -10808,7 +14269,7 @@ extension Components {
             ///   - items:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                items: [Components.Schemas.RecentActivityItemBody]? = nil,
+                items: [Components.Schemas.RecentActivityItemBody],
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.items = items
@@ -10819,7 +14280,7 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.items = try container.decodeIfPresent(
+                self.items = try container.decode(
                     [Components.Schemas.RecentActivityItemBody].self,
                     forKey: .items
                 )
@@ -10829,7 +14290,7 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.items,
                     forKey: .items
                 )
@@ -10839,7 +14300,7 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody`.
         public struct RecentActivityItemBody: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody/sceneId`.
-            public var sceneId: Swift.String?
+            public var sceneId: Swift.String
             /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody/sentenceOffset`.
             public var sentenceOffset: Swift.Int32?
             /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody/pageIndex`.
@@ -10850,9 +14311,9 @@ extension Components {
                 case mobile = "mobile"
             }
             /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody/deviceType`.
-            public var deviceType: Components.Schemas.RecentActivityItemBody.deviceTypePayload?
+            public var deviceType: Components.Schemas.RecentActivityItemBody.deviceTypePayload
             /// - Remark: Generated from `#/components/schemas/RecentActivityItemBody/updatedAt`.
-            public var updatedAt: Foundation.Date?
+            public var updatedAt: Foundation.Date
             /// A container of undocumented properties.
             public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
             /// Creates a new `RecentActivityItemBody`.
@@ -10865,11 +14326,11 @@ extension Components {
             ///   - updatedAt:
             ///   - additionalProperties: A container of undocumented properties.
             public init(
-                sceneId: Swift.String? = nil,
+                sceneId: Swift.String,
                 sentenceOffset: Swift.Int32? = nil,
                 pageIndex: Swift.Int32? = nil,
-                deviceType: Components.Schemas.RecentActivityItemBody.deviceTypePayload? = nil,
-                updatedAt: Foundation.Date? = nil,
+                deviceType: Components.Schemas.RecentActivityItemBody.deviceTypePayload,
+                updatedAt: Foundation.Date,
                 additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
             ) {
                 self.sceneId = sceneId
@@ -10888,7 +14349,7 @@ extension Components {
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                self.sceneId = try container.decodeIfPresent(
+                self.sceneId = try container.decode(
                     Swift.String.self,
                     forKey: .sceneId
                 )
@@ -10900,11 +14361,11 @@ extension Components {
                     Swift.Int32.self,
                     forKey: .pageIndex
                 )
-                self.deviceType = try container.decodeIfPresent(
+                self.deviceType = try container.decode(
                     Components.Schemas.RecentActivityItemBody.deviceTypePayload.self,
                     forKey: .deviceType
                 )
-                self.updatedAt = try container.decodeIfPresent(
+                self.updatedAt = try container.decode(
                     Foundation.Date.self,
                     forKey: .updatedAt
                 )
@@ -10918,7 +14379,7 @@ extension Components {
             }
             public func encode(to encoder: any Swift.Encoder) throws {
                 var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(
+                try container.encode(
                     self.sceneId,
                     forKey: .sceneId
                 )
@@ -10930,11 +14391,11 @@ extension Components {
                     self.pageIndex,
                     forKey: .pageIndex
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.deviceType,
                     forKey: .deviceType
                 )
-                try container.encodeIfPresent(
+                try container.encode(
                     self.updatedAt,
                     forKey: .updatedAt
                 )
@@ -11758,6 +15219,61 @@ extension Components {
                 try container.encodeIfPresent(
                     self.length,
                     forKey: .length
+                )
+                try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/SnapshotIdBody`.
+        public struct SnapshotIdBody: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/SnapshotIdBody/projectId`.
+            public var projectId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/SnapshotIdBody/projectVersion`.
+            public var projectVersion: Swift.Int32
+            /// A container of undocumented properties.
+            public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+            /// Creates a new `SnapshotIdBody`.
+            ///
+            /// - Parameters:
+            ///   - projectId:
+            ///   - projectVersion:
+            ///   - additionalProperties: A container of undocumented properties.
+            public init(
+                projectId: Swift.String,
+                projectVersion: Swift.Int32,
+                additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()
+            ) {
+                self.projectId = projectId
+                self.projectVersion = projectVersion
+                self.additionalProperties = additionalProperties
+            }
+            public enum CodingKeys: String, CodingKey {
+                case projectId
+                case projectVersion
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.projectId = try container.decode(
+                    Swift.String.self,
+                    forKey: .projectId
+                )
+                self.projectVersion = try container.decode(
+                    Swift.Int32.self,
+                    forKey: .projectVersion
+                )
+                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [
+                    "projectId",
+                    "projectVersion"
+                ])
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(
+                    self.projectId,
+                    forKey: .projectId
+                )
+                try container.encode(
+                    self.projectVersion,
+                    forKey: .projectVersion
                 )
                 try encoder.encodeAdditionalProperties(additionalProperties)
             }
@@ -12702,6 +16218,365 @@ extension Components {
                     forKey: .unresolved
                 )
                 try encoder.encodeAdditionalProperties(additionalProperties)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExport`.
+        public struct WorkArchiveExport: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExport/format`.
+            @frozen public enum formatPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case codexia_hyphen_work_sol_v1 = "codexia-work/v1"
+            }
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExport/format`.
+            public var format: Components.Schemas.WorkArchiveExport.formatPayload
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExport/project`.
+            public var project: Components.Schemas.WorkArchiveExportProject
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExport/documents`.
+            public var documents: [Components.Schemas.WorkArchiveExportDocument]
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExport/knowledge`.
+            public var knowledge: Components.Schemas.WorkArchiveExportKnowledge
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExport/evidence`.
+            public var evidence: Components.Schemas.WorkArchiveExportEvidence
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExport/moduleRecords`.
+            public var moduleRecords: [Components.Schemas.WorkArchiveExportModuleRecord]
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExport/omittedRecords`.
+            public var omittedRecords: [Swift.String]
+            /// Creates a new `WorkArchiveExport`.
+            ///
+            /// - Parameters:
+            ///   - format:
+            ///   - project:
+            ///   - documents:
+            ///   - knowledge:
+            ///   - evidence:
+            ///   - moduleRecords:
+            ///   - omittedRecords:
+            public init(
+                format: Components.Schemas.WorkArchiveExport.formatPayload,
+                project: Components.Schemas.WorkArchiveExportProject,
+                documents: [Components.Schemas.WorkArchiveExportDocument],
+                knowledge: Components.Schemas.WorkArchiveExportKnowledge,
+                evidence: Components.Schemas.WorkArchiveExportEvidence,
+                moduleRecords: [Components.Schemas.WorkArchiveExportModuleRecord],
+                omittedRecords: [Swift.String]
+            ) {
+                self.format = format
+                self.project = project
+                self.documents = documents
+                self.knowledge = knowledge
+                self.evidence = evidence
+                self.moduleRecords = moduleRecords
+                self.omittedRecords = omittedRecords
+            }
+            public enum CodingKeys: String, CodingKey {
+                case format
+                case project
+                case documents
+                case knowledge
+                case evidence
+                case moduleRecords
+                case omittedRecords
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportAnchor`.
+        public struct WorkArchiveExportAnchor: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportAnchor/value1`.
+            public var value1: Components.Schemas.WorkArchiveAnchor
+            /// Creates a new `WorkArchiveExportAnchor`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            public init(value1: Components.Schemas.WorkArchiveAnchor) {
+                self.value1 = value1
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                self.value1 = try .init(from: decoder)
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1.encode(to: encoder)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportAssertion`.
+        public struct WorkArchiveExportAssertion: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportAssertion/value1`.
+            public var value1: Components.Schemas.WorkArchiveAssertion
+            /// Creates a new `WorkArchiveExportAssertion`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            public init(value1: Components.Schemas.WorkArchiveAssertion) {
+                self.value1 = value1
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                self.value1 = try .init(from: decoder)
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1.encode(to: encoder)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportAssertionEvidence`.
+        public struct WorkArchiveExportAssertionEvidence: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportAssertionEvidence/value1`.
+            public var value1: Components.Schemas.WorkArchiveAssertionEvidence
+            /// Creates a new `WorkArchiveExportAssertionEvidence`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            public init(value1: Components.Schemas.WorkArchiveAssertionEvidence) {
+                self.value1 = value1
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                self.value1 = try .init(from: decoder)
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1.encode(to: encoder)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportDocument`.
+        public struct WorkArchiveExportDocument: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportDocument/value1`.
+            public var value1: Components.Schemas.WorkArchiveDocument
+            /// Creates a new `WorkArchiveExportDocument`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            public init(value1: Components.Schemas.WorkArchiveDocument) {
+                self.value1 = value1
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                self.value1 = try .init(from: decoder)
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1.encode(to: encoder)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportEvidence`.
+        public struct WorkArchiveExportEvidence: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportEvidence/anchors`.
+            public var anchors: [Components.Schemas.WorkArchiveExportAnchor]
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportEvidence/mentions`.
+            public var mentions: [Components.Schemas.WorkArchiveExportMention]
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportEvidence/assertions`.
+            public var assertions: [Components.Schemas.WorkArchiveExportAssertion]
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportEvidence/assertionEvidence`.
+            public var assertionEvidence: [Components.Schemas.WorkArchiveExportAssertionEvidence]
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportEvidence/unresolved`.
+            public var unresolved: Components.Schemas.WorkArchiveExportUnresolvedEvidence
+            /// Creates a new `WorkArchiveExportEvidence`.
+            ///
+            /// - Parameters:
+            ///   - anchors:
+            ///   - mentions:
+            ///   - assertions:
+            ///   - assertionEvidence:
+            ///   - unresolved:
+            public init(
+                anchors: [Components.Schemas.WorkArchiveExportAnchor],
+                mentions: [Components.Schemas.WorkArchiveExportMention],
+                assertions: [Components.Schemas.WorkArchiveExportAssertion],
+                assertionEvidence: [Components.Schemas.WorkArchiveExportAssertionEvidence],
+                unresolved: Components.Schemas.WorkArchiveExportUnresolvedEvidence
+            ) {
+                self.anchors = anchors
+                self.mentions = mentions
+                self.assertions = assertions
+                self.assertionEvidence = assertionEvidence
+                self.unresolved = unresolved
+            }
+            public enum CodingKeys: String, CodingKey {
+                case anchors
+                case mentions
+                case assertions
+                case assertionEvidence
+                case unresolved
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportKnowledge`.
+        public struct WorkArchiveExportKnowledge: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportKnowledge/nodes`.
+            public var nodes: [Components.Schemas.WorkArchiveExportKnowledgeNode]
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportKnowledge/aliases`.
+            public var aliases: [Components.Schemas.WorkArchiveExportKnowledgeAlias]
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportKnowledge/relations`.
+            public var relations: [Components.Schemas.WorkArchiveExportKnowledgeRelation]
+            /// Creates a new `WorkArchiveExportKnowledge`.
+            ///
+            /// - Parameters:
+            ///   - nodes:
+            ///   - aliases:
+            ///   - relations:
+            public init(
+                nodes: [Components.Schemas.WorkArchiveExportKnowledgeNode],
+                aliases: [Components.Schemas.WorkArchiveExportKnowledgeAlias],
+                relations: [Components.Schemas.WorkArchiveExportKnowledgeRelation]
+            ) {
+                self.nodes = nodes
+                self.aliases = aliases
+                self.relations = relations
+            }
+            public enum CodingKeys: String, CodingKey {
+                case nodes
+                case aliases
+                case relations
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportKnowledgeAlias`.
+        public struct WorkArchiveExportKnowledgeAlias: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportKnowledgeAlias/value1`.
+            public var value1: Components.Schemas.WorkArchiveKnowledgeAlias
+            /// Creates a new `WorkArchiveExportKnowledgeAlias`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            public init(value1: Components.Schemas.WorkArchiveKnowledgeAlias) {
+                self.value1 = value1
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                self.value1 = try .init(from: decoder)
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1.encode(to: encoder)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportKnowledgeNode`.
+        public struct WorkArchiveExportKnowledgeNode: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportKnowledgeNode/value1`.
+            public var value1: Components.Schemas.WorkArchiveKnowledgeNode
+            /// Creates a new `WorkArchiveExportKnowledgeNode`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            public init(value1: Components.Schemas.WorkArchiveKnowledgeNode) {
+                self.value1 = value1
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                self.value1 = try .init(from: decoder)
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1.encode(to: encoder)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportKnowledgeRelation`.
+        public struct WorkArchiveExportKnowledgeRelation: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportKnowledgeRelation/value1`.
+            public var value1: Components.Schemas.WorkArchiveKnowledgeRelation
+            /// Creates a new `WorkArchiveExportKnowledgeRelation`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            public init(value1: Components.Schemas.WorkArchiveKnowledgeRelation) {
+                self.value1 = value1
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                self.value1 = try .init(from: decoder)
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1.encode(to: encoder)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportMention`.
+        public struct WorkArchiveExportMention: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportMention/value1`.
+            public var value1: Components.Schemas.WorkArchiveMention
+            /// Creates a new `WorkArchiveExportMention`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            public init(value1: Components.Schemas.WorkArchiveMention) {
+                self.value1 = value1
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                self.value1 = try .init(from: decoder)
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1.encode(to: encoder)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportModuleRecord`.
+        public struct WorkArchiveExportModuleRecord: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportModuleRecord/value1`.
+            public var value1: Components.Schemas.WorkArchiveModuleRecord
+            /// Creates a new `WorkArchiveExportModuleRecord`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            public init(value1: Components.Schemas.WorkArchiveModuleRecord) {
+                self.value1 = value1
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                self.value1 = try .init(from: decoder)
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                try self.value1.encode(to: encoder)
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportProject`.
+        public struct WorkArchiveExportProject: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportProject/title`.
+            public var title: Swift.String
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportProject/settings`.
+            public struct settingsPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `settingsPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportProject/settings`.
+            public var settings: Components.Schemas.WorkArchiveExportProject.settingsPayload
+            /// Creates a new `WorkArchiveExportProject`.
+            ///
+            /// - Parameters:
+            ///   - title:
+            ///   - settings:
+            public init(
+                title: Swift.String,
+                settings: Components.Schemas.WorkArchiveExportProject.settingsPayload
+            ) {
+                self.title = title
+                self.settings = settings
+            }
+            public enum CodingKeys: String, CodingKey {
+                case title
+                case settings
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/WorkArchiveExportUnresolvedEvidence`.
+        public struct WorkArchiveExportUnresolvedEvidence: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportUnresolvedEvidence/anchors`.
+            public var anchors: [Components.Schemas.WorkArchiveExportAnchor]
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportUnresolvedEvidence/mentions`.
+            public var mentions: [Components.Schemas.WorkArchiveExportMention]
+            /// - Remark: Generated from `#/components/schemas/WorkArchiveExportUnresolvedEvidence/assertionEvidence`.
+            public var assertionEvidence: [Components.Schemas.WorkArchiveExportAssertionEvidence]
+            /// Creates a new `WorkArchiveExportUnresolvedEvidence`.
+            ///
+            /// - Parameters:
+            ///   - anchors:
+            ///   - mentions:
+            ///   - assertionEvidence:
+            public init(
+                anchors: [Components.Schemas.WorkArchiveExportAnchor],
+                mentions: [Components.Schemas.WorkArchiveExportMention],
+                assertionEvidence: [Components.Schemas.WorkArchiveExportAssertionEvidence]
+            ) {
+                self.anchors = anchors
+                self.mentions = mentions
+                self.assertionEvidence = assertionEvidence
+            }
+            public enum CodingKeys: String, CodingKey {
+                case anchors
+                case mentions
+                case assertionEvidence
             }
         }
         /// - Remark: Generated from `#/components/schemas/WorkArchiveKnowledge`.

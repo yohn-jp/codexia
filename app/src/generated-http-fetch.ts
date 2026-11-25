@@ -1,17 +1,25 @@
-import type { ResponseGuard } from "./api-response";
+import type { ApiTransportPolicy } from './api-transport';
+import { requestApi, requestApiEventStream, requestApiNoContent } from './api-transport';
 
-type Request = <T>(guard: ResponseGuard<T>, path: string, init: RequestInit) => Promise<T>;
-
-interface GeneratedFetchOptions extends RequestInit {
-  request?: Request;
+export interface GeneratedHttpOptions extends RequestInit {
+  transport?: ApiTransportPolicy;
+  fetcher?: typeof fetch;
+  responseMode?: 'json' | 'raw' | 'no-content';
   schema?: { safeParse(value: unknown): { success: boolean } };
 }
 
+/** Orval mutator: validate generated JSON schemas through the shared API boundary. */
 export function generatedHttpFetch<T>(
   path: string,
-  { request, schema, ...init }: GeneratedFetchOptions,
+  { transport, fetcher, responseMode, schema, ...init }: GeneratedHttpOptions,
 ): Promise<T> {
-  if (!request || !schema) throw new TypeError("A generated HTTP request requires the API transport and response schema");
-  // The API response boundary preserves additive fields after validation.
-  return request((value): value is T => schema.safeParse(value).success, path, init);
+  if (responseMode === 'raw') {
+    return requestApiEventStream(path, init, transport, fetcher) as Promise<T>;
+  }
+  if (responseMode === 'no-content') {
+    return requestApiNoContent(path, init, transport, fetcher) as Promise<T>;
+  }
+  if (!schema) throw new TypeError('A generated HTTP request requires a response schema');
+  const guard = (value: unknown): value is T => schema.safeParse(value).success;
+  return requestApi<T>(guard, path, init, transport, fetcher);
 }

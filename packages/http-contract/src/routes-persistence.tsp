@@ -31,7 +31,7 @@ op updatePersistenceProject(@path projectId: string, @body body: PersistenceProj
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/archive") @get @operationId("persistence_project_archive_get")
-op exportPersistenceArchive(@path projectId: string): WorkArchive | { @statusCode _: 404; @body body: ApiError; };
+op exportPersistenceArchive(@path projectId: string): WorkArchiveExport | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents") @get @operationId("persistence_documents_get")
@@ -100,6 +100,9 @@ op createAnchorMention(@path projectId: string, @path documentId: string, @path 
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/nodes") @get @operationId("persistence_nodes_get")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "The public route preserves its legacy unfiltered list response with nodes only, while the browsed response includes nextCursor and projectVersion. Desktop only calls the browsed form and validates the strict generated page projection.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopPersistenceNodeListBody")
 op listPersistenceNodes(@path projectId: string, @query q?: string, @query type?: string, @query status?: string, @query limit?: int32, @query cursor?: string, @query projectVersion?: int32): PersistenceNodeListBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
@@ -148,6 +151,9 @@ op createPersistenceAssertionEvidence(@path projectId: string, @path assertionId
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/changesets") @get @operationId("persistence_changesets_get")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "The public response keeps the approved compatibility schema; the selected Desktop client validates the strict generated ChangeSet projection until an epoch-compatible public schema update.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/PersistenceChangeSetDesktopListBody")
 op listPersistenceChangeSets(@path projectId: string, @query limit?: int32): PersistenceChangeSetListBody | { @statusCode _: 400; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
@@ -156,20 +162,35 @@ op proposePersistenceChangeSet(@path projectId: string, @body body: ProposeChang
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}") @get @operationId("persistence_changeset_get")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "The public response keeps the approved compatibility schema; the selected Desktop client validates the strict generated ChangeSet projection until an epoch-compatible public schema update.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/PersistenceChangeSetDesktopResponseBody")
 op getPersistenceChangeSet(@path projectId: string, @path changeSetId: string): PersistenceChangeSetResponseBody | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/approve") @post @operationId("persistence_changeset_approve_post")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "The public response keeps the approved compatibility schema; the selected Desktop client validates the strict generated ChangeSet projection until an epoch-compatible public schema update.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/PersistenceChangeSetDesktopApprovalBody")
 op approvePersistenceChangeSet(@path projectId: string, @path changeSetId: string, @body body: ChangeSetActionRequest): PersistenceChangeSetApprovalBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/reject") @post @operationId("persistence_changeset_reject_post")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "The public response keeps the approved compatibility schema; the selected Desktop client validates the strict generated ChangeSet projection until an epoch-compatible public schema update.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/PersistenceChangeSetDesktopApprovalBody")
 op rejectPersistenceChangeSet(@path projectId: string, @path changeSetId: string, @body body: ChangeSetActionRequest): PersistenceChangeSetApprovalBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/apply") @post @operationId("persistence_changeset_apply_post")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "The public response keeps the approved compatibility schema; the selected Desktop client validates the strict generated ChangeSet projection until an epoch-compatible public schema update.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/PersistenceChangeSetDesktopApplicationBody")
 op applyPersistenceChangeSet(@path projectId: string, @path changeSetId: string, @body body: ChangeSetActionRequest): PersistenceChangeSetApplicationBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/review-feed") @get @operationId("persistence_review_feed_get")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "The public response keeps the approved compatibility schema; the selected Desktop client validates the strict generated ChangeSet and core-proposal feed projection until an epoch-compatible public schema update.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopReviewFeedBody")
 op getPersistenceReviewFeed(@path projectId: string, @query limit?: int32): PersistenceReviewFeedBody | { @statusCode _: 403; @body body: ApiError; };

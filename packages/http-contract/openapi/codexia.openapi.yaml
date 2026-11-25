@@ -412,9 +412,7 @@ paths:
           content:
             application/json:
               schema:
-                anyOf:
-                  - $ref: '#/components/schemas/OwnerSetupState'
-                  - $ref: '#/components/schemas/OwnerSetupEnrolled'
+                $ref: '#/components/schemas/OwnerSetupStatusResponse'
         '403':
           description: Access is forbidden.
           headers:
@@ -529,7 +527,8 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - auth-adapter
-      x-codexia-runtime-response-deviation: Runtime serializes the consent list as a top-level array; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.
+      x-codexia-desktop-response-schema: '#/components/schemas/OAuthConsentRowList'
+      x-codexia-runtime-response-deviation: Runtime serializes the consent list as a top-level array; the approved baseline response body is an object. Keep the published compatibility schema unchanged and use the Codexia desktop response projection metadata for the verified typed array shape until an approved compatibility correction.
       x-codexia-security-deviation: The approved baseline encodes BearerAuth. Runtime requires the Better Auth owner-session cookie; this security representation remains incomplete pending an approved compatibility baseline correction.
       x-codexia-principal: OWNER-SESSION; same-origin request
       x-codexia-contract-status: incomplete
@@ -548,6 +547,7 @@ paths:
         - health
       security:
         - {}
+      x-codexia-desktop-response-schema: '#/components/schemas/DesktopVersionResponse'
       x-codexia-runtime-response-deviation: The runtime and OCI probes use a numeric contractVersion; the API epoch baseline documents a string.
       x-codexia-contract-status: incomplete
     head:
@@ -1146,6 +1146,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - jobs
+      x-codexia-desktop-response-schema: '#/components/schemas/DesktopJobList'
       x-codexia-runtime-response-deviation: Runtime serializes the public job collection as a top-level array; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.
       x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
@@ -1216,6 +1217,9 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - jobs
+      x-codexia-desktop-response-schema: '#/components/schemas/DesktopPublicJobBody'
+      x-codexia-runtime-response-deviation: Desktop validates progress between zero and one. The API epoch baseline keeps the nullable progress number schema.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/projects:
     get:
@@ -1418,6 +1422,9 @@ paths:
             schema:
               type: object
               additionalProperties: {}
+      x-codexia-desktop-response-schema: '#/components/schemas/DesktopActionResultBody'
+      x-codexia-runtime-response-deviation: Desktop validates the success and failure variants of the synchronous Action result; the API epoch baseline retains the published object schema.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:compute|propose)
   /api/projects/{projectId}/apply:
     post:
@@ -1515,6 +1522,7 @@ paths:
                 additionalProperties: {}
       tags:
         - projects
+      x-codexia-desktop-response-schema: '#/components/schemas/DesktopContributionList'
       x-codexia-runtime-response-deviation: Runtime emits an array of HTTP contribution descriptors; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.
       x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -1657,6 +1665,7 @@ paths:
                 additionalProperties: {}
       tags:
         - projects
+      x-codexia-desktop-response-schema: '#/components/schemas/DesktopModuleList'
       x-codexia-runtime-response-deviation: Runtime emits an array of module status objects; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.
       x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API | assigned MCP-CLIENT(mcp:read)
@@ -2726,7 +2735,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WorkArchive'
+                $ref: '#/components/schemas/WorkArchiveExport'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -2935,6 +2944,9 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - persistence
+      x-codexia-desktop-response-schema: '#/components/schemas/PersistenceChangeSetDesktopListBody'
+      x-codexia-runtime-response-deviation: The public response keeps the approved compatibility schema; the selected Desktop client validates the strict generated ChangeSet projection until an epoch-compatible public schema update.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
     post:
       operationId: persistence_changesets_post
@@ -3006,6 +3018,9 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - persistence
+      x-codexia-desktop-response-schema: '#/components/schemas/PersistenceChangeSetDesktopResponseBody'
+      x-codexia-runtime-response-deviation: The public response keeps the approved compatibility schema; the selected Desktop client validates the strict generated ChangeSet projection until an epoch-compatible public schema update.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/apply:
     post:
@@ -3054,6 +3069,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ChangeSetActionRequest'
+      x-codexia-desktop-response-schema: '#/components/schemas/PersistenceChangeSetDesktopApplicationBody'
+      x-codexia-runtime-response-deviation: The public response keeps the approved compatibility schema; the selected Desktop client validates the strict generated ChangeSet projection until an epoch-compatible public schema update.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/approve:
     post:
@@ -3102,6 +3120,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ChangeSetActionRequest'
+      x-codexia-desktop-response-schema: '#/components/schemas/PersistenceChangeSetDesktopApprovalBody'
+      x-codexia-runtime-response-deviation: The public response keeps the approved compatibility schema; the selected Desktop client validates the strict generated ChangeSet projection until an epoch-compatible public schema update.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/reject:
     post:
@@ -3150,6 +3171,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ChangeSetActionRequest'
+      x-codexia-desktop-response-schema: '#/components/schemas/PersistenceChangeSetDesktopApprovalBody'
+      x-codexia-runtime-response-deviation: The public response keeps the approved compatibility schema; the selected Desktop client validates the strict generated ChangeSet projection until an epoch-compatible public schema update.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/documents:
     get:
@@ -3869,6 +3893,9 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - persistence
+      x-codexia-desktop-response-schema: '#/components/schemas/DesktopPersistenceNodeListBody'
+      x-codexia-runtime-response-deviation: The public route preserves its legacy unfiltered list response with nodes only, while the browsed response includes nextCursor and projectVersion. Desktop only calls the browsed form and validates the strict generated page projection.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/v1/persistence/projects/{projectId}/nodes/{nodeId}:
     get:
@@ -4209,6 +4236,9 @@ paths:
                 $ref: '#/components/schemas/ApiError'
       tags:
         - persistence
+      x-codexia-desktop-response-schema: '#/components/schemas/DesktopReviewFeedBody'
+      x-codexia-runtime-response-deviation: The public response keeps the approved compatibility schema; the selected Desktop client validates the strict generated ChangeSet and core-proposal feed projection until an epoch-compatible public schema update.
+      x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/v1/persistence/status:
     get:
@@ -4245,6 +4275,7 @@ paths:
         - health
       security:
         - {}
+      x-codexia-desktop-response-schema: '#/components/schemas/DesktopVersionResponse'
       x-codexia-runtime-response-deviation: The runtime and OCI probes use a numeric contractVersion; the API epoch baseline documents a string.
       x-codexia-contract-status: incomplete
     head:
@@ -4683,9 +4714,14 @@ components:
         not: {}
     ApiSessionBody:
       type: object
+      required:
+        - authenticated
+        - authorScope
       properties:
         authenticated:
           type: boolean
+          enum:
+            - true
         authorScope:
           type: string
       additionalProperties: {}
@@ -4988,18 +5024,16 @@ components:
         not: {}
     CoreChangeProposalBody:
       type: object
+      required:
+        - id
+        - snapshot
+        - operations
+        - source
       properties:
         id:
           type: string
         snapshot:
-          type: object
-          properties:
-            projectId:
-              type: string
-            projectVersion:
-              type: integer
-              format: int32
-          additionalProperties: {}
+          $ref: '#/components/schemas/SnapshotIdBody'
         operations:
           type: array
           items:
@@ -5014,8 +5048,7 @@ components:
         evidence:
           type: array
           items:
-            type: object
-            additionalProperties: {}
+            $ref: '#/components/schemas/CoreProposalEvidenceBody'
       additionalProperties: {}
     CoreProjectCreateRequest:
       type: object
@@ -5028,12 +5061,65 @@ components:
           pattern: .*\S.*
       unevaluatedProperties:
         not: {}
+    CoreProposalEvidenceBody:
+      type: object
+      required:
+        - id
+        - snapshot
+        - module
+        - kind
+        - paths
+        - details
+      properties:
+        id:
+          type: string
+        snapshot:
+          $ref: '#/components/schemas/SnapshotIdBody'
+        module:
+          type: string
+          enum:
+            - story
+            - diagnostics
+            - nlp
+            - semantic
+            - speaker
+            - assistant
+            - publishing
+            - mcp
+            - search
+        kind:
+          type: string
+        paths:
+          type: array
+          items:
+            $ref: '#/components/schemas/CoreProposalFileRevisionBody'
+        details: {}
+      additionalProperties: {}
+    CoreProposalFileRevisionBody:
+      type: object
+      required:
+        - path
+        - revision
+      properties:
+        path:
+          type: string
+        revision:
+          anyOf:
+            - type: string
+            - type: 'null'
+      additionalProperties: {}
     CoreProposalStatusBody:
       type: object
+      required:
+        - proposal
+        - state
+        - approvedOperationIds
+        - applications
+        - appliedOperationIds
+        - stale
       properties:
         proposal:
-          type: object
-          additionalProperties: {}
+          $ref: '#/components/schemas/CoreChangeProposalBody'
         payloadComplete:
           type: boolean
         originalDigest:
@@ -5060,8 +5146,7 @@ components:
         applications:
           type: array
           items:
-            type: object
-            additionalProperties: {}
+            $ref: '#/components/schemas/ProposalApplyReceiptBody'
         appliedOperationIds:
           type: array
           items:
@@ -5069,6 +5154,373 @@ components:
         stale:
           type: boolean
       additionalProperties: {}
+    DesktopActionFailureBody:
+      type: object
+      required:
+        - ok
+        - snapshot
+        - error
+      properties:
+        ok:
+          type: boolean
+          enum:
+            - false
+        snapshot:
+          $ref: '#/components/schemas/SnapshotIdBody'
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            retryable:
+              type: boolean
+          required:
+            - code
+            - message
+            - retryable
+          additionalProperties: {}
+      additionalProperties: {}
+    DesktopActionResultBody:
+      anyOf:
+        - $ref: '#/components/schemas/DesktopActionSuccessBody'
+        - $ref: '#/components/schemas/DesktopActionFailureBody'
+    DesktopActionSuccessBody:
+      type: object
+      required:
+        - ok
+        - snapshot
+        - data
+      properties:
+        ok:
+          type: boolean
+          enum:
+            - true
+        snapshot:
+          $ref: '#/components/schemas/SnapshotIdBody'
+        data: {}
+        proposals:
+          type: array
+          items:
+            $ref: '#/components/schemas/CoreChangeProposalBody'
+      additionalProperties: {}
+    DesktopContributionList:
+      type: array
+      items:
+        $ref: '#/components/schemas/DesktopContributionResponseItem'
+    DesktopContributionResponseItem:
+      type: object
+      required:
+        - id
+        - module
+        - slot
+        - title
+        - action
+      properties:
+        contractVersion:
+          type: number
+          enum:
+            - 1
+        kind:
+          type: string
+          enum:
+            - panel
+            - editor-adornment
+            - context-action
+        contexts:
+          type: array
+          items:
+            type: string
+            enum:
+              - workspace
+              - editor
+              - reading
+        multipleInstances:
+          type: boolean
+        id:
+          type: string
+        module:
+          type: string
+          enum:
+            - story
+            - diagnostics
+            - nlp
+            - semantic
+            - speaker
+            - assistant
+            - publishing
+            - mcp
+            - search
+        slot:
+          type: string
+          enum:
+            - editor
+            - dock
+            - inspection
+            - review
+            - settings
+        title:
+          type: string
+        action:
+          type: string
+      additionalProperties: {}
+    DesktopCoreReviewFeedItem:
+      type: object
+      required:
+        - kind
+        - id
+        - projectId
+        - createdAt
+        - state
+        - approvalModel
+        - applicationModel
+        - status
+        - receipts
+        - stale
+      properties:
+        kind:
+          type: string
+          enum:
+            - core-proposal
+        id:
+          type: string
+        projectId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum:
+            - proposed
+            - partially_approved
+            - approved
+            - applied
+        approvalModel:
+          type: string
+          enum:
+            - per-operation
+        applicationModel:
+          type: string
+          enum:
+            - per-operation
+        status:
+          $ref: '#/components/schemas/CoreProposalStatusBody'
+        receipts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProposalApplyReceiptBody'
+        stale:
+          type: boolean
+    DesktopJobList:
+      type: array
+      items:
+        $ref: '#/components/schemas/DesktopPublicJobBody'
+    DesktopModuleList:
+      type: array
+      items:
+        $ref: '#/components/schemas/DesktopModuleResponseItem'
+    DesktopModuleResponseItem:
+      type: object
+      required:
+        - id
+        - availability
+        - activeJobs
+      properties:
+        id:
+          type: string
+          enum:
+            - story
+            - diagnostics
+            - nlp
+            - semantic
+            - speaker
+            - assistant
+            - publishing
+            - mcp
+            - search
+        availability:
+          type: string
+          enum:
+            - not-included
+            - disabled
+            - enabled-idle
+            - active
+        version:
+          type: string
+        activeJobs:
+          type: integer
+          format: int32
+      additionalProperties: {}
+    DesktopNativeReviewFeedItem:
+      type: object
+      required:
+        - kind
+        - id
+        - projectId
+        - createdAt
+        - state
+        - approvalModel
+        - applicationModel
+        - changeSet
+        - receipt
+      properties:
+        kind:
+          type: string
+          enum:
+            - native-change-set
+        id:
+          type: string
+        projectId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum:
+            - proposed
+            - approved
+            - applied
+            - rejected
+        approvalModel:
+          type: string
+          enum:
+            - whole-change-set
+        applicationModel:
+          type: string
+          enum:
+            - transaction
+        changeSet:
+          $ref: '#/components/schemas/PersistenceChangeSetDesktopBody'
+        receipt:
+          anyOf:
+            - $ref: '#/components/schemas/PersistenceChangeSetDesktopApplicationBody'
+            - type: 'null'
+    DesktopPersistenceNodeListBody:
+      type: object
+      required:
+        - nodes
+        - nextCursor
+        - projectVersion
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeNodeBody'
+        nextCursor:
+          anyOf:
+            - type: string
+            - type: 'null'
+        projectVersion:
+          type: integer
+          format: int32
+      additionalProperties: {}
+    DesktopPublicJobBody:
+      type: object
+      required:
+        - id
+        - type
+        - status
+        - result
+        - error
+        - createdAt
+        - updatedAt
+        - finishedAt
+        - progress
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - done
+            - error
+        result: {}
+        error:
+          anyOf:
+            - type: string
+            - type: 'null'
+        errorCode:
+          type: string
+        retryable:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        progress:
+          anyOf:
+            - $ref: '#/components/schemas/JobProgress'
+            - type: 'null'
+      additionalProperties: {}
+    DesktopReviewFeedBody:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DesktopReviewFeedItem'
+    DesktopReviewFeedItem:
+      anyOf:
+        - $ref: '#/components/schemas/DesktopCoreReviewFeedItem'
+        - $ref: '#/components/schemas/DesktopNativeReviewFeedItem'
+    DesktopVersionResponse:
+      type: object
+      required:
+        - name
+        - version
+        - profile
+        - auth
+        - runtime
+        - modules
+        - contractVersion
+      properties:
+        name:
+          type: string
+          enum:
+            - codexia
+        version:
+          type: string
+        apiEpoch:
+          type: integer
+          format: int32
+        profile:
+          type: string
+          enum:
+            - core
+            - full
+        auth:
+          type: array
+          items:
+            type: string
+        runtime:
+          type: object
+          additionalProperties: {}
+        modules:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        contractVersion:
+          type: integer
+          format: int32
+      unevaluatedProperties:
+        not: {}
     DocumentChange:
       type: object
       required:
@@ -5253,6 +5705,18 @@ components:
         not: {}
     InboxItemBody:
       type: object
+      required:
+        - id
+        - kind
+        - jobId
+        - jobType
+        - title
+        - body
+        - status
+        - read
+        - userId
+        - projectKey
+        - createdAt
       properties:
         id:
           type: string
@@ -5287,6 +5751,9 @@ components:
       additionalProperties: {}
     InboxListBody:
       type: object
+      required:
+        - items
+        - unreadCount
       properties:
         items:
           type: array
@@ -5298,6 +5765,8 @@ components:
       additionalProperties: {}
     InboxReadAllBody:
       type: object
+      required:
+        - marked
       properties:
         marked:
           type: integer
@@ -5305,10 +5774,17 @@ components:
       additionalProperties: {}
     InboxReadItemBody:
       type: object
+      required:
+        - item
       properties:
         item:
           $ref: '#/components/schemas/InboxItemBody'
       additionalProperties: {}
+    JobProgress:
+      type: number
+      format: double
+      minimum: 0
+      maximum: 1
     KnowledgeAliasBody:
       type: object
       properties:
@@ -5625,6 +6101,32 @@ components:
           type: string
       unevaluatedProperties:
         not: {}
+    OAuthConsentRow:
+      type: object
+      required:
+        - id
+        - clientId
+        - scopes
+      properties:
+        id:
+          type: string
+        clientId:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: {}
+    OAuthConsentRowList:
+      type: array
+      items:
+        $ref: '#/components/schemas/OAuthConsentRow'
     OwnerSessionBody:
       type: object
       required:
@@ -5744,6 +6246,10 @@ components:
             - active
       unevaluatedProperties:
         not: {}
+    OwnerSetupStatusResponse:
+      anyOf:
+        - $ref: '#/components/schemas/OwnerSetupState'
+        - $ref: '#/components/schemas/OwnerSetupEnrolled'
     OwnerSetupTransaction:
       type: object
       required:
@@ -6039,6 +6545,844 @@ components:
             - type: string
             - type: 'null'
       additionalProperties: {}
+    PersistenceChangeSetDesktopApplicationBody:
+      type: object
+      required:
+        - changeSet
+        - results
+        - replayed
+      properties:
+        changeSet:
+          $ref: '#/components/schemas/PersistenceChangeSetDesktopBody'
+        results:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        replayed:
+          type: boolean
+    PersistenceChangeSetDesktopApplyBody:
+      type: object
+      required:
+        - changeSet
+        - results
+        - replayed
+      properties:
+        changeSet:
+          $ref: '#/components/schemas/PersistenceChangeSetDesktopBody'
+        results:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        replayed:
+          type: boolean
+    PersistenceChangeSetDesktopApprovalBody:
+      type: object
+      required:
+        - changeSet
+      properties:
+        changeSet:
+          $ref: '#/components/schemas/PersistenceChangeSetDesktopBody'
+    PersistenceChangeSetDesktopBody:
+      type: object
+      required:
+        - id
+        - projectId
+        - authorId
+        - status
+        - operations
+        - readSet
+        - writeSet
+        - provenance
+        - version
+        - idempotencyKey
+        - createdAt
+        - approvedAt
+        - approvedBy
+        - appliedAt
+        - rejectedAt
+        - rejectedBy
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        authorId:
+          type: string
+        status:
+          type: string
+          enum:
+            - proposed
+            - approved
+            - applied
+            - rejected
+        operations:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersistenceChangeSetDesktopOperation'
+        readSet:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersistenceChangeSetDesktopReadEntry'
+        writeSet:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersistenceChangeSetDesktopWriteEntry'
+        provenance:
+          $ref: '#/components/schemas/PersistenceChangeSetDesktopProvenance'
+        version:
+          type: integer
+          format: int32
+          minimum: 1
+        idempotencyKey:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        approvedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        approvedBy:
+          anyOf:
+            - type: string
+            - type: 'null'
+        appliedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        rejectedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        rejectedBy:
+          anyOf:
+            - type: string
+            - type: 'null'
+    PersistenceChangeSetDesktopDocumentCreate:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - document.create
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            documentId:
+              type: string
+            parentId:
+              anyOf:
+                - type: string
+                - type: 'null'
+            kind:
+              type: string
+            title:
+              type: string
+            orderKey:
+              type: string
+            appendToEnd:
+              type: boolean
+            markdown:
+              type: string
+            authorId:
+              type: string
+            idempotencyKey:
+              type: string
+          required:
+            - projectId
+            - kind
+            - title
+            - orderKey
+            - markdown
+            - authorId
+            - idempotencyKey
+        hierarchy:
+          $ref: '#/components/schemas/PersistenceChangeSetDesktopHierarchy'
+    PersistenceChangeSetDesktopDocumentDelete:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - document.delete
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            documentId:
+              type: string
+            expectedVersion:
+              type: integer
+              format: int32
+              minimum: 1
+          required:
+            - projectId
+            - documentId
+            - expectedVersion
+    PersistenceChangeSetDesktopDocumentRestore:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - document.restore
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            documentId:
+              type: string
+            baseRevisionId:
+              type: string
+            sourceRevisionId:
+              type: string
+            authorId:
+              type: string
+            idempotencyKey:
+              type: string
+          required:
+            - projectId
+            - documentId
+            - baseRevisionId
+            - sourceRevisionId
+            - authorId
+            - idempotencyKey
+    PersistenceChangeSetDesktopDocumentSave:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - document.save
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            documentId:
+              type: string
+            baseRevisionId:
+              type: string
+            changes:
+              type: array
+              items:
+                $ref: '#/components/schemas/DocumentChange'
+            resultingSha256:
+              type: string
+              pattern: ^[0-9a-f]{64}$
+            authorId:
+              type: string
+            clientId:
+              type: string
+            idempotencyKey:
+              type: string
+          required:
+            - projectId
+            - documentId
+            - baseRevisionId
+            - changes
+            - resultingSha256
+            - authorId
+            - clientId
+            - idempotencyKey
+    PersistenceChangeSetDesktopDocumentUpdate:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - document.update
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            documentId:
+              type: string
+            expectedVersion:
+              type: integer
+              format: int32
+              minimum: 1
+            parentId:
+              anyOf:
+                - type: string
+                - type: 'null'
+            title:
+              type: string
+            orderKey:
+              type: string
+          required:
+            - projectId
+            - documentId
+            - expectedVersion
+    PersistenceChangeSetDesktopEvidenceAnchorSave:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - evidence.anchor.save
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            id:
+              type: string
+            documentId:
+              type: string
+            revisionId:
+              type: string
+            fromUtf16:
+              type: integer
+              format: int32
+              minimum: 0
+            toUtf16:
+              type: integer
+              format: int32
+              minimum: 0
+            quoteSha256:
+              type: string
+              pattern: ^[0-9a-f]{64}$
+            status:
+              type: string
+              enum:
+                - proposed
+                - confirmed
+                - needs_review
+                - orphaned
+            expectedVersion:
+              anyOf:
+                - type: integer
+                  format: int32
+                - type: 'null'
+          required:
+            - projectId
+            - id
+            - documentId
+            - revisionId
+            - fromUtf16
+            - toUtf16
+            - quoteSha256
+            - status
+            - expectedVersion
+    PersistenceChangeSetDesktopEvidenceAssertionLink:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - evidence.assertion.link
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            assertionId:
+              type: string
+            evidenceId:
+              type: string
+            role:
+              type: string
+              enum:
+                - supports
+                - contradicts
+                - quotes
+                - context
+          required:
+            - projectId
+            - assertionId
+            - evidenceId
+            - role
+    PersistenceChangeSetDesktopEvidenceAssertionSave:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - evidence.assertion.save
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            id:
+              type: string
+            proposition:
+              type: object
+              additionalProperties: {}
+            modality:
+              type: string
+            perspective:
+              type: string
+            narrativeTime:
+              type: object
+              additionalProperties: {}
+            confidence:
+              anyOf:
+                - type: number
+                  format: double
+                - type: 'null'
+            status:
+              type: string
+              enum:
+                - proposed
+                - confirmed
+                - rejected
+                - retired
+            expectedVersion:
+              anyOf:
+                - type: integer
+                  format: int32
+                - type: 'null'
+          required:
+            - projectId
+            - id
+            - proposition
+            - modality
+            - perspective
+            - narrativeTime
+            - confidence
+            - status
+            - expectedVersion
+    PersistenceChangeSetDesktopEvidenceMentionSave:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - evidence.mention.save
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            evidenceId:
+              type: string
+            nodeId:
+              type: string
+            source:
+              type: string
+            confidence:
+              anyOf:
+                - type: number
+                  format: double
+                - type: 'null'
+            extractorVersion:
+              anyOf:
+                - type: string
+                - type: 'null'
+            status:
+              type: string
+              enum:
+                - proposed
+                - confirmed
+                - ambiguous
+                - rejected
+          required:
+            - projectId
+            - evidenceId
+            - nodeId
+            - source
+            - confidence
+            - extractorVersion
+            - status
+    PersistenceChangeSetDesktopHierarchy:
+      type: object
+      required:
+        - kind
+        - logicalId
+      properties:
+        kind:
+          type: string
+          enum:
+            - volume
+            - chapter
+            - scene
+        logicalId:
+          type: string
+        volume:
+          $ref: '#/components/schemas/PersistenceChangeSetDesktopHierarchyParent'
+        chapter:
+          $ref: '#/components/schemas/PersistenceChangeSetDesktopHierarchyParent'
+    PersistenceChangeSetDesktopHierarchyParent:
+      type: object
+      required:
+        - documentId
+        - lookupId
+      properties:
+        documentId:
+          type: string
+        lookupId:
+          type: string
+    PersistenceChangeSetDesktopKnowledgeAliasSave:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - knowledge.alias.save
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            id:
+              type: string
+            nodeId:
+              type: string
+            surface:
+              type: string
+            normalized:
+              type: string
+            scope:
+              anyOf:
+                - type: string
+                - type: 'null'
+            status:
+              type: string
+              enum:
+                - proposed
+                - confirmed
+                - ambiguous
+                - retired
+          required:
+            - projectId
+            - id
+            - nodeId
+            - surface
+            - normalized
+            - scope
+            - status
+    PersistenceChangeSetDesktopKnowledgeMerge:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - knowledge.merge
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            sourceId:
+              type: string
+            targetId:
+              type: string
+            projectVersion:
+              type: integer
+              format: int32
+              minimum: 1
+            previewDigest:
+              type: string
+              pattern: ^[0-9a-f]{64}$
+            actorId:
+              type: string
+            origin:
+              type: string
+              enum:
+                - author
+                - external-agent
+            auditId:
+              type: string
+            generatedAliasId:
+              type: string
+            plan:
+              type: object
+              additionalProperties: {}
+          required:
+            - projectId
+            - sourceId
+            - targetId
+            - projectVersion
+            - previewDigest
+            - actorId
+            - origin
+            - auditId
+            - generatedAliasId
+            - plan
+    PersistenceChangeSetDesktopKnowledgeNodeSave:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - knowledge.node.save
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            id:
+              type: string
+            type:
+              type: string
+            name:
+              type: string
+            attributes:
+              type: object
+              additionalProperties: {}
+            status:
+              type: string
+              enum:
+                - proposed
+                - confirmed
+                - retired
+            expectedVersion:
+              anyOf:
+                - type: integer
+                  format: int32
+                - type: 'null'
+          required:
+            - projectId
+            - id
+            - type
+            - name
+            - attributes
+            - status
+            - expectedVersion
+    PersistenceChangeSetDesktopKnowledgeRelationSave:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - knowledge.relation.save
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            id:
+              type: string
+            sourceId:
+              type: string
+            targetId:
+              type: string
+            type:
+              type: string
+            attributes:
+              type: object
+              additionalProperties: {}
+            validity:
+              type: object
+              additionalProperties: {}
+            status:
+              type: string
+              enum:
+                - proposed
+                - confirmed
+                - rejected
+                - retired
+            expectedVersion:
+              anyOf:
+                - type: integer
+                  format: int32
+                - type: 'null'
+          required:
+            - projectId
+            - id
+            - sourceId
+            - targetId
+            - type
+            - attributes
+            - validity
+            - status
+            - expectedVersion
+    PersistenceChangeSetDesktopListBody:
+      type: object
+      required:
+        - changeSets
+      properties:
+        changeSets:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersistenceChangeSetDesktopBody'
+    PersistenceChangeSetDesktopModuleRecordSave:
+      type: object
+      required:
+        - type
+        - command
+      properties:
+        type:
+          type: string
+          enum:
+            - module.record.save
+        command:
+          type: object
+          properties:
+            projectId:
+              type: string
+            moduleId:
+              type: string
+            key:
+              type: string
+            value:
+              type: object
+              additionalProperties: {}
+            expectedVersion:
+              anyOf:
+                - type: integer
+                  format: int32
+                - type: 'null'
+          required:
+            - projectId
+            - moduleId
+            - key
+            - value
+            - expectedVersion
+    PersistenceChangeSetDesktopOperation:
+      anyOf:
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopDocumentCreate'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopDocumentUpdate'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopDocumentDelete'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopDocumentSave'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopDocumentRestore'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopModuleRecordSave'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopKnowledgeNodeSave'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopKnowledgeAliasSave'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopKnowledgeRelationSave'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopEvidenceAnchorSave'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopEvidenceMentionSave'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionSave'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopEvidenceAssertionLink'
+        - $ref: '#/components/schemas/PersistenceChangeSetDesktopKnowledgeMerge'
+    PersistenceChangeSetDesktopProvenance:
+      type: object
+      required:
+        - source
+        - actorId
+        - details
+      properties:
+        source:
+          type: string
+        actorId:
+          anyOf:
+            - type: string
+            - type: 'null'
+        details:
+          type: object
+          additionalProperties: {}
+    PersistenceChangeSetDesktopReadEntry:
+      type: object
+      required:
+        - resource
+        - id
+        - expectedVersion
+      properties:
+        resource:
+          type: string
+          enum:
+            - document
+            - module_record
+            - knowledge_node
+            - knowledge_alias
+            - knowledge_relation
+            - evidence_anchor
+            - mention_link
+            - assertion
+            - assertion_evidence
+        id:
+          type: string
+        expectedVersion:
+          anyOf:
+            - type: integer
+              format: int32
+            - type: 'null'
+        expectedRevisionId:
+          anyOf:
+            - type: string
+            - type: 'null'
+    PersistenceChangeSetDesktopResponseBody:
+      type: object
+      required:
+        - changeSet
+      properties:
+        changeSet:
+          $ref: '#/components/schemas/PersistenceChangeSetDesktopBody'
+        receipt:
+          anyOf:
+            - $ref: '#/components/schemas/PersistenceChangeSetDesktopApplicationBody'
+            - type: 'null'
+    PersistenceChangeSetDesktopResultBody:
+      type: object
+      required:
+        - changeSet
+        - replayed
+      properties:
+        changeSet:
+          $ref: '#/components/schemas/PersistenceChangeSetDesktopBody'
+        replayed:
+          type: boolean
+    PersistenceChangeSetDesktopWriteEntry:
+      type: object
+      required:
+        - resource
+        - id
+      properties:
+        resource:
+          type: string
+          enum:
+            - document
+            - module_record
+            - knowledge_node
+            - knowledge_alias
+            - knowledge_relation
+            - evidence_anchor
+            - mention_link
+            - assertion
+            - assertion_evidence
+        id:
+          type: string
     PersistenceChangeSetListBody:
       type: object
       properties:
@@ -6101,6 +7445,7 @@ components:
         version:
           type: integer
           format: int32
+          minimum: 0
         createdAt:
           type: string
           format: date-time
@@ -6506,6 +7851,9 @@ components:
           anyOf:
             - type: string
             - type: 'null'
+        projectVersion:
+          type: integer
+          format: int32
       additionalProperties: {}
     PersistenceProjectCreateRequest:
       type: object
@@ -6741,10 +8089,12 @@ components:
       additionalProperties: {}
     ProjectSnapshotResponse:
       type: object
+      required:
+        - snapshot
+        - document
       properties:
         snapshot:
-          type: object
-          additionalProperties: {}
+          $ref: '#/components/schemas/SnapshotIdBody'
         document:
           anyOf:
             - type: object
@@ -6753,6 +8103,10 @@ components:
                   type: string
                 revision:
                   type: string
+                  pattern: ^[0-9a-f]{64}$
+              required:
+                - path
+                - revision
               additionalProperties: {}
             - type: 'null'
       additionalProperties: {}
@@ -6822,6 +8176,11 @@ components:
       additionalProperties: {}
     ProposalApplyReceiptBody:
       type: object
+      required:
+        - operationId
+        - generation
+        - projectVersion
+        - revisions
       properties:
         operationId:
           type: string
@@ -6831,14 +8190,16 @@ components:
         projectVersion:
           type: integer
           format: int32
+          minimum: 1
         revisions:
           type: array
           items:
-            type: object
-            additionalProperties: {}
+            $ref: '#/components/schemas/CoreProposalFileRevisionBody'
       additionalProperties: {}
     ProposalListBody:
       type: object
+      required:
+        - proposals
       properties:
         proposals:
           type: array
@@ -6866,6 +8227,16 @@ components:
         not: {}
     PublicJobBody:
       type: object
+      required:
+        - id
+        - type
+        - status
+        - progress
+        - result
+        - error
+        - createdAt
+        - updatedAt
+        - finishedAt
       properties:
         id:
           type: string
@@ -7043,6 +8414,8 @@ components:
         not: {}
     RecentActivityBody:
       type: object
+      required:
+        - items
       properties:
         items:
           type: array
@@ -7051,6 +8424,11 @@ components:
       additionalProperties: {}
     RecentActivityItemBody:
       type: object
+      required:
+        - sceneId
+        - sentenceOffset
+        - deviceType
+        - updatedAt
       properties:
         sceneId:
           type: string
@@ -7230,6 +8608,19 @@ components:
         length:
           type: integer
           format: int32
+      additionalProperties: {}
+    SnapshotIdBody:
+      type: object
+      required:
+        - projectId
+        - projectVersion
+      properties:
+        projectId:
+          type: string
+        projectVersion:
+          type: integer
+          format: int32
+          minimum: 1
       additionalProperties: {}
     VersionResponse:
       type: object
@@ -7448,6 +8839,442 @@ components:
         unresolved:
           $ref: '#/components/schemas/WorkArchiveUnresolvedEvidence'
       additionalProperties: {}
+    WorkArchiveExport:
+      type: object
+      required:
+        - format
+        - project
+        - documents
+        - knowledge
+        - evidence
+        - moduleRecords
+        - omittedRecords
+      properties:
+        format:
+          type: string
+          enum:
+            - codexia-work/v1
+        project:
+          $ref: '#/components/schemas/WorkArchiveExportProject'
+        documents:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkArchiveExportDocument'
+          maxItems: 999
+        knowledge:
+          $ref: '#/components/schemas/WorkArchiveExportKnowledge'
+        evidence:
+          $ref: '#/components/schemas/WorkArchiveExportEvidence'
+        moduleRecords:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkArchiveExportModuleRecord'
+          maxItems: 10000
+        omittedRecords:
+          type: array
+          items:
+            type: string
+          maxItems: 10000
+      unevaluatedProperties:
+        not: {}
+    WorkArchiveExportAnchor:
+      type: object
+      required:
+        - id
+        - documentId
+        - revisionId
+        - fromUtf16
+        - toUtf16
+        - quoteSha256
+        - status
+      properties:
+        id:
+          type: string
+        documentId:
+          type: string
+        revisionId:
+          type: string
+        fromUtf16:
+          type: integer
+          format: int32
+          minimum: 0
+        toUtf16:
+          type: integer
+          format: int32
+          minimum: 0
+        quoteSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - needs_review
+            - orphaned
+      allOf:
+        - $ref: '#/components/schemas/WorkArchiveAnchor'
+    WorkArchiveExportAssertion:
+      type: object
+      required:
+        - id
+        - proposition
+        - modality
+        - perspective
+        - narrativeTime
+        - confidence
+        - status
+      properties:
+        id:
+          type: string
+        proposition:
+          type: object
+          additionalProperties: {}
+        modality:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        perspective:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        narrativeTime:
+          type: object
+          additionalProperties: {}
+        confidence:
+          anyOf:
+            - type: number
+              format: double
+            - type: 'null'
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - rejected
+            - retired
+      allOf:
+        - $ref: '#/components/schemas/WorkArchiveAssertion'
+    WorkArchiveExportAssertionEvidence:
+      type: object
+      required:
+        - assertionId
+        - evidenceId
+        - role
+      properties:
+        assertionId:
+          type: string
+        evidenceId:
+          type: string
+        role:
+          type: string
+          enum:
+            - supports
+            - contradicts
+            - quotes
+            - context
+      allOf:
+        - $ref: '#/components/schemas/WorkArchiveAssertionEvidence'
+    WorkArchiveExportDocument:
+      type: object
+      required:
+        - id
+        - parentId
+        - kind
+        - title
+        - orderKey
+        - markdown
+        - revisionId
+      properties:
+        id:
+          type: string
+        parentId:
+          anyOf:
+            - type: string
+            - type: 'null'
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        title:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        orderKey:
+          type: string
+          maxLength: 512
+        markdown:
+          type: string
+        revisionId:
+          type: string
+      allOf:
+        - $ref: '#/components/schemas/WorkArchiveDocument'
+    WorkArchiveExportEvidence:
+      type: object
+      required:
+        - anchors
+        - mentions
+        - assertions
+        - assertionEvidence
+        - unresolved
+      properties:
+        anchors:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkArchiveExportAnchor'
+          maxItems: 10000
+        mentions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkArchiveExportMention'
+          maxItems: 40000
+        assertions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkArchiveExportAssertion'
+          maxItems: 999
+        assertionEvidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkArchiveExportAssertionEvidence'
+          maxItems: 40000
+        unresolved:
+          $ref: '#/components/schemas/WorkArchiveExportUnresolvedEvidence'
+      unevaluatedProperties:
+        not: {}
+    WorkArchiveExportKnowledge:
+      type: object
+      required:
+        - nodes
+        - aliases
+        - relations
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkArchiveExportKnowledgeNode'
+          maxItems: 999
+        aliases:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkArchiveExportKnowledgeAlias'
+          maxItems: 10000
+        relations:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkArchiveExportKnowledgeRelation'
+          maxItems: 10000
+      unevaluatedProperties:
+        not: {}
+    WorkArchiveExportKnowledgeAlias:
+      type: object
+      required:
+        - id
+        - nodeId
+        - surface
+        - normalized
+        - scope
+        - status
+      properties:
+        id:
+          type: string
+        nodeId:
+          type: string
+        surface:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        normalized:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        scope:
+          anyOf:
+            - type: string
+            - type: 'null'
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - ambiguous
+            - retired
+      allOf:
+        - $ref: '#/components/schemas/WorkArchiveKnowledgeAlias'
+    WorkArchiveExportKnowledgeNode:
+      type: object
+      required:
+        - id
+        - type
+        - name
+        - attributes
+        - status
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        name:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        attributes:
+          type: object
+          additionalProperties: {}
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - retired
+      allOf:
+        - $ref: '#/components/schemas/WorkArchiveKnowledgeNode'
+    WorkArchiveExportKnowledgeRelation:
+      type: object
+      required:
+        - id
+        - sourceId
+        - targetId
+        - type
+        - attributes
+        - validity
+        - status
+      properties:
+        id:
+          type: string
+        sourceId:
+          type: string
+        targetId:
+          type: string
+        type:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        attributes:
+          type: object
+          additionalProperties: {}
+        validity:
+          type: object
+          additionalProperties: {}
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - rejected
+            - retired
+      allOf:
+        - $ref: '#/components/schemas/WorkArchiveKnowledgeRelation'
+    WorkArchiveExportMention:
+      type: object
+      required:
+        - evidenceId
+        - nodeId
+        - status
+        - source
+        - confidence
+        - extractorVersion
+      properties:
+        evidenceId:
+          type: string
+        nodeId:
+          type: string
+        status:
+          type: string
+          enum:
+            - proposed
+            - confirmed
+            - ambiguous
+            - rejected
+        source:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        confidence:
+          anyOf:
+            - type: number
+              format: double
+            - type: 'null'
+        extractorVersion:
+          anyOf:
+            - type: string
+            - type: 'null'
+      allOf:
+        - $ref: '#/components/schemas/WorkArchiveMention'
+    WorkArchiveExportModuleRecord:
+      type: object
+      required:
+        - moduleId
+        - key
+        - value
+      properties:
+        moduleId:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        key:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        value:
+          type: object
+          additionalProperties: {}
+      allOf:
+        - $ref: '#/components/schemas/WorkArchiveModuleRecord'
+    WorkArchiveExportProject:
+      type: object
+      required:
+        - title
+        - settings
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: .*\S.*
+        settings:
+          type: object
+          additionalProperties: {}
+      unevaluatedProperties:
+        not: {}
+    WorkArchiveExportUnresolvedEvidence:
+      type: object
+      required:
+        - anchors
+        - mentions
+        - assertionEvidence
+      properties:
+        anchors:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkArchiveExportAnchor'
+          maxItems: 20000
+        mentions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkArchiveExportMention'
+          maxItems: 40000
+        assertionEvidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkArchiveExportAssertionEvidence'
+          maxItems: 40000
+      unevaluatedProperties:
+        not: {}
     WorkArchiveKnowledge:
       type: object
       properties:

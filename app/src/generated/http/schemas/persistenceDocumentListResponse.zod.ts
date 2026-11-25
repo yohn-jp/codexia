@@ -6,6 +6,9 @@
  */
 import * as zod from 'zod';
 
+export const persistenceDocumentListResponseDocumentsItemVersionMin = 0;
+
+
 export const PersistenceDocumentListResponse = zod.looseObject({
   "documents": zod.array(zod.looseObject({
   "id": zod.string(),
@@ -15,7 +18,7 @@ export const PersistenceDocumentListResponse = zod.looseObject({
   "title": zod.string(),
   "orderKey": zod.string(),
   "headRevisionId": zod.union([zod.string(),zod.null()]),
-  "version": zod.int(),
+  "version": zod.int().min(persistenceDocumentListResponseDocumentsItemVersionMin),
   "createdAt": zod.iso.datetime({"offset":true}),
   "updatedAt": zod.iso.datetime({"offset":true})
 }))

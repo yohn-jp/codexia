@@ -39,11 +39,11 @@
 | REQ-AUTH-004 | [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md) | `/console/setup` と `/api/auth/codexia/setup/*` の setup-only 登録経路を実装。旧SSH-forward登録と本番activateは独立の承認境界 | `tests/e2e/passkey-bootstrap.acceptance.spec.ts` と `packages/api/test/passkey-bootstrap.acceptance.test.ts` が隔離環境の候補。本番Edge・VM・owner登録は #168 で未受入 | MAPPED_UNVERIFIED |
 | REQ-AUTH-005 | [Admin flow](../design/ADMIN-SCREEN-FLOW.md) | /console、/console/security、/console/identity は現行未実装 | 受入テスト未特定 | UNMAPPED |
 | REQ-API-001 | [API contract](../architecture/API-CONTRACT.md) | packages/api/src/server.ts、persistence-routes.ts、各moduleのHTTP contribution | persistence-routes.test.ts。全DTO未収録 | PARTIAL |
-| REQ-API-002 | [Interaction](../design/INTERACTION-CONTRACT.md) | persistence-routes.ts、postgres-store.ts、app/src/api.ts | tests/e2e/core.acceptance.spec.ts | MAPPED_UNVERIFIED |
+| REQ-API-002 | [Interaction](../design/INTERACTION-CONTRACT.md) | persistence-routes.ts、postgres-store.ts、app/src/api-documents.ts | tests/e2e/core.acceptance.spec.ts | MAPPED_UNVERIFIED |
 | REQ-MCP-001 | [Modules](../architecture/MODULES.md)、[MCP v2 migration](../architecture/MCP-V2-MIGRATION.md) | modules/mcp/src/http.ts、stdio.ts、tools.ts、tools/shared.ts、tools/project.ts、tools/knowledge.ts | MCPV-001..008; tests/integration/mcp-acceptance.test.mjs; modules/mcp/src/tools.test.ts | MAPPED_UNVERIFIED |
 | REQ-MCP-002 | [MCP-first](../architecture/MCP-FIRST.md)、[MCP v2 migration](../architecture/MCP-V2-MIGRATION.md) | modules/mcp/src/tools.ts、tools/shared.ts、tools/project.ts、tools/knowledge.ts | MCPV-001..008; tests/integration/mcp-acceptance.test.mjs | MAPPED_UNVERIFIED |
 | REQ-UI-001 | [User flow](../design/USER-SCREEN-FLOW.md) | app/src/launcher.tsx、app/src/shells/ | tests/e2e/modular-workspace.acceptance.spec.ts | MAPPED_UNVERIFIED |
-| REQ-UI-002 | [Interaction](../design/INTERACTION-CONTRACT.md) | app/src/storage/、app/src/api.ts、app/src/journal.test.ts | auth-recovery.acceptance.spec.ts、core.acceptance.spec.ts | MAPPED_UNVERIFIED |
+| REQ-UI-002 | [Interaction](../design/INTERACTION-CONTRACT.md) | app/src/storage/、app/src/application/persistence-save-protocol.ts、app/src/journal.test.ts | auth-recovery.acceptance.spec.ts、core.acceptance.spec.ts | MAPPED_UNVERIFIED |
 | REQ-UI-003 | [Screen catalog](../design/SCREEN-CONTROL-CATALOG.md) | app/src/App.tsx、app/src/components/、app/src/shells/ | ui-v1.acceptance.spec.ts。全CTRL ID未照合 | PARTIAL |
 | REQ-UI-004 | [UX](../design/UX-CONTRACT.md) | app/src/editor/、app/src/shells/ | core.acceptance.spec.ts。IME実機は別証拠 | MAPPED_UNVERIFIED |
 | REQ-UI-005 | [UX](../design/UX-CONTRACT.md) | app/src/components/、app/src/shells/ | redesign-visual.acceptance.spec.ts。支援技術は別証拠 | PARTIAL |

@@ -52,6 +52,7 @@ op headStartup(): HeadJsonResponse | { @statusCode _: 503; @header contentType: 
 @route("/api/version") @get @operationId("api_version_get")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-runtime-response-deviation", "The runtime and OCI probes use a numeric contractVersion; the API epoch baseline documents a string.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopVersionResponse")
 op getApiVersion(): VersionResponse;
 
 @tag("health") @useAuth(NoAuth)
@@ -62,6 +63,7 @@ op headApiVersion(): HeadJsonResponse;
 @route("/api/browser/version") @get @operationId("api_browser_version_get")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-runtime-response-deviation", "The runtime and OCI probes use a numeric contractVersion; the API epoch baseline documents a string.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopVersionResponse")
 op getBrowserVersion(): VersionResponse;
 
 @tag("health") @useAuth(NoAuth)
@@ -84,10 +86,14 @@ op getJobEvents(): EventStream | { @statusCode _: 403; @body body: ApiError; } |
 @route("/api/jobs") @get @operationId("jobs_list_get")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-runtime-response-deviation", "Runtime serializes the public job collection as a top-level array; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopJobList")
 op listJobs(): JsonResponse | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 503; @body body: ApiError; };
 
 @tag("jobs") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/jobs/{jobId}") @get @operationId("job_get")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "Desktop validates progress between zero and one. The API epoch baseline keeps the nullable progress number schema.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopPublicJobBody")
 op getJob(@path jobId: string): PublicJobBody | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 503; @body body: ApiError; };
 
 @tag("jobs") @extension("x-codexia-principal", "OWNER-API")
@@ -130,12 +136,14 @@ op putRecentActivity(@path projectId: string, @body body: JsonObject, @header("X
 @route("/api/projects/{projectId}/modules") @get @operationId("project_modules_get")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-runtime-response-deviation", "Runtime emits an array of module status objects; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopModuleList")
 op getProjectModules(@path projectId: string): JsonResponse;
 
 @tag("projects") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
 @route("/api/projects/{projectId}/contributions") @get @operationId("project_contributions_get")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-runtime-response-deviation", "Runtime emits an array of HTTP contribution descriptors; the approved baseline response body is an object. The wire-shape discrepancy remains tracked pending an approved compatibility correction.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopContributionList")
 op getProjectContributions(@path projectId: string): JsonResponse;
 
 @tag("projects") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")
@@ -194,6 +202,9 @@ op listProjectActions(@path projectId: string): ProjectActionsBody;
 
 @tag("actions") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:compute|propose)")
 @route("/api/projects/{projectId}/actions/{actionId}") @post @operationId("project_action_post")
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "Desktop validates the success and failure variants of the synchronous Action result; the API epoch baseline retains the published object schema.")
+@extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopActionResultBody")
 op invokeProjectAction(@path projectId: string, @path actionId: string, @body body: JsonObject, @header("Prefer") prefer?: string): ActionResultBody | { @statusCode _: 202; @header("Location") location: string; @header("Preference-Applied") preferenceApplied: "respond-async"; @header("X-Codexia-Job-Id") jobId: string; @body job: PublicJobBody; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
 @tag("snapshots") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT(mcp:read)")

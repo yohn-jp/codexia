@@ -139,70 +139,105 @@ model OAuthConsentContextBody {
 }
 
 model ApiSessionBody {
-  authenticated?: boolean;
-  authorScope?: string;
+  authenticated: true;
+  authorScope: string;
   ...Record<unknown>;
 }
 
 model PublicJobBody {
-  id?: string;
-  type?: string;
-  status?: "queued" | "running" | "done" | "error";
-  progress?: float64 | null;
-  result?: unknown;
-  error?: string | null;
+  id: string;
+  type: string;
+  status: "queued" | "running" | "done" | "error";
+  progress: float64 | null;
+  result: unknown;
+  error: string | null;
   errorCode?: string;
   retryable?: boolean;
-  createdAt?: utcDateTime;
-  updatedAt?: utcDateTime;
-  finishedAt?: utcDateTime | null;
+  createdAt: utcDateTime;
+  updatedAt: utcDateTime;
+  finishedAt: utcDateTime | null;
   ...Record<unknown>;
 }
 
+@minValue(0.0) @maxValue(1.0)
+scalar JobProgress extends float64;
+
 model InboxItemBody {
-  id?: string;
-  kind?: "job-complete";
-  jobId?: string;
-  jobType?: string;
-  title?: string;
-  body?: string;
-  status?: "done" | "error";
-  read?: boolean;
-  userId?: string | null;
-  projectKey?: string;
-  createdAt?: utcDateTime;
+  id: string;
+  kind: "job-complete";
+  jobId: string;
+  jobType: string;
+  title: string;
+  body: string;
+  status: "done" | "error";
+  read: boolean;
+  userId: string | null;
+  projectKey: string;
+  createdAt: utcDateTime;
   ...Record<unknown>;
 }
 
 model InboxListBody {
-  items?: InboxItemBody[];
-  unreadCount?: int32;
+  items: InboxItemBody[];
+  unreadCount: int32;
   ...Record<unknown>;
 }
 
 model InboxReadAllBody {
-  marked?: int32;
+  marked: int32;
   ...Record<unknown>;
 }
 
 model InboxReadItemBody {
-  item?: InboxItemBody;
+  item: InboxItemBody;
   ...Record<unknown>;
 }
 
 model RecentActivityItemBody {
-  sceneId?: string;
-  sentenceOffset?: int32 | null;
+  sceneId: string;
+  sentenceOffset: int32 | null;
   pageIndex?: int32 | null;
-  deviceType?: "desktop" | "mobile";
-  updatedAt?: utcDateTime;
+  deviceType: "desktop" | "mobile";
+  updatedAt: utcDateTime;
   ...Record<unknown>;
 }
 
 model RecentActivityBody {
-  items?: RecentActivityItemBody[];
+  items: RecentActivityItemBody[];
   ...Record<unknown>;
 }
+
+// Desktop Web wire row schemas are emitted as components for the generated
+// client; the published operations retain their approved legacy envelopes.
+model DesktopModuleResponseItem {
+  id: "story" | "diagnostics" | "nlp" | "semantic" | "speaker" | "assistant" | "publishing" | "mcp" | "search";
+  availability: "not-included" | "disabled" | "enabled-idle" | "active";
+  version?: string;
+  activeJobs: int32;
+  ...Record<unknown>;
+}
+
+model DesktopContributionResponseItem {
+  contractVersion?: 1;
+  kind?: "panel" | "editor-adornment" | "context-action";
+  contexts?: ("workspace" | "editor" | "reading")[];
+  multipleInstances?: boolean;
+  id: string;
+  module: "story" | "diagnostics" | "nlp" | "semantic" | "speaker" | "assistant" | "publishing" | "mcp" | "search";
+  slot: "editor" | "dock" | "inspection" | "review" | "settings";
+  title: string;
+  action: string;
+  ...Record<unknown>;
+}
+
+model DesktopPublicJobBody {
+  ...OmitProperties<PublicJobBody, "progress">;
+  progress: JobProgress | null;
+}
+
+model DesktopJobList is Array<DesktopPublicJobBody>;
+model DesktopModuleList is Array<DesktopModuleResponseItem>;
+model DesktopContributionList is Array<DesktopContributionResponseItem>;
 
 model ProjectObservationBody {
   snapshot?: { projectId?: string; projectVersion?: int32; ...Record<unknown>; };
@@ -266,8 +301,8 @@ model ProjectSceneResponse {
 }
 
 model ProjectSnapshotResponse {
-  snapshot?: JsonObject;
-  document?: { path?: string; revision?: string; ...Record<unknown>; } | null;
+  snapshot: SnapshotIdBody;
+  document: { path: string; @pattern("^[0-9a-f]{64}$") revision: string; ...Record<unknown>; } | null;
   ...Record<unknown>;
 }
 
@@ -303,6 +338,17 @@ model KnowledgeRelationBody {
 model PersistenceNodeListBody {
   nodes?: KnowledgeNodeBody[];
   nextCursor?: string | null;
+  projectVersion?: int32;
+  ...Record<unknown>;
+}
+
+// The public route serves both its legacy unfiltered node list and its newer
+// versioned browse page. Desktop only calls the browse form and validates the
+// stricter shape through the generated response projection.
+model DesktopPersistenceNodeListBody {
+  nodes: KnowledgeNodeBody[];
+  nextCursor: string | null;
+  projectVersion: int32;
   ...Record<unknown>;
 }
 
@@ -389,6 +435,272 @@ model PersistenceChangeSetBody {
   ...Record<unknown>;
 }
 
+model PersistenceChangeSetDesktopReadEntry {
+  resource: "document" | "module_record" | "knowledge_node" | "knowledge_alias" | "knowledge_relation" | "evidence_anchor" | "mention_link" | "assertion" | "assertion_evidence";
+  id: string;
+  expectedVersion: int32 | null;
+  expectedRevisionId?: string | null;
+}
+
+model PersistenceChangeSetDesktopWriteEntry {
+  resource: "document" | "module_record" | "knowledge_node" | "knowledge_alias" | "knowledge_relation" | "evidence_anchor" | "mention_link" | "assertion" | "assertion_evidence";
+  id: string;
+}
+
+model PersistenceChangeSetDesktopProvenance {
+  source: string;
+  actorId: string | null;
+  details: JsonObject;
+}
+
+model PersistenceChangeSetDesktopHierarchyParent {
+  documentId: string;
+  lookupId: string;
+}
+
+model PersistenceChangeSetDesktopHierarchy {
+  kind: "volume" | "chapter" | "scene";
+  logicalId: string;
+  volume?: PersistenceChangeSetDesktopHierarchyParent;
+  chapter?: PersistenceChangeSetDesktopHierarchyParent;
+}
+
+model PersistenceChangeSetDesktopDocumentCreate {
+  type: "document.create";
+  command: {
+    projectId: string;
+    documentId?: string;
+    parentId?: string | null;
+    kind: string;
+    title: string;
+    orderKey: string;
+    appendToEnd?: boolean;
+    markdown: string;
+    authorId: string;
+    idempotencyKey: string;
+  };
+  hierarchy?: PersistenceChangeSetDesktopHierarchy;
+}
+
+model PersistenceChangeSetDesktopDocumentUpdate {
+  type: "document.update";
+  command: {
+    projectId: string;
+    documentId: string;
+    @minValue(1) expectedVersion: int32;
+    parentId?: string | null;
+    title?: string;
+    orderKey?: string;
+  };
+}
+
+model PersistenceChangeSetDesktopDocumentDelete {
+  type: "document.delete";
+  command: { projectId: string; documentId: string; @minValue(1) expectedVersion: int32; };
+}
+
+model PersistenceChangeSetDesktopDocumentSave {
+  type: "document.save";
+  command: {
+    projectId: string;
+    documentId: string;
+    baseRevisionId: string;
+    changes: DocumentChange[];
+    @pattern("^[0-9a-f]{64}$") resultingSha256: string;
+    authorId: string;
+    clientId: string;
+    idempotencyKey: string;
+  };
+}
+
+model PersistenceChangeSetDesktopDocumentRestore {
+  type: "document.restore";
+  command: {
+    projectId: string;
+    documentId: string;
+    baseRevisionId: string;
+    sourceRevisionId: string;
+    authorId: string;
+    idempotencyKey: string;
+  };
+}
+
+model PersistenceChangeSetDesktopModuleRecordSave {
+  type: "module.record.save";
+  command: { projectId: string; moduleId: string; key: string; value: JsonObject; expectedVersion: int32 | null; };
+}
+
+model PersistenceChangeSetDesktopKnowledgeNodeSave {
+  type: "knowledge.node.save";
+  command: {
+    projectId: string; id: string; type: string; name: string; attributes: JsonObject;
+    status: "proposed" | "confirmed" | "retired"; expectedVersion: int32 | null;
+  };
+}
+
+model PersistenceChangeSetDesktopKnowledgeAliasSave {
+  type: "knowledge.alias.save";
+  command: {
+    projectId: string; id: string; nodeId: string; surface: string; normalized: string; scope: string | null;
+    status: "proposed" | "confirmed" | "ambiguous" | "retired";
+  };
+}
+
+model PersistenceChangeSetDesktopKnowledgeRelationSave {
+  type: "knowledge.relation.save";
+  command: {
+    projectId: string; id: string; sourceId: string; targetId: string; type: string;
+    attributes: JsonObject; validity: JsonObject;
+    status: "proposed" | "confirmed" | "rejected" | "retired"; expectedVersion: int32 | null;
+  };
+}
+
+model PersistenceChangeSetDesktopEvidenceAnchorSave {
+  type: "evidence.anchor.save";
+  command: {
+    projectId: string; id: string; documentId: string; revisionId: string;
+    @minValue(0) fromUtf16: int32; @minValue(0) toUtf16: int32;
+    @pattern("^[0-9a-f]{64}$") quoteSha256: string;
+    status: "proposed" | "confirmed" | "needs_review" | "orphaned";
+    expectedVersion: int32 | null;
+  };
+}
+
+model PersistenceChangeSetDesktopEvidenceMentionSave {
+  type: "evidence.mention.save";
+  command: {
+    projectId: string; evidenceId: string; nodeId: string; source: string;
+    confidence: float64 | null; extractorVersion: string | null;
+    status: "proposed" | "confirmed" | "ambiguous" | "rejected";
+  };
+}
+
+model PersistenceChangeSetDesktopEvidenceAssertionSave {
+  type: "evidence.assertion.save";
+  command: {
+    projectId: string; id: string; proposition: JsonObject; modality: string; perspective: string;
+    narrativeTime: JsonObject; confidence: float64 | null;
+    status: "proposed" | "confirmed" | "rejected" | "retired"; expectedVersion: int32 | null;
+  };
+}
+
+model PersistenceChangeSetDesktopEvidenceAssertionLink {
+  type: "evidence.assertion.link";
+  command: {
+    projectId: string; assertionId: string; evidenceId: string;
+    role: "supports" | "contradicts" | "quotes" | "context";
+  };
+}
+
+model PersistenceChangeSetDesktopKnowledgeMerge {
+  type: "knowledge.merge";
+  command: {
+    projectId: string; sourceId: string; targetId: string; @minValue(1) projectVersion: int32;
+    @pattern("^[0-9a-f]{64}$") previewDigest: string; actorId: string;
+    origin: "author" | "external-agent"; auditId: string; generatedAliasId: string; plan: JsonObject;
+  };
+}
+
+union PersistenceChangeSetDesktopOperation {
+  documentCreate: PersistenceChangeSetDesktopDocumentCreate,
+  documentUpdate: PersistenceChangeSetDesktopDocumentUpdate,
+  documentDelete: PersistenceChangeSetDesktopDocumentDelete,
+  documentSave: PersistenceChangeSetDesktopDocumentSave,
+  documentRestore: PersistenceChangeSetDesktopDocumentRestore,
+  moduleRecordSave: PersistenceChangeSetDesktopModuleRecordSave,
+  knowledgeNodeSave: PersistenceChangeSetDesktopKnowledgeNodeSave,
+  knowledgeAliasSave: PersistenceChangeSetDesktopKnowledgeAliasSave,
+  knowledgeRelationSave: PersistenceChangeSetDesktopKnowledgeRelationSave,
+  evidenceAnchorSave: PersistenceChangeSetDesktopEvidenceAnchorSave,
+  evidenceMentionSave: PersistenceChangeSetDesktopEvidenceMentionSave,
+  evidenceAssertionSave: PersistenceChangeSetDesktopEvidenceAssertionSave,
+  evidenceAssertionLink: PersistenceChangeSetDesktopEvidenceAssertionLink,
+  knowledgeMerge: PersistenceChangeSetDesktopKnowledgeMerge,
+}
+
+model PersistenceChangeSetDesktopBody {
+  id: string;
+  projectId: string;
+  authorId: string;
+  status: "proposed" | "approved" | "applied" | "rejected";
+  operations: PersistenceChangeSetDesktopOperation[];
+  readSet: PersistenceChangeSetDesktopReadEntry[];
+  writeSet: PersistenceChangeSetDesktopWriteEntry[];
+  provenance: PersistenceChangeSetDesktopProvenance;
+  @minValue(1) version: int32;
+  idempotencyKey: string;
+  createdAt: utcDateTime;
+  approvedAt: utcDateTime | null;
+  approvedBy: string | null;
+  appliedAt: utcDateTime | null;
+  rejectedAt: utcDateTime | null;
+  rejectedBy: string | null;
+}
+
+model PersistenceChangeSetDesktopListBody {
+  changeSets: PersistenceChangeSetDesktopBody[];
+}
+
+model PersistenceChangeSetDesktopResponseBody {
+  changeSet: PersistenceChangeSetDesktopBody;
+  receipt?: PersistenceChangeSetDesktopApplicationBody | null;
+}
+
+model PersistenceChangeSetDesktopApprovalBody {
+  changeSet: PersistenceChangeSetDesktopBody;
+}
+
+model PersistenceChangeSetDesktopApplicationBody {
+  changeSet: PersistenceChangeSetDesktopBody;
+  results: JsonObject[];
+  replayed: boolean;
+}
+
+model PersistenceChangeSetDesktopResultBody {
+  changeSet: PersistenceChangeSetDesktopBody;
+  replayed: boolean;
+}
+
+model PersistenceChangeSetDesktopApplyBody {
+  changeSet: PersistenceChangeSetDesktopBody;
+  results: JsonObject[];
+  replayed: boolean;
+}
+
+model DesktopCoreReviewFeedItem {
+  kind: "core-proposal";
+  id: string;
+  projectId: string;
+  createdAt: utcDateTime;
+  state: "proposed" | "partially_approved" | "approved" | "applied";
+  approvalModel: "per-operation";
+  applicationModel: "per-operation";
+  status: CoreProposalStatusBody;
+  receipts: ProposalApplyReceiptBody[];
+  stale: boolean;
+}
+
+model DesktopNativeReviewFeedItem {
+  kind: "native-change-set";
+  id: string;
+  projectId: string;
+  createdAt: utcDateTime;
+  state: "proposed" | "approved" | "applied" | "rejected";
+  approvalModel: "whole-change-set";
+  applicationModel: "transaction";
+  changeSet: PersistenceChangeSetDesktopBody;
+  receipt: PersistenceChangeSetDesktopApplicationBody | null;
+}
+
+union DesktopReviewFeedItem {
+  coreProposal: DesktopCoreReviewFeedItem,
+  nativeChangeSet: DesktopNativeReviewFeedItem,
+}
+
+model DesktopReviewFeedBody {
+  items: DesktopReviewFeedItem[];
+}
+
 model PersistenceChangeSetListBody {
   changeSets?: PersistenceChangeSetBody[];
   ...Record<unknown>;
@@ -441,31 +753,54 @@ model KnowledgeMergeResultBody {
   ...Record<unknown>;
 }
 
-model CoreProposalStatusBody {
-  proposal?: JsonObject;
-  payloadComplete?: boolean;
-  originalDigest?: string;
-  operationIds?: string[];
-  state?: "proposed" | "partially_approved" | "approved" | "applied";
-  approvedOperationIds?: string[];
-  approvedByOperationId?: Record<string>;
-  applications?: JsonObject[];
-  appliedOperationIds?: string[];
-  stale?: boolean;
+model SnapshotIdBody {
+  projectId: string;
+  @minValue(1)
+  projectVersion: int32;
   ...Record<unknown>;
 }
 
 model CoreChangeProposalBody {
-  id?: string;
-  snapshot?: { projectId?: string; projectVersion?: int32; ...Record<unknown>; };
-  operations?: JsonObject[];
-  source?: "author" | "module" | "mcp";
-  evidence?: JsonObject[];
+  id: string;
+  snapshot: SnapshotIdBody;
+  operations: JsonObject[];
+  source: "author" | "module" | "mcp";
+  evidence?: CoreProposalEvidenceBody[];
+  ...Record<unknown>;
+}
+
+model CoreProposalFileRevisionBody {
+  path: string;
+  revision: string | null;
+  ...Record<unknown>;
+}
+
+model CoreProposalEvidenceBody {
+  id: string;
+  snapshot: SnapshotIdBody;
+  module: "story" | "diagnostics" | "nlp" | "semantic" | "speaker" | "assistant" | "publishing" | "mcp" | "search";
+  kind: string;
+  paths: CoreProposalFileRevisionBody[];
+  details: unknown;
+  ...Record<unknown>;
+}
+
+model CoreProposalStatusBody {
+  proposal: CoreChangeProposalBody;
+  payloadComplete?: boolean;
+  originalDigest?: string;
+  operationIds?: string[];
+  state: "proposed" | "partially_approved" | "approved" | "applied";
+  approvedOperationIds: string[];
+  approvedByOperationId?: Record<string>;
+  applications: ProposalApplyReceiptBody[];
+  appliedOperationIds: string[];
+  stale: boolean;
   ...Record<unknown>;
 }
 
 model ProposalListBody {
-  proposals?: CoreProposalStatusBody[];
+  proposals: CoreProposalStatusBody[];
   ...Record<unknown>;
 }
 
@@ -566,7 +901,11 @@ model WritingStatsResponseBody {
 }
 
 model ProposalApplyReceiptBody {
-  operationId?: string; generation?: int32; projectVersion?: int32; revisions?: JsonObject[];
+  operationId: string;
+  generation: int32;
+  @minValue(1)
+  projectVersion: int32;
+  revisions: CoreProposalFileRevisionBody[];
   ...Record<unknown>;
 }
 
@@ -609,6 +948,29 @@ model ActionResultBody {
   proposals?: JsonObject[];
   error?: JsonObject;
   ...Record<unknown>;
+}
+
+// Desktop Web requests the synchronous result variant only. Async 202 job
+// responses remain an explicit operation result, but are rejected by its
+// generated client schema and handled through the job APIs.
+model DesktopActionSuccessBody {
+  ok: true;
+  snapshot: SnapshotIdBody;
+  data: unknown;
+  proposals?: CoreChangeProposalBody[];
+  ...Record<unknown>;
+}
+
+model DesktopActionFailureBody {
+  ok: false;
+  snapshot: SnapshotIdBody;
+  error: { code: string; message: string; retryable: boolean; ...Record<unknown>; };
+  ...Record<unknown>;
+}
+
+union DesktopActionResultBody {
+  success: DesktopActionSuccessBody;
+  failure: DesktopActionFailureBody;
 }
 
 model CoreProjectCreateRequest {
@@ -971,6 +1333,155 @@ model WorkArchive {
   ...Record<unknown>;
 }
 
+// Export has a complete, validated archive shape. Keep import on the
+// compatibility model above, whose optional fields and open object shapes are
+// required for the existing import contract.
+model WorkArchiveExportProject {
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  title: string;
+  settings: JsonObject;
+  ...Record<never>;
+}
+
+model WorkArchiveExportDocument extends WorkArchiveDocument {
+  id: string;
+  parentId: string | null;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  kind: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  title: string;
+  @maxLength(512)
+  orderKey: string;
+  markdown: string;
+  revisionId: string;
+}
+
+model WorkArchiveExportKnowledgeNode extends WorkArchiveKnowledgeNode {
+  id: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  type: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  name: string;
+  attributes: JsonObject;
+  status: "proposed" | "confirmed" | "retired";
+}
+
+model WorkArchiveExportKnowledgeAlias extends WorkArchiveKnowledgeAlias {
+  id: string;
+  nodeId: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  surface: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  normalized: string;
+  scope: string | null;
+  status: "proposed" | "confirmed" | "ambiguous" | "retired";
+}
+
+model WorkArchiveExportKnowledgeRelation extends WorkArchiveKnowledgeRelation {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  type: string;
+  attributes: JsonObject;
+  validity: JsonObject;
+  status: "proposed" | "confirmed" | "rejected" | "retired";
+}
+
+model WorkArchiveExportKnowledge {
+  @maxItems(999)
+  nodes: WorkArchiveExportKnowledgeNode[];
+  @maxItems(10000)
+  aliases: WorkArchiveExportKnowledgeAlias[];
+  @maxItems(10000)
+  relations: WorkArchiveExportKnowledgeRelation[];
+  ...Record<never>;
+}
+
+model WorkArchiveExportAnchor extends WorkArchiveAnchor {
+  id: string;
+  documentId: string;
+  revisionId: string;
+  @minValue(0) fromUtf16: int32;
+  @minValue(0) toUtf16: int32;
+  @pattern("^[0-9a-f]{64}$")
+  quoteSha256: string;
+  status: "proposed" | "confirmed" | "needs_review" | "orphaned";
+}
+
+model WorkArchiveExportMention extends WorkArchiveMention {
+  evidenceId: string;
+  nodeId: string;
+  status: "proposed" | "confirmed" | "ambiguous" | "rejected";
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  source: string;
+  confidence: float64 | null;
+  extractorVersion: string | null;
+}
+
+model WorkArchiveExportAssertion extends WorkArchiveAssertion {
+  id: string;
+  proposition: JsonObject;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  modality: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  perspective: string;
+  narrativeTime: JsonObject;
+  confidence: float64 | null;
+  status: "proposed" | "confirmed" | "rejected" | "retired";
+}
+
+model WorkArchiveExportAssertionEvidence extends WorkArchiveAssertionEvidence {
+  assertionId: string;
+  evidenceId: string;
+  role: "supports" | "contradicts" | "quotes" | "context";
+}
+
+model WorkArchiveExportUnresolvedEvidence {
+  @maxItems(20000)
+  anchors: WorkArchiveExportAnchor[];
+  @maxItems(40000)
+  mentions: WorkArchiveExportMention[];
+  @maxItems(40000)
+  assertionEvidence: WorkArchiveExportAssertionEvidence[];
+  ...Record<never>;
+}
+
+model WorkArchiveExportEvidence {
+  @maxItems(10000)
+  anchors: WorkArchiveExportAnchor[];
+  @maxItems(40000)
+  mentions: WorkArchiveExportMention[];
+  @maxItems(999)
+  assertions: WorkArchiveExportAssertion[];
+  @maxItems(40000)
+  assertionEvidence: WorkArchiveExportAssertionEvidence[];
+  unresolved: WorkArchiveExportUnresolvedEvidence;
+  ...Record<never>;
+}
+
+model WorkArchiveExportModuleRecord extends WorkArchiveModuleRecord {
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  moduleId: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  key: string;
+  value: JsonObject;
+}
+
+model WorkArchiveExport {
+  format: "codexia-work/v1";
+  project: WorkArchiveExportProject;
+  @maxItems(999)
+  documents: WorkArchiveExportDocument[];
+  knowledge: WorkArchiveExportKnowledge;
+  evidence: WorkArchiveExportEvidence;
+  @maxItems(10000)
+  moduleRecords: WorkArchiveExportModuleRecord[];
+  @maxItems(10000)
+  omittedRecords: string[];
+  ...Record<never>;
+}
+
 model WorkImportResult {
   project: Project;
   replayed: boolean;
@@ -1065,6 +1576,11 @@ model VersionResponse {
   ...Record<never>;
 }
 
+model DesktopVersionResponse {
+  ...OmitProperties<VersionResponse, "contractVersion">;
+  contractVersion: int32;
+}
+
 model EventStream {
   @header contentType: "text/event-stream";
   @header("Cache-Control") cacheControl?: string;
@@ -1142,6 +1658,7 @@ model PersistenceDocument {
   title: string;
   orderKey: string;
   headRevisionId: string | null;
+  @minValue(0)
   version: int32;
   createdAt: utcDateTime;
   updatedAt: utcDateTime;

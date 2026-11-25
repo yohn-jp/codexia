@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { EvidenceId, RevisionId } from '@codexia/persistence-contracts';
 import { api, setOAuthAccessToken } from './api.js';
-import { getPersistenceDocumentsGetUrl, getPersistenceStatusGetUrl } from './generated/http/client.js';
+import { getJobEventsGetUrl, getPersistenceDocumentsGetUrl, getPersistenceStatusGetUrl } from './generated/http/client.js';
 
 test('generated persistence status uses the authenticated transport and preserves response errors', async t => {
   const controller = new AbortController();
@@ -138,4 +138,30 @@ test('generated Text Anchor creation preserves the authored request and response
   controller.abort();
   await assert.rejects(create(), error => error === controller.signal.reason);
   assert.equal(fetch.mock.callCount(), 5);
+});
+
+test('generated job events leave the response stream readable and retain admission errors', async t => {
+  const controller = new AbortController();
+  const stream = 'data: {"type":"job-status"}\n\n';
+  const response = new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
+  let reply = response;
+  t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+    assert.equal(url, getJobEventsGetUrl());
+    assert.equal(url, '/api/jobs/events');
+    assert.equal(init.method, 'GET');
+    assert.equal(init.signal, controller.signal);
+    assert.equal(new Headers(init.headers).get('Accept'), 'text/event-stream');
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer stream-token');
+    assert.equal(init.credentials, 'omit');
+    return reply;
+  });
+  setOAuthAccessToken('stream-token');
+  t.after(() => setOAuthAccessToken(null));
+
+  const result = await api.jobEventStream(controller.signal);
+  assert.equal(result.bodyUsed, false);
+  assert.equal(await result.text(), stream);
+
+  reply = Response.json({ error: 'Busy', code: 'STREAM_BUSY' }, { status: 503 });
+  await assert.rejects(api.jobEventStream(controller.signal), { status: 503, code: 'STREAM_BUSY' });
 });
