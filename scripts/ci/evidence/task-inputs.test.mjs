@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { PLAYWRIGHT_IMAGE_DIGESTS } from '../browser/image-digests.mjs';
-import { captureTaskInputSource, taskInvocation, taskWorkflowJob, UX_PROJECTION_DOCUMENTS, isNonExecutableDocumentation, isTaskInputDocument } from './task-inputs.mjs';
+import { captureTaskInputSource, taskInvocation, taskWorkflowJob, UX_PROJECTION_DOCUMENTS, REQUIREMENTS_TRACE_DOCUMENTS, isRequirementsTraceInput, isNonExecutableDocumentation, isTaskInputDocument } from './task-inputs.mjs';
 import { createVerificationPlan } from '../impact/plan.mjs';
 
 function captureTaskInputClosure({ root, sha, task, runtime }) {
@@ -329,4 +329,26 @@ test('projection authority documents are task inputs only for the simulator root
     assert.equal(isTaskInputDocument(file, 'coverage'), file === 'app/DESIGN.md', `${file} keeps its existing product proof scope`);
   }
   assert.equal(isTaskInputDocument('docs/design/DEVELOPMENT-PAGES-UX.md', 'unit-root'), false);
+});
+
+test('specification authority and native iOS and IaC sources select the existing trace proof', () => {
+  for (const file of [
+    'docs/architecture/DOCUMENTATION-AUTHORITY.md',
+    'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md',
+    'docs/architecture/SPECIFICATION-TOOLCHAIN.md',
+    'docs/requirements/STRICTDOC-TRACEABILITY.md',
+    'docs/requirements/REQUIREMENT-REGISTER.md',
+    'docs/verification/TRACEABILITY-REGISTER.md',
+    'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
+  ]) {
+    assert.ok(REQUIREMENTS_TRACE_DOCUMENTS.includes(file), file);
+    assert.equal(isTaskInputDocument(file, 'requirements-trace'), true, file);
+    assert.equal(isRequirementsTraceInput(file), true, file);
+  }
+  for (const file of [
+    'ios/CodexiaApp/Sources/CodexiaApp.swift',
+    'ios/CodexiaTransport/Sources/CodexiaTransport/APITransport.swift',
+    'deploy/cloudflare/terraform/main.tf',
+    'deploy/ansible/site.yml',
+  ]) assert.equal(isRequirementsTraceInput(file), true, file);
 });

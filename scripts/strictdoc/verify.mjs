@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readRegularFile } from '../shared/read-regular-file.mjs';
 import { associateTraceCases } from './case-results.mjs';
 import { buildObligationTrace } from './obligation-trace.mjs';
-import { buildReverseTrace, discoverReverseSurfaces } from './reverse-trace.mjs';
+import { buildReverseTrace, discoverPlatformSurfaces, discoverReverseSurfaces } from './reverse-trace.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');
@@ -203,7 +203,10 @@ export function validateInventory(discovered, classifications) {
     }
   }
 
-  const kindMap = { routes: 'route', tools: 'tool', databaseObjects: 'databaseObject' };
+  const kindMap = {
+    routes: 'route', tools: 'tool', databaseObjects: 'databaseObject',
+    nativeIosViews: 'nativeIosView', iacResources: 'iacResource', ansibleFiles: 'ansibleSource',
+  };
   for (const [bucket, kind] of Object.entries(kindMap)) {
     for (const id of discovered[bucket] ?? []) {
       const entry = classificationByKey.get(`${kind}\0${id}`);
@@ -213,8 +216,8 @@ export function validateInventory(discovered, classifications) {
     }
   }
   for (const entry of classifications) {
-    if (!((discovered[`${entry.kind}s`] ?? []).includes(entry.id)) &&
-        !(entry.kind === 'databaseObject' && (discovered.databaseObjects ?? []).includes(entry.id))) {
+    const hasDiscoveredSurface = Object.entries(kindMap).some(([bucket, kind]) => kind === entry.kind && (discovered[bucket] ?? []).includes(entry.id));
+    if (!hasDiscoveredSurface) {
       violations.push(`Stale inventory classification for ${entry.kind} ${entry.id}`);
     }
   }
@@ -455,10 +458,19 @@ export async function discoverSourceInventory(root, scope) {
   const routeFiles = await readScopedSourceFiles(root, scope?.routes, 'route');
   const toolFiles = await readScopedSourceFiles(root, scope?.tools, 'tool');
   const databaseFiles = await readScopedSourceFiles(root, scope?.databaseObjects, 'database object');
+  const platform = await discoverPlatformSurfaces({
+    repositoryRoot: root,
+    nativeIosRoot: scope?.nativeIos,
+    iacRoot: scope?.iac,
+    ansibleRoot: scope?.ansible,
+  });
   const discovered = {
     routes: routeFiles.flatMap(({ source }) => discoverRouteFamilies(source)),
     tools: toolFiles.flatMap(({ source }) => discoverMcpToolNames(source)),
     databaseObjects: databaseFiles.flatMap(({ source }) => discoverSqlObjects(source)),
+    nativeIosViews: platform.surfaces.filter(item => item.kind === 'nativeIosView').map(item => item.id),
+    iacResources: platform.surfaces.filter(item => item.kind === 'iacResource').map(item => item.id),
+    ansibleFiles: platform.surfaces.filter(item => item.kind === 'ansibleSource').map(item => item.id),
   };
   for (const [bucket, values] of Object.entries(discovered)) {
     discovered[bucket] = [...new Set(values)].sort();

@@ -201,6 +201,11 @@ test('StrictDoc authority selects trace proof and the requirement register also 
     'docs/requirements/REQUIREMENT-REGISTER.md',
     'docs/requirements/STRICTDOC-TRACEABILITY.md',
     'docs/requirements/STRICTDOC-GRAMMAR.gra.md',
+    'docs/architecture/DOCUMENTATION-AUTHORITY.md',
+    'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md',
+    'docs/architecture/SPECIFICATION-TOOLCHAIN.md',
+    'docs/verification/TRACEABILITY-REGISTER.md',
+    'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
     'scripts/strictdoc/verify.mjs',
     'scripts/strictdoc/strictdoc_config.py',
     'scripts/strictdoc/requirements.lock.txt',
@@ -208,12 +213,18 @@ test('StrictDoc authority selects trace proof and the requirement register also 
     const selected = await plan([file]);
     const requirementRegister = file === 'docs/requirements/REQUIREMENT-REGISTER.md';
     const uxAuthority = UX_PROJECTION_DOCUMENTS.includes(file);
+    const architectureAuthority = file.startsWith('docs/architecture/');
+    const toolingAcceptance = file === 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md';
     assert.deepEqual(selected.tasks, requirementRegister
       ? ['unit-root', 'db-contract', 'coverage', 'requirements-trace']
-      : uxAuthority ? ['unit-root', 'coverage', 'requirements-trace'] : ['coverage', 'requirements-trace'], file);
+      : uxAuthority ? ['unit-root', 'coverage', 'requirements-trace']
+        : architectureAuthority ? ['coverage', 'architecture-g5', 'requirements-trace']
+          : toolingAcceptance ? ['db-contract', 'coverage', 'requirements-trace'] : ['coverage', 'requirements-trace'], file);
     assert.deepEqual(selected.groups, requirementRegister
       ? ['unit-core', 'unit-db', 'types-tests', 'types-trace']
-      : uxAuthority ? ['unit-core', 'types-tests', 'types-trace'] : ['types-tests', 'types-trace'], file);
+      : uxAuthority ? ['unit-core', 'types-tests', 'types-trace']
+        : architectureAuthority ? ['unit-architecture', 'types-tests', 'types-trace']
+          : toolingAcceptance ? ['unit-db', 'types-tests', 'types-trace'] : ['types-tests', 'types-trace'], file);
   }
 });
 
@@ -228,6 +239,9 @@ test('changes to trace inputs select the existing trace task without dropping do
     ['docs/design/INTERACTION-CONTRACT.md', null],
     ['app/src/App.tsx', 'unit-app'],
     ['deploy/ansible/deploy.yml', 'unit-root'],
+    ['deploy/ansible/site.yml', 'unit-root'],
+    ['deploy/cloudflare/terraform/main.tf', 'unit-root'],
+    ['ios/CodexiaApp/Sources/CodexiaApp.swift', 'unit-root'],
     ['deploy/backup/backup.sh', 'db-contract'],
   ]) {
     const selection = await plan([file]);
@@ -546,6 +560,8 @@ test('known operational inputs retain root proof without unrelated browser or OC
       'deploy/ansible/restore-drill.yml', 'deploy/backup/s3_transfer.py',
       'docs/deployment/BACKUP.md', 'docs/deployment/README.md',
     ].includes(file)) expected.push('requirements-trace');
+    if (file.startsWith('deploy/ansible/') && /\.ya?ml$/u.test(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
+    if (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf') && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
   }
@@ -649,7 +665,7 @@ test('root and coverage-only plans have a single owner for contract test executi
   assert.match(root.scripts['test:scripts'], /node --test 'scripts\/\*\*\/\*\.test\.mjs'/u);
   assert.match(runner, /if \(!plan\.tasks\.includes\('unit-root'\)\) await node\('--test', 'scripts\/ci\/impact\/contract\.test\.mjs'/u);
   assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
-  assert.deepEqual((await plan(['deploy/ansible/host.yml'])).tasks, ['unit-root','coverage']);
+  assert.deepEqual((await plan(['deploy/ansible/host.yml'])).tasks, ['unit-root','coverage','requirements-trace']);
 });
 
 test('push backup changes retain root and independent exact-head verification', async () => {
@@ -746,10 +762,13 @@ test('native Swift-only PR inputs select owner contract without unrelated Deskto
   for (const file of owned) {
     const result = await plan([file]);
     assert.equal(result.mode, 'affected', file);
-    assert.deepEqual(result.tasks, ['unit-root', 'coverage'], file);
+    const expected = file.endsWith('.swift')
+      ? ['unit-root', 'coverage', 'requirements-trace']
+      : ['unit-root', 'coverage'];
+    assert.deepEqual(result.tasks, expected, file);
     assert.equal(result.full_model_oci, false, file);
   }
-  assert.deepEqual((await plan(owned)).tasks, ['unit-root', 'coverage']);
+  assert.deepEqual((await plan(owned)).tasks, ['unit-root', 'coverage', 'requirements-trace']);
   const nativeApi = parse(readFileSync(new URL('../../../.github/workflows/ios-api.yml', import.meta.url), 'utf8'));
   for (const input of ['.github/workflows/ios-api.yml', 'ios/CodexiaTransport/**', 'packages/http-contract/openapi/codexia.openapi.yaml']) {
     assert.ok(nativeApi.on.pull_request.paths.includes(input), input);

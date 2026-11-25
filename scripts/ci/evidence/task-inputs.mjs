@@ -24,12 +24,15 @@ export const REQUIREMENTS_TRACE_DOCUMENTS = Object.freeze([
   'docs/architecture/BACKUP-CONSOLE-CONTRACT.md',
   'docs/architecture/CORE.md',
   'docs/architecture/DATA-MODEL.md',
+  'docs/architecture/DOCUMENTATION-AUTHORITY.md',
   'docs/architecture/EXTERNAL-INTERFACES.md',
   'docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md',
   'docs/architecture/MCP-FIRST.md',
   'docs/architecture/MCP-OAUTH.md',
   'docs/architecture/MODULES.md',
   'docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.md',
+  'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md',
+  'docs/architecture/SPECIFICATION-TOOLCHAIN.md',
   'docs/architecture/SYSTEM-DESIGN.md',
   'docs/deployment/BACKUP.md',
   'docs/deployment/INITIAL-DEPLOYMENT-FLOW.md',
@@ -47,6 +50,7 @@ export const REQUIREMENTS_TRACE_DOCUMENTS = Object.freeze([
   'docs/requirements/STRICTDOC-GRAMMAR.gra.md',
   'docs/requirements/STRICTDOC-TRACEABILITY.md',
   'docs/verification/CI-CD.md',
+  'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
   'docs/verification/TEST-ARCHITECTURE-OPTIMIZATION.md',
   'docs/verification/TRACEABILITY-REGISTER.md',
 ]);
@@ -89,6 +93,9 @@ const requirementsTraceSurfaces = new Set(REQUIREMENTS_TRACE_SURFACE_FILES);
 
 export function isRequirementsTraceInput(file) {
   return requirementsTraceDocuments.has(file) || requirementsTraceSurfaces.has(file) ||
+    (file.startsWith('ios/') && /\.swift$/u.test(file)) ||
+    (file.startsWith('deploy/ansible/') && /\.ya?ml$/u.test(file)) ||
+    (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf')) ||
     (/^app\/src\/.*\.[jt]sx?$/u.test(file) && !/\.test\./u.test(file));
 }
 

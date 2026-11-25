@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -14,7 +16,80 @@ test('reverse discovery records authority and provenance for HTTP, MCP, DB, UI a
   assert.ok(surfaces.some((item) => item.kind === 'uiControl' && item.id === 'WRT-01.A'));
   assert.ok(surfaces.some((item) => item.kind === 'backupInterface' && item.id === 'deploy/backup/backup.sh'));
   assert.ok(surfaces.every((item) => item.provenance && item.source?.path));
-  assert.deepEqual(new Set(limitations.map((item) => item.area)), new Set(['mcp-effect', 'database-live', 'ui-runtime', 'deployment-runtime', 'backup-receipt']));
+  assert.deepEqual(new Set(limitations.map((item) => item.area)), new Set(['mcp-effect', 'database-live', 'ui-runtime', 'native-ios-runtime', 'iac-runtime', 'ansible-runtime', 'deployment-runtime', 'backup-receipt']));
+});
+
+test('reverse discovery inventories native iOS views and declared IaC resources', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codexia-platform-inventory-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, 'ios/CodexiaApp/Sources'), { recursive: true });
+  await mkdir(path.join(root, 'ios/CodexiaEditor/Sources'), { recursive: true });
+  await mkdir(path.join(root, 'deploy/cloudflare/terraform'), { recursive: true });
+  await mkdir(path.join(root, 'deploy/ansible'), { recursive: true });
+  await writeFile(path.join(root, 'ios/CodexiaApp/Sources/EditorScreen.swift'), `import SwiftUI\nstruct EditorScreen: View { var body: some View { Text("Editor") } }\n`);
+  await writeFile(path.join(root, 'ios/CodexiaEditor/Sources/AuthoringView.swift'), `import SwiftUI\npublic struct AuthoringView: View { public var body: some View { Text("Authoring") } }\n`);
+  await writeFile(path.join(root, 'deploy/cloudflare/terraform/main.tf'), `resource "cloudflare_workers_route" "frontend" {\n  pattern = "example.com/*"\n}\n`);
+  await writeFile(path.join(root, 'deploy/ansible/site.yml'), `- name: Configure Codexia\n  hosts: codexia\n  tasks: []\n`);
+
+  const result = await discoverReverseSurfaces({ repositoryRoot: root });
+  assert.ok(result.surfaces.some(item => item.kind === 'nativeIosView' && item.id === 'EditorScreen' && item.source.path.endsWith('EditorScreen.swift')));
+  assert.ok(result.surfaces.some(item => item.kind === 'nativeIosView' && item.id === 'AuthoringView' && item.source.path.endsWith('AuthoringView.swift')));
+  assert.ok(result.surfaces.some(item => item.kind === 'iacResource' && item.id === 'cloudflare_workers_route.frontend' && item.source.path.endsWith('main.tf')));
+  assert.ok(result.surfaces.some(item => item.kind === 'ansibleSource' && item.id === 'deploy/ansible/site.yml'));
+  assert.ok(result.limitations.some(item => item.area === 'native-ios-runtime'));
+  assert.ok(result.limitations.some(item => item.area === 'iac-runtime'));
+});
+
+test('platform source coordinates survive comments and blank lines', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codexia-platform-coordinates-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const swiftPath = 'ios/CodexiaApp/Sources/EditorScreen.swift';
+  const terraformPath = 'deploy/cloudflare/terraform/main.tf';
+  await mkdir(path.dirname(path.join(root, swiftPath)), { recursive: true });
+  await mkdir(path.dirname(path.join(root, terraformPath)), { recursive: true });
+  const swift = ['import SwiftUI', '/*', 'struct CommentedView: View {}', '*/', '// struct CommentedLineView: View {}', '', '  struct EditorScreen: View {}', '', 'public struct SecondView: View {}'];
+  const terraform = ['/*', 'resource "cloudflare_workers_route" "commented" {}', '*/', '# resource "cloudflare_workers_route" "commented_line" {}', '', '  resource "cloudflare_workers_route" "frontend" {', '  pattern = "example.com/*"', '}', '', 'resource "cloudflare_workers_route" "origin" {}'];
+  for (const newline of ['\n', '\r\n']) {
+    await writeFile(path.join(root, swiftPath), swift.join(newline) + newline);
+    await writeFile(path.join(root, terraformPath), terraform.join(newline) + newline);
+    const { surfaces } = await discoverReverseSurfaces({ repositoryRoot: root });
+    assert.deepEqual(surfaces.filter(item => item.kind === 'nativeIosView').map(item => [item.id, item.source]), [
+      ['EditorScreen', { path: swiftPath, line: 7 }],
+      ['SecondView', { path: swiftPath, line: 9 }],
+    ]);
+    assert.deepEqual(surfaces.filter(item => item.kind === 'iacResource').map(item => [item.id, item.source]), [
+      ['cloudflare_workers_route.frontend', { path: terraformPath, line: 6 }],
+      ['cloudflare_workers_route.origin', { path: terraformPath, line: 10 }],
+    ]);
+  }
+});
+
+test('typed iOS and IaC identifiers reverse-map without certifying implementation or execution', () => {
+  const source = { path: 'fixture' };
+  const result = buildReverseTrace({
+    discovered: [
+      { kind: 'nativeIosView', id: 'AuthoringView', source, provenance: 'SwiftUI declaration' },
+      { kind: 'iacResource', id: 'cloudflare_workers_route.frontend', source, provenance: 'Terraform resource declaration' },
+    ],
+    obligations: [
+      { requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', surfaceIdentifiers: [{ kind: 'nativeIosView', id: 'AuthoringView' }], testIds: [], exactRuns: [] },
+      { requirementId: 'REQ-EXT-001', obligationId: 'OBL-REQ-EXT-001-O01', surfaceIdentifiers: [{ kind: 'iacResource', id: 'cloudflare_workers_route.frontend' }], testIds: [], exactRuns: [] },
+    ],
+  });
+  assert.deepEqual(result.rows.map(row => row.status), ['UNVERIFIED', 'UNVERIFIED']);
+  assert.equal(result.gaps.filter(gap => gap.kind === 'UNVERIFIED').length, 2);
+  assert.ok(result.rows.every(row => row.exactRuns.length === 0));
+});
+
+test('rejects a typed implementation reference with no independently discovered surface', () => {
+  const result = buildReverseTrace({
+    discovered: [],
+    obligations: [{
+      requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01',
+      surfaceIdentifiers: [{ kind: 'nativeIosView', id: 'MissingEditorView' }], testIds: [], exactRuns: [],
+    }],
+  });
+  assert.ok(result.violations.some(item => item.includes('Obligation surface identifier has no discovered source: nativeIosView MissingEditorView')));
 });
 
 test('reverse trace leaves new runtime surface unmapped and does not infer VERIFIED from test names', () => {

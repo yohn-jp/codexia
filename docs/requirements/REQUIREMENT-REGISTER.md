@@ -524,6 +524,7 @@ Passkey-firstの初回owner登録は一回限りsetup資格、owner不在、認�
 **UID**: OBL-REQ-AUTH-004-O01
 **Design reference**: [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.md)、[Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md)
 **Implementation identifiers**: app/src/console/ConsoleSetup.tsx; packages/api/src/owner-setup.ts; deploy/ansible/owner-setup.yml
+**Surface identifiers**: ansibleSource=deploy/ansible/prepare-owner-activation.yml
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -543,6 +544,9 @@ Passkey-firstの初回owner登録は一回限りsetup資格、owner不在、認�
 
 - **Type**: File
   **Path**: deploy/ansible/owner-setup.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/prepare-owner-activation.yml
 
 ## REQ-AUTH-005
 
@@ -821,6 +825,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **UID**: OBL-REQ-UI-001-O01
 **Design reference**: [UX contract](../design/UX-CONTRACT.md)、[iOS architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)
 **Implementation identifiers**: app/src/launcher.tsx
+**Surface identifiers**: nativeIosView=LibraryView; nativeIosView=AccountScreen; nativeIosView=ProjectScreen; nativeIosView=ProductEditorScreen; nativeIosView=FixtureProjectView; nativeIosView=FixtureListView; nativeIosView=FixtureEditorDestination; nativeIosView=AuthoringView
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -834,6 +839,12 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 
 - **Type**: File
   **Path**: app/src/launcher.tsx
+
+- **Type**: File
+  **Path**: ios/CodexiaApp/Sources/CodexiaApp.swift
+
+- **Type**: File
+  **Path**: ios/CodexiaEditor/Sources/CodexiaEditor/AuthoringView.swift
 
 ## REQ-UI-002
 
@@ -1092,6 +1103,7 @@ Edgeの静的UI配信とAPI/Tunnelのルーティングを分け、AccessをCore
 **UID**: OBL-REQ-EXT-001-O01
 **Design reference**: [Deployment](../deployment/README.md)、[System design](../architecture/SYSTEM-DESIGN.md)
 **Implementation identifiers**: deploy/cloudflare/ui-routes.json; scripts/verification/infrastructure/deployment-config.mjs
+**Surface identifiers**: iacResource=cloudflare_zero_trust_access_application.codexia; iacResource=cloudflare_zero_trust_access_application.identity_probe; iacResource=cloudflare_zero_trust_access_application.public_protocol; iacResource=terraform_data.public_oauth_edge_readiness; iacResource=cloudflare_zero_trust_tunnel_cloudflared.codexia; iacResource=cloudflare_dns_record.codexia; iacResource=cloudflare_zero_trust_tunnel_cloudflared_config.codexia; iacResource=cloudflare_worker.frontend; iacResource=cloudflare_workers_route.frontend; iacResource=cloudflare_workers_route.origin; iacResource=cloudflare_workers_route.owner_setup; iacResource=cloudflare_workers_route.owner_setup_frontend_identity
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1108,6 +1120,9 @@ Edgeの静的UI配信とAPI/Tunnelのルーティングを分け、AccessをCore
 
 - **Type**: File
   **Path**: scripts/verification/infrastructure/deployment-config.mjs
+
+- **Type**: File
+  **Path**: deploy/cloudflare/terraform/main.tf
 
 ## REQ-EXT-002
 
@@ -1197,6 +1212,7 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 **UID**: OBL-REQ-OPS-001-O01
 **Design reference**: [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md)
 **Implementation identifiers**: deploy/ansible/site.yml
+**Surface identifiers**: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/verify-base-tunnel-container.yml
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1210,6 +1226,42 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 
 - **Type**: File
   **Path**: deploy/ansible/site.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/auth-runtime.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/base-runtime.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/base-secrets.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/host-validate.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/host.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/inspect.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/inventory.example.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/owner-setup.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/preflight-observe.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/recreate-missing-app-database.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/verify-base-db-container.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/verify-base-tunnel-container.yml
 
 ## REQ-OPS-002
 
@@ -1247,6 +1299,7 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 **UID**: OBL-REQ-OPS-002-O01
 **Design reference**: [Update flow](../deployment/UPDATE-FLOW.md)、[CI/CD](../verification/CI-CD.md)
 **Implementation identifiers**: deploy/update-compatibility.json; .github/workflows/backend-release.yml; deploy/ansible/test-push-app-lifecycle.sh
+**Surface identifiers**: iacResource=cloudflare_worker_version.candidate; iacResource=cloudflare_worker.frontend; iacResource=terraform_data.public_oauth_edge_readiness; iacResource=cloudflare_workers_route.frontend; ansibleSource=deploy/ansible/cutover-host.yml; ansibleSource=deploy/ansible/cutover-observe.yml; ansibleSource=deploy/ansible/deploy-lifecycle-fixture.yml; ansibleSource=deploy/ansible/deploy-prepare.yml; ansibleSource=deploy/ansible/deploy-transaction.yml; ansibleSource=deploy/ansible/deploy.yml; ansibleSource=deploy/ansible/verify-deploy-base-runtime.yml
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1266,6 +1319,33 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 
 - **Type**: File
   **Path**: deploy/ansible/test-push-app-lifecycle.sh
+
+- **Type**: File
+  **Path**: deploy/cloudflare/terraform/initial-frontend-version/main.tf
+
+- **Type**: File
+  **Path**: deploy/cloudflare/terraform/main.tf
+
+- **Type**: File
+  **Path**: deploy/ansible/cutover-host.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/cutover-observe.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/deploy-lifecycle-fixture.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/deploy-prepare.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/deploy-transaction.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/deploy.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/verify-deploy-base-runtime.yml
 
 ## REQ-OPS-003
 
@@ -1297,6 +1377,7 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 **UID**: OBL-REQ-OPS-003-O01
 **Design reference**: [Backup](../deployment/BACKUP.md)
 **Implementation identifiers**: deploy/ansible/restore-drill.yml
+**Surface identifiers**: ansibleSource=deploy/ansible/restore-drill.yml
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1621,7 +1702,7 @@ A requirement-to-source relation must use a repository file path and any declare
 **Exact-run reference**: NOT_RUN
 **Comment**: Explicit criterion; source and test references are candidates only; no independent certification is implied.
 
-Reverse inventory leaves discovered route, tool, and database surfaces visible when classification is missing.
+Reverse inventory keeps discovered HTTP routes, MCP tools, database objects, Desktop UI controls, Native iOS views, and IaC resources or Ansible sources visible when classification or requirement mapping is missing.
 
 **Relations**:
 
@@ -1857,7 +1938,7 @@ Reject a deleted File relation and a line range outside the referenced source fi
 **Case name**: reports discovered runtime surfaces that lack an explicit classification
 **Exact-run reference**: NOT_RUN
 
-Keep a discovered route or database object visible as unclassified until it has a reasoned requirement or non-requirement classification.
+Keep discovered HTTP routes, MCP tools, database objects, Desktop UI controls, Native iOS views, Terraform resources, and Ansible sources visible as unclassified until each has a reasoned requirement or non-requirement classification.
 
 **Relations**:
 

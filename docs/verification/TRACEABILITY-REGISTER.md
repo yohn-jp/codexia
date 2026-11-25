@@ -76,6 +76,8 @@
 | modules/mcp/src/tools/、module action manifest | 全tool名、effect、scope、input/output Schema |
 | packages/persistence-postgres/migrations/、認証スキーマ | 全table/column/index/FK/trigger/roleとmigration |
 | app/src/ | 全画面・CTRL/CTA・状態・遷移・認可 |
+| ios/**/Sources/ | Native iOS SwiftUI view型とtransport入口。source declarationは実機・挙動の受入証拠ではない |
+| deploy/cloudflare/terraform/、deploy/ansible/ | IaC resource、playbook、inventory設定。宣言と実環境適用・収束の証拠を区別 |
 | deploy/、.github/workflows/ | Edge、IaC、更新、秘密管理、バックアップ、CI gate |
 | 全test、tests/e2e、tests/integration | どのobligationを何の期待値で証明するか |
 

@@ -13,9 +13,407 @@
       "packages/persistence-postgres/migrations/0001-initial.sql"
     ],
     "method": "The verifier derives route/method pairs from literal routePath or url.pathname equality blocks, tool names from literal server.tool registrations, and named top-level SQL CREATE TABLE/FUNCTION/TRIGGER/INDEX plus ALTER TABLE ADD CONSTRAINT declarations in the listed files.",
-    "discovery": "Source-derived. The verifier inspects the listed files independently of this classification manifest."
+    "discovery": "Source-derived. The verifier inspects the listed files independently of this classification manifest.",
+    "nativeIos": "ios",
+    "iac": "deploy/cloudflare/terraform",
+    "ansible": "deploy/ansible"
   },
   "classifications": [
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/auth-runtime.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/base-runtime.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/base-secrets.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/cutover-host.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/cutover-observe.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/deploy-lifecycle-fixture.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/deploy-prepare.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/deploy-transaction.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/deploy.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/host-validate.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/host.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/inspect.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/inventory.example.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/owner-setup.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/preflight-observe.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/prepare-owner-activation.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/recreate-missing-app-database.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/restore-drill.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/site.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/verify-base-db-container.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/verify-base-tunnel-container.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/verify-deploy-base-runtime.yml",
+      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.anchor_history",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.assertion",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.assertion_evidence",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.change_set",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.change_set_project_status_created_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.document",
+      "classification": "candidate REQ-DATA-001; conformance remains unverified"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.document_parent_order_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.document_revision",
+      "classification": "candidate REQ-DATA-002; conformance remains unverified"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.document_revision_history_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.document_revision_immutable",
+      "classification": "candidate REQ-DATA-002; conformance remains unverified"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.document.document_head_revision_fk",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.edit_operation",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.edit_operation_document_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_alias",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_alias_lookup_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_alias_same_node_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_node",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_node_name_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_relation",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_relation_source_type_target_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.knowledge_relation_target_type_source_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.mention_link",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.mention_link_node_evidence_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.project",
+      "classification": "candidate REQ-DATA-003; conformance remains unverified"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.reject_document_revision_mutation()",
+      "classification": "candidate REQ-DATA-002; conformance remains unverified"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.text_anchor",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "databaseObject",
+      "id": "public.text_anchor_document_revision_position_idx",
+      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_dns_record.codexia",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_worker_version.candidate",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_worker.frontend",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_workers_route.frontend",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_workers_route.origin",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_workers_route.owner_setup",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_workers_route.owner_setup_frontend_identity",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_zero_trust_access_application.codexia",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_zero_trust_access_application.identity_probe",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_zero_trust_access_application.public_protocol",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_zero_trust_tunnel_cloudflared_config.codexia",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_zero_trust_tunnel_cloudflared.codexia",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "terraform_data.public_oauth_edge_readiness",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "nativeIosView",
+      "id": "AccountScreen",
+      "classification": "REQ-UI-001 candidate; physical-device and view behavior acceptance remains unverified"
+    },
+    {
+      "kind": "nativeIosView",
+      "id": "AuthoringView",
+      "classification": "REQ-UI-001 candidate; device acceptance remains unverified"
+    },
+    {
+      "kind": "nativeIosView",
+      "id": "FixtureEditorDestination",
+      "classification": "REQ-UI-001 candidate; physical-device and view behavior acceptance remains unverified"
+    },
+    {
+      "kind": "nativeIosView",
+      "id": "FixtureListView",
+      "classification": "REQ-UI-001 candidate; physical-device and view behavior acceptance remains unverified"
+    },
+    {
+      "kind": "nativeIosView",
+      "id": "FixtureProjectView",
+      "classification": "REQ-UI-001 candidate; physical-device and view behavior acceptance remains unverified"
+    },
+    {
+      "kind": "nativeIosView",
+      "id": "LibraryView",
+      "classification": "REQ-UI-001 candidate; physical-device and view behavior acceptance remains unverified"
+    },
+    {
+      "kind": "nativeIosView",
+      "id": "ProductEditorScreen",
+      "classification": "REQ-UI-001 candidate; physical-device and view behavior acceptance remains unverified"
+    },
+    {
+      "kind": "nativeIosView",
+      "id": "ProjectScreen",
+      "classification": "REQ-UI-001 candidate; physical-device and view behavior acceptance remains unverified"
+    },
+    {
+      "kind": "route",
+      "id": "ANY /api/auth/token",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /.well-known/oauth-authorization-server/api/auth",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /.well-known/openid-configuration/api/auth",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/auth/codexia/setup/status",
+      "classification": "candidate REQ-AUTH-004; production activation observed only after separate acceptance"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/auth/oauth2/get-consents",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/health",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/inbox",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/jobs",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/jobs/events",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
     {
       "kind": "route",
       "id": "GET /api/projects",
@@ -23,8 +421,23 @@
     },
     {
       "kind": "route",
-      "id": "POST /api/projects",
-      "classification": "UNMAPPED: route-specific obligation not decomposed"
+      "id": "GET /api/projects/events",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/ready",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/review-queue",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/session",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
     },
     {
       "kind": "route",
@@ -33,18 +446,78 @@
     },
     {
       "kind": "route",
+      "id": "GET /api/v1/persistence/status",
+      "classification": "UNMAPPED: route-specific obligation not decomposed"
+    },
+    {
+      "kind": "route",
+      "id": "GET /health/live",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /health/ready",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /health/startup",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /api/health",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /api/ready",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /health/live",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /health/ready",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /health/startup",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/auth/codexia/owner-session",
+      "classification": "candidate REQ-AUTH-002 / API-OWNER-SESSION-001; read-only OWNER-SESSION cookie confirmation with exact same-origin guard; conformance remains unverified"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/auth/oauth2/consent-context",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/inbox/read-all",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/projects",
+      "classification": "UNMAPPED: route-specific obligation not decomposed"
+    },
+    {
+      "kind": "route",
       "id": "POST /api/v1/persistence/import",
       "classification": "UNMAPPED: route-specific obligation not decomposed"
     },
     {
       "kind": "route",
-      "id": "GET /api/v1/persistence/status",
-      "classification": "UNMAPPED: route-specific obligation not decomposed"
-    },
-    {
-      "kind": "tool",
-      "id": "list_projects",
-      "classification": "candidate REQ-AUTH-003; conformance remains unverified"
+      "id": "POST /api/v1/persistence/projects",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
     },
     {
       "kind": "tool",
@@ -57,270 +530,15 @@
       "classification": "candidate REQ-AUTH-003; conformance remains unverified"
     },
     {
-      "kind": "databaseObject",
-      "id": "public.project",
-      "classification": "candidate REQ-DATA-003; conformance remains unverified"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.document",
-      "classification": "candidate REQ-DATA-001; conformance remains unverified"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.document_revision",
-      "classification": "candidate REQ-DATA-002; conformance remains unverified"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.reject_document_revision_mutation()",
-      "classification": "candidate REQ-DATA-002; conformance remains unverified"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.document_revision_immutable",
-      "classification": "candidate REQ-DATA-002; conformance remains unverified"
-    },
-    {
-      "kind": "route",
-      "id": "ANY /api/auth/token",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /.well-known/oauth-authorization-server/api/auth",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /.well-known/openid-configuration/api/auth",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /api/auth/oauth2/get-consents",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /api/auth/codexia/setup/status",
-      "classification": "candidate REQ-AUTH-004; production activation observed only after separate acceptance"
-    },
-    {
-      "kind": "route",
-      "id": "GET /api/health",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /api/inbox",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /api/jobs",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /api/jobs/events",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /api/projects/events",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /api/ready",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /api/review-queue",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /api/session",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /health/live",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /health/ready",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "GET /health/startup",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "HEAD /api/health",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "HEAD /api/ready",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "HEAD /health/live",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "HEAD /health/ready",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "HEAD /health/startup",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "POST /api/auth/codexia/owner-session",
-      "classification": "candidate REQ-AUTH-002 / API-OWNER-SESSION-001; read-only OWNER-SESSION cookie confirmation with exact same-origin guard; conformance remains unverified"
-    },
-    {
-      "kind": "route",
-      "id": "POST /api/auth/oauth2/consent-context",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "POST /api/inbox/read-all",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "route",
-      "id": "POST /api/v1/persistence/projects",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.anchor_history",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.assertion",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.assertion_evidence",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.change_set",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.change_set_project_status_created_idx",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.document.document_head_revision_fk",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.document_parent_order_idx",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.document_revision_history_idx",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.edit_operation",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.edit_operation_document_idx",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.knowledge_alias",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.knowledge_alias_lookup_idx",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.knowledge_alias_same_node_idx",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.knowledge_node",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.knowledge_node_name_idx",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.knowledge_relation",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.knowledge_relation_source_type_target_idx",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.knowledge_relation_target_type_source_idx",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.mention_link",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.mention_link_node_evidence_idx",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.text_anchor",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
-    },
-    {
-      "kind": "databaseObject",
-      "id": "public.text_anchor_document_revision_position_idx",
-      "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed inventory is tracked by #671"
+      "kind": "tool",
+      "id": "list_projects",
+      "classification": "candidate REQ-AUTH-003; conformance remains unverified"
     }
   ],
   "limitations": [
-    "Route discovery covers literal path-equality dispatch blocks and the methods declared within them. Regex-expanded project/document routes, VERSION_PATHS arrays, auth-provider catchalls, module contributions, and runtime-composed routes remain for #671.",
-    "Tool discovery covers literal server.tool names in the listed MCP module. Other registration modules, enabled-action expansion, and runtime-composed tools remain for #671; dynamic names in this scope fail closed.",
-    "SQL discovery covers named top-level tables, functions, triggers, indexes, and ALTER TABLE ADD CONSTRAINT declarations in the listed initial migration. Other migrations, inline table constraints, and runtime-generated objects remain for #671; unsupported DDL fails closed.",
+    "Route discovery covers literal path-equality dispatch blocks and the methods declared within them. Regex-expanded project/document routes, VERSION_PATHS arrays, auth-provider catchalls, module contributions, and runtime-composed routes remain outside the current bounded scan and are reported as discovery limitations.",
+    "Tool discovery covers literal server.tool names in the listed MCP module. Other registration modules, enabled-action expansion, and runtime-composed tools remain outside the current bounded scan and are reported as discovery limitations; dynamic names in this scope fail closed.",
+    "SQL discovery covers named top-level tables, functions, triggers, indexes, and ALTER TABLE ADD CONSTRAINT declarations in the listed initial migration. Other migrations, inline table constraints, and runtime-generated objects remain outside the current bounded scan and are reported as discovery limitations; unsupported DDL fails closed.",
     "Candidate requirement links are navigation aids and do not establish implementation coverage or conformance."
   ]
 }
