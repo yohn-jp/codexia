@@ -12,22 +12,16 @@ Use an approved protected Ansible inventory and independently supplied recipient
 
 The deployment backup is a pre-rollout recovery point for the database and history resources. PostgreSQL roles and Podman secrets require separate recovery. Current push deployment admission rejects migration-fingerprint, API-epoch, and persistence-format changes. These changes require a separately reviewed operation with its own approval, encrypted pre-change backup, migration verification, and tested restore procedure.
 
-## Rehearse a reviewed Full candidate
+## Verify a candidate ledger on a restored backup
 
-Load the locally reviewed, publication-certified Full backend image by its immutable `ghcr.io/yohn-jp/codexia-backend@sha256:<digest>` reference on the isolated recovery host. Set `codexia_restore_candidate_full_image` to that reference in the approved `restore-drill` inputs. The standalone equivalent on that host is:
+Load the reviewed, publication-certified Full backend image by its immutable digest on the isolated recovery host. Use the migration fingerprint from the same certified image.
 
 ```sh
 bash deploy/backup/backup.sh drill "$backup_directory" "$recovery_identity_file" --approved \
-  --candidate-full-image "$certified_full_image"
+  --candidate-full-image "$certified_full_image" --candidate-ledger "$migration_fingerprint"
 ```
 
-After the restored PostgreSQL and history fingerprints match the backup, the candidate runs its packaged PostgreSQL maintenance `--check`, `--apply`, and `--check` against the scratch database. It uses a dedicated read-only role for checks and a separate writer for apply. The image uses only the scratch database's loopback network namespace.
-
-The same image then runs the packaged `maintain-job-history.js` command in the same three modes against the restored scratch history volume. It runs as UID/GID 1000 without network access and mounts the scratch volume read-only for checks. Apply promotes job-history formats 1 and 2 to format 3. A missing or current history is already ready. The drill requires both final checks to report readiness and preserves the encrypted backup bytes.
-
-Preserve the successful drill output with the exact digest and checksum-manifest SHA-256. The regular backup receipt still records the restored ciphertext identity. Paired activation and production recovery require their own approved procedure.
-
-[Push deployment procedure](PUSH-DEPLOYMENT.md)
+After verifying the restored database and history fingerprints, the drill checks the candidate's PostgreSQL ledger using a read-only role in the scratch database. Retain the checksum-manifest SHA-256 and the verified ledger fingerprint as recovery evidence.
 
 ## 採用済み目標: S3互換オブジェクトストレージへの暗号化バックアップ
 

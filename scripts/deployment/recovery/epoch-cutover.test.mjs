@@ -38,7 +38,7 @@ const drillOutput = [
   `Verified checksum manifest sha256: ${binding.checksumManifestSha256}`,
   `Verified database logical sha256: ${binding.databaseFingerprint}`,
   `Verified history logical sha256: ${binding.historyFingerprint}`,
-  `Isolated maintenance rehearsal verified: ${binding.candidateImage}`,
+  `Isolated candidate ledger verified: ${binding.candidateMigrationFingerprint}`,
 ].join('\n');
 
 async function writeAuthEvidence(directory, transactionBinding) {
@@ -106,33 +106,24 @@ test('new recovery evidence binds the exact plan and an API-only or first-activa
   try {
     const apiOnly = { ...binding, planSha256: hash('f'), migration: null };
     const activation = { ...apiOnly, priorImage: null, priorMigrationFingerprint: null };
-    const readOnlyLedgerProof = `Isolated candidate ledger verified: ${binding.candidateMigrationFingerprint}`;
-    const noConversionOutput = drillOutput.replace(`Isolated maintenance rehearsal verified: ${binding.candidateImage}`, readOnlyLedgerProof);
     for (const currentBinding of [apiOnly, activation]) {
       const proof = await writeAuthEvidence(directory, currentBinding);
       const options = { binding: currentBinding, window, authRecovery: proof, authEvidenceDirectory: directory,
         recoveryHostId: hash('8'), now: () => window.now,
         runDrill: async input => {
           assert.deepEqual(input, { backupDirectory: undefined, ageIdentityFile: undefined,
-            candidateImage: binding.candidateImage, candidateMigrationFingerprint: binding.candidateMigrationFingerprint, migration: null });
-          return noConversionOutput;
+            candidateImage: binding.candidateImage, candidateMigrationFingerprint: binding.candidateMigrationFingerprint });
+          return drillOutput;
         } };
       const result = await produceEpochCutoverRecoveryReceipt(options);
       assert.deepEqual(result.binding, currentBinding);
       assert.throws(() => validateEpochCutoverRecoveryReceipt(result, { ...currentBinding, planSha256: hash('0') }, window), /does not match/u);
       assert.throws(() => validateEpochCutoverRecoveryReceipt(receipt, currentBinding, window), /does not match/u);
-      await assert.rejects(produceEpochCutoverRecoveryReceipt({ ...options, runDrill: async () => drillOutput }), /restore drill did not verify/u);
       await assert.rejects(produceEpochCutoverRecoveryReceipt({
-        ...options, runDrill: async () => `${noConversionOutput}\nIsolated maintenance rehearsal verified: ${binding.candidateImage}`,
+        ...options, runDrill: async () => `${drillOutput}\nIsolated maintenance rehearsal verified: ${binding.candidateImage}`,
       }), /restore drill did not verify/u);
     }
 
-    const conversion = { ...apiOnly, migration: 'snapshot-history-v2' };
-    const conversionProof = await writeAuthEvidence(directory, conversion);
-    const options = { binding: conversion, window, authRecovery: conversionProof, authEvidenceDirectory: directory,
-      recoveryHostId: hash('8'), now: () => window.now };
-    assert.deepEqual((await produceEpochCutoverRecoveryReceipt({ ...options, runDrill: async () => `${drillOutput}\n${readOnlyLedgerProof}` })).binding, conversion);
-    await assert.rejects(produceEpochCutoverRecoveryReceipt({ ...options, runDrill: async () => noConversionOutput }), /restore drill did not verify/u);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -144,7 +135,7 @@ test('rejects partial, unknown and unsupported pair recovery bindings before the
     { ...binding, migration: null }, { ...binding, planSha256: hash('f') },
     { ...pair, migration: 'unknown' }, { ...pair, priorImage: null },
     { ...pair, priorMigrationFingerprint: null },
-    { ...pair, priorImage: null, priorMigrationFingerprint: null, migration: 'snapshot-history-v2' },
+    { ...pair, priorImage: null, priorMigrationFingerprint: null, migration: 'unregistered' },
     { ...pair, priorMigrationFingerprint: `sha256:${hash('8')}` },
   ]) await assert.rejects(produceEpochCutoverRecoveryReceipt({ binding: invalid, window }), /binding/u);
 });

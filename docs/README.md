@@ -36,7 +36,6 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Production deployment lifecycle and route selection | [Deployment lifecycle](deployment/DEPLOYMENT-LIFECYCLE.md) — normative state classification, initial pair activation, compatible updates, maintenance/recovery and shared acceptance |
 | Pristine VM, one-time setup key, first owner and recovery | [Initial deployment flows](deployment/INITIAL-DEPLOYMENT-FLOW.md) — SSH-ready VM, Ansible, Workers setup-only/API, protected activation and existing-owner restore contract |
 | Compatible backend updates and rollback | [Update flows](deployment/UPDATE-FLOW.md) — canonical state transitions |
-| MCP v2 API epoch cutover | [MCP v2 API epoch transition](deployment/MCP-V2-API-EPOCH.md) — API epoch 2→3, unchanged persistence/auth, and exact OpenAPI breakage proof |
 | Visual design system | [App design system](../app/DESIGN.md) — canonical visual direction and owner-confirmed decisions |
 | Design, information architecture and UX acceptance | [Design and UX contract](design/UX-CONTRACT.md) — normative target, not a runtime certification |
 | Creative workspace information architecture | [Information architecture](design/INFORMATION-ARCHITECTURE.md) — design proposal |

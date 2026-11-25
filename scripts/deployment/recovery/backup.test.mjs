@@ -163,7 +163,7 @@ test('fingerprint-locked returns canonical hashes only with the quiesced host lo
   }
 });
 
-test('restore maintenance rehearses the reviewed Full image only against verified scratch storage', async () => {
+test('restore drill checks the candidate ledger only against verified scratch storage', async () => {
   const fixture = await createFixture();
   try {
     const archive = fixture.backupDestination;
@@ -183,7 +183,6 @@ const args = process.argv.slice(2);
 const [verb, action, subject] = args;
 const statePath = process.env.DRILL_FIXTURE_RESOURCES;
 const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-const maintenanceTarget = args.some(argument => argument.endsWith('/maintain-job-history.js')) ? 'history' : 'database';
 fs.appendFileSync(process.env.DRILL_FIXTURE_COMMANDS, JSON.stringify(args) + '\\n');
 if (args.includes('-i') || verb === 'volume' && action === 'import') fs.readFileSync(0);
 const save = () => fs.writeFileSync(statePath, JSON.stringify(state));
@@ -195,16 +194,13 @@ else if (verb === 'volume' && action === 'inspect' || verb === 'inspect') {
 } else if (verb === 'run' && action === '-d') state.resources[args[args.indexOf('--name') + 1]] = id(args[args.indexOf('--label') + 1]);
 else if (verb === 'run' && args.includes('/bin/bash')) process.stdout.write('restored history');
 else if (verb === 'run' && args.at(-1).includes('verifyPostgresSchema')) process.stdout.write(process.env.DRILL_FIXTURE_LEDGER + '\\n');
-else if (verb === 'run' && args.at(-1) === '--apply') state[maintenanceTarget] = true;
-else if (verb === 'run' && args.at(-1) === '--check') {
-  process.exit(state[maintenanceTarget] && process.env.DRILL_FIXTURE_UNRESOLVED !== maintenanceTarget ? 0 : 2);
-} else if (verb === 'exec' && args.includes('sh')) process.stdout.write(process.env.DRILL_FIXTURE_BAD_RESTORE ? 'wrong database' : 'restored database');
+else if (verb === 'exec' && args.includes('sh')) process.stdout.write(process.env.DRILL_FIXTURE_BAD_RESTORE ? 'wrong database' : 'restored database');
 else if (verb === 'rm' || verb === 'volume' && action === 'rm') delete state.resources[args.at(-1)];
 save();
 `);
     const candidate = `ghcr.io/yohn-jp/codexia-backend@sha256:${'a'.repeat(64)}`;
     const ledger = 'sha256:' + 'b'.repeat(64);
-    const run = async (options, { unresolved = '', wrongDatabase = false, ledgerResult = ledger } = {}) => {
+    const run = async (options, { wrongDatabase = false, ledgerResult = ledger } = {}) => {
       await writeFile(scratch, JSON.stringify({ resources: {} }));
       await writeFile(commands, '');
       const result = spawnSync('bash', [backupProgram, 'drill', archive, identity, '--approved', ...options], {
@@ -213,8 +209,7 @@ save();
           ...process.env, HOME: fixture.home, CODEXIA_PUSH_STATE_DIR: fixture.stateDir,
           PATH: `${fixture.bin}:${process.env.PATH}`,
           DRILL_FIXTURE_RESOURCES: scratch, DRILL_FIXTURE_COMMANDS: commands,
-          DRILL_FIXTURE_UNRESOLVED: unresolved, DRILL_FIXTURE_LEDGER: ledgerResult,
-          DRILL_FIXTURE_BAD_RESTORE: wrongDatabase ? '1' : '',
+          DRILL_FIXTURE_LEDGER: ledgerResult, DRILL_FIXTURE_BAD_RESTORE: wrongDatabase ? '1' : '',
         },
       });
       assert.deepEqual(JSON.parse(await readFile(scratch, 'utf8')).resources, {});
@@ -246,79 +241,30 @@ save();
     assert.equal(unknownMigration.status, 1);
     assert.deepEqual(unknownMigration.calls, []);
 
-    const tagged = await run(['--candidate-full-image', 'ghcr.io/yohn-jp/codexia-backend:latest']);
+    const tagged = await run(['--candidate-full-image', 'ghcr.io/yohn-jp/codexia-backend:latest', '--candidate-ledger', ledger]);
     assert.equal(tagged.status, 1);
     assert.deepEqual(tagged.calls, []);
 
-    const wrongDatabase = await run(['--candidate-full-image', candidate], { wrongDatabase: true });
+    const wrongDatabase = await run(readOnlyArgs, { wrongDatabase: true });
     assert.equal(wrongDatabase.status, 1);
     assert.match(wrongDatabase.stderr, /Restored database logical fingerprint mismatch/u);
     assert.equal(wrongDatabase.calls.filter(call => call.includes(candidate)).length, 0);
 
-    const rehearsed = await run(['--candidate-full-image', candidate]);
-    assert.equal(rehearsed.status, 0, rehearsed.stderr);
-    assert.ok(rehearsed.stdout.includes(`Isolated maintenance rehearsal verified: ${candidate}`));
-    assert.ok(rehearsed.stdout.includes(`Verified database logical sha256: ${digest('restored database')}`));
-    assert.ok(rehearsed.stdout.includes(`Verified history logical sha256: ${digest('restored history')}`));
-    const restoredDb = rehearsed.calls.find(call => call[0] === 'run' && call[1] === '-d');
+    assert.ok(readOnly.stdout.includes(`Verified database logical sha256: ${digest('restored database')}`));
+    assert.ok(readOnly.stdout.includes(`Verified history logical sha256: ${digest('restored history')}`));
+    const restoredDb = readOnly.calls.find(call => call[0] === 'run' && call[1] === '-d');
     const dbName = restoredDb[restoredDb.indexOf('--name') + 1];
     assert.match(dbName, /^codexia-restore-drill-[a-f0-9-]+$/u);
     assert.equal(restoredDb[restoredDb.indexOf('--network') + 1], 'none');
-    const candidateCalls = rehearsed.calls.filter(call => call[0] === 'run' && call.includes(candidate));
-    assert.ok(rehearsed.calls.indexOf(candidateCalls[0]) > rehearsed.calls.findIndex(call => call.includes('/bin/bash')),
-      'the candidate must only run after both restored fingerprints have been checked');
-    assert.equal(candidateCalls[0][candidateCalls[0].indexOf('--network') + 1], 'none');
-    assert.equal(candidateCalls.length, 7);
-    const databaseCalls = candidateCalls.slice(1, 4);
-    assert.deepEqual(databaseCalls.map(call => call.at(-1)), ['--check', '--apply', '--check']);
-    assert.deepEqual(databaseCalls.map(call => call[call.indexOf('--env') + 1]), [
-      'CODEXIA_DATABASE_URL=postgres://codexia_preflight@127.0.0.1:5432/codexia',
-      'CODEXIA_DATABASE_URL=postgres://codexia@127.0.0.1:5432/codexia',
-      'CODEXIA_DATABASE_URL=postgres://codexia_preflight@127.0.0.1:5432/codexia',
-    ]);
-    for (const call of candidateCalls) {
-      assert.ok(call.includes('--pull=never'));
-      assert.ok(call.includes('--read-only'));
-      assert.ok(call.every(argument => !/^(?:-p|--publish)(?:=|$)/u.test(argument)));
-    }
-    for (const call of candidateCalls.slice(0, 4)) {
-      assert.ok(call.every(argument => !/^(?:-v|-p|--volume|--mount|--publish)(?:=|$)/u.test(argument)));
-    }
-    for (const call of databaseCalls) assert.equal(call[call.indexOf('--network') + 1], `container:${dbName}`);
-
-    const scratchHistory = rehearsed.calls.find(call => call[0] === 'volume' && call[1] === 'import')[2];
+    const scratchHistory = readOnly.calls.find(call => call[0] === 'volume' && call[1] === 'import')[2];
     assert.equal(scratchHistory, `${dbName}-history`);
-    const historyImport = rehearsed.calls.findIndex(call => call[0] === 'volume' && call[1] === 'import');
-    const privateMountRoot = rehearsed.calls.findIndex(call => call.at(-1) === 'chmod 0700 /history; chown 1000:1000 /history');
-    assert.ok(privateMountRoot > historyImport && privateMountRoot < rehearsed.calls.indexOf(candidateCalls[0]));
-    const mountSetup = rehearsed.calls[privateMountRoot];
+    const historyImport = readOnly.calls.findIndex(call => call[0] === 'volume' && call[1] === 'import');
+    const privateMountRoot = readOnly.calls.findIndex(call => call.at(-1) === 'chmod 0700 /history; chown 1000:1000 /history');
+    assert.ok(privateMountRoot > historyImport && privateMountRoot < readOnly.calls.indexOf(candidateChecks[0]));
+    const mountSetup = readOnly.calls[privateMountRoot];
     assert.equal(mountSetup[mountSetup.indexOf('--volume') + 1], `${scratchHistory}:/history:rw,nocopy`);
     assert.equal(mountSetup[mountSetup.indexOf('--network') + 1], 'none');
 
-    const historyCalls = candidateCalls.slice(4);
-    assert.deepEqual(historyCalls.map(call => call.at(-1)), ['--check', '--apply', '--check']);
-    assert.deepEqual(historyCalls.map(call => call[call.indexOf('--volume') + 1]), [
-      `${scratchHistory}:/history:ro,nocopy`, `${scratchHistory}:/history:rw,nocopy`, `${scratchHistory}:/history:ro,nocopy`,
-    ]);
-    for (const call of historyCalls) {
-      assert.equal(call.at(-2), '/app/node_modules/@codexia/api/dist/maintain-job-history.js');
-      assert.equal(call[call.indexOf('--network') + 1], 'none');
-      assert.equal(call[call.indexOf('--user') + 1], '1000:1000');
-      assert.equal(call[call.indexOf('--env') + 1], 'CODEXIA_USAGE_DIR=/history');
-      assert.equal(call.filter(argument => /^(?:-v|--volume|--mount)(?:=|$)/u.test(argument)).length, 1);
-      assert.ok(call.every(argument => !argument.startsWith('CODEXIA_DATABASE_URL')));
-    }
-
-    const pending = await run(['--candidate-full-image', candidate], { unresolved: 'database' });
-    assert.equal(pending.status, 1);
-    assert.match(pending.stderr, /still required after apply/u);
-    assert.doesNotMatch(pending.stdout, /verified/u);
-    assert.equal(pending.calls.filter(call => call.some(arg => arg.endsWith('/maintain-job-history.js'))).length, 0);
-
-    const pendingHistory = await run(['--candidate-full-image', candidate], { unresolved: 'history' });
-    assert.equal(pendingHistory.status, 1);
-    assert.match(pendingHistory.stderr, /job-history maintenance still required after apply/u);
-    assert.doesNotMatch(pendingHistory.stdout, /verified/u);
     for (const [name, bytes] of contents) assert.equal(await readFile(path.join(archive, name), 'utf8'), bytes);
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });

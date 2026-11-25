@@ -88,33 +88,13 @@ Inspect the target data and retain an independent backup before adopting an exis
 
 ## Database and schema maintenance boundary
 
-After initial schema creation, image-only `deploy` supports only an unchanged migration fingerprint, API epoch, and persistence format. The owning migration change needs an independently reviewed and explicitly approved procedure that defines a pre-change encrypted backup, migration execution and verification, and a tested restore path. The [isolated restore drill](BACKUP.md#rehearse-a-reviewed-full-candidate) can rehearse the one-time data conversion on a verified backup copy. PostgreSQL roles and Podman secrets require separate recovery. Production activation remains subject to the compatibility gates and the separately approved paired activation procedure below.
-
-The exact certified image packages `node /app/node_modules/@codexia/api/dist/maintain-snapshot-projections.js --check`. Its read-only connection reports pending snapshot proofs, Publishing records and NLP feature settings. A pending result exits with status 2. During approved maintenance, keep ingress closed and stop the old writer under the host lock. Verify the encrypted backup before running the same command with `--apply` and the authorized writable connection. It converts Publishing records and NLP feature settings before reconciling snapshot proofs. Rerun `--check` and require exit 0. Keep ingress closed until the paired activation and its readiness, sign-in and publication checks are complete. Recovery to the earlier persistence format requires the approved pre-change database restore.
-
-### One-time job history maintenance
-
-Use the exact certified Full image and run the maintenance command as the API's UID 1000. Mount only the installation's `codexia-history` volume at `/history`, preserve its ownership, mode and labels, and disable container networking.
-
-```sh
-CODEXIA_USAGE_DIR=/history node /app/node_modules/@codexia/api/dist/maintain-job-history.js --check
-```
-
-Exit 0 means the history is already current or absent. Exit 2 means conversion is pending. Exit 1 means invalid history or a maintenance error and blocks activation. If conversion is pending, keep the old writer stopped under the host lock and verify the encrypted pre-change backup. Then run the following command with the same image, UID and scoped mount.
-
-```sh
-CODEXIA_USAGE_DIR=/history node /app/node_modules/@codexia/api/dist/maintain-job-history.js --apply
-```
-
-Run `--check` again and require exit 0. Complete the applicable PostgreSQL maintenance and its verification before paired activation.
-
-On the [isolated recovery host](BACKUP.md#rehearse-a-reviewed-full-candidate), verify the check, apply and recheck sequence against a restored backup copy. If activation fails and the prior release cannot read the converted history, restore the history from the encrypted pre-change backup before restarting it. Restore the pre-change PostgreSQL backup when the prior release requires it.
+After initial schema creation, image-only `deploy` supports only an unchanged migration fingerprint, API epoch, and persistence format. The owning migration change needs an independently reviewed and explicitly approved procedure that defines a pre-change encrypted backup, migration execution and verification, and a tested restore path. The [isolated restore drill](BACKUP.md#verify-a-candidate-ledger-on-a-restored-backup) can verify the candidate ledger against a restored backup copy. PostgreSQL roles and Podman secrets require separate recovery. Production activation remains subject to the compatibility gates and the separately approved paired activation procedure below.
 
 ## Coordinated pair activation and cutover
 
 Use [protected pair maintenance](EPOCH-CUTOVER.md) to activate a first pair or apply a registered incompatible release transition. When both components are already compatible, use the ordinary release lanes. First-install and database-use approvals apply to a clean, owner-prepared API slot. Changes to an installed release use the maintenance and recovery approvals.
 
-The retained in-place persistence format 1 to 2 migration requires an existing Better Auth owner and an unchanged SQL ledger. An old authentication installation that needs a new owner uses a separately approved clean target and registered data transfer. For an existing Better Auth owner who has lost a device, use [device-loss recovery](../../deploy/ansible/AUTH-RUNTIME.md#existing-owner-device-loss-recovery).
+An old authentication installation that needs a new owner uses a separately approved clean target and registered data transfer. For an existing Better Auth owner who has lost a device, use [device-loss recovery](../../deploy/ansible/AUTH-RUNTIME.md#existing-owner-device-loss-recovery).
 
 ## Acceptance order
 
