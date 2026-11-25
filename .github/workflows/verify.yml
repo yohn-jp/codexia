@@ -142,6 +142,9 @@ jobs:
         with:
           sarif_file: ${{ runner.temp }}/ci-evidence/biome/biome-ci/biome-lint.sarif
           category: biome-lint
+          # The analyzed checkout is the PR head, not GitHub's synthetic merge.
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.ref }}
+          sha: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
