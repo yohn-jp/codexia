@@ -59,8 +59,8 @@ test("Chromium discovery retains Desktop and shared UI cases", () => {
   assert.ok(desktopIds.size < chromium.length, "Desktop selection must not absorb the entire UI suite");
   assert.ok(desktop.every(spec => chromium.some(all => identity(all) === identity(spec))));
   assert.ok(desktop.some(spec => spec.title.includes("keyboard select-all replacement")), "Desktop input proof must remain in Chromium");
-  assert.ok(chromium.some(spec => spec.title.includes("Mobile reader")), "Legacy Mobile reader proof must remain");
-  assert.ok(chromium.some(spec => spec.title.includes("guarded shell switches")), "Mixed shell proof must remain");
+  assert.ok(chromium.some(spec => spec.title.includes("Desktop reader")), "Desktop paged reading proof must remain");
+  assert.ok(chromium.some(spec => spec.title.includes("rejects retired Mobile routes")), "Retired route rejection proof must remain");
 });
 
 test("browser coverage counts discovered, executed, skipped and failed cases", () => {

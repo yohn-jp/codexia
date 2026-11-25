@@ -162,8 +162,8 @@ async function openContinuePanel(page: Page) {
 
 for (const kind of ["writing", "reading", "superseded reading"] as const) {
   test(`a delayed scene handles the chosen remote ${kind} position`, async ({ page, authorizeAuthor }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    const { project, scene, second, author } = await createOAuthWritingFixture(authorizeAuthor, page, "mobile", undefined, originalMarkdown);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const { project, scene, second, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", undefined, originalMarkdown);
     const path = `/api/v1/persistence/projects/${project.id}/documents/${second.id}`;
     const read = await author.fetch(path);
     expect(read.ok()).toBe(true);
@@ -182,7 +182,7 @@ for (const kind of ["writing", "reading", "superseded reading"] as const) {
     expect(patched.ok()).toBe(true);
     await remotePosition(author, project.id, second.id, 3);
     await page.reload();
-    await authorizeAuthor("mobile", page, { continueCurrentPage: true });
+    await authorizeAuthor("desktop", page, { continueCurrentPage: true });
     await expect(manuscriptEditor(page)).toBeVisible();
 
     let releaseLoad!: () => void;
@@ -194,24 +194,18 @@ for (const kind of ["writing", "reading", "superseded reading"] as const) {
       await loadGate;
       await route.continue();
     });
-    await page.getByRole("button", { name: "構成", exact: true }).click();
-    const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
-    await sheet.locator(".pg-library-continue summary").click();
-    const candidate = sheet.getByRole("region", { name: "続きから" }).locator("p").filter({ hasText: second.title });
+    const panel = await openContinuePanel(page);
+    const candidate = panel.locator("p").filter({ hasText: second.title });
     try {
       await candidate.getByRole("button", { name: kind === "writing" ? "続きを書く" : "読書位置を開く" }).click();
       await loadStarted;
       await expect(manuscriptEditor(page)).toHaveCount(0);
       if (kind === "superseded reading") {
-        await expect(sheet).toBeHidden();
-        await page.getByRole("button", { name: "作品", exact: true }).click();
         await page.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`).click();
-        await page.getByRole("button", { name: "書く", exact: true }).click();
       }
     } finally {
       releaseLoad();
     }
-    await expect(sheet).toBeHidden();
     if (kind === "superseded reading") {
       await expect(page).toHaveURL(new RegExp(`/scenes/${scene.id}(?:\\?|$)`));
       await expect(manuscriptEditor(page)).toContainText("最初の本文。");
@@ -222,8 +216,6 @@ for (const kind of ["writing", "reading", "superseded reading"] as const) {
     if (kind === "reading") {
       await expect(page.locator(".reading-pager")).toHaveAttribute("data-page-index", "2");
     } else {
-      // The editor stays unfocused on mobile to keep the soft keyboard closed.
-      // Read its logical selection instead of focusing the contenteditable from the test.
       await expect.poll(() => manuscriptEditor(page).evaluate((element) => {
         const content = element as HTMLElement & { cmTile?: { root: { view: { state: { selection: { main: { head: number } } } } } } };
         return content.cmTile?.root.view.state.selection.main.head;
@@ -241,12 +233,12 @@ test("recent activity hands off only numeric positions across devices, projects,
   await expect.poll(async () => (await activity(author, f.project.id)).items.some((item) => item.sceneId === f.scene.id && typeof item.sentenceOffset === "number")).toBe(true);
   for (const write of writes) expect(Object.keys(write).every((key) => ["sceneId", "sentenceOffset", "pageIndex", "deviceType"].includes(key))).toBe(true);
   await remotePosition(author, f.project.id, f.scene.id);
-  const mobile = await browser.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true });
-  const secondPage = await mobile.newPage();
+  const secondContext = await browser.newContext({ viewport: { width: 390, height: 900 } });
+  const secondPage = await secondContext.newPage();
   try {
-    await authorizeAuthor("mobile", secondPage, { path: writingFixturePath("mobile", f.project, f.scene) });
+    const secondAuthor = await authorizeAuthor("desktop", secondPage, { path: writingFixturePath("desktop", f.project, f.scene) });
     await expect(manuscriptEditor(secondPage)).toContainText("読書位置");
-    const before = await activity(author, f.project.id);
+    const before = await activity(secondAuthor, f.project.id);
     expect(before.items.some((item) => item.deviceType === "mobile" && item.pageIndex === 2)).toBe(true);
     const another = await author.fetch("/api/v1/persistence/projects", { method: "POST", headers: { Origin: author.origin }, data: { title: `Isolated cursor ${crypto.randomUUID()}` } });
     expect(another.status()).toBe(201);
@@ -256,7 +248,7 @@ test("recent activity hands off only numeric positions across devices, projects,
     await authorizeAuthor("desktop", page, { continueCurrentPage: true });
     expect((await activity(author, f.project.id)).items.some((item) => item.sceneId === f.scene.id && item.deviceType === "mobile")).toBe(true);
     const anonymous = await browser.newContext(); try { const denial = await anonymous.request.get(`${author.origin}/api/projects/${f.project.id}/recent-activity`); expect(denial.status()).toBe(401); } finally { await anonymous.close(); }
-  } finally { await mobile.close(); }
+  } finally { await secondContext.close(); }
 });
 
 test("recent activity polling pauses while naturally hidden and resumes when visible", async ({ authorizeAuthor }) => {
@@ -413,12 +405,12 @@ for (const departure of [false, true]) {
       release();
       expect((await olderResponse).ok()).toBe(true);
       expect((await activity(author, f.project.id)).items.find((item) => item.deviceType === "desktop")).toEqual(newer);
-      const mobile = await browser.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true });
+      const secondContext = await browser.newContext({ viewport: { width: 390, height: 900 } });
       try {
-        const other = await mobile.newPage();
-        const otherAuthor = await authorizeAuthor("mobile", other, { path: writingFixturePath("mobile", f.project, f.scene) });
+        const other = await secondContext.newPage();
+        const otherAuthor = await authorizeAuthor("desktop", other, { path: writingFixturePath("desktop", f.project, f.scene) });
         expect((await activity(otherAuthor, f.project.id)).items.find((item) => item.deviceType === "desktop")?.sentenceOffset).toBe(latest.sentenceOffset);
-      } finally { await mobile.close(); }
+      } finally { await secondContext.close(); }
     } finally {
       release();
       await page.unroute(url);

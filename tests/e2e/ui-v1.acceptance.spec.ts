@@ -235,12 +235,20 @@ test("legacy draft composition cannot write old scene text into a newly selected
   await expect(editor(page)).toContainText("最初の本文。"); expect(await sourceExists(page)).toBe(true);
 });
 
-test("the launcher remembers an explicit choice while direct Shell links keep the preference", async ({ page, authorServer, authorizeAuthor }) => {
-  await page.goto(authorServer.apiOrigin); await page.getByRole("button", { name: /Desktop|デスクトップ/u }).first().click();
-  await expect(page).toHaveURL(/desktop/u);
-  await authorizeAuthor("mobile", page, { path: "/mobile/?view=library" });
-  await expect(page.locator(".mobile-shell-page")).toHaveAttribute("data-mobile-view", "library");
-  await page.goto(authorServer.apiOrigin); await expect(page).toHaveURL(/desktop/u);
+test("the launcher opens Desktop for new and legacy choices and rejects retired Mobile routes", async ({ page, authorServer }) => {
+  const origin = authorServer.apiOrigin;
+  for (const route of ["/mobile", "/mobile/", "/mobile/projects/p/scenes/s"]) {
+    const response = await page.request.get(new URL(route, origin).href, { maxRedirects: 0 });
+    expect(response.status(), route).toBe(404);
+  }
+  await page.goto(origin);
+  await expect(page.getByRole("button", { name: /mobile|モバイル/iu })).toHaveCount(0);
+  await page.getByRole("button", { name: /Desktop/u }).click();
+  await expect(page).toHaveURL(url => url.pathname === "/desktop" || url.pathname === "/desktop/");
+  expect(await page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("desktop");
+  await page.evaluate(() => localStorage.setItem("scriptorium:ui-mode", "mobile"));
+  await page.goto(new URL("/?store=legacy&lang=ja#writing", origin).href);
+  await expect(page).toHaveURL(url => /^\/desktop\/?$/u.test(url.pathname) && url.search === "?lang=ja" && url.hash === "#writing");
 });
 
 test("revision history responses and errors stay bound to the scene that requested them", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
@@ -495,24 +503,24 @@ test("revision history pages tied PostgreSQL revisions through retry, navigation
   await expect(page.getByRole("region", { name: "Revision履歴", exact: true })).not.toContainText("Stored revision");
 
   await page.setViewportSize({ width: 360, height: 800 });
-  await authorizeAuthor("mobile", page, { path: writingFixturePath("mobile", project, scene) });
+  await authorizeAuthor("desktop", page, { path: writingFixturePath("desktop", project, scene) });
   await expect(editor(page)).toContainText(revision.markdown);
   await openRevisionHistory(page);
-  const mobileHistory = page.getByRole("region", { name: "Revision履歴", exact: true });
-  const mobileNextPage = mobileHistory.getByRole("button", { name: "さらに古いRevisionを読む", exact: true });
-  await expect(mobileNextPage).toBeVisible();
-  await mobileNextPage.scrollIntoViewIfNeeded();
-  const buttonBounds = await mobileNextPage.boundingBox();
+  const narrowHistory = page.getByRole("region", { name: "Revision履歴", exact: true });
+  const narrowNextPage = narrowHistory.getByRole("button", { name: "さらに古いRevisionを読む", exact: true });
+  await expect(narrowNextPage).toBeVisible();
+  await narrowNextPage.scrollIntoViewIfNeeded();
+  const buttonBounds = await narrowNextPage.boundingBox();
   expect(buttonBounds).toBeTruthy();
   expect(buttonBounds!.x).toBeGreaterThanOrEqual(0);
   expect(buttonBounds!.x + buttonBounds!.width).toBeLessThanOrEqual(360);
-  await mobileNextPage.click();
-  await expect(mobileHistory.locator("article")).toHaveCount(100);
-  await mobileHistory.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
-  await expect(mobileHistory.locator("article")).toHaveCount(150);
-  const mobileIds = await mobileHistory.locator("article").evaluateAll((articles) => articles.map((article) => article.getAttribute("data-revision-id")));
-  expect(new Set(mobileIds).size).toBe(150);
-  const originalRevision = mobileHistory.locator(`article[data-revision-id="${initialRevision.id}"]`);
+  await narrowNextPage.click();
+  await expect(narrowHistory.locator("article")).toHaveCount(100);
+  await narrowHistory.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
+  await expect(narrowHistory.locator("article")).toHaveCount(150);
+  const narrowIds = await narrowHistory.locator("article").evaluateAll((articles) => articles.map((article) => article.getAttribute("data-revision-id")));
+  expect(new Set(narrowIds).size).toBe(150);
+  const originalRevision = narrowHistory.locator(`article[data-revision-id="${initialRevision.id}"]`);
   await expect(originalRevision).toContainText("最初の本文。");
   await originalRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元", exact: true }).click();
   await expect(editor(page)).toContainText("最初の本文。");
@@ -581,7 +589,7 @@ test("a failed Knowledge list does not block the initial document and can be ret
   await expectMarkdown(page, draft);
 });
 
-test("same-named scenes show their chapter in the desktop and mobile writing headers", async ({ page, authorizeAuthor }) => {
+test("same-named scenes show their chapter in the Desktop writing header", async ({ page, authorizeAuthor }) => {
   const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const origin = new URL(page.url()).origin;
   const add = async (data: { kind: "chapter" | "scene"; title: string; orderKey: string; parentId?: string }) => {
@@ -598,11 +606,11 @@ test("same-named scenes show their chapter in the desktop and mobile writing hea
   const source = await add({ kind: "scene", title: "帰港", orderKey: "a", parentId: first.id });
   const writing = await add({ kind: "scene", title: "帰港", orderKey: "a", parentId: third.id });
 
-  for (const mode of ["desktop", "mobile"] as const) {
-    await page.setViewportSize({ width: mode === "desktop" ? 1280 : 390, height: 844 });
-    const context = page.locator(mode === "desktop" ? ".pg-editor-heading .eyebrow" : ".mobile-shell-context");
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    const context = page.locator(".pg-editor-heading .eyebrow");
     for (const [document, chapter] of [[writing, "第三章"], [source, "第一章"]] as const) {
-      await authorizeAuthor(mode, page, { path: `/${mode}/projects/${project.id}/scenes/${document.id}${mode === "mobile" ? "?view=writing" : ""}` });
+      await authorizeAuthor("desktop", page, { path: writingFixturePath("desktop", project, document) });
       await expect(editor(page)).toBeVisible();
       await expect(context).toBeVisible();
       await expect(context).toHaveText(`${chapter} / ${project.title}`);
@@ -610,134 +618,8 @@ test("same-named scenes show their chapter in the desktop and mobile writing hea
   }
 });
 
-test("mobile reference sheet has a named dialog and excludes the background from assistive technology", async ({ page, authorizeAuthor }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await createOAuthWritingFixture(authorizeAuthor, page, "mobile");
-  const pageRoot = page.locator("#ion-view-container-root");
-  const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
-
-  const outlineTrigger = page.getByRole("button", { name: "構成", exact: true });
-  await outlineTrigger.click();
-  await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeVisible();
-  await expect(pageRoot).toHaveAttribute("aria-hidden", "true");
-  await expect(page.getByRole("navigation", { name: "モバイル画面" })).toHaveCount(0);
-  const focusStaysInSheet = () => sheet.evaluate((element) => {
-    const documentFocus = element.ownerDocument.activeElement;
-    const shadowFocus = element.shadowRoot?.activeElement;
-    return documentFocus === element
-      ? Boolean(shadowFocus && element.shadowRoot?.contains(shadowFocus))
-      : Boolean(documentFocus && element.contains(documentFocus));
-  });
-
-  await page.keyboard.press("Tab");
-  await expect.poll(focusStaysInSheet).toBe(true);
-  await page.keyboard.press("Shift+Tab");
-  await expect.poll(focusStaysInSheet).toBe(true);
-  await page.keyboard.press("Escape");
-  await expect(sheet).not.toBeVisible();
-  await expect(pageRoot).not.toHaveAttribute("aria-hidden", "true");
-  await expect(outlineTrigger).toBeFocused();
-
-  const inspectorTrigger = page.getByRole("button", { name: "知識・保存", exact: true });
-  await inspectorTrigger.click();
-  await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeVisible();
-  await expect(pageRoot).toHaveAttribute("aria-hidden", "true");
-  await sheet.getByRole("button", { name: "閉じる", exact: true }).click();
-  await expect(sheet).not.toBeVisible();
-  await expect(pageRoot).not.toHaveAttribute("aria-hidden", "true");
-  await expect(inspectorTrigger).toBeFocused();
-});
-
-test("mobile outline reveal keeps its title, tabs, and dismiss control visible at narrow widths", async ({ page, authorizeAuthor }) => {
-  const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, "mobile", "作業中の初期シーン");
-  const origin = new URL(page.url()).origin;
-  async function createDocument(input: {
-    kind: "volume" | "chapter" | "scene";
-    title: string;
-    orderKey: string;
-    parentId?: string;
-  }): Promise<{ id: string }> {
-    const response = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents`, {
-      method: "POST",
-      headers: { Origin: origin, "Idempotency-Key": randomUUID() },
-      data: { markdown: "", ...input },
-    });
-    expect(response.status(), await response.text()).toBe(201);
-    return (await response.json() as { document: { id: string } }).document;
-  }
-
-  const volume = await createDocument({ kind: "volume", title: "第一巻　潮が満ちる", orderKey: "00" });
-  const chapter = await createDocument({ kind: "chapter", title: "第三章　濡れた目録", orderKey: "00", parentId: volume.id });
-  const title = "薄明の羅針盤と夜明け前の連絡船が交わした長い約束「青い目録」 CodexiaMobileManuscript";
-  const scene = await createDocument({ kind: "scene", title, orderKey: "00", parentId: chapter.id });
-
-  await page.setViewportSize({ width: 390, height: 844 });
-  await authorizeAuthor("mobile", page, { path: writingFixturePath("mobile", project, scene) });
-  await expect(editor(page)).toBeVisible();
-  const currentTitle = page.locator(".mobile-shell-current-title");
-  await expect(currentTitle).toHaveText(title);
-  const editorPanelFocus = await page.locator('.st-workspace-panel[data-workspace-panel="editor"]').evaluate((element) => {
-    const panel = element as HTMLElement;
-    panel.focus();
-    const style = getComputedStyle(panel);
-    return {
-      focused: document.activeElement === panel,
-      outlineStyle: style.outlineStyle,
-      outlineWidth: style.outlineWidth,
-      outlineOffset: style.outlineOffset,
-    };
-  });
-  expect(editorPanelFocus).toEqual({ focused: true, outlineStyle: "solid", outlineWidth: "3px", outlineOffset: "-3px" });
-  for (const { width, height } of [{ width: 390, height: 844 }, { width: 320, height: 760 }]) {
-    await page.setViewportSize({ width, height });
-    await expect(currentTitle).toBeVisible();
-    const titleLayout = await currentTitle.evaluate((element) => {
-      const style = getComputedStyle(element);
-      return {
-        whiteSpace: style.whiteSpace,
-        textOverflow: style.textOverflow,
-        overflow: style.overflow,
-        scrollWidth: element.scrollWidth,
-        clientWidth: element.clientWidth,
-      };
-    });
-    expect(titleLayout.whiteSpace).toBe("normal");
-    expect(titleLayout.textOverflow).toBe("clip");
-    expect(titleLayout.overflow).toBe("visible");
-    expect(titleLayout.scrollWidth).toBeLessThanOrEqual(titleLayout.clientWidth + 1);
-
-    await page.getByRole("button", { name: "構成", exact: true }).click();
-    const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
-    await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeVisible();
-    await expect(sheet.locator(".mobile-shell-reference-header")).toBeVisible();
-    const sheetLayout = () => sheet.evaluate((element) => {
-      const header = element.querySelector<HTMLElement>(".mobile-shell-reference-header");
-      const close = element.querySelector<HTMLButtonElement>(".mobile-shell-reference-close");
-      const selected = element.querySelector<HTMLElement>('.mobile-shell-reference-pane .pg-outline-document[aria-current="page"]');
-      if (!header || !close || !selected) return { headerVisible: false, closeVisible: false, selectedVisible: false };
-      const headerRect = header.getBoundingClientRect();
-      const closeRect = close.getBoundingClientRect();
-      const selectedRect = selected.getBoundingClientRect();
-      return {
-        headerVisible: headerRect.top >= 0 && headerRect.bottom <= window.innerHeight,
-        closeVisible: closeRect.top >= 0 && closeRect.bottom <= window.innerHeight,
-        selectedVisible: selectedRect.top >= headerRect.bottom && selectedRect.top < window.innerHeight
-          && selectedRect.bottom > headerRect.bottom,
-      };
-    });
-    await expect.poll(sheetLayout).toEqual({ headerVisible: true, closeVisible: true, selectedVisible: true });
-    await expect(sheet.getByRole("tablist", { name: "参照する情報" })).toBeVisible();
-    await expect(sheet.locator('.mobile-shell-reference-pane .pg-outline-document[aria-current="page"]')).toContainText(title);
-    await sheet.getByRole("button", { name: "閉じる", exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeHidden();
-    await expect(currentTitle).toHaveText(title);
-    await expect(editor(page)).toBeVisible();
-  }
-});
-
-test("mobile Knowledge write failures stay visible in the global status after leaving the editor", async ({ page, authorizeAuthor }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  const { project } = await createOAuthWritingFixture(authorizeAuthor, page, "mobile");
+test("Desktop Knowledge write failures preserve the proposed name for retry", async ({ page, authorizeAuthor }) => {
+  const { project } = await createOAuthWritingFixture(authorizeAuthor, page);
   const failure = "Knowledge候補を保存できませんでした。";
   await page.route(`**/api/v1/persistence/projects/${project.id}/nodes/*`, async (route) => {
     if (route.request().method() === "PUT") {
@@ -747,73 +629,37 @@ test("mobile Knowledge write failures stay visible in the global status after le
     await route.continue();
   });
 
-  await page.getByRole("button", { name: "知識・保存", exact: true }).click();
-  const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
-  await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeVisible();
-  await sheet.locator(".pg-knowledge-tools > summary").click();
-  await sheet.getByLabel("Knowledge候補を追加").fill("失敗する候補");
-  await sheet.getByRole("button", { name: "候補を保存", exact: true }).click();
-  const status = sheet.getByRole("region", { name: "保存と回復の状態" });
-  await expect(status.getByRole("alert")).toHaveText(failure);
-  await expect(status.getByRole("alert")).toBeVisible();
-  await expect(status).toHaveCSS("position", "static");
-
-  await sheet.getByRole("button", { name: "閉じる", exact: true }).click();
-  await expect(sheet).toBeHidden();
-  await page.getByRole("button", { name: "設定を開く", exact: true }).click();
-  const globalStatus = page.locator(".mobile-shell-status").first();
-  await expect(globalStatus.getByRole("alert")).toHaveText(failure);
-  await expect(globalStatus.getByRole("alert")).toBeVisible();
-  await expect(page.locator(".pg-editor-column")).toBeHidden();
-  await expect(page.getByRole("alert")).toHaveCount(1);
+  const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
+  const panels = toolbar.locator("details");
+  if (!await panels.evaluate(element => (element as HTMLDetailsElement).open)) await panels.locator("summary").click();
+  await toolbar.getByRole("button", { name: "知識と根拠を表示", exact: true }).click();
+  const knowledge = page.locator('[data-workspace-panel="inspector"] .pg-knowledge');
+  await knowledge.locator(".pg-knowledge-tools > summary").click();
+  const name = knowledge.getByLabel("Knowledge候補を追加");
+  await name.fill("失敗する候補");
+  await knowledge.getByRole("button", { name: "候補を保存", exact: true }).click();
+  await expect(knowledge.getByRole("alert")).toHaveText(failure);
+  await expect(name).toHaveValue("失敗する候補");
+  await page.unroute(`**/api/v1/persistence/projects/${project.id}/nodes/*`);
+  await knowledge.getByRole("button", { name: "候補を保存", exact: true }).click();
+  await expect(knowledge.getByRole("alert")).toHaveCount(0);
+  await expect(name).toHaveValue("");
 });
 
-test("desktop mode switch stays visible and operable at 320 CSS pixels", async ({ page, authorizeAuthor }) => {
-  await page.setViewportSize({ width: 320, height: 844 });
+test("Desktop keeps its breadcrumb and console navigation usable at 320 CSS pixels", async ({ page, authorizeAuthor }) => {
   const title = "320pxでも切れずに参照できる長い作品名".repeat(4);
-  const { project, scene } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", title);
-  const desktopShell = page.locator(".st-desktop-shell");
-  const modeSwitch = page.getByRole("button", { name: "モバイル ↗", exact: true });
-
+  await createOAuthWritingFixture(authorizeAuthor, page, "desktop", title);
+  const consoleButton = page.getByRole("button", { name: "管理コンソール", exact: true });
   for (const width of [320, 640, 1280, 320]) {
     await page.setViewportSize({ width, height: 844 });
-    await expect(desktopShell).toBeVisible();
-    await expect(page).toHaveURL(/\/desktop\//u);
-    await expect(modeSwitch).toBeVisible();
     await expect(page.locator(".st-studio-breadcrumb strong")).toHaveText(title);
+    await expect(consoleButton).toBeInViewport();
+    await expect(page.getByRole("button", { name: /モバイル/u })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
-    const box = await modeSwitch.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
   }
-
-  const pointerBox = await modeSwitch.boundingBox();
-  expect(pointerBox).not.toBeNull();
-  await page.mouse.click(pointerBox!.x + pointerBox!.width / 2, pointerBox!.y + pointerBox!.height / 2);
-  await expect(page).toHaveURL(/\/mobile\//u);
-  await authorizeAuthor("mobile", page, { continueCurrentPage: true });
-  await expect(editor(page)).toContainText("最初の本文。");
-
-  await authorizeAuthor("desktop", page, { path: writingFixturePath("desktop", project, scene) });
-  for (let attempt = 0; attempt < 24; attempt += 1) {
-    if (await modeSwitch.evaluate((element) => document.activeElement === element)) break;
-    await page.keyboard.press("Tab");
-  }
-  await expect(modeSwitch).toBeFocused();
-  const focusState = await modeSwitch.evaluate((element) => {
-    const style = getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth, left: rect.left, right: rect.right };
-  });
-  expect(focusState.outlineStyle).toBe("solid");
-  expect(focusState.outlineWidth).toBe("3px");
-  expect(focusState.left).toBeGreaterThanOrEqual(0);
-  expect(focusState.right).toBeLessThanOrEqual(320);
+  await consoleButton.focus();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/mobile\//u);
-  await authorizeAuthor("mobile", page, { continueCurrentPage: true });
-  await expect(editor(page)).toContainText("最初の本文。");
+  await expect(page).toHaveURL(url => url.pathname === "/console");
 });
 
 test("recovery retry after pagehide retains its exact PostgreSQL draft", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
@@ -837,28 +683,25 @@ test("recovery retry after pagehide retains its exact PostgreSQL draft", { tag: 
   await expectServerSaved(page);
 });
 
-test("both production Shells preserve recoverable Japanese drafts and the Mobile writing and reading flow", async ({ page, authorizeAuthor }) => {
-  for (const mode of ["desktop", "mobile"] as const) {
-    await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 });
-    const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page, mode, undefined, "");
-    const text = "東京《とうきょう》へ向かう。\n日本語😀の本文。";
-    await editor(page).click();
-    await page.keyboard.insertText(text);
-    await expectMarkdown(page, text);
-    // "Saved" can reflect the previous revision. The reader must open only
-    // after this exact manuscript is durable in PostgreSQL.
-    await expect.poll(async () => {
-      const response = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
-      return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
-    }).toBe(text);
-    await page.getByRole("button", { name: "読む", exact: true }).click();
-    await expect(page.getByRole("region", { name: "原稿の閲覧" })).toContainText("東京");
-    await page.getByRole("button", { name: "編集へ戻る" }).click(); await expectMarkdown(page, text);
-    await page.reload();
-    await authorizeAuthor(mode, page, { continueCurrentPage: true });
-    if (mode === "mobile") await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
-    await expectMarkdown(page, text);
-  }
+test("Desktop preserves the saved Japanese manuscript through reading, editing and reload", async ({ page, authorizeAuthor }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", undefined, "");
+  const text = "東京《とうきょう》へ向かう。\n日本語😀の本文。";
+  await editor(page).click();
+  await page.keyboard.insertText(text);
+  await expectMarkdown(page, text);
+  // "Saved" can reflect the previous revision. The reader must open only
+  // after this exact manuscript is durable in PostgreSQL.
+  await expect.poll(async () => {
+    const response = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
+    return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
+  }).toBe(text);
+  await page.getByRole("button", { name: "読む", exact: true }).click();
+  await expect(page.getByRole("region", { name: "原稿の閲覧" })).toContainText("東京");
+  await page.getByRole("button", { name: "編集へ戻る" }).click(); await expectMarkdown(page, text);
+  await page.reload();
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
+  await expectMarkdown(page, text);
 });
 
 async function visibleReaderParagraphs(page: Page): Promise<string[]> {
@@ -873,12 +716,12 @@ async function visibleReaderParagraphs(page: Page): Promise<string[]> {
   });
 }
 
-test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported widths and cancels touch gestures", async ({ page, browserName, authorizeAuthor }) => {
+test("Desktop reader keeps first-to-last Japanese paragraphs visible at narrow viewports and cancels touch gestures", async ({ page, browserName, authorizeAuthor }) => {
   for (const width of [320, 390]) {
     for (const direction of ["horizontal", "vertical"] as const) {
       await page.setViewportSize({ width, height: 844 });
       const text = Array.from({ length: 130 }, (_, index) => `第${index + 1}段落｜日本語の本文を読む。`).join("\n");
-      await createOAuthWritingFixture(authorizeAuthor, page, "mobile", undefined, text);
+      await createOAuthWritingFixture(authorizeAuthor, page, "desktop", undefined, text);
       await page.getByRole("button", { name: "読む", exact: true }).click();
       const displayMenu = page.locator(".pg-editor-display-menu");
       if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
@@ -968,11 +811,11 @@ test("UX canon keeps the manuscript visible and stable through PostgreSQL save r
   await expect(page.locator(".pg-notice")).toContainText("Text Anchorを保存しました");
 });
 
-test("UX canon puts Japanese prose before optional chrome at every shell width", async ({ page, authorizeAuthor }) => {
+test("UX canon puts Japanese prose before optional chrome at narrow and wide Desktop widths", async ({ page, authorizeAuthor }) => {
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 900 });
     const prose = "本文を中心に読める幅と余白を保つ。".repeat(20);
-    await createOAuthWritingFixture(authorizeAuthor, page, width < 640 ? "mobile" : "desktop", undefined, prose);
+    await createOAuthWritingFixture(authorizeAuthor, page, "desktop", undefined, prose);
     await expectMarkdown(page, prose);
     const box = await editor(page).boundingBox(); expect(box).not.toBeNull(); expect(box!.width).toBeGreaterThan(200);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
@@ -993,11 +836,11 @@ test("UX canon preserves focus and recovery when journal storage fails and retur
   await expect(editor(page)).toContainText(text);
 });
 
-test("UX canon keeps explicit shells usable with long Japanese titles and enlarged text", async ({ page, authorizeAuthor }) => {
-  for (const mode of ["desktop", "mobile"] as const) {
-    await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 });
+test("UX canon keeps Desktop usable with long Japanese titles and enlarged text", async ({ page, authorizeAuthor }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
     const prose = "大きな文字でも読み書きできる。".repeat(10);
-    await createOAuthWritingFixture(authorizeAuthor, page, mode, "長い日本語の章題".repeat(8), prose);
+    await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "長い日本語の章題".repeat(8), prose);
     await expectMarkdown(page, prose);
     const displayMenu = page.locator(".pg-editor-display-menu");
     if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
@@ -1008,66 +851,26 @@ test("UX canon keeps explicit shells usable with long Japanese titles and enlarg
   }
 });
 
-test("guarded shell switches remember completed choices and keep the manuscript without preference storage", async ({ page, authorizeAuthor }) => {
-  const { project, scene } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop");
+test("guarded console navigation preserves journaled text when PostgreSQL is unavailable", async ({ page, authorizeAuthor }) => {
+  const { project, scene } = await createOAuthWritingFixture(authorizeAuthor, page);
   const documentPath = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
-  await page.route((url) => url.pathname === documentPath, (route) => route.request().method() === "PATCH"
+  await page.route(url => url.pathname === documentPath, route => route.request().method() === "PATCH"
     ? route.fulfill({ status: 503, json: { error: "Manuscript saving temporarily unavailable" } })
     : route.continue());
-  const firstDraft = "切替前の現在の原稿を保持する。";
-  await page.evaluate(() => localStorage.setItem("scriptorium:ui-mode", "desktop"));
-  await replaceManuscript(page, firstDraft);
-  await expectMarkdown(page, firstDraft);
-  await expectDeviceDraft(page);
-
+  const draft = "移動後にも回復できる現在の原稿。";
+  await replaceManuscript(page, draft);
+  await expect.poll(() => readPersistenceDrafts(page).then(records =>
+    records.find(record => record.documentId === scene.id)?.markdown)).toBe(draft);
+  const consoleButton = page.getByRole("button", { name: "管理コンソール", exact: true });
   await editor(page).dispatchEvent("compositionstart", { data: "にほんご" });
-  await page.getByRole("button", { name: "モバイル ↗", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/desktop/projects/${project.id}/scenes/${scene.id}`, "u"));
-  expect(await page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("desktop");
-  await expectMarkdown(page, firstDraft);
+  await consoleButton.click();
+  await expect(page.getByRole("alert").filter({ hasText: "管理コンソールへの移動を停止しました" }).first()).toBeVisible();
+  await expectMarkdown(page, draft);
   await editor(page).dispatchEvent("compositionend", { data: "日本語" });
-
-  await page.getByRole("button", { name: "モバイル ↗", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/mobile/projects/${project.id}/scenes/${scene.id}`, "u"));
-  await authorizeAuthor("mobile", page, { continueCurrentPage: true });
-  await expectMarkdown(page, firstDraft);
-  expect(await page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("mobile");
-  await page.goto(new URL("/", page.url()).href);
-  await expect.poll(() => new URL(page.url()).pathname.startsWith("/mobile")).toBe(true);
-  await authorizeAuthor("mobile", page, { continueCurrentPage: true });
-  await expect(page.locator(".mobile-shell")).toBeVisible();
-
-  await authorizeAuthor("mobile", page, { path: writingFixturePath("mobile", project, scene) });
-  await expectMarkdown(page, firstDraft);
-  await page.getByRole("button", { name: "設定を開く", exact: true }).click();
-  await page.getByRole("button", { name: "Desktop版へ切り替え", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/desktop/projects/${project.id}/scenes/${scene.id}`, "u"));
-  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
-  await expectMarkdown(page, firstDraft);
-  expect(await page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("desktop");
-  await page.goto(new URL("/", page.url()).href);
-  await expect.poll(() => new URL(page.url()).pathname.startsWith("/desktop")).toBe(true);
-  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
-  await expect(page.locator(".st-desktop-shell")).toBeVisible();
-
+  await consoleButton.click();
+  await expect(page).toHaveURL(url => url.pathname === "/console");
   await authorizeAuthor("desktop", page, { path: writingFixturePath("desktop", project, scene) });
-  const secondDraft = "保存先が使えなくても移動経路と原稿を保持する。";
-  await editor(page).click();
-  await editor(page).press("ControlOrMeta+a");
-  await page.keyboard.insertText(secondDraft);
-  await expectMarkdown(page, secondDraft);
-  await expectDeviceDraft(page);
-  await page.evaluate(() => {
-    const original = Storage.prototype.setItem;
-    Storage.prototype.setItem = function (key: string, value: string): void {
-      if (key === "scriptorium:ui-mode") throw new DOMException("Storage unavailable", "QuotaExceededError");
-      original.call(this, key, value);
-    };
-  });
-  await page.getByRole("button", { name: "モバイル ↗", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/mobile/projects/${project.id}/scenes/${scene.id}`, "u"));
-  await authorizeAuthor("mobile", page, { continueCurrentPage: true });
-  await expectMarkdown(page, secondDraft);
+  await expectMarkdown(page, draft);
 });
 
 test("optional terminology cancels work at pagehide and resumes at pageshow", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
@@ -1112,24 +915,6 @@ test("optional terminology cancels work at pagehide and resumes at pageshow", { 
   }
 });
 
-test("Full terminology stays safe across a held native Shell departure window", async ({ page, authorizeAuthor }) => {
-  await createOAuthWritingFixture(authorizeAuthor, page); const text = "東京《とうきょう》の用語と変換を保持する。";
-  await expectMarkdown(page, "最初の本文。\n次の文章です。");
-  await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text);
-  await expectMarkdown(page, text);
-  await expectDeviceDraft(page);
-  await editor(page).dispatchEvent("compositionstart", { data: "とうきょう" });
-  await page.getByRole("button", { name: "モバイル ↗" }).click();
-  await expect(page).toHaveURL(/desktop/u); await expectMarkdown(page, text);
-  await editor(page).dispatchEvent("compositionend", { data: "東京" });
-  await page.getByRole("button", { name: "モバイル ↗" }).click();
-  await expect(page).toHaveURL(/mobile/u);
-  await authorizeAuthor("mobile", page, { continueCurrentPage: true });
-  await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
-  await expectMarkdown(page, text);
-});
-
-
 test("desktop author can download a portable work and import it without replacing the source", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const transfer = page.locator("details").filter({ has: page.locator("summary", { hasText: "作品のエクスポート・インポート" }) });
@@ -1167,12 +952,9 @@ test("keeps the manuscript near its scene title with one concise protection stat
   for (const sample of [
     { mode: "desktop" as const, width: 1440, height: 900 },
     { mode: "desktop" as const, width: 1024, height: 768 },
-    { mode: "mobile" as const, width: 390, height: 844 },
-    { mode: "mobile" as const, width: 320, height: 760 },
   ]) {
     await page.setViewportSize({ width: sample.width, height: sample.height });
-    const path = `/${sample.mode}/projects/${project.id}/scenes/${scene.id}${sample.mode === "mobile" ? "?view=writing" : ""}`;
-    await authorizeAuthor(sample.mode, page, { path });
+    await authorizeAuthor("desktop", page, { path: writingFixturePath("desktop", project, scene) });
     await expect(editor(page)).toBeVisible();
     const geometry = await page.evaluate(() => {
       const firstLine = document.querySelector<HTMLElement>(".pg-editor .cm-line");
@@ -1198,7 +980,7 @@ test("keeps the manuscript near its scene title with one concise protection stat
   }
   console.log(`authoring after: ${JSON.stringify(measured)}`);
   for (const sample of measured) {
-    const target = sample.mode === "desktop" ? sample.height / 3 : sample.height / 4;
+    const target = sample.height / 3;
     expect(sample.top, `${sample.mode} ${sample.width}x${sample.height}`).toBeLessThanOrEqual(target);
     expect(sample.protectionCount, `${sample.mode} ${sample.width}x${sample.height}`).toBe(1);
     expect(sample.pageWidth, `${sample.mode} ${sample.width}x${sample.height}`).toBe(sample.width);
@@ -1211,7 +993,7 @@ test("keeps the manuscript near its scene title with one concise protection stat
 });
 
 test("journal writes do not spam live save status while a server receipt remains exact", async ({ page, authorizeAuthor }) => {
-  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page, "mobile", undefined, "");
+  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", undefined, "");
   const details = await openProtectionDetails(page);
   await expect(details).toContainText("この端末: この原稿に未保存の変更はありません");
   await expect(details).toContainText("サーバー: PostgreSQLへの保存を確認しました");
@@ -1246,7 +1028,7 @@ test("save details keep the confirmed work version separate from later device in
   const initial = "A。作品に保存した文。";
   const firstAddition = "\nB。先に送信した文。";
   const secondAddition = "\nC。その後に入力した文。";
-  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page, "mobile", undefined, initial);
+  const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", undefined, initial);
   const details = await openProtectionDetails(page);
   const path = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
   let releaseFirst!: () => void;

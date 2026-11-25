@@ -4,38 +4,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./author-oauth-fixture";
-import { expectServerSaved, manuscriptEditor, openRevisionHistory } from "./postgres-fixture";
+import { manuscriptEditor, openRevisionHistory } from "./postgres-fixture";
 import { buildManuscript, createDocument, type CreatedDocument } from "./visual-manuscript-fixture";
 
 async function selectTheme(page: Page, mode: "light" | "dark" | "paper"): Promise<void> {
   await page.getByLabel("外観").selectOption(mode);
-}
-
-async function selectMobileTheme(page: Page, mode: "light" | "dark" | "paper"): Promise<void> {
-  const returnToWriting = page.getByRole("button", { name: "執筆画面へ戻る" });
-  if (await page.getByLabel("外観").count() === 0 || !await page.getByLabel("外観").isVisible()) {
-    await page.getByRole("button", { name: "設定を開く" }).click();
-    await expect(returnToWriting).toBeVisible();
-    await selectTheme(page, mode);
-    await returnToWriting.click();
-    await expect(manuscriptEditor(page)).toBeVisible();
-    return;
-  }
-  await selectTheme(page, mode);
-}
-
-async function openMobileReferenceSheet(page: Page, buttonName: "構成" | "知識・保存", panel: "outline" | "inspector"): Promise<void> {
-  await page.evaluate(() => {
-    const windowWithSheet = window as Window & { __referenceSheetPresented?: boolean };
-    windowWithSheet.__referenceSheetPresented = false;
-    document.querySelector("ion-modal.mobile-shell-reference-modal")?.addEventListener("ionModalDidPresent", () => {
-      windowWithSheet.__referenceSheetPresented = true;
-    }, { once: true });
-  });
-  await page.getByRole("button", { name: buttonName, exact: true }).click();
-  await expect(page.locator("ion-modal.mobile-shell-reference-modal.show-modal")).toBeVisible();
-  await expect.poll(() => page.evaluate(() => (window as Window & { __referenceSheetPresented?: boolean }).__referenceSheetPresented)).toBe(true);
-  await expect(page.locator(`#mobile-reference-tab-${panel}`)).toHaveAttribute("aria-selected", "true");
 }
 
 test("renders and exercises the full Quiet Page authoring surfaces", async ({ page, authorizeAuthor }, testInfo) => {
@@ -51,7 +24,6 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
           startTime: number;
           value: number;
           sources: Array<{ node: string; previousRect: DOMRectReadOnly; currentRect: DOMRectReadOnly }>;
-          shellState?: Record<string, unknown>;
         }>;
       };
     };
@@ -87,30 +59,6 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
                 }
                 return { node: parts.join(" <- "), previousRect, currentRect };
               }),
-              ...(document.querySelector<HTMLElement>(".mobile-shell-footer") ? {
-                shellState: (() => {
-                  const footer = document.querySelector<HTMLElement>(".mobile-shell-footer")!;
-                  const box = (selector: string) => {
-                    const element = footer.querySelector<HTMLElement>(selector);
-                    if (!element) return null;
-                    const style = getComputedStyle(element);
-                    return {
-                      height: Number(element.getBoundingClientRect().height.toFixed(1)),
-                      display: style.display,
-                      visibility: style.visibility,
-                    };
-                  };
-                  return {
-                    footerHeight: Number(footer.getBoundingClientRect().height.toFixed(1)),
-                    keyboardOpen: document.querySelector(".mobile-shell.mobile-shell-keyboard-open") !== null,
-                    accessories: box(".mobile-shell-writing-accessories"),
-                    status: box(".mobile-shell-status"),
-                    navigation: box(".mobile-shell-navigation"),
-                    activeView: document.querySelector(".mobile-shell")?.className ?? "",
-                    titleHeight: Number(document.querySelector(".mobile-shell-identity-bar")?.getBoundingClientRect().height.toFixed(1) ?? "0"),
-                  };
-                })(),
-              } : {}),
             });
           }
         }
@@ -125,8 +73,8 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
     const start = performance.getEntriesByName(`${name}:start`, "mark").at(-1);
     return start ? Math.round(performance.now() - start.startTime) : -1;
   }, mark);
-  const capturePerformance = async (mode: "desktop" | "mobile") => {
-    const record = await page.evaluate((screenMode) => {
+  const capturePerformance = async () => {
+    const record = await page.evaluate(() => {
       const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
       const resources = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
       const origin = window.location.origin;
@@ -140,12 +88,11 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
             startTime: number;
             value: number;
             sources: Array<{ node: string; previousRect: DOMRectReadOnly; currentRect: DOMRectReadOnly }>;
-            shellState?: Record<string, unknown>;
           }>;
         };
       }).__codexiaVitals;
       return {
-        mode: screenMode,
+        mode: "desktop",
         viewport: { width: window.innerWidth, height: window.innerHeight },
         domContentLoadedMs: navigation ? Math.round(navigation.domContentLoadedEventEnd) : null,
         loadEventEndMs: navigation ? Math.round(navigation.loadEventEnd) : null,
@@ -157,7 +104,7 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
         cls: vitals ? Number(vitals.cls.toFixed(4)) : null,
         layoutShifts: vitals?.shifts ?? [],
       };
-    }, mode);
+    });
     performanceRecords.push(record);
   };
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -167,7 +114,7 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
   await network.send("Network.setCacheDisabled", { cacheDisabled: true });
   await authorizeAuthor("desktop", page, { path: `/desktop/projects/${project.id}/scenes/${firstScene.id}` });
   await expect(manuscriptEditor(page)).toBeVisible();
-  await capturePerformance("desktop");
+  await capturePerformance();
 
   await selectTheme(page, "light");
   await expect(page.getByRole("button", { name: "執筆" })).toHaveAttribute("aria-pressed", "true");
@@ -213,95 +160,11 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
   await selectTheme(page, "dark");
   await page.screenshot({ path: join(captureDirectory, "after-desktop-dark.png") });
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  await authorizeAuthor("mobile", page, { path: `/mobile/projects/${project.id}/scenes/${firstScene.id}?view=writing` });
-  await expect(manuscriptEditor(page)).toBeVisible();
-  await capturePerformance("mobile");
-  await selectMobileTheme(page, "light");
-  await page.screenshot({ path: join(captureDirectory, "after-mobile-writing.png") });
-  const editor = manuscriptEditor(page);
-  await editor.evaluate((element) => { (window as Window & { __redesignEditorNode?: Element }).__redesignEditorNode = element; });
-  await page.evaluate(() => performance.mark("mobile-outline-sheet:start"));
-  await openMobileReferenceSheet(page, "構成", "outline");
-  await expect(page.locator("ion-modal")).toContainText("第二章　濡れた目録");
-  interactionMeasurementsMs.mobileOutlineSheet = await measureSince("mobile-outline-sheet");
-  await page.screenshot({ path: join(captureDirectory, "after-mobile-reference.png") });
-  await page.getByRole("button", { name: "閉じる" }).click();
-  await expect(page.locator("ion-modal.mobile-shell-reference-modal")).toBeHidden();
-  await expect(editor).toBeVisible();
-  expect(await page.evaluate(() => document.querySelector('[aria-labelledby="pg-manuscript-label"]') === (window as Window & { __redesignEditorNode?: Element }).__redesignEditorNode)).toBe(true);
-
-  await openMobileReferenceSheet(page, "知識・保存", "inspector");
-  await expect(page.locator("ion-modal")).toContainText("真鍮の羅針盤");
-  await expectServerSaved(page);
-  await page.screenshot({ path: join(captureDirectory, "after-mobile-knowledge.png") });
-  await page.getByRole("button", { name: "閉じる" }).click();
-  await expect(page.locator("ion-modal.mobile-shell-reference-modal")).toBeHidden();
-  await expect(page.getByRole("button", { name: "構成", exact: true })).toBeVisible();
-  await selectMobileTheme(page, "dark");
-  await openMobileReferenceSheet(page, "構成", "outline");
-  await page.screenshot({ path: join(captureDirectory, "after-mobile-reference-dark.png") });
-  await page.getByRole("button", { name: "閉じる" }).click();
-  await expect(page.locator("ion-modal.mobile-shell-reference-modal")).toBeHidden();
-  await openMobileReferenceSheet(page, "知識・保存", "inspector");
-  await expect(page.locator("ion-modal")).toContainText("真鍮の羅針盤");
-  await page.screenshot({ path: join(captureDirectory, "after-mobile-knowledge-dark.png") });
-  await page.getByRole("button", { name: "閉じる" }).click();
-  await expect(page.locator("ion-modal.mobile-shell-reference-modal")).toBeHidden();
-
-  await page.setViewportSize({ width: 320, height: 760 });
-  await expect(manuscriptEditor(page)).toBeVisible();
-  const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
-  expect(pageWidth).toBeLessThanOrEqual(320);
-  await page.screenshot({ path: join(captureDirectory, "after-mobile-320.png") });
-  await selectMobileTheme(page, "dark");
-  await page.screenshot({ path: join(captureDirectory, "after-mobile-dark.png") });
   await writeFile(join(captureDirectory, "performance.json"), JSON.stringify({
     method: "Local Chromium headless navigation timing; lab evidence, not field Core Web Vitals.",
     observations: performanceRecords,
     interactions: interactionMeasurementsMs,
   }, null, 2) + "\n");
-});
-
-test("mobile manuscript disclosures remain operable at 320 and 390 CSS pixels", async ({ page, authorizeAuthor }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  const { project, firstScene, author } = await buildManuscript(page, "desktop", authorizeAuthor);
-  for (const width of [390, 320]) {
-    await page.setViewportSize({ width, height: 844 });
-    await authorizeAuthor("mobile", page, { path: `/mobile/projects/${project.id}/scenes/${firstScene.id}?view=writing` });
-    await expect(manuscriptEditor(page)).toBeVisible();
-    await expectServerSaved(page);
-    const command = page.locator(".pg-editor-command-menu");
-    await command.locator("summary").click();
-    // A visible DOM node is not necessarily hit-testable when clipped.
-    // Use actual clicks (no force, no programmatic scrolling inside the toolbar).
-    await command.getByRole("button", { name: "Revision履歴", exact: true }).click();
-    await expect(page.getByRole("region", { name: "Revision履歴" })).toBeVisible();
-    await command.getByRole("button", { name: "Revision履歴", exact: true }).click();
-    await expect(page.getByRole("region", { name: "Revision履歴" })).toHaveCount(0);
-    await command.locator("summary").click();
-    const display = page.locator(".pg-editor-display-menu");
-    await display.locator("summary").click();
-    const fontSize = display.getByRole("spinbutton", { name: "原稿の文字サイズ" });
-    await fontSize.click();
-    await fontSize.fill("18");
-    await expect(fontSize).toHaveValue("18");
-    if (!await display.evaluate((element) => (element as HTMLDetailsElement).open)) await display.locator("summary").click();
-    const symbols = page.locator(".pg-editor-symbol-menu");
-    const symbol = width === 390 ? { label: "三点リーダーを挿入", text: "……" } : { label: "ダッシュを挿入", text: "――" };
-    await symbols.getByRole("button", { name: symbol.label }).click();
-    await expect(manuscriptEditor(page)).toContainText(symbol.text);
-    await display.locator("summary").click();
-    // The normal autosave may finish before a manual save can be clicked.
-    await expect.poll(async () => {
-      const response = await author.fetch(`/api/v1/persistence/projects/${project.id}/documents/${firstScene.id}`);
-      if (!response.ok()) return "";
-      const { revision } = await response.json() as { revision: { markdown: string } };
-      return revision.markdown;
-    }, { timeout: 15_000 }).toContain(symbol.text);
-    await expectServerSaved(page);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-  }
 });
 
 test("outline preserves database sibling order and reveals a navigated document", async ({ page, authorizeAuthor }) => {

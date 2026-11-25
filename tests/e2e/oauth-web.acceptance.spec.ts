@@ -74,7 +74,7 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
     };
     // Never mutate app/dist: other Playwright shards concurrently serve its
     // standard (non-OAuth) shells from the same checkout.
-    for (const ui of ["launcher", "desktop", "mobile", "oauth"]) {
+    for (const ui of ["launcher", "desktop", "oauth"]) {
       const build = spawnSync("pnpm", ["--filter", "@codexia/app", "exec", "vite", "build"], {
         cwd: resolve("."),
         encoding: "utf8",

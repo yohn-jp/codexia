@@ -6,7 +6,7 @@ interface Handoff { pending?: PendingClaim }
 
 /** Restore a real test-scoped bearer only on an explicitly selected document. */
 async function openPreparedAuthor(
-  page: Page, origin: string, shell: "desktop" | "mobile", destination: URL,
+  page: Page, origin: string, shell: "desktop", destination: URL,
   token: string, handoffs: WeakMap<Page, Handoff>,
   expectedView = page.getByRole("heading", { name: "Database workspace" }),
 ): Promise<void> {

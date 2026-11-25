@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import productConfig from "../../app/vite.config.ts";
 
 const shell = process.env.CODEXIA_UI;
-const prepared = shell === "desktop" || shell === "mobile";
+const prepared = shell === "desktop";
 const normalize = path => path.replaceAll("\\", "/");
 const runtime = normalize(fileURLToPath(new URL("./prepared-author-runtime.mjs", import.meta.url)));
 const entry = normalize(fileURLToPath(new URL(`../../app/src/entries/${shell}.tsx`, import.meta.url)));
