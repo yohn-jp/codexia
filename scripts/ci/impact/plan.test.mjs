@@ -647,44 +647,15 @@ test('Orval manifest and transport changes verify the deployment API route asser
   }
 });
 
-test('iOS packaging workflow changes retain root proof and its shared inputs stay fully verified', async () => {
-  const { OPERATIONAL_ROOT_PATHS } = await import('./plan.mjs');
-  const workflowPath = '.github/workflows/ios-unsigned-ipa.yml';
-  const workflow = parse(readFileSync(new URL('../../../' + workflowPath, import.meta.url), 'utf8'));
-  assert.ok(OPERATIONAL_ROOT_PATHS.includes(workflowPath));
-  assert.deepEqual(Object.keys(workflow.on).sort(), ['workflow_dispatch']);
-  assert.deepEqual(workflow.on.workflow_dispatch.inputs.profile.options, ['core', 'full']);
+test('the native Swift app owns manual unsigned IPA packaging', () => {
+  assert.equal(existsSync(new URL('../../../.github/workflows/ios-unsigned-ipa.yml', import.meta.url)), false);
   const native = parse(readFileSync(new URL('../../../.github/workflows/ios-editor.yml', import.meta.url), 'utf8'));
   assert.deepEqual(Object.keys(native.on), ['workflow_dispatch']);
-  assert.equal(native.jobs['native-ipa'].if, "${{ github.event_name == 'workflow_dispatch' }}");
+  const ipa = native.jobs['native-ipa'];
+  assert.equal(ipa.if, "${{ github.event_name == 'workflow_dispatch' }}");
+  assert.equal(ipa['runs-on'], 'xcode-27');
+  assert.ok(ipa.steps.some(step => step.run?.includes('ios/CodexiaApp/Scripts/package-unsigned-ipa.swift')));
   assert.deepEqual(native.jobs.editor.strategy.matrix.lane, ['state-model', 'editor-simulator', 'app-simulator']);
-  assert.equal(workflow.jobs.build['runs-on'], 'xcode-27');
-  assert.ok(workflow.jobs.build.steps.some(step => step.run?.includes('scripts/ios/validate-web-bundle.mjs')));
-  assert.ok(workflow.jobs.build.steps.some(step => step.run?.includes('scripts/ios/package-unsigned-ipa.mjs')));
-
-  const workflowOnly = await plan([workflowPath]);
-  assert.deepEqual(workflowOnly.tasks, ['unit-root', 'coverage']);
-  assert.equal(workflowOnly.full_model_oci, false);
-
-  const sharedImplementationPaths = [
-    'scripts/ios/validate-web-bundle.mjs',
-    'scripts/ios/package-unsigned-ipa.mjs',
-    'app/native/capacitor.config.ts',
-    'app/src/oauth.ts',
-    'pnpm-lock.yaml',
-  ];
-  for (const sharedPath of sharedImplementationPaths) {
-    const withWorkflow = await plan([workflowPath, sharedPath]);
-    const implementationOnly = await plan([sharedPath]);
-    for (const task of implementationOnly.tasks) assert.ok(withWorkflow.tasks.includes(task), `${sharedPath}: lost ${task}`);
-    assert.equal(withWorkflow.mode, implementationOnly.mode, sharedPath);
-    assert.equal(withWorkflow.full_model_oci, implementationOnly.full_model_oci, sharedPath);
-  }
-
-  const unknownMixed = await plan([workflowPath, 'scripts/new-ios-input.mjs']);
-  const unknownOnly = await plan(['scripts/new-ios-input.mjs']);
-  assert.deepEqual(unknownMixed.tasks, unknownOnly.tasks);
-  assert.equal(unknownMixed.mode, 'full');
 });
 
 test('CI contract-test changes select only root and coverage, including the iOS freeze diff', async () => {
@@ -752,7 +723,6 @@ test('push backup changes retain root and independent exact-head verification', 
 test('iOS packaging and CI dashboard changes remain root-scoped, mixed source remains fully covered', async () => {
   const { VERIFICATION_TASKS } = await import('./contract.mjs');
   for (const file of [
-    '.github/workflows/ios-unsigned-ipa.yml',
     'scripts/ios/package-unsigned-ipa.mjs',
     'app/native/package.json',
     'scripts/ci/dashboard/analysis.mjs',
@@ -761,10 +731,10 @@ test('iOS packaging and CI dashboard changes remain root-scoped, mixed source re
     assert.deepEqual((await plan([file])).tasks, ['unit-root', 'coverage'], file);
     assert.equal((await plan([file])).full_model_oci, false);
   }
-  const changed = await plan(['.github/workflows/ios-unsigned-ipa.yml', 'app/src/main.tsx']);
+  const changed = await plan(['scripts/ios/package-unsigned-ipa.mjs', 'app/src/main.tsx']);
   assert.ok(changed.tasks.includes('build-full') && changed.tasks.includes('browser-full-ui-v1'));
   assert.deepEqual((await plan(['scripts/ci/dashboard/analysis.mjs', 'unknown/unreviewed.txt'])).tasks, VERIFICATION_TASKS);
-  assert.deepEqual((await plan(['.github/workflows/ios-unsigned-ipa.yml'], 'push')).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(['scripts/ios/package-unsigned-ipa.mjs'], 'push')).tasks, VERIFICATION_TASKS);
 });
 
 test('the Passkey browser acceptance source is owned by the API unit, package typecheck, and dedicated Core Chromium shard', async () => {
@@ -828,6 +798,7 @@ test('native ownership fails closed for unsupported or mixed inputs and main', a
     'ios/CodexiaTransport/Sources/CodexiaAPI/new-helper.mjs',
     'ios/Unreviewed/Sources/Unexpected.swift',
     '.github/workflows/ios-other.yml',
+    '.github/workflows/ios-unsigned-ipa.yml',
     'pnpm-lock.yaml',
     'packages/api/src/server.ts',
   ]) {

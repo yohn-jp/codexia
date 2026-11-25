@@ -1,6 +1,6 @@
 # iOS native SwiftUI client — build, distribution and acceptance
 
-**Status: approved native SwiftUI target; current Capacitor/WebView implementation and unsigned-IPA CI are legacy and do not prove this target is shipped.** The implementation architecture is [iOS SwiftUI architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.md). [User screen flows](../design/USER-SCREEN-FLOW.md), [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.md) and [Core](../architecture/CORE.md) remain normative for behavior and rights.
+**Native SwiftUI is the approved iOS target. Physical-device acceptance remains pending during the iOS freeze.** The implementation architecture is [iOS SwiftUI architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.md). [User screen flows](../design/USER-SCREEN-FLOW.md), [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.md) and [Core](../architecture/CORE.md) remain normative for behavior and rights.
 
 ## Goal and boundaries
 
@@ -14,7 +14,7 @@ Web static assets remain under Cloudflare Access; the app uses an independently 
 - Build a SwiftUI executable/IPA from the **exact commit under test**. Record the Xcode/Swift toolchain, dependency lock/resolution, source revision, architectures, bundle ID, entitlements, build status, archive structure, artifact digest and retention policy.
 - Use generated Swift OpenAPI client DTOs from the same TypeSpec-derived OpenAPI 3.1 as Web; dependencies and compiler/toolchain compatibility must be pinned and validated. No iOS API schema fork or embedded credential.
 - Do not put Apple Account credentials, signing certificates, provisioning profiles, OAuth refresh tokens, bearer JWTs or user manuscripts in repository, GitHub Actions artifacts or distributed unsigned binaries.
-- Existing [unsigned iOS workflow](../../.github/workflows/ios-unsigned-ipa.yml), scripts and app/native/ use Capacitor and validate the **old shell**. Do not label their success as native SwiftUI build/functional acceptance. Replace/retire their obsolete build path during native cutover; preserve only genuinely required signing/distribution procedures.
+- To build an unsigned SwiftUI IPA, manually dispatch [Native iOS](../../.github/workflows/ios-editor.yml). Supply both the public HTTPS API origin and the registered public OAuth client ID for a configured build. Leaving both inputs empty produces an unconfigured proof archive. The native packaging script certifies the archive before the workflow uploads it.
 
 ## Authentication and network
 

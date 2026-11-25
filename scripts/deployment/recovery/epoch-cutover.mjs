@@ -31,7 +31,6 @@ const bindingPatterns = {
 const authEvidenceFields = ['offVmCiphertext', 'postgresRoles', 'podmanSecrets', 'previousOwnerAuthentication', 'rollbackProcedure'];
 const run = promisify(execFile);
 const backupProgram = fileURLToPath(new URL('../../../deploy/backup/backup.sh', import.meta.url));
-const snapshotHistoryMigration = 'snapshot-history-v2';
 
 function matches(value, pattern) {
   return typeof value === 'string' && value.trim() === value && pattern.test(value);
@@ -52,7 +51,7 @@ function verifyBinding(binding, expected) {
     (firstActivation && ['priorImage', 'priorMigrationFingerprint'].includes(field)) || matches(binding[field], pattern)) ||
     binding.hostname.length > 253 || binding.priorImage === binding.candidateImage ||
     (pair && (!matches(binding.planSha256, sha256) ||
-      (binding.migration !== null && (firstActivation || binding.migration !== snapshotHistoryMigration)) ||
+      binding.migration !== null ||
       (!firstActivation && binding.priorMigrationFingerprint !== binding.candidateMigrationFingerprint)))) {
     throw new Error('Invalid epoch cutover recovery binding');
   }
@@ -166,12 +165,9 @@ export async function readEpochCutoverRecoveryReceipt(filename, binding, window)
   return validateEpochCutoverRecoveryReceipt(await readProtectedJson(filename), binding, window);
 }
 
-async function runCanonicalDrill({ backupDirectory, ageIdentityFile, candidateImage, candidateMigrationFingerprint, migration }) {
-  const args = [backupProgram, 'drill', backupDirectory, ageIdentityFile, '--approved', '--candidate-full-image', candidateImage];
-  if (candidateMigrationFingerprint !== undefined) {
-    args.push('--candidate-ledger', candidateMigrationFingerprint);
-    if (migration !== null) args.push('--migration', migration);
-  }
+async function runCanonicalDrill({ backupDirectory, ageIdentityFile, candidateImage, candidateMigrationFingerprint }) {
+  const args = [backupProgram, 'drill', backupDirectory, ageIdentityFile, '--approved',
+    '--candidate-full-image', candidateImage, '--candidate-ledger', candidateMigrationFingerprint];
   try {
     const result = await run('bash', args);
     return result.stdout;
@@ -191,10 +187,9 @@ export async function produceEpochCutoverRecoveryReceipt({
   verifyAuthRecovery(authRecovery, binding, recoveryHostId, start, observed);
   await verifyAuthRecoveryRecords(authEvidenceDirectory, authRecovery, start);
 
-  const pair = Object.hasOwn(binding, 'planSha256');
   const stdout = await runDrill({
     backupDirectory, ageIdentityFile, candidateImage: binding.candidateImage,
-    ...(pair ? { candidateMigrationFingerprint: binding.candidateMigrationFingerprint, migration: binding.migration } : {}),
+    candidateMigrationFingerprint: binding.candidateMigrationFingerprint,
   });
   const lines = stdout.split('\n');
   const evidence = new Map([
@@ -202,8 +197,8 @@ export async function produceEpochCutoverRecoveryReceipt({
     ['Verified checksum manifest sha256:', binding.checksumManifestSha256],
     ['Verified database logical sha256:', binding.databaseFingerprint],
     ['Verified history logical sha256:', binding.historyFingerprint],
-    ['Isolated candidate ledger verified:', pair ? binding.candidateMigrationFingerprint : null],
-    ['Isolated maintenance rehearsal verified:', !pair || binding.migration !== null ? binding.candidateImage : null],
+    ['Isolated candidate ledger verified:', binding.candidateMigrationFingerprint],
+    ['Isolated maintenance rehearsal verified:', null],
   ]);
   for (const [prefix, value] of evidence) {
     const matches = lines.filter(line => line.startsWith(prefix));

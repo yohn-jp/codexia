@@ -15,14 +15,13 @@ lock_mode=--exclusive
 flock "$lock_mode" --nonblock 9 ||
   { echo 'Another Codexia operation holds the deployment host lock' >&2; exit 75; }
 
-exec python3 - "$(dirname -- "${BASH_SOURCE[0]}")" "$@" <<'PY'
+exec python3 - "$@" <<'PY'
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
-import runpy
 import stat
 import subprocess
 import sys
@@ -46,8 +45,6 @@ ACTIVE_UNIT = QUADLETS / f"{API}.container"
 PRIOR_UNIT = STATE / "cutover-prior-api.container"
 API_WANTS = QUADLETS / "default.target.wants/codexia-api.service"
 TUNNEL_WANTS = QUADLETS / "default.target.wants/codexia-tunnel.service"
-HOST_TOOLS = Path(sys.argv.pop(1))
-load_cutover_migration = runpy.run_path(str(HOST_TOOLS / "cutover-migrations.py"))["load_cutover_migration"]
 PODMAN = ("podman",)
 SYSTEMCTL = ("systemctl", "--user")
 API_DIST = "/app/node_modules/@codexia/api/dist"
@@ -245,10 +242,6 @@ def changes_backend(plan):
     return plan["priorImage"] != plan["candidateImage"]
 
 
-def migration_handler(plan):
-    return load_cutover_migration(plan["migration"], HOST_TOOLS, require)
-
-
 def validate_plan(request):
     require(all(key in request for key in PLAN_FIELDS), "Cutover plan is incomplete")
     approved_deadline(request)
@@ -266,21 +259,17 @@ def validate_plan(request):
                 request["candidateUnitSha256"] == request["priorUnitSha256"], "Retained API identity must match the prior release")
     prior = request["priorIdentity"]
     target = request["candidateIdentity"]
-    migration = migration_handler(request)
+    require(request["migration"] is None, "No data conversion is certified")
     if request["priorImage"] is None:
-        require(all(request[key] is None for key in ("priorIdentity", "priorUnitSha256", "priorContainerId")) and
-                migration is None, "A first activation must have no prior API or data conversion")
+        require(all(request[key] is None for key in ("priorIdentity", "priorUnitSha256", "priorContainerId")),
+                "A first activation must have no prior API")
     else:
         require(matches(IMMUTABLE_IMAGE, request["priorImage"]) and matches(HASH, request["priorUnitSha256"]) and
                 matches(HASH, request["priorContainerId"]), "Invalid prior immutable Full release")
         backend_identity(prior)
-        if migration is None:
-            require(prior["persistenceFormat"] == target["persistenceFormat"] and
-                    prior["migrationFingerprint"] == target["migrationFingerprint"],
-                    "No migration is certified for the changed persistence format or PostgreSQL schema ledger")
-        else:
-            require(changes_backend(request), "Data conversion requires a changed API image")
-            migration["validate"](prior, target, require)
+        require(prior["persistenceFormat"] == target["persistenceFormat"] and
+                prior["migrationFingerprint"] == target["migrationFingerprint"],
+                "No migration is certified for the changed persistence format or PostgreSQL schema ledger")
     return {key: request[key] for key in PLAN_FIELDS}
 
 
@@ -570,7 +559,7 @@ def maintenance_container():
             "--security-opt=no-new-privileges")
 
 
-def database_maintenance(image, option, ledger=False):
+def verify_database_ledger(image):
     # Do not publish the connection URL or put it in Podman arguments. The
     # normal app secret is mounted in the isolated client and consumed there.
     args = (*maintenance_container(), "--network=codexia-data",
@@ -579,28 +568,13 @@ def database_maintenance(image, option, ledger=False):
         password="$(cat /run/secrets/app-password)"
         case "$password" in *[!0-9a-fA-F]*) exit 1;; esac
         [ "${#password}" -eq 64 ]
-        export CODEXIA_DATABASE_URL="postgres://codexia:$password@codexia-db:5432/codexia"
-        if [ "$1" = --check ]; then
-            export CODEXIA_DATABASE_URL="$CODEXIA_DATABASE_URL?options=-c%20default_transaction_read_only%3Don"
-        fi
-        shift
+        export CODEXIA_DATABASE_URL="postgres://codexia:$password@codexia-db:5432/codexia?options=-c%20default_transaction_read_only%3Don"
         exec node "$@"
-    ''', "codexia-maintenance", option)
-    if ledger:
-        return output((*args, "--input-type=module", "-e", '''
+    ''', "codexia-maintenance")
+    return output((*args, "--input-type=module", "-e", '''
             import {verifyPostgresSchema} from "@codexia/persistence-postgres";
             console.log(await verifyPostgresSchema(process.env.CODEXIA_DATABASE_URL));
         '''), "The retained PostgreSQL migration ledger failed verification")
-    return command((*args, f"{API_DIST}/maintain-snapshot-projections.js", option),
-                   "Canonical database conversion failed", allowed=(0, 2) if option == "--check" else (0,))[0]
-
-
-def history_maintenance(image, option):
-    mode = "ro" if option == "--check" else "rw"
-    return command((*maintenance_container(), "--network=none", "--user=1000:1000",
-                    "--env=CODEXIA_USAGE_DIR=/history", "--volume", f"codexia-history:/history:{mode},nocopy",
-                    "--entrypoint=node", image, f"{API_DIST}/maintain-job-history.js", option),
-                   "Canonical history conversion failed", allowed=(0, 2) if option == "--check" else (0,))[0]
 
 
 def wait_for_healthy_api():
@@ -695,7 +669,7 @@ def admit(plan, journal):
 
 
 def read_only_database_check(image, identity, settings):
-    require(database_maintenance(image, "--check", ledger=True) == identity["migrationFingerprint"],
+    require(verify_database_ledger(image) == identity["migrationFingerprint"],
             "Live PostgreSQL ledger does not match the exact release identity")
     auth_cli(image, settings)
 
@@ -789,18 +763,12 @@ def apply(request, plan, journal):
         verify_backup(journal)
         verified_fingerprints(journal)
         auth_file, _ = setting_path(candidate, image, plan["candidateUnitSha256"])
-        require(image_identity(image) == identity, "Staged OCI identity changed after rehearsal")
+        require(image_identity(image) == identity, "Staged OCI identity changed after recovery verification")
         require_owner(plan, auth_file)
         read_only_database_check(image, identity, auth_file)
-        migration = migration_handler(plan)
-        pending = migration["prepare"](image, database_maintenance, history_maintenance) if migration else None
-        # Record the possible DB/history mutation before the first write or
-        # candidate start. Either can change persisted state despite failure.
+        # The candidate can change persisted state even if startup fails.
         require_current_window(plan)
-        transition(journal, "converting" if migration else "activating",
-                   requiresRestore=True, recoveryReceiptSha256=receipt)
-        if migration:
-            migration["apply"](pending, image, database_maintenance, history_maintenance, require)
+        transition(journal, "activating", requiresRestore=True, recoveryReceiptSha256=receipt)
         require_inactive(TUNNEL)
         require_inactive(API)
         validate_host(plan)
@@ -814,7 +782,7 @@ def apply(request, plan, journal):
 
 
 def recover_quiesce(plan, journal):
-    require(journal["phase"] in ("intent", "quiescing", "checkpointed", "converting", "activating",
+    require(journal["phase"] in ("intent", "quiescing", "checkpointed", "activating",
                                 "candidate-ready", "candidate-tunnel", "prior-ready", "prior-tunnel", "recovering", "safe-stopped"),
             "This checkpoint does not permit rollback after possible publication")
     if journal["phase"] == "safe-stopped":
@@ -893,7 +861,7 @@ def recover(request, plan, journal):
         require_owner(plan, auth_file)
         require_release(PRIOR_RELEASE, image, identity, auth_hash)
         require(image_identity(image) == identity, "Retained prior OCI identity changed")
-        require(database_maintenance(image, "--check", ledger=True) == identity["migrationFingerprint"],
+        require(verify_database_ledger(image) == identity["migrationFingerprint"],
                 "Restored PostgreSQL migration ledger does not match the prior release")
         auth_cli(image, auth_file)
         activate(PRIOR_UNIT, image, identity)

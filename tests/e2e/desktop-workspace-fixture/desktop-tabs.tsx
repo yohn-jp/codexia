@@ -5,8 +5,6 @@ import { createWorkspacePreset } from "../../../app/src/workspace/layout";
 import { saveWorkspaceSnapshot } from "../../../app/src/workspace/persistence";
 import type { WorkspacePanel } from "../../../app/src/application/contracts";
 
-import "../../../app/src/styles.css";
-
 type GuardOutcome = boolean | "delayed";
 
 interface DesktopTabsFixtureMetrics {
@@ -83,6 +81,7 @@ function DesktopTabsFixture(): ReactNode {
   </>;
 }
 
-const root = document.getElementById("root");
-if (!root) throw new Error("Desktop tabs fixture root is missing.");
-createRoot(root).render(<DesktopTabsFixture />);
+export function renderDesktopTabsFixture(root: HTMLElement): void {
+  // The fixture's workspace is mounted in this isolated browser context only.
+  createRoot(root).render(<DesktopTabsFixture />);
+}

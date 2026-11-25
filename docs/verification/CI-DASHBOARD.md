@@ -92,9 +92,9 @@ The inventory does **not** establish all required checks: API history retention,
 
 ## CI impact and iOS agreement
 
-Pure changes under **scripts/ci/dashboard/**, **scripts/ios/** and **app/native/**, or to the iOS IPA workflow, select the canonical **unit-root + coverage** task pair instead of the full browser/OCI graph. Unknown paths remain full; mixed shared application changes retain affected tests. This addresses the unnecessary all-tasks selection observed in [#449](https://github.com/yohn-jp/codexia/issues/449). Its measured improvement must still be checked against a real PR run.
+Pure changes under **scripts/ci/dashboard/**, **scripts/ios/** and **app/native/** select the canonical **unit-root + coverage** task pair instead of the full browser/OCI graph. Unknown paths remain full; mixed shared application changes retain affected tests. This addresses the unnecessary all-tasks selection observed in [#449](https://github.com/yohn-jp/codexia/issues/449). Its measured improvement must still be checked against a real PR run.
 
-The unsigned IPA workflow runs for native-related PR changes or manual dispatch, and moves to **xcode-27 ARM64** and **iOS 27.0 minimum**. **Adopted target: Windows Chromium Desktop React Web + native SwiftUI iOS with UIKit/TextKit editor.** [E2E execution](E2E-EXECUTION.md) defines browser optimization metrics and transition conditions; recorded historical runs retain their original matrix. Current Ionic/Capacitor IPA packaging is legacy until SwiftUI-specific CI replaces it; Mobile React viewport E2E is not a native release gate. A native unsigned archive does not prove Simulator acceptance, Apple signing, Keychain or physical installation. See [iOS client contract](../deployment/IOS-CLIENT.md).
+The [Native iOS workflow](../../.github/workflows/ios-editor.yml) builds the unsigned SwiftUI app on manual dispatch using Xcode 27 on ARM64 with a minimum deployment target of iOS 27.0. Simulator testing, device signing and physical installation have separate acceptance criteria in the [iOS client contract](../deployment/IOS-CLIENT.md).
 
 ## Local checks
 

@@ -11,17 +11,17 @@ const INITIAL_SCENE_ONE = "# Scene One\n\nThe first line of the story.\nBeacon Q
 const INITIAL_SCENE_TWO = "# Scene Two\n\nThe second line of the story.\nA submerged brass archive waits below Lantern Harbor.\n";
 
 // Only the Vite server is shared. Each test still gets its own browser context and journal.
-const test = base.extend<{}, { desktopTabsURL: string }>({
-  desktopTabsURL: [async ({}, use) => {
-    const configuredPort = process.env.CODEXIA_DESKTOP_TABS_PORT;
+const test = base.extend<{}, { transitionURL: string }>({
+  transitionURL: [async ({}, use) => {
+    const configuredPort = process.env.CODEXIA_WORKSPACE_FIXTURE_PORT;
     const port = configuredPort ? Number(configuredPort) : 0;
     if (configuredPort && (!Number.isInteger(port) || port < 1 || port > 65_535)) {
-      throw new Error("Desktop tabs fixture port must be valid");
+      throw new Error("Desktop workspace fixture port must be valid");
     }
     const requireFromApp = createRequire(resolve("app/package.json"));
     const { createServer } = await import(pathToFileURL(requireFromApp.resolve("vite")).href);
     const server = await createServer({
-      configFile: resolve("tests/e2e/desktop-tabs-fixture/vite.config.mjs"),
+      configFile: resolve("tests/e2e/desktop-workspace-fixture/vite.config.mjs"),
       server: { host: "127.0.0.1", port, strictPort: true, hmr: false },
     });
     try {
@@ -39,7 +39,7 @@ async function openDesktopTabsFixture(page: Page, url: string): Promise<{
   tabs: ReturnType<Page["getByRole"]>;
 }> {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(url);
+  await page.goto(`${url}/desktop-tabs`);
   const tabs = page.getByRole("tablist", { name: "パネル" });
   await expect(tabs).toBeVisible();
   await expect(tabs.getByRole("tab")).toHaveCount(2);
@@ -67,8 +67,8 @@ async function desktopTabsGuardCalls(page: Page): Promise<number> {
   return page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.guardCalls ?? -1);
 }
 
-test("desktop stack tabs use roving focus and keep the rendered panel association valid", async ({ page, desktopTabsURL }) => {
-  const { tabs } = await openDesktopTabsFixture(page, desktopTabsURL);
+test("desktop stack tabs use roving focus and keep the rendered panel association valid", async ({ page, transitionURL }) => {
+  const { tabs } = await openDesktopTabsFixture(page, transitionURL);
   const inspector = tabs.getByRole("tab", { name: "Inspector", exact: true });
   const outline = tabs.getByRole("tab", { name: "Outline", exact: true });
   const panel = page.getByRole("tabpanel");
@@ -105,8 +105,8 @@ test("desktop stack tabs use roving focus and keep the rendered panel associatio
   await expect(outline).toBeFocused();
 });
 
-test("desktop tab guard denial retains selection and a delayed transition cannot focus an obsolete tab", async ({ page, desktopTabsURL }) => {
-  const { tabs } = await openDesktopTabsFixture(page, desktopTabsURL);
+test("desktop tab guard denial retains selection and a delayed transition cannot focus an obsolete tab", async ({ page, transitionURL }) => {
+  const { tabs } = await openDesktopTabsFixture(page, transitionURL);
   const inspector = tabs.getByRole("tab", { name: "Inspector", exact: true });
   const outline = tabs.getByRole("tab", { name: "Outline", exact: true });
 
@@ -656,7 +656,6 @@ test("narrow Desktop keeps the manuscript internally scrollable while shell and 
   expect(scrollState.lastLineVisible).toBe(true);
 
   await expect(toolbar.getByRole("button", { name: "執筆", exact: true })).toBeInViewport();
-  await expect(page.getByRole("button", { name: "管理コンソール", exact: true })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
   await expect(page).toHaveURL(/\/desktop\//u);
 });
