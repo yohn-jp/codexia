@@ -73,6 +73,11 @@ export const operationIds = [
   'public_share_scene_get',
 ];
 
+// Auth capabilities are generated separately so the OAuth Web entrypoint
+// never imports the author API client or its bearer/native transport state.
+export const authMethodsOperationIds = ['auth_methods_get'];
+export const mainOperationIds = operationIds.filter(id => !authMethodsOperationIds.includes(id));
+
 // These are documented compatibility deviations, used by active Desktop
 // paths. Keep target-only operations excluded and review each ID deliberately.
 export const provisionalOperationIds = [
@@ -101,7 +106,7 @@ export function httpClientConfig(input, outputDirectory) {
   return {
     input: {
       target: input,
-      filters: { operationIds },
+      filters: { operationIds: mainOperationIds },
       override: {
         transformer: fileURLToPath(new URL('./scripts/orval-desktop-transformer.mjs', import.meta.url)),
       },
@@ -116,6 +121,31 @@ export function httpClientConfig(input, outputDirectory) {
         mutator: {
           path: fileURLToPath(new URL('./src/generated-http-fetch.ts', import.meta.url)),
           name: 'generatedHttpFetch',
+        },
+        fetch: { includeHttpResponseReturnType: false, runtimeValidation: true },
+        includeSchemaInArguments: true,
+        zod: { version: 4 },
+      },
+    },
+  };
+}
+
+export function authMethodsClientConfig(input, outputDirectory) {
+  return {
+    input: {
+      target: input,
+      filters: { operationIds: authMethodsOperationIds },
+    },
+    output: {
+      client: 'fetch',
+      urlEncodeParameters: true,
+      target: path.join(outputDirectory, 'client.ts'),
+      schemas: { type: 'zod', path: path.join(outputDirectory, 'schemas') },
+      operationManifest: { types: false },
+      override: {
+        mutator: {
+          path: fileURLToPath(new URL('./src/generated-auth-methods-fetch.ts', import.meta.url)),
+          name: 'generatedAuthMethodsFetch',
         },
         fetch: { includeHttpResponseReturnType: false, runtimeValidation: true },
         includeSchemaInArguments: true,

@@ -4,12 +4,20 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { generate } from 'orval';
 import { parse } from 'yaml';
-import { httpClientConfig, operationIds, provisionalOperationIds } from '../orval.config.mjs';
+import {
+  authMethodsClientConfig,
+  authMethodsOperationIds,
+  httpClientConfig,
+  mainOperationIds,
+  operationIds,
+  provisionalOperationIds,
+} from '../orval.config.mjs';
 
 const appRoot = fileURLToPath(new URL('../', import.meta.url));
 const input = fileURLToPath(new URL('../../packages/http-contract/openapi/codexia.openapi.yaml', import.meta.url));
 const generatedRoot = path.join(appRoot, 'src', 'generated');
 const target = path.join(generatedRoot, 'http');
+const authTarget = path.join(generatedRoot, 'auth-methods');
 const methods = new Set(['get', 'head', 'post', 'put', 'patch', 'delete', 'options', 'trace']);
 const operations = new Map();
 
@@ -50,29 +58,68 @@ function generatedFiles(directory) {
 }
 
 const staging = mkdtempSync(path.join(generatedRoot, '.http-'));
+const authStaging = mkdtempSync(path.join(generatedRoot, '.auth-'));
+
+async function readOperationManifest(directory) {
+  const loaded = await import(pathToFileURL(path.join(directory, 'client.operations.ts')));
+  return loaded.operations;
+}
+
 try {
   await generate(httpClientConfig(input, staging), appRoot);
-  const { operations: generatedOperations } = await import(pathToFileURL(path.join(staging, 'client.operations.ts')));
-  const generatedRoutes = Object.values(generatedOperations).map(({ operationId, method, path: route }) => [operationId, method, route]);
+  await generate(authMethodsClientConfig(input, authStaging), appRoot);
+  const mainOperations = await readOperationManifest(staging);
+  const authOperations = await readOperationManifest(authStaging);
+  assert.deepEqual(Object.keys(mainOperations).length, mainOperationIds.length, 'Main Orval client emitted an unexpected operation count');
+  assert.deepEqual(
+    Object.keys(authOperations).length,
+    authMethodsOperationIds.length,
+    'Auth methods Orval client emitted an unexpected operation count',
+  );
+  assert.ok(
+    !Object.keys(mainOperations).some(id => authMethodsOperationIds.includes(mainOperations[id].operationId)),
+    'Auth methods must not be duplicated in the main client',
+  );
+  const mergedOperations = Object.fromEntries(
+    [...Object.entries(mainOperations), ...Object.entries(authOperations)].sort(([left], [right]) => left.localeCompare(right)),
+  );
+  assert.equal(
+    Object.keys(mergedOperations).length,
+    Object.keys(mainOperations).length + Object.keys(authOperations).length,
+    'Generated clients contain duplicate operation names',
+  );
+  const generatedRoutes = Object.values(mergedOperations).map(({ operationId, method, path: route }) => [operationId, method, route]);
   const expectedRoutes = operationIds.map(id => {
     const { method, route } = operations.get(id);
     return [id, method, route];
   });
   assert.deepEqual(generatedRoutes.sort(), expectedRoutes.sort(), 'Orval did not emit the selected OpenAPI operations');
   const files = generatedFiles(staging);
-  assert.ok(files.length > 0, 'Orval produced no files');
+  const authFiles = generatedFiles(authStaging);
+  assert.ok(files.length > 0 && authFiles.length > 0, 'Orval produced no files');
   if (process.argv.includes('--check')) {
     const instruction = 'Run pnpm --filter @codexia/app generate:http and review the generated diff';
     assert.deepEqual(generatedFiles(target), files, instruction);
+    assert.deepEqual(generatedFiles(authTarget), authFiles, instruction);
     for (const file of files) {
       assert.deepEqual(readFileSync(path.join(target, file)), readFileSync(path.join(staging, file)), `${file} differs. ${instruction}`);
     }
-    console.log('Orval client matches the checked-in generated artifacts.');
+    for (const file of authFiles) {
+      assert.deepEqual(
+        readFileSync(path.join(authTarget, file)),
+        readFileSync(path.join(authStaging, file)),
+        `auth-methods/${file} differs. ${instruction}`,
+      );
+    }
+    console.log(`Orval clients match the checked-in generated artifacts (${generatedRoutes.length} operations across both clients).`);
   } else {
-    // Only this dedicated Orval output directory is replaced.
+    // Replace only the two dedicated Orval output directories.
     rmSync(target, { recursive: true, force: true });
     cpSync(staging, target, { recursive: true });
+    rmSync(authTarget, { recursive: true, force: true });
+    cpSync(authStaging, authTarget, { recursive: true });
   }
 } finally {
   rmSync(staging, { recursive: true, force: true });
+  rmSync(authStaging, { recursive: true, force: true });
 }
