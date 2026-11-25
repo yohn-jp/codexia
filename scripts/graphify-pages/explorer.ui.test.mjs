@@ -127,6 +127,20 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   assert.equal(await page.locator('#selected-symbol').textContent(), 'alpha');
   assert.equal(await page.locator('#outgoing-list .relation').count(), 1);
   assert.match(await page.locator('#graph-scope').innerText(), /シンボル間関係/);
+  const packagesOutgoing=page.getByRole('button',{name:/参照先ディレクトリ packages/u});
+  assert.equal(await packagesOutgoing.count(),1);
+  await packagesOutgoing.click();
+  assert.equal(new URL(page.url()).searchParams.get('dir'),'packages');
+  assert.equal(new URL(page.url()).searchParams.get('dirSide'),'outgoing');
+  assert.match(await page.locator('#outgoing-title').innerText(), /参照先 \(1\)/u);
+  assert.match(await page.locator('#directory-focus-status').innerText(), /packages/u);
+  assert.equal(await page.locator('#incoming-list .relation').count(),0);
+  assert.equal(await page.locator('#outgoing-list .relation').count(),1);
+  assert.equal(await page.locator('#neighbor-graph .node.linked').count(),1);
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('directory-group')),true);
+  await page.getByRole('button',{name:/参照先ディレクトリ packages/u}).click();
+  assert.equal(new URL(page.url()).searchParams.has('dir'),false);
+  assert.equal(await page.locator('#incoming-list .relation').count(),1);
   assert.equal(await page.locator('#neighbor-graph .edge-label').count(), 2);
   const symbolNodeLabels = await page.locator('#neighbor-graph .node.linked').evaluateAll(nodes => nodes.map(node => ({
     visible: [...node.querySelectorAll('.node-label, .node-subtitle')].map(label => label.textContent).join(' '),
@@ -136,10 +150,16 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   assert.equal(await page.locator('#symbol-source').isVisible(), true);
   assert.ok(await page.locator('#symbol-source').evaluate(element => element.getBoundingClientRect().height >= 44));
   assert.equal(await page.locator('#symbol-source').getAttribute('href'), `https://github.com/yohn-jp/codexia/blob/${sha}/packages/a.ts#L4`);
-  assert.equal(await page.locator('#outgoing-list .relation-evidence a').getAttribute('href'), `https://github.com/yohn-jp/codexia/blob/${sha}/packages/a.ts#L7`);
+  const directEvidence=page.locator('#outgoing-list .relation-evidence').first();
+  await directEvidence.locator('summary').click();
+  await directEvidence.locator('a').first().waitFor({ state: 'visible' });
+  assert.equal(await directEvidence.locator('a').getAttribute('href'), `https://github.com/yohn-jp/codexia/blob/${sha}/packages/a.ts#L7`);
   await page.locator('#depth').selectOption('3');
   assert.match(await page.locator('#expansion-list').innerText(), /循環\/重複/);
-  assert.ok(await page.locator('.relation-evidence a').count() > 0);
+  const expansionEvidence=page.locator('#expansion-list .relation-evidence').first();
+  await expansionEvidence.locator('summary').click();
+  await expansionEvidence.locator('a').first().waitFor({ state: 'visible' });
+  assert.ok(await expansionEvidence.locator('a').count() > 0);
   await page.locator('#outgoing-list .relation').filter({ hasText:'beta' }).click();
   assert.equal(new URL(page.url()).searchParams.get('symbol'), 'b-symbol');
   assert.match(await page.locator('#symbol-location').innerText(), /行番号なし/);
@@ -155,6 +175,10 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   await page.goBack();
   assert.equal(new URL(page.url()).searchParams.get('symbol'), 'a-symbol');
   await page.locator('#search').fill('packages/b.ts');
+  await page.waitForFunction(() => new URL(location.href).searchParams.get('q') === 'packages/b.ts');
+  assert.equal(new URL(page.url()).searchParams.get('q'), 'packages/b.ts');
+  await page.locator('#area').selectOption('packages');
+  assert.equal(new URL(page.url()).searchParams.get('area'), 'packages');
   const fileButton = page.locator('.file-button').first();
   await fileButton.focus();
   await page.keyboard.press('Enter');
@@ -163,6 +187,8 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   assert.equal(new URL(page.url()).searchParams.get('file'), 'packages/a.ts');
   await page.reload();
   assert.equal(await page.locator('#selected-path').textContent(), 'packages/a.ts');
+  assert.equal(await page.locator('#search').inputValue(), 'packages/b.ts');
+  assert.equal(await page.locator('#area').inputValue(), 'packages');
   assert.equal(await page.locator('#source-links a:not([hidden])').count(), 1);
   assert.equal(new URL(page.url()).searchParams.get('symbol'), 'a-symbol');
   assert.equal(await page.locator('#selected-symbol').textContent(), 'alpha');
@@ -176,6 +202,9 @@ test('Graphify explorer supports desktop, 320px, keyboard, deep links and covera
   await page.locator('.file-explorer-summary').click();
   assert.equal(await page.locator('#search').isVisible(), true);
   assert.equal(await page.locator('#neighbor-graph').isVisible(), true);
+  const evidenceDisclosures=await page.locator('.relation-evidence').all();
+  for (const disclosure of evidenceDisclosures) await disclosure.locator('summary').click();
+  await Promise.all(evidenceDisclosures.map(disclosure=>disclosure.locator('a').first().waitFor({state:'visible'})));
   for (const link of await page.locator('.relation-evidence a').all()) {
     assert.ok((await link.evaluate(element => element.getBoundingClientRect().height)) >= 44, 'source evidence links meet the minimum touch target');
   }
