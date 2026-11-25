@@ -24,7 +24,7 @@ using TypeSpec.OpenAPI;
   mcpRequestHeaders: #["Mcp-Session-Id", "MCP-Protocol-Version", "Last-Event-ID"],
   mcpExposeHeaders: #["Mcp-Session-Id", "WWW-Authenticate"],
   preflight: #{
-    route: "generic OPTIONS catch-all at / and /*; not a per-resource operation",
+    route: "explicit OPTIONS for registered API and MCP paths; requested method must match the path",
     successStatus: 204,
     deniedStatus: 403,
     allowMethods: #["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]

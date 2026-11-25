@@ -131,6 +131,9 @@ IDは重複させず、表示名や説明を変えるときも維持する。
 - SOURCE: persistence-routes.ts、native-knowledge-service.ts、native-knowledge-actions.ts、postgres-store.ts。
 - 不足: 各operationとJSON型を分離した完全DTO/エラー/権限表。
 
+ポータブル作品の import は正規化したアーカイブのハッシュで再送を照合する。
+従来のクライアントから送られる `Idempotency-Key` は任意とし、保存操作の冪等キー要件は個別の operation に従う。
+
 ## 共通エラー・セキュリティの契約
 
 - 入場前のcredential不正と、入場後の操作/資源への権限不足を区別する。projectや文書の存在を不要に漏らさない。

@@ -350,5 +350,10 @@ test('specification authority and native iOS and IaC sources select the existing
     'ios/CodexiaTransport/Sources/CodexiaTransport/APITransport.swift',
     'deploy/cloudflare/terraform/main.tf',
     'deploy/ansible/site.yml',
+    'packages/api/src/generated/http-contract.json',
+    'packages/api/src/http-contributions.ts',
+    'packages/api/package.json',
+    'modules/mcp/package.json',
+    'modules/publishing/package.json',
   ]) assert.equal(isRequirementsTraceInput(file), true, file);
 });

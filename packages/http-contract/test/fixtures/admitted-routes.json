@@ -1,13 +1,14 @@
 {
   "sourceBasis": {
+    "fastifyContract": "packages/api/src/generated/http-contract.json",
     "coreOwnerHealthAndAuthAdapters": "packages/api/src/server.ts",
-    "headAndPreflightDispatcher": "packages/api/src/server.ts",
+    "headAndPreflightRegistrations": "packages/api/src/server.ts",
     "persistence": "packages/api/src/persistence-routes.ts",
     "mcpContribution": "modules/mcp/src/http.ts",
     "publicPublishingContribution": "modules/publishing/src/http.ts",
     "betterAuthExternalBoundary": "packages/api/src/better-auth.ts",
     "backupConsoleTargets": "docs/architecture/BACKUP-CONSOLE-CONTRACT.md",
-    "ownerSetupDispatcher": "packages/api/src/owner-setup.ts"
+    "ownerSetupRegistrations": "packages/api/src/owner-setup.ts"
   },
   "current": [
     "DELETE /api/projects/{projectId}/modules/mcp/streamable",

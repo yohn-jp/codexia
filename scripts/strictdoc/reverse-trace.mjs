@@ -2,7 +2,6 @@ import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readRegularFile } from '../shared/read-regular-file.mjs';
-import { discoverLiteralDispatcherOperations } from '../../packages/http-contract/src/source-dispatcher-inventory.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, '../..');
@@ -134,17 +133,16 @@ export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, b
     limitations.push({ area: 'http', reason: 'Generated OpenAPI/admitted route inventory is missing; no contract operations inferred.' });
   }
 
-  for (const file of ['packages/api/src/server.ts', 'packages/api/src/persistence-routes.ts']) {
-    try {
-      const source = await readRegularFile(path.join(root, file));
-      surfaces.push(...discoverLiteralDispatcherOperations(source, file)
-        .map((id) => {
-          const delegatedMetadata = id === 'GET /.well-known/oauth-authorization-server/api/auth' || id === 'GET /.well-known/openid-configuration/api/auth';
-          return { kind: 'httpRuntimeRoute', id, classification: delegatedMetadata ? 'delegated-better-auth-metadata' : undefined, source: { path: file }, provenance: delegatedMetadata ? 'Explicit Better Auth external metadata path in the admitted HTTP fixture; the auth library owns its response.' : 'Literal method/path dispatch discovered by the shared AST helper; dynamic route families and other modules are not discovered.' };
-        }));
-    } catch {
-      limitations.push({ area: 'http', reason: `Runtime dispatcher source unavailable: ${file}` });
+  const generatedContractPath = 'packages/api/src/generated/http-contract.json';
+  try {
+    const generated = JSON.parse(await readRegularFile(path.join(root, generatedContractPath)));
+    for (const route of generated.routes ?? []) {
+      const id = `${route.method} ${route.url.replace(/:([A-Za-z][A-Za-z0-9_]*)/gu, '{$1}')}`;
+      if (route.contractStatus === 'target') continue;
+      surfaces.push({ kind: 'httpRuntimeRoute', id, source: { path: generatedContractPath }, provenance: `Generated Fastify registration with operationId ${route.operationId}; server registration resolves handlers by operationId and fails closed when a handler is missing.` });
     }
+  } catch {
+    limitations.push({ area: 'http', reason: `Generated Fastify HTTP contract is missing or invalid: ${generatedContractPath}` });
   }
   if (boundedDiscovery?.routes) {
     for (const id of boundedDiscovery.routes) {
@@ -154,7 +152,7 @@ export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, b
       const reason = deniedBoundary ? 'Server explicitly rejects generic Better Auth token issuance at /api/auth/token.' : delegatedMetadata ? 'Route is listed under the admitted HTTP inventory Better Auth external metadata paths.' : 'Existing bounded StrictDoc source discovery; parser scope is partial and this is not a complete runtime route inventory.';
       surfaces.push({ kind: 'httpBoundedRoute', id, classification, source: { path: 'scripts/strictdoc/surface-inventory.json' }, provenance: reason });
     }
-    limitations.push({ area: 'http-bounded', reason: 'Existing bounded route scan includes static literal families only; other Fastify/module contributions, regex routes, and dynamic dispatch remain unexpanded.' });
+    limitations.push({ area: 'http-bounded', reason: 'Existing bounded route scan includes static literal families only; dynamically supplied module contribution registrations remain unexpanded.' });
   }
 
   const mcpFiles = (await walkFiles(root, 'modules/mcp/src')).filter((file) => /\.tsx?$/u.test(file));

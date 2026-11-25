@@ -3,8 +3,7 @@
   "coverageStatus": "PARTIAL",
   "scope": {
     "routes": [
-      "packages/api/src/server.ts",
-      "packages/api/src/persistence-routes.ts"
+      "packages/api/src/generated/http-contract.json"
     ],
     "tools": [
       "modules/mcp/src/tools/project.ts"
@@ -12,8 +11,8 @@
     "databaseObjects": [
       "packages/persistence-postgres/migrations/0001-initial.sql"
     ],
-    "method": "The verifier derives route/method pairs from literal routePath or url.pathname equality blocks, tool names from literal server.tool registrations, and named top-level SQL CREATE TABLE/FUNCTION/TRIGGER/INDEX plus ALTER TABLE ADD CONSTRAINT declarations in the listed files.",
-    "discovery": "Source-derived. The verifier inspects the listed files independently of this classification manifest.",
+    "method": "The verifier reads method/path operation registrations from the generated Fastify HTTP contract artifact. Tool names and named SQL objects remain source-derived from the listed files.",
+    "discovery": "Source-derived from the checked-in generated Fastify route artifact, independently compared to classifications in this manifest.",
     "nativeIos": "ios",
     "iac": "deploy/cloudflare/terraform",
     "ansible": "deploy/ansible"
@@ -370,19 +369,44 @@
       "classification": "REQ-UI-001 candidate; physical-device and view behavior acceptance remains unverified"
     },
     {
-      "kind": "route",
-      "id": "ANY /api/auth/token",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+      "kind": "tool",
+      "id": "discover_actions",
+      "classification": "candidate REQ-AUTH-003; conformance remains unverified"
+    },
+    {
+      "kind": "tool",
+      "id": "invoke_action",
+      "classification": "candidate REQ-AUTH-003; conformance remains unverified"
+    },
+    {
+      "kind": "tool",
+      "id": "list_projects",
+      "classification": "candidate REQ-AUTH-003; conformance remains unverified"
     },
     {
       "kind": "route",
-      "id": "GET /.well-known/oauth-authorization-server/api/auth",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+      "id": "GET /api/auth/codexia/auth-methods",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
     },
     {
       "kind": "route",
-      "id": "GET /.well-known/openid-configuration/api/auth",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+      "id": "POST /api/auth/codexia/owner-session",
+      "classification": "candidate REQ-AUTH-002 / API-OWNER-SESSION-001; read-only OWNER-SESSION cookie confirmation with exact same-origin guard; conformance remains unverified"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/auth/codexia/setup/authorize",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/auth/codexia/setup/complete",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/auth/codexia/setup/profile",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
     },
     {
       "kind": "route",
@@ -391,8 +415,78 @@
     },
     {
       "kind": "route",
+      "id": "POST /api/auth/oauth2/consent-context",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
       "id": "GET /api/auth/oauth2/get-consents",
       "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/browser/version",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /api/browser/version",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/console/backups/config",
+      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/console/backups/config/activate",
+      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/console/backups/config/disable",
+      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+    },
+    {
+      "kind": "route",
+      "id": "PUT /api/console/backups/config/draft",
+      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/console/backups/config/probes",
+      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/console/backups/config/probes/{probeId}",
+      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/console/backups/recovery",
+      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/console/backups/runs",
+      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/console/backups/runs",
+      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/console/backups/runs/{runId}",
+      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/console/backups/status",
+      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
     },
     {
       "kind": "route",
@@ -401,8 +495,23 @@
     },
     {
       "kind": "route",
+      "id": "HEAD /api/health",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
       "id": "GET /api/inbox",
       "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/inbox/read-all",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/inbox/{inboxId}/read",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
     },
     {
       "kind": "route",
@@ -416,8 +525,18 @@
     },
     {
       "kind": "route",
+      "id": "GET /api/jobs/{jobId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
       "id": "GET /api/projects",
       "classification": "candidate REQ-AUTH-002; conformance remains unverified"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/projects",
+      "classification": "UNMAPPED: route-specific obligation not decomposed"
     },
     {
       "kind": "route",
@@ -426,7 +545,157 @@
     },
     {
       "kind": "route",
+      "id": "GET /api/projects/{projectId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/actions",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/projects/{projectId}/actions/{actionId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/projects/{projectId}/apply",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/projects/{projectId}/approvals",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/contributions",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/history",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/{snapshotId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/modules",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/modules/mcp/streamable",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/projects/{projectId}/modules/mcp/streamable",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "DELETE /api/projects/{projectId}/modules/mcp/streamable",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/observation",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/projects/{projectId}/proposals",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/proposals",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/proposals/{proposalId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/recent-activity",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "PUT /api/projects/{projectId}/recent-activity",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/review-queue",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/scenes/{sceneId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/projects/{projectId}/scratch",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/search",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/snapshot",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/status",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/tree",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/projects/{projectId}/writing-stats",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/public/projects/{projectId}/modules/publishing/share/{token}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/public/projects/{projectId}/modules/publishing/share/{token}/scenes/{sceneId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
       "id": "GET /api/ready",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /api/ready",
       "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
     },
     {
@@ -441,8 +710,193 @@
     },
     {
       "kind": "route",
+      "id": "POST /api/v1/persistence/import",
+      "classification": "UNMAPPED: route-specific obligation not decomposed"
+    },
+    {
+      "kind": "route",
       "id": "GET /api/v1/persistence/projects",
       "classification": "UNMAPPED: legacy persistence route retirement compatibility requires review"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "PATCH /api/v1/persistence/projects/{projectId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/archive",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/assertions/{assertionId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "PUT /api/v1/persistence/projects/{projectId}/assertions/{assertionId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/changesets",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/changesets",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/apply",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/approve",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/changesets/{changeSetId}/reject",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/documents",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/documents",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/documents/{documentId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "DELETE /api/v1/persistence/projects/{projectId}/documents/{documentId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/assertions",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/documents/{documentId}/anchors/{anchorId}/mentions",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}/metadata",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/documents/{documentId}/restore",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/documents/{documentId}/revisions",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/nodes",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/nodes/{nodeId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "PUT /api/v1/persistence/projects/{projectId}/nodes/{nodeId}",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/nodes/{nodeId}/aliases",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/nodes/{nodeId}/evidence",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/nodes/{nodeId}/merge-preview",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/v1/persistence/projects/{projectId}/nodes/{nodeId}/relations",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/review-feed",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
     },
     {
       "kind": "route",
@@ -451,27 +905,17 @@
     },
     {
       "kind": "route",
+      "id": "GET /api/version",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "HEAD /api/version",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
       "id": "GET /health/live",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
-    },
-    {
-      "kind": "route",
-      "id": "GET /health/ready",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
-    },
-    {
-      "kind": "route",
-      "id": "GET /health/startup",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
-    },
-    {
-      "kind": "route",
-      "id": "HEAD /api/health",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
-    },
-    {
-      "kind": "route",
-      "id": "HEAD /api/ready",
       "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
     },
     {
@@ -481,7 +925,17 @@
     },
     {
       "kind": "route",
+      "id": "GET /health/ready",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
       "id": "HEAD /health/ready",
+      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+    },
+    {
+      "kind": "route",
+      "id": "GET /health/startup",
       "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
     },
     {
@@ -491,52 +945,22 @@
     },
     {
       "kind": "route",
-      "id": "POST /api/auth/codexia/owner-session",
-      "classification": "candidate REQ-AUTH-002 / API-OWNER-SESSION-001; read-only OWNER-SESSION cookie confirmation with exact same-origin guard; conformance remains unverified"
+      "id": "GET /mcp",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
     },
     {
       "kind": "route",
-      "id": "POST /api/auth/oauth2/consent-context",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
+      "id": "POST /mcp",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
     },
     {
       "kind": "route",
-      "id": "POST /api/inbox/read-all",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
-    },
-    {
-      "kind": "route",
-      "id": "POST /api/projects",
-      "classification": "UNMAPPED: route-specific obligation not decomposed"
-    },
-    {
-      "kind": "route",
-      "id": "POST /api/v1/persistence/import",
-      "classification": "UNMAPPED: route-specific obligation not decomposed"
-    },
-    {
-      "kind": "route",
-      "id": "POST /api/v1/persistence/projects",
-      "classification": "UNMAPPED: source-declared surface found by bounded static scan; detailed obligation mapping remains unassigned in this bounded source inventory"
-    },
-    {
-      "kind": "tool",
-      "id": "discover_actions",
-      "classification": "candidate REQ-AUTH-003; conformance remains unverified"
-    },
-    {
-      "kind": "tool",
-      "id": "invoke_action",
-      "classification": "candidate REQ-AUTH-003; conformance remains unverified"
-    },
-    {
-      "kind": "tool",
-      "id": "list_projects",
-      "classification": "candidate REQ-AUTH-003; conformance remains unverified"
+      "id": "DELETE /mcp",
+      "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
     }
   ],
   "limitations": [
-    "Route discovery covers literal path-equality dispatch blocks and the methods declared within them. Regex-expanded project/document routes, VERSION_PATHS arrays, auth-provider catchalls, module contributions, and runtime-composed routes remain outside the current bounded scan and are reported as discovery limitations.",
+    "The HTTP route inventory is derived from generated Fastify operation registrations; independently registered Better Auth metadata and runtime module contributions are represented in separate contract or reverse-trace inventories.",
     "Tool discovery covers literal server.tool names in the listed MCP module. Other registration modules, enabled-action expansion, and runtime-composed tools remain outside the current bounded scan and are reported as discovery limitations; dynamic names in this scope fail closed.",
     "SQL discovery covers named top-level tables, functions, triggers, indexes, and ALTER TABLE ADD CONSTRAINT declarations in the listed initial migration. Other migrations, inline table constraints, and runtime-generated objects remain outside the current bounded scan and are reported as discovery limitations; unsupported DDL fails closed.",
     "Candidate requirement links are navigation aids and do not establish implementation coverage or conformance."

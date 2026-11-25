@@ -1,16 +1,17 @@
-import type { ModuleContext, ModuleDefinition, ModuleManifest } from "@codexia/contracts";
-import { closeMcpSessions, createMcpHttpContribution, type McpSession } from "./http.js";
+import type { ModuleContext, ModuleDefinition, ModuleManifest } from '@codexia/contracts';
+import { closeMcpSessions, createMcpHttpContribution, type McpSession } from './http.js';
 
 export const mcpManifest: ModuleManifest = {
-  id: "mcp",
-  version: "0.1.0",
+  id: 'mcp',
+  version: '0.1.0',
   contractVersion: 1,
   dependencies: [],
   provides: [],
   requires: [],
-  serverEntry: "./dist/index.js",
+  serverEntry: './dist/index.js',
   statePaths: [],
-  locality: "local",
+  locality: 'local',
+  http: [{ id: 'streamable', path: 'streamable', methods: ['GET', 'POST', 'DELETE'], access: 'owner', effect: 'propose' }],
 };
 
 /** Register the external MCP transports without allocating models or persistent storage. */
@@ -20,14 +21,14 @@ export async function createModule(context: ModuleContext): Promise<ModuleDefini
   const dispose = async () => {
     if (disposed) return;
     disposed = true;
-    context.signal.removeEventListener("abort", abortHandler);
+    context.signal.removeEventListener('abort', abortHandler);
     await closeMcpSessions(sessions);
   };
   const abortHandler = () => {
     void dispose();
   };
 
-  context.signal.addEventListener("abort", abortHandler, { once: true });
+  context.signal.addEventListener('abort', abortHandler, { once: true });
   if (context.signal.aborted) await dispose();
 
   return {
@@ -39,20 +40,20 @@ export async function createModule(context: ModuleContext): Promise<ModuleDefini
   };
 }
 
-export { createMcpHttpContribution } from "./http.js";
-export { registerMcpTools } from "./tools.js";
 export {
-  MCP_OAUTH_SCOPES,
   buildMcpProtectedResourceMetadata,
   createMcpProtectedResourceMetadataResponse,
-  protectedResourceMetadataUrl,
+  MCP_OAUTH_SCOPES,
   type McpProtectedResourceMetadata,
   type McpProtectedResourceOptions,
-} from "@codexia/contracts";
-export { ApiClient, McpApiError, actionClientFromContext } from "./api-client.js";
+  protectedResourceMetadataUrl,
+} from '@codexia/contracts';
+export { ApiClient, actionClientFromContext, McpApiError } from './api-client.js';
 export {
   createMcpWritingContext,
   MCP_WRITING_CONTEXT_MAX_CHARACTERS,
   MCP_WRITING_CONTEXT_MAX_SELECTION_CHARACTERS,
   mcpWritingContextSelectionSchema,
-} from "./context-manifest.js";
+} from './context-manifest.js';
+export { createMcpHttpContribution } from './http.js';
+export { registerMcpTools } from './tools.js';

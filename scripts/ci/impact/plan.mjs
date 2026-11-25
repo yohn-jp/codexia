@@ -68,11 +68,16 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
 
 const HTTP_CONTRACT_ROUTE_SOURCE_PATHS = new Set([
   'packages/api/src/server.ts',
+  'packages/api/src/generated/http-contract.json',
+  'packages/api/src/http-contributions.ts',
+  'packages/api/package.json',
   'packages/api/src/persistence-routes.ts',
   'packages/api/src/owner-setup.ts',
   'packages/api/src/better-auth.ts',
   'modules/mcp/src/http.ts',
+  'modules/mcp/package.json',
   'modules/publishing/src/http.ts',
+  'modules/publishing/package.json',
 ]);
 
 /** @param {string} file */

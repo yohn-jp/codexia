@@ -85,7 +85,12 @@ export const REQUIREMENTS_TRACE_SURFACE_FILES = Object.freeze([
   'deploy/backup/backup.sh',
   'deploy/backup/s3_transfer.py',
   'packages/http-contract/openapi/codexia.openapi.yaml',
-  'packages/http-contract/src/source-dispatcher-inventory.mjs',
+  'packages/http-contract/scripts/generate-fastify.mjs',
+  'packages/api/src/generated/http-contract.json',
+  'packages/api/src/http-contributions.ts',
+  'packages/api/package.json',
+  'modules/mcp/package.json',
+  'modules/publishing/package.json',
   'packages/http-contract/test/fixtures/admitted-routes.json',
   'packages/persistence-postgres/tests/db-contract/catalog-contract.json',
 ]);

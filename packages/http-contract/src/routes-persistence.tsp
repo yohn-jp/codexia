@@ -19,7 +19,7 @@ op createPersistenceProject(@body body: PersistenceProjectCreateRequest): { @sta
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/import") @post @operationId("persistence_import_post")
-op importPersistenceProject(@body body: WorkArchive, @header("Idempotency-Key") idempotencyKey: string): { @statusCode _: 201; @body body: WorkImportResult; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; } | { @statusCode _: 413; @body body: ApiError; };
+op importPersistenceProject(@body body: WorkArchive, @header("Idempotency-Key") idempotencyKey?: string): { @statusCode _: 201; @body body: WorkImportResult; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; } | { @statusCode _: 413; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}") @get @operationId("persistence_project_get")

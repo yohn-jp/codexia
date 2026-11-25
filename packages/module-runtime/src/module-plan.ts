@@ -1,5 +1,5 @@
-import { CONTRACT_VERSION, type ModuleId, type ModuleManifest } from "@codexia/contracts";
-import { ModuleRuntimeError, isModuleId, MODULE_IDS } from "./runtime-error.js";
+import { CONTRACT_VERSION, type HttpContributionDescriptor, type ModuleId, type ModuleManifest } from '@codexia/contracts';
+import { isModuleId, MODULE_IDS, ModuleRuntimeError } from './runtime-error.js';
 
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/;
 const capabilityId = /^[A-Za-z0-9][A-Za-z0-9:._/-]{0,127}$/;
@@ -13,8 +13,8 @@ export interface ResolvedModulePlan {
 }
 
 function boundedString(value: unknown, label: string, max = 512): string {
-  if (typeof value !== "string" || value.length === 0 || value.length > max || value.trim() !== value) {
-    throw new ModuleRuntimeError("invalid_manifest", `Invalid ${label}`);
+  if (typeof value !== 'string' || value.length === 0 || value.length > max || value.trim() !== value) {
+    throw new ModuleRuntimeError('invalid_manifest', `Invalid ${label}`);
   }
   return value;
 }
@@ -22,53 +22,124 @@ function boundedString(value: unknown, label: string, max = 512): string {
 function safeEntry(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined;
   const entry = boundedString(value, label, 1024);
-  if (entry.includes("\\") || entry.includes("\0") || entry.split("/").includes("..")) {
-    throw new ModuleRuntimeError("invalid_manifest", `Unsafe ${label}`);
+  if (entry.includes('\\') || entry.includes('\0') || entry.split('/').includes('..')) {
+    throw new ModuleRuntimeError('invalid_manifest', `Unsafe ${label}`);
   }
   return entry;
 }
 
+function copyHttpDescriptors(id: ModuleId, value: unknown): HttpContributionDescriptor[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 64)
+    throw new ModuleRuntimeError('invalid_manifest', `Module ${id} has invalid HTTP metadata`);
+  const ids = new Set<string>();
+  const registrations = new Set<string>();
+  return value.map((candidate: unknown) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      throw new ModuleRuntimeError('invalid_manifest', `Module ${id} has invalid HTTP metadata`);
+    }
+    const descriptor = candidate as HttpContributionDescriptor;
+    const methods = descriptor.methods;
+    if (
+      typeof descriptor.id !== 'string' ||
+      !/^[A-Za-z0-9._:-]{1,128}$/u.test(descriptor.id) ||
+      ids.has(descriptor.id) ||
+      typeof descriptor.path !== 'string' ||
+      descriptor.path.length === 0 ||
+      descriptor.path.length > 512 ||
+      descriptor.path.startsWith('/') ||
+      descriptor.path.split('/').some(part => !part || part === '.' || part === '..' || !/^[A-Za-z0-9._:-]+$/u.test(part)) ||
+      !Array.isArray(methods) ||
+      methods.length === 0 ||
+      methods.length > 4 ||
+      methods.some(method => !['GET', 'HEAD', 'POST', 'DELETE'].includes(method)) ||
+      new Set(methods).size !== methods.length ||
+      !['owner', 'public'].includes(descriptor.access) ||
+      !['read', 'compute', 'propose'].includes(descriptor.effect) ||
+      (descriptor.access === 'public' && descriptor.effect !== 'read') ||
+      (descriptor.effect === 'compute' && methods.some(method => method === 'GET' || method === 'HEAD'))
+    ) {
+      throw new ModuleRuntimeError('invalid_manifest', `Module ${id} has invalid HTTP metadata`);
+    }
+    ids.add(descriptor.id);
+    for (const method of methods) {
+      const registration = `${method} ${descriptor.path}`;
+      if (registrations.has(registration))
+        throw new ModuleRuntimeError('invalid_manifest', `Module ${id} has duplicate HTTP registrations`);
+      registrations.add(registration);
+    }
+    return Object.freeze({
+      id: descriptor.id,
+      path: descriptor.path,
+      methods: Object.freeze([...methods]) as unknown as HttpContributionDescriptor['methods'],
+      access: descriptor.access,
+      effect: descriptor.effect,
+    });
+  });
+}
+
 function copyManifest(value: ModuleManifest): Readonly<ModuleManifest> {
-  if (!value || typeof value !== "object" || !isModuleId((value as ModuleManifest).id)) {
-    throw new ModuleRuntimeError("unknown_module_id", "Module manifest has an unknown ID");
+  if (!value || typeof value !== 'object' || !isModuleId((value as ModuleManifest).id)) {
+    throw new ModuleRuntimeError('unknown_module_id', 'Module manifest has an unknown ID');
   }
   const manifest = value as ModuleManifest;
   const id = manifest.id;
-  if (typeof manifest.version !== "string" || !semver.test(manifest.version)) {
-    throw new ModuleRuntimeError("invalid_module_version", `Module ${id} has an invalid version`);
+  if (typeof manifest.version !== 'string' || !semver.test(manifest.version)) {
+    throw new ModuleRuntimeError('invalid_module_version', `Module ${id} has an invalid version`);
   }
   if (manifest.contractVersion !== CONTRACT_VERSION) {
-    throw new ModuleRuntimeError("contract_version_mismatch", `Module ${id} requires contract ${String(manifest.contractVersion)}; host provides ${CONTRACT_VERSION}`);
+    throw new ModuleRuntimeError(
+      'contract_version_mismatch',
+      `Module ${id} requires contract ${String(manifest.contractVersion)}; host provides ${CONTRACT_VERSION}`,
+    );
   }
-  if (!Array.isArray(manifest.dependencies) || !Array.isArray(manifest.provides) || !Array.isArray(manifest.requires) ||
-      (manifest.optionalRequires !== undefined && !Array.isArray(manifest.optionalRequires)) || !Array.isArray(manifest.statePaths)) {
-    throw new ModuleRuntimeError("invalid_manifest", `Module ${id} has invalid dependency, capability, or state metadata`);
+  if (
+    !Array.isArray(manifest.dependencies) ||
+    !Array.isArray(manifest.provides) ||
+    !Array.isArray(manifest.requires) ||
+    (manifest.optionalRequires !== undefined && !Array.isArray(manifest.optionalRequires)) ||
+    !Array.isArray(manifest.statePaths)
+  ) {
+    throw new ModuleRuntimeError('invalid_manifest', `Module ${id} has invalid dependency, capability, or state metadata`);
   }
-  const dependencies = manifest.dependencies.map((dependency) => {
-    if (!isModuleId(dependency)) throw new ModuleRuntimeError("unknown_module_id", `Module ${id} declares unknown dependency ${String(dependency)}`);
+  const dependencies = manifest.dependencies.map(dependency => {
+    if (!isModuleId(dependency))
+      throw new ModuleRuntimeError('unknown_module_id', `Module ${id} declares unknown dependency ${String(dependency)}`);
     return dependency;
   });
   if (new Set(dependencies).size !== dependencies.length || dependencies.includes(id)) {
-    throw new ModuleRuntimeError("invalid_manifest", `Module ${id} has duplicate or self dependencies`);
+    throw new ModuleRuntimeError('invalid_manifest', `Module ${id} has duplicate or self dependencies`);
   }
   const capabilities = (values: string[], label: string): string[] => {
-    if (values.length > 64 || values.some((item) => typeof item !== "string" || !capabilityId.test(item))) {
-      throw new ModuleRuntimeError("invalid_manifest", `Module ${id} has invalid ${label}`);
+    if (values.length > 64 || values.some(item => typeof item !== 'string' || !capabilityId.test(item))) {
+      throw new ModuleRuntimeError('invalid_manifest', `Module ${id} has invalid ${label}`);
     }
-    if (new Set(values).size !== values.length) throw new ModuleRuntimeError("invalid_manifest", `Module ${id} has duplicate ${label}`);
+    if (new Set(values).size !== values.length) throw new ModuleRuntimeError('invalid_manifest', `Module ${id} has duplicate ${label}`);
     return [...values];
   };
-  if (manifest.locality !== "local" && manifest.locality !== "optional-external") {
-    throw new ModuleRuntimeError("invalid_manifest", `Module ${id} has invalid locality`);
+  if (manifest.locality !== 'local' && manifest.locality !== 'optional-external') {
+    throw new ModuleRuntimeError('invalid_manifest', `Module ${id} has invalid locality`);
   }
-  if (manifest.statePaths.length > 64 || manifest.statePaths.some((path) => typeof path !== "string" || !path || path.startsWith("/") || path.split("/").includes("..") || path.includes("\\") || path.length > 1024)) {
-    throw new ModuleRuntimeError("invalid_manifest", `Module ${id} has unsafe state paths`);
+  if (
+    manifest.statePaths.length > 64 ||
+    manifest.statePaths.some(
+      path =>
+        typeof path !== 'string' ||
+        !path ||
+        path.startsWith('/') ||
+        path.split('/').includes('..') ||
+        path.includes('\\') ||
+        path.length > 1024,
+    )
+  ) {
+    throw new ModuleRuntimeError('invalid_manifest', `Module ${id} has unsafe state paths`);
   }
-  const provides = capabilities(manifest.provides, "provided capabilities");
-  const requires = capabilities(manifest.requires, "required capabilities");
-  const optionalRequires = capabilities(manifest.optionalRequires ?? [], "optional capabilities");
-  if (optionalRequires.some((capability) => requires.includes(capability) || provides.includes(capability))) {
-    throw new ModuleRuntimeError("invalid_manifest", `Module ${id} repeats a provided, required, or optional capability`);
+  const provides = capabilities(manifest.provides, 'provided capabilities');
+  const requires = capabilities(manifest.requires, 'required capabilities');
+  const optionalRequires = capabilities(manifest.optionalRequires ?? [], 'optional capabilities');
+  const http = copyHttpDescriptors(id, manifest.http);
+  if (optionalRequires.some(capability => requires.includes(capability) || provides.includes(capability))) {
+    throw new ModuleRuntimeError('invalid_manifest', `Module ${id} repeats a provided, required, or optional capability`);
   }
   return Object.freeze({
     id,
@@ -83,6 +154,7 @@ function copyManifest(value: ModuleManifest): Readonly<ModuleManifest> {
     workerEntry: safeEntry(manifest.workerEntry, `${id} worker entry`),
     statePaths: Object.freeze([...manifest.statePaths]) as unknown as string[],
     locality: manifest.locality,
+    http: Object.freeze(http) as unknown as HttpContributionDescriptor[],
   });
 }
 
@@ -93,12 +165,13 @@ export function resolveModulePlan(
   hostCapabilities: readonly string[] = [],
 ): ResolvedModulePlan {
   if (!Array.isArray(manifests) || manifests.length > MODULE_IDS.length) {
-    throw new ModuleRuntimeError("invalid_manifest", "Module manifest set exceeds the supported module count");
+    throw new ModuleRuntimeError('invalid_manifest', 'Module manifest set exceeds the supported module count');
   }
   const installed = new Map<ModuleId, Readonly<ModuleManifest>>();
   for (const raw of manifests) {
     const manifest = copyManifest(raw);
-    if (installed.has(manifest.id)) throw new ModuleRuntimeError("duplicate_module_id", `Module ${manifest.id} is installed more than once`);
+    if (installed.has(manifest.id))
+      throw new ModuleRuntimeError('duplicate_module_id', `Module ${manifest.id} is installed more than once`);
     installed.set(manifest.id, manifest);
   }
 
@@ -106,7 +179,11 @@ export function resolveModulePlan(
   for (const manifest of installed.values()) {
     for (const capability of manifest.provides) {
       const current = capabilityOwners.get(capability);
-      if (current) throw new ModuleRuntimeError("duplicate_capability_provider", `Capability ${capability} is provided by both ${current} and ${manifest.id}`);
+      if (current)
+        throw new ModuleRuntimeError(
+          'duplicate_capability_provider',
+          `Capability ${capability} is provided by both ${current} and ${manifest.id}`,
+        );
       capabilityOwners.set(capability, manifest.id);
     }
   }
@@ -114,15 +191,16 @@ export function resolveModulePlan(
   for (const manifest of installed.values()) {
     for (const dependency of manifest.dependencies) {
       if (!installed.has(dependency)) {
-        throw new ModuleRuntimeError("missing_dependency", `Module ${manifest.id} requires installed module ${dependency}`);
+        throw new ModuleRuntimeError('missing_dependency', `Module ${manifest.id} requires installed module ${dependency}`);
       }
     }
   }
 
   const requested = new Set<ModuleId>();
   for (const id of requestedIds) {
-    if (!isModuleId(id)) throw new ModuleRuntimeError("unknown_module_id", `Unknown module ID ${String(id)}`);
-    if (!installed.has(id)) throw new ModuleRuntimeError("redeployment_required", `Module ${id} is not included in this profile; redeployment is required`);
+    if (!isModuleId(id)) throw new ModuleRuntimeError('unknown_module_id', `Unknown module ID ${String(id)}`);
+    if (!installed.has(id))
+      throw new ModuleRuntimeError('redeployment_required', `Module ${id} is not included in this profile; redeployment is required`);
     requested.add(id);
   }
 
@@ -139,7 +217,7 @@ export function resolveModulePlan(
   const visited = new Set<ModuleId>();
   const visit = (id: ModuleId): void => {
     if (visited.has(id)) return;
-    if (visiting.has(id)) throw new ModuleRuntimeError("dependency_cycle", `Module or capability dependency cycle includes ${id}`);
+    if (visiting.has(id)) throw new ModuleRuntimeError('dependency_cycle', `Module or capability dependency cycle includes ${id}`);
     visiting.add(id);
     const manifest = installed.get(id)!;
     for (const dependency of manifest.dependencies) visit(dependency);
@@ -155,18 +233,24 @@ export function resolveModulePlan(
 
   const availableCapabilities = new Set<string>();
   for (const capability of hostCapabilities) {
-    if (typeof capability !== "string" || !capabilityId.test(capability)) throw new ModuleRuntimeError("invalid_capability", "Host declares an invalid capability ID");
+    if (typeof capability !== 'string' || !capabilityId.test(capability))
+      throw new ModuleRuntimeError('invalid_capability', 'Host declares an invalid capability ID');
     availableCapabilities.add(capability);
   }
   for (const capability of hostCapabilities) {
     const moduleProvider = capabilityOwners.get(capability);
-    if (moduleProvider) throw new ModuleRuntimeError("duplicate_capability_provider", `Capability ${capability} is provided by both the host and ${moduleProvider}`);
+    if (moduleProvider)
+      throw new ModuleRuntimeError(
+        'duplicate_capability_provider',
+        `Capability ${capability} is provided by both the host and ${moduleProvider}`,
+      );
   }
   for (const id of enabled) for (const capability of installed.get(id)!.provides) availableCapabilities.add(capability);
   for (const id of enabled) {
-    const missing = installed.get(id)!.requires.filter((capability) => !availableCapabilities.has(capability));
-    if (missing.length) throw new ModuleRuntimeError("missing_capability", `Module ${id} requires unavailable capabilities: ${missing.join(", ")}`);
+    const missing = installed.get(id)!.requires.filter(capability => !availableCapabilities.has(capability));
+    if (missing.length)
+      throw new ModuleRuntimeError('missing_capability', `Module ${id} requires unavailable capabilities: ${missing.join(', ')}`);
   }
 
-  return { manifests: installed, enabled, order: ordered.filter((id) => enabled.has(id)) };
+  return { manifests: installed, enabled, order: ordered.filter(id => enabled.has(id)) };
 }

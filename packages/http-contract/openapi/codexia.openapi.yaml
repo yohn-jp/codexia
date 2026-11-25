@@ -548,6 +548,8 @@ paths:
         - health
       security:
         - {}
+      x-codexia-runtime-response-deviation: The runtime and OCI probes use a numeric contractVersion; the API epoch baseline documents a string.
+      x-codexia-contract-status: incomplete
     head:
       operationId: api_browser_version_head
       parameters: []
@@ -1362,6 +1364,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: Prefer
+          in: header
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: The request has succeeded.
@@ -1369,6 +1376,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ActionResultBody'
+        '202':
+          description: The request has been accepted for processing, but processing has not yet completed.
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+            Preference-Applied:
+              required: true
+              schema:
+                type: string
+                enum:
+                  - respond-async
+            X-Codexia-Job-Id:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicJobBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -1407,6 +1435,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProposalApplyReceiptBody'
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposalApplyReceiptBody'
         '403':
           description: Access is forbidden.
           content:
@@ -1422,7 +1456,7 @@ paths:
             schema:
               type: object
               additionalProperties: {}
-      x-codexia-runtime-response-deviation: Runtime returns HTTP 201; the approved baseline success response is 200. The status discrepancy remains tracked pending an approved compatibility correction.
+      x-codexia-runtime-response-deviation: Runtime returns HTTP 201; the approved baseline success response is 200. The baseline 200 remains documented for API-epoch compatibility comparison.
       x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/projects/{projectId}/approvals:
@@ -1442,6 +1476,8 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
+        '204':
+          description: 'There is no content to send for this request, but the headers may be useful. '
         '403':
           description: Access is forbidden.
           content:
@@ -1497,6 +1533,13 @@ paths:
           schema:
             type: string
           explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          explode: false
       responses:
         '200':
           description: The request has succeeded.
@@ -1524,6 +1567,25 @@ paths:
           required: true
           schema:
             type: string
+        - name: sceneId
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: snapshot
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          explode: false
       responses:
         '200':
           description: The request has succeeded.
@@ -1553,6 +1615,19 @@ paths:
           required: true
           schema:
             type: string
+        - name: snapshot
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          explode: false
       responses:
         '200':
           description: The request has succeeded.
@@ -1978,6 +2053,19 @@ paths:
           required: true
           schema:
             type: string
+        - name: snapshot
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          explode: false
       responses:
         '200':
           description: The request has succeeded.
@@ -2004,6 +2092,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScratchCreateBody'
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScratchCreateBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -2025,7 +2119,7 @@ paths:
             schema:
               type: object
               additionalProperties: {}
-      x-codexia-runtime-response-deviation: Runtime returns HTTP 201; the approved baseline success response is 200. The status discrepancy remains tracked pending an approved compatibility correction.
+      x-codexia-runtime-response-deviation: Runtime returns HTTP 201; the approved baseline success response is 200. The baseline 200 remains documented for API-epoch compatibility comparison.
       x-codexia-contract-status: incomplete
       x-codexia-principal: OWNER-API
   /api/projects/{projectId}/search:
@@ -2056,6 +2150,13 @@ paths:
           schema:
             type: string
           explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          explode: false
       responses:
         '200':
           description: The request has succeeded.
@@ -2082,6 +2183,27 @@ paths:
           schema:
             type: string
         - name: snapshot
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          explode: false
+        - name: projection
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - editor
+          explode: false
+        - name: documentId
           in: query
           required: false
           schema:
@@ -2125,6 +2247,19 @@ paths:
           required: true
           schema:
             type: string
+        - name: snapshot
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          explode: false
       responses:
         '200':
           description: The request has succeeded.
@@ -2149,6 +2284,13 @@ paths:
           required: false
           schema:
             type: string
+          explode: false
+        - name: projectVersion
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
           explode: false
       responses:
         '200':
@@ -2384,7 +2526,7 @@ paths:
       parameters:
         - name: Idempotency-Key
           in: header
-          required: true
+          required: false
           schema:
             type: string
       responses:
@@ -4092,6 +4234,8 @@ paths:
         - health
       security:
         - {}
+      x-codexia-runtime-response-deviation: The runtime and OCI probes use a numeric contractVersion; the API epoch baseline documents a string.
+      x-codexia-contract-status: incomplete
     head:
       operationId: api_version_head
       parameters: []
@@ -7555,7 +7699,7 @@ x-codexia-cors:
     - Mcp-Session-Id
     - WWW-Authenticate
   preflight:
-    route: generic OPTIONS catch-all at / and /*; not a per-resource operation
+    route: explicit OPTIONS for registered API and MCP paths; requested method must match the path
     successStatus: 204
     deniedStatus: 403
     allowMethods:

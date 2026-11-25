@@ -190,6 +190,20 @@ test('Verify selects HTTP contract source comparison when any owning route sourc
   }
 });
 
+test('generated Fastify artifact, registration adapter, and module route manifests invalidate HTTP and trace proofs', async () => {
+  for (const file of [
+    'packages/api/src/generated/http-contract.json',
+    'packages/api/src/http-contributions.ts',
+    'packages/api/package.json',
+    'modules/mcp/package.json',
+    'modules/publishing/package.json',
+  ]) {
+    const selection = await plan([file]);
+    assert.ok(selection.tasks.includes('unit-http-contract'), `${file} selects HTTP route contract verification`);
+    assert.ok(selection.tasks.includes('requirements-trace'), `${file} invalidates route provenance`);
+  }
+});
+
 test('iOS deployment documentation selects the root tests that assert its contents', async () => {
   const selection = await plan(['docs/deployment/IOS-CLIENT.md']);
   assert.deepEqual(selection.tasks, ['unit-root', 'coverage', 'architecture-g5']);
@@ -231,7 +245,8 @@ test('StrictDoc authority selects trace proof and the requirement register also 
 test('changes to trace inputs select the existing trace task without dropping domain checks', async () => {
   for (const [file, owner] of [
     ['packages/api/src/server.ts', 'unit-api'],
-    ['packages/http-contract/src/source-dispatcher-inventory.mjs', 'unit-http-contract'],
+    ['packages/api/src/generated/http-contract.json', 'unit-http-contract'],
+    ['packages/http-contract/scripts/generate-fastify.mjs', 'unit-http-contract'],
     ['modules/mcp/src/tools/project.ts', 'unit-mcp'],
     ['packages/persistence-postgres/migrations/0001-initial.sql', 'db-contract'],
     ['packages/persistence-postgres/tests/db-contract/catalog-contract.json', 'db-contract'],

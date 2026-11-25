@@ -38,7 +38,10 @@
     "requires": [],
     "serverEntry": "./dist/index.js",
     "statePaths": [],
-    "locality": "local"
+    "locality": "local",
+    "http": [
+      { "id": "streamable", "path": "streamable", "methods": ["GET", "POST", "DELETE"], "access": "owner", "effect": "propose" }
+    ]
   },
   "bin": {
     "codexia-mcp": "./dist/stdio.js"

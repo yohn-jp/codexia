@@ -715,10 +715,12 @@ extension APIProtocol {
     /// - Remark: Generated from `#/paths//api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/get(manuscript_snapshots_get)`.
     public func manuscript_snapshots_get(
         path: Operations.manuscript_snapshots_get.Input.Path,
+        query: Operations.manuscript_snapshots_get.Input.Query = .init(),
         headers: Operations.manuscript_snapshots_get.Input.Headers = .init()
     ) async throws -> Operations.manuscript_snapshots_get.Output {
         try await manuscript_snapshots_get(Operations.manuscript_snapshots_get.Input(
             path: path,
+            query: query,
             headers: headers
         ))
     }
@@ -726,10 +728,12 @@ extension APIProtocol {
     /// - Remark: Generated from `#/paths//api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/{snapshotId}/get(manuscript_snapshot_get)`.
     public func manuscript_snapshot_get(
         path: Operations.manuscript_snapshot_get.Input.Path,
+        query: Operations.manuscript_snapshot_get.Input.Query = .init(),
         headers: Operations.manuscript_snapshot_get.Input.Headers = .init()
     ) async throws -> Operations.manuscript_snapshot_get.Output {
         try await manuscript_snapshot_get(Operations.manuscript_snapshot_get.Input(
             path: path,
+            query: query,
             headers: headers
         ))
     }
@@ -864,10 +868,12 @@ extension APIProtocol {
     /// - Remark: Generated from `#/paths//api/projects/{projectId}/scenes/{sceneId}/get(project_scene_get)`.
     public func project_scene_get(
         path: Operations.project_scene_get.Input.Path,
+        query: Operations.project_scene_get.Input.Query = .init(),
         headers: Operations.project_scene_get.Input.Headers = .init()
     ) async throws -> Operations.project_scene_get.Output {
         try await project_scene_get(Operations.project_scene_get.Input(
             path: path,
+            query: query,
             headers: headers
         ))
     }
@@ -925,10 +931,12 @@ extension APIProtocol {
     /// - Remark: Generated from `#/paths//api/projects/{projectId}/tree/get(project_tree_get)`.
     public func project_tree_get(
         path: Operations.project_tree_get.Input.Path,
+        query: Operations.project_tree_get.Input.Query = .init(),
         headers: Operations.project_tree_get.Input.Headers = .init()
     ) async throws -> Operations.project_tree_get.Output {
         try await project_tree_get(Operations.project_tree_get.Input(
             path: path,
+            query: query,
             headers: headers
         ))
     }
@@ -990,7 +998,7 @@ extension APIProtocol {
     /// - Remark: HTTP `POST /api/v1/persistence/import`.
     /// - Remark: Generated from `#/paths//api/v1/persistence/import/post(persistence_import_post)`.
     public func persistence_import_post(
-        headers: Operations.persistence_import_post.Input.Headers,
+        headers: Operations.persistence_import_post.Input.Headers = .init(),
         body: Operations.persistence_import_post.Input.Body
     ) async throws -> Operations.persistence_import_post.Output {
         try await persistence_import_post(Operations.persistence_import_post.Input(
