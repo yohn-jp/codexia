@@ -24,23 +24,13 @@ else
   chmod 0700 -- "$target"
 fi
 
-if [[ ! -x "$target/bin/python" ]]; then
-  [[ ! -e "$target/bin" ]] || {
-    printf '%s\n' 'Incomplete Python environment exists at the S3 runtime target' >&2
-    exit 1
-  }
-  python3 -m venv "$target"
-fi
-[[ -x "$target/bin/python" ]] || {
-  printf '%s\n' 'Pinned S3 Python environment is invalid' >&2
+# Retain the caller's private target and force a hash-verified reinstall.
+bash "$script_dir/../../scripts/shared/python-env.sh" ensure python3 "$target" \
+  --require-hashes --reinstall -r "$script_dir/requirements.lock"
+[[ -x "$target/bin/python" && "$(stat -Lc '%u:%a' -- "$target")" == "$(id -u):700" ]] || {
+  printf '%s\n' 'Pinned S3 Python environment is invalid or no longer private' >&2
   exit 1
 }
 
-"$target/bin/python" -m pip install \
-  --disable-pip-version-check \
-  --no-input \
-  --require-hashes \
-  --force-reinstall \
-  -r "$script_dir/requirements.lock" >/dev/null
 "$target/bin/python" -c 'import boto3, botocore; assert boto3.__version__ == "1.44.9"; assert botocore.__version__ == "1.44.9"'
 printf 'Installed pinned Boto3 runtime at %s\n' "$target"

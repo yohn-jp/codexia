@@ -8,6 +8,7 @@ import { BROWSER_SHARDS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIF
 import { ROOT_VERIFICATION_DOCUMENTS, UX_PROJECTION_DOCUMENTS, isNonExecutableDocumentation, isRequirementsTraceInput, taskGroup, taskWorkflowJob } from '../evidence/task-inputs.mjs';
 
 export const FULL_MODEL_OCI_PATHS = Object.freeze([
+  'scripts/shared/python-env.sh',
   '.dockerignore',
   '.github/workflows/full-model-oci-acceptance.yml',
   'Dockerfile',

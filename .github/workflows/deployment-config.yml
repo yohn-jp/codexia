@@ -3,6 +3,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - scripts/shared/python-env.sh
       - deploy/ansible/**
       - deploy/backup/**
       - deploy/quadlet/**
@@ -12,6 +13,7 @@ on:
   push:
     branches: [main]
     paths:
+      - scripts/shared/python-env.sh
       - deploy/ansible/**
       - deploy/backup/**
       - deploy/quadlet/**
@@ -68,7 +70,7 @@ jobs:
             terraform=false
             while IFS= read -r -d '' file; do
               case "$file" in
-                deploy/ansible/*|deploy/backup/*|deploy/quadlet/*|deploy/postgres/*) ansible=true ;;
+                deploy/ansible/*|deploy/backup/*|deploy/quadlet/*|deploy/postgres/*|scripts/shared/python-env.sh) ansible=true ;;
                 deploy/cloudflare/*) terraform=true ;;
                 .github/workflows/deployment-config.yml) ansible=true; terraform=true ;;
               esac
@@ -84,8 +86,7 @@ jobs:
       - name: Check Ansible configuration
         if: steps.reuse.outputs.eligible != 'true' && steps.impact.outputs.ansible == 'true'
         run: |
-          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
-          "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
+          bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt
           "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i deploy/ansible/inventory.example.yml deploy/ansible/site.yml --syntax-check
           "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i deploy/ansible/inventory.example.yml deploy/ansible/preflight-observe.yml --syntax-check
           python3 -B -m unittest discover -s deploy/ansible -p 'test_preflight_observe.py'

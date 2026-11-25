@@ -3,6 +3,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - scripts/shared/python-env.sh
       - deploy/ansible/site.yml
       - deploy/ansible/host.yml
       - deploy/ansible/host-validate.yml
@@ -13,6 +14,7 @@ on:
   push:
     branches: [main]
     paths:
+      - scripts/shared/python-env.sh
       - deploy/ansible/site.yml
       - deploy/ansible/host.yml
       - deploy/ansible/host-validate.yml
@@ -56,8 +58,7 @@ jobs:
       - name: Install supported Ansible control environment
         if: steps.reuse.outputs.eligible != 'true'
         run: |
-          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
-          "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt mitogen==0.3.55
+          bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt mitogen==0.3.55
           python="$RUNNER_TEMP/codexia-ansible/bin/python"
           plugin_dir=$("$python" -c 'import ansible_mitogen, os; print(os.path.join(os.path.dirname(ansible_mitogen.__file__), "plugins", "strategy"))')
           test -f "$plugin_dir/mitogen_linear.py"

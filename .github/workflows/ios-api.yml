@@ -2,6 +2,7 @@ name: Native iOS API
 on:
   pull_request:
     paths:
+      - scripts/shared/python-env.sh
       - .github/workflows/ios-api.yml
       - ios/CodexiaTransport/**
       - packages/http-contract/openapi/codexia.openapi.yaml
@@ -31,7 +32,8 @@ jobs:
         run: |
           xcodebuild -version | grep -E '^Xcode 27\.'
           swift --version
-          python3 -m pip install PyYAML==6.0.3
+          bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ios-yaml" PyYAML==6.0.3
+          echo "$RUNNER_TEMP/codexia-ios-yaml/bin" >> "$GITHUB_PATH"
       - name: Resolve locked Swift dependencies
         env:
           CODEXIA_GIT_READ_TOKEN: ${{ github.token }}
