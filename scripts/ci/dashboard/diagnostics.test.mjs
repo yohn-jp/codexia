@@ -26,7 +26,7 @@ const job = (id,name,created,start,end,override={}) => ({
 });
 const jobs = [
   job(1,'plan',0,1,8),job(2,'build-full',8,10,28),
-  job(3,'browser-full-webkit',28,30,91),job(4,'browser-full-writing',28,31,85),
+  job(3,'browser-full-ui-v1',28,30,91),job(4,'browser-full-writing',28,31,85),
   job(5,'certification',91,93,105),
 ];
 const revision = (pr=42,id=44,sha='a'.repeat(40),list=jobs) =>
@@ -50,13 +50,13 @@ test('diagnostic JSON is source-bound, complete and keeps measured stages and co
   assert.equal(payload.origin.pr,42);
   assert.equal(payload.origin.executedSha,'a'.repeat(40));
   assert.equal(payload.origin.bounds.historyTruncated,true);
-  assert.equal(payload.selectedVerify.observedLastLeaf.leafName,'browser-full-webkit');
+  assert.equal(payload.selectedVerify.observedLastLeaf.leafName,'browser-full-ui-v1');
   assert.equal(payload.selectedVerify.observedLastLeaf.runnerUpGapSeconds,6);
   const verify=payload.workflows[0];
   assert.equal(verify.workflowId,19);
   assert.equal(verify.event,'pull_request');
   assert.equal(verify.jobs.length,5);
-  const leaf=verify.jobs.find(job=>job.name==='browser-full-webkit');
+  const leaf=verify.jobs.find(job=>job.name==='browser-full-ui-v1');
   assert.equal(leaf.stages.beforeValidationSeconds,2);
   assert.equal(leaf.stages.validationSeconds,58);
   assert.equal(leaf.stages.containerInitializationSeconds,2);
@@ -64,7 +64,7 @@ test('diagnostic JSON is source-bound, complete and keeps measured stages and co
   assert.deepEqual(leaf.runnerLabels,['ubuntu-24.04']);
   assert.deepEqual(leaf.dependencies.map(parent=>parent.family),['plan','build']);
   assert.equal(leaf.observedDependencyReadyToStartSeconds,2);
-  assert.equal(verify.aggregate.longestJobs[0].name,'browser-full-webkit');
+  assert.equal(verify.aggregate.longestJobs[0].name,'browser-full-ui-v1');
   assert.equal(payload.comparableJobShapeHistory.matchingCount,1);
   assert.equal(payload.comparableJobShapeHistory.certification.p50Seconds,105);
   assert.match(payload.interpretation.notMeasured.taskDurations,/artifacts/u);
@@ -80,14 +80,14 @@ test('history separates same job shape from other workloads and truncated runs',
 });
 test('failed certification, missing step timestamps and unknown graph do not invent data', () => {
   const brokenJobs=jobs.map(j=>j.name==='certification' ? {...j,conclusion:'failure'} :
-    j.name==='browser-full-webkit' ? {...j,steps:[{number:1,name:'Initialize containers',conclusion:'success'}]} : j);
+    j.name==='browser-full-ui-v1' ? {...j,steps:[{number:1,name:'Initialize containers',conclusion:'success'}]} : j);
   const broken=revision(45,47,'d'.repeat(40),brokenJobs);
   const payload=buildDiagnosticExport(broken,[broken],coverage,'invalid graph');
   assert.equal(payload.origin.workflowGraph,null);
   assert.equal(payload.comparableJobShapeHistory.matchingCount,0);
   assert.equal(payload.selectedVerify.observedBlockingChain.verified,false);
   const verify=payload.workflows[0];
-  const leaf=verify.jobs.find(j=>j.name==='browser-full-webkit');
+  const leaf=verify.jobs.find(j=>j.name==='browser-full-ui-v1');
   assert.equal(leaf.stages.beforeValidationSeconds,null);
   assert.equal(leaf.stages.containerInitializationSeconds,null);
   assert.equal(leaf.stages.missingStepTimings,1);

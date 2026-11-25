@@ -8,16 +8,16 @@
 | --- | --- | --- |
 | Author Desktop Web | Windows Chrome/Edge (Chromium); real Chromium + exact profile + real API/PostgreSQL in routine CI; Windows device evidence for OS-specific IME, input, font and accessibility | macOS/Safari/Firefox/other OS compatibility is not an author product requirement; no UA-based blocking |
 | Owner console | Real supported Chromium and API/authz; focus, zoom, accessibility and failure/recovery | No removal of narrow viewport accessibility or protected owner admission tests |
-| Public reader and externally presented auth/consent | Their independent route, authentication, authorization, reader behavior and accessibility contracts | Preserve existing required proofs; no implicit universal browser support or silent Safari removal for these surfaces. An additional browser is required only by an independently justified contract, with scoped proof, not a full author matrix |
+| Public reader and externally presented auth/consent | Real Chromium; independent route, authentication, authorization, reader behavior and accessibility contracts | Preserve all functional and security proofs; no separate WebKit compatibility obligation in routine CI |
 | Native iOS | Swift Testing/XCTest and XCUITest on the accepted simulator and actual iPhone for native/device obligations; same real API semantics | Playwright WebKit is neither Safari on an actual device nor native SwiftUI/TextKit/Keychain/system-auth evidence. macOS build hosts are not macOS product clients |
 | Legacy Mobile React/Capacitor | Transitional checks required by the existing migration contract | Remove legacy routes, UI, dedicated tests/builds/dependencies only after [#794](https://github.com/yohn-jp/codexia/issues/794) prerequisites including Native physical-device acceptance; do not remove live legacy proof merely to shorten CI |
 | Core and Full | Both real profiles, profile-specific UI/module boundaries, API/authz, persistence, representative browser acceptance and OCI startup | Shared implementation does not prove equal runtime composition; move a redundant obligation only under the proof-placement contract |
 
-The author Desktop target is Chromium-only. The permanent full-suite WebKit duplication is retired as a requirement. Until cutover, classify every existing WebKit test by contract: (a) author Desktop browser-only compatibility, (b) shared browser behavior that must remain covered in Chromium, (c) independently required legacy Mobile or public/auth behavior. Remove (a) from the author matrix, retain/prove (b) at the faithful layer, keep (c) scoped to its actual obligation until the owning contract permits removal. Mixed cases must be split or preserved; do not treat name, viewport, skip or a green Chromium suite as proof of equivalence. No WebKit fallback for missing Chromium proof. No production browser-specific compatibility workaround is required solely for unsupported author browsers; remove one only after tracing all remaining consumers.
+Routine browser CI is Chromium-only for both Core and Full, including public/auth and any remaining legacy behavior. Retire the duplicate WebKit project and image; every existing Chromium spec remains selected, including mixed and narrow-viewport behavior. The Mobile Web retirement and native device admission remain governed by their own contracts. No WebKit fallback for missing Chromium proof. Retain independent API, auth, persistence, accessibility and native obligations; do not delete functional tests merely to remove a browser. No browser-specific production changes are authorized by this CI retirement.
 
 ## 2. Single execution authority and intended graph
 
-The current six browser lanes (Core/Full × writing/reference/WebKit) are implementation, not a permanent product interface. Start with the existing runner count and at most two independent validations per runner, one worker per spec. Repartition by measured cost and dependency/fixture affinity before proposing a runner increase. Use the existing Chromium-only digest-pinned Git-capable runtime for all ordinary target lanes after the complete inventory and preflight agree. A separately required transitional browser may retain a narrowly selected isolated execution path within the existing CI budget or require a reviewed change to that budget.
+Use six Chromium-only lanes (Core/Full × writing/reference/ui-v1), retaining the existing runner budget and at most two independent validations per runner, one worker per spec. All lanes use the same digest-pinned Git-capable Chromium runtime. Repartition by measured cost and dependency/fixture affinity before proposing a runner increase.
 
 ```mermaid
 flowchart TD
@@ -27,9 +27,7 @@ flowchart TD
   R --> V
   V --> S[Isolated fixture and runtime configuration]
   S --> W[Balanced selected Chromium tasks]
-  S --> T[Explicit transitional browser obligations if required]
   W --> E[Per task evidence]
-  T --> E
   E --> C[Exact source certification]
   P --> N[Independent API DB unit OCI and security proof]
   N --> C
@@ -63,7 +61,7 @@ For each migrated or deleted test record governing requirement, old identifier, 
 
 Measure actual full-run critical path, not the sum of parallel test durations. Use existing [CI Observatory](CI-DASHBOARD.md) and source-bound logs/artifacts; extend the existing reporter if needed rather than creating a second telemetry authority. Record per lane: queue, image pull/extract and PostgreSQL readiness, checkout/toolchain/install/cache, producer wait/transfer/verification, fixture DB/migration/bootstrap/key generation, Vite build, browser/context/auth, spec and test including hooks, controlled/real waits, teardown and artifact transfer. Distinguish concurrent work, elapsed duration and runner consumption. Preserve performance smoke isolation and stable task identity.
 
-First rebalance long UI and auth tasks across existing lanes (Chromium auth does not inherently require WebKit). Partition large specs only if independently isolated; do not increase Playwright worker count inside a spec under the current CI contract. A change to concurrency or runner count needs a reviewed budget and evidence that isolation, failure propagation and proof remain valid. Schedule independent preparation before a producer barrier; no busy waiting or arbitrary gate delays.
+Keep long UI and auth tasks balanced across existing Chromium lanes. Partition large specs only if independently isolated; do not increase Playwright worker count inside a spec under the current CI contract. A change to concurrency or runner count needs a reviewed budget and evidence that isolation, failure propagation and proof remain valid. Schedule independent preparation before a producer barrier; no busy waiting or arbitrary gate delays.
 
 Keep Playwright as the browser runner; use its native fixtures, clock, storage state and measured scheduling. Swift Testing/XCTest/XCUITest own native proof. Existing unit runner and real API/DB tests own their layers; evaluate Testing Library or fast-check only for a concrete migration, after checking existing dependencies, independent detection and total cost. Do not adopt Cypress, Selenium, WebdriverIO, Puppeteer, Appium or a generic testing DSL merely to replace Playwright or unify unrelated clients. New dependencies follow [dependency policy](../architecture/DEPENDENCY-POLICY.md).
 

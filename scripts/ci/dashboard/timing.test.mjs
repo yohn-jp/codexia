@@ -13,7 +13,7 @@ test('supplemental and skipped jobs are not certification predecessors or runner
     job('plan', 0, 1, 3), job('unit-core', 3, 5, 10),
     job('certification', 10, 11, 13),
     job('full-model-oci / Run pinned Full model lifecycle on rootless Podman', 3, 6, 20),
-    job('browser-full-webkit', 3, 22, 22, 'skipped'),
+    job('browser-full-ui-v1', 3, 22, 22, 'skipped'),
   ];
   const report = summarizeCiTiming(run, rows);
   assert.equal(report.wallClockSeconds, 20);
@@ -56,7 +56,7 @@ test('rapid successive main merges leave pending checks out of executed runner c
   const report = summarizeCiTiming({ ...run, status: 'in_progress' }, [
     { ...job('plan', 0, 1, 4), status: 'completed' },
     { ...job('unit-core', 4, 4, 4), status: 'queued', completed_at: null, conclusion: null },
-    { ...job('browser-core-webkit', 4, 4, 4), status: 'waiting', completed_at: null, conclusion: null },
+    { ...job('browser-core-ui-v1', 4, 4, 4), status: 'waiting', completed_at: null, conclusion: null },
     { ...job('browser-full-reference', 4, 4, 4), status: 'requested', completed_at: null, conclusion: null },
   ]);
   assert.equal(report.queuedJobCount, 3);

@@ -20,7 +20,6 @@ export const BROWSER_SHARDS = [
   { id: 'oauth-web', project: 'chromium', file: 'oauth-web.acceptance.spec.ts' },
   { id: 'passkey-bootstrap', project: 'chromium', file: 'passkey-bootstrap.acceptance.spec.ts' },
   ...['core', 'outline-headings', 'job-inbox', 'modular-workspace', 'native-review', 'persistence-database', 'recent-activity', 'redesign-visual', 'review-contributions', 'ui-v1'].map(id => ({ id, project: 'chromium', file: `${id}.acceptance.spec.ts` })),
-  { id: 'webkit', project: 'webkit', file: 'ui-v1.acceptance.spec.ts' },
 ];
 export const VERIFICATION_TASKS = [
   ...UNIT_TARGETS.map(({ id }) => `unit-${id}`),
@@ -32,7 +31,7 @@ export const VERIFICATION_TASKS = [
   'coverage', 'biome-ci', 'architecture-g5', 'requirements-trace',
 ];
 // Execution groups batch work without removing any validation obligation.
-// Browser lanes retain their stable job names; the transitional WebKit lane runs Chromium UI and scoped legacy WebKit.
+// All three browser lanes use Chromium; UI acceptance keeps its dedicated lane.
 // Group measured longer specs across the three existing lanes, never share mutable fixtures.
 // Start the two long-running specs together in each browser lane; fill shorter lanes before adding a tail.
 export const VERIFICATION_GROUPS = {
@@ -56,7 +55,7 @@ export const VERIFICATION_GROUPS = {
     // Run the performance-sensitive visual shard only after the shorter
     // reference tasks, avoiding an exclusive tail on the critical writing lane.
     [`browser-${profile}-reference`, ['modular-workspace', 'recent-activity', 'auth-recovery', 'native-review', 'oauth-web', 'outline-headings', 'passkey-bootstrap', 'review-contributions', 'job-inbox', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
-    [`browser-${profile}-webkit`, ['ui-v1', 'webkit'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-ui-v1`, ['ui-v1'].map(id => `browser-${profile}-${id}`)],
   ])),
 };
 // A single dependency authority for profile artifact consumers and certification.

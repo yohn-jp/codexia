@@ -260,28 +260,18 @@ test('browser jobs start from plan while exact producer restore gates execution;
 });
 test('browser groups retain immutable runtime and restore the exact producer before running selected shards', () => {
   const browser = workflow.jobs.browser;
-  const { webkit: mcrDigest, chromium: chromiumDigest } = PLAYWRIGHT_IMAGE_DIGESTS;
-  assert.match(mcrDigest, /^sha256:[0-9a-f]{64}$/u);
+  const { chromium: chromiumDigest } = PLAYWRIGHT_IMAGE_DIGESTS;
+  assert.deepEqual(Object.keys(PLAYWRIGHT_IMAGE_DIGESTS), ['chromium']);
   assert.match(chromiumDigest, /^sha256:[0-9a-f]{64}$/u);
-  assert.notEqual(mcrDigest, chromiumDigest, 'Single-browser and multi-browser images must remain distinct');
-  assert.equal(browser.container.image, [
-    "${{ endsWith(matrix.group, '-webkit') && 'mcr.microsoft.com/playwright@",
-    mcrDigest,
-    "' || format('ghcr.io/{0}/playwright-ubuntu-chromium@",
-    chromiumDigest,
-    "', github.repository) }}",
-  ].join(''));
+  assert.equal(browser.container.image, "${{ format('ghcr.io/{0}/playwright-ubuntu-chromium@" + chromiumDigest + "', github.repository) }}");
   assert.equal(browser.container.options, '--init --ipc=host');
   assert.deepEqual(browser.container.credentials, {
-    username: "${{ endsWith(matrix.group, '-webkit') && '' || github.actor }}",
-    password: "${{ endsWith(matrix.group, '-webkit') && '' || secrets.GITHUB_TOKEN }}",
+    username: '${{ github.actor }}',
+    password: '${{ secrets.GITHUB_TOKEN }}',
   });
   assert.equal(browser.permissions.packages, 'read');
   assert.equal(browser.env.CODEXIA_CI_BROWSER_GROUP, '${{ matrix.group }}');
-  assert.equal(browser.env.CODEXIA_PLAYWRIGHT_IMAGE_DIGEST, [
-    "${{ endsWith(matrix.group, '-webkit') && '", mcrDigest,
-    "' || '", chromiumDigest, "' }}",
-  ].join(''));
+  assert.equal(browser.env.CODEXIA_PLAYWRIGHT_IMAGE_DIGEST, chromiumDigest);
   const diagnostics = browser.steps.find(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.with.name.startsWith('playwright-failure-'));
   assert.ok(diagnostics);
   assert.equal(diagnostics.if, 'always()');
@@ -314,17 +304,15 @@ test('browser groups retain immutable runtime and restore the exact producer bef
   assert.match(runner, /run-shard\.mjs.*--prebuilt/);
 });
 
-test('browser runtime requirements distinguish Chromium and mixed browser lanes', () => {
+test('every browser runtime requires only Chromium', () => {
   for (const profile of PROFILES) {
-    for (const lane of ['writing', 'reference']) {
+    for (const lane of ['writing', 'reference', 'ui-v1']) {
       const requirements = browserRuntimeRequirements(`browser-${profile}-${lane}`);
       assert.deepEqual(requirements.projects, new Set(['chromium']));
       assert.equal(requirements.imageDigest, PLAYWRIGHT_IMAGE_DIGESTS.chromium);
     }
-    const mixed = browserRuntimeRequirements(`browser-${profile}-webkit`);
-    assert.deepEqual(mixed.projects, new Set(['chromium', 'webkit']));
-    assert.equal(mixed.imageDigest, PLAYWRIGHT_IMAGE_DIGESTS.webkit);
-    assert.ok(VERIFICATION_GROUPS[`browser-${profile}-webkit`].includes(`browser-${profile}-ui-v1`));
+    assert.throws(() => browserRuntimeRequirements(`browser-${profile}-webkit`), /Unknown CI browser group/u);
+    assert.ok(VERIFICATION_GROUPS[`browser-${profile}-ui-v1`].includes(`browser-${profile}-ui-v1`));
   }
   assert.throws(() => browserRuntimeRequirements('browser-preview-writing'), /Unknown CI browser group/u);
 });
@@ -388,7 +376,7 @@ test('all source checkouts bind exact PR head/main source without persisted cred
   }
 });
 
-test('every default browser spec is assigned a Chromium shard and WebKit UI is preserved', () => {
+test('every default browser spec is assigned exactly one Chromium shard', () => {
   const directory = fileURLToPath(new URL('../../../tests/e2e/', import.meta.url));
   const discover = current => readdirSync(current, { withFileTypes: true }).flatMap(entry => {
     const full = path.join(current, entry.name);
@@ -400,7 +388,7 @@ test('every default browser spec is assigned a Chromium shard and WebKit UI is p
   const hostOnly = 'core64-lifecycle.host.acceptance.spec.ts';
   const specs = discover(directory).filter(file => file !== hostOnly);
   assert.deepEqual(specs.toSorted(), BROWSER_SHARDS.filter(shard => shard.project === 'chromium').map(shard => shard.file).toSorted());
-  assert.deepEqual(BROWSER_SHARDS.filter(shard => shard.project === 'webkit').map(shard => shard.file), ['ui-v1.acceptance.spec.ts']);
+  assert.deepEqual(new Set(BROWSER_SHARDS.map(shard => shard.project)), new Set(['chromium']));
   const config = readFileSync(new URL('../../../tests/e2e/playwright.config.ts', import.meta.url), 'utf8');
   assert.match(config, /testIgnore: "\*\*\/core64-lifecycle\.host\.acceptance\.spec\.ts"/);
   assert.match(config, /fullyParallel: false/);
@@ -412,13 +400,10 @@ test('browser lanes cover each profile and use compatible browser images', () =>
     const prefix = `browser-${profile}-`;
     const writing = VERIFICATION_GROUPS[prefix + 'writing'];
     const reference = VERIFICATION_GROUPS[prefix + 'reference'];
-    const webkit = VERIFICATION_GROUPS[prefix + 'webkit'];
-    const tasks = [...writing, ...reference, ...webkit];
+    const ui = VERIFICATION_GROUPS[prefix + 'ui-v1'];
+    const tasks = [...writing, ...reference, ...ui];
     assert.deepEqual(tasks.toSorted(), BROWSER_SHARDS.map(shard => prefix + shard.id).toSorted());
-    for (const shard of BROWSER_SHARDS.filter(shard => shard.project === 'webkit')) {
-      assert.ok(webkit.includes(prefix + shard.id), 'WebKit must run on the multi-browser image');
-    }
-    assert.ok(BROWSER_SHARDS.some(shard => shard.project === 'chromium' && webkit.includes(prefix + shard.id)));
+    assert.deepEqual(ui, [prefix + 'ui-v1']);
     assert.equal(reference.at(-1), prefix + 'redesign-visual', 'Keep visual measurements after the parallel shards');
   }
 });
