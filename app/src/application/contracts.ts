@@ -15,6 +15,8 @@ export interface WorkspacePanel {
 export interface WorkspacePanelRequest {
   id: string;
   sequence: number;
+  /** Choose the focus target after the requested panel is revealed. */
+  getFocusTarget?: (panel: HTMLElement) => HTMLElement | undefined;
 }
 
 /** Production Desktop UI assembled by the application controller. */

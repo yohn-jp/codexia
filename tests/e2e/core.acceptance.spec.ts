@@ -116,6 +116,37 @@ preparedAuthorTest("scoped CSS preserves desktop pseudo elements under reduced m
   await page.emulateMedia({ reducedMotion: "no-preference" });
 });
 
+test("creation actions reveal and focus Outline from the Review workspace", async ({ page, authorizeAuthor }) => {
+  let createdProject = false;
+  await page.route((url) => url.pathname === rootPath, async (route) => {
+    if (!createdProject && route.request().method() === "GET") {
+      return route.fulfill({ json: { projects: [], nextCursor: null } });
+    }
+    if (route.request().method() !== "POST") return route.continue();
+    const response = await route.fetch();
+    createdProject = response.ok();
+    await route.fulfill({ response });
+  });
+  await authorizeAuthor("desktop", page);
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  const review = page.getByRole("toolbar", { name: "ワークスペース配置" }).getByRole("button", { name: "レビュー", exact: true });
+
+  await review.click();
+  await expect(outline).toHaveCount(0);
+  await page.getByRole("button", { name: "最初の作品を作成" }).click();
+  const title = outline.getByLabel("作品名", { exact: true });
+  await expect(title).toBeFocused();
+  await title.fill(`Review creation ${randomUUID()}`);
+  await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
+
+  const createDocument = page.getByRole("button", { name: "最初の文書を作成" });
+  await expect(createDocument).toBeVisible();
+  await review.click();
+  await expect(outline).toHaveCount(0);
+  await createDocument.click();
+  await expect(outline.getByLabel("文書名", { exact: true })).toBeFocused();
+});
+
 // Each former Git lifecycle scenario below now exercises the corresponding PostgreSQL
 // revision, browser recovery, or explicit removal boundary. No Git fixture is created.
 

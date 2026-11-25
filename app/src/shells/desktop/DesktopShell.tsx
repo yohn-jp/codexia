@@ -22,8 +22,8 @@ export function DesktopShell({
 
   useEffect(() => {
     if (!requestedPanel?.id || !requestedPanel.sequence) return;
-    setEffectiveRequest({ id: requestedPanel.id, sequence: ++requestSeq.current });
-  }, [requestedPanel?.id, requestedPanel?.sequence]);
+    setEffectiveRequest({ ...requestedPanel, sequence: ++requestSeq.current });
+  }, [requestedPanel]);
 
   return (
     <div className="st-desktop-shell st-studio-shell">

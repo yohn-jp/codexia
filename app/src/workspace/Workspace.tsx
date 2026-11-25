@@ -470,6 +470,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   useEffect(() => {
     const panelId = requestedPanel?.id;
     const sequence = requestedPanel?.sequence;
+    const getFocusTarget = requestedPanel?.getFocusTarget;
     if (!panelId || !sequence) return;
     const requestKey = `${scope}:${mode}:${panelId}:${sequence}`;
     if (handledRequestRef.current === requestKey || changingRef.current) return;
@@ -487,16 +488,18 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       const allowed = await changeLayout(change, "パネルを開きました。次回も使うには配置を保存してください。", true, isCurrent);
       if (!allowed || !isCurrent()) return;
       setFloating((current) => isCurrent() ? current.filter((item) => item.panelId !== panelId) : current);
+      if (getFocusTarget) setMaximizedPanelId((current) => isCurrent() && current !== panelId ? null : current);
       onActivePanelChange?.(panelId);
       window.requestAnimationFrame(() => {
         if (!isCurrent()) return;
         const element = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>("[data-workspace-panel]") ?? [])
           .find((candidate) => candidate.dataset.workspacePanel === panelId);
-        element?.focus();
+        if (!element) return;
+        (getFocusTarget?.(element) ?? element).focus();
       });
     };
     void reveal();
-  }, [requestedPanel?.id, requestedPanel?.sequence, scope, mode, catalog, visibleIds, changeLayout, changing, onActivePanelChange]);
+  }, [requestedPanel?.id, requestedPanel?.sequence, requestedPanel?.getFocusTarget, scope, mode, catalog, visibleIds, changeLayout, changing, onActivePanelChange]);
 
   const changePreset = (preset: Exclude<WorkspacePreset, "custom">): void => {
     void changeLayout(() => createWorkspacePreset(preset, panelIds), `${presetTitle(preset)}の作業面を開きました。次回も使うには配置を保存してください。`)
