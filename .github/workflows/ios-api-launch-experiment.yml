@@ -98,7 +98,7 @@ jobs:
             *) exit 1 ;;
           esac
           read -r -a scm_flags <<< "${SCM_FLAGS:-}"
-          xcodebuild "${scm_flags[@]}" "${args[@]}" build-for-testing 2>&1 | tee "$evidence/build.log"
+          xcodebuild ${scm_flags[@]+"${scm_flags[@]}"} "${args[@]}" build-for-testing 2>&1 | tee "$evidence/build.log"
           git diff --exit-code -- Package.resolved
           if [[ "$LANE" == keychain-simulator ]]; then
             cmp Package.resolved "$workspace/Package.resolved"
@@ -146,7 +146,7 @@ jobs:
           export GIT_TRACE2_EVENT="$evidence/git-trace.jsonl"
           date -u '+launch-start %Y-%m-%dT%H:%M:%SZ'
           read -r -a scm_flags <<< "${SCM_FLAGS:-}"
-          xcodebuild "${scm_flags[@]}" -xctestrun "$NATIVE_TEST_RUN" \
+          xcodebuild ${scm_flags[@]+"${scm_flags[@]}"} -xctestrun "$NATIVE_TEST_RUN" \
             -destination "platform=iOS Simulator,id=$CODEXIA_SIMULATOR_ID" \
             -parallel-testing-enabled NO -resultBundlePath "$evidence/tests.xcresult" \
             test-without-building 2>&1 | tee "$evidence/tests.log"
