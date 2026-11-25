@@ -27,7 +27,7 @@ export function profileRoots(profile) {
 }
 
 const requiredEntries = profile => [
-  'app/dist/index.html','app/dist/desktop/index.html','app/dist/mobile/index.html',
+  'app/dist/index.html','app/dist/desktop/index.html',
   'packages/api/dist/server.js','packages/core/dist/index.js','packages/persistence-postgres/dist/index.js',
   ...['server.mjs','browser.mjs','module-manifests.json'].map(file => 'profiles/' + profile + '/generated/' + file),
 ];
@@ -79,6 +79,7 @@ export function validateBundle(bundle, expected) {
   for (const file of bundle.files) {
     assert.ok(safeRelative(file.path) && roots.some(dir=>file.path.startsWith(dir+'/')), 'Unsafe profile artifact path');
     assert.ok(!/\.(node|so|dll|dylib|exe)$/iu.test(file.path), 'Native binary cannot be shared');
+    assert.ok(!file.path.startsWith('app/dist/mobile/'), 'Retired Mobile Web build output');
     assert.ok(!seen.has(file.path),'Duplicate profile artifact path');
     seen.add(file.path);
     assert.ok(Number.isSafeInteger(file.size) && file.size>=0 && file.size<=MAX_BYTES-total,'Invalid profile file size');

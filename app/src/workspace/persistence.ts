@@ -20,7 +20,7 @@ export interface WorkspaceSnapshot {
 }
 
 /** One localStorage value is the commit point for a complete workspace layout. */
-export function workspaceSnapshotStorageKey(scope: string, mode: "desktop" | "mobile"): string {
+export function workspaceSnapshotStorageKey(scope: string, mode: "desktop"): string {
   return `scriptorium:workspace:v2:${encodeURIComponent(scope)}:${mode}`;
 }
 
@@ -28,12 +28,11 @@ function workspacePanelIds(layout: WorkspaceLayout): string[] {
   return [...visiblePanelIds(layout.root), ...layout.hiddenPanelIds];
 }
 
-function isWorkspaceSnapshot(value: unknown, mode: "desktop" | "mobile"): value is WorkspaceSnapshot & { version: 2 } {
+function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshot & { version: 2 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   if (Object.keys(record).length !== 3 || !["version", "layout", "floating"].every((key) => Object.prototype.hasOwnProperty.call(record, key)) ||
       record.version !== 2 || !validateWorkspaceLayout(record.layout) || !Array.isArray(record.floating)) return false;
-  if (mode === "mobile" && record.floating.length !== 0) return false;
   return validateFloatingPanels(record.floating, workspacePanelIds(record.layout), record.layout.hiddenPanelIds);
 }
 
@@ -41,7 +40,7 @@ function isWorkspaceSnapshot(value: unknown, mode: "desktop" | "mobile"): value 
 export function loadWorkspaceSnapshot(
   storage: WorkspaceStorage,
   scope: string,
-  mode: "desktop" | "mobile",
+  mode: "desktop",
   panelIds: string[],
 ): WorkspaceLoad {
   const fallback = createWorkspacePreset("writing", panelIds);
@@ -55,7 +54,7 @@ export function loadWorkspaceSnapshot(
   if (raw.length > MAX_WORKSPACE_RECORD_CHARACTERS) return { layout: fallback, floating: [], state: "invalid" };
   try {
     const value: unknown = JSON.parse(raw);
-    return isWorkspaceSnapshot(value, mode)
+    return isWorkspaceSnapshot(value)
       ? { layout: value.layout, floating: value.floating, state: "valid" }
       : { layout: fallback, floating: [], state: "invalid" };
   } catch {
@@ -67,11 +66,11 @@ export function loadWorkspaceSnapshot(
 export function saveWorkspaceSnapshot(
   storage: WorkspaceStorage,
   scope: string,
-  mode: "desktop" | "mobile",
+  mode: "desktop",
   snapshot: WorkspaceSnapshot,
 ): boolean {
   const value = { version: 2 as const, layout: snapshot.layout, floating: snapshot.floating };
-  if (!isWorkspaceSnapshot(value, mode)) return false;
+  if (!isWorkspaceSnapshot(value)) return false;
   try {
     const serialized = JSON.stringify(value);
     if (serialized.length > MAX_WORKSPACE_RECORD_CHARACTERS) return false;

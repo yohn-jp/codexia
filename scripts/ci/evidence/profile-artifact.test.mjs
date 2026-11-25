@@ -16,7 +16,7 @@ async function fixture(t,profile='core'){
     'packages/contracts/dist/index.js', 'packages/persistence-contracts/dist/index.js',
     'packages/persistence-postgres/dist/index.js', 'packages/module-runtime/dist/index.js',
     'packages/core/dist/index.js', 'packages/migration/dist/index.js',
-    'app/dist/index.html','app/dist/desktop/index.html','app/dist/mobile/index.html',
+    'app/dist/index.html','app/dist/desktop/index.html',
     'packages/api/dist/server.js','profiles/'+profile+'/generated/server.mjs',
     'profiles/'+profile+'/generated/browser.mjs','profiles/'+profile+'/generated/module-manifests.json',
     ...optionalOutputs,
@@ -35,7 +35,8 @@ test('exact profile output round trips, with no optional modules in core',async 
     assert.deepEqual(bundle.files.map(file => file.path).filter(file => file.startsWith('modules/')).sort(),
       profile === 'core' ? [] : optionalOutputs.sort());
     await restoreProfile(consumer,bundle,identity);
-    assert.equal(await readFile(path.join(consumer,'app/dist/mobile/index.html'),'utf8'),'fixture app/dist/mobile/index.html');
+    assert.equal(await readFile(path.join(consumer,'app/dist/desktop/index.html'),'utf8'),'fixture app/dist/desktop/index.html');
+    await assert.rejects(readFile(path.join(consumer,'app/dist/mobile/index.html')), {code:'ENOENT'});
     const migration=path.join(consumer,'packages/migration/dist/index.js');
     await assert.rejects(readFile(migration),{code:'ENOENT'});
     await assert.rejects(restoreProfile(consumer,bundle,identity),/already exists/);
@@ -51,7 +52,8 @@ test('rejects stale or wrong profile, corruption, paths, duplicates and missing 
     b=>{b.files[0].path='app/dist/../../outside';},
     b=>{b.files[0].path='modules/story/dist/index.js';},
     b=>{b.files.push(b.files[0]);},
-    b=>{b.files=b.files.filter(file=>file.path!=='app/dist/mobile/index.html');},
+    b=>{b.files=b.files.filter(file=>file.path!=='app/dist/desktop/index.html');},
+    b=>{b.files.push({...b.files.find(file=>file.path==='app/dist/desktop/index.html'),path:'app/dist/mobile/index.html'});},
   ]){
     const invalid=structuredClone(bundle);mutate(invalid);
     assert.throws(()=>validateBundle(invalid,identity));

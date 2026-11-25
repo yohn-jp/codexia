@@ -1051,7 +1051,7 @@ describe('Codexia HTTP boundary', () => {
     const apiServer = await startApi(staticDir);
     t.after(apiServer.close);
 
-    for (const ui of ['desktop', 'mobile']) {
+    for (const ui of ['desktop']) {
       for (const route of [
         `/${ui}`,
         `/${ui}/`,
@@ -1069,6 +1069,11 @@ describe('Codexia HTTP boundary', () => {
       assert.equal((await fetch(`${apiServer.base}/${ui}/assets/missing.js`)).status, 404);
       assert.equal((await fetch(`${apiServer.base}/${ui}/unknown-route`)).status, 404);
       assert.equal((await fetch(`${apiServer.base}/${ui}/server.test.js`)).status, 404);
+    }
+
+    // Even if stale files remain on disk, retired authoring routes must never serve them.
+    for (const route of ['/mobile', '/mobile/', '/mobile/writing', '/mobile/projects/p/scenes/s', '/mobile/index.html', '/mobile/main.js', '/mobile/assets/chunk.js']) {
+      assert.equal((await fetch(`${apiServer.base}${route}`, { redirect: 'manual' })).status, 404, route);
     }
 
     const health = await fetch(`${apiServer.base}/api/health`);
@@ -1217,6 +1222,12 @@ describe('Codexia HTTP boundary', () => {
     const apiServer = await startApi(staticDir);
     t.after(apiServer.close);
     for (const [ui, fixture] of fixtures) {
+      if (ui === 'mobile') {
+        for (const route of ['/mobile/', '/mobile/main.js', '/mobile/styles.css', `/mobile/assets/${fixture.entry}`, `/mobile/assets/${fixture.stylesheet}`]) {
+          assert.equal((await fetch(`${apiServer.base}${route}`, { redirect: 'manual' })).status, 404, route);
+        }
+        continue;
+      }
       const prefix = ui === 'launcher' ? '' : `/${ui}`;
       const route = `${prefix}/`;
       const shell = await fetch(`${apiServer.base}${route}`);

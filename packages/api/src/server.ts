@@ -398,7 +398,7 @@ async function staticAliasTarget(
 
 function isContentHashedAssetPath(pathname: string): boolean {
   return (
-    /^\/(?:desktop\/|mobile\/)?assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/u.test(pathname) ||
+    /^\/(?:desktop\/)?assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/u.test(pathname) ||
     /^\/oauth\/assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\.(?:js|css|svg)$/u.test(pathname)
   );
 }
@@ -416,7 +416,7 @@ async function serveStatic(request: IncomingMessage, response: ServerResponse, s
     '/drafts.js': { filename: 'drafts.js', contentType: 'text/javascript; charset=utf-8' },
     '/styles.css': { filename: 'styles.css', contentType: 'text/css; charset=utf-8' },
   };
-  const uiMatch = /^\/(desktop|mobile)(?:\/(.*))?$/u.exec(path);
+  const uiMatch = /^\/(desktop)(?:\/(.*))?$/u.exec(path);
   const ui = uiMatch?.[1];
   const uiPath = uiMatch?.[2] ?? '';
   const uiEntry =

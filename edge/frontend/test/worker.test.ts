@@ -14,7 +14,7 @@ test("static shell proxies never catch API or missing assets", () => {
   assert.equal(routes.some(line => line.startsWith("/console/*") || line.startsWith("/console/:")), false);
   assert.equal(routes.includes("/console/unknown /desktop/index.html 200"), false);
   assert.ok(routes.includes("/desktop/projects/:project/scenes/:scene /desktop/index.html 200"));
-  assert.ok(routes.includes("/mobile/projects/:project/scenes/:scene /mobile/index.html 200"));
+  assert.equal(routes.some(line => line.startsWith("/mobile") || line.includes(" /mobile/")), false);
   assert.ok(routes.includes("/r/story/:project/:slug /index.html 200"));
   // OAuth navigations resolve directly to the dedicated static entries.
   assert.ok(routes.includes("/oauth/login /oauth/oauth-login.html 200"));

@@ -13,7 +13,6 @@ import type {
 } from '@codexia/contracts';
 import { assertChangeOperation } from '@codexia/contracts';
 import { ApiError } from './api-error';
-import { hasNativeApiSession } from './api-transport';
 import * as generated from './generated/http/client';
 import type * as wire from './generated/http/schemas';
 import * as generatedSchemas from './generated/http/schemas';
@@ -60,7 +59,7 @@ function requestOptions(signal?: AbortSignal): { signal?: AbortSignal } {
 
 /** Desktop Web core operations generated from the TypeSpec HTTP contract. */
 export const coreApi = {
-  version: (): Promise<RuntimeVersion> => (hasNativeApiSession() ? generated.apiVersionGet() : generated.apiBrowserVersionGet()),
+  version: (): Promise<RuntimeVersion> => generated.apiBrowserVersionGet(),
   session: (): Promise<Session> => generated.apiSessionGet(),
   jobs: (signal?: AbortSignal): Promise<PublicJob[]> => generated.jobsListGet(requestOptions(signal)),
   job: (jobId: string, signal?: AbortSignal): Promise<PublicJob> => generated.jobGet(jobId, requestOptions(signal)),

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { api, clearNativeApiSession, configureNativeApiSession, setOAuthAccessToken } from './api.js';
+import { api, setOAuthAccessToken } from './api.js';
 
 function runtimeVersion(profile: 'core' | 'full') {
   return { name: 'codexia', version: '0.1.0', contractVersion: 2, profile, auth: ['oauth-owner', 'oauth-mcp'], runtime: {}, modules: [] };
@@ -70,75 +70,6 @@ test('OAuth API admission preserves 401, 403, and 503 without refresh or downgra
   } finally {
     setOAuthAccessToken(null);
     globalThis.fetch = originalFetch;
-  }
-});
-
-test('native API requests use only the configured HTTPS transport and omit WebView credentials', async () => {
-  const nativeCalls: Array<{ url: string; init: RequestInit }> = [];
-  const tokenRequests: string[] = [];
-  configureNativeApiSession({
-    apiOrigin: 'https://api.example.test',
-    accessTokenFor: async requestUrl => {
-      tokenRequests.push(requestUrl);
-      return 'native-api-access-token';
-    },
-    fetchRequest: async (url, init) => {
-      nativeCalls.push({ url, init });
-      return Response.json(runtimeVersion('core'));
-    },
-  });
-  try {
-    await api.version();
-    assert.deepEqual(tokenRequests, ['https://api.example.test/api/version']);
-    assert.equal(nativeCalls[0]?.url, 'https://api.example.test/api/version');
-    assert.equal(new Headers(nativeCalls[0]?.init.headers).get('Authorization'), 'Bearer native-api-access-token');
-    assert.equal(nativeCalls[0]?.init.credentials, 'omit');
-  } finally {
-    clearNativeApiSession();
-  }
-});
-
-test('native API requests fail closed when the HTTPS API origin is missing', async () => {
-  let calls = 0;
-  configureNativeApiSession({
-    apiOrigin: null,
-    accessTokenFor: async () => {
-      throw new Error('must not request a token');
-    },
-    fetchRequest: async () => {
-      calls += 1;
-      return Response.json({});
-    },
-  });
-  try {
-    await assert.rejects(
-      api.session(),
-      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'NATIVE_API_ORIGIN_MISSING',
-    );
-    assert.equal(calls, 0);
-  } finally {
-    clearNativeApiSession();
-  }
-});
-
-test('native job streaming reports unsupported instead of using WebView fetch or retrying forever', async () => {
-  let calls = 0;
-  configureNativeApiSession({
-    apiOrigin: 'https://api.example.test',
-    accessTokenFor: async () => 'native-api-token',
-    fetchRequest: async () => {
-      calls += 1;
-      return Response.json({});
-    },
-  });
-  try {
-    await assert.rejects(
-      api.jobEventStream(new AbortController().signal),
-      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'NATIVE_STREAM_UNSUPPORTED',
-    );
-    assert.equal(calls, 0);
-  } finally {
-    clearNativeApiSession();
   }
 });
 

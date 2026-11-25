@@ -6,10 +6,7 @@ export type { EditorSnapshotRead, InboxItem, JobEvent, PublicJob } from './api-c
 export { ApiError } from './api-error';
 export type { AuthorReviewFeedItem, PersistenceAnchorView, PersistenceNodeRead } from './api-knowledge';
 export {
-  clearNativeApiSession,
-  configureNativeApiSession,
   DocumentDepartureError,
-  type NativeApiSession,
   setOAuthAccessToken,
 } from './api-transport';
 export type { PersistenceStatusResponse as PersistenceStatus } from './generated/http/schemas/persistenceStatusResponse.zod';

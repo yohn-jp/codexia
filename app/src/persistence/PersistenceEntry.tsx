@@ -6,18 +6,11 @@ import { authClient } from "../auth-client";
 import { PersistenceWorkspace } from "./PersistenceWorkspace";
 import { createConsoleReturnLocation } from "../console/console-return";
 import { CONSOLE_NAVIGATION_REQUEST } from "../console/console-navigation";
-import { attemptNativeLogout } from "./nativeLogout";
-import type { NativeSignOutResult } from "../../native/plugins/codexia-auth/src/index.mjs";
 
 type EntryState = "checking" | "signed-out" | "database" | "failed";
 
-export interface NativePersistenceAuth {
-  signIn(): Promise<void>;
-  signOut(): Promise<NativeSignOutResult>;
-}
-
-export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobile"; nativeAuth?: NativePersistenceAuth | null }) {
-  const nativeShell = nativeAuth !== undefined;
+export function PersistenceEntry() {
+  const mode = "desktop";
   const [state, setState] = useState<EntryState>("checking");
   const [oauthConfig, setOAuthConfig] = useState<OAuthWebConfig | null>(null);
   const [authorScope, setAuthorScope] = useState("owner");
@@ -64,11 +57,6 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
         setMessage(error instanceof Error ? error.message : "認証またはPostgreSQL接続を確認できませんでした。");
         return;
       }
-      if (nativeShell && error instanceof ApiError && error.code.startsWith("NATIVE_API_ORIGIN_")) {
-        setState("signed-out");
-        setMessage("iOS API接続先を確認してください。登録済みのHTTPS API originが必要です。");
-        return;
-      }
       if (versionChecked && error instanceof ApiError && error.status === 401) {
         setState("signed-out");
       } else {
@@ -84,7 +72,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     let mounted = true;
     void (async () => {
       try {
-        const config = nativeShell ? null : webOAuthConfig(mode);
+        const config = webOAuthConfig();
         if (mounted) setOAuthConfig(config);
         if (config) {
           const authorization = await completeOAuthAuthorization(config);
@@ -112,7 +100,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     window.addEventListener("pagehide", hide);
     window.addEventListener("pageshow", resume);
     return () => { mounted = false; inspectSequenceRef.current += 1; window.removeEventListener("pagehide", hide); window.removeEventListener("pageshow", resume); };
-  }, [inspect, mode, nativeShell]);
+  }, [inspect]);
 
   const protectBeforeAuthTransition = useCallback(async (action: string): Promise<boolean> => {
     if (workspaceScopeRef.current === null) return true;
@@ -126,7 +114,6 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
   }, []);
 
   useEffect(() => {
-    if (mode !== "desktop" || nativeShell) return;
     const requestNavigation = () => {
       setConsoleNavigationError("");
       void (async () => {
@@ -144,7 +131,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     };
     window.addEventListener(CONSOLE_NAVIGATION_REQUEST, requestNavigation);
     return () => window.removeEventListener(CONSOLE_NAVIGATION_REQUEST, requestNavigation);
-  }, [mode, nativeShell, protectBeforeAuthTransition]);
+  }, [protectBeforeAuthTransition]);
 
   async function startOAuthSignIn(): Promise<void> {
     if (!oauthConfig || busy) return;
@@ -158,49 +145,6 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
       await beginOAuthAuthorization(oauthConfig);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "OAuth sign-in could not be started.");
-      setBusy(false);
-    }
-  }
-
-  async function completeNativeSignIn(): Promise<void> {
-    if (!nativeAuth || busy) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      if (!await protectBeforeAuthTransition("ネイティブ認証への移動")) return;
-      await nativeAuth.signIn();
-      await inspect();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "ネイティブ認証を完了できませんでした。");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function completeNativeLogout(): Promise<void> {
-    if (!nativeAuth || busy) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      const outcome = await attemptNativeLogout({
-        protectDraft: () => protectBeforeAuthTransition("ログアウト"),
-        blockWorkspace: () => setSessionBlocked(true),
-        signOut: nativeAuth.signOut,
-      });
-      if (outcome.kind === "draft-unprotected") return;
-      if (outcome.kind === "complete") {
-        workspaceScopeRef.current = null;
-        setSessionBlocked(false);
-        setState("signed-out");
-        return;
-      }
-      if (outcome.kind === "revocation-unconfirmed") {
-        workspaceScopeRef.current = null;
-        setSessionBlocked(false);
-        setState("signed-out");
-      }
-      setMessage(outcome.message);
-    } finally {
       setBusy(false);
     }
   }
@@ -227,8 +171,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
 
   if (state === "database") return <>
     <div inert={sessionBlocked} hidden={sessionBlocked} style={{ display: sessionBlocked ? "none" : "contents" }}>
-      <PersistenceWorkspace mode={mode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
-        if (nativeShell) { void completeNativeLogout(); return; }
+      <PersistenceWorkspace authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
         if (oauthConfig) void completeWebOAuthLogout();
       }} />
     </div>
@@ -242,9 +185,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
       <p>編集中の原稿は現在の画面に保持しています。認証と接続を確認するまで編集を停止します。</p>
       <button type="button" disabled={busy} onClick={() => void inspect()}>再試行</button>
       {oauthConfig && <button type="button" disabled={busy} onClick={() => void startOAuthSignIn()}>OAuthで再認証</button>}
-      {nativeAuth && <button type="button" disabled={busy} onClick={() => void completeNativeSignIn()}>ネイティブ認証で再入場</button>}
-      {nativeShell && nativeAuth && <button type="button" disabled={busy} onClick={() => void completeNativeLogout()}>ログアウトを再試行</button>}
-      {!nativeShell && oauthConfig && <button type="button" disabled={busy} onClick={() => void completeWebOAuthLogout()}>ログアウトを再試行</button>}
+      {oauthConfig && <button type="button" disabled={busy} onClick={() => void completeWebOAuthLogout()}>ログアウトを再試行</button>}
       <button type="button" disabled={busy} onClick={() => void (async () => {
         if (!protectionRef.current || !await protectionRef.current()) { setMessage("入力を保護できないため再読み込みを停止しました。接続を再確認してください。"); return; }
         window.location.reload();
@@ -269,16 +210,6 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
       <p>APIに接続するため、登録済みのOAuthクライアントでサインインしてください。APIアクセストークンはこの画面を閉じると破棄されます。</p>
       {message && <p role="alert">{message}</p>}
       <button type="button" disabled={busy} onClick={() => void startOAuthSignIn()}>{busy ? "認証を開始しています…" : "OAuthでサインイン"}</button>
-      <a href="/">画面選択へ戻る</a>
-    </section>
-  </main>;
-  if (nativeShell) return <main className={`pg-entry pg-${mode}`}>
-    <section className="pg-login" aria-labelledby="native-oauth-entry-title">
-      <p className="eyebrow">Codexia · iOS</p>
-      <h1 id="native-oauth-entry-title">作品を開く</h1>
-      <p>{nativeAuth ? "APIへ接続するため、登録済みのネイティブクライアントでサインインしてください。" : "ネイティブ認証を利用できません。アプリの公開クライアント設定を確認してください。"}</p>
-      {message && <p role="alert">{message}</p>}
-      {nativeAuth && <button type="button" disabled={busy} onClick={() => void completeNativeSignIn()}>{busy ? "認証を開始しています…" : "ネイティブ認証でサインイン"}</button>}
       <a href="/">画面選択へ戻る</a>
     </section>
   </main>;

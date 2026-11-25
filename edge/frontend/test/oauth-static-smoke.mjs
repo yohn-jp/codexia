@@ -119,7 +119,7 @@ try {
     headless: true,
     ...(systemChromium ? { executablePath: systemChromium, args: ['--no-sandbox'] } : {}),
   });
-  for (const shell of ['desktop', 'mobile']) {
+  for (const shell of ['desktop']) {
     const expectedRedirect = `${fixtureOrigin}/${shell}`;
     const page = await browser.newPage();
     const errors = [];
@@ -224,7 +224,7 @@ try {
       await page.close();
     }
   }
-  console.log('Dedicated OAuth entries stay under their own asset prefix while Desktop/Mobile OAuth remains functional');
+  console.log('Dedicated OAuth entries stay under their own asset prefix while Desktop OAuth remains functional');
 } finally {
   if (browser) await browser.close();
   if (server && server.exitCode === null)
