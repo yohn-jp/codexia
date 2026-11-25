@@ -331,8 +331,9 @@ model KnowledgeRelationBody {
 }
 
 model PersistenceNodeListBody {
-  nodes?: KnowledgeNodeBody[];
-  nextCursor?: string | null;
+  nodes: KnowledgeNodeBody[];
+  nextCursor: string | null;
+  projectVersion: int32;
   ...Record<unknown>;
 }
 
@@ -409,31 +410,280 @@ model AssertionEvidenceListBody {
   ...Record<unknown>;
 }
 
-model PersistenceChangeSetOperation {
-  type?: "document.create" | "document.update" | "document.delete" | "document.save" | "document.restore" | "module.record.save" | "knowledge.node.save" | "knowledge.alias.save" | "knowledge.relation.save" | "evidence.anchor.save" | "evidence.mention.save" | "evidence.assertion.save" | "evidence.assertion.link" | "knowledge.merge";
-  command?: JsonObject;
-  hierarchy?: JsonObject;
+model PersistenceChangeSetBody {
+  id?: string; projectId?: string; authorId?: string;
+  status?: "proposed" | "approved" | "applied" | "rejected";
+  operations?: JsonObject[]; readSet?: JsonObject[]; writeSet?: JsonObject[]; provenance?: JsonObject;
+  version?: int32; idempotencyKey?: string; createdAt?: utcDateTime;
+  approvedAt?: utcDateTime | null; approvedBy?: string | null; appliedAt?: utcDateTime | null;
+  rejectedAt?: utcDateTime | null; rejectedBy?: string | null;
   ...Record<unknown>;
 }
 
-model PersistenceChangeSetBody {
-  id?: string;
-  projectId?: string;
-  authorId?: string;
-  status?: "proposed" | "approved" | "applied" | "rejected";
-  operations?: PersistenceChangeSetOperation[];
-  readSet?: JsonObject[];
-  writeSet?: JsonObject[];
-  provenance?: JsonObject;
-  version?: int32;
-  idempotencyKey?: string;
-  createdAt?: utcDateTime;
-  approvedAt?: utcDateTime | null;
-  approvedBy?: string | null;
-  appliedAt?: utcDateTime | null;
-  rejectedAt?: utcDateTime | null;
-  rejectedBy?: string | null;
-  ...Record<unknown>;
+model PersistenceChangeSetDesktopReadEntry {
+  resource: "document" | "module_record" | "knowledge_node" | "knowledge_alias" | "knowledge_relation" | "evidence_anchor" | "mention_link" | "assertion" | "assertion_evidence";
+  id: string;
+  expectedVersion: int32 | null;
+  expectedRevisionId?: string | null;
+}
+
+model PersistenceChangeSetDesktopWriteEntry {
+  resource: "document" | "module_record" | "knowledge_node" | "knowledge_alias" | "knowledge_relation" | "evidence_anchor" | "mention_link" | "assertion" | "assertion_evidence";
+  id: string;
+}
+
+model PersistenceChangeSetDesktopProvenance {
+  source: string;
+  actorId: string | null;
+  details: JsonObject;
+}
+
+model PersistenceChangeSetDesktopHierarchyParent {
+  documentId: string;
+  lookupId: string;
+}
+
+model PersistenceChangeSetDesktopHierarchy {
+  kind: "volume" | "chapter" | "scene";
+  logicalId: string;
+  volume?: PersistenceChangeSetDesktopHierarchyParent;
+  chapter?: PersistenceChangeSetDesktopHierarchyParent;
+}
+
+model PersistenceChangeSetDesktopDocumentCreate {
+  type: "document.create";
+  command: {
+    projectId: string;
+    documentId?: string;
+    parentId?: string | null;
+    kind: string;
+    title: string;
+    orderKey: string;
+    appendToEnd?: boolean;
+    markdown: string;
+    authorId: string;
+    idempotencyKey: string;
+  };
+  hierarchy?: PersistenceChangeSetDesktopHierarchy;
+}
+
+model PersistenceChangeSetDesktopDocumentUpdate {
+  type: "document.update";
+  command: {
+    projectId: string;
+    documentId: string;
+    @minValue(1) expectedVersion: int32;
+    parentId?: string | null;
+    title?: string;
+    orderKey?: string;
+  };
+}
+
+model PersistenceChangeSetDesktopDocumentDelete {
+  type: "document.delete";
+  command: { projectId: string; documentId: string; @minValue(1) expectedVersion: int32; };
+}
+
+model PersistenceChangeSetDesktopDocumentSave {
+  type: "document.save";
+  command: {
+    projectId: string;
+    documentId: string;
+    baseRevisionId: string;
+    changes: DocumentChange[];
+    @pattern("^[0-9a-f]{64}$") resultingSha256: string;
+    authorId: string;
+    clientId: string;
+    idempotencyKey: string;
+  };
+}
+
+model PersistenceChangeSetDesktopDocumentRestore {
+  type: "document.restore";
+  command: {
+    projectId: string;
+    documentId: string;
+    baseRevisionId: string;
+    sourceRevisionId: string;
+    authorId: string;
+    idempotencyKey: string;
+  };
+}
+
+model PersistenceChangeSetDesktopModuleRecordSave {
+  type: "module.record.save";
+  command: { projectId: string; moduleId: string; key: string; value: JsonObject; expectedVersion: int32 | null; };
+}
+
+model PersistenceChangeSetDesktopKnowledgeNodeSave {
+  type: "knowledge.node.save";
+  command: {
+    projectId: string; id: string; type: string; name: string; attributes: JsonObject;
+    status: "proposed" | "confirmed" | "retired"; expectedVersion: int32 | null;
+  };
+}
+
+model PersistenceChangeSetDesktopKnowledgeAliasSave {
+  type: "knowledge.alias.save";
+  command: {
+    projectId: string; id: string; nodeId: string; surface: string; normalized: string; scope: string | null;
+    status: "proposed" | "confirmed" | "ambiguous" | "retired";
+  };
+}
+
+model PersistenceChangeSetDesktopKnowledgeRelationSave {
+  type: "knowledge.relation.save";
+  command: {
+    projectId: string; id: string; sourceId: string; targetId: string; type: string;
+    attributes: JsonObject; validity: JsonObject;
+    status: "proposed" | "confirmed" | "rejected" | "retired"; expectedVersion: int32 | null;
+  };
+}
+
+model PersistenceChangeSetDesktopEvidenceAnchorSave {
+  type: "evidence.anchor.save";
+  command: {
+    projectId: string; id: string; documentId: string; revisionId: string;
+    @minValue(0) fromUtf16: int32; @minValue(0) toUtf16: int32;
+    @pattern("^[0-9a-f]{64}$") quoteSha256: string;
+    status: "proposed" | "confirmed" | "needs_review" | "orphaned";
+    expectedVersion: int32 | null;
+  };
+}
+
+model PersistenceChangeSetDesktopEvidenceMentionSave {
+  type: "evidence.mention.save";
+  command: {
+    projectId: string; evidenceId: string; nodeId: string; source: string;
+    confidence: float64 | null; extractorVersion: string | null;
+    status: "proposed" | "confirmed" | "ambiguous" | "rejected";
+  };
+}
+
+model PersistenceChangeSetDesktopEvidenceAssertionSave {
+  type: "evidence.assertion.save";
+  command: {
+    projectId: string; id: string; proposition: JsonObject; modality: string; perspective: string;
+    narrativeTime: JsonObject; confidence: float64 | null;
+    status: "proposed" | "confirmed" | "rejected" | "retired"; expectedVersion: int32 | null;
+  };
+}
+
+model PersistenceChangeSetDesktopEvidenceAssertionLink {
+  type: "evidence.assertion.link";
+  command: {
+    projectId: string; assertionId: string; evidenceId: string;
+    role: "supports" | "contradicts" | "quotes" | "context";
+  };
+}
+
+model PersistenceChangeSetDesktopKnowledgeMerge {
+  type: "knowledge.merge";
+  command: {
+    projectId: string; sourceId: string; targetId: string; @minValue(1) projectVersion: int32;
+    @pattern("^[0-9a-f]{64}$") previewDigest: string; actorId: string;
+    origin: "author" | "external-agent"; auditId: string; generatedAliasId: string; plan: JsonObject;
+  };
+}
+
+union PersistenceChangeSetDesktopOperation {
+  documentCreate: PersistenceChangeSetDesktopDocumentCreate,
+  documentUpdate: PersistenceChangeSetDesktopDocumentUpdate,
+  documentDelete: PersistenceChangeSetDesktopDocumentDelete,
+  documentSave: PersistenceChangeSetDesktopDocumentSave,
+  documentRestore: PersistenceChangeSetDesktopDocumentRestore,
+  moduleRecordSave: PersistenceChangeSetDesktopModuleRecordSave,
+  knowledgeNodeSave: PersistenceChangeSetDesktopKnowledgeNodeSave,
+  knowledgeAliasSave: PersistenceChangeSetDesktopKnowledgeAliasSave,
+  knowledgeRelationSave: PersistenceChangeSetDesktopKnowledgeRelationSave,
+  evidenceAnchorSave: PersistenceChangeSetDesktopEvidenceAnchorSave,
+  evidenceMentionSave: PersistenceChangeSetDesktopEvidenceMentionSave,
+  evidenceAssertionSave: PersistenceChangeSetDesktopEvidenceAssertionSave,
+  evidenceAssertionLink: PersistenceChangeSetDesktopEvidenceAssertionLink,
+  knowledgeMerge: PersistenceChangeSetDesktopKnowledgeMerge,
+}
+
+model PersistenceChangeSetDesktopBody {
+  id: string;
+  projectId: string;
+  authorId: string;
+  status: "proposed" | "approved" | "applied" | "rejected";
+  operations: PersistenceChangeSetDesktopOperation[];
+  readSet: PersistenceChangeSetDesktopReadEntry[];
+  writeSet: PersistenceChangeSetDesktopWriteEntry[];
+  provenance: PersistenceChangeSetDesktopProvenance;
+  @minValue(1) version: int32;
+  idempotencyKey: string;
+  createdAt: utcDateTime;
+  approvedAt: utcDateTime | null;
+  approvedBy: string | null;
+  appliedAt: utcDateTime | null;
+  rejectedAt: utcDateTime | null;
+  rejectedBy: string | null;
+}
+
+model PersistenceChangeSetDesktopListBody {
+  changeSets: PersistenceChangeSetDesktopBody[];
+}
+
+model PersistenceChangeSetDesktopResponseBody {
+  changeSet: PersistenceChangeSetDesktopBody;
+  receipt?: PersistenceChangeSetDesktopApplicationBody | null;
+}
+
+model PersistenceChangeSetDesktopApprovalBody {
+  changeSet: PersistenceChangeSetDesktopBody;
+}
+
+model PersistenceChangeSetDesktopApplicationBody {
+  changeSet: PersistenceChangeSetDesktopBody;
+  results: JsonObject[];
+  replayed: boolean;
+}
+
+model PersistenceChangeSetDesktopResultBody {
+  changeSet: PersistenceChangeSetDesktopBody;
+  replayed: boolean;
+}
+
+model PersistenceChangeSetDesktopApplyBody {
+  changeSet: PersistenceChangeSetDesktopBody;
+  results: JsonObject[];
+  replayed: boolean;
+}
+
+model DesktopCoreReviewFeedItem {
+  kind: "core-proposal";
+  id: string;
+  projectId: string;
+  createdAt: utcDateTime;
+  state: "proposed" | "partially_approved" | "approved" | "applied";
+  approvalModel: "per-operation";
+  applicationModel: "per-operation";
+  status: CoreProposalStatusBody;
+  receipts: ProposalApplyReceiptBody[];
+  stale: boolean;
+}
+
+model DesktopNativeReviewFeedItem {
+  kind: "native-change-set";
+  id: string;
+  projectId: string;
+  createdAt: utcDateTime;
+  state: "proposed" | "approved" | "applied" | "rejected";
+  approvalModel: "whole-change-set";
+  applicationModel: "transaction";
+  changeSet: PersistenceChangeSetDesktopBody;
+  receipt: PersistenceChangeSetDesktopApplicationBody | null;
+}
+
+union DesktopReviewFeedItem {
+  coreProposal: DesktopCoreReviewFeedItem,
+  nativeChangeSet: DesktopNativeReviewFeedItem,
+}
+
+model DesktopReviewFeedBody {
+  items: DesktopReviewFeedItem[];
 }
 
 model PersistenceChangeSetListBody {

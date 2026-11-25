@@ -21,10 +21,7 @@ import type {
   ProposalStatus,
 } from '@codexia/contracts';
 import { ApiError } from './api-error';
-import {
-  PersistenceChangeSetBody,
-} from './generated/http/schemas/persistenceChangeSetBody.zod';
-import { PersistenceChangeSetOperation } from './generated/http/schemas/persistenceChangeSetOperation.zod';
+import { PersistenceChangeSetDesktopBody } from './generated/http/schemas/persistenceChangeSetDesktopBody.zod';
 export type AuthorReviewFeedItem =
   | {
       kind: 'core-proposal';
@@ -136,14 +133,11 @@ function options(signal?: AbortSignal): { signal?: AbortSignal } {
 }
 
 function assertChangeSetProjectBinding(value: unknown): asserts value is ChangeSet {
-  if (!record(value) || typeof value.projectId !== 'string' || !Array.isArray(value.operations)) return invalidResponse();
-  for (const operation of value.operations) {
-    if (
-      !PersistenceChangeSetOperation.safeParse(operation).success ||
-      !record(operation) ||
-      !record(operation.command) ||
-      operation.command.projectId !== value.projectId
-    ) {
+  const parsed = PersistenceChangeSetDesktopBody.safeParse(value);
+  if (!parsed.success) return invalidResponse();
+  const changeSet = parsed.data as unknown as ChangeSet;
+  for (const operation of changeSet.operations) {
+    if (operation.command.projectId !== changeSet.projectId) {
       return invalidResponse();
     }
   }
@@ -269,7 +263,7 @@ export const knowledgeApi = {
         status: filters.status,
         ...(filters.cursor ? { cursor: filters.cursor } : {}),
       },
-      { signal },
+      options(signal),
     );
     return page as unknown as PersistenceKnowledgePage;
   },
@@ -449,21 +443,7 @@ export function readActionChangeSet(value: unknown, referenceOnly: boolean): Nat
     }
     return { id: changeSet.id, projectId: changeSet.projectId };
   }
-  const parsed = PersistenceChangeSetBody.safeParse(changeSet);
-  if (!parsed.success) return invalidResponse();
-  const full = parsed.data as unknown as ChangeSet;
-  if (
-    !full.id ||
-    !full.projectId ||
-    !Array.isArray(full.operations) ||
-    full.operations.some(
-      operation =>
-        !PersistenceChangeSetOperation.safeParse(operation).success ||
-        !record(operation.command) ||
-        operation.command.projectId !== full.projectId,
-    )
-  ) {
-    return invalidResponse();
-  }
+  assertChangeSetProjectBinding(changeSet);
+  const full = changeSet as unknown as ChangeSet;
   return { id: full.id, projectId: full.projectId };
 }

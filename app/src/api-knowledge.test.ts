@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readActionChangeSet } from './api-knowledge.js';
-import { PersistenceChangeSetBody } from './generated/http/schemas/persistenceChangeSetBody.zod.js';
+import { PersistenceChangeSetDesktopBody } from './generated/http/schemas/persistenceChangeSetDesktopBody.zod.js';
 
 const projectId = 'project-1';
 const changeSet = {
@@ -39,9 +39,23 @@ const changeSet = {
 };
 
 test('generated ChangeSet schema covers persisted native operation variants', () => {
-  assert.equal(PersistenceChangeSetBody.safeParse(changeSet).success, true);
+  assert.equal(PersistenceChangeSetDesktopBody.safeParse(changeSet).success, true);
   assert.deepEqual(readActionChangeSet({ changeSet }, false), { id: 'change-1', projectId });
-  assert.equal(PersistenceChangeSetBody.safeParse({ ...changeSet, operations: [{ type: 'knowledge.future', command: {} }] }).success, false);
+  assert.equal(PersistenceChangeSetDesktopBody.safeParse({ ...changeSet, operations: [{ type: 'knowledge.future', command: {} }] }).success, false);
+  assert.equal(
+    PersistenceChangeSetDesktopBody.safeParse({
+      ...changeSet,
+      operations: [{ type: 'document.restore', command: { projectId, documentId: 'doc-1', baseRevisionId: 'revision-4', authorId: 'author-1', idempotencyKey: 'restore-opening' } }],
+    }).success,
+    false,
+  );
+  assert.equal(
+    PersistenceChangeSetDesktopBody.safeParse({
+      ...changeSet,
+      operations: [{ type: 'knowledge.merge', command: { ...changeSet.operations.at(-1)!.command, previewDigest: 'stale' } }],
+    }).success,
+    false,
+  );
 });
 
 test('action ChangeSet decoding checks hierarchy project binding and reference identity', () => {
