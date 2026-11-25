@@ -113,6 +113,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   native-ipa:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     name: Native unsigned IPA
     runs-on: xcode-27
     timeout-minutes: 40
