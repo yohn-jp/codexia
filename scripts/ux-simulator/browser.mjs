@@ -109,12 +109,13 @@ function current() {
 }
 
 function apply(next) {
+  const scenarioChanged = state?.scenario !== next.scenario || state?.platform !== next.platform;
   state = next;
   problem = '';
   selectedControl = null;
   paintStage();
   paintInspector();
-  paintCatalog();
+  if (scenarioChanged) paintCatalog();
   (stage.querySelector('[data-current-state]') ?? main).focus();
 }
 
@@ -296,7 +297,7 @@ function paintCatalog() {
         h('div', { class: 'actions' }, flow.platforms.filter((value) => !platform.value || value === platform.value).map((value) =>
           button(labels[value], () => open(activeMode, value, flow.id), {
             'aria-current': state?.scenario === flow.id && state.platform === value && state.projection === activeMode ? 'true' : null,
-          })))),
+          }))),
         activeMode === 'expected' && h('details', {}, h('summary', {}, '状態を直接表示'),
           h('ul', {}, snapshot.expected.states.filter(({ id, platforms }) => id.startsWith(flow.id + '/')
             && (!platform.value || !platforms || platforms.includes(platform.value))).map((node) => {
