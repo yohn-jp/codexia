@@ -39,6 +39,13 @@ export function assessMergeReadiness({ pr, mainSha, mergeBase, runs, workflowId,
   return result('compact-candidate', 'Full exact-base PR proof candidate; main must independently certify the actual merged tree and evidence');
 }
 
+export function isMergeObservationCurrent({ initialPr, currentPr, mainSha, currentMainSha }) {
+  return currentMainSha === mainSha && currentPr.state === 'open' &&
+    currentPr.head?.sha === initialPr.head?.sha && currentPr.base?.ref === initialPr.base?.ref &&
+    currentPr.base?.sha === mainSha && currentPr.base?.repo?.id === initialPr.base?.repo?.id &&
+    currentPr.head?.repo?.id === initialPr.head?.repo?.id;
+}
+
 async function main() {
   const [number, ...extra] = process.argv.slice(2);
   assert.match(number ?? '', /^[1-9]\d*$/u, 'Usage: merge-readiness.mjs PR_NUMBER');
@@ -69,8 +76,8 @@ async function main() {
   // Never report readiness from a moving base or replaced PR head.
   const currentMain = await readMain();
   const { data: currentPr } = await github.rest.pulls.get({ owner, repo, pull_number: Number(number) });
-  if (currentMain !== mainSha || currentPr.head.sha !== pr.head.sha || currentPr.state !== 'open') {
-    result = { status: 'not-ready', reason: 'PR or main moved during observation', headSha: pr.head.sha, mainSha };
+  if (!isMergeObservationCurrent({ initialPr: pr, currentPr, mainSha, currentMainSha: currentMain })) {
+    result = { status: 'not-ready', reason: 'PR, base or main moved during observation', headSha: pr.head.sha, mainSha };
   }
   console.log(JSON.stringify(result, null, 2));
   if (result.status === 'not-ready') process.exitCode = 1;
