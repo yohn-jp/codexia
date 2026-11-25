@@ -31,7 +31,7 @@ op updatePersistenceProject(@path projectId: string, @body body: PersistenceProj
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/archive") @get @operationId("persistence_project_archive_get")
-op exportPersistenceArchive(@path projectId: string): WorkArchive | { @statusCode _: 404; @body body: ApiError; };
+op exportPersistenceArchive(@path projectId: string): WorkArchiveExport | { @statusCode _: 404; @body body: ApiError; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents") @get @operationId("persistence_documents_get")

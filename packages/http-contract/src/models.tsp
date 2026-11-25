@@ -1086,6 +1086,157 @@ model WorkArchive {
   ...Record<unknown>;
 }
 
+// Export has a complete, validated archive shape. Keep import on the
+// compatibility model above, whose optional fields and open object shapes are
+// required for the existing import contract.
+model WorkArchiveExportProject {
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  title: string;
+  settings: JsonObject;
+  ...Record<never>;
+}
+
+model WorkArchiveExportDocument extends WorkArchiveDocument {
+  id: string;
+  parentId: string | null;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  kind: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  title: string;
+  @maxLength(512)
+  orderKey: string;
+  markdown: string;
+  revisionId: string;
+}
+
+model WorkArchiveExportKnowledgeNode extends WorkArchiveKnowledgeNode {
+  id: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  type: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  name: string;
+  attributes: JsonObject;
+  status: "proposed" | "confirmed" | "retired";
+}
+
+model WorkArchiveExportKnowledgeAlias extends WorkArchiveKnowledgeAlias {
+  id: string;
+  nodeId: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  surface: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  normalized: string;
+  scope: string | null;
+  status: "proposed" | "confirmed" | "ambiguous" | "retired";
+}
+
+model WorkArchiveExportKnowledgeRelation extends WorkArchiveKnowledgeRelation {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  type: string;
+  attributes: JsonObject;
+  validity: JsonObject;
+  status: "proposed" | "confirmed" | "rejected" | "retired";
+}
+
+model WorkArchiveExportKnowledge {
+  @maxItems(999)
+  nodes: WorkArchiveExportKnowledgeNode[];
+  @maxItems(10000)
+  aliases: WorkArchiveExportKnowledgeAlias[];
+  @maxItems(10000)
+  relations: WorkArchiveExportKnowledgeRelation[];
+  ...Record<never>;
+}
+
+model WorkArchiveExportAnchor extends WorkArchiveAnchor {
+  id: string;
+  documentId: string;
+  revisionId: string;
+  @minValue(0) fromUtf16: int32;
+  @minValue(0) toUtf16: int32;
+  @pattern("^[0-9a-f]{64}$")
+  quoteSha256: string;
+  status: "proposed" | "confirmed" | "needs_review" | "orphaned";
+}
+
+model WorkArchiveExportMention extends WorkArchiveMention {
+  evidenceId: string;
+  nodeId: string;
+  status: "proposed" | "confirmed" | "ambiguous" | "rejected";
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  source: string;
+  @minValue(0) @maxValue(1)
+  confidence: float64 | null;
+  extractorVersion: string | null;
+}
+
+model WorkArchiveExportAssertion extends WorkArchiveAssertion {
+  id: string;
+  proposition: JsonObject;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  modality: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  perspective: string;
+  narrativeTime: JsonObject;
+  @minValue(0) @maxValue(1)
+  confidence: float64 | null;
+  status: "proposed" | "confirmed" | "rejected" | "retired";
+}
+
+model WorkArchiveExportAssertionEvidence extends WorkArchiveAssertionEvidence {
+  assertionId: string;
+  evidenceId: string;
+  role: "supports" | "contradicts" | "quotes" | "context";
+}
+
+model WorkArchiveExportUnresolvedEvidence {
+  @maxItems(20000)
+  anchors: WorkArchiveExportAnchor[];
+  @maxItems(40000)
+  mentions: WorkArchiveExportMention[];
+  @maxItems(40000)
+  assertionEvidence: WorkArchiveExportAssertionEvidence[];
+  ...Record<never>;
+}
+
+model WorkArchiveExportEvidence {
+  @maxItems(10000)
+  anchors: WorkArchiveExportAnchor[];
+  @maxItems(40000)
+  mentions: WorkArchiveExportMention[];
+  @maxItems(999)
+  assertions: WorkArchiveExportAssertion[];
+  @maxItems(40000)
+  assertionEvidence: WorkArchiveExportAssertionEvidence[];
+  unresolved: WorkArchiveExportUnresolvedEvidence;
+  ...Record<never>;
+}
+
+model WorkArchiveExportModuleRecord extends WorkArchiveModuleRecord {
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  moduleId: string;
+  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  key: string;
+  value: JsonObject;
+}
+
+model WorkArchiveExport {
+  format: "codexia-work/v1";
+  project: WorkArchiveExportProject;
+  @maxItems(999)
+  documents: WorkArchiveExportDocument[];
+  knowledge: WorkArchiveExportKnowledge;
+  evidence: WorkArchiveExportEvidence;
+  @maxItems(10000)
+  moduleRecords: WorkArchiveExportModuleRecord[];
+  @maxItems(10000)
+  omittedRecords: string[];
+  ...Record<never>;
+}
+
 model WorkImportResult {
   project: Project;
   replayed: boolean;

@@ -22,6 +22,7 @@ import type {
   ProjectResponse,
   SaveDocumentRequest,
   WorkArchive,
+  WorkArchiveExport,
   WorkImportResult,
 } from './generated/http/schemas';
 import {
@@ -42,7 +43,7 @@ import {
 } from './generated/http/client';
 
 /** Public API aliases use generated wire types, with domain brands at the edge. */
-export type PortableWorkArchive = WorkArchive;
+export type PortableWorkArchive = WorkArchiveExport;
 export type PortableWorkImportResult = Omit<WorkImportResult, 'project'> & { project: PersistenceProject };
 export type PersistenceProjectEnvelope = Omit<ProjectResponse, 'project'> & { project: PersistenceProject };
 export type PersistenceProjectPage = Omit<ProjectPageResponse, 'projects'> & { projects: PersistenceProject[] };
