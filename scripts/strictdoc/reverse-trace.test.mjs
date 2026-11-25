@@ -40,6 +40,30 @@ test('reverse discovery inventories native iOS views and declared IaC resources'
   assert.ok(result.limitations.some(item => item.area === 'iac-runtime'));
 });
 
+test('platform source coordinates survive comments and blank lines', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codexia-platform-coordinates-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const swiftPath = 'ios/CodexiaApp/Sources/EditorScreen.swift';
+  const terraformPath = 'deploy/cloudflare/terraform/main.tf';
+  await mkdir(path.dirname(path.join(root, swiftPath)), { recursive: true });
+  await mkdir(path.dirname(path.join(root, terraformPath)), { recursive: true });
+  const swift = ['import SwiftUI', '/*', 'struct CommentedView: View {}', '*/', '// struct CommentedLineView: View {}', '', '  struct EditorScreen: View {}', '', 'public struct SecondView: View {}'];
+  const terraform = ['/*', 'resource "cloudflare_workers_route" "commented" {}', '*/', '# resource "cloudflare_workers_route" "commented_line" {}', '', '  resource "cloudflare_workers_route" "frontend" {', '  pattern = "example.com/*"', '}', '', 'resource "cloudflare_workers_route" "origin" {}'];
+  for (const newline of ['\n', '\r\n']) {
+    await writeFile(path.join(root, swiftPath), swift.join(newline) + newline);
+    await writeFile(path.join(root, terraformPath), terraform.join(newline) + newline);
+    const { surfaces } = await discoverReverseSurfaces({ repositoryRoot: root });
+    assert.deepEqual(surfaces.filter(item => item.kind === 'nativeIosView').map(item => [item.id, item.source]), [
+      ['EditorScreen', { path: swiftPath, line: 7 }],
+      ['SecondView', { path: swiftPath, line: 9 }],
+    ]);
+    assert.deepEqual(surfaces.filter(item => item.kind === 'iacResource').map(item => [item.id, item.source]), [
+      ['cloudflare_workers_route.frontend', { path: terraformPath, line: 6 }],
+      ['cloudflare_workers_route.origin', { path: terraformPath, line: 10 }],
+    ]);
+  }
+});
+
 test('typed iOS and IaC identifiers reverse-map without certifying implementation or execution', () => {
   const source = { path: 'fixture' };
   const result = buildReverseTrace({

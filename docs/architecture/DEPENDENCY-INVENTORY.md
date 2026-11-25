@@ -98,7 +98,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | --- | --- | --- | --- |
 | `@vanilla-extract/css` | `1.21.3` (`app` build-only) | Desktop Web・型付きテーマ／静的CSS | **採用済み**: Light/Dark/Paper semantic token contractを生成時にCSSへ展開 |
 | `@vanilla-extract/vite-plugin` | `5.2.6` (`app` build-only) | Vite 8・CSSビルド統合 | **採用済み**: Vite 8をpeer dependencyとして許可し、OAuth source boundaryを維持 |
-| `@vanilla-extract/recipes` | `0.5.7` (`app` build-only) | Desktop UI・型付きvariants | **採用済み**: 既存compact button variantを静的CSSとして生成 |
+| `@vanilla-extract/recipes` | `0.5.7` (`app` build-only) | Desktop UI・型付きsize/state variants | **採用済み**: 共有button sizeと通知read stateの離散variantを静的CSSとして生成 |
 
 既存のVanilla CSSは移行元であり、恒久的な第二のデザインシステムにしない。CodeMirror等の外部スタイルは責務を分離して維持可能。iOS SwiftUIは対象外。
 
@@ -119,7 +119,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
 | `@zip.js/zip.js` | `2.25.0` | `scripts/ci/evidence`・不信頼なCI ArtifactのZIP読取 | **CI専用**: BSD-3-Clause。Node 24に対応し、peer依存なし。更新時は厳格な形式検査、CRC、重複・重なり、パス・ファイル種別、実展開量の拒否条件と、認定・promotionの証拠検証を確認 |
-| `@octokit/rest` | `22.0.1` | `scripts/ci/evidence`の実行時依存・`scripts/github/rest-client.mjs`を正本とするCI、release、deployment、artifact provenance用GitHub REST通信とLink pagination | **CI専用**: GitHub API通信を単一のSDKに集約し、無条件リトライを無効化する。API originと`yohn-jp/codexia` repository pathを制限し、total_count・全page・run/attempt/SHA・artifact identityをCodexia側で検証する。署名付きartifact URLからのarchive取得とブラウザーでの公開API参照は別経路に保つ |
+| `@octokit/rest` | `22.0.1` | `scripts/ci/evidence`の実行時依存。`scripts/github/octokit.mjs`がCI、release、deployment、artifact provenance用のOctokit instanceを設定し、`scripts/github/paginate-actions.mjs`がOctokitの標準Link paginatorで取得した証拠inventoryの完全性を検証 | **CI専用**: Octokit REST typed endpointsとLink paginationを使用し、retryを無効化する。API originと`yohn-jp/codexia` repository pathを制限し、既定・呼び出し単位のtimeoutとredirect拒否を維持する。Actionsのtotal_count・全page・run/attempt/SHA・artifact identityをCodexia側で検証する。artifact ZIPの署名URL取得はAPI tokenから分離し、ブラウザーでの公開API参照は別経路に保つ |
 
 ### ネイティブ・エッジ
 

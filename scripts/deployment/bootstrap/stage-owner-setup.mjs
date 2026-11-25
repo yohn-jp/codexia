@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { ownerSetupWranglerConfig, stageOwnerSetupAssets } from '../../build/frontend/owner-setup-assets.mjs';
 import { createCloudflareCutover, ownerSetupArtifactTag } from '../../release/cutover/cloudflare.mjs';
 import { digestEvidence } from '../cutover/coordinator.mjs';
@@ -19,9 +20,10 @@ async function main(env = process.env) {
   assert.match(env.GITHUB_SHA ?? '', /^[a-f0-9]{40}$/u);
   assert.ok(env.GH_TOKEN && env.CODEXIA_OWNER_SETUP_WORKER_TOKEN, 'Protected staging credentials required');
   const assertCurrentMain = async () => {
-    const { stdout } = await run('gh', ['api', 'repos/yohn-jp/codexia/git/ref/heads/main', '--jq', '.object.sha'],
-      { timeout: 30_000 });
-    assert.equal(stdout.trim(), env.GITHUB_SHA, 'Main changed after protected setup asset dispatch');
+    const { data: reference } = await createGitHubOctokit({ token: env.GH_TOKEN, timeout: 30_000 }).rest.git.getRef({
+      owner: 'yohn-jp', repo: 'codexia', ref: 'heads/main',
+    });
+    assert.equal(reference.object?.sha, env.GITHUB_SHA, 'Main changed after protected setup asset dispatch');
   };
   await assertCurrentMain();
   const request = parsePreflightRequest(env.CODEXIA_PREFLIGHT_REQUEST ?? '');

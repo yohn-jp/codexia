@@ -4,16 +4,21 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { assertTrustedBackendPublicationRun } from './verify-push.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
 
 const repository = 'yohn-jp/codexia';
 const sha = /^[a-f0-9]{40}$/u;
 
 async function readPublisherRun(id, token, fetchImpl = fetch) {
-  const github = createGitHubRestClient({ token, fetchImpl, timeout: 20_000 });
-  const response = await github.request('GET', `/repos/${repository}/actions/runs/${id}`, { headers: { 'X-GitHub-Api-Version': '2022-11-28' } });
-  if (response.status < 200 || response.status >= 300) throw new Error('Requested backend publisher run could not be verified (HTTP ' + response.status + ')');
-  return response.data;
+  const github = createGitHubOctokit({ token, fetchImpl, timeout: 20_000 });
+  try {
+    return (await github.rest.actions.getWorkflowRun({ owner: 'yohn-jp', repo: 'codexia', run_id: id })).data;
+  } catch (error) {
+    if (Number.isSafeInteger(error?.status)) {
+      throw new Error(`Requested backend publisher run could not be verified (HTTP ${error.status})`, { cause: error });
+    }
+    throw error;
+  }
 }
 
 export async function resolveManualPublisherRun({ env, checkoutSha, fetchImpl = fetch }) {

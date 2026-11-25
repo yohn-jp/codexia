@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { resolveProducerJobAttempts, selectLatestJobArtifact } from './artifact-selection.mjs';
 import { downloadArtifact } from './download-artifacts.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
+import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
 export function listProducerArtifacts(github,runId,artifactName) {
-  return github.paginate(`/repos/yohn-jp/codexia/actions/runs/${runId}/artifacts`, { name: artifactName }, 'artifacts');
+  return paginateActionsInventory(github, github.rest.actions.listWorkflowRunArtifacts,
+    { owner: 'yohn-jp', repo: 'codexia', run_id: runId, name: artifactName }, 'artifacts');
 }
 
 /** Wait only for the exact selected producer's actual terminal state.
@@ -52,15 +54,15 @@ export async function fetchLatestProducerArtifact({plan,runId,repository,token,p
   assert.match(String(runId),/^\d+$/u);
   assert.equal(repository,'yohn-jp/codexia','Artifact producer repository mismatch');
   assert.ok(token,'Artifact read token required');
-  const github=createGitHubRestClient({token});
-  const request=async (endpoint,timeoutMs=15_000)=>{
-    const response=await github.request('GET',`/repos/${repository}/${endpoint}`,{request:{timeout:Math.max(1,Math.min(15_000,Math.ceil(timeoutMs)))}});
-    assert.ok(response.status>=200&&response.status<300,'Artifact metadata unavailable: HTTP '+response.status);return response.data;
-  };
+  const github=createGitHubOctokit({token});
+  const [owner, repo] = repository.split('/');
+  const request=async (timeoutMs=15_000)=>github.rest.actions.getWorkflowRun({ owner, repo, run_id: Number(runId),
+    request:{signal:AbortSignal.timeout(Math.max(1,Math.min(15_000,Math.ceil(timeoutMs))))}}).then(response=>response.data);
   const read=async timeoutMs=>{
     const [run,jobs]=await Promise.all([
-      request('actions/runs/'+runId,timeoutMs),
-      github.paginate(`/repos/${repository}/actions/runs/${runId}/jobs`,{filter:'latest'},'jobs')]);
+      request(timeoutMs),
+      paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRun,
+        {owner,repo,run_id:Number(runId),filter:'latest'},'jobs')]);
     return {run,jobs};
   };
   const {run,jobs,waitMs}=waitForProducerMs>0
@@ -71,7 +73,9 @@ export async function fetchLatestProducerArtifact({plan,runId,repository,token,p
   const artifacts=await listProducerArtifacts(github,runId,artifactName);
   if(waitForProducerMs>0)console.log(JSON.stringify({phase:'profile-producer-wait',producerJob,waitMs}));
   const selected=selectLatestJobArtifact(artifactName,producerJob,artifacts,jobs,{runId,sourceSha:plan.sha});
-  const resolved=await resolveProducerJobAttempts(jobs,run,github,[producerJob]);
+  const resolved=await resolveProducerJobAttempts(jobs,run,
+    (producerRunId,attempt)=>paginateActionsInventory(github,github.rest.actions.listJobsForWorkflowRunAttempt,
+      {owner,repo,run_id:producerRunId,attempt_number:attempt},'jobs'),[producerJob]);
   const job=resolved.find(job=>job.name===producerJob);
   assert.ok(Number.isSafeInteger(job.run_attempt)&&job.run_attempt>0,'Invalid producer attempt');
   const bytes=await downloadArtifact(selected,repository,token,fetch,maxArchive===undefined?{}:{maxArchive});

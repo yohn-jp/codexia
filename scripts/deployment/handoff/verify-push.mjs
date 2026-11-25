@@ -11,7 +11,8 @@ import { selectReleaseSource } from '../../release/components/source-gate.mjs';
 import { publishedBackendCompatibility, successfulPublicationJobs, verifyExistingBackendRelease } from '../../release/backend/verify-existing.mjs';
 import { expectedBackendMigrationFingerprint, inspectBackendImageWithoutExecution } from '../../release/backend/image-inspection.mjs';
 import { validatePushDeploymentCertificate } from '../admission/validate.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
+import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const WORKFLOW_PATH = '.github/workflows/backend-release.yml';
@@ -104,15 +105,21 @@ export function createHandoffDeploymentOutputs({ fullImage, producerSha, fullCer
 }
 
 async function githubJson(resource, token, fetchImpl = fetch) {
-  const github = createGitHubRestClient({ token, fetchImpl, timeout: 20_000 });
-  const response = await github.request('GET', `/repos/${REPOSITORY}/${resource}`, { headers: { 'X-GitHub-Api-Version': '2022-11-28' } });
-  if (response.status < 200 || response.status >= 300) throw new Error('Backend deployment handoff provenance lookup failed (HTTP ' + response.status + ')');
-  return response.data;
+  const github = createGitHubOctokit({ token, fetchImpl, timeout: 20_000 });
+  const run = /^actions\/runs\/([1-9]\d{0,15})$/u.exec(resource);
+  assert.ok(run, 'Unapproved backend deployment run lookup');
+  return (await github.rest.actions.getWorkflowRun({ owner: 'yohn-jp', repo: 'codexia', run_id: Number(run[1]) })).data;
 }
 
 async function githubPages(resource, token, fetchImpl, key, parameters = {}) {
-  const github = createGitHubRestClient({ token, fetchImpl, timeout: 20_000 });
-  return github.paginate(`/repos/${REPOSITORY}/${resource}`, parameters, key);
+  const github = createGitHubOctokit({ token, fetchImpl, timeout: 20_000 });
+  const [owner, repo] = REPOSITORY.split('/');
+  const run = /^actions\/runs\/([1-9]\d{0,15})\/(jobs|artifacts)$/u.exec(resource);
+  assert.ok(run, 'Unapproved backend deployment pagination endpoint');
+  if (run[2] === 'jobs') return paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRun,
+    { owner, repo, run_id: Number(run[1]), ...parameters }, key);
+  return paginateActionsInventory(github, github.rest.actions.listWorkflowRunArtifacts,
+    { owner, repo, run_id: Number(run[1]), ...parameters }, key);
 }
 
 async function verifyVerifyRun(runId, certificate, token, fetchImpl) {

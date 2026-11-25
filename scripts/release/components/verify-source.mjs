@@ -2,7 +2,8 @@
 // Read-only gates for tag and commit-addressed publication.
 import { execFileSync } from 'node:child_process';
 import { assertReleaseIdentity, assertVerificationJobs, verifiedSourceRun } from './policy.mjs';
-import { createGitHubRestClient } from '../../github/rest-client.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
+import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
 const repository = process.env.GITHUB_REPOSITORY;
 const tag = process.env.GITHUB_REF_NAME;
@@ -15,17 +16,13 @@ if (commitRelease) {
   if (!/^[a-f0-9]{40}$/.test(expectedSha) || checkoutSha !== expectedSha || process.env.GITHUB_REF !== 'refs/heads/main') throw new Error('Commit publication requires exact main source');
 } else assertReleaseIdentity(tag, expectedSha, checkoutSha);
 if(repository!=='yohn-jp/codexia') throw new Error('Release repository mismatch');
-const github=createGitHubRestClient({token});
-const request=async path=>{
-  const response=await github.request('GET',`/repos/${repository}/${path}`);
-  if(response.status<200||response.status>=300) throw new Error(`Release verification read failed (HTTP ${response.status})`);
-  return response.data;
-};
+const github=createGitHubOctokit({token});
+const [owner, repo] = repository.split('/');
 if (!commitRelease) {
-  let reference = (await request(`git/ref/tags/${encodeURIComponent(tag)}`)).object;
+  let reference = (await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` })).data.object;
   for (let depth = 0; reference?.type === 'tag' && depth < 8; depth++) {
     if (!/^[a-f0-9]{40}$/.test(reference.sha ?? '')) throw new Error('Invalid annotated tag object');
-    reference = (await request(`git/tags/${reference.sha}`)).object;
+    reference = (await github.rest.git.getTag({ owner, repo, tag_sha: reference.sha })).data.object;
   }
   if (reference?.type !== 'commit') throw new Error('Release tag does not resolve to a commit');
   assertReleaseIdentity(tag, expectedSha, reference.sha);
@@ -37,17 +34,18 @@ let runs;
 if (commitRelease && exactId) {
   const id = Number(exactId);
   if (!Number.isSafeInteger(id) || id < 1) throw new Error('Invalid completed Verify run ID');
-  const run = await request(`actions/runs/${id}`);
+  const run = (await github.rest.actions.getWorkflowRun({ owner, repo, run_id: id })).data;
   if (run.id !== id || run.path !== '.github/workflows/verify.yml' ||
       run.repository?.full_name !== repository || run.head_repository?.full_name !== repository) {
     throw new Error('Release completion event does not identify the canonical Verify run');
   }
   runs = [run];
 } else {
-  runs = await github.paginate(`/repos/${repository}/actions/workflows/verify.yml/runs`,
-    { head_sha: expectedSha, branch: 'main', event: 'push' }, 'workflow_runs');
+  runs = await paginateActionsInventory(github, github.rest.actions.listWorkflowRuns,
+    { owner, repo, workflow_id: 'verify.yml', head_sha: expectedSha, branch: 'main', event: 'push' }, 'workflow_runs');
 }
 const verified = verifiedSourceRun(runs, expectedSha);
-const jobs = await github.paginate(`/repos/${repository}/actions/runs/${verified.id}/jobs`, { filter: 'latest' }, 'jobs');
+const jobs = await paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRun,
+  { owner, repo, run_id: verified.id, filter: 'latest' }, 'jobs');
 assertVerificationJobs(jobs);
 console.log(`Verified release ${tag} source ${expectedSha} with run ${verified.id}. No publication performed by this gate.`);

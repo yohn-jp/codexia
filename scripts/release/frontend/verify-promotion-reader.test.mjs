@@ -30,7 +30,7 @@ test('frontend promotion proof reader downloads and extracts a digest-verified J
 
   assert.deepEqual(await readFrontendPromotionProofArtifact(artifact, 'report.json', 'test-read-token', fetchImpl), expected);
   assert.equal(requests[0].url, 'https://api.github.com/repos/yohn-jp/codexia/actions/artifacts/731/zip');
-  assert.equal(requests[0].options.headers.Authorization, 'Bearer test-read-token');
+  assert.equal(new Headers(requests[0].options.headers).get('authorization'), 'token test-read-token');
   assert.equal(requests[0].options.redirect, 'manual');
   assert.equal(requests[1].url, 'https://storage.example/proof.zip?signature=temporary');
   assert.equal(requests[1].options.headers, undefined);

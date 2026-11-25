@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { selectReleaseSource } from '../../release/components/source-gate.mjs';
 import { createHandoffDeploymentOutputs, verifyCutoverBackendPublication } from '../handoff/verify-push.mjs';
 import { assertDeploymentPlanApproval, assertDeploymentPlanBinding } from '../preflight/plan.mjs';
+import { createGitHubOctokit } from '../../github/octokit.mjs';
 
 const hash = /^[a-f0-9]{64}$/u;
 
@@ -43,8 +44,12 @@ async function main(stage, env) {
   assert.equal(env.GITHUB_EVENT_NAME, 'workflow_dispatch');
   if (stage === 'freshness') {
     const git = (...args) => execFileSync('git', args, { encoding: 'utf8', timeout: 60_000 });
-    const liveMain = execFileSync('gh', ['api', 'repos/yohn-jp/codexia/git/ref/heads/main', '--jq', '.object.sha'],
-      { encoding: 'utf8', timeout: 30_000 }).trim();
+    const token = env.GH_TOKEN || env.GITHUB_TOKEN;
+    assert.ok(token, 'Protected source freshness requires GitHub Actions read access');
+    const { data: reference } = await createGitHubOctokit({ token, timeout: 30_000 }).rest.git.getRef({
+      owner: 'yohn-jp', repo: 'codexia', ref: 'heads/main',
+    });
+    const liveMain = reference.object?.sha;
     assertManualActivationSource(env.CODEXIA_VERIFIED_MAIN_SHA, env.GITHUB_SHA, liveMain, git);
     await appendFile(env.GITHUB_OUTPUT, 'current=true\n');
     return;

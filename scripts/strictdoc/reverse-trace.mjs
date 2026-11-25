@@ -68,8 +68,8 @@ function implementationControlReferences(source, file) {
 
 function nativeIosViews(source, file) {
   const surfaces = [];
-  const code = source.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/^\s*\/\/.*$/gmu, '');
-  const pattern = /^\s*(?:public\s+|internal\s+|private\s+|fileprivate\s+)?(?:struct|class)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:[^\n{]*\bView\b/gmu;
+  const code = source.replace(/\/\*[\s\S]*?\*\//gu, comment => comment.replace(/[^\r\n]/gu, ' ')).replace(/^[\t ]*\/\/.*$/gmu, '');
+  const pattern = /^[\t ]*(?:public\s+|internal\s+|private\s+|fileprivate\s+)?(?:struct|class)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:[^\n{]*\bView\b/gmu;
   for (const match of code.matchAll(pattern)) {
     surfaces.push({
       kind: 'nativeIosView', id: match[1], source: { path: file, line: code.slice(0, match.index).split('\n').length },
@@ -81,8 +81,8 @@ function nativeIosViews(source, file) {
 
 function terraformResources(source, file) {
   const surfaces = [];
-  source = source.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/^\s*(?:#|\/\/).*$/gmu, '');
-  const pattern = /^\s*resource\s+"([A-Za-z_][A-Za-z0-9_]*)"\s+"([A-Za-z_][A-Za-z0-9_-]*)"\s*\{/gmu;
+  source = source.replace(/\/\*[\s\S]*?\*\//gu, comment => comment.replace(/[^\r\n]/gu, ' ')).replace(/^[\t ]*(?:#|\/\/).*$/gmu, '');
+  const pattern = /^[\t ]*resource\s+"([A-Za-z_][A-Za-z0-9_]*)"\s+"([A-Za-z_][A-Za-z0-9_-]*)"\s*\{/gmu;
   for (const match of source.matchAll(pattern)) {
     surfaces.push({
       kind: 'iacResource', id: `${match[1]}.${match[2]}`, source: { path: file, line: source.slice(0, match.index).split('\n').length },
