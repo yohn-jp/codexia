@@ -543,6 +543,10 @@ jobs:
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
           CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
         run: node scripts/ci/evidence/profile-artifact.mjs restore "${{ matrix.profile }}" "$CODEXIA_CI_PROFILE_RECEIPT"
+      - name: Observe browser runner before validation
+        if: always() && !cancelled()
+        continue-on-error: true
+        run: node scripts/ci/dashboard/runner-observation.mjs before "${{ runner.temp }}/browser-runner-observation"
       - name: Run selected validations
         if: always() && !cancelled()
         env:
@@ -552,6 +556,18 @@ jobs:
           CODEXIA_CI_PROFILE_RESTORE: ${{ steps.restore-profile.outcome }}
           CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
         run: node scripts/ci/execution/group.mjs "browser-${{ matrix.group }}"
+      - name: Observe browser runner after validation
+        if: always() && !cancelled()
+        continue-on-error: true
+        run: node scripts/ci/dashboard/runner-observation.mjs after "${{ runner.temp }}/browser-runner-observation"
+      - uses: actions/upload-artifact@v7.0.2
+        if: always() && !cancelled()
+        continue-on-error: true
+        with:
+          name: browser-runner-observation-${{ matrix.group }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/browser-runner-observation
+          if-no-files-found: warn
+          retention-days: 7
       # Only one full-install main-push browser job populates the scoped cache after passing
       # every selected validation. A cache failure must not replace CI evidence.
       - name: Save browser pnpm cache from main
