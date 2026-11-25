@@ -168,9 +168,12 @@ test('UX projection source and Pages inputs select scoped canonical proofs', asy
   }
   for (const file of ['scripts/audit/ux-artifact.mjs', 'scripts/audit/ux-artifact.test.mjs',
     '.github/workflows/repository-audit.yml']) assert.ok(OPERATIONAL_ROOT_PATHS.includes(file), file);
-  for (const file of ['scripts/ci/evidence/task-inputs.mjs', 'scripts/ci/evidence/task-inputs.test.mjs']) {
-    assert.equal((await plan([file])).mode, 'full', 'shared CI evidence authority preserves full verification');
-  }
+  assert.equal((await plan(['scripts/ci/evidence/task-inputs.mjs'])).mode, 'full', 'shared CI evidence authority preserves full verification');
+  const evidenceTest = await plan(['scripts/ci/evidence/task-inputs.test.mjs']);
+  assert.equal(evidenceTest.mode, 'affected', 'root-only evidence contract test does not alter execution authority');
+  assert.ok(evidenceTest.tasks.includes('unit-root'));
+  assert.ok(evidenceTest.tasks.includes('coverage'));
+  assert.equal(evidenceTest.full_model_oci, false);
 });
 
 test('Verify selects HTTP contract source comparison when any owning route source changes', async () => {
