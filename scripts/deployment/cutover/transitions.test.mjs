@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { migrationContracts, resolveMigrationContracts } from './transitions.mjs';
+import { approvedMigration, migrationContracts, resolveMigrationContracts } from './transitions.mjs';
 
 const ledger = 'sha256:' + 'a'.repeat(64);
 const schema = 'sha256:' + 'b'.repeat(64);
@@ -44,4 +44,36 @@ test('a future API-only contract requires no changes to the resolver and request
   assert.deepEqual(resolveMigrationContracts(apiOnly), []);
   assert.equal(resolveMigrationContracts(apiOnly, [future])[0].dataConversion, false);
   assert.deepEqual(resolveMigrationContracts({ ...apiOnly, target: { ...apiOnly.target, backend: backend(46, 8) } }, [future]), []);
+});
+
+test('the registered MCP API epoch transition is exact and leaves compatible persistence untouched', () => {
+  const contract = migrationContracts.find(value => value.id === 'mcp-v2-api-2-to-3');
+  assert.ok(contract);
+  assert.deepEqual(contract.source, { apiEpoch: 2, persistenceFormat: 2 });
+  assert.deepEqual(contract.target, { apiEpoch: 3, persistenceFormat: 2 });
+  assert.deepEqual(contract.requiredAxes, ['api-epoch']);
+  assert.deepEqual(contract.optionalAxes, []);
+  assert.equal(contract.handler, null);
+
+  const apiOnly = {
+    source: { ...evidence.source, backend: backend(2, 2) },
+    target: { ...evidence.target, backend: backend(3, 2) },
+    state: { A: 'ready', D: 'compatible' },
+    changeAxes: ['backend', 'frontend', 'api-epoch'],
+  };
+  const [resolved] = resolveMigrationContracts(apiOnly);
+  assert.ok(resolved);
+  assert.equal(resolved.dataConversion, false);
+  assert.equal(approvedMigration(resolved).handler, null);
+
+  for (const rejected of [
+    { source: { ...apiOnly.source, backend: backend(1, 2) } },
+    { target: { ...apiOnly.target, backend: backend(4, 2) } },
+    { source: { ...apiOnly.source, backend: backend(2, 1) } },
+    { target: { ...apiOnly.target, backend: backend(3, 3) } },
+    { target: { ...apiOnly.target, authSchemas: ['sha256:' + 'c'.repeat(64)] } },
+    { changeAxes: [...apiOnly.changeAxes, 'auth-schema'] },
+  ]) {
+    assert.deepEqual(resolveMigrationContracts({ ...apiOnly, ...rejected }), []);
+  }
 });

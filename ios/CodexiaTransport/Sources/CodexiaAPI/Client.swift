@@ -4686,18 +4686,18 @@ public struct Client: APIProtocol {
                 suppressMutabilityWarning(&request)
                 try converter.setHeaderFieldAsURI(
                     in: &request.headerFields,
-                    name: "Mcp-Session-Id",
-                    value: input.headers.Mcp_hyphen_Session_hyphen_Id
-                )
-                try converter.setHeaderFieldAsURI(
-                    in: &request.headerFields,
                     name: "MCP-Protocol-Version",
                     value: input.headers.MCP_hyphen_Protocol_hyphen_Version
                 )
                 try converter.setHeaderFieldAsURI(
                     in: &request.headerFields,
-                    name: "Last-Event-ID",
-                    value: input.headers.Last_hyphen_Event_hyphen_ID
+                    name: "Mcp-Method",
+                    value: input.headers.Mcp_hyphen_Method
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Name",
+                    value: input.headers.Mcp_hyphen_Name
                 )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
@@ -4707,57 +4707,6 @@ public struct Client: APIProtocol {
             },
             deserializer: { response, responseBody in
                 switch response.status.code {
-                case 200:
-                    let headers: Operations.project_mcp_stream_get.Output.Ok.Headers = .init(
-                        Mcp_hyphen_Session_hyphen_Id: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "Mcp-Session-Id",
-                            as: Swift.String.self
-                        ),
-                        MCP_hyphen_Protocol_hyphen_Version: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "MCP-Protocol-Version",
-                            as: Swift.String.self
-                        ),
-                        WWW_hyphen_Authenticate: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "WWW-Authenticate",
-                            as: Swift.String.self
-                        )
-                    )
-                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
-                    let body: Operations.project_mcp_stream_get.Output.Ok.Body
-                    let chosenContentType = try converter.bestContentType(
-                        received: contentType,
-                        options: [
-                            "text/event-stream",
-                            "application/json"
-                        ]
-                    )
-                    switch chosenContentType {
-                    case "text/event-stream":
-                        body = try converter.getResponseBodyAsBinary(
-                            OpenAPIRuntime.HTTPBody.self,
-                            from: responseBody,
-                            transforming: { value in
-                                .text_event_hyphen_stream(value)
-                            }
-                        )
-                    case "application/json":
-                        body = try await converter.getResponseBodyAsJSON(
-                            Operations.project_mcp_stream_get.Output.Ok.Body.jsonPayload.self,
-                            from: responseBody,
-                            transforming: { value in
-                                .json(value)
-                            }
-                        )
-                    default:
-                        preconditionFailure("bestContentType chose an invalid content type.")
-                    }
-                    return .ok(.init(
-                        headers: headers,
-                        body: body
-                    ))
                 case 401:
                     let headers: Operations.project_mcp_stream_get.Output.Unauthorized.Headers = .init(WWW_hyphen_Authenticate: try converter.getRequiredHeaderFieldAsURI(
                         in: response.headerFields,
@@ -4788,6 +4737,28 @@ public struct Client: APIProtocol {
                         headers: headers,
                         body: body
                     ))
+                case 405:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.project_mcp_stream_get.Output.MethodNotAllowed.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .methodNotAllowed(.init(body: body))
                 default:
                     return .undocumented(
                         statusCode: response.status.code,
@@ -4820,13 +4791,18 @@ public struct Client: APIProtocol {
                 suppressMutabilityWarning(&request)
                 try converter.setHeaderFieldAsURI(
                     in: &request.headerFields,
-                    name: "Mcp-Session-Id",
-                    value: input.headers.Mcp_hyphen_Session_hyphen_Id
+                    name: "MCP-Protocol-Version",
+                    value: input.headers.MCP_hyphen_Protocol_hyphen_Version
                 )
                 try converter.setHeaderFieldAsURI(
                     in: &request.headerFields,
-                    name: "MCP-Protocol-Version",
-                    value: input.headers.MCP_hyphen_Protocol_hyphen_Version
+                    name: "Mcp-Method",
+                    value: input.headers.Mcp_hyphen_Method
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Name",
+                    value: input.headers.Mcp_hyphen_Name
                 )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
@@ -4847,11 +4823,6 @@ public struct Client: APIProtocol {
                 switch response.status.code {
                 case 200:
                     let headers: Operations.project_mcp_stream_post.Output.Ok.Headers = .init(
-                        Mcp_hyphen_Session_hyphen_Id: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "Mcp-Session-Id",
-                            as: Swift.String.self
-                        ),
                         MCP_hyphen_Protocol_hyphen_Version: try converter.getOptionalHeaderFieldAsURI(
                             in: response.headerFields,
                             name: "MCP-Protocol-Version",
@@ -4896,6 +4867,58 @@ public struct Client: APIProtocol {
                         headers: headers,
                         body: body
                     ))
+                case 202:
+                    let headers: Operations.project_mcp_stream_post.Output.Accepted.Headers = .init(MCP_hyphen_Protocol_hyphen_Version: try converter.getOptionalHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "MCP-Protocol-Version",
+                        as: Swift.String.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.project_mcp_stream_post.Output.Accepted.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Operations.project_mcp_stream_post.Output.Accepted.Body.jsonPayload.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .accepted(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 400:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.project_mcp_stream_post.Output.BadRequest.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .badRequest(.init(body: body))
                 case 401:
                     let headers: Operations.project_mcp_stream_post.Output.Unauthorized.Headers = .init(WWW_hyphen_Authenticate: try converter.getRequiredHeaderFieldAsURI(
                         in: response.headerFields,
@@ -4926,6 +4949,72 @@ public struct Client: APIProtocol {
                         headers: headers,
                         body: body
                     ))
+                case 403:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.project_mcp_stream_post.Output.Forbidden.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .forbidden(.init(body: body))
+                case 413:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.project_mcp_stream_post.Output.ContentTooLarge.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .contentTooLarge(.init(body: body))
+                case 415:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.project_mcp_stream_post.Output.UnsupportedMediaType.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .unsupportedMediaType(.init(body: body))
                 default:
                     return .undocumented(
                         statusCode: response.status.code,
@@ -4958,13 +5047,18 @@ public struct Client: APIProtocol {
                 suppressMutabilityWarning(&request)
                 try converter.setHeaderFieldAsURI(
                     in: &request.headerFields,
-                    name: "Mcp-Session-Id",
-                    value: input.headers.Mcp_hyphen_Session_hyphen_Id
+                    name: "MCP-Protocol-Version",
+                    value: input.headers.MCP_hyphen_Protocol_hyphen_Version
                 )
                 try converter.setHeaderFieldAsURI(
                     in: &request.headerFields,
-                    name: "MCP-Protocol-Version",
-                    value: input.headers.MCP_hyphen_Protocol_hyphen_Version
+                    name: "Mcp-Method",
+                    value: input.headers.Mcp_hyphen_Method
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Name",
+                    value: input.headers.Mcp_hyphen_Name
                 )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
@@ -4974,48 +5068,6 @@ public struct Client: APIProtocol {
             },
             deserializer: { response, responseBody in
                 switch response.status.code {
-                case 200:
-                    let headers: Operations.project_mcp_stream_delete.Output.Ok.Headers = .init(
-                        Mcp_hyphen_Session_hyphen_Id: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "Mcp-Session-Id",
-                            as: Swift.String.self
-                        ),
-                        MCP_hyphen_Protocol_hyphen_Version: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "MCP-Protocol-Version",
-                            as: Swift.String.self
-                        ),
-                        WWW_hyphen_Authenticate: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "WWW-Authenticate",
-                            as: Swift.String.self
-                        )
-                    )
-                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
-                    let body: Operations.project_mcp_stream_delete.Output.Ok.Body
-                    let chosenContentType = try converter.bestContentType(
-                        received: contentType,
-                        options: [
-                            "application/json"
-                        ]
-                    )
-                    switch chosenContentType {
-                    case "application/json":
-                        body = try await converter.getResponseBodyAsJSON(
-                            Operations.project_mcp_stream_delete.Output.Ok.Body.jsonPayload.self,
-                            from: responseBody,
-                            transforming: { value in
-                                .json(value)
-                            }
-                        )
-                    default:
-                        preconditionFailure("bestContentType chose an invalid content type.")
-                    }
-                    return .ok(.init(
-                        headers: headers,
-                        body: body
-                    ))
                 case 401:
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
                     let body: Operations.project_mcp_stream_delete.Output.Unauthorized.Body
@@ -5038,6 +5090,28 @@ public struct Client: APIProtocol {
                         preconditionFailure("bestContentType chose an invalid content type.")
                     }
                     return .unauthorized(.init(body: body))
+                case 405:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.project_mcp_stream_delete.Output.MethodNotAllowed.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .methodNotAllowed(.init(body: body))
                 default:
                     return .undocumented(
                         statusCode: response.status.code,
@@ -11899,10 +11973,12 @@ public struct Client: APIProtocol {
                     method: .get
                 )
                 suppressMutabilityWarning(&request)
-                try converter.setHeaderFieldAsURI(
-                    in: &request.headerFields,
-                    name: "Mcp-Session-Id",
-                    value: input.headers.Mcp_hyphen_Session_hyphen_Id
+                try converter.setQueryItemAsURI(
+                    in: &request,
+                    style: .form,
+                    explode: false,
+                    name: "projectId",
+                    value: input.query.projectId
                 )
                 try converter.setHeaderFieldAsURI(
                     in: &request.headerFields,
@@ -11911,8 +11987,13 @@ public struct Client: APIProtocol {
                 )
                 try converter.setHeaderFieldAsURI(
                     in: &request.headerFields,
-                    name: "Last-Event-ID",
-                    value: input.headers.Last_hyphen_Event_hyphen_ID
+                    name: "Mcp-Method",
+                    value: input.headers.Mcp_hyphen_Method
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Name",
+                    value: input.headers.Mcp_hyphen_Name
                 )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
@@ -11922,57 +12003,6 @@ public struct Client: APIProtocol {
             },
             deserializer: { response, responseBody in
                 switch response.status.code {
-                case 200:
-                    let headers: Operations.mcp_root_get.Output.Ok.Headers = .init(
-                        Mcp_hyphen_Session_hyphen_Id: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "Mcp-Session-Id",
-                            as: Swift.String.self
-                        ),
-                        MCP_hyphen_Protocol_hyphen_Version: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "MCP-Protocol-Version",
-                            as: Swift.String.self
-                        ),
-                        WWW_hyphen_Authenticate: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "WWW-Authenticate",
-                            as: Swift.String.self
-                        )
-                    )
-                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
-                    let body: Operations.mcp_root_get.Output.Ok.Body
-                    let chosenContentType = try converter.bestContentType(
-                        received: contentType,
-                        options: [
-                            "text/event-stream",
-                            "application/json"
-                        ]
-                    )
-                    switch chosenContentType {
-                    case "text/event-stream":
-                        body = try converter.getResponseBodyAsBinary(
-                            OpenAPIRuntime.HTTPBody.self,
-                            from: responseBody,
-                            transforming: { value in
-                                .text_event_hyphen_stream(value)
-                            }
-                        )
-                    case "application/json":
-                        body = try await converter.getResponseBodyAsJSON(
-                            Operations.mcp_root_get.Output.Ok.Body.jsonPayload.self,
-                            from: responseBody,
-                            transforming: { value in
-                                .json(value)
-                            }
-                        )
-                    default:
-                        preconditionFailure("bestContentType chose an invalid content type.")
-                    }
-                    return .ok(.init(
-                        headers: headers,
-                        body: body
-                    ))
                 case 401:
                     let headers: Operations.mcp_root_get.Output.Unauthorized.Headers = .init(WWW_hyphen_Authenticate: try converter.getRequiredHeaderFieldAsURI(
                         in: response.headerFields,
@@ -12003,6 +12033,28 @@ public struct Client: APIProtocol {
                         headers: headers,
                         body: body
                     ))
+                case 405:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.mcp_root_get.Output.MethodNotAllowed.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .methodNotAllowed(.init(body: body))
                 default:
                     return .undocumented(
                         statusCode: response.status.code,
@@ -12031,15 +12083,27 @@ public struct Client: APIProtocol {
                     method: .post
                 )
                 suppressMutabilityWarning(&request)
-                try converter.setHeaderFieldAsURI(
-                    in: &request.headerFields,
-                    name: "Mcp-Session-Id",
-                    value: input.headers.Mcp_hyphen_Session_hyphen_Id
+                try converter.setQueryItemAsURI(
+                    in: &request,
+                    style: .form,
+                    explode: false,
+                    name: "projectId",
+                    value: input.query.projectId
                 )
                 try converter.setHeaderFieldAsURI(
                     in: &request.headerFields,
                     name: "MCP-Protocol-Version",
                     value: input.headers.MCP_hyphen_Protocol_hyphen_Version
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Method",
+                    value: input.headers.Mcp_hyphen_Method
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Name",
+                    value: input.headers.Mcp_hyphen_Name
                 )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
@@ -12060,11 +12124,6 @@ public struct Client: APIProtocol {
                 switch response.status.code {
                 case 200:
                     let headers: Operations.mcp_root_post.Output.Ok.Headers = .init(
-                        Mcp_hyphen_Session_hyphen_Id: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "Mcp-Session-Id",
-                            as: Swift.String.self
-                        ),
                         MCP_hyphen_Protocol_hyphen_Version: try converter.getOptionalHeaderFieldAsURI(
                             in: response.headerFields,
                             name: "MCP-Protocol-Version",
@@ -12109,6 +12168,58 @@ public struct Client: APIProtocol {
                         headers: headers,
                         body: body
                     ))
+                case 202:
+                    let headers: Operations.mcp_root_post.Output.Accepted.Headers = .init(MCP_hyphen_Protocol_hyphen_Version: try converter.getOptionalHeaderFieldAsURI(
+                        in: response.headerFields,
+                        name: "MCP-Protocol-Version",
+                        as: Swift.String.self
+                    ))
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.mcp_root_post.Output.Accepted.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Operations.mcp_root_post.Output.Accepted.Body.jsonPayload.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .accepted(.init(
+                        headers: headers,
+                        body: body
+                    ))
+                case 400:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.mcp_root_post.Output.BadRequest.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .badRequest(.init(body: body))
                 case 401:
                     let headers: Operations.mcp_root_post.Output.Unauthorized.Headers = .init(WWW_hyphen_Authenticate: try converter.getRequiredHeaderFieldAsURI(
                         in: response.headerFields,
@@ -12139,6 +12250,72 @@ public struct Client: APIProtocol {
                         headers: headers,
                         body: body
                     ))
+                case 403:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.mcp_root_post.Output.Forbidden.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .forbidden(.init(body: body))
+                case 413:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.mcp_root_post.Output.ContentTooLarge.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .contentTooLarge(.init(body: body))
+                case 415:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.mcp_root_post.Output.UnsupportedMediaType.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .unsupportedMediaType(.init(body: body))
                 default:
                     return .undocumented(
                         statusCode: response.status.code,
@@ -12169,13 +12346,18 @@ public struct Client: APIProtocol {
                 suppressMutabilityWarning(&request)
                 try converter.setHeaderFieldAsURI(
                     in: &request.headerFields,
-                    name: "Mcp-Session-Id",
-                    value: input.headers.Mcp_hyphen_Session_hyphen_Id
+                    name: "MCP-Protocol-Version",
+                    value: input.headers.MCP_hyphen_Protocol_hyphen_Version
                 )
                 try converter.setHeaderFieldAsURI(
                     in: &request.headerFields,
-                    name: "MCP-Protocol-Version",
-                    value: input.headers.MCP_hyphen_Protocol_hyphen_Version
+                    name: "Mcp-Method",
+                    value: input.headers.Mcp_hyphen_Method
+                )
+                try converter.setHeaderFieldAsURI(
+                    in: &request.headerFields,
+                    name: "Mcp-Name",
+                    value: input.headers.Mcp_hyphen_Name
                 )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
@@ -12185,48 +12367,6 @@ public struct Client: APIProtocol {
             },
             deserializer: { response, responseBody in
                 switch response.status.code {
-                case 200:
-                    let headers: Operations.mcp_root_delete.Output.Ok.Headers = .init(
-                        Mcp_hyphen_Session_hyphen_Id: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "Mcp-Session-Id",
-                            as: Swift.String.self
-                        ),
-                        MCP_hyphen_Protocol_hyphen_Version: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "MCP-Protocol-Version",
-                            as: Swift.String.self
-                        ),
-                        WWW_hyphen_Authenticate: try converter.getOptionalHeaderFieldAsURI(
-                            in: response.headerFields,
-                            name: "WWW-Authenticate",
-                            as: Swift.String.self
-                        )
-                    )
-                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
-                    let body: Operations.mcp_root_delete.Output.Ok.Body
-                    let chosenContentType = try converter.bestContentType(
-                        received: contentType,
-                        options: [
-                            "application/json"
-                        ]
-                    )
-                    switch chosenContentType {
-                    case "application/json":
-                        body = try await converter.getResponseBodyAsJSON(
-                            Operations.mcp_root_delete.Output.Ok.Body.jsonPayload.self,
-                            from: responseBody,
-                            transforming: { value in
-                                .json(value)
-                            }
-                        )
-                    default:
-                        preconditionFailure("bestContentType chose an invalid content type.")
-                    }
-                    return .ok(.init(
-                        headers: headers,
-                        body: body
-                    ))
                 case 401:
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
                     let body: Operations.mcp_root_delete.Output.Unauthorized.Body
@@ -12249,6 +12389,28 @@ public struct Client: APIProtocol {
                         preconditionFailure("bestContentType chose an invalid content type.")
                     }
                     return .unauthorized(.init(body: body))
+                case 405:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.mcp_root_delete.Output.MethodNotAllowed.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .methodNotAllowed(.init(body: body))
                 default:
                     return .undocumented(
                         statusCode: response.status.code,

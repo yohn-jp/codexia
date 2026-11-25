@@ -1589,7 +1589,6 @@ model EventStream {
 
 model McpEventStream {
   @header contentType: "text/event-stream";
-  @header("Mcp-Session-Id") mcpSessionId?: string;
   @header("MCP-Protocol-Version") protocolVersion?: string;
   @header("WWW-Authenticate") wwwAuthenticate?: string;
   @body body: string;
@@ -1597,10 +1596,20 @@ model McpEventStream {
 
 model McpJsonResponse {
   @header contentType: "application/json";
-  @header("Mcp-Session-Id") mcpSessionId?: string;
   @header("MCP-Protocol-Version") protocolVersion?: string;
   @header("WWW-Authenticate") wwwAuthenticate?: string;
   @body body: JsonObject;
+}
+
+model McpMethodDenied {
+  @statusCode statusCode: 405;
+  @body body: ApiError;
+}
+
+model McpAcceptedResponse {
+  @statusCode statusCode: 202;
+  @header("MCP-Protocol-Version") protocolVersion?: string;
+  @body body?: JsonObject;
 }
 
 model JsonResponse {

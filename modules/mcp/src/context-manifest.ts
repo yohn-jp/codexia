@@ -1,4 +1,4 @@
-import { z } from "zod/v3";
+import { z } from 'zod/v4';
 
 export const MCP_WRITING_CONTEXT_MAX_CHARACTERS = 50_000;
 export const MCP_WRITING_CONTEXT_MAX_SELECTION_CHARACTERS = 5_000;
@@ -29,7 +29,7 @@ export interface McpWritingContextInput {
 export class McpWritingContextInputError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "McpWritingContextInputError";
+    this.name = 'McpWritingContextInputError';
   }
 }
 
@@ -60,7 +60,7 @@ function fnv1aHash(text: string): string {
     hash ^= text.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193);
   }
-  return (hash >>> 0).toString(16).padStart(8, "0");
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 /** Keep the source MCP context identity, limits, and manifest fields intact. */
@@ -73,13 +73,10 @@ export function createMcpWritingContext(input: McpWritingContextInput) {
       selection.to - selection.from !== selection.text.length ||
       takeCharacters(selection.text, MCP_WRITING_CONTEXT_MAX_SELECTION_CHARACTERS).trimmed)
   ) {
-    throw new McpWritingContextInputError(
-      "Selection range is invalid or text exceeds the 5000 character limit",
-    );
+    throw new McpWritingContextInputError('Selection range is invalid or text exceeds the 5000 character limit');
   }
 
-  const boundedTitle =
-    input.sceneTitle === undefined ? undefined : takeCharacters(input.sceneTitle, 512);
+  const boundedTitle = input.sceneTitle === undefined ? undefined : takeCharacters(input.sceneTitle, 512);
   const title = boundedTitle?.text;
   const boundedSavedText = takeCharacters(input.manuscriptText, MCP_WRITING_CONTEXT_MAX_CHARACTERS);
   const savedText = boundedSavedText.text;
@@ -91,25 +88,25 @@ export function createMcpWritingContext(input: McpWritingContextInput) {
 
   const parts = [
     {
-      kind: "scene" as const,
-      source: "arcadia" as const,
+      kind: 'scene' as const,
+      source: 'arcadia' as const,
       source_identity: { project_id: input.projectId, scene_id: input.sceneId },
       revision: input.sceneRevision ?? null,
-      inclusion_reason: "Requested scene identity",
+      inclusion_reason: 'Requested scene identity',
       metadata_included: true,
       size: {
-        source_character_count: characterCount(input.sceneTitle ?? ""),
-        included_character_count: sceneTitleIncluded ? characterCount(title ?? "") : 0,
-        included_byte_count: sceneTitleIncluded ? byteCount(title ?? "") : 0,
+        source_character_count: characterCount(input.sceneTitle ?? ''),
+        included_character_count: sceneTitleIncluded ? characterCount(title ?? '') : 0,
+        included_byte_count: sceneTitleIncluded ? byteCount(title ?? '') : 0,
         token_count: null,
-        token_count_status: "not_measured",
+        token_count_status: 'not_measured',
       },
       dropped: title !== undefined && !sceneTitleIncluded,
       trimmed: sceneTitleIncluded && sceneTrimmed,
     },
     {
-      kind: "saved_manuscript" as const,
-      source: "arcadia" as const,
+      kind: 'saved_manuscript' as const,
+      source: 'arcadia' as const,
       source_identity: {
         project_id: input.projectId,
         scene_id: input.sceneId,
@@ -117,16 +114,14 @@ export function createMcpWritingContext(input: McpWritingContextInput) {
         content_hash: savedContentHash,
       },
       revision: input.manuscriptRevision,
-      inclusion_reason: manifestOnly
-        ? "Saved manuscript omitted by manifest-only response"
-        : "Requested saved scene manuscript",
+      inclusion_reason: manifestOnly ? 'Saved manuscript omitted by manifest-only response' : 'Requested saved scene manuscript',
       metadata_included: true,
       size: {
         source_character_count: characterCount(input.manuscriptText),
         included_character_count: manifestOnly ? 0 : characterCount(savedText),
         included_byte_count: manifestOnly ? 0 : byteCount(savedText),
         token_count: null,
-        token_count_status: "not_measured",
+        token_count_status: 'not_measured',
       },
       dropped: manifestOnly,
       trimmed: !manifestOnly && savedTextTrimmed,
@@ -134,8 +129,8 @@ export function createMcpWritingContext(input: McpWritingContextInput) {
     ...(selection
       ? [
           {
-            kind: "selection" as const,
-            source: "mcp_client" as const,
+            kind: 'selection' as const,
+            source: 'mcp_client' as const,
             source_identity: {
               project_id: input.projectId,
               scene_id: input.sceneId,
@@ -145,15 +140,15 @@ export function createMcpWritingContext(input: McpWritingContextInput) {
             },
             revision: null,
             inclusion_reason: manifestOnly
-              ? "Caller selection omitted by manifest-only response"
-              : "Explicitly provided as an MCP selection argument",
+              ? 'Caller selection omitted by manifest-only response'
+              : 'Explicitly provided as an MCP selection argument',
             metadata_included: true,
             size: {
               source_character_count: characterCount(selection.text),
               included_character_count: manifestOnly ? 0 : characterCount(selection.text),
               included_byte_count: manifestOnly ? 0 : byteCount(selection.text),
               token_count: null,
-              token_count_status: "not_measured",
+              token_count_status: 'not_measured',
             },
             dropped: manifestOnly,
             trimmed: false,
@@ -177,18 +172,18 @@ export function createMcpWritingContext(input: McpWritingContextInput) {
     },
     selection: selection
       ? {
-          status: "client_provided" as const,
+          status: 'client_provided' as const,
           from: selection.from,
           to: selection.to,
           text: selection.text,
           content_hash: selectionContentHash,
         }
-      : { status: "not_provided" as const },
-    draft: { status: "not_shared" as const },
+      : { status: 'not_provided' as const },
+    draft: { status: 'not_shared' as const },
     manifest: {
-      scope: "arcadia_provided_context" as const,
+      scope: 'arcadia_provided_context' as const,
       external_host_final_prompt_observed: false as const,
-      draft: { status: "not_shared" as const },
+      draft: { status: 'not_shared' as const },
       parts,
     },
   };

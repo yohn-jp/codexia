@@ -12,7 +12,7 @@
 | EXT-EDGE-002 | Browser/iOS/MCP client → Cloudflare Tunnel → VM Fastify | HTTPS /api*、/health*、/mcp*、/.well-known/* | TLS/Edge audienceとアプリ内OAuth・resource authorizationを分離 | deploy/cloudflare/ui-routes.json、public-protocol-paths.json、packages/api/src/server.ts |
 | EXT-AUTH-001 | Browser/iOS → Codexia Better Auth | OAuth 2.0 code + PKCE S256、sign-in/consent、JWKS/metadata | 登録済みpublic client、exact redirect URI、issuer/audience、session/CSRF | [Auth](API-AUTHN-AUTHZ.md)、packages/api/src/better-auth.ts、app/src/oauth.ts |
 | EXT-AUTH-002 | Better Auth ↔ optional external OIDC IdP | OIDC discovery、authorization、callback、token/identity | 外部IdP credentialをCodexia API bearerとみなさない。設定なしでもPasskey利用可能 | [Auth](API-AUTHN-AUTHZ.md)、packages/api/src/auth-mode.ts、better-auth.ts |
-| EXT-MCP-001 | External AI client → Codexia /mcp | OAuth protected resource + Streamable HTTP / JSON-RPC | 登録MCP client、assigned project、mcp:read/compute/proposeのみ。approval/apply禁止 | [MCP OAuth](MCP-OAUTH.md)、packages/api/src/oauth-mcp.ts、modules/mcp/src/http.ts、tools/ |
+| EXT-MCP-001 | External AI client → Codexia /mcp | OAuth protected resource + MCP 2026-07-28 Streamable HTTP / JSON-RPC | 登録MCP client、assigned project、mcp:read/compute/proposeのみ。approval/apply禁止 | [MCP OAuth](MCP-OAUTH.md)、packages/api/src/oauth-mcp.ts、modules/mcp/src/http.ts、tools/ |
 | EXT-MCP-002 | Local trusted MCP adapter → Core actions | MCP stdio | 運用実行環境のtrusted identityと同一Core action/effect。別writer禁止 | [Modules](MODULES.md)、modules/mcp/src/stdio.ts、tools.ts |
 | EXT-DB-001 | VM API/Core → PostgreSQL | pg protocol/transaction、別schema | public author dataはPostgreSQL正本。auth schemaとroleを分離 | [DB detail](DATABASE-DETAIL-CONTRACT.md)、packages/persistence-postgres/src/postgres-store.ts、packages/api/src/auth-schema.ts |
 | EXT-OPS-001 | GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → VM | private control-plane SSH / declarative deployment | protected environment、host key pin、release certificate。Cloudflare公開面を管理SSHに流用しない | [Deployment](../deployment/README.md)、deploy/ansible/、.github/workflows/backend-deployment-handoff.yml |
@@ -52,7 +52,9 @@
 - client allowlistとserver側project assignmentは packages/api/src/oauth-mcp.tsおよび環境設定が認可を所有する。client自己申告projectだけで権限を決めない。
 - permitted effectは read / compute / propose。approval/apply、作者のrecent-activity、inbox、管理設定、直接PersistenceはMCPから拒否する。
 - Tool名、入力/出力Schema、権限、snapshot、エラー、timeout、replay、処理上限の物理一覧は modules/mcp/src/tools/ のregistrarとshared action descriptorから抽出し、将来のschemaツールで実装と突合する。
-- HTTP transportとstdioは認可済みCore actionへ到達するadapter。HTTPへの接続可否と、ツールのeffect認可を混同しない。認証対象外の内部LLM実行拡張は凍結。
+- HTTP と stdio は公式 SDK v2 の共通サーバーファクトリーからツールを登録し、認可済み Core action を呼ぶ。
+  プロトコルの採用版と互換期限は [MCP 移行設計](MCP-V2-MIGRATION.md) に従う。
+  HTTP への接続後もツールごとの effect を判定する。内部 LLM 実行の拡張は凍結する。
 - 代表検証候補は tests/integration/mcp-acceptance.test.mjs と packages/api/src/oauth-mcp.test.ts。各toolのpositive/negative境界まで証明できるかは別途監査する。
 
 ## 配備・registry・backup外部IFの受入

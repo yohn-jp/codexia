@@ -1,5 +1,5 @@
 import type { ModuleContext, ModuleDefinition, ModuleManifest } from '@codexia/contracts';
-import { closeMcpSessions, createMcpHttpContribution, type McpSession } from './http.js';
+import { createMcpHttpContribution } from './http.js';
 
 export const mcpManifest: ModuleManifest = {
   id: 'mcp',
@@ -15,28 +15,13 @@ export const mcpManifest: ModuleManifest = {
 };
 
 /** Register the external MCP transports without allocating models or persistent storage. */
-export async function createModule(context: ModuleContext): Promise<ModuleDefinition> {
-  const sessions = new Map<string, McpSession>();
-  let disposed = false;
-  const dispose = async () => {
-    if (disposed) return;
-    disposed = true;
-    context.signal.removeEventListener('abort', abortHandler);
-    await closeMcpSessions(sessions);
-  };
-  const abortHandler = () => {
-    void dispose();
-  };
-
-  context.signal.addEventListener('abort', abortHandler, { once: true });
-  if (context.signal.aborted) await dispose();
-
+export async function createModule(_context: ModuleContext): Promise<ModuleDefinition> {
   return {
     manifest: mcpManifest,
     actions: [],
     ui: [],
-    http: [createMcpHttpContribution(sessions)],
-    dispose,
+    http: [createMcpHttpContribution()],
+    async dispose() {},
   };
 }
 

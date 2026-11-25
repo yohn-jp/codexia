@@ -13,11 +13,30 @@ test('reverse discovery records authority and provenance for HTTP, MCP, DB, UI a
   assert.ok(surfaces.some((item) => item.kind === 'httpOperation' && item.id === 'GET /api/projects'));
   assert.ok(surfaces.some((item) => item.kind === 'httpRuntimeRoute' && item.id === 'GET /api/projects' && item.source.path === 'packages/api/src/generated/http-contract.json'));
   assert.ok(surfaces.some((item) => item.kind === 'mcpTool' && item.id === 'list_projects'));
+  const publicMcpTools = surfaces.filter((item) => item.kind === 'mcpTool');
+  assert.equal(publicMcpTools.length, 53, 'all public MCP tools remain discoverable across SDK v1/v2 registration shapes');
+  assert.equal(new Set(publicMcpTools.map((item) => item.id)).size, 53, 'every public MCP tool has one unique reverse mapping');
   assert.ok(surfaces.some((item) => item.kind === 'databaseCatalogObject' && item.id === 'public.project'));
   assert.ok(surfaces.some((item) => item.kind === 'uiControl' && item.id === 'WRT-01.A'));
   assert.ok(surfaces.some((item) => item.kind === 'backupInterface' && item.id === 'deploy/backup/backup.sh'));
   assert.ok(surfaces.every((item) => item.provenance && item.source?.path));
   assert.deepEqual(new Set(limitations.map((item) => item.area)), new Set(['mcp-effect', 'database-live', 'ui-runtime', 'native-ios-runtime', 'iac-runtime', 'ansible-runtime', 'deployment-runtime', 'backup-receipt']));
+});
+
+test('reverse discovery inventories SDK v2 registerTool names with source coordinates', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codexia-mcp-v2-inventory-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const toolPath = 'modules/mcp/src/tools/project.ts';
+  await mkdir(path.dirname(path.join(root, toolPath)), { recursive: true });
+  await writeFile(path.join(root, toolPath), [
+    'server.registerTool("list_projects", { description: "List", inputSchema: {} }, async () => {});',
+    'server.registerTool(dynamicToolName, { description: "Dynamic", inputSchema: {} }, handler);',
+  ].join('\n'));
+
+  const { surfaces } = await discoverReverseSurfaces({ repositoryRoot: root });
+  assert.ok(surfaces.some(item => item.kind === 'mcpTool' && item.id === 'list_projects'
+    && item.source.path === toolPath && item.source.line === 1));
+  assert.ok(surfaces.some(item => item.kind === 'mcpRegistration' && item.id === `dynamic:${toolPath}`));
 });
 
 test('reverse discovery inventories native iOS views and declared IaC resources', async t => {

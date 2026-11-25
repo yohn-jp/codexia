@@ -1678,17 +1678,17 @@ paths:
           required: true
           schema:
             type: string
-        - name: Mcp-Session-Id
-          in: header
-          required: false
-          schema:
-            type: string
         - name: MCP-Protocol-Version
           in: header
           required: false
           schema:
             type: string
-        - name: Last-Event-ID
+        - name: Mcp-Method
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: Mcp-Name
           in: header
           required: false
           schema:
@@ -1699,29 +1699,6 @@ paths:
           schema:
             type: string
       responses:
-        '200':
-          description: The request has succeeded.
-          headers:
-            Mcp-Session-Id:
-              required: false
-              schema:
-                type: string
-            MCP-Protocol-Version:
-              required: false
-              schema:
-                type: string
-            WWW-Authenticate:
-              required: false
-              schema:
-                type: string
-          content:
-            text/event-stream:
-              schema:
-                type: string
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
         '401':
           description: Access is unauthorized.
           headers:
@@ -1729,6 +1706,12 @@ paths:
               required: true
               schema:
                 type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '405':
+          description: Client error
           content:
             application/json:
               schema:
@@ -1744,12 +1727,17 @@ paths:
           required: true
           schema:
             type: string
-        - name: Mcp-Session-Id
+        - name: MCP-Protocol-Version
           in: header
           required: false
           schema:
             type: string
-        - name: MCP-Protocol-Version
+        - name: Mcp-Method
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: Mcp-Name
           in: header
           required: false
           schema:
@@ -1763,10 +1751,6 @@ paths:
         '200':
           description: The request has succeeded.
           headers:
-            Mcp-Session-Id:
-              required: false
-              schema:
-                type: string
             MCP-Protocol-Version:
               required: false
               schema:
@@ -1783,6 +1767,24 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
+        '202':
+          description: The request has been accepted for processing, but processing has not yet completed.
+          headers:
+            MCP-Protocol-Version:
+              required: false
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Access is unauthorized.
           headers:
@@ -1790,6 +1792,24 @@ paths:
               required: true
               schema:
                 type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '415':
+          description: Client error
           content:
             application/json:
               schema:
@@ -1817,39 +1837,30 @@ paths:
           required: true
           schema:
             type: string
-        - name: Mcp-Session-Id
-          in: header
-          required: false
-          schema:
-            type: string
         - name: MCP-Protocol-Version
           in: header
           required: false
           schema:
             type: string
+        - name: Mcp-Method
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: Mcp-Name
+          in: header
+          required: false
+          schema:
+            type: string
       responses:
-        '200':
-          description: The request has succeeded.
-          headers:
-            Mcp-Session-Id:
-              required: false
-              schema:
-                type: string
-            MCP-Protocol-Version:
-              required: false
-              schema:
-                type: string
-            WWW-Authenticate:
-              required: false
-              schema:
-                type: string
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
-        '401':
-          description: Access is unauthorized.
+                $ref: '#/components/schemas/ApiError'
+        '405':
+          description: Client error
           content:
             application/json:
               schema:
@@ -4470,17 +4481,23 @@ paths:
     get:
       operationId: mcp_root_get
       parameters:
-        - name: Mcp-Session-Id
-          in: header
+        - name: projectId
+          in: query
           required: false
           schema:
             type: string
+          explode: false
         - name: MCP-Protocol-Version
           in: header
           required: false
           schema:
             type: string
-        - name: Last-Event-ID
+        - name: Mcp-Method
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: Mcp-Name
           in: header
           required: false
           schema:
@@ -4491,29 +4508,6 @@ paths:
           schema:
             type: string
       responses:
-        '200':
-          description: The request has succeeded.
-          headers:
-            Mcp-Session-Id:
-              required: false
-              schema:
-                type: string
-            MCP-Protocol-Version:
-              required: false
-              schema:
-                type: string
-            WWW-Authenticate:
-              required: false
-              schema:
-                type: string
-          content:
-            text/event-stream:
-              schema:
-                type: string
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
         '401':
           description: Access is unauthorized.
           headers:
@@ -4525,18 +4519,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '405':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       tags:
         - mcp
       x-codexia-principal: MCP-CLIENT + project assignment + scope
     post:
       operationId: mcp_root_post
       parameters:
-        - name: Mcp-Session-Id
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+          explode: false
+        - name: MCP-Protocol-Version
           in: header
           required: false
           schema:
             type: string
-        - name: MCP-Protocol-Version
+        - name: Mcp-Method
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: Mcp-Name
           in: header
           required: false
           schema:
@@ -4550,10 +4561,6 @@ paths:
         '200':
           description: The request has succeeded.
           headers:
-            Mcp-Session-Id:
-              required: false
-              schema:
-                type: string
             MCP-Protocol-Version:
               required: false
               schema:
@@ -4570,6 +4577,24 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
+        '202':
+          description: The request has been accepted for processing, but processing has not yet completed.
+          headers:
+            MCP-Protocol-Version:
+              required: false
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Access is unauthorized.
           headers:
@@ -4577,6 +4602,24 @@ paths:
               required: true
               schema:
                 type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '415':
+          description: Client error
           content:
             application/json:
               schema:
@@ -4599,39 +4642,30 @@ paths:
     delete:
       operationId: mcp_root_delete
       parameters:
-        - name: Mcp-Session-Id
-          in: header
-          required: false
-          schema:
-            type: string
         - name: MCP-Protocol-Version
           in: header
           required: false
           schema:
             type: string
+        - name: Mcp-Method
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: Mcp-Name
+          in: header
+          required: false
+          schema:
+            type: string
       responses:
-        '200':
-          description: The request has succeeded.
-          headers:
-            Mcp-Session-Id:
-              required: false
-              schema:
-                type: string
-            MCP-Protocol-Version:
-              required: false
-              schema:
-                type: string
-            WWW-Authenticate:
-              required: false
-              schema:
-                type: string
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
-        '401':
-          description: Access is unauthorized.
+                $ref: '#/components/schemas/ApiError'
+        '405':
+          description: Client error
           content:
             application/json:
               schema:
@@ -9519,11 +9553,11 @@ x-codexia-cors:
     - X-Codexia-Recent-Activity-Order
     - Prefer
   mcpRequestHeaders:
-    - Mcp-Session-Id
     - MCP-Protocol-Version
-    - Last-Event-ID
+    - Mcp-Method
+    - Mcp-Name
   mcpExposeHeaders:
-    - Mcp-Session-Id
+    - MCP-Protocol-Version
     - WWW-Authenticate
   preflight:
     route: explicit OPTIONS for registered API and MCP paths; requested method must match the path
@@ -9537,5 +9571,5 @@ x-codexia-cors:
       - PATCH
       - DELETE
       - OPTIONS
-x-codexia-api-epoch: 2
+x-codexia-api-epoch: 3
 x-codexia-contract-status: incomplete

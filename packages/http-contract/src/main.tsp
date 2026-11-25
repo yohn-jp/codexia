@@ -14,15 +14,15 @@ using TypeSpec.OpenAPI;
 @info(#{ version: "2.0.0" })
 @server("https://api.codexia.example", "Codexia API")
 @extension("x-codexia-contract-status", "incomplete")
-@extension("x-codexia-api-epoch", 2)
+@extension("x-codexia-api-epoch", 3)
 @extension("x-codexia-cors", #{
   originPolicy: "same-origin or exact configured HTTPS origin; wildcard origins are forbidden",
   credentials: false,
   vary: #["Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers"],
   methods: #["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
   requestHeaders: #["Authorization", "Content-Type", "Idempotency-Key", "X-Client-Id", "X-Codexia-Recent-Activity-Order", "Prefer"],
-  mcpRequestHeaders: #["Mcp-Session-Id", "MCP-Protocol-Version", "Last-Event-ID"],
-  mcpExposeHeaders: #["Mcp-Session-Id", "WWW-Authenticate"],
+  mcpRequestHeaders: #["MCP-Protocol-Version", "Mcp-Method", "Mcp-Name"],
+  mcpExposeHeaders: #["MCP-Protocol-Version", "WWW-Authenticate"],
   preflight: #{
     route: "explicit OPTIONS for registered API and MCP paths; requested method must match the path",
     successStatus: 204,

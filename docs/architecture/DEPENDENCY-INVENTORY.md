@@ -55,7 +55,8 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@types/pg` | API `8.23.1` / persistence `^8.23.1` | PostgreSQL型 | **連動**: 両接続主体の`pg` 8.23系と型定義の整合を型検査で確認 |
 | `jsonc-parser` | `3.3.1` | API・起動時のMCPクライアント別project割当を厳格JSONとして解析し、同一オブジェクト内の重複キーを検出 | **新規採用**: APIの実行時依存。更新時は構文エラー、コメント、末尾カンマ、エスケープ表記を含む重複キーの拒否を検証 |
 | `zod` | `4.6.7` | API/MCP/Assistant/Speakerの境界入力（API起動時のMCP project割当を含む）、Desktop Webの生成DTO検証 | **既存採用**: 対象間で統一。Core-onlyを無条件にZod依存にしない |
-| `@modelcontextprotocol/sdk` | `1.32.2` | MCP・公式SDK | **既存採用**: プロトコル処理を二重実装しない。旧版を維持する独立した制約は未確認 |
+| `@modelcontextprotocol/server` | `2.4.0` | MCP 実行時。2026-07-28 の HTTP と stdio | **連動**。Node 24、TypeScript 7、Zod v4 と組み合わせてツール登録、入出力、切断を検証する |
+| `@modelcontextprotocol/client` | `2.4.0` | MCP の開発時検証。HTTP と stdio の呼び出し | **連動**。server と同じ版に固定し、両 transport と旧世代互換を検証する |
 
 ### Web UI・ルーター・エディター
 

@@ -157,7 +157,7 @@ test('discovers an unclassified SQL object from source instead of trusting cache
   }));
   await writeFile(path.join(root, 'modules', 'mcp', 'src', 'tools.ts'), [
     'server.tool("list_projects", "existing tool", {});',
-    'server.tool("spec01_inventory_fixture", "unclassified tool", {});',
+    'server.registerTool("spec01_inventory_fixture", { description: "unclassified tool", inputSchema: {} }, async () => {});',
   ].join('\n'));
   await writeFile(path.join(root, 'packages', 'persistence-postgres', 'migrations', '0001-initial.sql'), [
     'CREATE TABLE project (id integer PRIMARY KEY);',
