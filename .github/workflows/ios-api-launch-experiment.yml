@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   api:
-    name: Launch (${{ matrix.lane }}, ${{ matrix.variant }})
+    name: Launch (${{ matrix.lane }}, ${{ matrix.variant }}, repeat ${{ matrix.repeat }})
     runs-on: xcode-27
     timeout-minutes: 45
     strategy:
@@ -22,6 +22,7 @@ jobs:
       matrix:
         lane: [keychain-simulator, transport-simulator]
         variant: [control, git-cache]
+        repeat: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -55,6 +56,9 @@ jobs:
             git config --global core.fsmonitor true
             git config --global core.untrackedCache true
             git fsmonitor--daemon start
+          else
+            git config --global core.fsmonitor false
+            git config --global core.untrackedCache false
           fi
           git config --show-origin --get-regexp '^core\.(fsmonitor|untrackedcache)$' || true
       - name: Select iOS 27 iPhone Simulator without booting
@@ -155,7 +159,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: ios-api-launch-${{ matrix.lane }}-${{ matrix.variant }}-${{ github.event.pull_request.head.sha || github.sha }}-attempt-${{ github.run_attempt }}
+          name: ios-api-launch-${{ matrix.lane }}-${{ matrix.variant }}-repeat-${{ matrix.repeat }}-${{ github.event.pull_request.head.sha || github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ios-api-evidence/
           if-no-files-found: error
           retention-days: 14
