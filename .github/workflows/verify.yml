@@ -212,7 +212,12 @@ jobs:
             architecture)
               pnpm --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
               ;;
-            api|db)
+            api)
+              # unit-api integration tests import the public app adapter; install
+              # its workspace importer so app/src runtime dependencies resolve.
+              pnpm --filter '@codexia/api...' --filter @codexia/app --filter @codexia/ci-evidence --fail-if-no-match install --frozen-lockfile --prefer-offline
+              ;;
+            db)
               # Both tasks require the exact API dependency closure; the DB
               # contract also builds it before its isolated rootless fixture.
               pnpm --filter '@codexia/api...' --filter @codexia/ci-evidence --fail-if-no-match install --frozen-lockfile --prefer-offline

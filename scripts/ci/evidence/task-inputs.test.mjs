@@ -33,7 +33,8 @@ async function fixture(t) {
     'scripts/ci/impact/contract.mjs', 'scripts/ci/execution/workspace.mjs', '.github/workflows/verify.yml',
     'scripts/ci/evidence/package.json',
     'scripts/architecture/package.json', 'scripts/architecture/package-lock.json', 'scripts/architecture/verify.mjs',
-    'packages/core/package.json', 'packages/core/src/index.ts', 'packages/core/index.test.mjs', 'docs/README.md']) {
+    'packages/core/package.json', 'packages/core/src/index.ts', 'packages/core/index.test.mjs',
+    'app/package.json', 'app/src/api.ts', 'docs/README.md']) {
     const target = path.join(root, file);
     await mkdir(path.dirname(target), { recursive: true });
     const content = file === 'package.json' ? JSON.stringify({ packageManager: 'pnpm@12.21.0' })
@@ -58,6 +59,27 @@ test('task input closure is stable for an unchanged tree and ignores only impact
   await git(root, 'commit', '-qm', 'docs only');
   const docsOnly = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
   assert.deepEqual(docsOnly, first, 'documentation excluded by the canonical impact rules does not change task inputs');
+});
+
+test('unit-api proof binds the imported public app adapter and its runtime dependency manifest', async t => {
+  const root = await fixture(t);
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const input = { root, sha, task: 'unit-api', runtime };
+  const original = captureTaskInputClosure(input);
+
+  await writeFile(path.join(root, 'app/src/api.ts'), 'export const api = {} as const;\n');
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-qm', 'change public app adapter');
+  const sourceChanged = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+  assert.notEqual(sourceChanged.source, original.source, 'app adapter source must invalidate the API task proof');
+
+  await git(root, 'reset', '--hard', sha);
+  await writeFile(path.join(root, 'app/package.json'), JSON.stringify({ name: '@codexia/app', dependencies: { 'oauth4webapi': '3.8.9' } }));
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-qm', 'change app runtime dependencies');
+  const dependencyChanged = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+  assert.notEqual(dependencyChanged.dependencies, original.dependencies,
+    'app runtime dependencies used by the imported adapter must invalidate the API task proof');
 });
 
 test('task input closure binds source, test, dependency, environment, toolchain, recipe, and producer inputs', async t => {
