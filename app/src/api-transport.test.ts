@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   clearNativeApiSession,
   configureNativeApiSession,
+  requestApiNoContent,
   requestApi,
   requestApiEventStream,
 } from "./api-transport.js";
@@ -69,10 +70,22 @@ test("native API event streams remain explicitly unsupported", async () => {
     fetchRequest: async () => Response.json({}),
   });
   try {
-    await assert.rejects(requestApiEventStream("/api/jobs/events", new AbortController().signal), { code: "NATIVE_STREAM_UNSUPPORTED" });
+    await assert.rejects(requestApiEventStream("/api/jobs/events", { signal: new AbortController().signal }), { code: "NATIVE_STREAM_UNSUPPORTED" });
   } finally {
     clearNativeApiSession();
   }
+});
+
+test("no-content transport accepts only 204 and preserves other response errors", async () => {
+  await requestApiNoContent("/api/projects/p/approvals", {}, { auth: "api" }, async () => new Response(null, { status: 204 }));
+  await assert.rejects(
+    requestApiNoContent("/api/projects/p/approvals", {}, { auth: "api" }, async () => Response.json({}, { status: 200 })),
+    { status: 502, code: "INVALID_RESPONSE" },
+  );
+  await assert.rejects(
+    requestApiNoContent("/api/projects/p/approvals", {}, { auth: "api" }, async () => Response.json({ error: "Denied", code: "FORBIDDEN" }, { status: 403 })),
+    { status: 403, code: "FORBIDDEN" },
+  );
 });
 
 test("generated job event operation can return the raw SSE Response", async () => {

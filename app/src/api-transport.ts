@@ -139,16 +139,17 @@ export async function requestApi<T>(
     readApiResponse(await fetchApiRequest(path, init, routePolicy, fetcher), guard));
 }
 
-/** Fetch a response for non-JSON operations while retaining shared auth and lifecycle behavior. */
-export function requestApiResponse(
+/** Accept exactly a 204 response for operations whose runtime contract is no-content. */
+export function requestApiNoContent(
   path: string,
   init: RequestInit = {},
   policy: ApiTransportPolicy = { auth: "api" },
   fetcher: typeof fetch = fetch,
-): Promise<Response> {
+): Promise<void> {
   const lifecycle = documentLifecycle;
   const routePolicy = effectivePolicy(path, policy);
-  return withDocumentDepartureClassification(lifecycle, init, () => fetchApiRequest(path, init, routePolicy, fetcher));
+  return withDocumentDepartureClassification(lifecycle, init, async () =>
+    readApiResponse(await fetchApiRequest(path, init, routePolicy, fetcher), (value): value is undefined => value === undefined));
 }
 
 /** Store an API access token only in the current JavaScript runtime. */
@@ -182,16 +183,23 @@ export function hasNativeApiSession(): boolean {
   return nativeApiSession !== undefined;
 }
 
-/** Raw SSE retains the server response body and the native unsupported boundary. */
-export async function requestApiEventStream(path: string, signal: AbortSignal): Promise<Response> {
+/** Raw SSE retains request options, response body, errors, lifecycle, and native boundary. */
+export async function requestApiEventStream(
+  path: string,
+  init: RequestInit = {},
+  policy: ApiTransportPolicy = { auth: "api" },
+  fetcher: typeof fetch = fetch,
+): Promise<Response> {
   if (nativeApiSession) {
     throw new ApiError("Native job event streaming is unavailable; use the Job Inbox refresh action.", 501, "NATIVE_STREAM_UNSUPPORTED");
   }
-  const init = { headers: { Accept: "text/event-stream" }, signal };
+  const headers = new Headers(init.headers);
+  if (!headers.has("Accept")) headers.set("Accept", "text/event-stream");
+  const streamInit = { ...init, headers };
   const lifecycle = documentLifecycle;
-  const policy = effectivePolicy(path, { auth: "api" });
-  return withDocumentDepartureClassification(lifecycle, init, async () => {
-    const response = await fetchApiRequest(path, init, policy, fetch);
+  const routePolicy = effectivePolicy(path, policy);
+  return withDocumentDepartureClassification(lifecycle, streamInit, async () => {
+    const response = await fetchApiRequest(path, streamInit, routePolicy, fetcher);
     if (!response.ok) {
       let body: unknown = null;
       try { body = await response.json(); } catch { /* preserve the status and fallback error below */ }

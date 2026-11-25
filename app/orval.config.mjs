@@ -76,6 +76,8 @@ export const operationIds = [
 // These are documented compatibility deviations, used by active Desktop
 // paths. Keep target-only operations excluded and review each ID deliberately.
 export const provisionalOperationIds = [
+  'api_browser_version_get',
+  'api_version_get',
   'auth_list_consents_get',
   'jobs_list_get',
   'persistence_anchor_mentions_post',
