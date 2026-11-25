@@ -105,18 +105,15 @@ async function scratchPayloads(page: Page): Promise<Array<{ key: string; scratch
 
 preparedAuthorTest("scoped CSS renders desktop pseudo elements and mobile web-component parts", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);
-  const brand = page.locator(".st-desktop-shell .brand");
-  await expect(brand).toBeVisible();
-  const mark = await brand.evaluate((element) => {
-    const pseudo = getComputedStyle(element, "::before");
-    return { content: pseudo.content, display: pseudo.display, width: pseudo.width, height: pseudo.height, background: pseudo.backgroundColor };
+  const wordmark = page.locator(".st-studio-shell .st-studio-wordmark");
+  await expect(wordmark).toBeVisible();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const durations = await wordmark.evaluate((element) => {
+    const seconds = (value: string) => Number.parseFloat(value) / (value.endsWith("ms") ? 1000 : 1);
+    return ["::before", "::after"].map((pseudo) => seconds(getComputedStyle(element, pseudo).animationDuration));
   });
-  expect(mark.content).toBe('"S"');
-  expect(mark.display).toBe("grid");
-  expect(mark.width).toBe("36px");
-  expect(mark.height).toBe("36px");
-  expect(mark.background).not.toBe("rgba(0, 0, 0, 0)");
-  expect((await brand.screenshot()).byteLength).toBeGreaterThan(0);
+  for (const duration of durations) expect(duration).toBeCloseTo(0.00001, 8);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
 
   await authorizeAuthor("mobile", page, { path: `/mobile/projects/${f.projectId}/scenes/${f.one.document.id}?view=writing` });
   const mobileContent = page.locator("ion-content.mobile-shell-content");

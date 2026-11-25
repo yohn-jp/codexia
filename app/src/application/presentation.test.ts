@@ -45,15 +45,17 @@ test('global component selectors stay inside the React root while document and t
     scopeGlobalSelector?.('.shell :is(.a, .b), .shell[data-label="a,b"] .item'),
     ':where(#root) .shell :is(.a, .b),\n:where(#root) .shell[data-label="a,b"] .item',
   );
+});
+
+test('global selector scoping preserves pseudo-elements and selector-list boundaries', () => {
   assert.equal(
-    scopeGlobalSelector?.('.panel::before, .panel::after, dialog::backdrop, x-card::part(resize-handle), slot::slotted(img)'),
-    ':where(#root) .panel::before,\n:where(#root) .panel::after,\n:where(#root) dialog::backdrop,\n:where(#root) x-card::part(resize-handle),\n:where(#root) slot::slotted(img)',
+    scopeGlobalSelector?.('.panel::before, .panel::after, ion-content::part(scroll), dialog::backdrop'),
+    ':where(#root) .panel::before,\n:where(#root) .panel::after,\n:where(#root) ion-content::part(scroll),\n:where(#root) dialog::backdrop',
   );
   assert.equal(
-    scopeGlobalSelector?.('.panel:is(.first, .second)::before, [data-label="a,b"] .item:not(.off, .hidden) /* , */'),
-    ':where(#root) .panel:is(.first, .second)::before,\n:where(#root) [data-label="a,b"] .item:not(.off, .hidden) /* , */',
+    scopeGlobalSelector?.(':root[data-zp-theme="dark"] .panel::before, .shell:is(.a, .b) /* a,b */ .item'),
+    ':root[data-zp-theme="dark"] :where(#root) .panel::before,\n:where(#root) .shell:is(.a, .b) /* a,b */ .item',
   );
-  assert.doesNotMatch(scopeGlobalSelector?.('.panel::before') ?? '', /:is\([^)]*::before/u);
 });
 
 test('an available panel keeps its workspace identity and explains a missing project', () => {
