@@ -20,6 +20,7 @@ createApiReference('#scalar-api-reference', {
   authentication: { allowedSecuritySchemes: [] },
   // Raise native secondary/danger tokens to AA contrast on Scalar's dark surfaces.
   customCss: `
+    #scalar-api-reference .scalar-api-reference,
     #scalar-api-reference .dark-mode {
       --scalar-color-3: #a0a0a0;
       --scalar-color-red: #ff7373;
