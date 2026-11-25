@@ -221,8 +221,6 @@ class TransactionTests(unittest.TestCase):
                 observer.observe_transaction(directory)
 
 
-
-
 class AbsentDatabaseResetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -282,6 +280,32 @@ class AbsentDatabaseResetTests(unittest.TestCase):
                 reset.converge("123", home)
             self.assertEqual(events, ["codexia-tunnel", "codexia-api", "create"])
             self.assertTrue(backup.exists())
+
+    def test_unknown_or_unreachable_db_never_stops_services(self):
+        reset = self.reset
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".local/state/codexia-deploy").mkdir(parents=True)
+            with patch.object(reset, "exists", return_value=True), \
+                    patch.object(reset, "admin_sql", side_effect=ValueError("unreachable")), \
+                    patch.object(reset, "stop_slot") as stop:
+                with self.assertRaises(ValueError):
+                    reset.converge("123", home)
+                stop.assert_not_called()
+
+    def test_absent_cluster_is_left_to_canonical_base_creation(self):
+        reset = self.reset
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".local/state/codexia-deploy").mkdir(parents=True)
+            with patch.object(reset, "exists", return_value=False), \
+                    patch.object(reset, "admin_sql") as sql, \
+                    patch.object(reset, "service_state", return_value=False), \
+                    patch.object(reset, "command"), \
+                    patch.object(reset, "stop_slot") as stop:
+                reset.converge("absent", home)
+                sql.assert_not_called()
+                self.assertEqual(stop.call_count, 2)
 
     def test_pending_transaction_prevents_reset(self):
         reset = self.reset

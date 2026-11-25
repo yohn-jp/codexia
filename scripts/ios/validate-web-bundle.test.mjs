@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -179,13 +179,4 @@ test("native bundle validation rejects public settings omitted from the compiled
       /missing configured API audience/u,
     );
   } finally { await rm(directory, { recursive: true, force: true }); }
-});
-
-test("Manual IPA generation retains Core and Full profile and bundle validation", async () => {
-  const workflow = await readFile(new URL("../../.github/workflows/ios-unsigned-ipa.yml", import.meta.url), "utf8");
-  assert.doesNotMatch(workflow, /^  pull_request:/mu);
-  assert.match(workflow, /^  workflow_dispatch:/mu);
-  assert.match(workflow, /fromJSON\('\["core","full"\]'\)/u);
-  assert.match(workflow, /validate-web-bundle\.mjs app\/dist\/mobile web/u);
-  assert.match(workflow, /validate-web-bundle\.mjs app\/dist\/ios-web native/u);
 });

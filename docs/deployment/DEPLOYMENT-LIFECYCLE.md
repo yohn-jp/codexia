@@ -67,10 +67,12 @@ flowchart TD
     PENDING -->|なし| LOST{"既存状態の復旧が必要?"}
     LOST -->|はい| RESTORE["R2: 独立backup / Secret復元"]
     RESTORE --> OBS
-    LOST -->|いいえ| DRIFT{"drift・DB/Auth非互換・障害?"}
+    LOST -->|いいえ| EMPTYDB{"DB不在を確認・新規承認済み・基盤正常?"}
+    EMPTYDB -->|はい| BOOT["R4: Bootstrap"]
+    EMPTYDB -->|いいえ| DRIFT{"drift・DB/Auth非互換・障害?"}
     DRIFT -->|はい| MAINT["R3: 保守・復旧・協調移行"]
     DRIFT -->|いいえ| BASE{"基盤・DB・Auth runtime収束済み?"}
-    BASE -->|いいえ| BOOT["R4: Bootstrap"]
+    BASE -->|いいえ| BOOT
     BOOT --> OBS
     BASE -->|はい| OWNER{"owner activation準備済み?"}
     OWNER -->|いいえ / 新規承認済み| SETUP["R5: 限定公開・owner登録<br/>activation preparation"]

@@ -256,6 +256,7 @@ class BootstrapControllerTests(unittest.TestCase):
             ("vars", "codexia_auth_bootstrap_image", self.image),
             ("vars", "codexia_database_initialization_approved", True),
             ("vars", "codexia_recreate_missing_app_database_approved", True),
+            ("vars", "codexia_expected_absent_database", "123"),
             ("vars", "codexia_bootstrap_stages", ["base", "auth-runtime"]),
             ("vars", "codexia_expected_bootstrap_resume", {"clusterId": "123"}),
             ("vars", "codexia_expected_owner_setup_checkpoint", {"setupMarkerPresent": True}),
