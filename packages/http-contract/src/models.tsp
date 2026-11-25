@@ -1133,6 +1133,7 @@ model PersistenceDocument {
   title: string;
   orderKey: string;
   headRevisionId: string | null;
+  @minValue(0)
   version: int32;
   createdAt: utcDateTime;
   updatedAt: utcDateTime;
