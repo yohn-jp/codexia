@@ -207,6 +207,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/audit/repomix.config.json',
   '.github/workflows/production-preflight.yml',
   'deploy/ansible/preflight-observe.py',
+  'deploy/ansible/reset-absent-app-database.py',
   'deploy/ansible/preflight-observe.yml',
   'deploy/ansible/test_preflight_observe.py',
   'deploy/ansible/prepare-deploy-ssh.sh',

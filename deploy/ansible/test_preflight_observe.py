@@ -36,7 +36,10 @@ class ObserveDatabaseTests(unittest.TestCase):
         ledger = [{"version": "0001-initial.sql", "checksum": "a" * 64}]
         with patch.object(observer, "command", return_value=(0, "true")):
             with patch.object(observer, "json_sql", return_value={**cluster, "appExists": False}):
-                self.assertEqual(self.observe()["state"], "missing")
+                self.assertEqual(self.observe(), {"state": "missing", "authState": "absent", "clusterId": "123"})
+            with patch.object(observer, "json_sql", return_value={**cluster, "appExists": False, "rolesValid": False}):
+                with self.assertRaises(ValueError):
+                    self.observe()
             with patch.object(observer, "json_sql", side_effect=[
                 cluster, {"ledgerExists": True, "authExists": False, "appRelations": 5}, ledger
             ]):
@@ -216,6 +219,105 @@ class TransactionTests(unittest.TestCase):
             (directory / "rollback-api.container").touch()
             with self.assertRaises(ValueError):
                 observer.observe_transaction(directory)
+
+
+class AbsentDatabaseResetTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            "reset_absent_db", Path(__file__).with_name("reset-absent-app-database.py"))
+        cls.reset = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.reset)
+
+    def test_recheck_blocks_existing_database_before_slot_mutation(self):
+        reset = self.reset
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state = home / ".local/state/codexia-deploy"
+            state.mkdir(parents=True)
+            release = state / "deployed-release.json"
+            release.write_text("retained")
+            release.chmod(0o600)
+            with patch.object(reset, "exists", return_value=True), \
+                    patch.object(reset, "admin_sql", return_value="123|false|true"), \
+                    patch.object(reset, "stop_slot") as stop:
+                with self.assertRaises(ValueError):
+                    reset.converge("123", home)
+                stop.assert_not_called()
+            self.assertTrue(release.exists())
+
+    def test_verified_missing_database_cleans_only_obsolete_state_then_creates(self):
+        reset = self.reset
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state = home / ".local/state/codexia-deploy"
+            auth = home / ".config/codexia-auth"
+            for directory in (state, auth):
+                directory.mkdir(parents=True)
+            old = [state / "deployed-release.json", state / "owner-setup.promoted", auth / "runtime.env"]
+            backup = state / "backup.age"
+            for path in old + [backup]:
+                path.write_text("fixture")
+                path.chmod(0o600)
+            events = []
+
+            def sql(query, read_only=True):
+                if query.startswith("CREATE"):
+                    self.assertTrue(all(not path.exists() for path in old))
+                    self.assertFalse(read_only)
+                    events.append("create")
+                    return ""
+                if query.startswith("SELECT pg_get_userbyid"):
+                    return "codexia"
+                return "123|true|true"
+
+            with patch.object(reset, "exists", return_value=True), \
+                    patch.object(reset, "admin_sql", side_effect=sql), \
+                    patch.object(reset, "verify_api_container"), \
+                    patch.object(reset, "service_state", return_value=False), \
+                    patch.object(reset, "command"), \
+                    patch.object(reset, "stop_slot", side_effect=lambda name, _: events.append(name)):
+                reset.converge("123", home)
+            self.assertEqual(events, ["codexia-tunnel", "codexia-api", "create"])
+            self.assertTrue(backup.exists())
+
+    def test_unknown_or_unreachable_db_never_stops_services(self):
+        reset = self.reset
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".local/state/codexia-deploy").mkdir(parents=True)
+            with patch.object(reset, "exists", return_value=True), \
+                    patch.object(reset, "admin_sql", side_effect=ValueError("unreachable")), \
+                    patch.object(reset, "stop_slot") as stop:
+                with self.assertRaises(ValueError):
+                    reset.converge("123", home)
+                stop.assert_not_called()
+
+    def test_absent_cluster_is_left_to_canonical_base_creation(self):
+        reset = self.reset
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".local/state/codexia-deploy").mkdir(parents=True)
+            with patch.object(reset, "exists", return_value=False), \
+                    patch.object(reset, "admin_sql") as sql, \
+                    patch.object(reset, "service_state", return_value=False), \
+                    patch.object(reset, "command"), \
+                    patch.object(reset, "stop_slot") as stop:
+                reset.converge("absent", home)
+                sql.assert_not_called()
+                self.assertEqual(stop.call_count, 2)
+
+    def test_pending_transaction_prevents_reset(self):
+        reset = self.reset
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state = home / ".local/state/codexia-deploy"
+            state.mkdir(parents=True)
+            (state / "deploy-transaction.json").write_text("fixture")
+            with patch.object(reset, "verify_absent"), patch.object(reset, "stop_slot") as stop:
+                with self.assertRaises(ValueError):
+                    reset.converge("absent", home)
+                stop.assert_not_called()
 
 
 if __name__ == "__main__":

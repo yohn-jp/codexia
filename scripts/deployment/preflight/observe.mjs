@@ -48,7 +48,7 @@ export function publicFrontendEvidence(value) {
 function stateDatabase(database, target, intent) {
   if (!database) return 'unknown';
   if (database.state === 'absent') return intent === 'restore' ? 'lost' : 'absent';
-  if (database.state === 'missing') return intent === 'restore' ? 'lost' : 'unknown';
+  if (database.state === 'missing') return intent === 'restore' ? 'lost' : intent === 'install' ? 'absent' : 'unknown';
   if (database.state === 'pristine') return 'pristine';
   if (database.state !== 'initialized') return 'unknown';
   return migrationSetFingerprint(database.ledger) === target.backend.migrationFingerprint ? 'compatible' : 'incompatible';
@@ -81,6 +81,9 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
     state.H = host.H;
     state.D = stateDatabase(host.database, targetIdentity, intent);
     state.A = host.database?.authState ?? 'unknown';
+    // Only a trusted host observation of a missing database can establish this
+    // fresh install; old DB-bound owner state cannot be used as an identity.
+    if (intent === 'install' && state.D === 'absent') state.A = 'absent';
     state.T = host.transaction ? (['recovering', 'pending'].includes(host.transaction.phase) ? 'recover' : 'resume') : 'none';
     if (state.T !== 'none') blockers.push('recovery-plan-required');
     if (installed?.state === 'running') {

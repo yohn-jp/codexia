@@ -130,11 +130,12 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
           AND EXISTS (SELECT FROM pg_roles r WHERE rolname='codexia' AND rolcanlogin AND NOT rolsuper
             AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
             AND NOT EXISTS (SELECT FROM pg_auth_members WHERE roleid=r.oid OR member=r.oid)
-            AND EXISTS (SELECT FROM pg_database WHERE datname='codexia' AND datdba=r.oid))) ;""")
+            AND (NOT EXISTS (SELECT FROM pg_database WHERE datname='codexia')
+              OR EXISTS (SELECT FROM pg_database WHERE datname='codexia' AND datdba=r.oid)))) ;""")
     require(re.fullmatch(r"[1-9][0-9]{0,19}", cluster["clusterId"]))
-    if not cluster["appExists"]:
-        return {"state": "missing", "authState": "unknown", "clusterId": cluster["clusterId"]}
     require(cluster["rolesValid"] and volume_layout == "ready")
+    if not cluster["appExists"]:
+        return {"state": "missing", "authState": "absent", "clusterId": cluster["clusterId"]}
     db = json_sql("codexia", """SELECT json_build_object(
         'ledgerExists', to_regclass('public.codexia_schema_migrations') IS NOT NULL,
         'authExists', EXISTS (SELECT FROM pg_namespace WHERE nspname='codexia_auth'),
@@ -379,7 +380,20 @@ def observe():
                 backend = {"state": "absent"}
         database = observe_database(volumes, containers, state_dir, auth_dir, full,
                                     os.environ["CODEXIA_AUTH_SCHEMA_QUERY"], facts["volumeLayout"])
-        if full:
+        if database["state"] in ("missing", "absent"):
+            # Verify the canonical residual slot independently of old DB health.
+            if containers["codexia-api"]:
+                require(re.fullmatch(FULL_IMAGE, info[2]))
+                if metadata(residues[0]) is not None:
+                    lines = private_text(residues[0]).splitlines()
+                    require("ContainerName=codexia-api" in lines and "Image=" + info[2] in lines)
+            if backend["state"] != "absent":
+                if not residue and not containers["codexia-api"]:
+                    # An interrupted reset may have removed the Quadlet before reload.
+                    _, source = command(["systemctl", "--user", "show", "--property=SourcePath", "--value", "codexia-api.service"], (0, 4))
+                    require(source == str(residues[0]))
+                backend = {"state": "fault", "databaseAbsent": True}
+        elif full:
             require(database.get("clusterId") == writer["database"]["clusterId"])
         base_unknown = facts["baseDrift"] or (containers["codexia-tunnel"] and not facts["baseEvidence"]["tunnel"])
         h = "drift" if drift else "unknown" if base_unknown else "ready" if facts["hostReady"] and all(networks.values()) and all(volumes.values()) \

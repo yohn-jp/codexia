@@ -183,7 +183,8 @@ async function planObservation({ bootstrapMode } = {}) {
     let edge = null;
     try {
       edge = await edgeReader.observeLifecycle({
-        backendExpected: host.backend?.state === 'running',
+        backendExpected: host.backend?.state === 'running' ||
+          (host.backend?.databaseAbsent === true && host.topology?.containers?.['codexia-api'] === true),
         ownerSetupArtifactDigest: candidateFrontend.artifactDigest,
       });
     } catch { /* failed or unauthorized observation is never absence */ }
@@ -223,6 +224,10 @@ async function planObservation({ bootstrapMode } = {}) {
         codexia_bootstrap_stages: admission.stages,
         codexia_owner_setup_install_intent: admission.installIntent,
         codexia_owner_setup_approved: false,
+        ...(admission.installIntent && plan.observation.state.D === 'absent' &&
+          (host.database.state === 'missing' || (host.database.state === 'absent' && host.topology?.storagePresent === true)) ? {
+          codexia_expected_absent_database: host.database.state === 'missing' ? host.database.clusterId : 'absent',
+        } : {}),
         ...(plan.observation.bootstrapResume ? {
           codexia_expected_bootstrap_resume: plan.observation.bootstrapResume,
         } : {}),
