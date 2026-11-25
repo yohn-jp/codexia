@@ -116,7 +116,7 @@ async function waitForDatabase(connectionString) {
 async function checkPreviewReady(origin) {
   const health = await fetch(`${origin}/api/health`, { signal: AbortSignal.timeout(1000) });
   if (!health.ok || (await health.json()).status !== 'ok') throw new Error('Local preview API is not ready');
-  for (const mode of ['desktop', 'mobile']) {
+  for (const mode of ['desktop']) {
     const page = await fetch(`${origin}/${mode}/`, { signal: AbortSignal.timeout(1500) });
     if (!page.ok || !(page.headers.get('content-type') ?? '').includes('text/html')) throw new Error(`/${mode}/ is not ready`);
   }
@@ -160,11 +160,11 @@ async function captureScreenshots(baseURL, { project, scene }, signInAuthorBrows
   const htmlByMode = {};
   try {
     await mkdir(path.join(artifactDir, 'snapshots'), { recursive: true });
-    for (const [mode, width, height] of [['desktop', 1440, 900], ['mobile', 390, 844]]) {
+    for (const [mode, width, height] of [['desktop', 1440, 900]]) {
       const context = await browser.newContext({ viewport: { width, height } });
       try {
         const page = await context.newPage();
-        const route = `/${mode}/projects/${project.id}/scenes/${scene.id}${mode === 'mobile' ? '?view=writing' : ''}`;
+        const route = `/${mode}/projects/${project.id}/scenes/${scene.id}`;
         const accessToken = await signInAuthorBrowser(page, baseURL, mode, { path: route });
         await page.getByRole('textbox', { name: '本文', exact: true }).waitFor({ timeout: 20_000 });
         await page.getByRole('heading', { name: scene.title, exact: true }).waitFor({ timeout: 20_000 });
@@ -206,13 +206,13 @@ async function serveSnapshots(htmlByMode, baseURL, id) {
       response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id }));
       return;
     }
-    const mode = /^\/(desktop|mobile)\/$/u.exec(url.pathname)?.[1];
+    const mode = /^\/(desktop)\/$/u.exec(url.pathname)?.[1];
     if (mode && htmlByMode[mode]) {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; script-src 'none'; connect-src 'none'; form-action 'none'; object-src 'none'" }).end(htmlByMode[mode]);
       return;
     }
     // Built, uncredentialed assets only; never proxy an API or a write method.
-    if (/^\/(?:desktop|mobile)\/assets\/[a-zA-Z0-9_.-]+$/u.test(url.pathname)) {
+    if (/^\/(?:desktop)\/assets\/[a-zA-Z0-9_.-]+$/u.test(url.pathname)) {
       try {
         const asset = await fetch(new URL(url.pathname, baseURL), { signal: AbortSignal.timeout(3000) });
         if (!asset.ok) throw new Error('Asset unavailable');
@@ -271,14 +271,14 @@ async function main() {
     const baseURL = fixture.apiOrigin;
     await checkPreviewReady(baseURL);
     const writing = await seedPreviewProject(fixture);
-    console.log(`\nCodexia preview: ${baseURL}/desktop/ and ${baseURL}/mobile/`);
+    console.log(`\nCodexia preview: ${baseURL}/desktop/`);
     console.log('Use OAuthでサインイン with the local preview identity provider.');
     if (options.capture) {
       const htmlByMode = await captureScreenshots(baseURL, writing, signInAuthorBrowser);
       ({ server: snapshotServer, port: options.snapshotPort } = await serveSnapshots(htmlByMode, baseURL, id));
       await mkdir(artifactDir, { recursive: true });
       await writeFile(sessionFile, JSON.stringify({ id, snapshotBaseURL: `http://127.0.0.1:${options.snapshotPort}` }, null, 2));
-      console.log(`Frozen, authenticated visual snapshots: http://127.0.0.1:${options.snapshotPort}/desktop/ and /mobile/`);
+      console.log(`Frozen, authenticated visual snapshots: http://127.0.0.1:${options.snapshotPort}/desktop/`);
       console.log('Run in another terminal: corepack pnpm ui:scan');
       console.log(`Screenshots: ${path.relative(root, path.join(artifactDir, 'snapshots'))}`);
     } else {

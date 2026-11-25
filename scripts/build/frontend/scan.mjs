@@ -44,7 +44,6 @@ async function main() {
   const scans = [
     { name: 'source', args: ['--json', 'app'] },
     { name: 'desktop', args: ['--no-design-system', '--viewport', '1440x900', '--json', `${origin}/desktop/`] },
-    { name: 'mobile', args: ['--no-design-system', '--viewport', '390x844', '--json', `${origin}/mobile/`] },
   ];
   const report = { tool: `impeccable@${version}`, snapshot: true, scans: {} };
   for (const scan of scans) {

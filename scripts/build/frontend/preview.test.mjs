@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { parsePreviewArgs, parsePublishedPort } from './preview.mjs';
 import { checkedSnapshotUrl } from './scan.mjs';
 
-test('UI preview defaults to isolated core UI with both browser snapshots', () => {
+test('UI preview defaults to isolated core UI with Desktop browser snapshots', () => {
   assert.deepEqual(parsePreviewArgs([]), { profile: 'core', port: 4173, engine: 'auto', skipBuild: false, capture: true });
 });
 
