@@ -42,8 +42,8 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     await traceLink.click();
     assert.match(page.url(), /\/requirements\/traceability\/$/u);
     assert.equal((await page.goto(`${base}/requirements/traceability/`)).status(), 200);
-    assert.match(await page.getByRole('heading', { name: 'Requirements traceability status' }).innerText(), /Requirements traceability status/u);
-    assert.match(await page.locator('body').innerText(), /Reverse surface inventory/u);
+    assert.match(await page.getByRole('heading', { name: '実装トレーサビリティ' }).innerText(), /実装トレーサビリティ/u);
+    assert.match(await page.locator('body').innerText(), /実装面の逆引き/u);
     assert.match(await page.locator('body').innerText(), /UNMAPPED|No exact-source run/u);
     const traceResponse = await page.request.get(`${base}/requirements/traceability/traceability.json`);
     assert.equal(traceResponse.status(), 200);
@@ -52,6 +52,71 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     assert.ok(trace.summary.requirementCount > 0 && trace.summary.obligationCount > 0);
     assert.ok(trace.summary.obligationGapCount + trace.summary.reverseGapCount > 0, 'Known gaps must remain visible in the Pages projection');
     assert.ok(trace.requirements.some(item => item.requirementId === 'REQ-TRACE-001'));
+    assert.equal(trace.summary.evidenceFreshness.sourceSha, registry.sourceSha);
+    assert.ok(trace.summary.areaCounts.API.obligationCount > 0);
+    assert.equal(trace.referenceAudit.broken.length, 0, 'all declared repository references should resolve');
+
+    const traceSearch = page.getByRole('searchbox', { name: '追跡データを検索' });
+    await traceSearch.fill('REQ-OPS-004');
+    const requirementRows = page.locator('#obligation-table tbody tr[data-trace-row]');
+    assert.equal(await requirementRows.filter({ visible: true }).count(), 1);
+    assert.match(await requirementRows.filter({ visible: true }).first().innerText(), /REQ-OPS-004/u);
+    assert.match(page.url(), /[?&]q=REQ-OPS-004/u, 'filters should be addressable in the URL');
+    await traceSearch.fill('');
+    await page.getByLabel('状態').selectOption('EXPLICIT_NOT_IMPLEMENTED');
+    const declaredUnimplemented = await requirementRows.filter({ visible: true }).evaluateAll(rows => rows.map(row => row.dataset.search));
+    assert.ok(declaredUnimplemented.some(row => row.includes('req-ops-004') || row.includes('req-ops-005') || row.includes('req-ui-006')),
+      'explicit implementation declarations should be filterable without changing conformance status');
+    await page.getByRole('button', { name: '条件を解除' }).click();
+    await page.getByLabel('状態').selectOption('UNMAPPED');
+    const unmappedRequirementRows = await page.locator('#requirement-table tbody tr[data-trace-row]').filter({ visible: true }).evaluateAll(rows => rows.map(row => row.textContent));
+    assert.ok(unmappedRequirementRows.some(row => /REQ-UI-006|REQ-OPS-004|REQ-OPS-005/u.test(row)),
+      'conformance UNMAPPED should filter requirement obligations');
+    await page.getByRole('button', { name: '条件を解除' }).click();
+    await page.getByLabel('領域').selectOption('API');
+    assert.ok(await requirementRows.filter({ visible: true }).count() > 0);
+    const visibleAreas = await requirementRows.filter({ visible: true }).evaluateAll(rows => rows.map(row => row.dataset.area));
+    assert.ok(visibleAreas.every(area => area === 'API'));
+    await page.getByRole('button', { name: '条件を解除' }).click();
+
+    await page.getByLabel('surface種別').selectOption('mcpTool');
+    const surfaceRows = page.locator('#surface-table tbody tr[data-trace-row]');
+    const visibleSurfaceKinds = await surfaceRows.filter({ visible: true }).evaluateAll(rows => rows.map(row => row.dataset.kind));
+    assert.ok(visibleSurfaceKinds.length > 0 && visibleSurfaceKinds.every(kind => kind === 'mcpTool'));
+    await page.getByLabel('surface種別').selectOption('');
+    await page.getByLabel('状態').selectOption('UNVERIFIED');
+    const visibleSurfaceStatuses = await surfaceRows.filter({ visible: true }).evaluateAll(rows => rows.map(row => row.dataset.status.split(/\s+/u)));
+    assert.ok(visibleSurfaceStatuses.length > 0 && visibleSurfaceStatuses.every(statuses => statuses.includes('UNVERIFIED')));
+    const unverifiedColor = await page.locator('#surface-table .state[data-state="UNVERIFIED"]').first().evaluate(element => getComputedStyle(element).color);
+    assert.notEqual(unverifiedColor, 'rgb(120, 223, 180)', 'UNVERIFIED must not use the VERIFIED success color');
+    await page.getByRole('button', { name: '条件を解除' }).click();
+
+    const reverseLink = page.locator('#surface-table tbody tr[data-trace-row] a[href^="#obligation-"]').first();
+    assert.ok(await reverseLink.count() > 0, 'reverse surface should link to its obligation');
+    await reverseLink.click();
+    assert.match(page.url(), /#obligation-OBL-REQ-/u);
+    const testLink = page.locator('#test-table a[href^="#obligation-"]').first();
+    assert.ok(await testLink.count() > 0, 'test execution should link back to its obligation');
+    await testLink.click();
+    assert.match(page.url(), /#obligation-OBL-REQ-/u);
+    const detail = page.locator('#obligation-table details[data-detail]').first();
+    assert.ok(await detail.count() > 0);
+    await detail.locator('summary').click();
+    assert.equal(await detail.evaluate(element => element.open), true);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const layout = await page.evaluate(() => ({
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth,
+      table: document.querySelector('#obligation-table-scroll').scrollWidth,
+      tableViewport: document.querySelector('#obligation-table-scroll').clientWidth,
+    }));
+    assert.ok(layout.document <= layout.viewport, `Page should avoid body overflow at mobile width: ${JSON.stringify(layout)}`);
+    assert.ok(layout.table > layout.tableViewport, 'Dense implementation table should scroll within its labelled region');
+    const screenshotDir = process.env.PAGES_SCREENSHOTS || '/tmp';
+    await mkdir(screenshotDir, { recursive: true });
+    await page.screenshot({ path: path.join(screenshotDir, 'requirements-traceability-mobile.png'), fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.addInitScript(() => {
       window.cspViolations = [];
       document.addEventListener('securitypolicyviolation', event => {

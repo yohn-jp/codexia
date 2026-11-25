@@ -851,6 +851,7 @@ async function runVerifier(args) {
     const nodeTraceTests = [
       'scripts/strictdoc/verify.test.mjs', 'scripts/strictdoc/case-results.test.mjs',
       'scripts/strictdoc/obligation-trace.test.mjs', 'scripts/strictdoc/reverse-trace.test.mjs',
+      'scripts/audit/specifications.test.mjs',
     ];
     const browserTraceTests = ['scripts/strictdoc/verify.browser.mjs'];
     const nodeTest = await executeTraceTests(root, tempRoot, 'node', nodeTraceTests);

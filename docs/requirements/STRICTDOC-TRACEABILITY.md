@@ -67,15 +67,21 @@ StrictDocが直接扱えるsource-file/range relationを優先し、正本内に
 | --- | --- | --- |
 | TRC-01 | 登録済み全REQ-IDを一度だけ変換 | **LOCAL_PASS**: main baselineの33 IDをStrictDoc requirement nodeと照合し、欠落・重複・余分なIDを検査 |
 | TRC-02 | Markdown parse→HTML/JSON→同一入力から再生成 | **LOCAL_PASS**: StrictDoc 0.32.1のHTML/JSONを2回生成し比較。HTML検索timestamp、確認済みMarkdown document MID、検索index key順とunordered membership順のみを正規化し、membership値と他の出力を保持 |
-| TRC-03 | REQ→設計→実装surface→obligation | **PARTIAL**: File relationの存在と範囲、明示したtyped surface identifierを検査する。意味的な実装適合、symbol AST coverage、全obligationへの網羅は未証明 |
-| TRC-04 | 実装側の逆引き | **PARTIAL**: bounded scanからHTTP method/path、MCP登録、DB object、Desktop UI control、Native iOS SwiftUI view、Terraform resource、Ansible sourceを `reverseTrace` に記録する。未分類・未対応surfaceは残件として出力する。動的登録、全migration/live DB、実画面・実機挙動、適用済みIaC、host実行、隔離復元は静的source scanでは証明しない。 |
+| TRC-03 | REQ→設計→実装surface→obligation | **PARTIAL**: File relationのpath/rangeと明示したtyped surface identifierを検査する。生成Fastify routeのOperation ID、test caseの宣言名・source/rangeを保持する。意味的な実装適合、全obligationに対するsymbol AST coverageは未証明 |
+| TRC-04 | 実装側の逆引き | **PARTIAL**: bounded scanからHTTP method/path、MCP tool、DB object、Desktop UI control、Native iOS SwiftUI view、Terraform resource、Ansible source、GitHub Actions workflow定義を `reverseTrace` に記録する。workflow定義は実行済みjob/runを意味しない。surface inventoryの分類と候補REQはaccepted relationと分離し、未分類・対応未接続surfaceも表示する。動的登録、全migration/live DB、実画面・実機挙動、適用済みIaC、host実行、隔離復元は静的source scanでは証明しない。 |
 | TRC-05 | TEST→CI exact source evidence | Node fault-injectionとPlaywright static-page testはローカル実測済み。GitHub run/source SHA/task/artifact identityをreportに記録し、hosted resultは当該PRの実際のVerify runで判定 |
 | TRC-06 | 重複UID・切れた参照・inventory欠落・不正MIDへの故障注入 | **LOCAL_PASS**: `verify.test.mjs`の負例を実行。legacy product behaviorの適合試験とは区別 |
 | TRC-07 | Repository Audit Pagesに静的サイトを公開 | StrictDoc HTML/JSONと `/requirements/traceability/` のstatus HTML/JSONを既存の唯一のpublisherが生成する。PR artifactをChromiumで検査し、mainの同じpublisherが公開する。公開URLとsource SHAが一致するまで `PENDING_PAGES_PUBLISH` を維持する。 |
 
 ## 現段階での実装範囲と残件
 
-StrictDoc 0.32.1による要求HTML/JSON生成、REQ-IDとsource relationの検査、boundedなHTTP/MCP/DB/Desktop UI/Native iOS/IaC reverse inventory、Node fault-injection、Playwright表示検査を既存CI taskと単一Repository Audit Pages publisherに統合する。`/requirements/traceability/` は要求・義務・reverse surface・exact-source観測・未解決gapを同じbuild SHAで表示する。部分的なFile relationやsource-scoped inventoryを要求適合と読み替えない。動的route/tool、全migration/live catalog、semantic symbol mapping、実画面/実機挙動、適用済みIaC/host実行の確認はこのscanで証明せず、実行証拠を得るまでPARTIALまたはBLOCKEDとして残す。
+StrictDoc 0.32.1による要求HTML/JSON生成、REQ-IDとsource relationの検査、boundedなHTTP/MCP/DB/Desktop UI/Native iOS/IaC/Ansible/CI workflow reverse inventory、Node fault-injection、Playwright表示検査を既存CI taskと単一Repository Audit Pages publisherに統合する。`/requirements/traceability/` は既存の `obligationTrace`、`reverseTrace`、`caseExecutions` から要求・義務・reverse surface・exact-source観測・未解決gapを同じbuild SHAで投影する。StrictDoc Traceability Matrix、Deep Trace、Coverage Table、HTML/JSONへの直接リンクも併記する。各source/design/test参照はbuild SHAに固定し、test caseの `NOT_RUN`、`SKIPPED`、`TODO`、`AMBIGUOUS` とGitHub runのfreshnessを別々に保つ。部分的なFile relationやsource-scoped inventoryを要求適合と読み替えない。
+
+dashboardの検索とarea/status/surface type filterはURL queryへ反映する。要求→obligation→設計/source/testと、source surface/test→obligationのanchor linkを相互に探索できる。inventoryに記録済みのclassificationとcandidate REQは表示するが、StrictDoc relationへ自動昇格しない。candidateも明示的NOT_APPLICABLEもないsurfaceは「分類なし」、分類はあるがobligation linkがないsurfaceは「obligation linkなし」として区別する。`UNMAPPED`は記録上リンクされていないことを示し、コード不存在の断定ではない。
+
+この変更ではLikeC4の関係グラフを追加しない。関係の正本はRequirement Registerと既存StrictDoc relationのままであり、Matrix/HTML/JSONの標準出力と同じprojectionを使うdashboardで今回の双方向探索要件を満たす。新しいgraph authorityや別の要求台帳は導入しない。
+
+このsource scanの観測限界は以下の通りである。HTTP/MCPの動的登録と実行時権限・副作用、PostgreSQL live `pg_catalog` と全環境の適用状態、Desktop UIの全runtime状態遷移、実機iOS UI、Terraformの適用済みresource、Ansible/hostの実収束は静的宣言と一致するとは限らない。現在のREQ-UI-006 state machineは未導入で、その設計上の全遷移を正規実装から抽出できない。これらは「観測不能・証拠不足」として残し、追加の実行証拠がない限りVERIFIEDにしない。
 
 ## 個別義務trace projection
 

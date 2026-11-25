@@ -18,6 +18,10 @@ export function associateTraceCases(scenarios, cases) {
   const casesByName = Map.groupBy(cases, item => item.name);
   return scenarios.map(scenario => {
     const files = (scenario.RELATIONS ?? []).filter(relation => relation.TYPE === 'File');
+    const sourceRefs = files.map(relation => ({
+      path: relation.VALUE ?? relation.PATH,
+      ...(relation.LINE_RANGE === undefined ? {} : { range: String(relation.LINE_RANGE) }),
+    }));
     const matches = (casesByName.get(scenario['Case name']) ?? []).filter(item => files.some(relation => {
       if ((relation.VALUE ?? relation.PATH) !== item.file) return false;
       if (relation.LINE_RANGE === undefined) return true;
@@ -25,8 +29,11 @@ export function associateTraceCases(scenarios, cases) {
       return item.line >= start && item.line <= end;
     }));
     if (matches.length !== 1) {
-      return { testId: scenario.UID, result: matches.length > 1 ? 'AMBIGUOUS' : 'NOT_RUN' };
+      return {
+        testId: scenario.UID, name: scenario['Case name'], sourceRefs,
+        result: matches.length > 1 ? 'AMBIGUOUS' : 'NOT_RUN',
+      };
     }
-    return { testId: scenario.UID, ...matches[0] };
+    return { testId: scenario.UID, name: scenario['Case name'], sourceRefs, ...matches[0] };
   });
 }

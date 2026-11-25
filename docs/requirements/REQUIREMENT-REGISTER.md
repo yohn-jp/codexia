@@ -1570,6 +1570,7 @@ CIは選択タスク、exact-source、成果物IDと必須gateを証明し、未
 **UID**: OBL-REQ-QUAL-002-O01
 **Design reference**: [CI/CD](../verification/CI-CD.md)
 **Implementation identifiers**: .github/workflows/verify.yml; scripts/ci/impact/plan.mjs
+**Surface identifiers**: ciWorkflow=.github/workflows/verify.yml
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1638,7 +1639,7 @@ INP p75、CLS p75の品質目安に加え、原稿入力・保存・復旧の別
 **Design owner**: [Requirements governance](README.md)、[Traceability register](../verification/TRACEABILITY-REGISTER.md)
 **Implementation identifiers**: この台帳とAPI・DB・外部IFの初期契約
 **Verification identifiers**: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
-**Test IDs**: TEST-TRC-01-001, TEST-TRC-02-001, TEST-TRC-02-002, TEST-TRC-03-001, TEST-TRC-04-001, TEST-TRC-04-002, TEST-TRC-05-001, TEST-TRC-05-002, TEST-TRC-05-003, TEST-TRC-07-001
+**Test IDs**: TEST-TRC-01-001, TEST-TRC-02-001, TEST-TRC-02-002, TEST-TRC-03-001, TEST-TRC-04-001, TEST-TRC-04-002, TEST-TRC-05-001, TEST-TRC-05-002, TEST-TRC-05-003, TEST-TRC-07-001, TEST-TRC-08-001
 **Exact-run reference**: NOT_RUN
 **Comment**: ACCEPTED／**構築中**; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
@@ -1803,6 +1804,38 @@ The staged static StrictDoc page renders every requirement UID in the browser ch
 - **Type**: File
   **Path**: scripts/strictdoc/verify.browser.mjs
   **Lines**: 70, 90
+
+## OBL-REQ-TRACE-001-O08
+
+**Type**: OBLIGATION
+**MID**: 5bfdcec3e2f8dbfabaf2f48f81f6b297
+**UID**: OBL-REQ-TRACE-001-O08
+**Design reference**: [StrictDoc traceability](STRICTDOC-TRACEABILITY.md)
+**Implementation identifiers**: scripts/audit/specifications.mjs; scripts/audit/traceability-ui.js; scripts/audit/traceability.css; scripts/pages-ui/navigation.mjs
+**Surface identifiers**: ciWorkflow=.github/workflows/repository-audit.yml
+**Test IDs**: TEST-TRC-08-001
+**Exact-run reference**: NOT_RUN
+**Comment**: Dashboard projection and browser operation are source-bound. Candidate requirement IDs remain navigation hints and never become accepted relations.
+
+Requirementsから実装・テストへ、実装面から義務へ移動できる静的ページを生成する。適合状態、分類、候補、参照欠落、未実行状態を区別し、設計正本・実装・TEST-ID・同一source SHAの実行証拠へ直接リンクする。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-TRACE-001
+
+- **Type**: File
+  **Path**: docs/requirements/STRICTDOC-TRACEABILITY.md
+- **Type**: File
+  **Path**: scripts/audit/specifications.mjs
+- **Type**: File
+  **Path**: scripts/audit/traceability-ui.js
+- **Type**: File
+  **Path**: scripts/audit/traceability.css
+- **Type**: File
+  **Path**: scripts/audit/specifications.browser.mjs
+- **Type**: File
+  **Path**: .github/workflows/repository-audit.yml
 
 ## OBL-REQ-API-002-O02
 
@@ -2056,6 +2089,23 @@ Use Playwright to open the generated static page and verify that every UID in th
   **ID**: REQ-TRACE-001
 - **Type**: File
   **Path**: scripts/strictdoc/verify.browser.mjs
+
+## TEST-TRC-08-001
+
+**Type**: TEST
+**MID**: 7554b5f2d31df6dadb5d2307590bf5a5
+**UID**: TEST-TRC-08-001
+**Case name**: projects obligations, reverse surfaces, and evidence links without conformance promotion
+**Exact-run reference**: NOT_RUN
+
+Verify the public Requirements projection preserves explicit obligation links, candidate-only classifications, declared test sources, source SHA links, and existing conformance states.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-TRACE-001
+- **Type**: File
+  **Path**: scripts/audit/specifications.test.mjs
 
 ## TEST-TRC-02-002
 
