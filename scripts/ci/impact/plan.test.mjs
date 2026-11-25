@@ -649,10 +649,12 @@ test('iOS packaging workflow changes retain root proof and its shared inputs sta
   const workflowPath = '.github/workflows/ios-unsigned-ipa.yml';
   const workflow = parse(readFileSync(new URL('../../../' + workflowPath, import.meta.url), 'utf8'));
   assert.ok(OPERATIONAL_ROOT_PATHS.includes(workflowPath));
-  assert.deepEqual(Object.keys(workflow.on).sort(), ['pull_request', 'workflow_dispatch']);
-  for (const input of ['app/native/**', 'scripts/shared/html-document.mjs', 'scripts/ios/**', 'scripts/shared/read-regular-file.mjs']) {
-    assert.ok(workflow.on.pull_request.paths.includes(input), input);
-  }
+  assert.deepEqual(Object.keys(workflow.on).sort(), ['workflow_dispatch']);
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.profile.options, ['core', 'full']);
+  const native = parse(readFileSync(new URL('../../../.github/workflows/ios-editor.yml', import.meta.url), 'utf8'));
+  assert.ok(native.on.pull_request);
+  assert.equal(native.jobs['native-ipa'].if, "${{ github.event_name == 'workflow_dispatch' }}");
+  assert.deepEqual(native.jobs.editor.strategy.matrix.lane, ['state-model', 'editor-simulator', 'app-simulator']);
   assert.equal(workflow.jobs.build['runs-on'], 'xcode-27');
   assert.ok(workflow.jobs.build.steps.some(step => step.run?.includes('scripts/ios/validate-web-bundle.mjs')));
   assert.ok(workflow.jobs.build.steps.some(step => step.run?.includes('scripts/ios/package-unsigned-ipa.mjs')));

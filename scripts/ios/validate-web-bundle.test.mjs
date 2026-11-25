@@ -181,11 +181,10 @@ test("native bundle validation rejects public settings omitted from the compiled
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("Mobile entry config changes run Core and Full artifact validation in pull request CI", async () => {
+test("Manual IPA generation retains Core and Full profile and bundle validation", async () => {
   const workflow = await readFile(new URL("../../.github/workflows/ios-unsigned-ipa.yml", import.meta.url), "utf8");
-  assert.match(workflow, /^      - app\/vite\.config\.ts$/mu);
-  assert.match(workflow, /^      - app\/vite\.native\.config\.ts$/mu);
-  assert.match(workflow, /^      - app\/src\/entries\/mobile\.tsx$/mu);
+  assert.doesNotMatch(workflow, /^  pull_request:/mu);
+  assert.match(workflow, /^  workflow_dispatch:/mu);
   assert.match(workflow, /fromJSON\('\["core","full"\]'\)/u);
   assert.match(workflow, /validate-web-bundle\.mjs app\/dist\/mobile web/u);
   assert.match(workflow, /validate-web-bundle\.mjs app\/dist\/ios-web native/u);
