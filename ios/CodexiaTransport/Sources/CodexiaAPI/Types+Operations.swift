@@ -8482,12 +8482,19 @@ public enum Operations {
             public var path: Operations.project_action_post.Input.Path
             /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/{actionId}/POST/header`.
             public struct Headers: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/{actionId}/POST/header/Prefer`.
+                public var Prefer: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_action_post.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
+                ///   - Prefer:
                 ///   - accept:
-                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_action_post.AcceptableContentType>] = .defaultValues()) {
+                public init(
+                    Prefer: Swift.String? = nil,
+                    accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_action_post.AcceptableContentType>] = .defaultValues()
+                ) {
+                    self.Prefer = Prefer
                     self.accept = accept
                 }
             }
@@ -8579,6 +8586,92 @@ public enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct Accepted: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/{actionId}/POST/responses/202/headers`.
+                public struct Headers: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/{actionId}/POST/responses/202/headers/Location`.
+                    public var Location: Swift.String
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/{actionId}/POST/responses/202/headers/Preference-Applied`.
+                    @frozen public enum Preference_hyphen_AppliedPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case respond_hyphen_async = "respond-async"
+                    }
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/{actionId}/POST/responses/202/headers/Preference-Applied`.
+                    public var Preference_hyphen_Applied: Operations.project_action_post.Output.Accepted.Headers.Preference_hyphen_AppliedPayload
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/{actionId}/POST/responses/202/headers/X-Codexia-Job-Id`.
+                    public var X_hyphen_Codexia_hyphen_Job_hyphen_Id: Swift.String
+                    /// Creates a new `Headers`.
+                    ///
+                    /// - Parameters:
+                    ///   - Location:
+                    ///   - Preference_hyphen_Applied:
+                    ///   - X_hyphen_Codexia_hyphen_Job_hyphen_Id:
+                    public init(
+                        Location: Swift.String,
+                        Preference_hyphen_Applied: Operations.project_action_post.Output.Accepted.Headers.Preference_hyphen_AppliedPayload,
+                        X_hyphen_Codexia_hyphen_Job_hyphen_Id: Swift.String
+                    ) {
+                        self.Location = Location
+                        self.Preference_hyphen_Applied = Preference_hyphen_Applied
+                        self.X_hyphen_Codexia_hyphen_Job_hyphen_Id = X_hyphen_Codexia_hyphen_Job_hyphen_Id
+                    }
+                }
+                /// Received HTTP response headers
+                public var headers: Operations.project_action_post.Output.Accepted.Headers
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/{actionId}/POST/responses/202/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/actions/{actionId}/POST/responses/202/content/application\/json`.
+                    case json(Components.Schemas.PublicJobBody)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.PublicJobBody {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.project_action_post.Output.Accepted.Body
+                /// Creates a new `Accepted`.
+                ///
+                /// - Parameters:
+                ///   - headers: Received HTTP response headers
+                ///   - body: Received HTTP response body
+                public init(
+                    headers: Operations.project_action_post.Output.Accepted.Headers,
+                    body: Operations.project_action_post.Output.Accepted.Body
+                ) {
+                    self.headers = headers
+                    self.body = body
+                }
+            }
+            /// The request has been accepted for processing, but processing has not yet completed.
+            ///
+            /// - Remark: Generated from `#/paths//api/projects/{projectId}/actions/{actionId}/post(project_action_post)/responses/202`.
+            ///
+            /// HTTP response code: `202 accepted`.
+            case accepted(Operations.project_action_post.Output.Accepted)
+            /// The associated value of the enum case if `self` is `.accepted`.
+            ///
+            /// - Throws: An error if `self` is not `.accepted`.
+            /// - SeeAlso: `.accepted`.
+            public var accepted: Operations.project_action_post.Output.Accepted {
+                get throws {
+                    switch self {
+                    case let .accepted(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "accepted",
                             response: self
                         )
                     }
@@ -8839,6 +8932,57 @@ public enum Operations {
                     }
                 }
             }
+            public struct Created: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/apply/POST/responses/201/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/apply/POST/responses/201/content/application\/json`.
+                    case json(Components.Schemas.ProposalApplyReceiptBody)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ProposalApplyReceiptBody {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.project_apply_post.Output.Created.Body
+                /// Creates a new `Created`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.project_apply_post.Output.Created.Body) {
+                    self.body = body
+                }
+            }
+            /// The request has succeeded and a new resource has been created as a result.
+            ///
+            /// - Remark: Generated from `#/paths//api/projects/{projectId}/apply/post(project_apply_post)/responses/201`.
+            ///
+            /// HTTP response code: `201 created`.
+            case created(Operations.project_apply_post.Output.Created)
+            /// The associated value of the enum case if `self` is `.created`.
+            ///
+            /// - Throws: An error if `self` is not `.created`.
+            /// - SeeAlso: `.created`.
+            public var created: Operations.project_apply_post.Output.Created {
+                get throws {
+                    switch self {
+                    case let .created(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "created",
+                            response: self
+                        )
+                    }
+                }
+            }
             public struct Forbidden: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/apply/POST/responses/403/content`.
                 @frozen public enum Body: Sendable, Hashable {
@@ -9056,6 +9200,41 @@ public enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct NoContent: Sendable, Hashable {
+                /// Creates a new `NoContent`.
+                public init() {}
+            }
+            /// There is no content to send for this request, but the headers may be useful. 
+            ///
+            /// - Remark: Generated from `#/paths//api/projects/{projectId}/approvals/post(project_approvals_post)/responses/204`.
+            ///
+            /// HTTP response code: `204 noContent`.
+            case noContent(Operations.project_approvals_post.Output.NoContent)
+            /// There is no content to send for this request, but the headers may be useful. 
+            ///
+            /// - Remark: Generated from `#/paths//api/projects/{projectId}/approvals/post(project_approvals_post)/responses/204`.
+            ///
+            /// HTTP response code: `204 noContent`.
+            public static var noContent: Self {
+                .noContent(.init())
+            }
+            /// The associated value of the enum case if `self` is `.noContent`.
+            ///
+            /// - Throws: An error if `self` is not `.noContent`.
+            /// - SeeAlso: `.noContent`.
+            public var noContent: Operations.project_approvals_post.Output.NoContent {
+                get throws {
+                    switch self {
+                    case let .noContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "noContent",
                             response: self
                         )
                     }
@@ -9309,12 +9488,19 @@ public enum Operations {
             public struct Query: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/history/GET/query/snapshot`.
                 public var snapshot: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/history/GET/query/projectVersion`.
+                public var projectVersion: Swift.Int64?
                 /// Creates a new `Query`.
                 ///
                 /// - Parameters:
                 ///   - snapshot:
-                public init(snapshot: Swift.String? = nil) {
+                ///   - projectVersion:
+                public init(
+                    snapshot: Swift.String? = nil,
+                    projectVersion: Swift.Int64? = nil
+                ) {
                     self.snapshot = snapshot
+                    self.projectVersion = projectVersion
                 }
             }
             public var query: Operations.project_history_get.Input.Query
@@ -9472,6 +9658,31 @@ public enum Operations {
                 }
             }
             public var path: Operations.manuscript_snapshots_get.Input.Path
+            /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/GET/query`.
+            public struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/GET/query/sceneId`.
+                public var sceneId: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/GET/query/snapshot`.
+                public var snapshot: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/GET/query/projectVersion`.
+                public var projectVersion: Swift.Int64?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - sceneId:
+                ///   - snapshot:
+                ///   - projectVersion:
+                public init(
+                    sceneId: Swift.String? = nil,
+                    snapshot: Swift.String? = nil,
+                    projectVersion: Swift.Int64? = nil
+                ) {
+                    self.sceneId = sceneId
+                    self.snapshot = snapshot
+                    self.projectVersion = projectVersion
+                }
+            }
+            public var query: Operations.manuscript_snapshots_get.Input.Query
             /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/GET/header`.
             public struct Headers: Sendable, Hashable {
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.manuscript_snapshots_get.AcceptableContentType>]
@@ -9488,12 +9699,15 @@ public enum Operations {
             ///
             /// - Parameters:
             ///   - path:
+            ///   - query:
             ///   - headers:
             public init(
                 path: Operations.manuscript_snapshots_get.Input.Path,
+                query: Operations.manuscript_snapshots_get.Input.Query = .init(),
                 headers: Operations.manuscript_snapshots_get.Input.Headers = .init()
             ) {
                 self.path = path
+                self.query = query
                 self.headers = headers
             }
         }
@@ -9610,6 +9824,26 @@ public enum Operations {
                 }
             }
             public var path: Operations.manuscript_snapshot_get.Input.Path
+            /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/{snapshotId}/GET/query`.
+            public struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/{snapshotId}/GET/query/snapshot`.
+                public var snapshot: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/{snapshotId}/GET/query/projectVersion`.
+                public var projectVersion: Swift.Int64?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - snapshot:
+                ///   - projectVersion:
+                public init(
+                    snapshot: Swift.String? = nil,
+                    projectVersion: Swift.Int64? = nil
+                ) {
+                    self.snapshot = snapshot
+                    self.projectVersion = projectVersion
+                }
+            }
+            public var query: Operations.manuscript_snapshot_get.Input.Query
             /// - Remark: Generated from `#/paths/api/projects/{projectId}/manuscripts/{manuscriptId}/snapshots/{snapshotId}/GET/header`.
             public struct Headers: Sendable, Hashable {
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.manuscript_snapshot_get.AcceptableContentType>]
@@ -9626,12 +9860,15 @@ public enum Operations {
             ///
             /// - Parameters:
             ///   - path:
+            ///   - query:
             ///   - headers:
             public init(
                 path: Operations.manuscript_snapshot_get.Input.Path,
+                query: Operations.manuscript_snapshot_get.Input.Query = .init(),
                 headers: Operations.manuscript_snapshot_get.Input.Headers = .init()
             ) {
                 self.path = path
+                self.query = query
                 self.headers = headers
             }
         }
@@ -12054,6 +12291,26 @@ public enum Operations {
                 }
             }
             public var path: Operations.project_scene_get.Input.Path
+            /// - Remark: Generated from `#/paths/api/projects/{projectId}/scenes/{sceneId}/GET/query`.
+            public struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/scenes/{sceneId}/GET/query/snapshot`.
+                public var snapshot: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/scenes/{sceneId}/GET/query/projectVersion`.
+                public var projectVersion: Swift.Int64?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - snapshot:
+                ///   - projectVersion:
+                public init(
+                    snapshot: Swift.String? = nil,
+                    projectVersion: Swift.Int64? = nil
+                ) {
+                    self.snapshot = snapshot
+                    self.projectVersion = projectVersion
+                }
+            }
+            public var query: Operations.project_scene_get.Input.Query
             /// - Remark: Generated from `#/paths/api/projects/{projectId}/scenes/{sceneId}/GET/header`.
             public struct Headers: Sendable, Hashable {
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_scene_get.AcceptableContentType>]
@@ -12070,12 +12327,15 @@ public enum Operations {
             ///
             /// - Parameters:
             ///   - path:
+            ///   - query:
             ///   - headers:
             public init(
                 path: Operations.project_scene_get.Input.Path,
+                query: Operations.project_scene_get.Input.Query = .init(),
                 headers: Operations.project_scene_get.Input.Headers = .init()
             ) {
                 self.path = path
+                self.query = query
                 self.headers = headers
             }
         }
@@ -12284,6 +12544,57 @@ public enum Operations {
                     }
                 }
             }
+            public struct Created: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/scratch/POST/responses/201/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/projects/{projectId}/scratch/POST/responses/201/content/application\/json`.
+                    case json(Components.Schemas.ScratchCreateBody)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ScratchCreateBody {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.project_scratch_post.Output.Created.Body
+                /// Creates a new `Created`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.project_scratch_post.Output.Created.Body) {
+                    self.body = body
+                }
+            }
+            /// The request has succeeded and a new resource has been created as a result.
+            ///
+            /// - Remark: Generated from `#/paths//api/projects/{projectId}/scratch/post(project_scratch_post)/responses/201`.
+            ///
+            /// HTTP response code: `201 created`.
+            case created(Operations.project_scratch_post.Output.Created)
+            /// The associated value of the enum case if `self` is `.created`.
+            ///
+            /// - Throws: An error if `self` is not `.created`.
+            /// - SeeAlso: `.created`.
+            public var created: Operations.project_scratch_post.Output.Created {
+                get throws {
+                    switch self {
+                    case let .created(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "created",
+                            response: self
+                        )
+                    }
+                }
+            }
             public struct BadRequest: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/scratch/POST/responses/400/content`.
                 @frozen public enum Body: Sendable, Hashable {
@@ -12443,20 +12754,25 @@ public enum Operations {
                 public var limit: Swift.Int32?
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/search/GET/query/snapshot`.
                 public var snapshot: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/search/GET/query/projectVersion`.
+                public var projectVersion: Swift.Int64?
                 /// Creates a new `Query`.
                 ///
                 /// - Parameters:
                 ///   - q:
                 ///   - limit:
                 ///   - snapshot:
+                ///   - projectVersion:
                 public init(
                     q: Swift.String,
                     limit: Swift.Int32? = nil,
-                    snapshot: Swift.String? = nil
+                    snapshot: Swift.String? = nil,
+                    projectVersion: Swift.Int64? = nil
                 ) {
                     self.q = q
                     self.limit = limit
                     self.snapshot = snapshot
+                    self.projectVersion = projectVersion
                 }
             }
             public var query: Operations.project_search_get.Input.Query
@@ -12644,12 +12960,33 @@ public enum Operations {
             public struct Query: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/snapshot/GET/query/snapshot`.
                 public var snapshot: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/snapshot/GET/query/projectVersion`.
+                public var projectVersion: Swift.Int64?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/snapshot/GET/query/projection`.
+                @frozen public enum projectionPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case editor = "editor"
+                }
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/snapshot/GET/query/projection`.
+                public var projection: Operations.project_snapshot_get.Input.Query.projectionPayload?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/snapshot/GET/query/documentId`.
+                public var documentId: Swift.String?
                 /// Creates a new `Query`.
                 ///
                 /// - Parameters:
                 ///   - snapshot:
-                public init(snapshot: Swift.String? = nil) {
+                ///   - projectVersion:
+                ///   - projection:
+                ///   - documentId:
+                public init(
+                    snapshot: Swift.String? = nil,
+                    projectVersion: Swift.Int64? = nil,
+                    projection: Operations.project_snapshot_get.Input.Query.projectionPayload? = nil,
+                    documentId: Swift.String? = nil
+                ) {
                     self.snapshot = snapshot
+                    self.projectVersion = projectVersion
+                    self.projection = projection
+                    self.documentId = documentId
                 }
             }
             public var query: Operations.project_snapshot_get.Input.Query
@@ -12908,6 +13245,26 @@ public enum Operations {
                 }
             }
             public var path: Operations.project_tree_get.Input.Path
+            /// - Remark: Generated from `#/paths/api/projects/{projectId}/tree/GET/query`.
+            public struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/tree/GET/query/snapshot`.
+                public var snapshot: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/tree/GET/query/projectVersion`.
+                public var projectVersion: Swift.Int64?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - snapshot:
+                ///   - projectVersion:
+                public init(
+                    snapshot: Swift.String? = nil,
+                    projectVersion: Swift.Int64? = nil
+                ) {
+                    self.snapshot = snapshot
+                    self.projectVersion = projectVersion
+                }
+            }
+            public var query: Operations.project_tree_get.Input.Query
             /// - Remark: Generated from `#/paths/api/projects/{projectId}/tree/GET/header`.
             public struct Headers: Sendable, Hashable {
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.project_tree_get.AcceptableContentType>]
@@ -12924,12 +13281,15 @@ public enum Operations {
             ///
             /// - Parameters:
             ///   - path:
+            ///   - query:
             ///   - headers:
             public init(
                 path: Operations.project_tree_get.Input.Path,
+                query: Operations.project_tree_get.Input.Query = .init(),
                 headers: Operations.project_tree_get.Input.Headers = .init()
             ) {
                 self.path = path
+                self.query = query
                 self.headers = headers
             }
         }
@@ -13038,12 +13398,19 @@ public enum Operations {
             public struct Query: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/projects/{projectId}/writing-stats/GET/query/snapshot`.
                 public var snapshot: Swift.String?
+                /// - Remark: Generated from `#/paths/api/projects/{projectId}/writing-stats/GET/query/projectVersion`.
+                public var projectVersion: Swift.Int64?
                 /// Creates a new `Query`.
                 ///
                 /// - Parameters:
                 ///   - snapshot:
-                public init(snapshot: Swift.String? = nil) {
+                ///   - projectVersion:
+                public init(
+                    snapshot: Swift.String? = nil,
+                    projectVersion: Swift.Int64? = nil
+                ) {
                     self.snapshot = snapshot
+                    self.projectVersion = projectVersion
                 }
             }
             public var query: Operations.project_writing_stats_get.Input.Query
@@ -14230,7 +14597,7 @@ public enum Operations {
             /// - Remark: Generated from `#/paths/api/v1/persistence/import/POST/header`.
             public struct Headers: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/api/v1/persistence/import/POST/header/Idempotency-Key`.
-                public var Idempotency_hyphen_Key: Swift.String
+                public var Idempotency_hyphen_Key: Swift.String?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.persistence_import_post.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
@@ -14238,7 +14605,7 @@ public enum Operations {
                 ///   - Idempotency_hyphen_Key:
                 ///   - accept:
                 public init(
-                    Idempotency_hyphen_Key: Swift.String,
+                    Idempotency_hyphen_Key: Swift.String? = nil,
                     accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.persistence_import_post.AcceptableContentType>] = .defaultValues()
                 ) {
                     self.Idempotency_hyphen_Key = Idempotency_hyphen_Key
@@ -14258,7 +14625,7 @@ public enum Operations {
             ///   - headers:
             ///   - body:
             public init(
-                headers: Operations.persistence_import_post.Input.Headers,
+                headers: Operations.persistence_import_post.Input.Headers = .init(),
                 body: Operations.persistence_import_post.Input.Body
             ) {
                 self.headers = headers
