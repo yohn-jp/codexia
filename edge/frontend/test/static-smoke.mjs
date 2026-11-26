@@ -14,7 +14,7 @@ try {
   let ready=false;
   for(let i=0;i<60;i++){try{const r=await fetch(base+'/');if(r.ok){ready=true;break;}}catch{}await delay(500);}
   assert.ok(ready,'Wrangler static asset server did not become ready');
-  for(const [path,prefix] of [['/?utm_source=smoke','/assets/'],['/desktop','/desktop/assets/'],['/desktop/projects/a/scenes/b?x=1','/desktop/assets/'],['/r/story/123e4567-e89b-12d3-a456-426614174000/reader','/assets/'],['/console','/desktop/assets/'],['/console/security/','/desktop/assets/'],['/console/backups/history','/desktop/assets/']]){
+  for(const [path,prefix] of [['/?utm_source=smoke','/assets/'],['/desktop','/desktop/assets/'],['/desktop/projects/a/scenes/b?x=1','/desktop/assets/'],['/r/story/123e4567-e89b-12d3-a456-426614174000/reader','/assets/'],['/console','/desktop/assets/'],['/console/setup','/desktop/assets/'],['/console/setup/','/desktop/assets/'],['/console/security/','/desktop/assets/'],['/console/backups/history','/desktop/assets/']]){
     const response=await fetch(base+path,{redirect:'manual'});assert.equal(response.status,200,path);assert.match(response.headers.get('content-type')??'',/text\/html/);assert.match(response.headers.get('content-security-policy')??'',/script-src 'self'/);assert.equal(response.headers.get('strict-transport-security'),'max-age=31536000',path+' host-only HSTS');const html=await response.text();const js=inspectHtml(html).scripts.find((src)=>/\.js(?:\?|$)/iu.test(src));assert.ok(js?.startsWith(prefix),path+' script path: '+js);const script=await fetch(base+js);assert.equal(script.status,200,js);assert.match(script.headers.get('content-type')??'',/javascript/);assert.ok((await script.text()).length>100);}
   for(const path of ['/assets/does-not-exist.js','/desktop/assets/missing.js','/unknown','/console/unknown','/api/login','/mobile','/mobile/','/mobile/settings/','/mobile/index.html','/mobile/assets/missing.js'])assert.equal((await fetch(base+path,{redirect:'manual'})).status,404,path);
   // Exercise real browser module loading under the deployed static CSP.
@@ -28,8 +28,10 @@ try {
       const errors=[];
       page.on('pageerror',error=>errors.push(error.message));
       try {
+        if(path==='/console/setup') await page.route(base+'/api/auth/codexia/setup/status',route=>route.fulfill({json:{state:'setup-pending'}}));
         await page.goto(base+path,{waitUntil:'domcontentloaded'});
         await page.getByRole('heading',{name:heading,exact:true}).waitFor({timeout:20000});
+        if(path==='/console/setup') await page.getByLabel('初期登録キー').waitFor({timeout:20000});
         assert.deepEqual(errors,[],path+' browser exceptions');
       } finally {await page.close();}
     }

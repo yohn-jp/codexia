@@ -16,8 +16,8 @@ const generatedBrowserModules = browserModuleProfilePath
   : resolve(workspaceRoot, 'profiles', profile, 'generated', 'browser.mjs');
 
 const ui = process.env.CODEXIA_UI ?? 'launcher';
-if (!['launcher', 'desktop', 'oauth', 'owner-setup'].includes(ui)) throw new Error('Invalid CODEXIA_UI');
-const uiDirectory = ui === 'launcher' ? '' : ui === 'owner-setup' ? 'console/setup' : ui;
+if (!['launcher', 'desktop', 'oauth'].includes(ui)) throw new Error('Invalid CODEXIA_UI');
+const uiDirectory = ui === 'launcher' ? '' : ui;
 
 // OAuth browser fixture assets must not overwrite app/dist while other shards
 // serve the canonical non-OAuth shells from the same CI checkout.
@@ -74,7 +74,7 @@ function oauthSourceBoundary(): Plugin {
 
 export default defineConfig({
   root: appRoot,
-  publicDir: ui === 'oauth' || ui === 'owner-setup' ? false : resolve(appRoot, 'public'),
+  publicDir: ui === 'oauth' ? false : resolve(appRoot, 'public'),
   plugins: [
     vanillaExtractPlugin(),
     react(),
@@ -103,14 +103,12 @@ export default defineConfig({
     cssCodeSplit: false,
     rollupOptions: {
       input:
-        ui === 'owner-setup'
-          ? resolve(appRoot, 'owner-setup.html')
-          : ui === 'oauth'
-            ? {
-                login: resolve(appRoot, 'oauth-login.html'),
-                consent: resolve(appRoot, 'oauth-consent.html'),
-              }
-            : resolve(appRoot, 'index.html'),
+        ui === 'oauth'
+          ? {
+              login: resolve(appRoot, 'oauth-login.html'),
+              consent: resolve(appRoot, 'oauth-consent.html'),
+            }
+          : resolve(appRoot, 'index.html'),
       output: {
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
