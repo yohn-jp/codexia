@@ -35,13 +35,16 @@ export async function advancePair({
     ...(candidate.initialControls ? { initialControls: candidate.initialControls } : {}),
   };
   const matchesJournal = () => journal.planSha256 === planSha256;
-  if (operation !== 'recover' && !(matchesJournal() && journal.phase === 'safe-stopped')) {
-    const recordedWindow = matchesJournal() ? journal.reactivationWindow ?? null : null;
+  const firstActivationWithoutWorker = prior.image === null && prior.workerVersion === null;
+  const retainedBackendFirstFrontend = prior.image !== null && prior.image === candidate.image && prior.workerVersion === null;
+  const recordedWindow = matchesJournal() ? journal.reactivationWindow ?? null : null;
+  const renewRetainedWindow = operation === 'advance' && retainedBackendFirstFrontend && matchesJournal() &&
+    journal.phase === 'checkpointed' && typeof journal.retainedCandidateWorker === 'boolean' &&
+    request.reactivationWindow != null && !isDeepStrictEqual(request.reactivationWindow, recordedWindow);
+  if (operation !== 'recover' && !(matchesJournal() && journal.phase === 'safe-stopped') && !renewRetainedWindow) {
     requireCondition(isDeepStrictEqual(request.reactivationWindow ?? null, recordedWindow),
       'Reactivation approval does not match the durable checkpoint');
   }
-  const firstActivationWithoutWorker = prior.image === null && prior.workerVersion === null;
-  const retainedBackendFirstFrontend = prior.image !== null && prior.image === candidate.image && prior.workerVersion === null;
   const candidateWorkerRetained = () => (firstActivationWithoutWorker || retainedBackendFirstFrontend) &&
     journal.retainedCandidateWorker === true && id(ingress) === candidate.workerVersion;
   const observeCheckpoint = async () => {
@@ -266,6 +269,15 @@ export async function advancePair({
     if (retainedBackendFirstFrontend && typeof journal.retainedCandidateWorker === 'boolean') {
       verifyRetainedBackend();
       await verifyRetryWorker(id(ingress));
+      if (renewRetainedWindow) {
+        await mutateHost('checkpoint');
+        await observeCheckpoint();
+        requireCondition(journal.phase === 'checkpointed' &&
+          isDeepStrictEqual(journal.reactivationWindow, request.reactivationWindow),
+        'Host did not persist the renewed Frontend retry window');
+        verifyRetainedBackend();
+        await verifyFence();
+      }
     } else {
       await proveStagedWorker();
     }
