@@ -715,7 +715,7 @@ APIの入口、body/query、レスポンス、エラー、認可、競合、冪�
 **Design owner**: [MCP-first](../architecture/MCP-FIRST.md)、[Modules](../architecture/MODULES.md)、[MCP v2 migration](../architecture/MCP-V2-MIGRATION.md)
 **Implementation identifiers**: modules/mcp/src/http.ts; modules/mcp/src/stdio.ts; modules/mcp/src/tools.ts; modules/mcp/src/tools/shared.ts; modules/mcp/src/tools/project.ts; modules/mcp/src/tools/knowledge.ts
 **Verification identifiers**: MCPV-001..008; tests/integration/mcp-acceptance.test.mjs; modules/mcp/src/tools.test.ts; packages/api/test/better-auth.integration.test.ts
-**Test IDs**: TEST-MCPV-001-001, TEST-MCPV-001-002, TEST-MCPV-004-001, TEST-MCPV-004-002, TEST-MCPV-006-001, TEST-MCPV-006-002, TEST-MCPV-006-003, TEST-MCPV-006-004, TEST-MCPV-007-001, TEST-MCPV-007-002, TEST-MCPV-007-003, TEST-MCPV-007-004, TEST-MCPV-004-003
+**Test IDs**: TEST-MCPV-001-001, TEST-MCPV-001-002, TEST-MCPV-004-001, TEST-MCPV-004-002, TEST-MCPV-006-001, TEST-MCPV-006-002, TEST-MCPV-006-003, TEST-MCPV-006-004, TEST-MCPV-006-005, TEST-MCPV-007-001, TEST-MCPV-007-002, TEST-MCPV-007-003, TEST-MCPV-007-004, TEST-MCPV-004-003
 **Exact-run reference**: NOT_RUN
 **Comment**: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
@@ -743,7 +743,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **UID**: OBL-REQ-MCP-001-O01
 **Design reference**: [MCP-first](../architecture/MCP-FIRST.md)、[Modules](../architecture/MODULES.md)
 **Implementation identifiers**: modules/mcp/src/http.ts; modules/mcp/src/stdio.ts; modules/mcp/src/tools.ts
-**Test IDs**: TEST-MCPV-004-001; TEST-MCPV-004-002; TEST-MCPV-006-001; TEST-MCPV-006-002; TEST-MCPV-006-003; TEST-MCPV-006-004, TEST-MCPV-004-003
+**Test IDs**: TEST-MCPV-004-001; TEST-MCPV-004-002; TEST-MCPV-006-001; TEST-MCPV-006-002; TEST-MCPV-006-003; TEST-MCPV-006-004; TEST-MCPV-006-005, TEST-MCPV-004-003
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
 
@@ -2444,6 +2444,24 @@ Check an oversized request body receives 413 before the SDK action context is ac
 - **Type**: File
   **Path**: modules/mcp/src/http.test.ts
   **Lines**: 311, 330
+
+## TEST-MCPV-006-005
+
+**Type**: TEST
+**MID**: 79d00c3ff35b508520399c674c4976ab
+**UID**: TEST-MCPV-006-005
+**Case name**: does not activate the MCP module for a request cancelled during admission
+**Exact-run reference**: NOT_RUN
+
+Close an MCP connection during OAuth admission and confirm that only the connected control request reaches module activation.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: packages/api/src/server.test.ts
+  **Lines**: 5023, 5070
 
 ## TEST-MCPV-004-003
 
