@@ -129,7 +129,13 @@ CANDIDATE
     rootless cat "$source_artifact/$file" > "$archive/$file"
   done
   digest="$(sha256sum "$archive/SHA256SUMS" | cut -d ' ' -f1)"
-  bash "$repo_root/deploy/backup/s3-fixture.sh" --transfer-only "$archive" "$source_sha" "$outputs" >"$tmp/s3-lifecycle-transfer.log" 2>&1
+  if ! bash "$repo_root/deploy/backup/s3-fixture.sh" --transfer-only "$archive" "$source_sha" "$outputs" >"$tmp/s3-lifecycle-transfer.log" 2>&1; then
+    redact_log "$tmp/s3-lifecycle-transfer.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/s3-lifecycle-transfer-bounded.log"
+    echo 'S3 lifecycle transfer failed' >&2
+    tail -30 "$RUNNER_TEMP/codexia-push-app-lifecycle/s3-lifecycle-transfer-bounded.log" >&2
+    return 1
+  fi
+  echo 'S3 lifecycle transfer verified'
   mapfile -t received < <(find "$outputs" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
   [[ "${#received[@]}" == 1 ]]
   cmp -- "$archive/SHA256SUMS" "${received[0]}/SHA256SUMS"
@@ -139,13 +145,19 @@ CANDIDATE
   done
   sudo install -o codexia -g codexia -m 0600 "$tmp/age-identity" "$drill/identity"
   sudo install -o codexia -g codexia -m 0600 "$tmp/auth-introspection-secret" "$drill/introspection-secret"
-  rootless env CODEXIA_PUSH_STATE_DIR="$drill" "$fixture_home/.local/bin/codexia-backup" drill \
+  if ! rootless env CODEXIA_PUSH_STATE_DIR="$drill" "$fixture_home/.local/bin/codexia-backup" drill \
     "$drill/backup" "$drill/identity" --approved --candidate-full-image "$image" --candidate-ledger "$ledger" \
     --candidate-api-ready --candidate-runtime-settings "$runtime_settings" \
-    --candidate-introspection-secret-file "$drill/introspection-secret" >"$tmp/s3-lifecycle-drill.log" 2>&1
+    --candidate-introspection-secret-file "$drill/introspection-secret" >"$tmp/s3-lifecycle-drill.log" 2>&1; then
+    redact_log "$tmp/s3-lifecycle-drill.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/s3-lifecycle-drill-bounded.log"
+    echo 'S3 lifecycle candidate restore failed' >&2
+    tail -30 "$RUNNER_TEMP/codexia-push-app-lifecycle/s3-lifecycle-drill-bounded.log" >&2
+    return 1
+  fi
   grep -Fxq "Verified checksum manifest sha256: $digest" "$tmp/s3-lifecycle-drill.log"
   grep -Fxq "Isolated candidate ledger verified: $ledger" "$tmp/s3-lifecycle-drill.log"
   grep -Fxq 'Isolated candidate API readiness verified' "$tmp/s3-lifecycle-drill.log"
+  echo 'S3 lifecycle candidate restore and API readiness verified'
   rootless rm -r -- "$drill"
   append_observation s3_restore_lifecycle "$(node -e '
     const [sourceSha, image, ledger, manifestSha256] = process.argv.slice(1);
