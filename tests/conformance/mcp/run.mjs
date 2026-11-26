@@ -23,6 +23,7 @@ const evidence = {
   inspectorTool: '@modelcontextprotocol/inspector@2.16.0',
   officialConformance: { status: 'NOT_RUN' },
   fullRequiredSuiteAgainstProduct: { status: 'NOT_RUN_BY_SCOPE', note: 'Stock 2026 suite runs only against the loopback SDK-backed fixture; it includes hostile protocol scenarios.' },
+  stdioProtocolProbe: { status: 'NOT_RUN' },
   inspector: { status: 'NOT_RUN' },
   authorization: { status: 'NOT_RUN' },
   contract: { status: 'NOT_RUN' },
@@ -112,12 +113,34 @@ async function publishOfficialEvidence(source) {
 }
 
 async function runInspector(label, target, args, expectPass) {
-  const result = await execute(inspectorBin, ['--cli', '--format', 'json', ...target, ...args]);
+  const result = await execute(inspectorBin, ['--cli', '--format', 'json', '--protocol-era', 'modern', ...target, ...args]);
   await writeFile(resolve(output, `${label}.stdout.txt`), result.stdout);
   await writeFile(resolve(output, `${label}.stderr.txt`), result.stderr);
   const passed = expectPass ? result.code === 0 : result.code !== 0;
   if (!passed) throw new Error(`${label} expected ${expectPass ? 'success' : 'contract rejection'} but exited ${result.code}: ${result.stderr.slice(-900)}`);
   return result;
+}
+
+async function verifyAdmissionError(result, endpoint, token, expectedStatus, expectedCode) {
+  const { error } = JSON.parse(result.stderr);
+  assert.equal(error.code, expectedStatus === 404 ? 'error' : 'auth_required');
+  if (error.status !== undefined) assert.equal(error.status, expectedStatus);
+  // Inspector's discovery errors do not always retain the API response body.
+  const response = await fetch(endpoint, {
+    method: 'POST', signal: AbortSignal.timeout(5_000),
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover' }),
+  });
+  assert.equal(response.status, expectedStatus);
+  const body = await response.json();
+  assert.equal(body.code, expectedCode);
+  return { inspectorCode: error.code, httpStatus: response.status, httpCode: body.code };
+}
+
+function assertLiveProjectStatus(result, projectId) {
+  const { structuredContent } = JSON.parse(result.stdout).result;
+  assert.equal(structuredContent.snapshot.projectId, projectId);
+  assert.equal(structuredContent.data.state, 'durable');
 }
 
 async function startProtocolFixture(mutated = false) {
@@ -194,7 +217,7 @@ try {
   const baselineToolsListChecks = await scenarioResults(conformanceDir, 'tools-list');
   const baselineToolsList = baselineToolsListChecks?.find(item => item.id === 'tools-list');
   const baselineSchemaCheck = baselineToolsListChecks?.find(item => item.id === 'wire-schema-valid');
-  const detected = baselineToolsList?.status === 'SUCCESS' && baselineSchemaCheck?.status === 'SUCCESS' && mutationSchemaCheck?.status === 'FAILURE' &&
+  const detected = mutated.code === 1 && baselineToolsList?.status === 'SUCCESS' && baselineSchemaCheck?.status === 'SUCCESS' && mutationSchemaCheck?.status === 'FAILURE' &&
     /JSONRPCResultResponse: must have required property 'id'/u.test(mutationSchemaCheck.errorMessage ?? '');
   evidence.mutation = {
     defect: 'delete only the request id from a successful tools/list JSON-RPC response',
@@ -230,9 +253,9 @@ try {
   const authHeader = token => ['--header', `Authorization: Bearer ${token}`];
   await guarded('official Inspector HTTP tools/list', async () => {
     const result = await runInspector('inspector-http-tools-list', httpTarget, ['--method', 'tools/list', ...authHeader(liveHost.tokens.full)], true);
-    const envelope = JSON.parse(result.stdout);
-    assert.ok(JSON.stringify(envelope).includes('invoke_action'), 'published tool list includes invoke_action');
-    assert.ok(JSON.stringify(envelope).includes('action_id'), 'published input schema includes action_id');
+    const { tools } = JSON.parse(result.stdout).result;
+    const invoke = tools.find(tool => tool.name === 'invoke_action');
+    assert.ok(invoke?.inputSchema?.required?.includes('action_id'), 'invoke_action publishes required action_id');
     evidence.inspector.http = 'PASS: official Inspector connected to live Fastify/Core/PostgreSQL MCP endpoint';
   });
   await guarded('official Inspector stdio', async () => {
@@ -242,36 +265,29 @@ try {
       '-e', `CODEXIA_PROJECT_ID=${liveHost.projectId}`,
       process.execPath, resolve(root, 'modules/mcp/dist/stdio.js')];
     const result = await runInspector('inspector-stdio-tools-list', stdioTarget, ['--method', 'tools/list'], true);
-    assert.ok(JSON.stringify(JSON.parse(result.stdout)).includes('invoke_action'), 'stdio tool list includes invoke_action');
+    assert.ok(JSON.parse(result.stdout).result.tools.some(tool => tool.name === 'invoke_action'), 'stdio tool list includes invoke_action');
     const actionResult = await runInspector('inspector-stdio-invoke-action', stdioTarget,
       ['--method', 'tools/call', '--tool-name', 'invoke_action', '--tool-arg', 'action_id=core.status'], true);
-    assert.ok(JSON.stringify(JSON.parse(actionResult.stdout)).includes('durable'), 'stdio action call reaches live Core and returns durable status');
+    assertLiveProjectStatus(actionResult, liveHost.projectId);
     evidence.inspector.stdio = 'PASS: official Inspector connected through production serveStdio entry to live API';
   });
 
-  for (const [key, label] of [['owner', 'owner client token'], ['wrongScope', 'wrong scope token'], ['expired', 'expired token']]) {
+  for (const [key, label, status, code] of [
+    ['owner', 'owner client token', 403, 'OAUTH_MCP_CLIENT_NOT_ALLOWED'],
+    ['wrongScope', 'wrong scope token', 403, 'OAUTH_MCP_SCOPE_INVALID'],
+    ['expired', 'expired token', 401, 'OAUTH_TOKEN_INVALID'],
+  ]) {
     await guarded(`authorization rejects ${label}`, async () => {
-      const result = await runInspector(`inspector-deny-${key}`, httpTarget, ['--method', 'tools/list', ...authHeader(liveHost.tokens[key])], false);
-      if (key === 'expired') {
-        assert.match(`${result.stdout}\n${result.stderr}`, /auth_required/u, 'Inspector correctly surfaces the expired-token OAuth challenge');
-        const response = await fetch(`${liveHost.baseUrl}/mcp?projectId=${encodeURIComponent(liveHost.projectId)}`, {
-          method: 'POST', headers: { Authorization: `Bearer ${liveHost.tokens.expired}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2026-07-28', capabilities: {}, clientInfo: { name: 'expired-token-probe', version: '1.0.0' } } }),
-        });
-        const body = await response.json().catch(() => ({}));
-        assert.equal(response.status, 401, 'expired access token is rejected by MCP HTTP admission');
-        evidence.authorization[key] = { inspector: 'AUTH_REQUIRED', httpStatus: response.status, httpCode: body.code ?? body.error?.code ?? null };
-      } else {
-        assert.match(`${result.stdout}\n${result.stderr}`, /403/u, 'client/scope rejection reports HTTP 403');
-        evidence.authorization[key] = 'DENIED_403';
-      }
+      const token = liveHost.tokens[key];
+      const result = await runInspector(`inspector-deny-${key}`, httpTarget, ['--method', 'tools/list', ...authHeader(token)], false);
+      evidence.authorization[key] = await verifyAdmissionError(result, endpoint, token, status, code);
     });
   }
   await guarded('authorization rejects unassigned project', async () => {
-    const unassigned = ['--transport', 'http', '--server-url', `${liveHost.baseUrl}/mcp?projectId=${encodeURIComponent(liveHost.unassignedProjectId)}`];
+    const unassignedEndpoint = `${liveHost.baseUrl}/mcp?projectId=${encodeURIComponent(liveHost.unassignedProjectId)}`;
+    const unassigned = ['--transport', 'http', '--server-url', unassignedEndpoint];
     const result = await runInspector('inspector-deny-unassigned-project', unassigned, ['--method', 'tools/list', ...authHeader(liveHost.tokens.full)], false);
-    assert.match(`${result.stdout}\n${result.stderr}`, /404/u, 'unassigned project is concealed as HTTP 404');
-    evidence.authorization.unassignedProject = 'DENIED';
+    evidence.authorization.unassignedProject = await verifyAdmissionError(result, unassignedEndpoint, liveHost.tokens.full, 404, 'PROJECT_NOT_FOUND');
   });
   await guarded('authorization accepts read scope', async () => {
     await runInspector('inspector-accept-read-scope', httpTarget, ['--method', 'tools/list', ...authHeader(liveHost.tokens.read)], true);
@@ -279,18 +295,21 @@ try {
   });
 
   await guarded('schema and unknown tool negatives', async () => {
-    const good = JSON.parse((await runInspector('inspector-invoke-action-success', httpTarget,
-      ['--method', 'tools/call', '--tool-name', 'invoke_action', '--tool-arg', 'action_id=core.status', ...authHeader(liveHost.tokens.full)], true)).stdout);
-    assert.ok(JSON.stringify(good).includes('durable'), 'known action success control returns live Core status');
+    const good = await runInspector('inspector-invoke-action-success', httpTarget,
+      ['--method', 'tools/call', '--tool-name', 'invoke_action', '--tool-arg', 'action_id=core.status', ...authHeader(liveHost.tokens.full)], true);
+    assertLiveProjectStatus(good, liveHost.projectId);
     const invalid = await runInspector('inspector-invalid-schema-argument', httpTarget,
       ['--method', 'tools/call', '--tool-name', 'invoke_action', '--tool-arg', 'unexpected=value', ...authHeader(liveHost.tokens.full)], false);
-    assert.match(`${invalid.stdout}\n${invalid.stderr}`, /invalid|action_id|schema|argument/iu, 'invalid call is rejected for the missing required action_id');
-    evidence.contract = { validInvokeAction: 'ACCEPTED', missingRequiredActionId: 'REJECTED by Inspector/catalog schema validation' };
+    const { result } = JSON.parse(invalid.stdout);
+    assert.equal(result.isError, true);
+    assert.ok(result.content.some(item => item.type === 'text' && /Input validation error: .*action_id/u.test(item.text)));
+    evidence.contract = { validInvokeAction: 'ACCEPTED', missingRequiredActionId: 'REJECTED' };
   });
 
   await guarded('wire-level unknown tool negative', async () => {
     const moduleRequire = (await import('node:module')).createRequire(resolve(root, 'modules/mcp/package.json'));
-    const { Client, StreamableHTTPClientTransport } = await import(moduleRequire.resolve('@modelcontextprotocol/client'));
+    const { Client, ProtocolErrorCode, StreamableHTTPClientTransport } = await import(moduleRequire.resolve('@modelcontextprotocol/client'));
+    const { StdioClientTransport } = await import(moduleRequire.resolve('@modelcontextprotocol/client/stdio'));
     const transport = new StreamableHTTPClientTransport(new URL(`/mcp?projectId=${encodeURIComponent(liveHost.projectId)}`, liveHost.baseUrl), {
       authProvider: { token: async () => liveHost.tokens.full },
     });
@@ -308,6 +327,38 @@ try {
       await client.close().catch(() => undefined);
       await transport.close().catch(() => undefined);
     }
+
+    const stdioEnv = {
+      PATH: process.env.PATH ?? '/usr/bin:/bin', CODEXIA_API_URL: liveHost.baseUrl,
+      CODEXIA_MCP_ACCESS_TOKEN: liveHost.tokens.full, CODEXIA_PROJECT_ID: liveHost.projectId,
+    };
+    for (const era of ['legacy', 'modern']) {
+      const stdioTransport = new StdioClientTransport({
+        command: process.execPath, args: [resolve(root, 'modules/mcp/dist/stdio.js')], env: stdioEnv, cwd: root, stderr: 'inherit',
+      });
+      const stdioClient = new Client({ name: `codexia-mcp-${era}`, version: '1.0.0' }, {
+        versionNegotiation: { mode: era === 'legacy' ? 'legacy' : { pin: '2026-07-28' } },
+      });
+      try {
+        if (era === 'legacy' && Date.now() >= Date.UTC(2027, 0, 28)) {
+          await assert.rejects(stdioClient.connect(stdioTransport), { code: ProtocolErrorCode.UnsupportedProtocolVersion });
+          evidence.stdioProtocolProbe.legacy = { admission: 'REJECTED_AFTER_CUTOFF' };
+          continue;
+        }
+        await stdioClient.connect(stdioTransport);
+        assert.equal(stdioClient.getProtocolEra(), era);
+        const version = stdioClient.getNegotiatedProtocolVersion();
+        assert.match(version, era === 'legacy' ? /^2025-/u : /^2026-07-28$/u);
+        const catalog = await stdioClient.listTools();
+        assert.ok(catalog.tools.some(tool => tool.name === 'invoke_action'), `stdio ${era} lists Codexia tools`);
+        const status = await stdioClient.callTool({ name: 'invoke_action', arguments: { action_id: 'core.status' } });
+        assert.equal(status.structuredContent?.snapshot?.projectId, liveHost.projectId);
+        evidence.stdioProtocolProbe[era] = { admission: 'ACCEPTED', version };
+      } finally {
+        await stdioClient.close().catch(() => undefined);
+        await stdioTransport.close().catch(() => undefined);
+      }
+    }
   });
 } catch (error) {
   failures.push(error instanceof Error ? error.message : String(error));
@@ -321,6 +372,7 @@ try {
   evidence.inspector.status = evidence.inspector.http && evidence.inspector.stdio ? 'PASSED' : 'INCOMPLETE';
   evidence.authorization.status = ['owner', 'wrongScope', 'expired', 'unassignedProject', 'readScope'].every(key => evidence.authorization[key]) ? 'PASSED' : 'INCOMPLETE';
   evidence.contract.status = evidence.contract.wire ? 'PASSED' : 'INCOMPLETE';
+  evidence.stdioProtocolProbe.status = evidence.stdioProtocolProbe.legacy && evidence.stdioProtocolProbe.modern ? 'PASSED' : 'INCOMPLETE';
   evidence.mutation.status = evidence.mutation.detectedByOfficialTool ? 'DETECTED' : 'NOT_DETECTED';
   evidence.status = failures.length ? 'FAILED_OR_BLOCKED' : 'PASSED';
   evidence.failures = failures;
