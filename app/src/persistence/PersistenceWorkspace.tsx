@@ -1143,7 +1143,10 @@ export function PersistenceWorkspace({
   );
 
   const openDocument = useCallback(
-    async (nextDocumentId: string, selection?: { intent: number; protect: () => Promise<boolean>; replaceRoute?: boolean }): Promise<boolean> => {
+    async (
+      nextDocumentId: string,
+      selection?: { intent: number; protect: () => Promise<boolean>; replaceRoute?: boolean },
+    ): Promise<boolean> => {
       const currentProject = projects.find(item => item.id === projectId);
       const currentJournal = journalRef.current;
       if (sessionBlockedRef.current || !currentProject || !currentJournal || !nextDocumentId) return false;
