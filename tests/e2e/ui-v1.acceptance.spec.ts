@@ -334,6 +334,12 @@ test("revision history responses and errors stay bound to the scene that request
   await initialResponse;
   await expect(page.getByRole("region", { name: "Revision履歴", exact: true })).toHaveCount(0);
   await page.unroute(historyUrl);
+  // The previous history entry is B; a failed history read must preserve A.
+  await page.goBack();
+  await expect(editorAlert).toHaveText("対象の文書を開けませんでした。");
+  await expectMarkdown(page, aCurrent);
+  await expect(page).toHaveURL(url => url.pathname === writingFixturePath("desktop", project, scene));
+  await expect(page.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`)).toHaveAttribute("aria-current", "page");
   await page.unroute(failedDocumentRoute);
   await openManuscriptScene(page, scene);
   await openRevisionHistory(page);
