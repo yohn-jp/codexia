@@ -3,7 +3,6 @@
 .codegraph
 .agents
 ios
-scripts/ci/benchmark
 build
 **/build
 !scripts/build/
