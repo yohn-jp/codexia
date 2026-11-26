@@ -36,13 +36,21 @@ Preflightは環境、host pin、観測時刻、source/candidate、現在のident
 | R1 RESUME / RECOVER | Tに既知の未完了操作あり | 同一操作の記録・現状態・fenceを照合して再開または切戻し。未知記録はR0 |
 | R2 RESTORE | 既存環境の復旧意図があり必要な保存状態が欠落・故障 | 独立backup・外部秘密管理から復元。必要なら先に基盤構築するが初回owner発行は禁止 |
 | R3 MAINTENANCE | H drift、D既存非互換、確認済み旧認証方式からの変更、既存A回復必要、B停止・障害・残存状態またはF障害 | 明示保守・復旧・移行。先行保全・互換性判定。既存owner回復を新規登録と分離 |
-| R4 BOOTSTRAP | H未構築/部分構築、D未作成/新規空またはA未構成で、新規・既存採用・復旧の意図が確定 | 必要なhost/secrets/base/auth-runtimeを収束。新規初期化を別承認。既存identity/ledger/資格情報保持 |
+| R4 BOOTSTRAP | H未構築/部分構築、D未作成/新規空またはA未構成で、新規・既存採用・復旧の意図が確定。承認済みinstallでDの欠落を確認した場合は旧B/Aの残存より優先 | 必要なhost/secrets/base/auth-runtimeを収束。新規初期化を別承認。既存identity/ledger/資格情報保持 |
 | R5 OWNER_SETUP | 承認済み新規installでA登録待ちまたはactivation未準備、あるいはB setup-only | 制限付きsetup UI/APIと一回限りgrant。本人登録、client検証、保護されたactivation preparation。既存ownerを再発行しない |
 | R6 ACTIVATE | H/D/A検証済み、B clean未配備 | F互換なら既存初回Backend配備。F未配備/非互換ならpair activation。初回・DB使用承認、backup |
 | R7 CUTOVER | B通常稼働だが非互換、F未配備、またはF非互換かつ通常Frontend admissionが成立しない | 既存データ/owner保持、必要な移行・協調配備。既に互換な側を無用に再配備しない |
 | R8 UPDATE / VERIFY | B通常稼働・互換、Fが正常で通常admission成立 | 変更のあるcomponentのみ通常互換更新。完全同一ならno-op＋health/identity検証 |
 
-R0の不明は独立した証拠で確定した旧identityや未配備を含まない。R1の再開可能な操作が本人登録・別承認待ちなら待機状態を返し、自動再試行ループや新しい登録キー発行を行わない。R2で基盤のdriftがある場合は安全な明示修復を復元の前提とする。R3のmigrationとR7の対切替が同一保守操作に属する場合は一つのfence・保全・transactionで完結させる。途中で通常公開へ戻さない。既存データを新規として扱う経路はない。旧認証からの移行に新しいBetter Auth owner登録が必要なら、旧データ保全・新規認証の明示承認・別のclean targetを用いる保守経路でのみ行う。
+R0の不明は独立した証拠で確定した旧identityや未配備を含まない。R1の再開可能な操作が本人登録・別承認待ちなら待機状態を返し、自動再試行ループや新しい登録キー発行を行わない。R2で基盤のdriftがある場合は安全な明示修復を復元の前提とする。R3のmigrationとR7の対切替が同一保守操作に属する場合は一つのfence・保全・transactionで完結させる。途中で通常公開へ戻さない。既存データを新規として扱う経路はない。確認済みのDB不在に対する新規初期化は、既存データの変換・削除ではない。旧認証からの移行に新しいBetter Auth owner登録が必要なら、旧データ保全・新規認証の明示承認・別のclean targetを用いる保守経路でのみ行う。
+
+### DB不在時の再初期化（R4）
+
+VMの利用履歴や旧API epochではなく現在のDB状態を判定する。新規installの明示と既存のdatabase-initialization承認がある場合、管理接続・canonical基盤の確認と正常なPostgreSQL管理接続による専用logical DBの不存在確認（または新規基盤での確認済み未作成）を根拠に、R4へ収束する。接続不能・認証失敗・観測不明は不存在と見なさずR0で停止する。restore意図はR2を維持する。既存DBを削除・上書きする操作は一切含めない。
+
+DB不在が確定した旧配備では、旧epoch・旧owner・旧API稼働記録は新しいDBの互換条件としない。既知の未完了操作はR1を優先し、不明な操作記録・基盤drift・対象所有者不一致は停止する。R4の保護された実行系統はproduction queueとcanonical host lockの下でDB不在を再検証し、Tunnel/APIを停止して旧API slotおよびDBに束縛された旧owner/setup/release状態だけを整理し、既存のclean target検証を満たす。PostgreSQL cluster・他DB・role・Secret・外部Tunnel/Access設定・独立backupは保持する。処理中断時は再観測し、不在が維持されている場合に限り整理を再開できること。既に作成・初期化されたDBは通常の新規空・install intentに束縛された再開契約に従い、暗黙に破棄しない。
+
+既存BootstrapのDB初期化承認を用い、DB再作成固有の重複承認や旧epoch移行契約を要求しない。認定済みFull imageで現行schema/ledgerとBetter Authを初期化し、R5でownerを登録、R6で互換Frontendとactivationを行う。旧Frontendの存在はR4の妨げではない。通常update/adoptではDB不在を自動的な新規installへ読み替えない。
 
 ### 統合Deployment経路
 
@@ -59,10 +67,12 @@ flowchart TD
     PENDING -->|なし| LOST{"既存状態の復旧が必要?"}
     LOST -->|はい| RESTORE["R2: 独立backup / Secret復元"]
     RESTORE --> OBS
-    LOST -->|いいえ| DRIFT{"drift・DB/Auth非互換・障害?"}
+    LOST -->|いいえ| EMPTYDB{"DB不在を確認・新規承認済み・基盤正常?"}
+    EMPTYDB -->|はい| BOOT["R4: Bootstrap"]
+    EMPTYDB -->|いいえ| DRIFT{"drift・DB/Auth非互換・障害?"}
     DRIFT -->|はい| MAINT["R3: 保守・復旧・協調移行"]
     DRIFT -->|いいえ| BASE{"基盤・DB・Auth runtime収束済み?"}
-    BASE -->|いいえ| BOOT["R4: Bootstrap"]
+    BASE -->|いいえ| BOOT
     BOOT --> OBS
     BASE -->|はい| OWNER{"owner activation準備済み?"}
     OWNER -->|いいえ / 新規承認済み| SETUP["R5: 限定公開・owner登録<br/>activation preparation"]
@@ -94,7 +104,7 @@ flowchart TD
 | 停止・障害・残存状態 | R3復旧後再判定 | R3復旧後再判定 | R3復旧後再判定 |
 | 不明 | R0 | R0 | R0 |
 
-Frontend障害はR3、未観測はR0を先行する。空VMでも旧Frontendが残り得る。API停止だけではclean未配備ではない。API container/unit/activation link/transaction/release/rollback記録が残る場合は既存配備の回復とし、first-install承認で上書きしない。
+Frontend障害はR3、未観測はR0を先行する。空VMでも旧Frontendが残り得る。API停止だけではclean未配備ではない。API container/unit/activation link/transaction/release/rollback記録が残る場合は既存配備の回復とし、first-install承認で上書きしない。ただし、前節のDB不在が確認されR4の初期化が承認された場合に限り、旧配備の残存状態を整理する。
 
 ## 共通制御と個別移行の境界
 

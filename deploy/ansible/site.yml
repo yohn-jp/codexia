@@ -100,14 +100,14 @@
         codexia_stage == 'secrets' or
         (codexia_stage == 'bootstrap' and 'secrets' in (codexia_bootstrap_stages | default(['host', 'secrets', 'base', 'auth-runtime'])))
 
-    - name: Recreate only a separately approved absent Codexia logical database
+    - name: Converge an observed absent Codexia database before base and auth initialization
       ansible.builtin.include_tasks:
         file: recreate-missing-app-database.yml
         apply:
           become: true
           become_user: "{{ codexia_service_user }}"
           environment: "{{ service_runtime_env }}"
-      when: codexia_stage == 'bootstrap' and codexia_recreate_missing_app_database_approved | default(false) | bool
+      when: codexia_stage == 'bootstrap' and codexia_expected_absent_database is defined
 
     - name: Converge canonical database, networks, volumes and Tunnel Quadlets
       ansible.builtin.include_tasks:

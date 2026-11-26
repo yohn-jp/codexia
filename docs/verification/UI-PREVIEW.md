@@ -1,6 +1,6 @@
 # UI preview and Impeccable Detector (Windows / Linux / macOS)
 
-**Current implementation note:** the preview still serves Desktop and *legacy* Mobile React UIs with a shared browser fixture, the Codexia API with Better Auth, and a disposable PostgreSQL database. The accepted product target is **Windows Chromium Desktop React Web + native SwiftUI iOS**. Preview tooling may run on Linux/macOS; this is not a product support promise. The supported product and browser-test transition are defined in [System design](../architecture/SYSTEM-DESIGN.md) and [E2E execution](E2E-EXECUTION.md). Accordingly, the Mobile Web preview is not future product acceptance or native evidence. [UX-CONTRACT](../design/UX-CONTRACT.md) defines UX acceptance and [DESIGN.md](../../app/DESIGN.md) records the agreed visual design.
+The local preview serves the Desktop React authoring UI with Better Auth and disposable PostgreSQL. The supported authoring platforms and browser verification scope are defined in [System design](../architecture/SYSTEM-DESIGN.md) and [E2E execution](E2E-EXECUTION.md). [UX-CONTRACT](../design/UX-CONTRACT.md) defines UX acceptance and [DESIGN.md](../../app/DESIGN.md) records the agreed visual design.
 
 ## Design checks on GitHub
 
@@ -27,14 +27,13 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm ui:preview
 ```
 
-This builds the selected profile and the UI assets configured for the local OAuth issuer. The shared fixture migrates disposable PostgreSQL and registers a local owner and client. The preview seeds a sample project with a volume, chapter and two scenes through the authenticated API. It signs in through the real browser OAuth flow, opens a seeded scene in Desktop and Mobile, and saves PNGs and inert HTML in `artifacts/ui-preview/snapshots/`. The preview command remains running.
+This builds the selected profile and the UI assets configured for the local OAuth issuer. The shared fixture migrates disposable PostgreSQL and registers a local owner and client. The preview seeds a sample project with a volume, chapter and two scenes through the authenticated API. It signs in through the real browser OAuth flow, opens a seeded scene in Desktop, and saves PNGs and inert HTML in `artifacts/ui-preview/snapshots/`. The preview command remains running.
 
 The terminal prints the interactive addresses.
 
 - `http://127.0.0.1:4173/desktop/`
-- `http://127.0.0.1:4173/mobile/`
 
-To explore the preview in your browser, choose **OAuthでサインイン**, then **IDプロバイダーでサインイン**. Choose **許可して続ける** if prompted. The identity provider uses the disposable preview account. After capture, the terminal prints two snapshot URLs from a second loopback-only server. The server serves the rendered documents with scripts removed and prevents API requests.
+To explore the preview in your browser, choose **OAuthでサインイン**, then **IDプロバイダーでサインイン**. Choose **許可して続ける** if prompted. The identity provider uses the disposable preview account. After capture, the terminal prints the Desktop snapshot URL from a second loopback-only server. The server serves the rendered documents with scripts removed and prevents API requests.
 
 In a second PowerShell at the repository root, while preview is running:
 
@@ -42,7 +41,7 @@ In a second PowerShell at the repository root, while preview is running:
 corepack pnpm ui:scan
 ```
 
-**Current scanner implementation (legacy):** the scanner executes a pinned Impeccable version against `app/` and frozen Desktop/Mobile snapshots at `1440x900` and `390x844`. The target scanner/CI should keep Desktop Web coverage and **remove the Mobile React 390px gate at native cutover**, replacing iOS acceptance with Simulator/physical-device tests per [native design](../architecture/IOS-SWIFTUI-ARCHITECTURE.md). This text does not claim the existing scanner has already changed. Reports are written to `artifacts/ui-preview/detector/{source,desktop,mobile,summary}.json` (ignored by git). Exit code **2** from Impeccable is findings, **1** is a failed scan; only a successful scan is included in the summary. There is no inference that an empty JSON from a failed HTTP request means a clean UI. Runs do not alter source or a design-system file.
+The scanner runs the pinned Impeccable engine against `app/` and the frozen Desktop snapshot at `1440x900`. Reports are written to `artifacts/ui-preview/detector/{source,desktop,summary}.json` (ignored by git). Exit code **2** from Impeccable is findings, **1** is a failed scan; only a successful scan is included in the summary. There is no inference that an empty JSON from a failed HTTP request means a clean UI. Runs do not alter source or a design-system file.
 
 The snapshots preserve the seeded, authenticated layout but **are not interactive**. They do not prove end-to-end behavior, permissions, animations or native iOS rendering. Those remain covered by existing E2E tests and manual UX review. A separate browser scan of the real interactive URLs would only examine the sign-in state in a new unauthenticated browser; do not count that as an editor audit.
 

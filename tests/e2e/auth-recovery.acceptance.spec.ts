@@ -30,7 +30,7 @@ test.beforeEach(async ({ context }) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
     const shell = pathname.split("/")[1];
-    if (request.method() !== "GET" || (shell !== "desktop" && shell !== "mobile")) {
+    if (request.method() !== "GET" || shell !== "desktop") {
       await route.fulfill({ status: 404 });
       return;
     }

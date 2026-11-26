@@ -63,6 +63,30 @@ test('observed pair: exact no-op, backend-only and frontend-only updates', () =>
   assert.equal(planFromObservations(ui).plan.route, 'R8');
   assert.deepEqual(planFromObservations(ui).plan.observation.changeAxes, ['frontend']);
 });
+test('verified missing logical database selects approved fresh bootstrap, not an epoch transition', () => {
+  const f = fixture();
+  f.candidateBackend = { ...f.candidateBackend, identity: { ...f.candidateBackend.identity, apiEpoch: 3, version: '2.0.0' } };
+  f.candidateFrontend.identity = { ...f.candidateFrontend.identity, apiEpoch: 3, version: '2.0.0' };
+  f.host.database = { state: 'missing', authState: 'absent', clusterId: '123' };
+  f.host.backend = { state: 'fault', databaseAbsent: true };
+  f.edge.backend = null;
+  f.priorBackend = null;
+  f.intent = 'install';
+  const { plan } = planFromObservations(f);
+  assert.equal(plan.candidateRoute, 'R4');
+  assert.deepEqual(plan.blockers, ['approval-required']);
+  assert.deepEqual(plan.requiredApprovals, ['bootstrap', 'database-initialization']);
+  assert.equal(plan.requiresTransition, false);
+  assert.equal(plan.observation.state.F, 'incompatible');
+  f.intent = 'update';
+  assert.equal(planFromObservations(f).plan.candidateRoute, 'R0');
+  f.intent = 'restore';
+  assert.equal(planFromObservations(f).plan.candidateRoute, 'R2');
+  f.intent = 'install';
+  f.host.database = { state: 'unknown', authState: 'unknown' };
+  assert.equal(planFromObservations(f).plan.candidateRoute, 'R0');
+});
+
 test('verified empty and partial infrastructure, owner setup, first activation and missing UI', () => {
   const f = fixture();
   absentFrontend(f); absentBackend(f);
