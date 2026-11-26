@@ -353,6 +353,8 @@ function WorkspaceTree({
           id={domId('st-workspace-pane', node.activePanelId)}
           role="tabpanel"
           aria-labelledby={domId('st-workspace-tab', node.activePanelId)}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: A tabpanel must be focusable for keyboard users when tabbing from its tab.
+          tabIndex={0}
         >
           <PanelFrame
             panelId={node.activePanelId}
