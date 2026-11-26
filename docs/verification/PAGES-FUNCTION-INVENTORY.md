@@ -50,7 +50,7 @@ GitHub Pages の配信先は当時の確認環境から未確認。
 
 - **唯一のPages公開者:** [Repository Audit Pages](../../.github/workflows/repository-audit.yml)。`main`の`push`または`workflow_dispatch`で監査サイト一式を生成・Pagesに公開する。PRでは同じパッケージング処理を実行し、`repository-audit-preview` artifactへ保存するが公開しない。別のGraphify/CI/Atlas専用publisherはない。
 - **同じ静的サイト内のデータ取得方法は異なる。** Auditはビルド時のremote branch HEADをパッケージし、Architecture/Graphはビルド時にcheckoutされたソースSHAを参照する。CIはページ閲覧時にブラウザーからGitHub Actionsの公開REST APIを取得する。日時・SHA・対象範囲を一律の「最新」と表示できない。
-- **実行環境:** 監査は`repomix@1.19.0`と`@alibaba-group/open-code-review@1.13.13`を使用。Graphは`graphifyy[sql,terraform]==0.9.115`の`extract --code-only`と`cluster-only --no-label`。Architectureは`@mermaid-js/mermaid-cli@12.2.0`のCLI+ChromeでSVGを生成し、Playwrightで表示を確認する。これらはPages公開物を生成するビルド依存であり、ブラウザー上の管理権限ではない。
+- **実行環境:** 監査は`repomix@1.19.0`と`@alibaba-group/open-code-review@1.13.13`を使用。Graphは`graphifyy[sql,terraform]==0.9.120`の`extract --code-only`と`cluster-only`（LLMなしの標準hubラベル）。Architectureは`@mermaid-js/mermaid-cli@12.2.0`のCLI+ChromeでSVGを生成し、Playwrightで表示を確認する。これらはPages公開物を生成するビルド依存であり、ブラウザー上の管理権限ではない。
 - **公開データ:** 全ブランチの監査対象ソースを`repomix.json`と分割JSONで配布する。ルールによる秘匿ファイル・履歴・vendored skillの除外があるが、**それだけで非公開ブランチの機密性を証明しない**。公開対象の認可、漏えい検査とPages可視性の検討が必要。
 - **非目標:** GitHub PagesはCodexia本番アプリのCloudflare Workers UI（`/console`を含む）ではない。PagesからVM、Ansible、Better Auth、原稿を操作しない。診断表示をCI合格、マージ可否、未使用コードの証拠と混同しない。
 
@@ -69,7 +69,7 @@ GitHub Pages の配信先は当時の確認環境から未確認。
 | `/ci/dashboard/{collection.mjs,analysis.mjs,diagnostics.mjs,timing.mjs}`、`/ci/impact/contract.mjs`、`/ci/verify.yml` 等 | ブラウザーCI解析の同梱ソース。利用者のUIページではない | [CI packer](../../scripts/ci/dashboard/collect.mjs) | 実装コード確認 |
 | `/graph/` | ファイル・シンボル検索、ディレクトリ別の直接参照、参照元なし候補抽出、参照元/先一覧、隣接グラフ、SHA固定ソースリンク | [Graph packer](../../scripts/graphify-pages/pack.mjs)、[explorer](../../scripts/graphify-pages/explorer.html) | 実装コード確認 |
 | `/graph/?file=<path>` | 選択ファイルのディープリンクを開く。入力は生成済みindex内のパスに限定 | [explorer](../../scripts/graphify-pages/explorer.html) | 実装コード確認 |
-| `/graph/communities.html` | Graphify本来の集約コミュニティHTMLを変更せず閲覧 | [Graph packer](../../scripts/graphify-pages/pack.mjs) | 実装コード確認 |
+| `/graph/communities.html` | Graphify本来の集約コミュニティHTMLに、同一SHAのコミュニティ詳細・内部グラフ・構成要素・依存関係の探索を追加 | [Graph packer](../../scripts/graphify-pages/pack.mjs) | 実装コード確認 |
 | `/graph/source.json` | 元SHAと集約件数・抽出モードを参照 | [Graph packer](../../scripts/graphify-pages/pack.mjs) | 実装コード確認 |
 | `/architecture/` | LikeC4 のシステム構造と運用トポロジー、Mermaid の画面・状態・ER・導入・更新の図を開く。拡大・縮小、元行、hashディープリンクを利用できる | [Atlas packer](../../scripts/architecture-diagrams/pack.mjs)、[viewer](../../scripts/architecture-diagrams/index.html) | 実装コード確認 |
 | `/architecture/#<group>-<index>` | SHA/文書/行の紐付く図へ直接移動する。ビルド時の`manifest.json`に存在するIDに限る | [Atlas JS](../../scripts/architecture-diagrams/atlas.js) | 実装コード確認 |
@@ -97,7 +97,7 @@ GitHub Pages の配信先は当時の確認環境から未確認。
 
 - `graphify extract . --code-only`のAST由来`graph.json`を使用。`tests/**`、`docs/**`、`evidence/**`、`.agents/**`、`*.test.*`、`*.spec.*`を解析から除く。Graphifyの`source_file`を同じcheckoutの`git ls-files`と突き合わせ、追跡ファイルに限り索引化する。
 - 現行explorerにはパス/シンボル検索、ディレクトリフィルタ、参照元なしフィルタ、1ファイルの参照先/参照元、グラフ上のクリック・キーボード選択、SHA固定GitHubソースへのリンクがある。画面中央の隣接グラフは**各方向最大8件**、下のリストは直接隣接の全件を扱う。検索結果一覧は**先頭200件**。
-- ファイル間エッジは`imports`、`imports_from`、`re_exports`、`calls`、`references`、`depends_on`、`instantiates`、`inherits`、`implements`、`extends`、`uses`の限定された静的観測を集約する。複数エッジは件数と関係種別を保持するが、表示はファイル単位が中心。現在のGraphify HTMLは別のコミュニティ概観として保存する。
+- ファイル間エッジは`imports`、`imports_from`、`re_exports`、`calls`、`references`、`depends_on`、`instantiates`、`inherits`、`implements`、`extends`、`uses`の限定された静的観測を集約する。複数エッジは件数と関係種別を保持するが、表示はファイル単位が中心。Graphify HTMLは別のコミュニティ概観として保持し、同一の解析結果から索引化された構成要素と関係だけを詳細表示する。
 - 限界: 解析対象外ファイル、動的import、MCP登録、ルート登録、DBアクセス、CIの実行、リフレクション等の実行時到達を証明できない。**参照元0件 ≠ 未使用/削除可能**。多段探索、エッジの位置・根拠へのjump、変更前後比較、入口からの到達性と解析カバレッジの説明は現行UI/packingにない。
 
 #### D. Architecture Atlas

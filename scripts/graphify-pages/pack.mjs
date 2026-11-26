@@ -6,6 +6,8 @@ import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EXCLUSION_PATTERNS, exclusionCategory, repositoryPath, summarizeGraph } from './analysis.mjs';
 
+import { projectCommunities } from './community-data.mjs';
+
 const MAX_HTML_BYTES = 20 * 1024 * 1024;
 const MAX_GRAPH_BYTES = 80 * 1024 * 1024;
 const MAX_CANDIDATE_BYTES = 16 * 1024 * 1024;
@@ -23,7 +25,7 @@ export function trackedPathsFromGit(repoRoot = process.cwd()) {
 }
 
 function validateCandidateInventory(inventory, sha, trackedFiles) {
-  if (!inventory || typeof inventory !== 'object' || inventory.schemaVersion !== 1 || inventory.codeOnly !== true || inventory.generator !== 'graphify.detect' || inventory.generatorVersion !== '0.9.115') {
+  if (!inventory || typeof inventory !== 'object' || inventory.schemaVersion !== 1 || inventory.codeOnly !== true || inventory.generator !== 'graphify.detect' || inventory.generatorVersion !== '0.9.120') {
     throw new Error('Graphify candidate inventory has an unsupported schema or generator');
   }
   if (inventory.sourceSha !== sha) throw new Error('Graphify candidate inventory source SHA does not match the graph');
@@ -44,7 +46,7 @@ function validateCandidateInventory(inventory, sha, trackedFiles) {
 export async function packGraph(sourceDir, pagesDir, sha, trackedFiles = trackedPathsFromGit(), candidateInventoryPath = null) {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Graph source must be a full commit SHA');
   const source = resolve(sourceDir);
-  // Read once, validate, and publish the same native HTML bytes.
+  // Keep the upstream graph and append a source-bound community inspector.
   const htmlBytes = await readFile(join(source, 'graph.html'));
   if (htmlBytes.byteLength < 100 || htmlBytes.byteLength > MAX_HTML_BYTES) throw new Error('Graph HTML empty or over 20 MiB limit');
   const html = htmlBytes.toString('utf8');
@@ -67,6 +69,17 @@ export async function packGraph(sourceDir, pagesDir, sha, trackedFiles = tracked
     candidates = validateCandidateInventory(inventory, sha, trackedFiles);
   }
   const index = summarizeGraph(graph, sha, trackedFiles, candidates);
+  const communities = projectCommunities(graph, index);
+  if (candidates && graph.nodes.length && !communities.groups.length) throw new Error('Clustered Graphify graph has no community assignments');
+  const communityTemplate = await readFile(new URL('./community-panel.html', import.meta.url), 'utf8');
+  const communityPayload = JSON.stringify(communities).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+  const communitySlot = '__GRAPHIFY_COMMUNITY_JSON__';
+  if (communityTemplate.split(communitySlot).length !== 2) throw new Error('Community panel requires one data slot');
+  const closing = /<\/body\s*>\s*<\/html\s*>\s*$/i;
+  if (!closing.test(html)) throw new Error('Graphify HTML requires a closing body');
+  const communityHtml = html.replace(closing, tail => communityTemplate.replace(communitySlot, () => communityPayload) + tail);
+  const communityBytes = Buffer.from(communityHtml, 'utf8');
+  if (communityBytes.byteLength > MAX_HTML_BYTES) throw new Error('Graph community explorer exceeds 20 MiB limit');
   // The JSON is part of the HTML, but source snippets, graph.json and raw graph edges aren't published separately.
   const payload = JSON.stringify(index).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const template = await readFile(new URL('./explorer.html', import.meta.url), 'utf8');
@@ -93,7 +106,7 @@ export async function packGraph(sourceDir, pagesDir, sha, trackedFiles = tracked
   const target = join(resolve(pagesDir), 'graph');
   await mkdir(target, { recursive: true });
   await writeFile(join(target, 'index.html'), explorerBytes);
-  await writeFile(join(target, 'communities.html'), htmlBytes);
+  await writeFile(join(target, 'communities.html'), communityBytes);
   await writeFile(join(target, 'analysis.mjs'), await readFile(new URL('./analysis.mjs', import.meta.url)));
   await writeFile(join(target, 'source.json'), sourceBytes);
   return { bytes: explorerBytes.byteLength, path: join(target, 'index.html'), stats: index.stats };
