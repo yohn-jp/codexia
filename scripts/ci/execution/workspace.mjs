@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { trackedHttpOutputs } from '../evidence/coverage-inputs.mjs';
+import { discoverWorkspacePaths, trackedHttpOutputs } from '../evidence/coverage-inputs.mjs';
 import { runDependencyBuilds } from './parallel.mjs';
 import { CONFORMANCE_TASKS, TEST_TYPECHECK_SCOPES, TYPECHECK_TARGETS, UNIT_TARGETS, WORKSPACES } from '../impact/contract.mjs';
 
@@ -337,14 +337,7 @@ function assertUnique(values, label) {
 async function checkCoverage() {
   const committed = trackedHttpOutputs(root);
   if (committed.length) fail('HTTP contract build outputs must be untracked: ' + committed.join(', '));
-  const actualWorkspacePaths = ['app'];
-  for (const area of ['packages', 'modules']) {
-    const entries = await readdir(path.join(root, area), { withFileTypes: true });
-    for (const entry of entries.filter((candidate) => candidate.isDirectory())) {
-      const packageEntries = await readdir(path.join(root, area, entry.name));
-      if (packageEntries.includes('package.json')) actualWorkspacePaths.push(`${area}/${entry.name}`);
-    }
-  }
+  const actualWorkspacePaths = await discoverWorkspacePaths(root);
   const declaredPaths = WORKSPACES.map(({ path: workspacePath }) => workspacePath);
   const missingTargets = actualWorkspacePaths.filter((workspacePath) => !declaredPaths.includes(workspacePath));
   const unknownTargets = declaredPaths.filter((workspacePath) => !actualWorkspacePaths.includes(workspacePath));

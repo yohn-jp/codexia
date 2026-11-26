@@ -45,6 +45,18 @@ export function trackedHttpOutputs(root) {
   }).split('\0').filter(Boolean);
 }
 
+export async function discoverWorkspacePaths(root) {
+  const workspaces = ['app'];
+  for (const area of ['packages', 'modules']) {
+    const entries = await readdir(path.join(root, area), { withFileTypes: true });
+    for (const entry of entries.filter(candidate => candidate.isDirectory())) {
+      const packageEntries = await readdir(path.join(root, area, entry.name));
+      if (packageEntries.includes('package.json')) workspaces.push(`${area}/${entry.name}`);
+    }
+  }
+  return workspaces.sort();
+}
+
 /** Build a conservative report-only closure for the static full-plan coverage task. */
 export async function captureCoverageInputClosure({ root, runtime, invocation, workflowJob }) {
   const sourcePaths = ['scripts/ci/execution/workspace.mjs', 'scripts/ci/impact/contract.mjs', 'scripts/ci/execution/parallel.mjs',
@@ -52,24 +64,16 @@ export async function captureCoverageInputClosure({ root, runtime, invocation, w
     'scripts/ci/evidence/download-artifacts.mjs',
     'scripts/ci/browser/fixture.mjs', 'scripts/ci/browser/image-digests.mjs', 'scripts/ci/evidence/input-proof.mjs',
     'scripts/ci/evidence/task-inputs.mjs', 'scripts/ci/evidence/coverage-inputs.mjs', '.github/workflows/verify.yml'];
-  const packageManifests = (await readdir(path.join(root, 'packages'), { withFileTypes: true }))
-    .filter(entry => entry.isDirectory()).map(entry => `packages/${entry.name}/package.json`);
-  const moduleManifests = (await readdir(path.join(root, 'modules'), { withFileTypes: true }))
-    .filter(entry => entry.isDirectory()).map(entry => `modules/${entry.name}/package.json`);
-  const manifestPaths = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts/ci/evidence/package.json', ...packageManifests, ...moduleManifests, 'app/package.json'];
-  const testDirectories = ['scripts', 'app', ...manifestPaths.filter(file => file.startsWith('packages/') || file.startsWith('modules/')).map(file => path.dirname(file))];
+  const workspaceDirectories = await discoverWorkspacePaths(root);
+  const manifestPaths = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts/ci/evidence/package.json',
+    ...workspaceDirectories.map(directory => `${directory}/package.json`)];
+  const testDirectories = ['scripts', ...workspaceDirectories];
   const tests = (await Promise.all(testDirectories.map(directory => walkTestFiles(root, path.join(root, directory)))))
     .flat().sort(([a], [b]) => a.localeCompare(b));
   const fileDigests = async paths => Promise.all([...new Set(paths)].sort().map(async relativePath => {
     const bytes = await readFile(path.join(root, relativePath));
     return [relativePath, createHash('sha256').update(bytes).digest('hex')];
   }));
-  const workspaceDirectories = [];
-  for (const area of ['packages', 'modules']) {
-    workspaceDirectories.push(...(await readdir(path.join(root, area), { withFileTypes: true }))
-      .filter(entry => entry.isDirectory()).map(entry => `${area}/${entry.name}`));
-  }
-  workspaceDirectories.push('app');
   const closure = {
     source: digest({ files: await fileDigests(sourcePaths), trackedHttpOutputs: trackedHttpOutputs(root) }),
     tests: digest(tests),
@@ -77,7 +81,7 @@ export async function captureCoverageInputClosure({ root, runtime, invocation, w
     environment: digest({ cwd: root, platform: runtime.platform, arch: runtime.arch }),
     toolchain: digest({ nodeVersion: runtime.nodeVersion, execPath: runtime.execPath, imageOS: runtime.imageOS ?? null, imageVersion: runtime.imageVersion ?? null }),
     recipe: digest({ invocation, workflowJob, mode: 'static-coverage' }),
-    producers: digest({ prerequisites: [], workspaceDirectories: workspaceDirectories.sort() }),
+    producers: digest({ prerequisites: [], workspaceDirectories }),
   };
   return closure;
 }
