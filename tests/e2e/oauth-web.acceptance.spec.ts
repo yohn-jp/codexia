@@ -69,7 +69,6 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
       VITE_CODEXIA_OAUTH_CLIENT_ID: fixture.webClientId,
       VITE_CODEXIA_API_AUDIENCE: fixture.audience,
       VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: `${fixture.apiOrigin}/desktop`,
-      VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: `${fixture.apiOrigin}/mobile`,
       VITE_CODEXIA_OAUTH_SCOPES: "openid codexia:api",
     };
     // Never mutate app/dist: other Playwright shards concurrently serve its
