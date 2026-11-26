@@ -1,14 +1,17 @@
-import { createHash, randomUUID } from "node:crypto";
-import { assertProjectPath, isPublishingRecordKey, nextOrderKey, NLP_FEATURE_SETTINGS_KEY, NLP_LEGACY_FEATURE_SETTINGS_PATH, parseNlpFeatureSettings, parsePublishingEpisodesRecord, parsePublishingShareGrantIndex, PRIVATE_PUBLISHING_PATHS, PUBLISHING_EPISODES_KEY } from "@codexia/contracts";
+import { createHash, randomUUID } from 'node:crypto';
 import {
-  CORE_DOCUMENT_PATHS,
-  HIERARCHY_CREATE_SOURCE,
-  HIERARCHY_DELETE_SOURCE,
-  HIERARCHY_REORDER_SOURCE,
-  NLP_FEATURE_SETTINGS_CHANGESET_SOURCE,
-  PUBLISHING_CHANGESET_SOURCE,
-  hierarchyDocumentPaths,
-  PersistenceError,
+  assertProjectPath,
+  isPublishingRecordKey,
+  NLP_FEATURE_SETTINGS_KEY,
+  NLP_LEGACY_FEATURE_SETTINGS_PATH,
+  nextOrderKey,
+  PRIVATE_PUBLISHING_PATHS,
+  PUBLISHING_EPISODES_KEY,
+  parseNlpFeatureSettings,
+  parsePublishingEpisodesRecord,
+  parsePublishingShareGrantIndex,
+} from '@codexia/contracts';
+import {
   type Assertion,
   type AssertionEvidence,
   type AssertionId,
@@ -20,12 +23,14 @@ import {
   type ChangeSetReadSetEntry,
   type ChangeSetResource,
   type ChangeSetWriteSetEntry,
+  CORE_DOCUMENT_PATHS,
   type CreateChangeSetCommand,
   type CreateDocumentCommand,
   type CreateProjectCommand,
+  type DeleteDocumentCommand,
   type Document,
-  type DocumentHeadRevisionLookup,
   type DocumentHeadRevisionHash,
+  type DocumentHeadRevisionLookup,
   type DocumentId,
   type DocumentRevision,
   type DocumentRevisionKey,
@@ -34,28 +39,38 @@ import {
   type EvidenceAnchor,
   type EvidenceAnchorHistory,
   type EvidenceId,
+  HIERARCHY_CREATE_SOURCE,
+  HIERARCHY_DELETE_SOURCE,
+  HIERARCHY_REORDER_SOURCE,
   type HierarchyDocumentCreate,
+  hierarchyDocumentPaths,
   type IdempotencyKey,
   type JsonObject,
   type KnowledgeAlias,
+  type KnowledgeMergeChangeCommand,
   type KnowledgeNode,
-  type KnowledgeNodeSearch,
   type KnowledgeNodeId,
+  type KnowledgeNodeSearch,
   type KnowledgeProjectionBatch,
   type KnowledgeProjectionBatchLimits,
   type KnowledgeRelation,
   type KnowledgeRelationId,
   type LinkAssertionEvidenceCommand,
   type MentionLink,
+  type ModuleRecord,
+  NLP_FEATURE_SETTINGS_CHANGESET_SOURCE,
   type Persistence,
+  PersistenceError,
   type PersistenceReader,
   type PersistenceTransaction,
   type Project,
-  type ProjectPageCursor,
   type ProjectId,
+  type ProjectPageCursor,
   type ProposalReviewQueueOptions,
-  type RevisionId,
+  type ProposeKnowledgeMergeCommand,
+  PUBLISHING_CHANGESET_SOURCE,
   type RestoreDocumentRevisionCommand,
+  type RevisionId,
   type SaveAssertionCommand,
   type SaveDocumentCommand,
   type SaveEvidenceAnchorCommand,
@@ -63,18 +78,13 @@ import {
   type SaveKnowledgeNodeCommand,
   type SaveKnowledgeRelationCommand,
   type SaveMentionLinkCommand,
-  type TextChange,
-  type UpdateProjectCommand,
-  type UpdateDocumentCommand,
-  type DeleteDocumentCommand,
-  type ModuleRecord,
   type SaveModuleRecordCommand,
-  type KnowledgeMergeChangeCommand,
-  type KnowledgeMergeResult,
-  type ProposeKnowledgeMergeCommand,
-} from "@codexia/persistence-contracts";
-import { Pool, type PoolClient, type PoolConfig, type QueryResult, type QueryResultRow } from "pg";
-import { applyKnowledgeMerge, knowledgeMergeOperation, planKnowledgeMerge, shouldGenerateSourceNameAlias } from "./knowledge-merge.js";
+  type TextChange,
+  type UpdateDocumentCommand,
+  type UpdateProjectCommand,
+} from '@codexia/persistence-contracts';
+import { Pool, type PoolClient, type PoolConfig, type QueryResult, type QueryResultRow } from 'pg';
+import { applyKnowledgeMerge, knowledgeMergeOperation, planKnowledgeMerge, shouldGenerateSourceNameAlias } from './knowledge-merge.js';
 
 type DbRow = QueryResultRow;
 
@@ -90,7 +100,7 @@ function chunks<T>(values: readonly T[], size: number): T[][] {
 }
 
 function asString(value: unknown): string {
-  if (typeof value === "string") return value;
+  if (typeof value === 'string') return value;
   if (value instanceof Date) return value.toISOString();
   throw new Error(`Unexpected database string value: ${String(value)}`);
 }
@@ -100,8 +110,8 @@ function asNullableString(value: unknown): string | null {
 }
 
 function asNumber(value: unknown): number {
-  if (typeof value === "number") return value;
-  if (typeof value === "string") return Number(value);
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return Number(value);
   throw new Error(`Unexpected database number value: ${String(value)}`);
 }
 
@@ -110,15 +120,15 @@ function asNullableNumber(value: unknown): number | null {
 }
 
 function asJsonObject(value: unknown): JsonObject {
-  if (typeof value === "string") return JSON.parse(value) as JsonObject;
-  if (value && typeof value === "object" && !Array.isArray(value)) return value as JsonObject;
-  throw new Error("Unexpected database JSON object value");
+  if (typeof value === 'string') return JSON.parse(value) as JsonObject;
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as JsonObject;
+  throw new Error('Unexpected database JSON object value');
 }
 
 function asJsonArray<T>(value: unknown): T[] {
-  const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
+  const parsed = typeof value === 'string' ? (JSON.parse(value) as unknown) : value;
   if (Array.isArray(parsed)) return parsed as T[];
-  throw new Error("Unexpected database JSON array value");
+  throw new Error('Unexpected database JSON array value');
 }
 
 function mapProject(row: DbRow): Project {
@@ -167,7 +177,7 @@ function mapKnowledgeNode(row: DbRow): KnowledgeNode {
     type: asString(row.type),
     name: asString(row.name),
     attributes: asJsonObject(row.attributes),
-    status: asString(row.status) as KnowledgeNode["status"],
+    status: asString(row.status) as KnowledgeNode['status'],
     version: asNumber(row.version),
     deletedAt: asNullableString(row.deleted_at),
     createdAt: asString(row.created_at),
@@ -177,13 +187,13 @@ function mapKnowledgeNode(row: DbRow): KnowledgeNode {
 
 function mapKnowledgeAlias(row: DbRow): KnowledgeAlias {
   return {
-    id: asString(row.id) as KnowledgeAlias["id"],
+    id: asString(row.id) as KnowledgeAlias['id'],
     projectId: asString(row.project_id) as ProjectId,
     nodeId: asString(row.node_id) as KnowledgeNodeId,
     surface: asString(row.surface),
     normalized: asString(row.normalized),
     scope: asNullableString(row.scope),
-    status: asString(row.status) as KnowledgeAlias["status"],
+    status: asString(row.status) as KnowledgeAlias['status'],
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
   };
@@ -198,7 +208,7 @@ function mapKnowledgeRelation(row: DbRow): KnowledgeRelation {
     type: asString(row.type),
     attributes: asJsonObject(row.attributes),
     validity: asJsonObject(row.validity),
-    status: asString(row.status) as KnowledgeRelation["status"],
+    status: asString(row.status) as KnowledgeRelation['status'],
     version: asNumber(row.version),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
@@ -214,7 +224,7 @@ function mapEvidenceAnchor(row: DbRow): EvidenceAnchor {
     fromUtf16: asNumber(row.from_utf16),
     toUtf16: asNumber(row.to_utf16),
     quoteSha256: asString(row.quote_sha256).trim(),
-    status: asString(row.status) as EvidenceAnchor["status"],
+    status: asString(row.status) as EvidenceAnchor['status'],
     version: asNumber(row.version),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
@@ -230,7 +240,7 @@ function mapAssertion(row: DbRow): Assertion {
     perspective: asString(row.perspective),
     narrativeTime: asJsonObject(row.narrative_time),
     confidence: asNullableNumber(row.confidence),
-    status: asString(row.status) as Assertion["status"],
+    status: asString(row.status) as Assertion['status'],
     version: asNumber(row.version),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
@@ -242,11 +252,11 @@ function mapChangeSet(row: DbRow): ChangeSet {
     id: asString(row.id) as ChangeSetId,
     projectId: asString(row.project_id) as ProjectId,
     authorId: asString(row.author_id),
-    status: asString(row.status) as ChangeSet["status"],
+    status: asString(row.status) as ChangeSet['status'],
     operations: asJsonArray<ChangeSetOperation>(row.operations),
-    readSet: asJsonArray<ChangeSet["readSet"][number]>(row.read_set),
-    writeSet: asJsonArray<ChangeSet["writeSet"][number]>(row.write_set),
-    provenance: asJsonObject(row.provenance) as unknown as ChangeSet["provenance"],
+    readSet: asJsonArray<ChangeSet['readSet'][number]>(row.read_set),
+    writeSet: asJsonArray<ChangeSet['writeSet'][number]>(row.write_set),
+    provenance: asJsonObject(row.provenance) as unknown as ChangeSet['provenance'],
     version: asNumber(row.version),
     idempotencyKey: asString(row.idempotency_key),
     createdAt: asString(row.created_at),
@@ -264,42 +274,44 @@ function toJson(value: unknown): string {
 
 function canonicalValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalValue);
-  if (value && typeof value === "object") {
+  if (value && typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, item]) => [key, canonicalValue(item)]);
     return Object.fromEntries(entries);
   }
-  if (typeof value === "number" && !Number.isFinite(value)) throw validationError("JSON numbers must be finite");
-  if (value === undefined || typeof value === "function" || typeof value === "symbol" || typeof value === "bigint") {
-    throw validationError("Value is not JSON serializable");
+  if (typeof value === 'number' && !Number.isFinite(value)) throw validationError('JSON numbers must be finite');
+  if (value === undefined || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') {
+    throw validationError('Value is not JSON serializable');
   }
   return value;
 }
 
 function digest(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(canonicalValue(value)), "utf8").digest("hex");
+  return createHash('sha256')
+    .update(JSON.stringify(canonicalValue(value)), 'utf8')
+    .digest('hex');
 }
 
 function bodyDigest(markdown: string): string {
-  return createHash("sha256").update(markdown, "utf8").digest("hex");
+  return createHash('sha256').update(markdown, 'utf8').digest('hex');
 }
 
 function validationError(message: string): PersistenceError {
-  return new PersistenceError("validation", message);
+  return new PersistenceError('validation', message);
 }
 
 function notFound(resource: string, id: string): PersistenceError {
-  return new PersistenceError("not_found", `${resource} was not found`, { resource, id });
+  return new PersistenceError('not_found', `${resource} was not found`, { resource, id });
 }
 
 function conflict(resource: string, id: string, expected: string | number | null, actual: string | number | null): PersistenceError {
-  return new PersistenceError("conflict", `${resource} changed since it was read`, { resource, id, expected, actual });
+  return new PersistenceError('conflict', `${resource} changed since it was read`, { resource, id, expected, actual });
 }
 
 function idempotencyConflict(key: IdempotencyKey): PersistenceError {
-  return new PersistenceError("idempotency_conflict", "Idempotency key was already used for a different request", {
-    resource: "idempotency_key",
+  return new PersistenceError('idempotency_conflict', 'Idempotency key was already used for a different request', {
+    resource: 'idempotency_key',
     id: key,
   });
 }
@@ -314,17 +326,17 @@ function assertHash(value: string, field: string): void {
 
 function assertConfidence(value: number | null): void {
   if (value !== null && (!Number.isFinite(value) || value < 0 || value > 1)) {
-    throw validationError("confidence must be between zero and one");
+    throw validationError('confidence must be between zero and one');
   }
 }
 
 function assertUtf16Boundary(text: string, offset: number): void {
-  if (!Number.isInteger(offset) || offset < 0 || offset > text.length) throw validationError("Text offset is outside the revision");
+  if (!Number.isInteger(offset) || offset < 0 || offset > text.length) throw validationError('Text offset is outside the revision');
   if (offset === 0 || offset === text.length) return;
   const previous = text.charCodeAt(offset - 1);
   const next = text.charCodeAt(offset);
   if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
-    throw validationError("Text offset splits a UTF-16 surrogate pair");
+    throw validationError('Text offset splits a UTF-16 surrogate pair');
   }
 }
 
@@ -333,16 +345,16 @@ function applyTextChanges(markdown: string, changes: readonly TextChange[]): str
   let previousEnd = 0;
   for (const change of changes) {
     if (!Number.isInteger(change.fromUtf16) || !Number.isInteger(change.toUtf16) || change.fromUtf16 > change.toUtf16) {
-      throw validationError("Text changes must use non-negative integer ranges");
+      throw validationError('Text changes must use non-negative integer ranges');
     }
-    if (change.fromUtf16 < previousEnd) throw validationError("Text changes must be sorted and non-overlapping");
+    if (change.fromUtf16 < previousEnd) throw validationError('Text changes must be sorted and non-overlapping');
     assertUtf16Boundary(markdown, change.fromUtf16);
     assertUtf16Boundary(markdown, change.toUtf16);
     result.push(markdown.slice(previousEnd, change.fromUtf16), change.insert);
     previousEnd = change.toUtf16;
   }
   result.push(markdown.slice(previousEnd));
-  return result.join("");
+  return result.join('');
 }
 
 function mapTextOffset(offset: number, changes: readonly TextChange[], association: -1 | 1): number {
@@ -370,10 +382,12 @@ function mapTextOffset(offset: number, changes: readonly TextChange[], associati
   return offset + delta;
 }
 
-function textAnchorWasTouched(anchor: Pick<EvidenceAnchor, "fromUtf16" | "toUtf16">, changes: readonly TextChange[]): boolean {
-  return changes.some((change) => change.fromUtf16 === change.toUtf16
-    ? change.fromUtf16 > anchor.fromUtf16 && change.fromUtf16 < anchor.toUtf16
-    : change.fromUtf16 < anchor.toUtf16 && change.toUtf16 > anchor.fromUtf16);
+function textAnchorWasTouched(anchor: Pick<EvidenceAnchor, 'fromUtf16' | 'toUtf16'>, changes: readonly TextChange[]): boolean {
+  return changes.some(change =>
+    change.fromUtf16 === change.toUtf16
+      ? change.fromUtf16 > anchor.fromUtf16 && change.fromUtf16 < anchor.toUtf16
+      : change.fromUtf16 < anchor.toUtf16 && change.toUtf16 > anchor.fromUtf16,
+  );
 }
 
 function encodeCursor(value: unknown): string {
@@ -385,7 +399,7 @@ function mapMentionLink(row: DbRow): MentionLink {
     projectId: asString(row.project_id) as ProjectId,
     evidenceId: asString(row.evidence_id) as EvidenceId,
     nodeId: asString(row.node_id) as KnowledgeNodeId,
-    status: asString(row.status) as MentionLink["status"],
+    status: asString(row.status) as MentionLink['status'],
     source: asString(row.source),
     confidence: asNullableNumber(row.confidence),
     extractorVersion: asNullableString(row.extractor_version),
@@ -399,51 +413,70 @@ function mapAssertionEvidence(row: DbRow): AssertionEvidence {
     projectId: asString(row.project_id) as ProjectId,
     assertionId: asString(row.assertion_id) as AssertionId,
     evidenceId: asString(row.evidence_id) as EvidenceId,
-    role: asString(row.evidence_role) as AssertionEvidence["role"],
+    role: asString(row.evidence_role) as AssertionEvidence['role'],
     createdAt: asString(row.created_at),
   };
 }
 
 function databaseError(error: unknown): unknown {
   if (error instanceof PersistenceError) return error;
-  if (!error || typeof error !== "object" || !("code" in error)) return error;
+  if (!error || typeof error !== 'object' || !('code' in error)) return error;
   const code = (error as { code?: unknown }).code;
-  if (code === "23505") return new PersistenceError("conflict", "A persistence constraint rejected the write");
-  if (code === "23503" || code === "23514" || code === "22P02") {
-    return new PersistenceError("validation", "A persistence constraint rejected the write");
+  if (code === '23505') return new PersistenceError('conflict', 'A persistence constraint rejected the write');
+  if (code === '23503' || code === '23514' || code === '22P02') {
+    return new PersistenceError('validation', 'A persistence constraint rejected the write');
   }
   return error;
 }
 
 function operationWriteTargets(operation: ChangeSetOperation): readonly ChangeSetWriteSetEntry[] {
   switch (operation.type) {
-    case "document.create":
-      if (!operation.command.documentId) throw validationError("ChangeSet document creates require a stable documentId");
+    case 'document.create':
+      if (!operation.command.documentId) throw validationError('ChangeSet document creates require a stable documentId');
       return [
-        { resource: "document", id: operation.command.documentId },
-        ...(operation.hierarchy ? [{
-          resource: "module_record" as const, id: JSON.stringify([CORE_DOCUMENT_PATHS, operation.command.documentId]),
-        }] : []),
+        { resource: 'document', id: operation.command.documentId },
+        ...(operation.hierarchy
+          ? [
+              {
+                resource: 'module_record' as const,
+                id: JSON.stringify([CORE_DOCUMENT_PATHS, operation.command.documentId]),
+              },
+            ]
+          : []),
       ];
-    case "document.update":
-    case "document.delete":
-    case "document.save":
-    case "document.restore": return [{ resource: "document", id: operation.command.documentId }];
-    case "module.record.save": return [{ resource: "module_record", id: JSON.stringify([operation.command.moduleId, operation.command.key]) }];
-    case "knowledge.node.save": return [{ resource: "knowledge_node", id: operation.command.id }];
-    case "knowledge.alias.save": return [{ resource: "knowledge_alias", id: operation.command.id }];
-    case "knowledge.relation.save": return [{ resource: "knowledge_relation", id: operation.command.id }];
-    case "evidence.anchor.save": return [{ resource: "evidence_anchor", id: operation.command.id }];
-    case "evidence.mention.save": return [{
-      resource: "mention_link",
-      id: `${operation.command.evidenceId}:${operation.command.nodeId}`,
-    }];
-    case "evidence.assertion.save": return [{ resource: "assertion", id: operation.command.id }];
-    case "evidence.assertion.link": return [{
-      resource: "assertion_evidence",
-      id: `${operation.command.assertionId}:${operation.command.evidenceId}`,
-    }];
-    case "knowledge.merge": return knowledgeMergeWriteSet(operation.command);
+    case 'document.update':
+    case 'document.delete':
+    case 'document.save':
+    case 'document.restore':
+      return [{ resource: 'document', id: operation.command.documentId }];
+    case 'module.record.save':
+      return [{ resource: 'module_record', id: JSON.stringify([operation.command.moduleId, operation.command.key]) }];
+    case 'knowledge.node.save':
+      return [{ resource: 'knowledge_node', id: operation.command.id }];
+    case 'knowledge.alias.save':
+      return [{ resource: 'knowledge_alias', id: operation.command.id }];
+    case 'knowledge.relation.save':
+      return [{ resource: 'knowledge_relation', id: operation.command.id }];
+    case 'evidence.anchor.save':
+      return [{ resource: 'evidence_anchor', id: operation.command.id }];
+    case 'evidence.mention.save':
+      return [
+        {
+          resource: 'mention_link',
+          id: `${operation.command.evidenceId}:${operation.command.nodeId}`,
+        },
+      ];
+    case 'evidence.assertion.save':
+      return [{ resource: 'assertion', id: operation.command.id }];
+    case 'evidence.assertion.link':
+      return [
+        {
+          resource: 'assertion_evidence',
+          id: `${operation.command.assertionId}:${operation.command.evidenceId}`,
+        },
+      ];
+    case 'knowledge.merge':
+      return knowledgeMergeWriteSet(operation.command);
     default: {
       const exhaustive: never = operation;
       throw validationError(`Unsupported ChangeSet operation: ${String(exhaustive)}`);
@@ -456,17 +489,21 @@ function knowledgeMergeWriteSet(command: KnowledgeMergeChangeCommand): readonly 
   const plan = command.plan as unknown as KnowledgeMergePlan;
   const { sourceAliases, sourceRelations, sourceMentions, targetMentions, assertions } = plan;
   const generatedAlias = shouldGenerateSourceNameAlias(plan)
-    ? [{ resource: "knowledge_alias" as const, id: command.generatedAliasId }]
+    ? [{ resource: 'knowledge_alias' as const, id: command.generatedAliasId }]
     : [];
   return [
-    { resource: "knowledge_node", id: command.sourceId },
-    { resource: "knowledge_node", id: command.targetId },
-    ...sourceAliases.filter(alias => alias.status !== "retired").map(alias => ({ resource: "knowledge_alias" as const, id: alias.id })),
+    { resource: 'knowledge_node', id: command.sourceId },
+    { resource: 'knowledge_node', id: command.targetId },
+    ...sourceAliases.filter(alias => alias.status !== 'retired').map(alias => ({ resource: 'knowledge_alias' as const, id: alias.id })),
     ...generatedAlias,
-    ...sourceRelations.filter(relation => relation.status !== "retired" && relation.status !== "rejected").map(relation => ({ resource: "knowledge_relation" as const, id: relation.id })),
-    ...sourceMentions.filter(mention => !targetMentions.some(target => target.evidenceId === mention.evidenceId)).map(mention => ({ resource: "mention_link" as const, id: `${mention.evidenceId}:${command.targetId}` })),
-    ...assertions.map(assertion => ({ resource: "assertion" as const, id: assertion.id })),
-    { resource: "module_record", id: JSON.stringify(["core.knowledge-merge", command.auditId]) },
+    ...sourceRelations
+      .filter(relation => relation.status !== 'retired' && relation.status !== 'rejected')
+      .map(relation => ({ resource: 'knowledge_relation' as const, id: relation.id })),
+    ...sourceMentions
+      .filter(mention => !targetMentions.some(target => target.evidenceId === mention.evidenceId))
+      .map(mention => ({ resource: 'mention_link' as const, id: `${mention.evidenceId}:${command.targetId}` })),
+    ...assertions.map(assertion => ({ resource: 'assertion' as const, id: assertion.id })),
+    { resource: 'module_record', id: JSON.stringify(['core.knowledge-merge', command.auditId]) },
   ];
 }
 
@@ -474,18 +511,36 @@ type KnowledgeMergePlan = Awaited<ReturnType<typeof planKnowledgeMerge>>;
 
 function knowledgeMergeReadSet(plan: KnowledgeMergePlan, command: KnowledgeMergeChangeCommand): readonly ChangeSetReadSetEntry[] {
   const entries: ChangeSetReadSetEntry[] = [
-    { resource: "knowledge_node", id: command.sourceId, expectedVersion: plan.source.version },
-    { resource: "knowledge_node", id: command.targetId, expectedVersion: plan.target.version },
-    ...plan.sourceAliases.map(alias => ({ resource: "knowledge_alias" as const, id: alias.id, expectedVersion: 1 })),
-    ...plan.targetAliases.map(alias => ({ resource: "knowledge_alias" as const, id: alias.id, expectedVersion: 1 })),
-    ...plan.sourceRelations.map(relation => ({ resource: "knowledge_relation" as const, id: relation.id, expectedVersion: relation.version })),
-    ...plan.targetRelations.map(relation => ({ resource: "knowledge_relation" as const, id: relation.id, expectedVersion: relation.version })),
-    ...plan.sourceMentions.map(link => ({ resource: "mention_link" as const, id: `${link.evidenceId}:${link.nodeId}`, expectedVersion: 1 })),
-    ...plan.targetMentions.map(link => ({ resource: "mention_link" as const, id: `${link.evidenceId}:${link.nodeId}`, expectedVersion: 1 })),
-    ...plan.sourceMentions.filter(link => !plan.targetMentions.some(target => target.evidenceId === link.evidenceId)).map(link => ({ resource: "mention_link" as const, id: `${link.evidenceId}:${command.targetId}`, expectedVersion: null })),
-    ...plan.assertions.map(assertion => ({ resource: "assertion" as const, id: assertion.id, expectedVersion: assertion.version })),
-    { resource: "knowledge_alias", id: command.generatedAliasId, expectedVersion: null },
-    { resource: "module_record", id: JSON.stringify(["core.knowledge-merge", command.auditId]), expectedVersion: null },
+    { resource: 'knowledge_node', id: command.sourceId, expectedVersion: plan.source.version },
+    { resource: 'knowledge_node', id: command.targetId, expectedVersion: plan.target.version },
+    ...plan.sourceAliases.map(alias => ({ resource: 'knowledge_alias' as const, id: alias.id, expectedVersion: 1 })),
+    ...plan.targetAliases.map(alias => ({ resource: 'knowledge_alias' as const, id: alias.id, expectedVersion: 1 })),
+    ...plan.sourceRelations.map(relation => ({
+      resource: 'knowledge_relation' as const,
+      id: relation.id,
+      expectedVersion: relation.version,
+    })),
+    ...plan.targetRelations.map(relation => ({
+      resource: 'knowledge_relation' as const,
+      id: relation.id,
+      expectedVersion: relation.version,
+    })),
+    ...plan.sourceMentions.map(link => ({
+      resource: 'mention_link' as const,
+      id: `${link.evidenceId}:${link.nodeId}`,
+      expectedVersion: 1,
+    })),
+    ...plan.targetMentions.map(link => ({
+      resource: 'mention_link' as const,
+      id: `${link.evidenceId}:${link.nodeId}`,
+      expectedVersion: 1,
+    })),
+    ...plan.sourceMentions
+      .filter(link => !plan.targetMentions.some(target => target.evidenceId === link.evidenceId))
+      .map(link => ({ resource: 'mention_link' as const, id: `${link.evidenceId}:${command.targetId}`, expectedVersion: null })),
+    ...plan.assertions.map(assertion => ({ resource: 'assertion' as const, id: assertion.id, expectedVersion: assertion.version })),
+    { resource: 'knowledge_alias', id: command.generatedAliasId, expectedVersion: null },
+    { resource: 'module_record', id: JSON.stringify(['core.knowledge-merge', command.auditId]), expectedVersion: null },
   ];
   return [...new Map(entries.map(entry => [`${entry.resource}:${entry.id}`, entry])).values()];
 }
@@ -502,26 +557,31 @@ function validateChangeSetOperations(
   provenance: { source: string; actorId: string | null; details: JsonObject },
   allowKnowledgeMerge = false,
 ): void {
-  if (operations.length === 0) throw validationError("A ChangeSet must contain at least one operation");
+  if (operations.length === 0) throw validationError('A ChangeSet must contain at least one operation');
   const first = operations[0];
-  if (provenance.source === HIERARCHY_CREATE_SOURCE &&
-      (operations.length !== 1 || first?.type !== "document.create" || !first.hierarchy)) {
-    throw validationError("A hierarchy create must be the only operation in its native ChangeSet");
+  if (provenance.source === HIERARCHY_CREATE_SOURCE && (operations.length !== 1 || first?.type !== 'document.create' || !first.hierarchy)) {
+    throw validationError('A hierarchy create must be the only operation in its native ChangeSet');
   }
   if (provenance.source === PUBLISHING_CHANGESET_SOURCE || provenance.source === NLP_FEATURE_SETTINGS_CHANGESET_SOURCE) {
     const publishing = provenance.source === PUBLISHING_CHANGESET_SOURCE;
-    const moduleId = publishing ? "publishing" : "nlp";
-    const label = publishing ? "Publishing" : "NLP feature settings";
+    const moduleId = publishing ? 'publishing' : 'nlp';
+    const label = publishing ? 'Publishing' : 'NLP feature settings';
     const observation = readSet[0];
-    if (operations.length !== 1 || first?.type !== "module.record.save" || first.command.moduleId !== moduleId ||
-        !(publishing ? isPublishingRecordKey(first.command.key) : first.command.key === NLP_FEATURE_SETTINGS_KEY) ||
-        !provenance.actorId?.trim() || readSet.length !== 1 ||
-        observation?.resource !== "module_record" || observation.id !== JSON.stringify([moduleId, first.command.key]) ||
-        observation.expectedVersion !== first.command.expectedVersion) {
+    if (
+      operations.length !== 1 ||
+      first?.type !== 'module.record.save' ||
+      first.command.moduleId !== moduleId ||
+      !(publishing ? isPublishingRecordKey(first.command.key) : first.command.key === NLP_FEATURE_SETTINGS_KEY) ||
+      !provenance.actorId?.trim() ||
+      readSet.length !== 1 ||
+      observation?.resource !== 'module_record' ||
+      observation.id !== JSON.stringify([moduleId, first.command.key]) ||
+      observation.expectedVersion !== first.command.expectedVersion
+    ) {
       throw validationError(`${label} ChangeSets require one versioned ${label} record update`);
     }
-    if (!publishing && provenance.details.origin !== "author" && provenance.details.origin !== "external-agent") {
-      throw validationError("NLP feature settings require a verified proposal origin");
+    if (!publishing && provenance.details.origin !== 'author' && provenance.details.origin !== 'external-agent') {
+      throw validationError('NLP feature settings require a verified proposal origin');
     }
     const { key, value } = first.command;
     let normalized: JsonObject;
@@ -534,67 +594,92 @@ function validateChangeSetOperations(
     if (digest(normalized) !== digest(value)) throw validationError(`${label} record is not normalized`);
   }
   for (const operation of operations) {
-    if (operation.type === "document.create" && operation.hierarchy !== undefined && provenance.source !== HIERARCHY_CREATE_SOURCE) {
-      throw validationError("Hierarchy documents require a native hierarchy ChangeSet");
+    if (operation.type === 'document.create' && operation.hierarchy !== undefined && provenance.source !== HIERARCHY_CREATE_SOURCE) {
+      throw validationError('Hierarchy documents require a native hierarchy ChangeSet');
     }
-    if (operation.type === "knowledge.merge" && !allowKnowledgeMerge) throw validationError("Knowledge merge operations require the native merge proposal entrypoint");
-    if (operation.type === "module.record.save" && operation.command.moduleId.startsWith("core.")) throw validationError("Core record namespaces cannot be mutated by ChangeSets");
-    if (operation.type === "module.record.save" && operation.command.moduleId === "publishing" &&
-        isPublishingRecordKey(operation.command.key) && provenance.source !== PUBLISHING_CHANGESET_SOURCE) {
-      throw validationError("Protected Publishing records require a Publishing ChangeSet");
+    if (operation.type === 'knowledge.merge' && !allowKnowledgeMerge)
+      throw validationError('Knowledge merge operations require the native merge proposal entrypoint');
+    if (operation.type === 'module.record.save' && operation.command.moduleId.startsWith('core.'))
+      throw validationError('Core record namespaces cannot be mutated by ChangeSets');
+    if (
+      operation.type === 'module.record.save' &&
+      operation.command.moduleId === 'publishing' &&
+      isPublishingRecordKey(operation.command.key) &&
+      provenance.source !== PUBLISHING_CHANGESET_SOURCE
+    ) {
+      throw validationError('Protected Publishing records require a Publishing ChangeSet');
     }
-    if (operation.type === "module.record.save" && operation.command.moduleId === "nlp" &&
-        operation.command.key === NLP_FEATURE_SETTINGS_KEY && provenance.source !== NLP_FEATURE_SETTINGS_CHANGESET_SOURCE) {
-      throw validationError("NLP feature settings require a scoped ChangeSet");
+    if (
+      operation.type === 'module.record.save' &&
+      operation.command.moduleId === 'nlp' &&
+      operation.command.key === NLP_FEATURE_SETTINGS_KEY &&
+      provenance.source !== NLP_FEATURE_SETTINGS_CHANGESET_SOURCE
+    ) {
+      throw validationError('NLP feature settings require a scoped ChangeSet');
     }
-    if (operation.command.projectId !== projectId) throw validationError("All ChangeSet operations must use its project scope");
+    if (operation.command.projectId !== projectId) throw validationError('All ChangeSet operations must use its project scope');
   }
-  assertNonEmpty(provenance.source, "ChangeSet provenance source");
+  assertNonEmpty(provenance.source, 'ChangeSet provenance source');
   digest(provenance.details);
 
   for (const entry of readSet) {
-    assertNonEmpty(entry.id, "ChangeSet read-set id");
+    assertNonEmpty(entry.id, 'ChangeSet read-set id');
     if (entry.expectedVersion !== null && (!Number.isInteger(entry.expectedVersion) || entry.expectedVersion < 1)) {
-      throw validationError("ChangeSet read-set versions must be positive integers or null");
+      throw validationError('ChangeSet read-set versions must be positive integers or null');
     }
-    if (entry.expectedRevisionId !== undefined && entry.resource !== "document") {
-      throw validationError("Only document read-set entries can name a revision");
+    if (entry.expectedRevisionId !== undefined && entry.resource !== 'document') {
+      throw validationError('Only document read-set entries can name a revision');
     }
   }
-  const readKeys = readSet.map((entry) => changeSetResourceKey(entry.resource, entry.id));
-  if (new Set(readKeys).size !== readKeys.length) throw validationError("ChangeSet read-set entries must be unique");
+  const readKeys = readSet.map(entry => changeSetResourceKey(entry.resource, entry.id));
+  if (new Set(readKeys).size !== readKeys.length) throw validationError('ChangeSet read-set entries must be unique');
 
-  for (const entry of writeSet) assertNonEmpty(entry.id, "ChangeSet write-set id");
-  const declaredWriteKeys = writeSet.map((entry) => changeSetResourceKey(entry.resource, entry.id));
-  if (new Set(declaredWriteKeys).size !== declaredWriteKeys.length) throw validationError("ChangeSet write-set entries must be unique");
-  const merge = operations.find(operation => operation.type === "knowledge.merge");
+  for (const entry of writeSet) assertNonEmpty(entry.id, 'ChangeSet write-set id');
+  const declaredWriteKeys = writeSet.map(entry => changeSetResourceKey(entry.resource, entry.id));
+  if (new Set(declaredWriteKeys).size !== declaredWriteKeys.length) throw validationError('ChangeSet write-set entries must be unique');
+  const merge = operations.find(operation => operation.type === 'knowledge.merge');
   if (merge) {
     const command = merge.command;
-    if (operations.length !== 1 || provenance.source !== "native-knowledge-merge" || provenance.actorId !== command.actorId
-      || provenance.details.projectVersion !== command.projectVersion || provenance.details.sourceId !== command.sourceId
-      || provenance.details.targetId !== command.targetId || provenance.details.previewDigest !== command.previewDigest
-      || provenance.details.origin !== command.origin || command.projectId !== projectId || command.sourceId === command.targetId
-      || !Number.isSafeInteger(command.projectVersion) || command.projectVersion < 1 || !/^[0-9a-f]{64}$/u.test(command.previewDigest)) {
-      throw validationError("A Knowledge merge must be the only operation in a valid native merge ChangeSet");
+    if (
+      operations.length !== 1 ||
+      provenance.source !== 'native-knowledge-merge' ||
+      provenance.actorId !== command.actorId ||
+      provenance.details.projectVersion !== command.projectVersion ||
+      provenance.details.sourceId !== command.sourceId ||
+      provenance.details.targetId !== command.targetId ||
+      provenance.details.previewDigest !== command.previewDigest ||
+      provenance.details.origin !== command.origin ||
+      command.projectId !== projectId ||
+      command.sourceId === command.targetId ||
+      !Number.isSafeInteger(command.projectVersion) ||
+      command.projectVersion < 1 ||
+      !/^[0-9a-f]{64}$/u.test(command.previewDigest)
+    ) {
+      throw validationError('A Knowledge merge must be the only operation in a valid native merge ChangeSet');
     }
   }
-  const operationWriteKeys = operations.flatMap(operation => operationWriteTargets(operation)).map(target => changeSetResourceKey(target.resource, target.id));
+  const operationWriteKeys = operations
+    .flatMap(operation => operationWriteTargets(operation))
+    .map(target => changeSetResourceKey(target.resource, target.id));
   if (JSON.stringify([...new Set(operationWriteKeys)].sort()) !== JSON.stringify([...declaredWriteKeys].sort())) {
-    throw validationError("ChangeSet writeSet must exactly describe the operations");
+    throw validationError('ChangeSet writeSet must exactly describe the operations');
   }
 }
 
 class PostgresTransaction implements PersistenceTransaction {
   readonly changedProjects = new Set<ProjectId>();
 
-  constructor(private readonly client: PoolClient, private readonly readOnly: boolean) {}
+  constructor(
+    private readonly client: PoolClient,
+    private readonly readOnly: boolean,
+  ) {}
 
   private async query<Row extends DbRow = DbRow>(text: string, values: readonly unknown[] = []) {
     return this.client.query<Row>(text, [...values]);
   }
 
   private ensureWritable(): void {
-    if (this.readOnly) throw new Error("Cannot write through a persistence read snapshot");
+    if (this.readOnly) throw new Error('Cannot write through a persistence read snapshot');
   }
 
   private markChanged(projectId: ProjectId): void {
@@ -603,21 +688,25 @@ class PostgresTransaction implements PersistenceTransaction {
 
   async getProject(projectId: ProjectId): Promise<Project | undefined> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(projectId)) return undefined;
-    const result = await this.query("SELECT * FROM project WHERE id = $1", [projectId]);
+    const result = await this.query('SELECT * FROM project WHERE id = $1', [projectId]);
     return result.rows[0] ? mapProject(result.rows[0]) : undefined;
   }
 
   async listProjects(limit = 100): Promise<readonly Project[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("Project page size must be between 1 and 200");
-    const result = await this.query("SELECT * FROM project ORDER BY updated_at DESC, id LIMIT $1", [limit]);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError('Project page size must be between 1 and 200');
+    const result = await this.query('SELECT * FROM project ORDER BY updated_at DESC, id LIMIT $1', [limit]);
     return result.rows.map(mapProject);
   }
 
   async listProjectPage(limit: number, after?: ProjectPageCursor): Promise<readonly Project[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 201) throw validationError("Project page read must be between 1 and 201");
-    if (after && (!Number.isFinite(Date.parse(after.updatedAt)) || new Date(after.updatedAt).toISOString() !== after.updatedAt ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(after.id))) {
-      throw validationError("Project page cursor is invalid");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 201) throw validationError('Project page read must be between 1 and 201');
+    if (
+      after &&
+      (!Number.isFinite(Date.parse(after.updatedAt)) ||
+        new Date(after.updatedAt).toISOString() !== after.updatedAt ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(after.id))
+    ) {
+      throw validationError('Project page cursor is invalid');
     }
     const result = await this.query(
       `SELECT * FROM project
@@ -631,37 +720,60 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   async getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined> {
-    const result = await this.query("SELECT * FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL", [projectId, documentId]);
+    const result = await this.query('SELECT * FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL', [
+      projectId,
+      documentId,
+    ]);
     return result.rows[0] ? mapDocument(result.rows[0]) : undefined;
   }
 
   async listDocuments(projectId: ProjectId, parentId?: DocumentId | null, limit = 500): Promise<readonly Document[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Document page size must be between 1 and 1000");
-    const result = parentId === undefined
-      ? await this.query("SELECT * FROM document WHERE project_id = $1 AND deleted_at IS NULL ORDER BY parent_id NULLS FIRST, order_key, id LIMIT $2", [projectId, limit])
-      : await this.query("SELECT * FROM document WHERE project_id = $1 AND deleted_at IS NULL AND parent_id IS NOT DISTINCT FROM $2 ORDER BY order_key, id LIMIT $3", [projectId, parentId, limit]);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError('Document page size must be between 1 and 1000');
+    const result =
+      parentId === undefined
+        ? await this.query(
+            'SELECT * FROM document WHERE project_id = $1 AND deleted_at IS NULL ORDER BY parent_id NULLS FIRST, order_key, id LIMIT $2',
+            [projectId, limit],
+          )
+        : await this.query(
+            'SELECT * FROM document WHERE project_id = $1 AND deleted_at IS NULL AND parent_id IS NOT DISTINCT FROM $2 ORDER BY order_key, id LIMIT $3',
+            [projectId, parentId, limit],
+          );
     return result.rows.map(mapDocument);
   }
 
-  async getRevision(projectId: ProjectId, documentId: DocumentId, revisionId: RevisionId, throughHead?: RevisionId): Promise<DocumentRevision | undefined> {
-    const result = throughHead === undefined
-      ? await this.query("SELECT * FROM document_revision WHERE project_id = $1 AND document_id = $2 AND id = $3", [projectId, documentId, revisionId])
-      : await this.query(`WITH RECURSIVE ancestry(id,parent_revision_id) AS (
+  async getRevision(
+    projectId: ProjectId,
+    documentId: DocumentId,
+    revisionId: RevisionId,
+    throughHead?: RevisionId,
+  ): Promise<DocumentRevision | undefined> {
+    const result =
+      throughHead === undefined
+        ? await this.query('SELECT * FROM document_revision WHERE project_id = $1 AND document_id = $2 AND id = $3', [
+            projectId,
+            documentId,
+            revisionId,
+          ])
+        : await this.query(
+            `WITH RECURSIVE ancestry(id,parent_revision_id) AS (
           SELECT id,parent_revision_id FROM document_revision WHERE project_id=$1 AND document_id=$2 AND id=$4
           UNION ALL
           SELECT r.id,r.parent_revision_id FROM document_revision r JOIN ancestry a ON r.id=a.parent_revision_id
           WHERE r.project_id=$1 AND r.document_id=$2
         )
         SELECT r.* FROM document_revision r JOIN ancestry a ON r.id=a.id
-        WHERE r.project_id=$1 AND r.document_id=$2 AND r.id=$3`, [projectId,documentId,revisionId,throughHead]);
+        WHERE r.project_id=$1 AND r.document_id=$2 AND r.id=$3`,
+            [projectId, documentId, revisionId, throughHead],
+          );
     return result.rows[0] ? mapRevision(result.rows[0]) : undefined;
   }
 
   private async selectDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[], includeBody: boolean) {
     if (heads.length === 0) return [];
     const fields = includeBody
-      ? "revision.project_id, revision.document_id, revision.id, revision.parent_revision_id, revision.markdown, revision.sha256, revision.author_id, revision.created_at"
-      : "revision.sha256";
+      ? 'revision.project_id, revision.document_id, revision.id, revision.parent_revision_id, revision.markdown, revision.sha256, revision.author_id, revision.created_at'
+      : 'revision.sha256';
     const result = await this.query(
       `SELECT requested.document_id AS requested_document_id, requested.revision_id AS requested_revision_id, ${fields}
        FROM unnest($2::uuid[], $3::uuid[]) WITH ORDINALITY
@@ -669,12 +781,15 @@ class PostgresTransaction implements PersistenceTransaction {
        LEFT JOIN document_revision AS revision
          ON revision.project_id = $1 AND revision.document_id = requested.document_id AND revision.id = requested.revision_id
        ORDER BY requested.request_order`,
-      [projectId, heads.map((head) => head.documentId), heads.map((head) => head.revisionId)],
+      [projectId, heads.map(head => head.documentId), heads.map(head => head.revisionId)],
     );
     return result.rows;
   }
 
-  async getDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionLookup[]> {
+  async getDocumentHeadRevisions(
+    projectId: ProjectId,
+    heads: readonly DocumentRevisionKey[],
+  ): Promise<readonly DocumentHeadRevisionLookup[]> {
     return (await this.selectDocumentHeadRevisions(projectId, heads, true)).map(row => ({
       documentId: asString(row.requested_document_id) as DocumentId,
       revisionId: asString(row.requested_revision_id) as RevisionId,
@@ -682,7 +797,10 @@ class PostgresTransaction implements PersistenceTransaction {
     }));
   }
 
-  async getDocumentHeadRevisionHashes(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionHash[]> {
+  async getDocumentHeadRevisionHashes(
+    projectId: ProjectId,
+    heads: readonly DocumentRevisionKey[],
+  ): Promise<readonly DocumentHeadRevisionHash[]> {
     return (await this.selectDocumentHeadRevisions(projectId, heads, false)).map(row => ({
       documentId: asString(row.requested_document_id) as DocumentId,
       revisionId: asString(row.requested_revision_id) as RevisionId,
@@ -690,9 +808,18 @@ class PostgresTransaction implements PersistenceTransaction {
     }));
   }
 
-  async listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string, throughHead?: RevisionId): Promise<DocumentRevisionPage> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("Revision page size must be between 1 and 200");
-    const ancestry = throughHead === undefined ? "" : `WITH RECURSIVE ancestry(id,parent_revision_id) AS (
+  async listRevisions(
+    projectId: ProjectId,
+    documentId: DocumentId,
+    limit: number,
+    before?: string,
+    throughHead?: RevisionId,
+  ): Promise<DocumentRevisionPage> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError('Revision page size must be between 1 and 200');
+    const ancestry =
+      throughHead === undefined
+        ? ''
+        : `WITH RECURSIVE ancestry(id,parent_revision_id) AS (
       SELECT id,parent_revision_id FROM document_revision WHERE project_id=$1 AND document_id=$2 AND id=$5
       UNION ALL
       SELECT r.id,r.parent_revision_id FROM document_revision r JOIN ancestry a ON r.id=a.parent_revision_id
@@ -700,12 +827,12 @@ class PostgresTransaction implements PersistenceTransaction {
     )`;
     const result = await this.query(
       `${ancestry} SELECT revision.* FROM document_revision AS revision
-       ${throughHead === undefined ? "" : "JOIN ancestry ON revision.id=ancestry.id"}
+       ${throughHead === undefined ? '' : 'JOIN ancestry ON revision.id=ancestry.id'}
        WHERE revision.project_id = $1 AND revision.document_id = $2
          AND ($3::uuid IS NULL OR (revision.created_at, revision.id) < (
            SELECT cursor.created_at, cursor.id FROM document_revision AS cursor
            WHERE cursor.project_id = $1 AND cursor.document_id = $2 AND cursor.id = $3
-           ${throughHead === undefined ? "" : "AND cursor.id IN (SELECT id FROM ancestry)"}
+           ${throughHead === undefined ? '' : 'AND cursor.id IN (SELECT id FROM ancestry)'}
          ))
        ORDER BY revision.created_at DESC, revision.id DESC LIMIT $4`,
       [projectId, documentId, before ?? null, limit + 1, ...(throughHead === undefined ? [] : [throughHead])],
@@ -718,9 +845,19 @@ class PostgresTransaction implements PersistenceTransaction {
     };
   }
 
-  async listProjectRevisionHistory(projectId: ProjectId, heads: readonly DocumentRevisionKey[], limit: number): Promise<readonly Pick<DocumentRevision, "id" | "documentId" | "createdAt">[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 200 || heads.length > 1000 ||
-        new Set(heads.map(head => head.documentId)).size !== heads.length) throw validationError("Invalid project revision history bounds");
+  async listProjectRevisionHistory(
+    projectId: ProjectId,
+    heads: readonly DocumentRevisionKey[],
+    limit: number,
+  ): Promise<readonly Pick<DocumentRevision, 'id' | 'documentId' | 'createdAt'>[]> {
+    if (
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 200 ||
+      heads.length > 1000 ||
+      new Set(heads.map(head => head.documentId)).size !== heads.length
+    )
+      throw validationError('Invalid project revision history bounds');
     if (!heads.length) return [];
     const result = await this.query(
       `WITH RECURSIVE ancestry(id, document_id, parent_revision_id, created_at, position) AS (
@@ -744,20 +881,21 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   async getKnowledgeNode(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<KnowledgeNode | undefined> {
-    const result = await this.query("SELECT * FROM knowledge_node WHERE project_id = $1 AND id = $2", [projectId, nodeId]);
+    const result = await this.query('SELECT * FROM knowledge_node WHERE project_id = $1 AND id = $2', [projectId, nodeId]);
     return result.rows[0] ? mapKnowledgeNode(result.rows[0]) : undefined;
   }
 
   async listKnowledgeNodes(projectId: ProjectId, limit = 100): Promise<readonly KnowledgeNode[]> {
     const result = await this.query(
-      "SELECT * FROM knowledge_node WHERE project_id = $1 AND deleted_at IS NULL ORDER BY name, id LIMIT $2",
+      'SELECT * FROM knowledge_node WHERE project_id = $1 AND deleted_at IS NULL ORDER BY name, id LIMIT $2',
       [projectId, limit],
     );
     return result.rows.map(mapKnowledgeNode);
   }
 
   async searchKnowledgeNodes(projectId: ProjectId, search: KnowledgeNodeSearch): Promise<readonly KnowledgeNode[]> {
-    if (!Number.isInteger(search.limit) || search.limit < 1 || search.limit > 101) throw validationError("Knowledge search page size must be between 1 and 101");
+    if (!Number.isInteger(search.limit) || search.limit < 1 || search.limit > 101)
+      throw validationError('Knowledge search page size must be between 1 and 101');
     const result = await this.query(
       `SELECT n.* FROM knowledge_node n
        WHERE n.project_id = $1 AND (n.deleted_at IS NULL OR $4::text = 'retired')
@@ -769,37 +907,48 @@ class PostgresTransaction implements PersistenceTransaction {
          AND ($4::text IS NULL OR n.status = $4)
          AND ($5::text IS NULL OR (lower(n.name), n.id) > (lower($5), $6::uuid))
        ORDER BY lower(n.name), n.id LIMIT $7`,
-      [projectId, search.query ?? null, search.type ?? null, search.status ?? null,
-        search.after?.name ?? null, search.after?.id ?? null, search.limit],
+      [
+        projectId,
+        search.query ?? null,
+        search.type ?? null,
+        search.status ?? null,
+        search.after?.name ?? null,
+        search.after?.id ?? null,
+        search.limit,
+      ],
     );
     return result.rows.map(mapKnowledgeNode);
   }
 
   async listAllKnowledgeNodes(projectId: ProjectId, limit = 1000): Promise<readonly KnowledgeNode[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Archive knowledge page size must be between 1 and 1000");
-    const result = await this.query("SELECT * FROM knowledge_node WHERE project_id = $1 ORDER BY id LIMIT $2", [projectId, limit]);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+      throw validationError('Archive knowledge page size must be between 1 and 1000');
+    const result = await this.query('SELECT * FROM knowledge_node WHERE project_id = $1 ORDER BY id LIMIT $2', [projectId, limit]);
     return result.rows.map(mapKnowledgeNode);
   }
 
   async listAssertions(projectId: ProjectId, limit = 1000): Promise<readonly Assertion[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Archive assertion page size must be between 1 and 1000");
-    const result = await this.query("SELECT * FROM assertion WHERE project_id = $1 ORDER BY id LIMIT $2", [projectId, limit]);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+      throw validationError('Archive assertion page size must be between 1 and 1000');
+    const result = await this.query('SELECT * FROM assertion WHERE project_id = $1 ORDER BY id LIMIT $2', [projectId, limit]);
     return result.rows.map(mapAssertion);
   }
 
   async listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId, limit = 500): Promise<readonly KnowledgeAlias[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Knowledge alias page size must be between 1 and 1000");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+      throw validationError('Knowledge alias page size must be between 1 and 1000');
     const result = await this.query(
-      "SELECT * FROM knowledge_alias WHERE project_id = $1 AND node_id = $2 ORDER BY normalized, id LIMIT $3",
+      'SELECT * FROM knowledge_alias WHERE project_id = $1 AND node_id = $2 ORDER BY normalized, id LIMIT $3',
       [projectId, nodeId, limit],
     );
     return result.rows.map(mapKnowledgeAlias);
   }
 
   async listKnowledgeRelations(projectId: ProjectId, nodeId: KnowledgeNodeId, limit = 500): Promise<readonly KnowledgeRelation[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Knowledge relation page size must be between 1 and 1000");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+      throw validationError('Knowledge relation page size must be between 1 and 1000');
     const result = await this.query(
-      "SELECT * FROM knowledge_relation WHERE project_id = $1 AND (source_id = $2 OR target_id = $2) ORDER BY type, id LIMIT $3",
+      'SELECT * FROM knowledge_relation WHERE project_id = $1 AND (source_id = $2 OR target_id = $2) ORDER BY type, id LIMIT $3',
       [projectId, nodeId, limit],
     );
     return result.rows.map(mapKnowledgeRelation);
@@ -810,12 +959,12 @@ class PostgresTransaction implements PersistenceTransaction {
     nodeIds: readonly KnowledgeNodeId[],
     limits: KnowledgeProjectionBatchLimits,
   ): Promise<KnowledgeProjectionBatch> {
-    if (nodeIds.length > 1000) throw validationError("Knowledge projection node batch cannot exceed 1000 nodes");
+    if (nodeIds.length > 1000) throw validationError('Knowledge projection node batch cannot exceed 1000 nodes');
     const validLimits: readonly [number, number, string][] = [
-      [limits.aliasesPerNode, 1000, "Knowledge alias"],
-      [limits.relationsPerNode, 1000, "Knowledge relation"],
-      [limits.mentionsPerNode, 500, "Knowledge mention"],
-      [limits.assertionsPerAnchor, 200, "Evidence assertion"],
+      [limits.aliasesPerNode, 1000, 'Knowledge alias'],
+      [limits.relationsPerNode, 1000, 'Knowledge relation'],
+      [limits.mentionsPerNode, 500, 'Knowledge mention'],
+      [limits.assertionsPerAnchor, 200, 'Evidence assertion'],
     ];
     for (const [limit, maximum, label] of validLimits) {
       if (!Number.isInteger(limit) || limit < 1 || limit > maximum) {
@@ -875,10 +1024,10 @@ class PostgresTransaction implements PersistenceTransaction {
     const evidenceIds = [...new Set(mentions.map(mention => mention.evidenceId))];
     const anchors: EvidenceAnchor[] = [];
     for (const evidenceChunk of chunks(evidenceIds, KNOWLEDGE_PROJECTION_EVIDENCE_BATCH_SIZE)) {
-      const anchorRows = await this.query(
-        "SELECT * FROM text_anchor WHERE project_id = $1 AND id = ANY($2::uuid[]) ORDER BY id",
-        [projectId, evidenceChunk],
-      );
+      const anchorRows = await this.query('SELECT * FROM text_anchor WHERE project_id = $1 AND id = ANY($2::uuid[]) ORDER BY id', [
+        projectId,
+        evidenceChunk,
+      ]);
       anchors.push(...anchorRows.rows.map(mapEvidenceAnchor));
     }
 
@@ -887,8 +1036,9 @@ class PostgresTransaction implements PersistenceTransaction {
       const key = JSON.stringify([anchor.documentId, anchor.revisionId]);
       if (!revisionByKey.has(key)) revisionByKey.set(key, { documentId: anchor.documentId, revisionId: anchor.revisionId });
     }
-    const revisionPairs = [...revisionByKey.values()].sort((left, right) =>
-      left.documentId.localeCompare(right.documentId) || left.revisionId.localeCompare(right.revisionId));
+    const revisionPairs = [...revisionByKey.values()].sort(
+      (left, right) => left.documentId.localeCompare(right.documentId) || left.revisionId.localeCompare(right.revisionId),
+    );
     const revisions: DocumentRevision[] = [];
     for (const revisionChunk of chunks(revisionPairs, KNOWLEDGE_PROJECTION_REVISION_BATCH_SIZE)) {
       const revisionRows = await this.query(
@@ -922,10 +1072,10 @@ class PostgresTransaction implements PersistenceTransaction {
     const assertionIds = [...new Set(assertionEvidence.map(item => item.link.assertionId))].sort();
     const assertions: Assertion[] = [];
     for (const assertionChunk of chunks(assertionIds, KNOWLEDGE_PROJECTION_EVIDENCE_BATCH_SIZE)) {
-      const assertionRows = await this.query(
-        "SELECT * FROM assertion WHERE project_id = $1 AND id = ANY($2::uuid[]) ORDER BY id",
-        [projectId, assertionChunk],
-      );
+      const assertionRows = await this.query('SELECT * FROM assertion WHERE project_id = $1 AND id = ANY($2::uuid[]) ORDER BY id', [
+        projectId,
+        assertionChunk,
+      ]);
       assertions.push(...assertionRows.rows.map(mapAssertion));
     }
 
@@ -933,21 +1083,27 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   async getEvidenceAnchor(projectId: ProjectId, evidenceId: EvidenceId): Promise<EvidenceAnchor | undefined> {
-    const result = await this.query("SELECT * FROM text_anchor WHERE project_id = $1 AND id = $2", [projectId, evidenceId]);
+    const result = await this.query('SELECT * FROM text_anchor WHERE project_id = $1 AND id = $2', [projectId, evidenceId]);
     return result.rows[0] ? mapEvidenceAnchor(result.rows[0]) : undefined;
   }
 
   async listEvidenceDocumentIds(projectId: ProjectId, limit = 1000): Promise<readonly DocumentId[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Evidence document page size must be between 1 and 1000");
-    const result = await this.query(
-      "SELECT DISTINCT document_id FROM text_anchor WHERE project_id = $1 ORDER BY document_id LIMIT $2",
-      [projectId, limit],
-    );
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+      throw validationError('Evidence document page size must be between 1 and 1000');
+    const result = await this.query('SELECT DISTINCT document_id FROM text_anchor WHERE project_id = $1 ORDER BY document_id LIMIT $2', [
+      projectId,
+      limit,
+    ]);
     return result.rows.map(row => asString(row.document_id) as DocumentId);
   }
 
-  async listDocumentEvidence(projectId: ProjectId, documentId: DocumentId, revisionId?: RevisionId, limit = 200): Promise<readonly EvidenceAnchor[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw validationError("Evidence page size must be between 1 and 500");
+  async listDocumentEvidence(
+    projectId: ProjectId,
+    documentId: DocumentId,
+    revisionId?: RevisionId,
+    limit = 200,
+  ): Promise<readonly EvidenceAnchor[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw validationError('Evidence page size must be between 1 and 500');
     const result = await this.query(
       `SELECT * FROM text_anchor
        WHERE project_id = $1 AND document_id = $2 AND ($3::uuid IS NULL OR current_revision_id = $3)
@@ -958,41 +1114,45 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   async listEvidenceHistory(projectId: ProjectId, evidenceId: EvidenceId, limit = 500): Promise<readonly EvidenceAnchorHistory[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Evidence history page size must be between 1 and 1000");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+      throw validationError('Evidence history page size must be between 1 and 1000');
     const result = await this.query(
       `SELECT evidence_id, revision_id, from_utf16, to_utf16, status, recorded_at
        FROM anchor_history WHERE project_id = $1 AND evidence_id = $2 ORDER BY version DESC LIMIT $3`,
       [projectId, evidenceId, limit],
     );
-    return result.rows.reverse().map((row) => ({
+    return result.rows.reverse().map(row => ({
       evidenceId: asString(row.evidence_id) as EvidenceId,
       revisionId: asString(row.revision_id) as RevisionId,
       fromUtf16: asNumber(row.from_utf16),
       toUtf16: asNumber(row.to_utf16),
-      status: asString(row.status) as EvidenceAnchorHistory["status"],
+      status: asString(row.status) as EvidenceAnchorHistory['status'],
       recordedAt: asString(row.recorded_at),
     }));
   }
 
   async getMentionLink(projectId: ProjectId, evidenceId: EvidenceId, nodeId: KnowledgeNodeId): Promise<MentionLink | undefined> {
-    const result = await this.query(
-      "SELECT * FROM mention_link WHERE project_id = $1 AND evidence_id = $2 AND node_id = $3",
-      [projectId, evidenceId, nodeId],
-    );
+    const result = await this.query('SELECT * FROM mention_link WHERE project_id = $1 AND evidence_id = $2 AND node_id = $3', [
+      projectId,
+      evidenceId,
+      nodeId,
+    ]);
     return result.rows[0] ? mapMentionLink(result.rows[0]) : undefined;
   }
 
   async listMentionLinks(projectId: ProjectId, evidenceId: EvidenceId, limit = 500): Promise<readonly MentionLink[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Evidence mention page size must be between 1 and 1000");
-    const result = await this.query(
-      "SELECT * FROM mention_link WHERE project_id = $1 AND evidence_id = $2 ORDER BY node_id LIMIT $3",
-      [projectId, evidenceId, limit],
-    );
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+      throw validationError('Evidence mention page size must be between 1 and 1000');
+    const result = await this.query('SELECT * FROM mention_link WHERE project_id = $1 AND evidence_id = $2 ORDER BY node_id LIMIT $3', [
+      projectId,
+      evidenceId,
+      limit,
+    ]);
     return result.rows.map(mapMentionLink);
   }
 
   async listNodeMentions(projectId: ProjectId, nodeId: KnowledgeNodeId, limit = 200): Promise<readonly MentionLink[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw validationError("Mention page size must be between 1 and 500");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw validationError('Mention page size must be between 1 and 500');
     const result = await this.query(
       `SELECT * FROM mention_link WHERE project_id = $1 AND node_id = $2
        ORDER BY updated_at DESC, evidence_id LIMIT $3`,
@@ -1002,35 +1162,37 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   async getAssertion(projectId: ProjectId, assertionId: AssertionId): Promise<Assertion | undefined> {
-    const result = await this.query("SELECT * FROM assertion WHERE project_id = $1 AND id = $2", [projectId, assertionId]);
+    const result = await this.query('SELECT * FROM assertion WHERE project_id = $1 AND id = $2', [projectId, assertionId]);
     return result.rows[0] ? mapAssertion(result.rows[0]) : undefined;
   }
 
   async listAssertionEvidence(projectId: ProjectId, assertionId: AssertionId, limit = 500): Promise<readonly AssertionEvidence[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Assertion evidence page size must be between 1 and 1000");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+      throw validationError('Assertion evidence page size must be between 1 and 1000');
     const result = await this.query(
-      "SELECT * FROM assertion_evidence WHERE project_id = $1 AND assertion_id = $2 ORDER BY evidence_id LIMIT $3",
+      'SELECT * FROM assertion_evidence WHERE project_id = $1 AND assertion_id = $2 ORDER BY evidence_id LIMIT $3',
       [projectId, assertionId, limit],
     );
     return result.rows.map(mapAssertionEvidence);
   }
 
   async listEvidenceAssertions(projectId: ProjectId, evidenceId: EvidenceId, limit = 100): Promise<readonly AssertionEvidence[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("Assertion evidence page size must be between 1 and 200");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200)
+      throw validationError('Assertion evidence page size must be between 1 and 200');
     const result = await this.query(
-      "SELECT * FROM assertion_evidence WHERE project_id = $1 AND evidence_id = $2 ORDER BY assertion_id, evidence_role LIMIT $3",
+      'SELECT * FROM assertion_evidence WHERE project_id = $1 AND evidence_id = $2 ORDER BY assertion_id, evidence_role LIMIT $3',
       [projectId, evidenceId, limit],
     );
     return result.rows.map(mapAssertionEvidence);
   }
 
   async getChangeSet(projectId: ProjectId, changeSetId: ChangeSetId): Promise<ChangeSet | undefined> {
-    const result = await this.query("SELECT * FROM change_set WHERE project_id = $1 AND id = $2", [projectId, changeSetId]);
+    const result = await this.query('SELECT * FROM change_set WHERE project_id = $1 AND id = $2', [projectId, changeSetId]);
     return result.rows[0] ? mapChangeSet(result.rows[0]) : undefined;
   }
 
   private async changeSetRowByIdempotencyKey(projectId: ProjectId, key: IdempotencyKey): Promise<DbRow | undefined> {
-    const result = await this.query("SELECT * FROM change_set WHERE project_id = $1 AND idempotency_key = $2", [projectId, key]);
+    const result = await this.query('SELECT * FROM change_set WHERE project_id = $1 AND idempotency_key = $2', [projectId, key]);
     return result.rows[0];
   }
 
@@ -1039,8 +1201,12 @@ class PostgresTransaction implements PersistenceTransaction {
     return row ? mapChangeSet(row) : undefined;
   }
 
-  async listChangeSets(projectId: ProjectId, limit = 50, { excludeSources = [] }: { excludeSources?: readonly string[] } = {}): Promise<readonly ChangeSet[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("ChangeSet page size must be between 1 and 200");
+  async listChangeSets(
+    projectId: ProjectId,
+    limit = 50,
+    { excludeSources = [] }: { excludeSources?: readonly string[] } = {},
+  ): Promise<readonly ChangeSet[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError('ChangeSet page size must be between 1 and 200');
     const result = await this.query(
       `SELECT * FROM change_set WHERE project_id = $1 AND COALESCE(provenance->>'source', '') <> ALL($2::text[])
        ORDER BY created_at DESC, id LIMIT $3`,
@@ -1050,73 +1216,89 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   async getChangeSetReceipt(projectId: ProjectId, changeSetId: ChangeSetId): Promise<ChangeSetApplicationResult | undefined> {
-    const result = await this.query("SELECT status, application_result FROM change_set WHERE project_id = $1 AND id = $2", [projectId, changeSetId]);
+    const result = await this.query('SELECT status, application_result FROM change_set WHERE project_id = $1 AND id = $2', [
+      projectId,
+      changeSetId,
+    ]);
     const row = result.rows[0];
-    if (!row || row.status !== "applied") return undefined;
-    const stored = asJsonObject(row.application_result) as unknown as Omit<ChangeSetApplicationResult, "replayed">;
+    if (row?.status !== 'applied') return undefined;
+    const stored = asJsonObject(row.application_result) as unknown as Omit<ChangeSetApplicationResult, 'replayed'>;
     return { ...stored, replayed: false };
   }
 
   async createProject(command: CreateProjectCommand): Promise<Project> {
     this.ensureWritable();
-    assertNonEmpty(command.title, "Project title");
-    const id = command.id ?? randomUUID() as ProjectId;
-    const result = await this.query(
-      "INSERT INTO project(id, title, settings) VALUES ($1, $2, $3::jsonb) RETURNING *",
-      [id, command.title, toJson(command.settings ?? {})],
-    );
+    assertNonEmpty(command.title, 'Project title');
+    const id = command.id ?? (randomUUID() as ProjectId);
+    const result = await this.query('INSERT INTO project(id, title, settings) VALUES ($1, $2, $3::jsonb) RETURNING *', [
+      id,
+      command.title,
+      toJson(command.settings ?? {}),
+    ]);
     return mapProject(result.rows[0]!);
   }
 
   async updateProject(command: UpdateProjectCommand): Promise<Project> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    if (command.title !== undefined) assertNonEmpty(command.title, "Project title");
+    if (command.title !== undefined) assertNonEmpty(command.title, 'Project title');
     const result = await this.query(
       `UPDATE project SET title = COALESCE($3, title), settings = COALESCE($4::jsonb, settings),
        updated_at = clock_timestamp() WHERE id = $1 AND version = $2 RETURNING *`,
       [command.projectId, command.expectedVersion, command.title ?? null, command.settings === undefined ? null : toJson(command.settings)],
     );
-    if (!result.rows[0]) throw conflict("project", command.projectId, command.expectedVersion, (await this.getProject(command.projectId))?.version ?? null);
+    if (!result.rows[0])
+      throw conflict('project', command.projectId, command.expectedVersion, (await this.getProject(command.projectId))?.version ?? null);
     this.markChanged(command.projectId);
-    return {...mapProject(result.rows[0]), version: asNumber(result.rows[0].version) + 1};
+    return { ...mapProject(result.rows[0]), version: asNumber(result.rows[0].version) + 1 };
   }
 
   async assertProjectVersion(projectId: ProjectId, expectedVersion?: number): Promise<void> {
     this.ensureWritable();
-    const result = await this.query("SELECT version FROM project WHERE id = $1 FOR UPDATE", [projectId]);
-    if (!result.rows[0]) throw notFound("project", projectId);
+    const result = await this.query('SELECT version FROM project WHERE id = $1 FOR UPDATE', [projectId]);
+    if (!result.rows[0]) throw notFound('project', projectId);
     const actual = asNumber(result.rows[0].version);
-    if (expectedVersion !== undefined && actual !== expectedVersion) throw conflict("project", projectId, expectedVersion, actual);
+    if (expectedVersion !== undefined && actual !== expectedVersion) throw conflict('project', projectId, expectedVersion, actual);
   }
 
   private async lockProject(projectId: ProjectId): Promise<void> {
-    const result = await this.query("SELECT id FROM project WHERE id = $1 FOR UPDATE", [projectId]);
-    if (!result.rows[0]) throw notFound("project", projectId);
+    const result = await this.query('SELECT id FROM project WHERE id = $1 FOR UPDATE', [projectId]);
+    if (!result.rows[0]) throw notFound('project', projectId);
   }
 
   async updateDocument(command: UpdateDocumentCommand): Promise<Document> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    if (command.title !== undefined) assertNonEmpty(command.title, "Document title");
+    if (command.title !== undefined) assertNonEmpty(command.title, 'Document title');
     if (command.parentId !== undefined && command.parentId !== null) {
-      if (!(await this.getDocument(command.projectId, command.parentId))) throw notFound("parent document", command.parentId);
+      if (!(await this.getDocument(command.projectId, command.parentId))) throw notFound('parent document', command.parentId);
       const cycle = await this.query(
         `WITH RECURSIVE ancestors AS (
            SELECT id, parent_id FROM document WHERE project_id = $1 AND id = $2
            UNION SELECT d.id, d.parent_id FROM document d JOIN ancestors a ON d.id = a.parent_id WHERE d.project_id = $1
-         ) SELECT 1 FROM ancestors WHERE id = $3`, [command.projectId, command.parentId, command.documentId]);
-      if (cycle.rows.length) throw validationError("Document hierarchy cannot contain a cycle");
+         ) SELECT 1 FROM ancestors WHERE id = $3`,
+        [command.projectId, command.parentId, command.documentId],
+      );
+      if (cycle.rows.length) throw validationError('Document hierarchy cannot contain a cycle');
     }
     const result = await this.query(
       `UPDATE document SET parent_id = CASE WHEN $4 THEN $5::uuid ELSE parent_id END,
        title = COALESCE($6, title), order_key = COALESCE($7, order_key), version = version + 1,
        updated_at = clock_timestamp() WHERE project_id = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING *`,
-      [command.projectId, command.documentId, command.expectedVersion, command.parentId !== undefined, command.parentId ?? null, command.title ?? null, command.orderKey ?? null]);
+      [
+        command.projectId,
+        command.documentId,
+        command.expectedVersion,
+        command.parentId !== undefined,
+        command.parentId ?? null,
+        command.title ?? null,
+        command.orderKey ?? null,
+      ],
+    );
     if (!result.rows[0]) {
       const current = await this.getDocument(command.projectId, command.documentId);
-      if (!current) throw notFound("document", command.documentId);
-      throw conflict("document", command.documentId, command.expectedVersion, current.version);
+      if (!current) throw notFound('document', command.documentId);
+      throw conflict('document', command.documentId, command.expectedVersion, current.version);
     }
     this.markChanged(command.projectId);
     return mapDocument(result.rows[0]);
@@ -1125,38 +1307,58 @@ class PostgresTransaction implements PersistenceTransaction {
   async deleteDocument(command: DeleteDocumentCommand): Promise<Document> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    const children = await this.query("SELECT 1 FROM document WHERE project_id = $1 AND parent_id = $2 AND deleted_at IS NULL LIMIT 1", [command.projectId, command.documentId]);
-    if (children.rows.length) throw validationError("Delete child documents before their parent");
+    const children = await this.query('SELECT 1 FROM document WHERE project_id = $1 AND parent_id = $2 AND deleted_at IS NULL LIMIT 1', [
+      command.projectId,
+      command.documentId,
+    ]);
+    if (children.rows.length) throw validationError('Delete child documents before their parent');
     const result = await this.query(
       `UPDATE document SET deleted_at = clock_timestamp(), version = version + 1, updated_at = clock_timestamp()
        WHERE project_id = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING *`,
-      [command.projectId, command.documentId, command.expectedVersion]);
+      [command.projectId, command.documentId, command.expectedVersion],
+    );
     if (!result.rows[0]) {
       const current = await this.getDocument(command.projectId, command.documentId);
-      if (!current) throw notFound("document", command.documentId);
-      throw conflict("document", command.documentId, command.expectedVersion, current.version);
+      if (!current) throw notFound('document', command.documentId);
+      throw conflict('document', command.documentId, command.expectedVersion, current.version);
     }
     this.markChanged(command.projectId);
     return mapDocument(result.rows[0]);
   }
 
   async getModuleRecord(projectId: ProjectId, moduleId: string, key: string): Promise<ModuleRecord | undefined> {
-    const result = await this.query("SELECT * FROM module_record WHERE project_id = $1 AND module_id = $2 AND key = $3", [projectId, moduleId, key]);
+    const result = await this.query('SELECT * FROM module_record WHERE project_id = $1 AND module_id = $2 AND key = $3', [
+      projectId,
+      moduleId,
+      key,
+    ]);
     return result.rows[0] ? this.mapModuleRecord(result.rows[0]) : undefined;
   }
 
   async listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]> {
-    const result = await this.query("SELECT * FROM module_record WHERE project_id = $1 AND ($2::text IS NULL OR module_id = $2) ORDER BY module_id, key", [projectId, moduleId ?? null]);
-    return result.rows.map((row) => this.mapModuleRecord(row));
+    const result = await this.query(
+      'SELECT * FROM module_record WHERE project_id = $1 AND ($2::text IS NULL OR module_id = $2) ORDER BY module_id, key',
+      [projectId, moduleId ?? null],
+    );
+    return result.rows.map(row => this.mapModuleRecord(row));
   }
 
   async listProposalReviewQueue(
-    projectIds: readonly ProjectId[] | null, moduleId: string, limit: number, { excludePrivateProposals }: ProposalReviewQueueOptions = {},
+    projectIds: readonly ProjectId[] | null,
+    moduleId: string,
+    limit: number,
+    { excludePrivateProposals }: ProposalReviewQueueOptions = {},
   ): Promise<{
-    unresolvedCount: number; records: readonly { record: ModuleRecord; projectVersion: number }[];
+    unresolvedCount: number;
+    records: readonly { record: ModuleRecord; projectVersion: number }[];
   }> {
-    if ((projectIds !== null && (projectIds.length > 200 || new Set(projectIds).size !== projectIds.length)) ||
-        !Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Invalid proposal review scope or page size");
+    if (
+      (projectIds !== null && (projectIds.length > 200 || new Set(projectIds).size !== projectIds.length)) ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 1000
+    )
+      throw validationError('Invalid proposal review scope or page size');
     if (projectIds?.length === 0) return { unresolvedCount: 0, records: [] };
     const scope = `FROM project p
       JOIN module_record m ON m.project_id = p.id AND m.module_id = $2
@@ -1171,41 +1373,80 @@ class PostgresTransaction implements PersistenceTransaction {
     const args = [projectIds, moduleId, excludePrivateProposals ? PRIVATE_PUBLISHING_PATHS : []];
     const count = await this.query(`SELECT count(*) AS count ${scope}`, args);
     const unresolvedCount = asNumber(count.rows[0]?.count);
-    const page = await this.query(`SELECT m.*, p.version AS project_version ${scope}
-      ORDER BY scope.position, p.updated_at DESC, p.id, m.key LIMIT $4`, [...args, limit]);
-    return { unresolvedCount, records: page.rows.map(row => ({
-      record: this.mapModuleRecord(row), projectVersion: asNumber(row.project_version),
-    })) };
+    const page = await this.query(
+      `SELECT m.*, p.version AS project_version ${scope}
+      ORDER BY scope.position, p.updated_at DESC, p.id, m.key LIMIT $4`,
+      [...args, limit],
+    );
+    return {
+      unresolvedCount,
+      records: page.rows.map(row => ({
+        record: this.mapModuleRecord(row),
+        projectVersion: asNumber(row.project_version),
+      })),
+    };
   }
 
-  async listPortableModuleRecords(projectId: ProjectId): Promise<{records: readonly ModuleRecord[]; omittedAuthorityModules: readonly string[]}> {
-    const records = await this.query("SELECT * FROM module_record WHERE project_id=$1 AND module_id NOT LIKE 'core.authority.%' ORDER BY module_id,key", [projectId]);
-    const omitted = await this.query("SELECT DISTINCT module_id FROM module_record WHERE project_id=$1 AND module_id LIKE 'core.authority.%' ORDER BY module_id", [projectId]);
-    return {records:records.rows.map(row=>this.mapModuleRecord(row)),omittedAuthorityModules:omitted.rows.map(row=>asString(row.module_id))};
+  async listPortableModuleRecords(
+    projectId: ProjectId,
+  ): Promise<{ records: readonly ModuleRecord[]; omittedAuthorityModules: readonly string[] }> {
+    const records = await this.query(
+      "SELECT * FROM module_record WHERE project_id=$1 AND module_id NOT LIKE 'core.authority.%' ORDER BY module_id,key",
+      [projectId],
+    );
+    const omitted = await this.query(
+      "SELECT DISTINCT module_id FROM module_record WHERE project_id=$1 AND module_id LIKE 'core.authority.%' ORDER BY module_id",
+      [projectId],
+    );
+    return {
+      records: records.rows.map(row => this.mapModuleRecord(row)),
+      omittedAuthorityModules: omitted.rows.map(row => asString(row.module_id)),
+    };
   }
 
   private mapModuleRecord(row: DbRow): ModuleRecord {
-    return { projectId: asString(row.project_id) as ProjectId, moduleId: asString(row.module_id), key: asString(row.key), value: asJsonObject(row.value), version: asNumber(row.version), createdAt: asString(row.created_at), updatedAt: asString(row.updated_at) };
+    return {
+      projectId: asString(row.project_id) as ProjectId,
+      moduleId: asString(row.module_id),
+      key: asString(row.key),
+      value: asJsonObject(row.value),
+      version: asNumber(row.version),
+      createdAt: asString(row.created_at),
+      updatedAt: asString(row.updated_at),
+    };
   }
 
   async saveModuleRecord(command: SaveModuleRecordCommand): Promise<ModuleRecord> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertNonEmpty(command.moduleId, "Module id");
-    assertNonEmpty(command.key, "Module record key");
-    const result = command.expectedVersion === null
-      ? await this.query(`INSERT INTO module_record(project_id, module_id, key, value) VALUES ($1, $2, $3, $4::jsonb)
-          ON CONFLICT DO NOTHING RETURNING *`, [command.projectId, command.moduleId, command.key, toJson(command.value)])
-      : await this.query(`UPDATE module_record SET value = $4::jsonb, version = version + 1, updated_at = clock_timestamp()
-          WHERE project_id = $1 AND module_id = $2 AND key = $3 AND version = $5 RETURNING *`, [command.projectId, command.moduleId, command.key, toJson(command.value), command.expectedVersion]);
-    if (!result.rows[0]) throw conflict("module_record", JSON.stringify([command.moduleId, command.key]), command.expectedVersion, (await this.getModuleRecord(command.projectId, command.moduleId, command.key))?.version ?? null);
-    if (!command.moduleId.startsWith("core.authority.")) this.markChanged(command.projectId);
+    assertNonEmpty(command.moduleId, 'Module id');
+    assertNonEmpty(command.key, 'Module record key');
+    const result =
+      command.expectedVersion === null
+        ? await this.query(
+            `INSERT INTO module_record(project_id, module_id, key, value) VALUES ($1, $2, $3, $4::jsonb)
+          ON CONFLICT DO NOTHING RETURNING *`,
+            [command.projectId, command.moduleId, command.key, toJson(command.value)],
+          )
+        : await this.query(
+            `UPDATE module_record SET value = $4::jsonb, version = version + 1, updated_at = clock_timestamp()
+          WHERE project_id = $1 AND module_id = $2 AND key = $3 AND version = $5 RETURNING *`,
+            [command.projectId, command.moduleId, command.key, toJson(command.value), command.expectedVersion],
+          );
+    if (!result.rows[0])
+      throw conflict(
+        'module_record',
+        JSON.stringify([command.moduleId, command.key]),
+        command.expectedVersion,
+        (await this.getModuleRecord(command.projectId, command.moduleId, command.key))?.version ?? null,
+      );
+    if (!command.moduleId.startsWith('core.authority.')) this.markChanged(command.projectId);
     return this.mapModuleRecord(result.rows[0]);
   }
 
   /** Serialize same-project retries before checking the durable idempotency receipt. */
   private async lockIdempotencyKey(projectId: ProjectId, key: IdempotencyKey): Promise<void> {
-    await this.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))", [JSON.stringify([projectId, key])]);
+    await this.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))', [JSON.stringify([projectId, key])]);
   }
 
   private async existingIdempotentWrite(
@@ -1214,14 +1455,18 @@ class PostgresTransaction implements PersistenceTransaction {
     requestSha256: string,
   ): Promise<DocumentWriteResult | undefined> {
     const result = await this.query(
-      "SELECT request_sha256, response_document, new_revision_id, document_id FROM edit_operation WHERE project_id = $1 AND idempotency_key = $2",
+      'SELECT request_sha256, response_document, new_revision_id, document_id FROM edit_operation WHERE project_id = $1 AND idempotency_key = $2',
       [projectId, idempotencyKey],
     );
     const row = result.rows[0];
     if (!row) return undefined;
     if (asString(row.request_sha256).trim() !== requestSha256) throw idempotencyConflict(idempotencyKey);
-    const revision = await this.getRevision(projectId, asString(row.document_id) as DocumentId, asString(row.new_revision_id) as RevisionId);
-    if (!revision) throw new Error("Idempotency record references a missing immutable revision");
+    const revision = await this.getRevision(
+      projectId,
+      asString(row.document_id) as DocumentId,
+      asString(row.new_revision_id) as RevisionId,
+    );
+    if (!revision) throw new Error('Idempotency record references a missing immutable revision');
     return {
       document: asJsonObject(row.response_document) as unknown as Document,
       revision,
@@ -1240,7 +1485,15 @@ class PostgresTransaction implements PersistenceTransaction {
     const result = await this.query(
       `INSERT INTO document_revision(project_id, document_id, id, parent_revision_id, markdown, sha256, author_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [command.projectId, command.documentId, id, command.parentRevisionId, command.markdown, bodyDigest(command.markdown), command.authorId],
+      [
+        command.projectId,
+        command.documentId,
+        id,
+        command.parentRevisionId,
+        command.markdown,
+        bodyDigest(command.markdown),
+        command.authorId,
+      ],
     );
     return mapRevision(result.rows[0]!);
   }
@@ -1259,8 +1512,8 @@ class PostgresTransaction implements PersistenceTransaction {
     );
     if (!result.rows[0]) {
       const current = await this.getDocument(projectId, documentId);
-      if (!current) throw notFound("document", documentId);
-      throw conflict("document_revision", documentId, expectedHead, current.headRevisionId);
+      if (!current) throw notFound('document', documentId);
+      throw conflict('document_revision', documentId, expectedHead, current.headRevisionId);
     }
     this.markChanged(projectId);
     return mapDocument(result.rows[0]);
@@ -1273,7 +1526,7 @@ class PostgresTransaction implements PersistenceTransaction {
     revision: DocumentRevision;
     document: Document;
     idempotencyKey: IdempotencyKey;
-    operationType: "document.create" | "document.save" | "document.restore";
+    operationType: 'document.create' | 'document.save' | 'document.restore';
     requestSha256: string;
     changeDescription: unknown;
     clientId: string;
@@ -1284,9 +1537,16 @@ class PostgresTransaction implements PersistenceTransaction {
          request_sha256, change_desc, client_id, response_document
        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb)`,
       [
-        command.projectId, command.idempotencyKey, command.operationType, command.documentId,
-        command.baseRevisionId, command.revision.id, command.requestSha256,
-        toJson(command.changeDescription), command.clientId, toJson(command.document),
+        command.projectId,
+        command.idempotencyKey,
+        command.operationType,
+        command.documentId,
+        command.baseRevisionId,
+        command.revision.id,
+        command.requestSha256,
+        toJson(command.changeDescription),
+        command.clientId,
+        toJson(command.document),
       ],
     );
   }
@@ -1294,12 +1554,12 @@ class PostgresTransaction implements PersistenceTransaction {
   async createDocument(command: CreateDocumentCommand): Promise<DocumentWriteResult> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertNonEmpty(command.idempotencyKey, "Idempotency key");
-    assertNonEmpty(command.authorId, "Author id");
-    assertNonEmpty(command.title, "Document title");
-    assertNonEmpty(command.kind, "Document kind");
+    assertNonEmpty(command.idempotencyKey, 'Idempotency key');
+    assertNonEmpty(command.authorId, 'Author id');
+    assertNonEmpty(command.title, 'Document title');
+    assertNonEmpty(command.kind, 'Document kind');
     const requestSha256 = digest({
-      type: "document.create",
+      type: 'document.create',
       projectId: command.projectId,
       documentId: command.documentId ?? null,
       parentId: command.parentId ?? null,
@@ -1313,23 +1573,26 @@ class PostgresTransaction implements PersistenceTransaction {
     await this.lockIdempotencyKey(command.projectId, command.idempotencyKey);
     const replay = await this.existingIdempotentWrite(command.projectId, command.idempotencyKey, requestSha256);
     if (replay) return replay;
-    if (!(await this.getProject(command.projectId))) throw notFound("project", command.projectId);
+    if (!(await this.getProject(command.projectId))) throw notFound('project', command.projectId);
 
-    const activeDocuments = asNumber((await this.query(
-      "SELECT count(*)::integer AS active_count FROM document WHERE project_id = $1 AND deleted_at IS NULL",
-      [command.projectId],
-    )).rows[0]!.active_count);
+    const activeDocuments = asNumber(
+      (
+        await this.query('SELECT count(*)::integer AS active_count FROM document WHERE project_id = $1 AND deleted_at IS NULL', [
+          command.projectId,
+        ])
+      ).rows[0]?.active_count,
+    );
     if (activeDocuments >= MAX_ACTIVE_DOCUMENTS_PER_PROJECT) {
-      throw new PersistenceError("conflict", `Project is limited to at most ${MAX_ACTIVE_DOCUMENTS_PER_PROJECT} active documents`, {
-        resource: "document_limit",
+      throw new PersistenceError('conflict', `Project is limited to at most ${MAX_ACTIVE_DOCUMENTS_PER_PROJECT} active documents`, {
+        resource: 'document_limit',
         id: command.projectId,
         expected: MAX_ACTIVE_DOCUMENTS_PER_PROJECT,
         actual: activeDocuments,
       });
     }
-    const documentId = command.documentId ?? randomUUID() as DocumentId;
+    const documentId = command.documentId ?? (randomUUID() as DocumentId);
     const parentId = command.parentId ?? null;
-    if (parentId && !(await this.getDocument(command.projectId, parentId))) throw notFound("parent document", parentId);
+    if (parentId && !(await this.getDocument(command.projectId, parentId))) throw notFound('parent document', parentId);
     let orderKey = command.orderKey;
     if (command.appendToEnd) {
       const lastSibling = await this.query(
@@ -1341,8 +1604,8 @@ class PostgresTransaction implements PersistenceTransaction {
       const previousKey = lastSibling.rows[0] ? asString(lastSibling.rows[0].order_key) : null;
       orderKey = nextOrderKey(previousKey === null ? [] : [previousKey]);
       if (previousKey !== null) {
-        const comparison = await this.query("SELECT $1::text > $2::text AS advances", [orderKey, previousKey]);
-        if (comparison.rows[0]?.advances !== true) throw validationError("Append order is incompatible with the PostgreSQL collation");
+        const comparison = await this.query('SELECT $1::text > $2::text AS advances', [orderKey, previousKey]);
+        if (comparison.rows[0]?.advances !== true) throw validationError('Append order is incompatible with the PostgreSQL collation');
       }
     }
     await this.query(
@@ -1365,20 +1628,20 @@ class PostgresTransaction implements PersistenceTransaction {
       revision,
       document,
       idempotencyKey: command.idempotencyKey,
-      operationType: "document.create",
+      operationType: 'document.create',
       requestSha256,
       changeDescription: { initialBodySha256: revision.sha256 },
-      clientId: "",
+      clientId: '',
     });
     return { document, revision, replayed: false };
   }
 
   private async lockedHead(projectId: ProjectId, documentId: DocumentId): Promise<Document> {
-    const result = await this.query(
-      "SELECT * FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE",
-      [projectId, documentId],
-    );
-    if (!result.rows[0]) throw notFound("document", documentId);
+    const result = await this.query('SELECT * FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE', [
+      projectId,
+      documentId,
+    ]);
+    if (!result.rows[0]) throw notFound('document', documentId);
     return mapDocument(result.rows[0]);
   }
 
@@ -1398,33 +1661,27 @@ class PostgresTransaction implements PersistenceTransaction {
     );
     for (const row of result.rows) {
       const anchor = mapEvidenceAnchor(row);
-      const wasOrphaned = anchor.status === "orphaned";
+      const wasOrphaned = anchor.status === 'orphaned';
       const touched = !wasOrphaned && textAnchorWasTouched(anchor, changes);
       let fromUtf16 = mapTextOffset(anchor.fromUtf16, changes, touched ? -1 : 1);
       let toUtf16 = mapTextOffset(anchor.toUtf16, changes, touched ? 1 : -1);
       fromUtf16 = Math.min(nextMarkdown.length, Math.max(0, fromUtf16));
       toUtf16 = Math.min(nextMarkdown.length, Math.max(fromUtf16, toUtf16));
-      const status: EvidenceAnchor["status"] = wasOrphaned || fromUtf16 === toUtf16
-        ? "orphaned"
-        : touched
-          ? "needs_review"
-          : anchor.status;
-      const quoteSha256 = fromUtf16 < toUtf16
-        ? bodyDigest(nextMarkdown.slice(fromUtf16, toUtf16))
-        : anchor.quoteSha256;
+      const status: EvidenceAnchor['status'] = wasOrphaned || fromUtf16 === toUtf16 ? 'orphaned' : touched ? 'needs_review' : anchor.status;
+      const quoteSha256 = fromUtf16 < toUtf16 ? bodyDigest(nextMarkdown.slice(fromUtf16, toUtf16)) : anchor.quoteSha256;
       const updated = await this.query(
         `UPDATE text_anchor SET current_revision_id = $4, from_utf16 = $5, to_utf16 = $6,
            quote_sha256 = $7, status = $8, version = version + 1, updated_at = clock_timestamp()
          WHERE project_id = $1 AND id = $2 AND version = $3 RETURNING version`,
         [projectId, anchor.id, anchor.version, nextRevisionId, fromUtf16, toUtf16, quoteSha256, status],
       );
-      const version = asNumber(updated.rows[0]!.version);
+      const version = asNumber(updated.rows[0]?.version);
       await this.query(
         `INSERT INTO anchor_history(project_id, evidence_id, document_id, version, revision_id, from_utf16, to_utf16, status)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [projectId, anchor.id, documentId, version, nextRevisionId, fromUtf16, toUtf16, status],
       );
-      if (touched || status === "orphaned") {
+      if (touched || status === 'orphaned') {
         await this.query(
           `UPDATE mention_link SET status = 'proposed', updated_at = clock_timestamp()
            WHERE project_id = $1 AND evidence_id = $2 AND status = 'confirmed'`,
@@ -1437,12 +1694,12 @@ class PostgresTransaction implements PersistenceTransaction {
   async saveDocument(command: SaveDocumentCommand): Promise<DocumentWriteResult> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertNonEmpty(command.idempotencyKey, "Idempotency key");
-    assertNonEmpty(command.authorId, "Author id");
-    assertNonEmpty(command.clientId, "Client id");
-    assertHash(command.resultingSha256, "resultingSha256");
+    assertNonEmpty(command.idempotencyKey, 'Idempotency key');
+    assertNonEmpty(command.authorId, 'Author id');
+    assertNonEmpty(command.clientId, 'Client id');
+    assertHash(command.resultingSha256, 'resultingSha256');
     const requestSha256 = digest({
-      type: "document.save",
+      type: 'document.save',
       projectId: command.projectId,
       documentId: command.documentId,
       baseRevisionId: command.baseRevisionId,
@@ -1457,14 +1714,14 @@ class PostgresTransaction implements PersistenceTransaction {
 
     const head = await this.lockedHead(command.projectId, command.documentId);
     if (head.headRevisionId !== command.baseRevisionId) {
-      throw conflict("document_revision", command.documentId, command.baseRevisionId, head.headRevisionId);
+      throw conflict('document_revision', command.documentId, command.baseRevisionId, head.headRevisionId);
     }
     const base = await this.getRevision(command.projectId, command.documentId, command.baseRevisionId);
-    if (!base) throw notFound("document revision", command.baseRevisionId);
+    if (!base) throw notFound('document revision', command.baseRevisionId);
     const markdown = applyTextChanges(base.markdown, command.changes);
     const actualHash = bodyDigest(markdown);
     if (actualHash !== command.resultingSha256) {
-      throw validationError("The supplied changes do not produce resultingSha256");
+      throw validationError('The supplied changes do not produce resultingSha256');
     }
     const revision = await this.insertRevision({
       projectId: command.projectId,
@@ -1482,7 +1739,7 @@ class PostgresTransaction implements PersistenceTransaction {
       revision,
       document,
       idempotencyKey: command.idempotencyKey,
-      operationType: "document.save",
+      operationType: 'document.save',
       requestSha256,
       changeDescription: command.changes,
       clientId: command.clientId,
@@ -1493,10 +1750,10 @@ class PostgresTransaction implements PersistenceTransaction {
   async restoreDocumentRevision(command: RestoreDocumentRevisionCommand): Promise<DocumentWriteResult> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertNonEmpty(command.idempotencyKey, "Idempotency key");
-    assertNonEmpty(command.authorId, "Author id");
+    assertNonEmpty(command.idempotencyKey, 'Idempotency key');
+    assertNonEmpty(command.authorId, 'Author id');
     const requestSha256 = digest({
-      type: "document.restore",
+      type: 'document.restore',
       projectId: command.projectId,
       documentId: command.documentId,
       baseRevisionId: command.baseRevisionId,
@@ -1509,10 +1766,10 @@ class PostgresTransaction implements PersistenceTransaction {
 
     const head = await this.lockedHead(command.projectId, command.documentId);
     if (head.headRevisionId !== command.baseRevisionId) {
-      throw conflict("document_revision", command.documentId, command.baseRevisionId, head.headRevisionId);
+      throw conflict('document_revision', command.documentId, command.baseRevisionId, head.headRevisionId);
     }
     const source = await this.getRevision(command.projectId, command.documentId, command.sourceRevisionId);
-    if (!source) throw notFound("source document revision", command.sourceRevisionId);
+    if (!source) throw notFound('source document revision', command.sourceRevisionId);
     const revision = await this.insertRevision({
       projectId: command.projectId,
       documentId: command.documentId,
@@ -1522,12 +1779,17 @@ class PostgresTransaction implements PersistenceTransaction {
     });
     const document = await this.updateDocumentHead(command.projectId, command.documentId, command.baseRevisionId, revision.id);
     const base = await this.getRevision(command.projectId, command.documentId, command.baseRevisionId);
-    if (!base) throw notFound("base document revision", command.baseRevisionId);
-    const restoreChanges: TextChange[] = base.markdown === source.markdown ? [] : [{
-      fromUtf16: 0,
-      toUtf16: base.markdown.length,
-      insert: source.markdown,
-    }];
+    if (!base) throw notFound('base document revision', command.baseRevisionId);
+    const restoreChanges: TextChange[] =
+      base.markdown === source.markdown
+        ? []
+        : [
+            {
+              fromUtf16: 0,
+              toUtf16: base.markdown.length,
+              insert: source.markdown,
+            },
+          ];
     await this.advanceEvidenceAnchors(command.projectId, command.documentId, base.id, revision.id, source.markdown, restoreChanges);
     await this.recordDocumentOperation({
       projectId: command.projectId,
@@ -1536,10 +1798,10 @@ class PostgresTransaction implements PersistenceTransaction {
       revision,
       document,
       idempotencyKey: command.idempotencyKey,
-      operationType: "document.restore",
+      operationType: 'document.restore',
       requestSha256,
       changeDescription: { restoredFrom: source.id },
-      clientId: "",
+      clientId: '',
     });
     return { document, revision, replayed: false };
   }
@@ -1547,8 +1809,8 @@ class PostgresTransaction implements PersistenceTransaction {
   async saveKnowledgeNode(command: SaveKnowledgeNodeCommand): Promise<KnowledgeNode> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertNonEmpty(command.type, "Knowledge node type");
-    assertNonEmpty(command.name, "Knowledge node name");
+    assertNonEmpty(command.type, 'Knowledge node type');
+    assertNonEmpty(command.name, 'Knowledge node name');
     if (command.expectedVersion === null) {
       const result = await this.query(
         `INSERT INTO knowledge_node(project_id, id, type, name, attributes, status, deleted_at)
@@ -1568,8 +1830,8 @@ class PostgresTransaction implements PersistenceTransaction {
     );
     if (!result.rows[0]) {
       const current = await this.getKnowledgeNode(command.projectId, command.id);
-      if (!current) throw conflict("knowledge_node", command.id, command.expectedVersion, null);
-      throw conflict("knowledge_node", command.id, command.expectedVersion, current.version);
+      if (!current) throw conflict('knowledge_node', command.id, command.expectedVersion, null);
+      throw conflict('knowledge_node', command.id, command.expectedVersion, current.version);
     }
     this.markChanged(command.projectId);
     return mapKnowledgeNode(result.rows[0]);
@@ -1578,9 +1840,9 @@ class PostgresTransaction implements PersistenceTransaction {
   async saveKnowledgeAlias(command: SaveKnowledgeAliasCommand): Promise<KnowledgeAlias> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertNonEmpty(command.surface, "Knowledge alias surface");
-    assertNonEmpty(command.normalized, "Knowledge alias normalized value");
-    if (!(await this.getKnowledgeNode(command.projectId, command.nodeId))) throw notFound("knowledge node", command.nodeId);
+    assertNonEmpty(command.surface, 'Knowledge alias surface');
+    assertNonEmpty(command.normalized, 'Knowledge alias normalized value');
+    if (!(await this.getKnowledgeNode(command.projectId, command.nodeId))) throw notFound('knowledge node', command.nodeId);
     const result = await this.query(
       `INSERT INTO knowledge_alias(project_id, id, node_id, surface, normalized, scope, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -1596,15 +1858,24 @@ class PostgresTransaction implements PersistenceTransaction {
   async saveKnowledgeRelation(command: SaveKnowledgeRelationCommand): Promise<KnowledgeRelation> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertNonEmpty(command.type, "Knowledge relation type");
-    if (!(await this.getKnowledgeNode(command.projectId, command.sourceId))) throw notFound("source knowledge node", command.sourceId);
-    if (!(await this.getKnowledgeNode(command.projectId, command.targetId))) throw notFound("target knowledge node", command.targetId);
+    assertNonEmpty(command.type, 'Knowledge relation type');
+    if (!(await this.getKnowledgeNode(command.projectId, command.sourceId))) throw notFound('source knowledge node', command.sourceId);
+    if (!(await this.getKnowledgeNode(command.projectId, command.targetId))) throw notFound('target knowledge node', command.targetId);
     let result: QueryResult<DbRow>;
     if (command.expectedVersion === null) {
       result = await this.query(
         `INSERT INTO knowledge_relation(project_id, id, source_id, target_id, type, attributes, validity, status)
          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8) RETURNING *`,
-        [command.projectId, command.id, command.sourceId, command.targetId, command.type, toJson(command.attributes), toJson(command.validity), command.status],
+        [
+          command.projectId,
+          command.id,
+          command.sourceId,
+          command.targetId,
+          command.type,
+          toJson(command.attributes),
+          toJson(command.validity),
+          command.status,
+        ],
       );
     } else {
       result = await this.query(
@@ -1612,11 +1883,29 @@ class PostgresTransaction implements PersistenceTransaction {
            attributes = $6::jsonb, validity = $7::jsonb, status = $8, version = version + 1,
            updated_at = clock_timestamp()
          WHERE project_id = $1 AND id = $2 AND version = $9 RETURNING *`,
-        [command.projectId, command.id, command.sourceId, command.targetId, command.type, toJson(command.attributes), toJson(command.validity), command.status, command.expectedVersion],
+        [
+          command.projectId,
+          command.id,
+          command.sourceId,
+          command.targetId,
+          command.type,
+          toJson(command.attributes),
+          toJson(command.validity),
+          command.status,
+          command.expectedVersion,
+        ],
       );
       if (!result.rows[0]) {
-        const current = await this.query("SELECT version FROM knowledge_relation WHERE project_id = $1 AND id = $2", [command.projectId, command.id]);
-        throw conflict("knowledge_relation", command.id, command.expectedVersion, current.rows[0] ? asNumber(current.rows[0].version) : null);
+        const current = await this.query('SELECT version FROM knowledge_relation WHERE project_id = $1 AND id = $2', [
+          command.projectId,
+          command.id,
+        ]);
+        throw conflict(
+          'knowledge_relation',
+          command.id,
+          command.expectedVersion,
+          current.rows[0] ? asNumber(current.rows[0].version) : null,
+        );
       }
     }
     this.markChanged(command.projectId);
@@ -1626,22 +1915,22 @@ class PostgresTransaction implements PersistenceTransaction {
   async saveEvidenceAnchor(command: SaveEvidenceAnchorCommand): Promise<EvidenceAnchor> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertHash(command.quoteSha256, "quoteSha256");
+    assertHash(command.quoteSha256, 'quoteSha256');
     if (!Number.isInteger(command.fromUtf16) || !Number.isInteger(command.toUtf16) || command.fromUtf16 >= command.toUtf16) {
-      throw validationError("Evidence anchors require a non-empty UTF-16 range");
+      throw validationError('Evidence anchors require a non-empty UTF-16 range');
     }
     const revision = await this.getRevision(command.projectId, command.documentId, command.revisionId);
-    if (!revision) throw notFound("evidence document revision", command.revisionId);
+    if (!revision) throw notFound('evidence document revision', command.revisionId);
     // Serialize head validation with document saves; an anchor must not be
     // created against an already-superseded revision in a concurrent writer.
     const document = await this.lockedHead(command.projectId, command.documentId);
     if (document.headRevisionId !== command.revisionId) {
-      throw conflict("document_revision", command.documentId, command.revisionId, document.headRevisionId);
+      throw conflict('document_revision', command.documentId, command.revisionId, document.headRevisionId);
     }
     assertUtf16Boundary(revision.markdown, command.fromUtf16);
     assertUtf16Boundary(revision.markdown, command.toUtf16);
     if (bodyDigest(revision.markdown.slice(command.fromUtf16, command.toUtf16)) !== command.quoteSha256) {
-      throw validationError("Evidence quote hash does not match the referenced revision range");
+      throw validationError('Evidence quote hash does not match the referenced revision range');
     }
 
     let result: QueryResult<DbRow>;
@@ -1649,25 +1938,56 @@ class PostgresTransaction implements PersistenceTransaction {
       result = await this.query(
         `INSERT INTO text_anchor(project_id, id, document_id, current_revision_id, from_utf16, to_utf16, quote_sha256, status)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [command.projectId, command.id, command.documentId, command.revisionId, command.fromUtf16, command.toUtf16, command.quoteSha256, command.status],
+        [
+          command.projectId,
+          command.id,
+          command.documentId,
+          command.revisionId,
+          command.fromUtf16,
+          command.toUtf16,
+          command.quoteSha256,
+          command.status,
+        ],
       );
     } else {
       result = await this.query(
         `UPDATE text_anchor SET current_revision_id = $4, from_utf16 = $5, to_utf16 = $6, quote_sha256 = $7,
            status = $8, version = version + 1, updated_at = clock_timestamp()
          WHERE project_id = $1 AND id = $2 AND document_id = $3 AND version = $9 RETURNING *`,
-        [command.projectId, command.id, command.documentId, command.revisionId, command.fromUtf16, command.toUtf16, command.quoteSha256, command.status, command.expectedVersion],
+        [
+          command.projectId,
+          command.id,
+          command.documentId,
+          command.revisionId,
+          command.fromUtf16,
+          command.toUtf16,
+          command.quoteSha256,
+          command.status,
+          command.expectedVersion,
+        ],
       );
       if (!result.rows[0]) {
-        const current = await this.query("SELECT version FROM text_anchor WHERE project_id = $1 AND id = $2", [command.projectId, command.id]);
-        throw conflict("evidence_anchor", command.id, command.expectedVersion, current.rows[0] ? asNumber(current.rows[0].version) : null);
+        const current = await this.query('SELECT version FROM text_anchor WHERE project_id = $1 AND id = $2', [
+          command.projectId,
+          command.id,
+        ]);
+        throw conflict('evidence_anchor', command.id, command.expectedVersion, current.rows[0] ? asNumber(current.rows[0].version) : null);
       }
     }
     const anchor = mapEvidenceAnchor(result.rows[0]!);
     await this.query(
       `INSERT INTO anchor_history(project_id, evidence_id, document_id, version, revision_id, from_utf16, to_utf16, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [command.projectId, command.id, command.documentId, anchor.version, command.revisionId, command.fromUtf16, command.toUtf16, command.status],
+      [
+        command.projectId,
+        command.id,
+        command.documentId,
+        anchor.version,
+        command.revisionId,
+        command.fromUtf16,
+        command.toUtf16,
+        command.status,
+      ],
     );
     this.markChanged(command.projectId);
     return anchor;
@@ -1676,10 +1996,10 @@ class PostgresTransaction implements PersistenceTransaction {
   async saveMentionLink(command: SaveMentionLinkCommand): Promise<MentionLink> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertNonEmpty(command.source, "Mention source");
+    assertNonEmpty(command.source, 'Mention source');
     assertConfidence(command.confidence);
-    if (!(await this.getEvidenceAnchor(command.projectId, command.evidenceId))) throw notFound("evidence anchor", command.evidenceId);
-    if (!(await this.getKnowledgeNode(command.projectId, command.nodeId))) throw notFound("knowledge node", command.nodeId);
+    if (!(await this.getEvidenceAnchor(command.projectId, command.evidenceId))) throw notFound('evidence anchor', command.evidenceId);
+    if (!(await this.getKnowledgeNode(command.projectId, command.nodeId))) throw notFound('knowledge node', command.nodeId);
     const result = await this.query(
       `INSERT INTO mention_link(project_id, evidence_id, node_id, status, source, confidence, extractor_version)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -1696,26 +2016,48 @@ class PostgresTransaction implements PersistenceTransaction {
   async saveAssertion(command: SaveAssertionCommand): Promise<Assertion> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertNonEmpty(command.modality, "Assertion modality");
-    assertNonEmpty(command.perspective, "Assertion perspective");
+    assertNonEmpty(command.modality, 'Assertion modality');
+    assertNonEmpty(command.perspective, 'Assertion perspective');
     assertConfidence(command.confidence);
     let result: QueryResult<DbRow>;
     if (command.expectedVersion === null) {
       result = await this.query(
         `INSERT INTO assertion(project_id, id, proposition, modality, perspective, narrative_time, confidence, status)
          VALUES ($1, $2, $3::jsonb, $4, $5, $6::jsonb, $7, $8) RETURNING *`,
-        [command.projectId, command.id, toJson(command.proposition), command.modality, command.perspective, toJson(command.narrativeTime), command.confidence, command.status],
+        [
+          command.projectId,
+          command.id,
+          toJson(command.proposition),
+          command.modality,
+          command.perspective,
+          toJson(command.narrativeTime),
+          command.confidence,
+          command.status,
+        ],
       );
     } else {
       result = await this.query(
         `UPDATE assertion SET proposition = $3::jsonb, modality = $4, perspective = $5, narrative_time = $6::jsonb,
            confidence = $7, status = $8, version = version + 1, updated_at = clock_timestamp()
          WHERE project_id = $1 AND id = $2 AND version = $9 RETURNING *`,
-        [command.projectId, command.id, toJson(command.proposition), command.modality, command.perspective, toJson(command.narrativeTime), command.confidence, command.status, command.expectedVersion],
+        [
+          command.projectId,
+          command.id,
+          toJson(command.proposition),
+          command.modality,
+          command.perspective,
+          toJson(command.narrativeTime),
+          command.confidence,
+          command.status,
+          command.expectedVersion,
+        ],
       );
       if (!result.rows[0]) {
-        const current = await this.query("SELECT version FROM assertion WHERE project_id = $1 AND id = $2", [command.projectId, command.id]);
-        throw conflict("assertion", command.id, command.expectedVersion, current.rows[0] ? asNumber(current.rows[0].version) : null);
+        const current = await this.query('SELECT version FROM assertion WHERE project_id = $1 AND id = $2', [
+          command.projectId,
+          command.id,
+        ]);
+        throw conflict('assertion', command.id, command.expectedVersion, current.rows[0] ? asNumber(current.rows[0].version) : null);
       }
     }
     this.markChanged(command.projectId);
@@ -1725,8 +2067,8 @@ class PostgresTransaction implements PersistenceTransaction {
   async linkAssertionEvidence(command: LinkAssertionEvidenceCommand): Promise<AssertionEvidence> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    if (!(await this.getAssertion(command.projectId, command.assertionId))) throw notFound("assertion", command.assertionId);
-    if (!(await this.getEvidenceAnchor(command.projectId, command.evidenceId))) throw notFound("evidence anchor", command.evidenceId);
+    if (!(await this.getAssertion(command.projectId, command.assertionId))) throw notFound('assertion', command.assertionId);
+    if (!(await this.getEvidenceAnchor(command.projectId, command.evidenceId))) throw notFound('evidence anchor', command.evidenceId);
     const result = await this.query(
       `INSERT INTO assertion_evidence(project_id, assertion_id, evidence_id, evidence_role)
        VALUES ($1, $2, $3, $4)
@@ -1742,15 +2084,18 @@ class PostgresTransaction implements PersistenceTransaction {
     return this.createChangeSetInternal(command, false);
   }
 
-  private async createChangeSetInternal(command: CreateChangeSetCommand, allowKnowledgeMerge: boolean): Promise<{ changeSet: ChangeSet; replayed: boolean }> {
+  private async createChangeSetInternal(
+    command: CreateChangeSetCommand,
+    allowKnowledgeMerge: boolean,
+  ): Promise<{ changeSet: ChangeSet; replayed: boolean }> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertNonEmpty(command.authorId, "ChangeSet author id");
-    assertNonEmpty(command.idempotencyKey, "ChangeSet idempotency key");
-    const scopedModuleRecord = command.provenance.source === PUBLISHING_CHANGESET_SOURCE ||
-      command.provenance.source === NLP_FEATURE_SETTINGS_CHANGESET_SOURCE;
+    assertNonEmpty(command.authorId, 'ChangeSet author id');
+    assertNonEmpty(command.idempotencyKey, 'ChangeSet idempotency key');
+    const scopedModuleRecord =
+      command.provenance.source === PUBLISHING_CHANGESET_SOURCE || command.provenance.source === NLP_FEATURE_SETTINGS_CHANGESET_SOURCE;
     if (scopedModuleRecord && command.authorId !== command.provenance.actorId) {
-      throw validationError("Scoped ChangeSet author and proposal actor must match");
+      throw validationError('Scoped ChangeSet author and proposal actor must match');
     }
     validateChangeSetOperations(
       command.projectId,
@@ -1776,29 +2121,41 @@ class PostgresTransaction implements PersistenceTransaction {
       return { changeSet: mapChangeSet(existing), replayed: true };
     }
     let readSet = command.readSet;
-    if (command.provenance.source === "native-knowledge-service" || command.provenance.source === HIERARCHY_REORDER_SOURCE ||
-        command.provenance.source === HIERARCHY_DELETE_SOURCE || command.provenance.source === HIERARCHY_CREATE_SOURCE ||
-        scopedModuleRecord) {
+    if (
+      command.provenance.source === 'native-knowledge-service' ||
+      command.provenance.source === HIERARCHY_REORDER_SOURCE ||
+      command.provenance.source === HIERARCHY_DELETE_SOURCE ||
+      command.provenance.source === HIERARCHY_CREATE_SOURCE ||
+      scopedModuleRecord
+    ) {
       const sourceVersion = command.provenance.details.projectVersion;
-      if (typeof sourceVersion !== "number" || !Number.isSafeInteger(sourceVersion)) throw validationError("Native ChangeSet is missing its project snapshot fence");
+      if (typeof sourceVersion !== 'number' || !Number.isSafeInteger(sourceVersion))
+        throw validationError('Native ChangeSet is missing its project snapshot fence');
       await this.assertProjectVersion(command.projectId, sourceVersion);
     }
-    if (command.provenance.source === "native-knowledge-service") {
+    if (command.provenance.source === 'native-knowledge-service') {
       readSet = await this.prepareNativeChangeSetReadSet(command.projectId, command.operations, command.readSet);
       await this.assertChangeSetReadSet(command.projectId, readSet);
     }
     if (scopedModuleRecord) await this.assertChangeSetReadSet(command.projectId, readSet);
     const firstOperation = command.operations[0];
-    if (firstOperation?.type === "document.create" && firstOperation.hierarchy) {
+    if (firstOperation?.type === 'document.create' && firstOperation.hierarchy) {
       await this.checkHierarchyCreate(firstOperation.command, firstOperation.hierarchy);
     }
-    const id = command.id ?? randomUUID() as ChangeSetId;
+    const id = command.id ?? (randomUUID() as ChangeSetId);
     const result = await this.query(
       `INSERT INTO change_set(project_id, id, author_id, status, operations, read_set, write_set, provenance, idempotency_key, request_sha256)
        VALUES ($1, $2, $3, 'proposed', $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9) RETURNING *`,
       [
-        command.projectId, id, command.authorId, toJson(command.operations), toJson(readSet),
-        toJson(command.writeSet), toJson(command.provenance), command.idempotencyKey, requestSha256,
+        command.projectId,
+        id,
+        command.authorId,
+        toJson(command.operations),
+        toJson(readSet),
+        toJson(command.writeSet),
+        toJson(command.provenance),
+        command.idempotencyKey,
+        requestSha256,
       ],
     );
     return { changeSet: mapChangeSet(result.rows[0]!), replayed: false };
@@ -1807,31 +2164,50 @@ class PostgresTransaction implements PersistenceTransaction {
   async proposeKnowledgeMerge(command: ProposeKnowledgeMergeCommand): Promise<{ changeSet: ChangeSet; replayed: boolean }> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertNonEmpty(command.actorId, "Knowledge merge actor id");
-    assertNonEmpty(command.idempotencyKey, "Knowledge merge idempotency key");
-    if (!Number.isSafeInteger(command.projectVersion) || command.projectVersion < 1 || !/^[0-9a-f]{64}$/u.test(command.previewDigest) || command.sourceId === command.targetId) {
-      throw validationError("Knowledge merge proposal is malformed");
+    assertNonEmpty(command.actorId, 'Knowledge merge actor id');
+    assertNonEmpty(command.idempotencyKey, 'Knowledge merge idempotency key');
+    if (
+      !Number.isSafeInteger(command.projectVersion) ||
+      command.projectVersion < 1 ||
+      !/^[0-9a-f]{64}$/u.test(command.previewDigest) ||
+      command.sourceId === command.targetId
+    ) {
+      throw validationError('Knowledge merge proposal is malformed');
     }
     await this.lockIdempotencyKey(command.projectId, command.idempotencyKey);
     const stored = await this.getChangeSetByIdempotencyKey(command.projectId, command.idempotencyKey);
     if (stored) {
       const details = stored.provenance.details;
-      const same = stored.authorId === command.actorId && stored.provenance.source === "native-knowledge-merge"
-        && stored.provenance.actorId === command.actorId && details.projectVersion === command.projectVersion
-        && details.sourceId === command.sourceId && details.targetId === command.targetId
-        && details.previewDigest === command.previewDigest && details.origin === command.origin;
+      const same =
+        stored.authorId === command.actorId &&
+        stored.provenance.source === 'native-knowledge-merge' &&
+        stored.provenance.actorId === command.actorId &&
+        details.projectVersion === command.projectVersion &&
+        details.sourceId === command.sourceId &&
+        details.targetId === command.targetId &&
+        details.previewDigest === command.previewDigest &&
+        details.origin === command.origin;
       if (!same) throw idempotencyConflict(command.idempotencyKey);
       return { changeSet: stored, replayed: true };
     }
     await this.assertProjectVersion(command.projectId, command.projectVersion);
     const plan = await planKnowledgeMerge(this, command.projectId, command.sourceId, command.targetId);
     if (plan.projectVersion !== command.projectVersion || plan.previewDigest !== command.previewDigest || plan.conflicts.length > 0) {
-      throw new PersistenceError("conflict", "Knowledge merge preview is stale or has unresolved conflicts", { resource: "knowledge_merge", id: command.sourceId });
+      throw new PersistenceError('conflict', 'Knowledge merge preview is stale or has unresolved conflicts', {
+        resource: 'knowledge_merge',
+        id: command.sourceId,
+      });
     }
     const operationCommand: KnowledgeMergeChangeCommand = {
-      projectId: command.projectId, sourceId: command.sourceId, targetId: command.targetId,
-      projectVersion: command.projectVersion, previewDigest: command.previewDigest, actorId: command.actorId,
-      origin: command.origin, auditId: randomUUID(), generatedAliasId: randomUUID() as KnowledgeMergeChangeCommand["generatedAliasId"],
+      projectId: command.projectId,
+      sourceId: command.sourceId,
+      targetId: command.targetId,
+      projectVersion: command.projectVersion,
+      previewDigest: command.previewDigest,
+      actorId: command.actorId,
+      origin: command.origin,
+      auditId: randomUUID(),
+      generatedAliasId: randomUUID() as KnowledgeMergeChangeCommand['generatedAliasId'],
       plan: JSON.parse(JSON.stringify(plan)) as JsonObject,
     };
     const operation = knowledgeMergeOperation(operationCommand);
@@ -1839,25 +2215,41 @@ class PostgresTransaction implements PersistenceTransaction {
     const readSet = knowledgeMergeReadSet(plan, operationCommand);
     await this.assertChangeSetReadSet(command.projectId, readSet);
     const provenance = {
-      source: "native-knowledge-merge",
+      source: 'native-knowledge-merge',
       actorId: command.actorId,
-      details: { projectVersion: command.projectVersion, sourceId: command.sourceId, targetId: command.targetId, previewDigest: command.previewDigest, origin: command.origin },
+      details: {
+        projectVersion: command.projectVersion,
+        sourceId: command.sourceId,
+        targetId: command.targetId,
+        previewDigest: command.previewDigest,
+        origin: command.origin,
+      },
     };
-    return this.createChangeSetInternal({
-      projectId: command.projectId, authorId: command.actorId, idempotencyKey: command.idempotencyKey,
-      operations: [operation], readSet, writeSet, provenance,
-    }, true);
+    return this.createChangeSetInternal(
+      {
+        projectId: command.projectId,
+        authorId: command.actorId,
+        idempotencyKey: command.idempotencyKey,
+        operations: [operation],
+        readSet,
+        writeSet,
+        provenance,
+      },
+      true,
+    );
   }
 
   private async assertChangeSetApplicable(changeSet: ChangeSet): Promise<void> {
-    if (changeSet.provenance.source === "native-knowledge-service") {
+    if (changeSet.provenance.source === 'native-knowledge-service') {
       const sourceVersion = changeSet.provenance.details.projectVersion;
-      if (typeof sourceVersion !== "number" || !Number.isInteger(sourceVersion)) throw validationError("Native ChangeSet is missing its project snapshot fence");
+      if (typeof sourceVersion !== 'number' || !Number.isInteger(sourceVersion))
+        throw validationError('Native ChangeSet is missing its project snapshot fence');
       await this.assertProjectVersion(changeSet.projectId, sourceVersion);
     }
-    if (changeSet.provenance.source === "native-knowledge-merge") {
+    if (changeSet.provenance.source === 'native-knowledge-merge') {
       const sourceVersion = changeSet.provenance.details.projectVersion;
-      if (typeof sourceVersion !== "number" || !Number.isSafeInteger(sourceVersion)) throw validationError("Native merge ChangeSet is missing its project snapshot fence");
+      if (typeof sourceVersion !== 'number' || !Number.isSafeInteger(sourceVersion))
+        throw validationError('Native merge ChangeSet is missing its project snapshot fence');
       await this.assertProjectVersion(changeSet.projectId, sourceVersion);
     }
 
@@ -1867,7 +2259,7 @@ class PostgresTransaction implements PersistenceTransaction {
       changeSet.readSet,
       changeSet.writeSet,
       changeSet.provenance,
-      changeSet.operations.some(operation => operation.type === "knowledge.merge"),
+      changeSet.operations.some(operation => operation.type === 'knowledge.merge'),
     );
     if (changeSet.provenance.source === HIERARCHY_REORDER_SOURCE) await this.assertHierarchyReorderScope(changeSet);
     if (changeSet.provenance.source === HIERARCHY_DELETE_SOURCE) await this.assertHierarchyDeleteScope(changeSet);
@@ -1878,39 +2270,40 @@ class PostgresTransaction implements PersistenceTransaction {
     projectId: ProjectId;
     changeSetId: ChangeSetId;
     expectedVersion: number;
-    transition: "approve" | "reject";
+    transition: 'approve' | 'reject';
     actorId: string;
   }): Promise<ChangeSet> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    assertNonEmpty(command.actorId, `${command.transition === "approve" ? "Approver" : "Rejector"} id`);
+    assertNonEmpty(command.actorId, `${command.transition === 'approve' ? 'Approver' : 'Rejector'} id`);
     const current = await this.getChangeSet(command.projectId, command.changeSetId);
-    if (!current) throw notFound("change set", command.changeSetId);
-    if (current.status !== "proposed") {
-      throw new PersistenceError("invalid_change_set_state", `Cannot ${command.transition} a ${current.status} ChangeSet`, {
-        resource: "change_set",
+    if (!current) throw notFound('change set', command.changeSetId);
+    if (current.status !== 'proposed') {
+      throw new PersistenceError('invalid_change_set_state', `Cannot ${command.transition} a ${current.status} ChangeSet`, {
+        resource: 'change_set',
         id: command.changeSetId,
-        expected: "proposed",
+        expected: 'proposed',
         actual: current.status,
       });
     }
     if (current.version !== command.expectedVersion) {
-      throw conflict("change_set", command.changeSetId, command.expectedVersion, current.version);
+      throw conflict('change_set', command.changeSetId, command.expectedVersion, current.version);
     }
-    if (command.transition === "approve") await this.assertChangeSetApplicable(current);
+    if (command.transition === 'approve') await this.assertChangeSetApplicable(current);
 
-    const result = command.transition === "approve"
-      ? await this.query(
-        `UPDATE change_set SET status = 'approved', version = version + 1, approved_at = clock_timestamp(), approved_by = $4
+    const result =
+      command.transition === 'approve'
+        ? await this.query(
+            `UPDATE change_set SET status = 'approved', version = version + 1, approved_at = clock_timestamp(), approved_by = $4
          WHERE project_id = $1 AND id = $2 AND version = $3 AND status = 'proposed' RETURNING *`,
-        [command.projectId, command.changeSetId, command.expectedVersion, command.actorId],
-      )
-      : await this.query(
-        `UPDATE change_set SET status = 'rejected', version = version + 1, rejected_at = clock_timestamp(), rejected_by = $4
+            [command.projectId, command.changeSetId, command.expectedVersion, command.actorId],
+          )
+        : await this.query(
+            `UPDATE change_set SET status = 'rejected', version = version + 1, rejected_at = clock_timestamp(), rejected_by = $4
          WHERE project_id = $1 AND id = $2 AND version = $3 AND status = 'proposed' RETURNING *`,
-        [command.projectId, command.changeSetId, command.expectedVersion, command.actorId],
-      );
-    if (!result.rows[0]) throw conflict("change_set", current.id, command.expectedVersion, null);
+            [command.projectId, command.changeSetId, command.expectedVersion, command.actorId],
+          );
+    if (!result.rows[0]) throw conflict('change_set', current.id, command.expectedVersion, null);
     return mapChangeSet(result.rows[0]!);
   }
 
@@ -1924,7 +2317,7 @@ class PostgresTransaction implements PersistenceTransaction {
       projectId: command.projectId,
       changeSetId: command.changeSetId,
       expectedVersion: command.expectedVersion,
-      transition: "approve",
+      transition: 'approve',
       actorId: command.approvedBy,
     });
   }
@@ -1939,45 +2332,62 @@ class PostgresTransaction implements PersistenceTransaction {
       projectId: command.projectId,
       changeSetId: command.changeSetId,
       expectedVersion: command.expectedVersion,
-      transition: "reject",
+      transition: 'reject',
       actorId: command.rejectedBy,
     });
   }
 
   private async applyOperation(operation: ChangeSetOperation, approvedBy: string | null): Promise<ChangeSetOperationResult> {
     switch (operation.type) {
-      case "document.update": return this.updateDocument(operation.command);
-      case "document.delete": return this.deleteDocument(operation.command);
-      case "module.record.save": return this.saveModuleRecord(operation.command);
-      case "document.create": {
+      case 'document.update':
+        return this.updateDocument(operation.command);
+      case 'document.delete':
+        return this.deleteDocument(operation.command);
+      case 'module.record.save':
+        return this.saveModuleRecord(operation.command);
+      case 'document.create': {
         if (!operation.hierarchy) return this.createDocument(operation.command);
-        if (!approvedBy) throw validationError("Approved hierarchy creation lacks its author approval identity");
+        if (!approvedBy) throw validationError('Approved hierarchy creation lacks its author approval identity');
         return this.createHierarchyDocument(operation.command, operation.hierarchy, approvedBy);
       }
-      case "document.save": return this.saveDocument(operation.command);
-      case "document.restore": {
-        if (!approvedBy) throw validationError("Approved restore lacks its author approval identity");
+      case 'document.save':
+        return this.saveDocument(operation.command);
+      case 'document.restore': {
+        if (!approvedBy) throw validationError('Approved restore lacks its author approval identity');
         return this.restoreDocumentRevision({ ...operation.command, authorId: approvedBy });
       }
-      case "knowledge.node.save": return this.saveKnowledgeNode(operation.command);
-      case "knowledge.alias.save": return this.saveKnowledgeAlias(operation.command);
-      case "knowledge.relation.save": return this.saveKnowledgeRelation(operation.command);
-      case "evidence.anchor.save": return this.saveEvidenceAnchor(operation.command);
-      case "evidence.mention.save": return this.saveMentionLink(operation.command);
-      case "evidence.assertion.save": return this.saveAssertion(operation.command);
-      case "evidence.assertion.link": return this.linkAssertionEvidence(operation.command);
-      case "knowledge.merge": {
-        if (!approvedBy) throw validationError("Approved merge lacks its author approval identity");
+      case 'knowledge.node.save':
+        return this.saveKnowledgeNode(operation.command);
+      case 'knowledge.alias.save':
+        return this.saveKnowledgeAlias(operation.command);
+      case 'knowledge.relation.save':
+        return this.saveKnowledgeRelation(operation.command);
+      case 'evidence.anchor.save':
+        return this.saveEvidenceAnchor(operation.command);
+      case 'evidence.mention.save':
+        return this.saveMentionLink(operation.command);
+      case 'evidence.assertion.save':
+        return this.saveAssertion(operation.command);
+      case 'evidence.assertion.link':
+        return this.linkAssertionEvidence(operation.command);
+      case 'knowledge.merge': {
+        if (!approvedBy) throw validationError('Approved merge lacks its author approval identity');
         return applyKnowledgeMerge(
-        this,
-        operation.command.projectId,
-        operation.command.sourceId,
-        operation.command.targetId,
-        operation.command.projectVersion,
-        operation.command.previewDigest,
-        approvedBy,
-        { auditId: operation.command.auditId, generatedAliasId: operation.command.generatedAliasId, plan: operation.command.plan, proposedBy: operation.command.actorId, origin: operation.command.origin },
-      );
+          this,
+          operation.command.projectId,
+          operation.command.sourceId,
+          operation.command.targetId,
+          operation.command.projectVersion,
+          operation.command.previewDigest,
+          approvedBy,
+          {
+            auditId: operation.command.auditId,
+            generatedAliasId: operation.command.generatedAliasId,
+            plan: operation.command.plan,
+            proposedBy: operation.command.actorId,
+            origin: operation.command.origin,
+          },
+        );
       }
       default: {
         const exhaustive: never = operation;
@@ -1988,11 +2398,18 @@ class PostgresTransaction implements PersistenceTransaction {
 
   /** Resolve unversioned upsert preconditions and referenced identities once, under the project fence.
    * Exact retries are checked by createChangeSet before this state-dependent work. */
-  private async prepareNativeChangeSetReadSet(projectId: ProjectId, operations: readonly ChangeSetOperation[], entries: readonly ChangeSetReadSetEntry[]): Promise<readonly ChangeSetReadSetEntry[]> {
+  private async prepareNativeChangeSetReadSet(
+    projectId: ProjectId,
+    operations: readonly ChangeSetOperation[],
+    entries: readonly ChangeSetReadSetEntry[],
+  ): Promise<readonly ChangeSetReadSetEntry[]> {
     const resolved = new Map<string, ChangeSetReadSetEntry>();
     for (const entry of entries) {
-      const unversioned = entry.resource === "knowledge_alias" || entry.resource === "mention_link" || entry.resource === "assertion_evidence";
-      const expectedVersion = unversioned ? (await this.currentChangeSetReadSetEntry(projectId, entry)).actualVersion : entry.expectedVersion;
+      const unversioned =
+        entry.resource === 'knowledge_alias' || entry.resource === 'mention_link' || entry.resource === 'assertion_evidence';
+      const expectedVersion = unversioned
+        ? (await this.currentChangeSetReadSetEntry(projectId, entry)).actualVersion
+        : entry.expectedVersion;
       resolved.set(changeSetResourceKey(entry.resource, entry.id), { ...entry, expectedVersion });
     }
     const earlier = new Set<string>();
@@ -2005,39 +2422,48 @@ class PostgresTransaction implements PersistenceTransaction {
     };
     for (const operation of operations) {
       switch (operation.type) {
-        case "knowledge.node.save":
-        case "evidence.assertion.save": break;
-        case "knowledge.alias.save":
-          await reference("knowledge_node", operation.command.nodeId);
+        case 'knowledge.node.save':
+        case 'evidence.assertion.save':
           break;
-        case "knowledge.relation.save":
-          await reference("knowledge_node", operation.command.sourceId);
-          await reference("knowledge_node", operation.command.targetId);
+        case 'knowledge.alias.save':
+          await reference('knowledge_node', operation.command.nodeId);
           break;
-        case "evidence.anchor.save": {
+        case 'knowledge.relation.save':
+          await reference('knowledge_node', operation.command.sourceId);
+          await reference('knowledge_node', operation.command.targetId);
+          break;
+        case 'evidence.anchor.save': {
           const c = operation.command;
           const document = await this.getDocument(projectId, c.documentId);
           const revision = await this.getRevision(projectId, c.documentId, c.revisionId);
-          if (!document || !revision) throw notFound("evidence document revision", c.revisionId);
-          if (document.headRevisionId !== c.revisionId) throw conflict("document_revision", c.documentId, c.revisionId, document.headRevisionId);
-          if (c.fromUtf16 >= c.toUtf16) throw validationError("Evidence anchors require a non-empty UTF-16 range");
+          if (!document || !revision) throw notFound('evidence document revision', c.revisionId);
+          if (document.headRevisionId !== c.revisionId)
+            throw conflict('document_revision', c.documentId, c.revisionId, document.headRevisionId);
+          if (c.fromUtf16 >= c.toUtf16) throw validationError('Evidence anchors require a non-empty UTF-16 range');
           assertUtf16Boundary(revision.markdown, c.fromUtf16);
           assertUtf16Boundary(revision.markdown, c.toUtf16);
-          if (bodyDigest(revision.markdown.slice(c.fromUtf16, c.toUtf16)) !== c.quoteSha256) throw validationError("Evidence quote hash does not match the referenced revision range");
+          if (bodyDigest(revision.markdown.slice(c.fromUtf16, c.toUtf16)) !== c.quoteSha256)
+            throw validationError('Evidence quote hash does not match the referenced revision range');
           const current = await this.getEvidenceAnchor(projectId, c.id);
-          if (current && current.documentId !== c.documentId) throw validationError("Evidence anchor document identity cannot change");
-          resolved.set(changeSetResourceKey("document", c.documentId), { resource: "document", id: c.documentId, expectedVersion: document.version, expectedRevisionId: c.revisionId });
+          if (current && current.documentId !== c.documentId) throw validationError('Evidence anchor document identity cannot change');
+          resolved.set(changeSetResourceKey('document', c.documentId), {
+            resource: 'document',
+            id: c.documentId,
+            expectedVersion: document.version,
+            expectedRevisionId: c.revisionId,
+          });
           break;
         }
-        case "evidence.mention.save":
-          await reference("evidence_anchor", operation.command.evidenceId);
-          await reference("knowledge_node", operation.command.nodeId);
+        case 'evidence.mention.save':
+          await reference('evidence_anchor', operation.command.evidenceId);
+          await reference('knowledge_node', operation.command.nodeId);
           break;
-        case "evidence.assertion.link":
-          await reference("assertion", operation.command.assertionId);
-          await reference("evidence_anchor", operation.command.evidenceId);
+        case 'evidence.assertion.link':
+          await reference('assertion', operation.command.assertionId);
+          await reference('evidence_anchor', operation.command.evidenceId);
           break;
-        default: throw validationError("Only native Knowledge and Evidence operations can be proposed");
+        default:
+          throw validationError('Only native Knowledge and Evidence operations can be proposed');
       }
       for (const target of operationWriteTargets(operation)) earlier.add(changeSetResourceKey(target.resource, target.id));
     }
@@ -2047,25 +2473,32 @@ class PostgresTransaction implements PersistenceTransaction {
   private async checkHierarchyCreate(command: CreateDocumentCommand, hierarchy: HierarchyDocumentCreate) {
     const { projectId, documentId } = command;
     const { kind, logicalId } = hierarchy;
-    const volume = kind === "volume" ? undefined : hierarchy.volume;
-    const chapter = kind === "scene" ? hierarchy.chapter : undefined;
+    const volume = kind === 'volume' ? undefined : hierarchy.volume;
+    const chapter = kind === 'scene' ? hierarchy.chapter : undefined;
     const parentId = chapter?.documentId ?? volume?.documentId ?? null;
-    if (!documentId || kind !== command.kind || !["volume", "chapter", "scene"].includes(kind) ||
-        typeof logicalId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(logicalId) ||
-        (kind !== "volume" && !volume) || (kind === "scene" && !chapter) ||
-        command.parentId !== parentId || command.appendToEnd !== true ||
-        (kind !== "scene" && command.markdown !== "")) {
-      throw validationError("A hierarchy creation requires a canonical document and parent scope");
+    if (
+      !documentId ||
+      kind !== command.kind ||
+      !['volume', 'chapter', 'scene'].includes(kind) ||
+      typeof logicalId !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,128}$/u.test(logicalId) ||
+      (kind !== 'volume' && !volume) ||
+      (kind === 'scene' && !chapter) ||
+      command.parentId !== parentId ||
+      command.appendToEnd !== true ||
+      (kind !== 'scene' && command.markdown !== '')
+    ) {
+      throw validationError('A hierarchy creation requires a canonical document and parent scope');
     }
     const paths = hierarchyDocumentPaths(hierarchy);
     try {
       assertProjectPath(paths.metadataPath);
       if (paths.manuscriptPath) assertProjectPath(paths.manuscriptPath);
       for (const reference of [volume, chapter]) {
-        if (reference && (!reference.lookupId || reference.lookupId.includes("/"))) throw new Error("Invalid parent path segment");
+        if (reference && (!reference.lookupId || reference.lookupId.includes('/'))) throw new Error('Invalid parent path segment');
       }
     } catch {
-      throw validationError("A hierarchy creation requires path-safe identities");
+      throw validationError('A hierarchy creation requires path-safe identities');
     }
     const { metadataPath, manuscriptPath } = paths;
     const reservedPaths = manuscriptPath ? [metadataPath, manuscriptPath] : [metadataPath];
@@ -2075,48 +2508,65 @@ class PostgresTransaction implements PersistenceTransaction {
     const mappingById = new Map(mappingRows.map(record => [record.key, record.value]));
     function matchesLookup(document: Document, lookupId: string): boolean {
       const metadata = mappingById.get(document.id)?.metadata;
-      const logicalId = metadata && typeof metadata === "object" && !Array.isArray(metadata) && typeof metadata.id === "string"
-        ? metadata.id : document.id;
+      const logicalId =
+        metadata && typeof metadata === 'object' && !Array.isArray(metadata) && typeof metadata.id === 'string' ? metadata.id : document.id;
       return lookupId === document.id || lookupId === logicalId;
     }
     const currentVolume = volume && documentById.get(volume.documentId);
     const currentChapter = chapter && documentById.get(chapter.documentId);
-    if ((volume && (!currentVolume || currentVolume.kind !== "volume" || currentVolume.parentId !== null ||
-                    !matchesLookup(currentVolume, volume.lookupId))) ||
-        (chapter && (!currentChapter || currentChapter.kind !== "chapter" || currentChapter.parentId !== volume?.documentId ||
-                     !matchesLookup(currentChapter, chapter.lookupId)))) {
-      throw new PersistenceError("conflict", "A hierarchy parent changed since the proposal was created", {
-        resource: "hierarchy_parent_changed", id: parentId ?? projectId,
+    if (
+      (volume && (currentVolume?.kind !== 'volume' || currentVolume.parentId !== null || !matchesLookup(currentVolume, volume.lookupId))) ||
+      (chapter &&
+        (currentChapter?.kind !== 'chapter' ||
+          currentChapter.parentId !== volume?.documentId ||
+          !matchesLookup(currentChapter, chapter.lookupId)))
+    ) {
+      throw new PersistenceError('conflict', 'A hierarchy parent changed since the proposal was created', {
+        resource: 'hierarchy_parent_changed',
+        id: parentId ?? projectId,
       });
     }
     if (documents.some(document => matchesLookup(document, logicalId))) {
-      throw new PersistenceError("conflict", "The hierarchy identity already exists", { resource: "hierarchy_id_exists", id: logicalId });
+      throw new PersistenceError('conflict', 'The hierarchy identity already exists', { resource: 'hierarchy_id_exists', id: logicalId });
     }
     for (const mapping of mappingRows) {
       const path = reservedPaths.find(path => mapping.value.metadataPath === path || mapping.value.manuscriptPath === path);
       if (path) {
         const active = documentById.has(mapping.key as DocumentId);
-        throw new PersistenceError("conflict", active ? "The hierarchy path already exists" : "The hierarchy path is reserved by retained document history", {
-          resource: active ? "hierarchy_path_exists" : "hierarchy_path_reserved", id: path,
-        });
+        throw new PersistenceError(
+          'conflict',
+          active ? 'The hierarchy path already exists' : 'The hierarchy path is reserved by retained document history',
+          {
+            resource: active ? 'hierarchy_path_exists' : 'hierarchy_path_reserved',
+            id: path,
+          },
+        );
       }
     }
     for (const path of reservedPaths) {
-      const artifact = await this.getModuleRecord(projectId, "core.artifacts", path);
+      const artifact = await this.getModuleRecord(projectId, 'core.artifacts', path);
       if (artifact && artifact.value.deleted !== true) {
-        throw new PersistenceError("conflict", "The hierarchy path already exists", { resource: "hierarchy_path_exists", id: path });
+        throw new PersistenceError('conflict', 'The hierarchy path already exists', { resource: 'hierarchy_path_exists', id: path });
       }
     }
-    const orderKey = nextOrderKey(documents.filter(document => document.parentId === parentId && document.kind === kind)
-      .map(document => document.orderKey));
+    const orderKey = nextOrderKey(
+      documents.filter(document => document.parentId === parentId && document.kind === kind).map(document => document.orderKey),
+    );
     return { paths, orderKey };
   }
 
-  private async createHierarchyDocument(command: CreateDocumentCommand, hierarchy: HierarchyDocumentCreate, authorId: string): Promise<DocumentWriteResult> {
+  private async createHierarchyDocument(
+    command: CreateDocumentCommand,
+    hierarchy: HierarchyDocumentCreate,
+    authorId: string,
+  ): Promise<DocumentWriteResult> {
     const { paths, orderKey } = await this.checkHierarchyCreate(command, hierarchy);
     const created = await this.createDocument({ ...command, orderKey, appendToEnd: false, authorId });
     await this.saveModuleRecord({
-      projectId: command.projectId, moduleId: CORE_DOCUMENT_PATHS, key: created.document.id, expectedVersion: null,
+      projectId: command.projectId,
+      moduleId: CORE_DOCUMENT_PATHS,
+      key: created.document.id,
+      expectedVersion: null,
       value: { ...paths, metadata: { id: hierarchy.logicalId, title: created.document.title, order: created.document.orderKey } },
     });
     return created;
@@ -2124,31 +2574,43 @@ class PostgresTransaction implements PersistenceTransaction {
 
   private async assertHierarchyReorderScope(changeSet: ChangeSet): Promise<void> {
     const { projectId, operations, readSet, provenance } = changeSet;
-    const versions = new Map(readSet.filter(entry => entry.resource === "document").map(entry => [entry.id, entry.expectedVersion]));
-    const expected = operations.map(operation => {
-      if (operation.type !== "document.update" || operation.command.parentId !== undefined || operation.command.title !== undefined ||
-          operation.command.orderKey === undefined || versions.get(operation.command.documentId) !== operation.command.expectedVersion) {
-        throw validationError("A hierarchy reorder must contain versioned order updates only");
-      }
-      return operation.command.documentId;
-    }).sort();
+    const versions = new Map(readSet.filter(entry => entry.resource === 'document').map(entry => [entry.id, entry.expectedVersion]));
+    const expected = operations
+      .map(operation => {
+        if (
+          operation.type !== 'document.update' ||
+          operation.command.parentId !== undefined ||
+          operation.command.title !== undefined ||
+          operation.command.orderKey === undefined ||
+          versions.get(operation.command.documentId) !== operation.command.expectedVersion
+        ) {
+          throw validationError('A hierarchy reorder must contain versioned order updates only');
+        }
+        return operation.command.documentId;
+      })
+      .sort();
     await this.assertHierarchySiblingScope(projectId, provenance.details, expected);
   }
 
   private async assertHierarchyDeleteScope(changeSet: ChangeSet): Promise<void> {
     const { projectId, operations, readSet, provenance } = changeSet;
     const { siblingIds } = provenance.details;
-    const versions = new Map(readSet.filter(entry => entry.resource === "document").map(entry => [entry.id, entry.expectedVersion]));
+    const versions = new Map(readSet.filter(entry => entry.resource === 'document').map(entry => [entry.id, entry.expectedVersion]));
     const selected = operations.map(operation => {
-      if (operation.type !== "document.delete" || versions.get(operation.command.documentId) !== operation.command.expectedVersion) {
-        throw validationError("A hierarchy deletion must contain versioned document deletions only");
+      if (operation.type !== 'document.delete' || versions.get(operation.command.documentId) !== operation.command.expectedVersion) {
+        throw validationError('A hierarchy deletion must contain versioned document deletions only');
       }
       return operation.command.documentId;
     });
     const targetId = selected.at(-1);
-    if (!targetId || !Array.isArray(siblingIds) || !siblingIds.every(id => typeof id === "string") ||
-        !siblingIds.includes(targetId) || new Set(selected).size !== selected.length) {
-      throw validationError("A hierarchy deletion requires a canonical subtree and sibling set");
+    if (
+      !targetId ||
+      !Array.isArray(siblingIds) ||
+      !siblingIds.every(id => typeof id === 'string') ||
+      !siblingIds.includes(targetId) ||
+      new Set(selected).size !== selected.length
+    ) {
+      throw validationError('A hierarchy deletion requires a canonical subtree and sibling set');
     }
     await this.assertHierarchySiblingScope(projectId, provenance.details, siblingIds);
     const current = await this.query(
@@ -2162,105 +2624,128 @@ class PostgresTransaction implements PersistenceTransaction {
     );
     const expected = new Set<string>(selected);
     if (current.rows.length !== expected.size || current.rows.some(row => !expected.has(asString(row.id)))) {
-      throw new PersistenceError("conflict", "The hierarchy subtree changed since it was read", {
-        resource: "hierarchy_subtree", id: targetId,
+      throw new PersistenceError('conflict', 'The hierarchy subtree changed since it was read', {
+        resource: 'hierarchy_subtree',
+        id: targetId,
       });
     }
   }
 
   private async assertHierarchySiblingScope(projectId: ProjectId, details: JsonObject, expected: readonly string[]): Promise<void> {
     const { kind, parentId, volumeId } = details;
-    if (!((kind === "volume" && parentId === null && volumeId === null) ||
-          (kind === "chapter" && typeof parentId === "string" && parentId === volumeId) ||
-          (kind === "scene" && typeof parentId === "string" && typeof volumeId === "string"))) {
-      throw validationError("A hierarchy change requires a canonical sibling scope");
+    if (
+      !(
+        (kind === 'volume' && parentId === null && volumeId === null) ||
+        (kind === 'chapter' && typeof parentId === 'string' && parentId === volumeId) ||
+        (kind === 'scene' && typeof parentId === 'string' && typeof volumeId === 'string')
+      )
+    ) {
+      throw validationError('A hierarchy change requires a canonical sibling scope');
     }
-    const scopeConflict = () => new PersistenceError("conflict", "The hierarchy sibling set changed since it was read", {
-      resource: "hierarchy_siblings", id: parentId ?? projectId,
-    });
-    if (volumeId !== null && (await this.getDocument(projectId, volumeId as DocumentId))?.kind !== "volume") throw scopeConflict();
-    if (kind === "scene") {
+    const scopeConflict = () =>
+      new PersistenceError('conflict', 'The hierarchy sibling set changed since it was read', {
+        resource: 'hierarchy_siblings',
+        id: parentId ?? projectId,
+      });
+    if (volumeId !== null && (await this.getDocument(projectId, volumeId as DocumentId))?.kind !== 'volume') throw scopeConflict();
+    if (kind === 'scene') {
       const chapter = await this.getDocument(projectId, parentId as DocumentId);
-      if (chapter?.kind !== "chapter" || chapter.parentId !== volumeId) throw scopeConflict();
+      if (chapter?.kind !== 'chapter' || chapter.parentId !== volumeId) throw scopeConflict();
     }
     const rows = await this.listDocuments(projectId, parentId as DocumentId | null, MAX_ACTIVE_DOCUMENTS_PER_PROJECT + 1);
-    const actual = rows.filter(document => document.kind === kind).map(document => document.id).sort();
-    if (rows.length > MAX_ACTIVE_DOCUMENTS_PER_PROJECT || actual.length !== expected.length ||
-        actual.some((id, index) => id !== expected[index])) throw scopeConflict();
+    const actual = rows
+      .filter(document => document.kind === kind)
+      .map(document => document.id)
+      .sort();
+    if (
+      rows.length > MAX_ACTIVE_DOCUMENTS_PER_PROJECT ||
+      actual.length !== expected.length ||
+      actual.some((id, index) => id !== expected[index])
+    )
+      throw scopeConflict();
   }
 
-  private async currentChangeSetReadSetEntry(projectId: ProjectId, entry: ChangeSetReadSetEntry): Promise<{ actualVersion: number | null; actualRevisionId: string | null }> {
-      let actualVersion: number | null;
-      let actualRevisionId: string | null = null;
-      switch (entry.resource) {
-        case "document": {
-          const result = await this.query(
-            "SELECT version, head_revision_id FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE",
-            [projectId, entry.id],
-          );
-          actualVersion = result.rows[0] ? asNumber(result.rows[0].version) : null;
-          actualRevisionId = result.rows[0] ? asNullableString(result.rows[0].head_revision_id) : null;
-          break;
-        }
-        case "module_record": {
-          let identity: unknown;
-          try { identity = JSON.parse(entry.id); } catch { throw validationError("Invalid module record identity"); }
-          if (!Array.isArray(identity) || identity.length !== 2 || identity.some((part) => typeof part !== "string")) throw validationError("Invalid module record identity");
-          const result = await this.query("SELECT version FROM module_record WHERE project_id = $1 AND module_id = $2 AND key = $3 FOR UPDATE", [projectId, identity[0], identity[1]]);
-          actualVersion = result.rows[0] ? asNumber(result.rows[0].version) : null;
-          break;
-        }
-        case "knowledge_node":
-        case "knowledge_relation":
-        case "evidence_anchor":
-        case "assertion": {
-          const table = {
-            knowledge_node: "knowledge_node",
-            knowledge_relation: "knowledge_relation",
-            evidence_anchor: "text_anchor",
-            assertion: "assertion",
-          }[entry.resource];
-          const result = await this.query(
-            `SELECT version FROM ${table} WHERE project_id = $1 AND id = $2 FOR UPDATE`,
-            [projectId, entry.id],
-          );
-          actualVersion = result.rows[0] ? asNumber(result.rows[0].version) : null;
-          break;
-        }
-        case "knowledge_alias": {
-          const result = await this.query(
-            "SELECT 1 FROM knowledge_alias WHERE project_id = $1 AND id = $2 FOR UPDATE",
-            [projectId, entry.id],
-          );
-          actualVersion = result.rows[0] ? 1 : null;
-          break;
-        }
-        case "mention_link": {
-          const [evidenceId, nodeId, ...rest] = entry.id.split(":");
-          if (!evidenceId || !nodeId || rest.length > 0) throw validationError("Mention-link read-set ids must be evidenceId:nodeId");
-          const result = await this.query(
-            "SELECT 1 FROM mention_link WHERE project_id = $1 AND evidence_id = $2 AND node_id = $3 FOR UPDATE",
-            [projectId, evidenceId, nodeId],
-          );
-          actualVersion = result.rows[0] ? 1 : null;
-          break;
-        }
-        case "assertion_evidence": {
-          const [assertionId, evidenceId, ...rest] = entry.id.split(":");
-          if (!assertionId || !evidenceId || rest.length > 0) throw validationError("Assertion-evidence read-set ids must be assertionId:evidenceId");
-          const result = await this.query(
-            "SELECT 1 FROM assertion_evidence WHERE project_id = $1 AND assertion_id = $2 AND evidence_id = $3 FOR UPDATE",
-            [projectId, assertionId, evidenceId],
-          );
-          actualVersion = result.rows[0] ? 1 : null;
-          break;
-        }
-        default: {
-          const exhaustive: never = entry.resource;
-          throw validationError(`Unsupported ChangeSet read-set resource: ${String(exhaustive)}`);
-        }
+  private async currentChangeSetReadSetEntry(
+    projectId: ProjectId,
+    entry: ChangeSetReadSetEntry,
+  ): Promise<{ actualVersion: number | null; actualRevisionId: string | null }> {
+    let actualVersion: number | null;
+    let actualRevisionId: string | null = null;
+    switch (entry.resource) {
+      case 'document': {
+        const result = await this.query(
+          'SELECT version, head_revision_id FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE',
+          [projectId, entry.id],
+        );
+        actualVersion = result.rows[0] ? asNumber(result.rows[0].version) : null;
+        actualRevisionId = result.rows[0] ? asNullableString(result.rows[0].head_revision_id) : null;
+        break;
       }
-      return { actualVersion, actualRevisionId };
+      case 'module_record': {
+        let identity: unknown;
+        try {
+          identity = JSON.parse(entry.id);
+        } catch {
+          throw validationError('Invalid module record identity');
+        }
+        if (!Array.isArray(identity) || identity.length !== 2 || identity.some(part => typeof part !== 'string'))
+          throw validationError('Invalid module record identity');
+        const result = await this.query(
+          'SELECT version FROM module_record WHERE project_id = $1 AND module_id = $2 AND key = $3 FOR UPDATE',
+          [projectId, identity[0], identity[1]],
+        );
+        actualVersion = result.rows[0] ? asNumber(result.rows[0].version) : null;
+        break;
+      }
+      case 'knowledge_node':
+      case 'knowledge_relation':
+      case 'evidence_anchor':
+      case 'assertion': {
+        const table = {
+          knowledge_node: 'knowledge_node',
+          knowledge_relation: 'knowledge_relation',
+          evidence_anchor: 'text_anchor',
+          assertion: 'assertion',
+        }[entry.resource];
+        const result = await this.query(`SELECT version FROM ${table} WHERE project_id = $1 AND id = $2 FOR UPDATE`, [projectId, entry.id]);
+        actualVersion = result.rows[0] ? asNumber(result.rows[0].version) : null;
+        break;
+      }
+      case 'knowledge_alias': {
+        const result = await this.query('SELECT 1 FROM knowledge_alias WHERE project_id = $1 AND id = $2 FOR UPDATE', [
+          projectId,
+          entry.id,
+        ]);
+        actualVersion = result.rows[0] ? 1 : null;
+        break;
+      }
+      case 'mention_link': {
+        const [evidenceId, nodeId, ...rest] = entry.id.split(':');
+        if (!evidenceId || !nodeId || rest.length > 0) throw validationError('Mention-link read-set ids must be evidenceId:nodeId');
+        const result = await this.query(
+          'SELECT 1 FROM mention_link WHERE project_id = $1 AND evidence_id = $2 AND node_id = $3 FOR UPDATE',
+          [projectId, evidenceId, nodeId],
+        );
+        actualVersion = result.rows[0] ? 1 : null;
+        break;
+      }
+      case 'assertion_evidence': {
+        const [assertionId, evidenceId, ...rest] = entry.id.split(':');
+        if (!assertionId || !evidenceId || rest.length > 0)
+          throw validationError('Assertion-evidence read-set ids must be assertionId:evidenceId');
+        const result = await this.query(
+          'SELECT 1 FROM assertion_evidence WHERE project_id = $1 AND assertion_id = $2 AND evidence_id = $3 FOR UPDATE',
+          [projectId, assertionId, evidenceId],
+        );
+        actualVersion = result.rows[0] ? 1 : null;
+        break;
+      }
+      default: {
+        const exhaustive: never = entry.resource;
+        throw validationError(`Unsupported ChangeSet read-set resource: ${String(exhaustive)}`);
+      }
+    }
+    return { actualVersion, actualRevisionId };
   }
 
   private async assertChangeSetReadSet(projectId: ProjectId, entries: readonly ChangeSetReadSetEntry[]): Promise<void> {
@@ -2282,30 +2767,30 @@ class PostgresTransaction implements PersistenceTransaction {
   }): Promise<ChangeSetApplicationResult> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
-    const selected = await this.query(
-      "SELECT * FROM change_set WHERE project_id = $1 AND id = $2 FOR UPDATE",
-      [command.projectId, command.changeSetId],
-    );
+    const selected = await this.query('SELECT * FROM change_set WHERE project_id = $1 AND id = $2 FOR UPDATE', [
+      command.projectId,
+      command.changeSetId,
+    ]);
     const row = selected.rows[0];
-    if (!row) throw notFound("change set", command.changeSetId);
+    if (!row) throw notFound('change set', command.changeSetId);
     const changeSet = mapChangeSet(row);
-    if (changeSet.status === "applied") {
+    if (changeSet.status === 'applied') {
       if (command.expectedVersion !== changeSet.version - 1) {
-        throw conflict("change_set", changeSet.id, command.expectedVersion, changeSet.version);
+        throw conflict('change_set', changeSet.id, command.expectedVersion, changeSet.version);
       }
-      const stored = asJsonObject(row.application_result) as unknown as Omit<ChangeSetApplicationResult, "replayed">;
+      const stored = asJsonObject(row.application_result) as unknown as Omit<ChangeSetApplicationResult, 'replayed'>;
       return { ...stored, replayed: true };
     }
-    if (changeSet.status !== "approved") {
-      throw new PersistenceError("invalid_change_set_state", `Cannot apply a ${changeSet.status} ChangeSet`, {
-        resource: "change_set",
+    if (changeSet.status !== 'approved') {
+      throw new PersistenceError('invalid_change_set_state', `Cannot apply a ${changeSet.status} ChangeSet`, {
+        resource: 'change_set',
         id: command.changeSetId,
-        expected: "approved",
+        expected: 'approved',
         actual: changeSet.status,
       });
     }
     if (changeSet.version !== command.expectedVersion) {
-      throw conflict("change_set", changeSet.id, command.expectedVersion, changeSet.version);
+      throw conflict('change_set', changeSet.id, command.expectedVersion, changeSet.version);
     }
 
     await this.assertChangeSetApplicable(changeSet);
@@ -2316,15 +2801,19 @@ class PostgresTransaction implements PersistenceTransaction {
        WHERE project_id = $1 AND id = $2 AND version = $3 AND status = 'approved' RETURNING *`,
       [command.projectId, command.changeSetId, command.expectedVersion],
     );
-    if (!updated.rows[0]) throw conflict("change_set", changeSet.id, command.expectedVersion, null);
+    if (!updated.rows[0]) throw conflict('change_set', changeSet.id, command.expectedVersion, null);
     const nextChangeSet = mapChangeSet(updated.rows[0]);
     const resultWithoutReplay = { changeSet: nextChangeSet, results };
-    await this.query(
-      "UPDATE change_set SET application_result = $3::jsonb WHERE project_id = $1 AND id = $2",
-      [command.projectId, command.changeSetId, toJson(resultWithoutReplay)],
-    );
+    await this.query('UPDATE change_set SET application_result = $3::jsonb WHERE project_id = $1 AND id = $2', [
+      command.projectId,
+      command.changeSetId,
+      toJson(resultWithoutReplay),
+    ]);
     this.markChanged(command.projectId);
-    const finalRow = await this.query("SELECT * FROM change_set WHERE project_id = $1 AND id = $2", [command.projectId, command.changeSetId]);
+    const finalRow = await this.query('SELECT * FROM change_set WHERE project_id = $1 AND id = $2', [
+      command.projectId,
+      command.changeSetId,
+    ]);
     return { changeSet: mapChangeSet(finalRow.rows[0]!), results, replayed: false };
   }
 }
@@ -2337,11 +2826,11 @@ export class PostgresPersistence implements Persistence {
   private readonly pool: Pool;
 
   constructor(config: PoolConfig | string) {
-    this.pool = new Pool(typeof config === "string" ? { connectionString: config } : config);
+    this.pool = new Pool(typeof config === 'string' ? { connectionString: config } : config);
   }
 
   async checkHealth(): Promise<void> {
-    await this.pool.query("SELECT 1");
+    await this.pool.query('SELECT 1');
   }
 
   async findUnprovenCurrentSnapshotProjectIds(
@@ -2349,9 +2838,8 @@ export class PostgresPersistence implements Persistence {
     options: { projectId?: ProjectId; after?: ProjectId; limit?: number } = {},
   ): Promise<readonly ProjectId[]> {
     const { projectId = null, after = null, limit = 100 } = options;
-    if (!Number.isSafeInteger(projectionEpoch) || projectionEpoch < 1 ||
-        !Number.isInteger(limit) || limit < 1 || limit > 200) {
-      throw validationError("Invalid snapshot projection epoch or project page size");
+    if (!Number.isSafeInteger(projectionEpoch) || projectionEpoch < 1 || !Number.isInteger(limit) || limit < 1 || limit > 200) {
+      throw validationError('Invalid snapshot projection epoch or project page size');
     }
     const result = await this.pool.query<{ id: ProjectId }>(
       `SELECT p.id
@@ -2386,11 +2874,12 @@ export class PostgresPersistence implements Persistence {
   }
 
   private async findLegacyArtifactProjectIds(
-    paths: readonly string[], options: { projectId?: ProjectId; after?: ProjectId; limit?: number },
+    paths: readonly string[],
+    options: { projectId?: ProjectId; after?: ProjectId; limit?: number },
   ): Promise<readonly ProjectId[]> {
     const { projectId = null, after = null, limit = 100 } = options;
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
-      throw validationError("Invalid legacy artifact maintenance project page size");
+      throw validationError('Invalid legacy artifact maintenance project page size');
     }
     const result = await this.pool.query<{ id: ProjectId }>(
       `SELECT p.id FROM project p
@@ -2409,28 +2898,28 @@ export class PostgresPersistence implements Persistence {
   }
 
   /** Recognize the existing dedicated updater reader from the actual DB session, not a client flag. */
-  async snapshotStartupMode(): Promise<"transition" | "validate"> {
+  async snapshotStartupMode(): Promise<'transition' | 'validate'> {
     const result = await this.pool.query("SELECT current_user AS role_name, current_setting('default_transaction_read_only') AS read_only");
     const row = result.rows[0];
-    if (!row) throw new Error("PostgreSQL startup identity is unavailable");
-    if (row.role_name === "codexia_preflight") {
-      if (row.read_only !== "on") throw new Error("Updater preflight must use read-only PostgreSQL transactions");
-      return "validate";
+    if (!row) throw new Error('PostgreSQL startup identity is unavailable');
+    if (row.role_name === 'codexia_preflight') {
+      if (row.read_only !== 'on') throw new Error('Updater preflight must use read-only PostgreSQL transactions');
+      return 'validate';
     }
-    if (row.read_only !== "off") throw new Error("Writer startup requires writable PostgreSQL transactions");
-    return "transition";
+    if (row.read_only !== 'off') throw new Error('Writer startup requires writable PostgreSQL transactions');
+    return 'transition';
   }
 
   async read<T>(work: (reader: PersistenceReader) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try {
-      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const reader = new PostgresTransaction(client, true);
       const result = await work(reader);
-      await client.query("COMMIT");
+      await client.query('COMMIT');
       return result;
     } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
+      await client.query('ROLLBACK').catch(() => undefined);
       mapDatabaseError(error);
     } finally {
       client.release();
@@ -2440,20 +2929,19 @@ export class PostgresPersistence implements Persistence {
   async transaction<T>(work: (transaction: PersistenceTransaction) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try {
-      await client.query("BEGIN");
+      await client.query('BEGIN');
       const transaction = new PostgresTransaction(client, false);
       const result = await work(transaction);
       const changedProjects = [...transaction.changedProjects].sort();
       if (changedProjects.length > 0) {
-        await client.query(
-          "UPDATE project SET version = version + 1, updated_at = clock_timestamp() WHERE id = ANY($1::uuid[])",
-          [changedProjects],
-        );
+        await client.query('UPDATE project SET version = version + 1, updated_at = clock_timestamp() WHERE id = ANY($1::uuid[])', [
+          changedProjects,
+        ]);
       }
-      await client.query("COMMIT");
+      await client.query('COMMIT');
       return result;
     } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
+      await client.query('ROLLBACK').catch(() => undefined);
       mapDatabaseError(error);
     } finally {
       client.release();

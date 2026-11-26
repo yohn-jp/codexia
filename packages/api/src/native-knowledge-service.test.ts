@@ -389,10 +389,9 @@ test('native snapshot scope, rollback, rejection, and stale source fences fail c
       expectedVersion: null,
     }),
   );
-  await assert.rejects(
-    approveNativeChangeSet(persistence, p.id, stale.changeSet.id, stale.changeSet.version, 'author'),
-    { code: 'conflict' },
-  );
+  await assert.rejects(approveNativeChangeSet(persistence, p.id, stale.changeSet.id, stale.changeSet.version, 'author'), {
+    code: 'conflict',
+  });
   assert.equal((await persistence.read(reader => reader.getChangeSet(p.id, stale.changeSet.id)))?.status, 'proposed');
   const rejectedStale = await rejectNativeChangeSet(persistence, p.id, stale.changeSet.id, stale.changeSet.version, 'author');
   assert.equal(rejectedStale.status, 'rejected');
