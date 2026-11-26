@@ -13,10 +13,11 @@ spec.loader.exec_module(observer)
 
 
 class ObserveDatabaseTests(unittest.TestCase):
-    def observe(self, *, volume=True, container=True, layout="ready", writer=None, directory=Path("/unused")):
+    def observe(self, *, volume=True, container=True, layout="ready", writer=None,
+                directory=Path("/unused"), resume_clean=False):
         return observer.observe_database(
             {"codexia-postgres": volume}, {"codexia-db": container},
-            directory, directory, writer, "", layout)
+            directory, directory, writer, "", layout, resume_clean=resume_clean)
 
     def test_positive_absence_and_empty_volume_need_no_sql_or_container_start(self):
         with patch.object(observer, "command") as command:
@@ -71,23 +72,48 @@ class ObserveDatabaseTests(unittest.TestCase):
                         patch.object(observer, "json_sql", side_effect=[cluster, db, ledger]):
                     return self.observe(directory=directory, **kwargs)
 
-            self.assertNotIn("bootstrapIntent", observe_initialized())
+            self.assertNotIn("bootstrapIntent", observe_initialized(resume_clean=True))
             intent.write_text(f"123:456:{image}\n")
             intent.chmod(0o600)
-            result = observe_initialized()
+            result = observe_initialized(resume_clean=True)
             self.assertEqual(result["authState"], "absent")
             self.assertEqual(result["databaseOid"], "456")
             self.assertEqual(result["bootstrapIntent"], {"clusterId": "123", "databaseOid": "456", "image": image})
             self.assertEqual(result["ledger"], ledger)
-            self.assertNotIn("bootstrapIntent", observe_initialized(writer={"authMode": "legacy"}))
+            self.assertNotIn("bootstrapIntent", observe_initialized(resume_clean=True, writer={"authMode": "legacy"}))
             handoff = directory / "owner-setup.age"
             handoff.write_text("fixture-ciphertext")
-            self.assertNotIn("bootstrapIntent", observe_initialized())
+            self.assertNotIn("bootstrapIntent", observe_initialized(resume_clean=True))
             handoff.unlink()
             for cluster_id, database_oid in [("321", "456"), ("123", "654")]:
                 intent.write_text(f"{cluster_id}:{database_oid}:{image}\n")
                 with self.subTest(cluster=cluster_id, database=database_oid), self.assertRaises(ValueError):
-                    observe_initialized()
+                    observe_initialized(resume_clean=True)
+
+    def test_empty_auth_schema_checkpoint_requires_locked_clean_intent(self):
+        cluster = {"clusterId": "123", "databaseOid": "456", "appExists": True, "rolesValid": True}
+        ledger = [{"version": "0001-initial.sql", "checksum": "a" * 64}]
+        image = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            intent = directory / "owner-setup.intent"
+            intent.write_text(f"123:456:{image}\n")
+            intent.chmod(0o600)
+            with patch.object(observer, "command", return_value=(0, "true")), \
+                    patch.object(observer, "json_sql", side_effect=[cluster,
+                        {"ledgerExists": True, "authExists": True, "appRelations": 5}, ledger,
+                        {"empty": True}]), patch.object(observer, "sql", return_value=""):
+                result = self.observe(directory=directory, resume_clean=True)
+                self.assertEqual(result["authState"], "absent")
+                self.assertTrue(result["emptyAuthSchema"])
+                self.assertEqual(result["bootstrapIntent"],
+                    {"clusterId": "123", "databaseOid": "456", "image": image})
+            with patch.object(observer, "command", return_value=(0, "true")), \
+                    patch.object(observer, "json_sql", side_effect=[cluster,
+                        {"ledgerExists": True, "authExists": True, "appRelations": 5}, ledger,
+                        {"empty": True}]), patch.object(observer, "sql", return_value=""):
+                result = self.observe(directory=directory, resume_clean=False)
+                self.assertNotIn("emptyAuthSchema", result)
 
     def test_sql_forces_read_only_and_never_exports_password(self):
         with patch.object(observer, "command", return_value=(0, "ok")) as command:
@@ -117,7 +143,8 @@ class ObserveDatabaseTests(unittest.TestCase):
                     with patch.object(observer, "command", return_value=(0, "true")), \
                             patch.object(observer, "sql", return_value="t"), \
                             patch.object(observer, "json_sql", side_effect=[
-                                cluster, {"ledgerExists": True, "authExists": True, "appRelations": 10}, ledger, no_grant
+                                cluster, {"ledgerExists": True, "authExists": True, "appRelations": 10}, ledger,
+                                {"empty": False}, no_grant
                             ]):
                         result = self.observe(directory=directory)
                         self.assertEqual(result["authState"], expected)
@@ -125,7 +152,8 @@ class ObserveDatabaseTests(unittest.TestCase):
             with patch.object(observer, "command", return_value=(0, "true")), \
                     patch.object(observer, "sql", return_value="t"), \
                     patch.object(observer, "json_sql", side_effect=[
-                        cluster, {"ledgerExists": True, "authExists": True, "appRelations": 10}, ledger, no_grant
+                        cluster, {"ledgerExists": True, "authExists": True, "appRelations": 10}, ledger,
+                        {"empty": False}, no_grant
                     ]):
                 with self.assertRaises(ValueError):
                     self.observe(directory=directory)
@@ -146,7 +174,7 @@ class ObserveDatabaseTests(unittest.TestCase):
             def observe_owner(owner):
                 with patch.object(observer, "command", return_value=(0, "true")), \
                         patch.object(observer, "sql", return_value="t"), \
-                        patch.object(observer, "json_sql", side_effect=[cluster, db, ledger, owner]):
+                        patch.object(observer, "json_sql", side_effect=[cluster, db, ledger, {"empty": False}, owner]):
                     return self.observe(directory=directory)
 
             before_marker = observe_owner(no_grant)

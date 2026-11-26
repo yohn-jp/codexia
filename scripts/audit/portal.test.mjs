@@ -84,7 +84,7 @@ test('generates and verifies sitemap, SHA landing pages and review integrity aft
     const auditManifest=readFileSync(join(site,'manifest.json'),'utf8');
     const registry=generate(site,sha,origin);
     assert.equal(registry.routes.length,11);
-    assert.equal(registry.routes.find(route=>route.route==='/requirements/traceability/').generationStatus,'ready');
+    assert.equal(registry.routes.find(route=>route.route==='/requirements/traceability/').generationStatus,'unavailable', 'Traceability must not publish without the matching StrictDoc HTML bundle');
     assert.ok(registry.routes.find(route=>route.route==='/').internalLinks.includes('requirements/traceability/'));
     assert.equal(registry.routes.find(route=>route.route==='/ci/').sourceSha,undefined);
     assert.equal(registry.routes.find(route=>route.route==='/audit/').sourceSha,undefined);

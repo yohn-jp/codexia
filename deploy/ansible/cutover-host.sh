@@ -695,7 +695,16 @@ def checkpoint(plan, journal, request):
         journal = admit(plan, journal)
     if not changes_backend(plan):
         require_retained_pair(plan)
-        transition(journal, "checkpointed")
+        renewal = request.get("reactivationWindow")
+        if renewal is not None and renewal != journal.get("reactivationWindow"):
+            require(journal["phase"] == "checkpointed" and
+                    type(journal.get("retainedCandidateWorker")) is bool and not journal["requiresRestore"],
+                    "Only a recovered Frontend checkpoint can renew its window")
+            require_current_window(plan)
+            transition(journal, "checkpointed", reactivationWindow=renewal,
+                       reactivationStartedAt=datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"))
+        else:
+            transition(journal, "checkpointed")
         emit(phase_status(journal))
         return
     try:
@@ -802,6 +811,31 @@ def recover_quiesce(plan, journal):
 
 
 def recover(request, plan, journal):
+    if request.get("frontendRetry") is True:
+        require(plan["priorImage"] is not None and not changes_backend(plan),
+                "Frontend retry recovery requires a retained Backend")
+        retained_candidate_worker = request.get("retainedCandidateWorker")
+        require(type(retained_candidate_worker) is bool,
+                "Frontend retry requires an observed Worker state")
+        require(journal["phase"] in ("intent", "checkpointed", "candidate-ready",
+                                     "candidate-tunnel", "recovering", "prior-ready"),
+                "This checkpoint does not permit a frontend retry")
+        require(not journal["requiresRestore"], "Frontend retry cannot skip a required restoration")
+        if "retainedCandidateWorker" in journal:
+            require(journal["retainedCandidateWorker"] is not True or retained_candidate_worker is True,
+                    "A retained candidate Worker cannot be discarded during frontend retry")
+            require(journal["phase"] == "candidate-tunnel" or
+                    journal["retainedCandidateWorker"] is retained_candidate_worker,
+                    "Retained Worker state changed during frontend retry")
+        require_retained_pair(plan)
+        journal.pop("recoveryStartedAt", None)
+        journal.pop("recoveryReceiptSha256", None)
+        journal.pop("restoreReceiptSha256", None)
+        journal.pop("tunnelOpenedAt", None)
+        transition(journal, "checkpointed", requiresRestore=False,
+                   retainedCandidateWorker=retained_candidate_worker)
+        emit({**phase_status(journal), "nextOperation": "advance"})
+        return
     if plan["priorImage"] is None:
         require(journal["phase"] in ("recovering", "safe-stopped"), "Quiesce the first activation before safe stop")
         quiesce()
@@ -1011,16 +1045,29 @@ def main():
     plan = validate_plan(request)
     validate_host(plan)
     renewal = request.get("reactivationWindow")
+    retained_frontend_retry = (not changes_backend(plan) and plan["priorImage"] is not None and
+                               journal is not None and type(journal.get("retainedCandidateWorker")) is bool and
+                               not journal["requiresRestore"])
     if renewal is not None:
         require(isinstance(renewal, dict) and set(renewal) == {"notAfter", "approval"} and
-                matches(HASH, renewal["approval"]) and plan["priorImage"] is None,
+                matches(HASH, renewal["approval"]) and
+                (plan["priorImage"] is None or retained_frontend_retry or
+                 (not changes_backend(plan) and action == "finish" and journal is None and present(TERMINAL))),
                 "Invalid first activation renewal")
         approved_deadline(renewal)
     if journal is not None:
         require(plan == journal["plan"], "Request does not match the durable cutover plan")
+        renewing_retained = (action == "checkpoint" and retained_frontend_retry and
+                             journal["phase"] == "checkpointed" and renewal is not None and
+                             renewal != journal.get("reactivationWindow"))
+        if renewing_retained:
+            previous = journal.get("reactivationWindow") or journal["plan"]
+            require(approved_deadline(renewal) > approved_deadline(previous),
+                    "Renewed Frontend window must extend the durable deadline")
         if action not in ("recover-quiesce", "recover"):
             require((action == "checkpoint" and journal["phase"] == "safe-stopped") or
-                    renewal == journal.get("reactivationWindow"), "Request changed the durable activation window")
+                    renewing_retained or renewal == journal.get("reactivationWindow"),
+                    "Request changed the durable activation window")
     elif action == "finish" and present(TERMINAL):
         terminal = data(TERMINAL, private=True)
         require(terminal["plan"] == plan and terminal["outcome"] == request.get("outcome") and

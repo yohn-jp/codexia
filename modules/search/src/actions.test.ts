@@ -1,248 +1,507 @@
-import assert from "node:assert/strict";
-import { test } from "node:test";
-import { assertChangeOperation, type ChangeOperation, type KnowledgeProjectionEntry, type ModuleAction, type ModuleActionContext, type ModuleContext, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
-import { createSearchDefinition, createSearchActions } from "./actions.js";
-import { SnapshotIndexCache } from "./index-cache.js";
-import { TERM_REGISTRY_PATH } from "./terminology.js";
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import {
+  assertChangeOperation,
+  type ChangeOperation,
+  type KnowledgeProjectionEntry,
+  type ModuleAction,
+  type ModuleActionContext,
+  type ModuleContext,
+  type SnapshotId,
+  type SnapshotReader,
+} from '@codexia/contracts';
+import { createSearchActions, createSearchDefinition } from './actions.js';
+import { SnapshotIndexCache } from './index-cache.js';
+import { TERM_REGISTRY_PATH } from './terminology.js';
 
 const snapshot: SnapshotId = {
-  projectId: "search-fixture",
+  projectId: 'search-fixture',
   projectVersion: 11,
 };
 
 function revision(value: string): string {
   let hash = 0x811c9dc5;
-  for (const character of value) { hash ^= character.codePointAt(0)!; hash = Math.imul(hash, 0x01000193); }
-  return (hash >>> 0).toString(16).padStart(8, "0").repeat(8);
+  for (const character of value) {
+    hash ^= character.codePointAt(0)!;
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0').repeat(8);
 }
 
 function makeReader(values: Record<string, string>, selectedSnapshot = snapshot): SnapshotReader {
   const files = new Map(Object.entries(values).map(([path, content]) => [path, { content, revision: revision(content) }]));
   return {
     snapshot: selectedSnapshot,
-    async read(path) { return files.get(path) ?? null; },
-    async list(prefix) { return [...files.keys()].filter((path) => path === prefix || path.startsWith(`${prefix}/`)); },
-    async listRevisions(prefix) { return [...files].filter(([path]) => path === prefix || path.startsWith(`${prefix}/`)).map(([path, file]) => ({ path, revision: file.revision })); },
+    async read(path) {
+      return files.get(path) ?? null;
+    },
+    async list(prefix) {
+      return [...files.keys()].filter(path => path === prefix || path.startsWith(`${prefix}/`));
+    },
+    async listRevisions(prefix) {
+      return [...files]
+        .filter(([path]) => path === prefix || path.startsWith(`${prefix}/`))
+        .map(([path, file]) => ({ path, revision: file.revision }));
+    },
   };
 }
 
-function actionContext(reader: SnapshotReader, options: {
-  invoke?: ModuleActionContext["invoke"];
-  propose?: ModuleActionContext["propose"];
-} = {}): ModuleActionContext {
+function actionContext(
+  reader: SnapshotReader,
+  options: {
+    invoke?: ModuleActionContext['invoke'];
+    propose?: ModuleActionContext['propose'];
+  } = {},
+): ModuleActionContext {
   return {
-    projectId: "search-fixture", reader, signal: new AbortController().signal,
-    async invoke(id, input, signal) { return options.invoke ? options.invoke(id, input, signal) : { ok: false, snapshot, error: { code: "missing_action", message: "missing", retryable: false } }; },
-    async listActions() { return []; }, async linkedReader() { throw new Error("unused"); },
+    projectId: 'search-fixture',
+    reader,
+    signal: new AbortController().signal,
+    async invoke(id, input, signal) {
+      return options.invoke
+        ? options.invoke(id, input, signal)
+        : { ok: false, snapshot, error: { code: 'missing_action', message: 'missing', retryable: false } };
+    },
+    async listActions() {
+      return [];
+    },
+    async linkedReader() {
+      throw new Error('unused');
+    },
     async propose(operations, evidence, proposalId) {
       if (options.propose) return options.propose(operations, evidence, proposalId);
-      throw new Error("unexpected proposal");
-    }, async runJob() { throw new Error("unused"); },
+      throw new Error('unexpected proposal');
+    },
+    async runJob() {
+      throw new Error('unused');
+    },
   };
 }
 
 function findAction(actions: ModuleAction[], id: string): ModuleAction {
-  const action = actions.find((candidate) => candidate.id === id);
+  const action = actions.find(candidate => candidate.id === id);
   assert.ok(action, `expected action ${id}`);
   return action;
 }
 
-function moduleContext(onAcquire: ModuleContext["acquireCapability"]): ModuleContext {
-  return { cacheDirectory: "/tmp/search-test", signal: new AbortController().signal, acquireCapability: onAcquire, async createWorkerService() { throw new Error("search is model-free"); } };
+function moduleContext(onAcquire: ModuleContext['acquireCapability']): ModuleContext {
+  return {
+    cacheDirectory: '/tmp/search-test',
+    signal: new AbortController().signal,
+    acquireCapability: onAcquire,
+    async createWorkerService() {
+      throw new Error('search is model-free');
+    },
+  };
 }
 
-test("lexical search does not activate optional NLP or Semantic providers unless requested", async () => {
+test('lexical search does not activate optional NLP or Semantic providers unless requested', async () => {
   let capabilityRequests = 0;
-  const module = createSearchDefinition(moduleContext(async () => { capabilityRequests += 1; throw new Error("provider is disabled"); }));
-  assert.equal(capabilityRequests, 0, "module registration must not load optional capabilities");
+  const module = createSearchDefinition(
+    moduleContext(async () => {
+      capabilityRequests += 1;
+      throw new Error('provider is disabled');
+    }),
+  );
+  assert.equal(capabilityRequests, 0, 'module registration must not load optional capabilities');
   assert.deepEqual(module.manifest.dependencies, []);
-  assert.deepEqual(module.manifest.optionalRequires, ["nlp.tokenizer", "semantic.embedding"]);
-  assert.equal(module.ui.find(({ id }) => id === "search.terms")?.contexts?.includes("workspace"), true);
-  assert.equal(module.ui.find(({ id }) => id === "search.terms.adornment")?.kind, "editor-adornment");
+  assert.deepEqual(module.manifest.optionalRequires, ['nlp.tokenizer', 'semantic.embedding']);
+  assert.equal(module.ui.find(({ id }) => id === 'search.terms')?.contexts?.includes('workspace'), true);
+  assert.equal(module.ui.find(({ id }) => id === 'search.terms.adornment')?.kind, 'editor-adornment');
   let semanticRequests = 0;
-  const context = actionContext(makeReader({ "manuscript/vol-main/ch-main-1/sc-1.md": "The moonlit harbor is quiet." }), {
+  const context = actionContext(makeReader({ 'manuscript/vol-main/ch-main-1/sc-1.md': 'The moonlit harbor is quiet.' }), {
     async invoke(id, input, signal) {
       semanticRequests += 1;
-      assert.equal(id, "semantic.search");
-      assert.equal((input as { query: string }).query, "moonlit harbor");
+      assert.equal(id, 'semantic.search');
+      assert.equal((input as { query: string }).query, 'moonlit harbor');
       assert.equal(signal?.aborted, false);
-      return { ok: false, snapshot, error: { code: "missing_action", message: "disabled", retryable: false } };
+      return { ok: false, snapshot, error: { code: 'missing_action', message: 'disabled', retryable: false } };
     },
   });
-  const query = findAction(module.actions, "search.query");
-  assert.throws(() => query.inputSchema.parse({ query: "harbor", scope: " ../outside" }), /Unsafe project path/u);
-  const basic = await query.invoke(query.inputSchema.parse({ query: "moonlit harbor" }), context);
+  const query = findAction(module.actions, 'search.query');
+  assert.throws(() => query.inputSchema.parse({ query: 'harbor', scope: ' ../outside' }), /Unsafe project path/u);
+  const basic = await query.invoke(query.inputSchema.parse({ query: 'moonlit harbor' }), context);
   assert.equal(basic.ok, true);
   if (basic.ok) assert.equal((basic.data as { results: unknown[] }).results.length, 1);
   assert.equal(capabilityRequests, 0);
   assert.equal(semanticRequests, 0);
 
-  const enhanced = await query.invoke(query.inputSchema.parse({ query: "moonlit harbor", useNlp: true }), context);
+  const enhanced = await query.invoke(query.inputSchema.parse({ query: 'moonlit harbor', useNlp: true }), context);
   assert.equal(enhanced.ok, true);
-  if (enhanced.ok) assert.deepEqual((enhanced.data as { warnings: string[] }).warnings, ["nlp_tokenizer_unavailable"]);
+  if (enhanced.ok) assert.deepEqual((enhanced.data as { warnings: string[] }).warnings, ['nlp_tokenizer_unavailable']);
   assert.equal(capabilityRequests, 1);
   assert.equal(semanticRequests, 0);
 
   let semanticScope: unknown;
   const originalInvoke = context.invoke;
   context.invoke = async (id, input, signal) => {
-    if (id === "semantic.search") semanticScope = (input as { scope?: unknown }).scope;
+    if (id === 'semantic.search') semanticScope = (input as { scope?: unknown }).scope;
     return originalInvoke(id, input, signal);
   };
-  const semantic = await query.invoke(query.inputSchema.parse({ query: "moonlit harbor", scope: "manuscript/vol-main", includeSemantic: true }), context);
+  const semantic = await query.invoke(
+    query.inputSchema.parse({ query: 'moonlit harbor', scope: 'manuscript/vol-main', includeSemantic: true }),
+    context,
+  );
   assert.equal(semantic.ok, true);
-  if (semantic.ok) assert.deepEqual((semantic.data as { warnings: string[] }).warnings, ["semantic_unavailable:missing_action"]);
+  if (semantic.ok) assert.deepEqual((semantic.data as { warnings: string[] }).warnings, ['semantic_unavailable:missing_action']);
   assert.equal(semanticRequests, 1);
-  assert.equal(semanticScope, "manuscript/vol-main");
+  assert.equal(semanticScope, 'manuscript/vol-main');
   await module.dispose();
 });
 
-test("terminology changes are emitted only as revision-guarded dictionary proposals", async () => {
-  const reader = makeReader({ "manuscript/vol-main/ch-main-1/sc-1.md": "A blue harbor." });
+test('terminology changes are emitted only as revision-guarded dictionary proposals', async () => {
+  const reader = makeReader({ 'manuscript/vol-main/ch-main-1/sc-1.md': 'A blue harbor.' });
   let proposed: ChangeOperation[] = [];
-  let evidence: Parameters<ModuleActionContext["propose"]>[1];
-  const context = actionContext(reader, { propose: async (operations, rows) => {
-    proposed = operations;
-    evidence = rows;
-    return { id: "proposal-1", snapshot, operations, source: "module" };
-  } });
-  const actions = createSearchActions(moduleContext(async () => { throw new Error("unused"); }), new SnapshotIndexCache());
-  const proposal = await findAction(actions, "search.terms.propose").invoke(findAction(actions, "search.terms.propose").inputSchema.parse({
-    canonical: "Blue Harbor", aliases: ["Harbor"], targetPath: "manuscript/vol-main/ch-main-1/sc-1.md",
-  }), context);
+  let evidence: Parameters<ModuleActionContext['propose']>[1];
+  const context = actionContext(reader, {
+    propose: async (operations, rows) => {
+      proposed = operations;
+      evidence = rows;
+      return { id: 'proposal-1', snapshot, operations, source: 'module' };
+    },
+  });
+  const actions = createSearchActions(
+    moduleContext(async () => {
+      throw new Error('unused');
+    }),
+    new SnapshotIndexCache(),
+  );
+  const proposal = await findAction(actions, 'search.terms.propose').invoke(
+    findAction(actions, 'search.terms.propose').inputSchema.parse({
+      canonical: 'Blue Harbor',
+      aliases: ['Harbor'],
+      targetPath: 'manuscript/vol-main/ch-main-1/sc-1.md',
+    }),
+    context,
+  );
   assert.equal(proposal.ok, true);
   assert.equal(proposed.length, 1);
-  assert.deepEqual(proposed[0]!.writes.map(({ path }) => path), [TERM_REGISTRY_PATH]);
+  assert.deepEqual(
+    proposed[0]!.writes.map(({ path }) => path),
+    [TERM_REGISTRY_PATH],
+  );
   assert.deepEqual(proposed[0]!.reads, [
     { path: TERM_REGISTRY_PATH, revision: null },
-    { path: "manuscript/vol-main/ch-main-1/sc-1.md", revision: revision("A blue harbor.") },
+    { path: 'manuscript/vol-main/ch-main-1/sc-1.md', revision: revision('A blue harbor.') },
   ]);
-  assert.equal(proposed[0]!.effect, "settings");
+  assert.equal(proposed[0]!.effect, 'settings');
   assert.doesNotThrow(() => assertChangeOperation(proposed[0]));
-  assert.match(proposed[0]!.writes[0]!.content ?? "", /Blue Harbor/u);
-  assert.equal(evidence?.[0]?.paths.some(({ path }) => path === "manuscript/vol-main/ch-main-1/sc-1.md"), true);
+  assert.match(proposed[0]!.writes[0]!.content ?? '', /Blue Harbor/u);
+  assert.equal(
+    evidence?.[0]?.paths.some(({ path }) => path === 'manuscript/vol-main/ch-main-1/sc-1.md'),
+    true,
+  );
 });
 
-test("module disposal aborts and invalidates active index work", async () => {
+test('search.terms.resolve applies whole-string Unicode normalization and preserves original UTF-16 spans', async () => {
+  const targetPath = 'manuscript/vol-main/ch-main-1/sc-1.md';
+  const text = 'ΟΣ / ος / 😀ΟΣ';
+  const original = text;
+  const reader = makeReader({
+    [targetPath]: text,
+    [TERM_REGISTRY_PATH]: JSON.stringify({
+      schemaVersion: 1,
+      terms: [{ id: 'greek-term', canonical: 'ΟΣ', aliases: [], targetPath }],
+    }),
+  });
+  const actions = createSearchActions(
+    moduleContext(async () => {
+      throw new Error('unused');
+    }),
+    new SnapshotIndexCache(),
+  );
+  const resolve = findAction(actions, 'search.terms.resolve');
+
+  const out = await resolve.invoke(resolve.inputSchema.parse({ text }), actionContext(reader));
+
+  assert.equal(out.ok, true);
+  if (out.ok) {
+    const data = out.data as { spans: Array<{ start: number; end: number; termId: string }>; ambiguities: unknown[] };
+    assert.deepEqual(
+      data.spans.map(({ start, end }) => ({ start, end })),
+      [
+        { start: 0, end: 2 },
+        { start: 5, end: 7 },
+        { start: 12, end: 14 },
+      ],
+    );
+    assert.deepEqual(
+      data.spans.map(({ start, end }) => text.slice(start, end)),
+      ['ΟΣ', 'ος', 'ΟΣ'],
+    );
+    assert.deepEqual(
+      data.spans.map(({ termId }) => termId),
+      ['greek-term', 'greek-term', 'greek-term'],
+    );
+    assert.deepEqual(data.ambiguities, []);
+  }
+  assert.equal(text, original);
+});
+
+test('search.terms.resolve preserves source spans after compatibility composition across graphemes', async () => {
+  const targetPath = 'manuscript/vol-main/ch-main-1/sc-1.md';
+  const text = 'ㄱㅏ / 東京 / 😀東京 / ㍿';
+  const reader = makeReader({
+    [targetPath]: text,
+    [TERM_REGISTRY_PATH]: JSON.stringify({
+      schemaVersion: 1,
+      terms: [
+        { id: 'hangul', canonical: '가', aliases: [], targetPath },
+        { id: 'tokyo', canonical: '東京', aliases: [], targetPath },
+        { id: 'company', canonical: '株式会社', aliases: [], targetPath },
+      ],
+    }),
+  });
+  const actions = createSearchActions(
+    moduleContext(async () => {
+      throw new Error('unused');
+    }),
+    new SnapshotIndexCache(),
+  );
+  const resolve = findAction(actions, 'search.terms.resolve');
+  const out = await resolve.invoke(resolve.inputSchema.parse({ text }), actionContext(reader));
+  assert.ok(out.ok);
+  if (out.ok) {
+    const data = out.data as { spans: Array<{ start: number; end: number; termId: string }> };
+    assert.deepEqual(
+      data.spans.map(({ start, end, termId }) => [termId, text.slice(start, end)]),
+      [
+        ['hangul', 'ㄱㅏ'],
+        ['tokyo', '東京'],
+        ['tokyo', '東京'],
+        ['company', '㍿'],
+      ],
+    );
+  }
+});
+
+test('module disposal aborts and invalidates active index work', async () => {
   let release!: () => void;
   let started!: () => void;
-  const blocked = new Promise<void>((resolve) => { release = resolve; });
-  const readStarted = new Promise<void>((resolve) => { started = resolve; });
-  const reader = makeReader({ "manuscript/vol-main/ch-main-1/sc-1.md": "A blue harbor." });
+  const blocked = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const readStarted = new Promise<void>(resolve => {
+    started = resolve;
+  });
+  const reader = makeReader({ 'manuscript/vol-main/ch-main-1/sc-1.md': 'A blue harbor.' });
   const originalReadMany = reader.read.bind(reader);
-  reader.read = async (path) => {
-    if (path.startsWith("manuscript/")) { started(); await blocked; }
+  reader.read = async path => {
+    if (path.startsWith('manuscript/')) {
+      started();
+      await blocked;
+    }
     return originalReadMany(path);
   };
-  const definition = createSearchDefinition(moduleContext(async () => { throw new Error("unused"); }));
-  const query = findAction(definition.actions, "search.query");
-  const pending = query.invoke(query.inputSchema.parse({ query: "harbor" }), actionContext(reader));
+  const definition = createSearchDefinition(
+    moduleContext(async () => {
+      throw new Error('unused');
+    }),
+  );
+  const query = findAction(definition.actions, 'search.query');
+  const pending = query.invoke(query.inputSchema.parse({ query: 'harbor' }), actionContext(reader));
   await readStarted;
   await definition.dispose();
   release();
-  await assert.rejects(pending, (error: unknown) => (error as { code?: string }).code === "job_cancelled");
+  await assert.rejects(pending, (error: unknown) => (error as { code?: string }).code === 'job_cancelled');
 });
 
-function knowledgeEntry(id: string, name: string, status = "confirmed", aliases: Array<{ surface: string; status: string; scope: string | null }> = [], aliasLimitReached = false): KnowledgeProjectionEntry {
+function knowledgeEntry(
+  id: string,
+  name: string,
+  status = 'confirmed',
+  aliases: Array<{ surface: string; status: string; scope: string | null }> = [],
+  aliasLimitReached = false,
+): KnowledgeProjectionEntry {
   return {
-    node: { id, name, status, deletedAt: null, type: "lore", attributes: {} },
-    aliases: aliases.map(alias => ({ ...alias, nodeId: id })), aliasLimitReached,
-    relations: [], evidence: [], relationLimitReached: false, evidenceLimitReached: false,
+    node: { id, name, status, deletedAt: null, type: 'lore', attributes: {} },
+    aliases: aliases.map(alias => ({ ...alias, nodeId: id })),
+    aliasLimitReached,
+    relations: [],
+    evidence: [],
+    relationLimitReached: false,
+    evidenceLimitReached: false,
   };
 }
 
 function withKnowledge(reader: SnapshotReader, entries: readonly KnowledgeProjectionEntry[], digest: string): SnapshotReader {
   return {
     ...reader,
-    knowledge: { source: { kind: "knowledge-projection", snapshot: reader.snapshot, revision: digest }, entries, documentMappings: [], nodeLimitReached: false },
+    knowledge: {
+      source: { kind: 'knowledge-projection', snapshot: reader.snapshot, revision: digest },
+      entries,
+      documentMappings: [],
+      nodeLimitReached: false,
+    },
   };
 }
 
-test("native Knowledge references store only identity and path, resolve aliases from pinned snapshot, and retain ambiguity",async()=>{
-  const a="11111111-1111-4111-8111-111111111111",b="22222222-2222-4222-8222-222222222222",retired="33333333-3333-4333-8333-333333333333";
-  const path = "documents/scene.md";
-  const entries=[knowledgeEntry(a,"青い塔","confirmed",[{surface:"塔",status:"confirmed",scope:null},{surface:"北塔",status:"ambiguous",scope:null},{surface:"司令塔",status:"confirmed",scope:"chapter"}]),knowledgeEntry(b,"赤い塔","confirmed",[{surface:"塔",status:"confirmed",scope:null}]),knowledgeEntry(retired,"退役","retired")];
-  const registry={schemaVersion:1,terms:[],knowledgeReferences:[{knowledgeId:a,targetPath:path}]};
-  const values = { [path]: "青い塔", [TERM_REGISTRY_PATH]: JSON.stringify(registry) };
-  const knowledgeRevision = "a".repeat(64);
-  const actions=createSearchActions(moduleContext(async()=>{throw Error("unused")}),new SnapshotIndexCache());
-  let proposed:ChangeOperation[]=[];
+test('native Knowledge references store only identity and path, resolve aliases from pinned snapshot, and retain ambiguity', async () => {
+  const a = '11111111-1111-4111-8111-111111111111',
+    b = '22222222-2222-4222-8222-222222222222',
+    retired = '33333333-3333-4333-8333-333333333333';
+  const path = 'documents/scene.md';
+  const entries = [
+    knowledgeEntry(a, '青い塔', 'confirmed', [
+      { surface: '塔', status: 'confirmed', scope: null },
+      { surface: '北塔', status: 'ambiguous', scope: null },
+      { surface: '司令塔', status: 'confirmed', scope: 'chapter' },
+    ]),
+    knowledgeEntry(b, '赤い塔', 'confirmed', [{ surface: '塔', status: 'confirmed', scope: null }]),
+    knowledgeEntry(retired, '退役', 'retired'),
+  ];
+  const registry = { schemaVersion: 1, terms: [], knowledgeReferences: [{ knowledgeId: a, targetPath: path }] };
+  const values = { [path]: '青い塔', [TERM_REGISTRY_PATH]: JSON.stringify(registry) };
+  const knowledgeRevision = 'a'.repeat(64);
+  const actions = createSearchActions(
+    moduleContext(async () => {
+      throw Error('unused');
+    }),
+    new SnapshotIndexCache(),
+  );
+  let proposed: ChangeOperation[] = [];
   const reader = withKnowledge(makeReader(values), entries, knowledgeRevision);
-  const context=actionContext(reader,{async propose(operations){proposed=operations;return {id:"link",snapshot,operations,source:"module"}}});
-  const resolve=findAction(actions,"search.terms.resolve");
-  const out=await resolve.invoke(resolve.inputSchema.parse({text:"😀青い塔、塔、北塔、司令塔、赤い塔、退役"}),context);
-  assert.equal(out.ok,true);
-  if(out.ok){
-    const result=out.data as {spans:Array<{start:number;end:number;termId:string}>;ambiguities:Array<{alias:string;termIds:string[]}>;candidates:Array<{termId:string}>};
-    assert.deepEqual(result.spans.map(s=>s.termId),["knowledge-"+a]);
-    assert.equal(result.spans[0]!.start,2);
-    assert.equal(result.ambiguities.find(x=>x.alias==="塔")?.termIds.length,2);
-    assert.ok(result.ambiguities.some(x=>x.alias==="北塔"));
-    assert.ok(result.ambiguities.some(x=>x.alias==="司令塔"));
-    assert.deepEqual(result.candidates.map(x=>x.termId),["knowledge-"+b]);
+  const context = actionContext(reader, {
+    async propose(operations) {
+      proposed = operations;
+      return { id: 'link', snapshot, operations, source: 'module' };
+    },
+  });
+  const resolve = findAction(actions, 'search.terms.resolve');
+  const out = await resolve.invoke(resolve.inputSchema.parse({ text: '😀青い塔、塔、北塔、司令塔、赤い塔、退役' }), context);
+  assert.equal(out.ok, true);
+  if (out.ok) {
+    const result = out.data as {
+      spans: Array<{ start: number; end: number; termId: string }>;
+      ambiguities: Array<{ alias: string; termIds: string[] }>;
+      candidates: Array<{ termId: string }>;
+    };
+    assert.deepEqual(
+      result.spans.map(s => s.termId),
+      ['knowledge-' + a],
+    );
+    assert.equal(result.spans[0]!.start, 2);
+    assert.equal(result.ambiguities.find(x => x.alias === '塔')?.termIds.length, 2);
+    assert.ok(result.ambiguities.some(x => x.alias === '北塔'));
+    assert.ok(result.ambiguities.some(x => x.alias === '司令塔'));
+    assert.deepEqual(
+      result.candidates.map(x => x.termId),
+      ['knowledge-' + b],
+    );
   }
-  const link=findAction(actions,"search.terms.linkKnowledge");
-  const linked=await link.invoke(link.inputSchema.parse({knowledgeId:b,targetPath:path}),context);
-  assert.equal(linked.ok,true);
-  const stored=JSON.parse(proposed[0]!.writes[0]!.content!);
-  assert.deepEqual(stored.knowledgeReferences,[{knowledgeId:a,targetPath:path},{knowledgeId:b,targetPath:path}]);
-  assert.doesNotMatch(JSON.stringify(stored),/青い塔|赤い塔|aliases/);
+  const link = findAction(actions, 'search.terms.linkKnowledge');
+  const linked = await link.invoke(link.inputSchema.parse({ knowledgeId: b, targetPath: path }), context);
+  assert.equal(linked.ok, true);
+  const stored = JSON.parse(proposed[0]!.writes[0]!.content!);
+  assert.deepEqual(stored.knowledgeReferences, [
+    { knowledgeId: a, targetPath: path },
+    { knowledgeId: b, targetPath: path },
+  ]);
+  assert.doesNotMatch(JSON.stringify(stored), /青い塔|赤い塔|aliases/);
   assert.equal(proposed[0]!.readKnowledgeRevision, knowledgeRevision);
-  assert.deepEqual(proposed[0]!.reads.map(({ path }) => path), [TERM_REGISTRY_PATH, path]);
-  assert.doesNotThrow(()=>assertChangeOperation(proposed[0]));
-  await assert.rejects(()=>link.invoke(link.inputSchema.parse({knowledgeId:retired,targetPath:path}),context),/Confirmed Knowledge unavailable/);
+  assert.deepEqual(
+    proposed[0]!.reads.map(({ path }) => path),
+    [TERM_REGISTRY_PATH, path],
+  );
+  assert.doesNotThrow(() => assertChangeOperation(proposed[0]));
+  await assert.rejects(
+    () => link.invoke(link.inputSchema.parse({ knowledgeId: retired, targetPath: path }), context),
+    /Confirmed Knowledge unavailable/,
+  );
   // New snapshot changes the authoritative aliases; the reference stays unchanged.
   const nextSnapshot = { ...snapshot, projectVersion: 12 };
-  const changed = withKnowledge(makeReader(values, nextSnapshot), [knowledgeEntry(a, "新しい塔"), entries[1]!], "b".repeat(64));
-  const text = "青い塔、新しい塔";
+  const changed = withKnowledge(makeReader(values, nextSnapshot), [knowledgeEntry(a, '新しい塔'), entries[1]!], 'b'.repeat(64));
+  const text = '青い塔、新しい塔';
   const result = await resolve.invoke(resolve.inputSchema.parse({ text }), actionContext(changed));
   assert.ok(result.ok);
   assert.deepEqual(result.snapshot, nextSnapshot);
   const resultSpans = (result.data as { spans: Array<{ start: number; end: number }> }).spans;
-  assert.deepEqual(resultSpans.map(({ start, end }) => text.slice(start, end)), ["新しい塔"]);
+  assert.deepEqual(
+    resultSpans.map(({ start, end }) => text.slice(start, end)),
+    ['新しい塔'],
+  );
 });
 
-test("incomplete bounded alias inventory fails closed for automatic Knowledge links", async () => {
-  const a="11111111-1111-4111-8111-111111111111",b="22222222-2222-4222-8222-222222222222";
-  const path = "documents/scene.md";
-  const values = { [path]: "塔", [TERM_REGISTRY_PATH]: JSON.stringify({ schemaVersion: 1, terms: [], knowledgeReferences: [{ knowledgeId: a, targetPath: path }] }) };
-  const entries = [knowledgeEntry(a, "青い塔", "confirmed", [{surface: "塔", status: "confirmed", scope: null}]), knowledgeEntry(b, "赤い塔", "confirmed", [], true)];
-  const actions=createSearchActions(moduleContext(async()=>{throw Error("unused")}),new SnapshotIndexCache());
-  const resolve=findAction(actions,"search.terms.resolve");
-  let proposed:ChangeOperation[]=[];
-  const context=actionContext(withKnowledge(makeReader(values), entries, "c".repeat(64)),{async propose(operations){proposed=operations;return {id:"link",snapshot,operations,source:"module"};}});
-  const out=await resolve.invoke(resolve.inputSchema.parse({text:"塔"}),context);
-  assert.equal(out.ok,true);
-  if(out.ok){
-    const result=out.data as {spans:Array<unknown>;candidates:Array<{termId:string}>};
-    assert.deepEqual(result.spans,[]);
-    assert.deepEqual(result.candidates.map(term=>term.termId),["knowledge-"+a]);
+test('incomplete bounded alias inventory fails closed for automatic Knowledge links', async () => {
+  const a = '11111111-1111-4111-8111-111111111111',
+    b = '22222222-2222-4222-8222-222222222222';
+  const path = 'documents/scene.md';
+  const values = {
+    [path]: '塔',
+    [TERM_REGISTRY_PATH]: JSON.stringify({ schemaVersion: 1, terms: [], knowledgeReferences: [{ knowledgeId: a, targetPath: path }] }),
+  };
+  const entries = [
+    knowledgeEntry(a, '青い塔', 'confirmed', [{ surface: '塔', status: 'confirmed', scope: null }]),
+    knowledgeEntry(b, '赤い塔', 'confirmed', [], true),
+  ];
+  const actions = createSearchActions(
+    moduleContext(async () => {
+      throw Error('unused');
+    }),
+    new SnapshotIndexCache(),
+  );
+  const resolve = findAction(actions, 'search.terms.resolve');
+  let proposed: ChangeOperation[] = [];
+  const context = actionContext(withKnowledge(makeReader(values), entries, 'c'.repeat(64)), {
+    async propose(operations) {
+      proposed = operations;
+      return { id: 'link', snapshot, operations, source: 'module' };
+    },
+  });
+  const out = await resolve.invoke(resolve.inputSchema.parse({ text: '塔' }), context);
+  assert.equal(out.ok, true);
+  if (out.ok) {
+    const result = out.data as { spans: Array<unknown>; candidates: Array<{ termId: string }> };
+    assert.deepEqual(result.spans, []);
+    assert.deepEqual(
+      result.candidates.map(term => term.termId),
+      ['knowledge-' + a],
+    );
   }
-  const link=findAction(actions,"search.terms.linkKnowledge");
-  const linked=await link.invoke(link.inputSchema.parse({knowledgeId:b,targetPath:path}),context);
-  assert.equal(linked.ok,true,"explicit UUID linking remains available when only aliases are truncated");
-  assert.equal(proposed.length,1);
+  const link = findAction(actions, 'search.terms.linkKnowledge');
+  const linked = await link.invoke(link.inputSchema.parse({ knowledgeId: b, targetPath: path }), context);
+  assert.equal(linked.ok, true, 'explicit UUID linking remains available when only aliases are truncated');
+  assert.equal(proposed.length, 1);
 });
 
-test("a Knowledge projection from another project or snapshot cannot resolve aliases or bind a proposal", async () => {
-  const id = "11111111-1111-4111-8111-111111111111";
-  const path = "documents/scene.md";
-  const reader = withKnowledge(makeReader({
-    [path]: "塔", [TERM_REGISTRY_PATH]: JSON.stringify({ schemaVersion: 1, terms: [], knowledgeReferences: [{ knowledgeId: id, targetPath: path }] }),
-  }), [knowledgeEntry(id, "青い塔", "confirmed", [{ surface: "塔", status: "confirmed", scope: null }])], "d".repeat(64));
-  const actions = createSearchActions(moduleContext(async () => { throw Error("unused"); }), new SnapshotIndexCache());
-  const resolve = findAction(actions, "search.terms.resolve");
-  const link = findAction(actions, "search.terms.linkKnowledge");
-  for (const selected of [{ ...snapshot, projectId: "different-project" }, { ...snapshot, projectVersion: 12 }]) {
+test('a Knowledge projection from another project or snapshot cannot resolve aliases or bind a proposal', async () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const path = 'documents/scene.md';
+  const reader = withKnowledge(
+    makeReader({
+      [path]: '塔',
+      [TERM_REGISTRY_PATH]: JSON.stringify({ schemaVersion: 1, terms: [], knowledgeReferences: [{ knowledgeId: id, targetPath: path }] }),
+    }),
+    [knowledgeEntry(id, '青い塔', 'confirmed', [{ surface: '塔', status: 'confirmed', scope: null }])],
+    'd'.repeat(64),
+  );
+  const actions = createSearchActions(
+    moduleContext(async () => {
+      throw Error('unused');
+    }),
+    new SnapshotIndexCache(),
+  );
+  const resolve = findAction(actions, 'search.terms.resolve');
+  const link = findAction(actions, 'search.terms.linkKnowledge');
+  for (const selected of [
+    { ...snapshot, projectId: 'different-project' },
+    { ...snapshot, projectVersion: 12 },
+  ]) {
     const context = actionContext({ ...reader, snapshot: selected });
-    const result = await resolve.invoke(resolve.inputSchema.parse({ text: "塔" }), context);
+    const result = await resolve.invoke(resolve.inputSchema.parse({ text: '塔' }), context);
     assert.ok(result.ok);
     const data = result.data as { spans: unknown[]; warning?: string };
     assert.deepEqual(data.spans, []);
-    assert.equal(data.warning, "knowledge_terminology_unavailable");
-    await assert.rejects(() => link.invoke(link.inputSchema.parse({ knowledgeId: id, targetPath: path }), context), /Invalid native Knowledge snapshot/u);
+    assert.equal(data.warning, 'knowledge_terminology_unavailable');
+    await assert.rejects(
+      () => link.invoke(link.inputSchema.parse({ knowledgeId: id, targetPath: path }), context),
+      /Invalid native Knowledge snapshot/u,
+    );
   }
-  const unavailable = await link.invoke(link.inputSchema.parse({ knowledgeId: id, targetPath: path }), actionContext(makeReader({ [path]: "塔" })));
+  const unavailable = await link.invoke(
+    link.inputSchema.parse({ knowledgeId: id, targetPath: path }),
+    actionContext(makeReader({ [path]: '塔' })),
+  );
   assert.equal(unavailable.ok, false);
-  assert.equal(unavailable.error.code, "snapshot_unavailable");
+  assert.equal(unavailable.error.code, 'snapshot_unavailable');
 });

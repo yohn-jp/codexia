@@ -24,11 +24,22 @@ jobs:
       - name: Regenerate from the pinned OpenAPI and Swift package lock
         run: |
           swift --version
+          old="$(mktemp -d)"
+          cp -a ios/CodexiaTransport/Sources/CodexiaAPI/. "$old/"
           bash ios/CodexiaTransport/generate.sh
-          git diff --binary -- ios/CodexiaTransport/Sources/CodexiaAPI > swift-regeneration.patch
-          git diff --stat -- ios/CodexiaTransport/Sources/CodexiaAPI
-          test -s swift-regeneration.patch
           bash ios/CodexiaTransport/generate.sh --check
+          : > swift-regeneration.patch
+          for file in ios/CodexiaTransport/Sources/CodexiaAPI/*.swift; do
+            name="$(basename "$file")"
+            rc=0
+            diff -u --label "a/$file" --label "b/$file" "$old/$name" "$file" >> swift-regeneration.patch || rc=$?
+            test "$rc" -le 1
+            printf 'SWIFT_OUTPUT_SHA %s %s\n' "$(git hash-object "$file")" "$file"
+          done
+          test -s swift-regeneration.patch
+          echo CODEXIA_SWIFT_PATCH_BEGIN
+          cat swift-regeneration.patch
+          echo CODEXIA_SWIFT_PATCH_END
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: swift-regeneration-patch

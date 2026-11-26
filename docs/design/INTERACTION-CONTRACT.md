@@ -61,7 +61,7 @@ Desktop WebとiOS Nativeは別public OAuth clientで同じBetter Auth/API認可�
 
 | 所有者 | 変えてよいpresentation | 保持すべき契約 |
 | --- | --- | --- |
-| Web launcher / PersistenceEntry | Desktop Web入口と状態表示 | Web auth mode、scope。旧Mobile選択は撤去対象 |
+| Web launcher / PersistenceEntry | Desktop Web入口と状態表示 | Web auth mode、scope。Mobile選択UIは撤去済み。保存済みの旧Mobile値はDesktopへ移行 |
 | PersistenceWorkspace controller | 表示用projection、画面構成 | canonical input、journal、guard、save/recovery、API |
 | DesktopShell (Web) | Desktop React操作面 | Web route/history、CodeMirror IMEとfocus |
 | Workspace | 初期preset、chrome、操作配置 | schema、catalog、layout persistence、lifetime |
