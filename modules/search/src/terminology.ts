@@ -118,18 +118,34 @@ interface NormalizedText {
 /** Keeps offsets in the original UTF-16 string while matching normalized graphemes. */
 function normalizeWithOffsets(text: string): NormalizedText {
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-  // Normalize whole text so contextual casing matches the whole-string alias normalization.
-  const value = normalizeTerm(text);
-  const starts: number[] = [];
-  const ends: number[] = [];
+  const decomposed: string[] = [];
+  const sourceStarts: number[] = [];
+  const sourceEnds: number[] = [];
   for (const segment of segmenter.segment(text)) {
-    const normalizedLength = normalizeTerm(segment.segment).length;
-    for (let index = 0; index < normalizedLength; index += 1) {
-      starts.push(segment.index);
-      ends.push(segment.index + segment.segment.length);
+    const part = segment.segment.normalize('NFKD');
+    decomposed.push(part);
+    for (let index = 0; index < part.length; index += 1) {
+      sourceStarts.push(segment.index);
+      sourceEnds.push(segment.index + segment.segment.length);
     }
   }
-  return { value, starts, ends };
+
+  // Compatibility decomposition can join previously separate graphemes (e.g. ㄱ + ㅏ).
+  // Segment again before canonical composition, keeping the union of original ranges.
+  const starts: number[] = [];
+  const ends: number[] = [];
+  for (const segment of segmenter.segment(decomposed.join(''))) {
+    const end = segment.index + segment.segment.length;
+    const startOffset = sourceStarts[segment.index]!;
+    const endOffset = sourceEnds[end - 1]!;
+    const normalizedLength = segment.segment.normalize('NFC').toLowerCase().length;
+    for (let index = 0; index < normalizedLength; index += 1) {
+      starts.push(startOffset);
+      ends.push(endOffset);
+    }
+  }
+  // Use whole-string casing, including contextual final sigma.
+  return { value: normalizeTerm(text), starts, ends };
 }
 
 function isWordCharacter(value: string | undefined): boolean {
