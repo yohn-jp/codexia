@@ -71,6 +71,15 @@ async function main(){
   const expectedTag=componentReleaseTagFromEnvironment(process.argv[2],env);
   const release=componentReleaseRecordFromEnvironment(env);
   assert.equal(release.tag,expectedTag,'Component release metadata differs from the trusted producer version');
+  await recordComponentRelease(release,{github});
+}
+
+// Shared immutable tag and release writer. The caller must first certify the
+// producer and verify the deployed identity in its protected release lane.
+export async function recordComponentRelease(release,{github}){
+  const expectedTag=release.tag;
+  assert.match(expectedTag,/^(?:frontend|backend)-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u);
+  assert.match(release.targetSha,/^[a-f0-9]{40}$/u);
   const [owner,repo]=repository.split('/');
   const readOrMissing=async operation=>{
     try{return (await operation()).data;}

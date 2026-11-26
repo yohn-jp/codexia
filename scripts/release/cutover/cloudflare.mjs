@@ -355,8 +355,8 @@ export function createCloudflareCutover({
     return initial ? { ...staged, initialControls } : staged;
   }
 
-  async function deploy({ fromVersionId, toVersionId }) {
-    assert.ok((await observeFence()).enabled, 'Cloudflare maintenance fence must be active before switching the Worker');
+  async function promoteVersion({ fromVersionId, toVersionId }, assertBoundary) {
+    await assertBoundary(false);
     const [before] = await Promise.all([observeDeployment({ allowAbsent: true }), readNormalVersion(toVersionId)]);
     if (before?.versionId === toVersionId) return before;
     assert.ok((fromVersionId === null || uuid.test(fromVersionId)) && (before?.versionId ?? null) === fromVersionId, 'Cloudflare has an unexpected live Worker version');
@@ -370,8 +370,34 @@ export function createCloudflareCutover({
     }
     const after = await observeDeployment();
     assert.ok(after.versionId === toVersionId, 'Cloudflare did not confirm the requested Worker version at 100%');
-    assert.ok((await observeFence()).enabled, 'Cloudflare maintenance fence changed while switching the Worker');
+    await assertBoundary(true);
     return after;
+  }
+
+  async function deploy(input) {
+    return promoteVersion(input, async after => {
+      assert.ok((await observeFence()).enabled, after
+        ? 'Cloudflare maintenance fence changed while switching the Worker'
+        : 'Cloudflare maintenance fence must be active before switching the Worker');
+    });
+  }
+
+  // The R5 controller has already admitted a certified fresh installation.
+  // Reuse the immutable version uploader and promotion sink without toggling
+  // a maintenance fence; the normal Access topology is required throughout.
+  async function deployForOwnerEnrollment({ observed, staged, artifactDigest }) {
+    assert.ok(observed?.workerId && observed.routesReady && observed.publicProtocolEnabled === false &&
+      observed.fence?.enabled === false && observed.backend === null, 'Owner enrollment requires protected canonical ingress');
+    await assertWorkerArtifact({ ...staged, artifactDigest, initialWorkerId: observed.workerId });
+    const fromVersionId = observed.deployment?.versionId ?? null;
+    const toVersionId = staged.versionId;
+    return promoteVersion({ fromVersionId, toVersionId }, async after => {
+      const current = await observeLifecycle({ backendExpected: false, ownerSetup: true });
+      assert.ok(current.routesReady && current.ingressDigest === observed.ingressDigest &&
+        current.workerId === observed.workerId, 'Canonical ingress changed during owner enrollment publication');
+      if (!after) assert.deepEqual(current.deployment, observed.deployment, 'Approved Worker deployment changed before publication');
+      else assert.equal(current.deployment?.versionId, toVersionId, 'Owner enrollment Worker version changed after publication');
+    });
   }
 
   async function verifyFenced() {
@@ -591,6 +617,6 @@ export function createCloudflareCutover({
   }
 
   return { observe, observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, assertWorkerArtifact, fence: () => setFence(true),
-    unfence: () => setFence(false), verifyFenced, verifyUnfenced, deploy,
+    unfence: () => setFence(false), verifyFenced, verifyUnfenced, deploy, deployForOwnerEnrollment,
     readInitialWorkerControls };
 }

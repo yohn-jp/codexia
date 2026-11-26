@@ -488,7 +488,7 @@ export async function verifyCutoverFrontendArtifact(input, { env = process.env, 
   assert.equal(identity.sourceSha, sourceSha, 'Frontend archive source differs from the producer');
   assert.equal(identity.profile, 'full', 'Cutover requires a Full frontend');
   assert.equal(identity.apiEpoch, expectedEpoch, 'Cutover requires the selected frontend API epoch');
-  return { identity, artifactId: id, artifactDigest: input.artifactDigest, runId, verifyRunId };
+  return { identity, artifactId: id, artifactDigest: input.artifactDigest, runId, verifyRunId, producerAttempt: attempt };
 }
 
 /** @param {{env?:NodeJS.ProcessEnv,fetchImpl?:typeof fetch}} options */

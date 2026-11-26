@@ -179,6 +179,7 @@ async function planObservation({ bootstrapMode } = {}) {
       ...config,
       origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
       readToken: env.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN,
+      ...(bootstrapMode === 'publish-frontend' ? { workerToken: env.CLOUDFLARE_API_TOKEN } : {}),
     });
     let edge = null;
     try {
@@ -197,7 +198,7 @@ async function planObservation({ bootstrapMode } = {}) {
     await mainSource();
     if (bootstrapMode) {
       stage = 'bootstrap-admission';
-      const { admitBootstrap, ownerSetupFrontendBindings, initialFrontendNeedsPublication, assertInitialFrontendReady } = await import('../bootstrap/admission.mjs');
+      const { admitBootstrap, ownerSetupFrontendBindings, assertInitialFrontendReady } = await import('../bootstrap/admission.mjs');
       const { plan } = result;
       if (bootstrapMode !== 'bootstrap') {
         assert.equal(host.database.setupImage, candidateBackend.image, 'Owner setup must use the certified installation image');
@@ -219,26 +220,17 @@ async function planObservation({ bootstrapMode } = {}) {
         assert.equal(env.CODEXIA_INITIAL_FRONTEND_APPROVAL, 'PUBLISH_INITIAL_FRONTEND');
         assert.notEqual(env.CODEXIA_EPOCH_CUTOVER_PAUSED, 'true', 'Production deployment is paused');
         assert.equal(request.intent, 'install');
-        const needsPublication = initialFrontendNeedsPublication(edge, candidateFrontend.identity);
+        assert.ok(env.CLOUDFLARE_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID === config.accountId,
+          'Canonical Worker publication credential and account must match the protected target');
         ownerSetupFrontendBindings(candidateFrontend.identity.oauthConfigIdentity, edge.origin);
-        if (needsPublication) {
-          stage = 'canonical-frontend-publication';
-          assert.ok(env.CLOUDFLARE_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID === config.accountId,
-            'Canonical Worker publication credential and account must match the protected target');
-          await mainSource();
-          await run('edge/frontend/node_modules/.bin/wrangler',
-            ['deploy', '--config', 'edge/frontend/wrangler.jsonc'], {
-              env: { PATH: env.PATH, HOME: env.HOME, CI: 'true', WRANGLER_SEND_METRICS: 'false',
-                CLOUDFLARE_ACCOUNT_ID: config.accountId, CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN },
-              timeout: 300_000,
-            });
-        }
-        stage = 'canonical-frontend-verification';
-        const after = await edgeReader.observeLifecycle({ backendExpected: false, ownerSetup: true });
-        assert.equal(after.ingressDigest, edge.ingressDigest, 'Canonical ingress changed during frontend publication');
-        assertInitialFrontendReady(after, candidateFrontend.identity);
-        await mainSource();
-        console.log('Certified canonical frontend is published for initial owner enrollment');
+        stage = 'canonical-frontend-publication';
+        const { publishInitialFrontend } = await import('../bootstrap/publish-frontend.mjs');
+        const { recordComponentRelease } = await import('../../release/components/record.mjs');
+        await publishInitialFrontend({ edge: edgeReader, observed: edge, candidate: candidateFrontend,
+          assertCurrentSource: mainSource,
+          recordRelease: release => recordComponentRelease(release, { github: createGitHubOctokit({ token: env.GH_TOKEN }) }),
+        });
+        console.log('Certified canonical frontend and immutable release record verified for initial owner enrollment');
         return;
       }
       if (bootstrapMode === 'owner-setup') assertInitialFrontendReady(edge, candidateFrontend.identity);
