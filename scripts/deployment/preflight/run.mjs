@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
-import { readPreservationEvidence } from '../cutover/preservation.mjs';
-import { digestEvidence } from '../cutover/coordinator.mjs';
+import { readPreservationEvidence } from './preservation.mjs';
+import { digestEvidence } from './evidence-digest.mjs';
 import { authSchemaFingerprint, CODEXIA_AUTH_SCHEMA } from '../../../packages/api/src/auth-schema.ts';
 
 const run = promisify(execFile);

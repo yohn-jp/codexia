@@ -238,7 +238,7 @@ test('Preflight stops at R0 when an initialized database lacks matching installa
     { ...ledger[0], checksum: 'f'.repeat(64) },
   ] });
   assert.equal(changedLedger.plan.route, 'R0');
-  assert.ok(changedLedger.plan.blockers.includes('unsupported-transition'));
+  assert.ok(changedLedger.plan.blockers.includes('state-or-intent-not-admitted'));
   assert.throws(() => admitBootstrap({ ...changedLedger, mode: 'bootstrap', initializeDatabase: true }), /does not admit/u);
 });
 

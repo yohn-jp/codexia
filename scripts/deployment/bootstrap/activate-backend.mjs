@@ -73,7 +73,7 @@ async function main(stage, env) {
   assert.equal(env.CODEXIA_FIRST_ACTIVATION_APPROVAL, 'ACTIVATE_CODEXIA_BACKEND');
   const { createCloudflareCutover } = await import('../../release/cutover/cloudflare.mjs');
   const { planFromObservations } = await import('../preflight/observe.mjs');
-  const { readPreservationEvidence } = await import('../cutover/preservation.mjs');
+  const { readPreservationEvidence } = await import('../preflight/preservation.mjs');
   const releases = await readLifecycleCandidate(request);
   assert.deepEqual(releases.candidateBackend, JSON.parse(Buffer.from(env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, 'base64')),
     'Reverified backend certificate differs from the verified deployment handoff');
