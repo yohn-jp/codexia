@@ -216,9 +216,10 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
   });
   const requirements = [...new Set(report.source.requirementIds ?? publicRows.map(row => row.requirementId))].sort().map(requirementId => {
     const matching = publicRows.filter(row => row.requirementId === requirementId);
+    const partialDeclaration = /部分導入済み|partially implemented/iu;
     const implementationDeclarations = [...new Map(matching.flatMap(row => [
-      ...row.requirementImplementationIdentifiers.filter(text => /未実装|未導入|not implemented|unimplemented/iu.test(text)).map(text => ({ sourceField: 'Implementation identifiers', text })),
-      ...(row.requirementComment && /未実装|未導入|not implemented|unimplemented/iu.test(row.requirementComment) ? [{ sourceField: 'Comment', text: row.requirementComment }] : []),
+      ...row.requirementImplementationIdentifiers.filter(text => /未実装|未導入|not implemented|unimplemented/iu.test(text) || partialDeclaration.test(text)).map(text => ({ sourceField: 'Implementation identifiers', text })),
+      ...(row.requirementComment && (/未実装|未導入|not implemented|unimplemented/iu.test(row.requirementComment) || partialDeclaration.test(row.requirementComment)) ? [{ sourceField: 'Comment', text: row.requirementComment }] : []),
       ...(row.statement && /未実装|not implemented|unimplemented/iu.test(row.statement) ? [{ sourceField: 'Obligation statement', text: row.statement }] : []),
     ]).map(item => [`${item.sourceField}\0${item.text}`, item])).values()];
     return {
@@ -228,7 +229,9 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
       conformanceStatus: matching[0]?.conformanceStatus ?? 'UNMAPPED',
       applicability: matching[0]?.applicability ?? 'UNKNOWN',
       implementationDeclarations,
-      implementationDeclarationStatus: implementationDeclarations.length ? 'EXPLICIT_NOT_IMPLEMENTED' : 'NO_EXPLICIT_DECLARATION',
+      implementationDeclarationStatus: implementationDeclarations.some(note => partialDeclaration.test(note.text))
+        ? 'EXPLICIT_PARTIALLY_IMPLEMENTED'
+        : implementationDeclarations.length ? 'EXPLICIT_NOT_IMPLEMENTED' : 'NO_EXPLICIT_DECLARATION',
       obligationIds: matching.map(row => row.obligationId),
       obligationStatusCounts: Object.fromEntries([...new Set(matching.map(row => row.status))].sort().map(status => [status, matching.filter(row => row.status === status).length])),
     };
@@ -363,9 +366,9 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
   const requirementHtml = requirements.map(item => {
     const related = publicRows.filter(row => row.requirementId === item.requirementId);
     const declarationHtml = item.implementationDeclarations.map(note => `<li><strong>${esc(note.sourceField)}</strong>: ${esc(note.text)}</li>`).join('');
-    const declaration = item.implementationDeclarationStatus === 'EXPLICIT_NOT_IMPLEMENTED'
-      ? `<span class="state" data-state="EXPLICIT_NOT_IMPLEMENTED">明示: 未実装</span><details><summary>登録記述を確認</summary><ul>${declarationHtml}</ul></details>`
-      : '明示記述なし';
+    const declaration = item.implementationDeclarationStatus === 'NO_EXPLICIT_DECLARATION'
+      ? '明示記述なし'
+      : `<span class="state" data-state="${esc(item.implementationDeclarationStatus)}">明示: ${item.implementationDeclarationStatus === 'EXPLICIT_PARTIALLY_IMPLEMENTED' ? '部分導入済み' : '未実装'}</span><details><summary>登録記述を確認</summary><ul>${declarationHtml}</ul></details>`;
     return `<tr ${attr({ area: item.area, status: [item.conformanceStatus, item.implementationDeclarationStatus] }, `${item.requirementId} ${item.implementationDeclarationStatus} ${declarationHtml} ${related.map(row => `${row.obligationId} ${row.statement} ${row.conformanceStatus} ${row.status}`).join(' ')}`)}><td><a href="#${esc(related[0]?.obligationId ? `obligation-${related[0].obligationId}` : '')}">${esc(item.requirementId)}</a></td><td>${esc(AREA_LABELS[item.area] ?? item.area)}</td><td>${esc([...new Set(related.map(row => row.conformanceStatus))].join(' · '))}</td><td>${related.map(row => `<a href="#obligation-${esc(row.obligationId)}">${esc(row.obligationId)}</a>`).join('<br>')}</td><td>${declaration}</td></tr>`;
   }).join('');
   const reverseHtml = reverse.map(row => {
