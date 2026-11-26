@@ -27,7 +27,7 @@ stdio の新規プロセスも同じ期限まで SDK が提供する旧世代の
 期限以降は HTTP の各リクエストと新規 stdio プロセスに `legacy: "reject"` を適用する。
 互換期間中も、接続元の認可と対象作品の選択は各リクエストでやり直す。
 MCP のセッション ID の発行、イベントストリームの再開、セッション削除は廃止する。
-API epoch 3 の MCP エンドポイントは GET と DELETE の成功応答を提供しない。
+API epoch 3 以降の MCP エンドポイントは GET と DELETE の成功応答を提供しない。epoch 4 では認可済み MCP POST の不正 JSON に JSON-RPC parse error（HTTP 400、id: null、code: -32700）を返す。認可等の ApiError は維持する。
 
 ## 移行後のリクエスト境界
 

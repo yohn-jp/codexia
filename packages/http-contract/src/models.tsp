@@ -10,6 +10,21 @@ namespace Codexia.Http;
 alias JsonObject = Record<unknown>;
 alias OwnerSessionCookie = ApiKeyAuth<ApiKeyLocation.cookie, "__Secure-better-auth.session_token">;
 
+// Native persistence uses PostgreSQL UUID identities. Portable archives
+// require the lowercase canonical representation emitted by the exporter.
+@format("uuid")
+scalar PersistenceId extends string;
+@pattern("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+scalar ArchiveId extends string;
+@minValue(1)
+scalar PositiveVersion extends int32;
+@minValue(0) @maxValue(1)
+scalar UnitConfidence extends float64;
+@minLength(1) @maxLength(200) @pattern(".*\\S.*")
+scalar PersistenceIdempotencyKey extends string;
+@minLength(1) @maxLength(128) @pattern(".*\\S.*")
+scalar PersistenceClientId extends string;
+
 model ApiError {
   error: string;
   code: string;
@@ -981,7 +996,7 @@ model CoreProjectCreateRequest {
 }
 
 model PersistenceProjectCreateRequest {
-  id?: string;
+  id?: PersistenceId;
   @pattern(".*\\S.*")
   @minLength(1)
   @maxLength(256)
@@ -1001,151 +1016,138 @@ model PersistenceProjectUpdateRequest {
   ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime rejects missing or invalid fields. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceDocumentCreateRequest {
-  documentId?: string;
-  parentId?: string | null;
+  documentId?: PersistenceId;
+  parentId?: PersistenceId | null;
   @minLength(1) @maxLength(64) @pattern(".*\\S.*")
-  kind?: string;
+  kind: string;
   @minLength(1) @maxLength(256) @pattern(".*\\S.*")
-  title?: string;
+  title: string;
   @maxLength(512)
   orderKey?: string;
   appendToEnd?: boolean;
-  markdown?: string;
-  ...Record<unknown>;
+  markdown: string;
+  ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime requires expectedVersion and validates optional metadata fields. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceDocumentMetadataRequest {
   @minValue(1)
-  expectedVersion?: int32;
-  parentId?: string | null;
+  expectedVersion: int32;
+  parentId?: PersistenceId | null;
   @minLength(1) @maxLength(256) @pattern(".*\\S.*")
   title?: string;
   @minLength(1) @maxLength(256) @pattern(".*\\S.*")
   orderKey?: string;
-  ...Record<unknown>;
+  ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime requires expectedVersion. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceDocumentDeleteRequest {
   @minValue(1)
-  expectedVersion?: int32;
-  ...Record<unknown>;
+  expectedVersion: int32;
+  ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime requires baseRevisionId and sourceRevisionId. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceDocumentRestoreRequest {
-  baseRevisionId?: string;
-  sourceRevisionId?: string;
-  ...Record<unknown>;
+  baseRevisionId: PersistenceId;
+  sourceRevisionId: PersistenceId;
+  ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime requires revisionId and UTF-16 offsets. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceAnchorCreateRequest {
-  id?: string;
-  revisionId?: string;
+  id?: PersistenceId;
+  revisionId: PersistenceId;
   @minValue(0)
-  fromUtf16?: int32;
+  fromUtf16: int32;
   @minValue(0)
-  toUtf16?: int32;
+  toUtf16: int32;
   status?: "proposed" | "confirmed";
-  nodeId?: string;
-  ...Record<unknown>;
+  nodeId?: PersistenceId;
+  ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime requires all update fields. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceAnchorUpdateRequest {
-  revisionId?: string;
+  revisionId: PersistenceId;
   @minValue(0)
-  fromUtf16?: int32;
+  fromUtf16: int32;
   @minValue(0)
-  toUtf16?: int32;
-  status?: "proposed" | "confirmed";
+  toUtf16: int32;
+  status: "proposed" | "confirmed";
   @minValue(1)
-  expectedVersion?: int32;
-  ...Record<unknown>;
+  expectedVersion: int32;
+  ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime requires the identity, statement, modality, perspective, revision and expected anchor version fields. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceAnchorAssertionRequest {
-  id?: string;
-  nodeId?: string;
+  id: PersistenceId;
+  nodeId: PersistenceId;
   @minLength(1) @maxLength(4000) @pattern(".*\\S.*")
-  statement?: string;
-  modality?: "fact" | "belief" | "disclosure" | "hypothesis";
+  statement: string;
+  modality: "fact" | "belief" | "disclosure" | "hypothesis";
   @minLength(1) @maxLength(128) @pattern(".*\\S.*")
-  perspective?: string;
-  revisionId?: string;
+  perspective: string;
+  revisionId: PersistenceId;
   @minValue(1)
-  expectedAnchorVersion?: int32;
-  ...Record<unknown>;
+  expectedAnchorVersion: int32;
+  ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime requires nodeId and validates optional status. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceMentionCreateRequest {
-  nodeId?: string;
+  nodeId: PersistenceId;
   status?: "proposed" | "confirmed" | "ambiguous" | "rejected";
-  ...Record<unknown>;
+  ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime requires type, name, attributes and status; expectedVersion is nullable/optional. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceKnowledgeNodeUpdateRequest {
   @minLength(1) @maxLength(64) @pattern(".*\\S.*")
-  type?: string;
+  type: string;
   @minLength(1) @maxLength(512) @pattern(".*\\S.*")
-  name?: string;
-  attributes?: JsonObject;
-  status?: "proposed" | "confirmed" | "retired";
-  expectedVersion?: int32 | null;
-  ...Record<unknown>;
+  name: string;
+  attributes: JsonObject;
+  status: "proposed" | "confirmed" | "retired";
+  expectedVersion?: PositiveVersion | null;
+  ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime requires surface and normalized. Optional id/scope/status are generated or defaulted. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceKnowledgeAliasCreateRequest {
-  id?: string;
+  id?: PersistenceId;
   @minLength(1) @maxLength(512) @pattern(".*\\S.*")
-  surface?: string;
+  surface: string;
   @minLength(1) @maxLength(512) @pattern(".*\\S.*")
-  normalized?: string;
+  normalized: string;
   scope?: string | null;
   status?: "proposed" | "confirmed" | "ambiguous" | "retired";
-  ...Record<unknown>;
+  ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime requires targetId and type. Optional attributes, validity, id and status default on the server. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceKnowledgeRelationCreateRequest {
-  id?: string;
-  targetId?: string;
+  id?: PersistenceId;
+  targetId: PersistenceId;
   @minLength(1) @maxLength(128) @pattern(".*\\S.*")
-  type?: string;
+  type: string;
   attributes?: JsonObject;
   validity?: JsonObject;
   status?: "proposed" | "confirmed" | "rejected" | "retired";
-  expectedVersion?: int32 | null;
-  ...Record<unknown>;
+  expectedVersion?: PositiveVersion | null;
+  ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime requires proposition, modality, perspective and status; expectedVersion is nullable. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceAssertionUpdateRequest {
-  proposition?: JsonObject;
+  proposition: JsonObject;
   @minLength(1) @maxLength(128) @pattern(".*\\S.*")
-  modality?: string;
+  modality: string;
   @minLength(1) @maxLength(128) @pattern(".*\\S.*")
-  perspective?: string;
+  perspective: string;
   narrativeTime?: JsonObject;
-  confidence?: float64 | null;
-  status?: "proposed" | "confirmed" | "rejected" | "retired";
-  expectedVersion?: int32 | null;
-  ...Record<unknown>;
+  confidence?: UnitConfidence | null;
+  status: "proposed" | "confirmed" | "rejected" | "retired";
+  expectedVersion: PositiveVersion | null;
+  ...Record<never>;
 }
 
-@extension("x-codexia-validation-status", "Shape documented; runtime requires evidenceId and role. Required-property and strict-unknown-key claims remain incomplete pending an epoch-compatible contract change.")
 model PersistenceAssertionEvidenceCreateRequest {
-  evidenceId?: string;
-  role?: "supports" | "contradicts" | "quotes" | "context";
-  ...Record<unknown>;
+  evidenceId: PersistenceId;
+  role: "supports" | "contradicts" | "quotes" | "context";
+  ...Record<never>;
 }
 
 model PersistenceAssertionEnvelope {
@@ -1186,206 +1188,63 @@ model PersistenceMentionLink {
   ...Record<never>;
 }
 
-model WorkArchiveProject {
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
-  title?: string;
-  settings?: JsonObject;
-  ...Record<unknown>;
-}
+@maxLength(1024)
+scalar ArchiveOmittedRecord extends string;
 
-model WorkArchiveDocument {
-  id?: string;
-  parentId?: string | null;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
-  kind?: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
-  title?: string;
-  @maxLength(512)
-  orderKey?: string;
-  markdown?: string;
-  revisionId?: string;
-  ...Record<unknown>;
-}
-
-model WorkArchiveKnowledgeNode {
-  id?: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
-  type?: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
-  name?: string;
-  attributes?: JsonObject;
-  status?: "proposed" | "confirmed" | "retired";
-  ...Record<unknown>;
-}
-
-model WorkArchiveKnowledgeAlias {
-  id?: string;
-  nodeId?: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
-  surface?: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
-  normalized?: string;
-  scope?: string | null;
-  status?: "proposed" | "confirmed" | "ambiguous" | "retired";
-  ...Record<unknown>;
-}
-
-model WorkArchiveKnowledgeRelation {
-  id?: string;
-  sourceId?: string;
-  targetId?: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
-  type?: string;
-  attributes?: JsonObject;
-  validity?: JsonObject;
-  status?: "proposed" | "confirmed" | "rejected" | "retired";
-  ...Record<unknown>;
-}
-
-model WorkArchiveKnowledge {
-  nodes?: WorkArchiveKnowledgeNode[];
-  aliases?: WorkArchiveKnowledgeAlias[];
-  relations?: WorkArchiveKnowledgeRelation[];
-  ...Record<unknown>;
-}
-
-model WorkArchiveAnchor {
-  id?: string;
-  documentId?: string;
-  revisionId?: string;
-  @minValue(0) fromUtf16?: int32;
-  @minValue(0) toUtf16?: int32;
-  @pattern("^[0-9a-f]{64}$") quoteSha256?: string;
-  status?: "proposed" | "confirmed" | "needs_review" | "orphaned";
-  ...Record<unknown>;
-}
-
-model WorkArchiveMention {
-  evidenceId?: string;
-  nodeId?: string;
-  status?: "proposed" | "confirmed" | "ambiguous" | "rejected";
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*") source?: string;
-  confidence?: float64 | null;
-  extractorVersion?: string | null;
-  ...Record<unknown>;
-}
-
-model WorkArchiveAssertion {
-  id?: string;
-  proposition?: JsonObject;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*") modality?: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*") perspective?: string;
-  narrativeTime?: JsonObject;
-  confidence?: float64 | null;
-  status?: "proposed" | "confirmed" | "rejected" | "retired";
-  ...Record<unknown>;
-}
-
-model WorkArchiveAssertionEvidence {
-  assertionId?: string;
-  evidenceId?: string;
-  role?: "supports" | "contradicts" | "quotes" | "context";
-  ...Record<unknown>;
-}
-
-model WorkArchiveUnresolvedEvidence {
-  @maxItems(20000)
-  anchors?: WorkArchiveAnchor[];
-  @maxItems(40000)
-  mentions?: WorkArchiveMention[];
-  @maxItems(40000)
-  assertionEvidence?: WorkArchiveAssertionEvidence[];
-  ...Record<unknown>;
-}
-
-model WorkArchiveEvidence {
-  @maxItems(10000)
-  anchors?: WorkArchiveAnchor[];
-  @maxItems(40000)
-  mentions?: WorkArchiveMention[];
-  @maxItems(999)
-  assertions?: WorkArchiveAssertion[];
-  @maxItems(40000)
-  assertionEvidence?: WorkArchiveAssertionEvidence[];
-  unresolved?: WorkArchiveUnresolvedEvidence;
-  ...Record<unknown>;
-}
-
-model WorkArchiveModuleRecord {
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*") moduleId?: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*") key?: string;
-  value?: JsonObject;
-  ...Record<unknown>;
-}
-
-@extension("x-codexia-validation-status", "The runtime enforces the strict codexia-work/v1 archive shape and size limits. OpenAPI fields remain optional/open while the approved compatibility baseline uses a generic JSON object; do not treat this schema as complete validation coverage.")
-model WorkArchive {
-  format?: "codexia-work/v1";
-  project?: WorkArchiveProject;
-  @maxItems(999)
-  documents?: WorkArchiveDocument[];
-  knowledge?: WorkArchiveKnowledge;
-  evidence?: WorkArchiveEvidence;
-  @maxItems(10000)
-  moduleRecords?: WorkArchiveModuleRecord[];
-  @maxItems(10000)
-  omittedRecords?: string[];
-  ...Record<unknown>;
-}
-
-// Export has a complete, validated archive shape. Keep import on the
-// compatibility model above, whose optional fields and open object shapes are
-// required for the existing import contract.
 model WorkArchiveExportProject {
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  @minLength(1) @maxLength(512)
   title: string;
   settings: JsonObject;
   ...Record<never>;
 }
 
-model WorkArchiveExportDocument extends WorkArchiveDocument {
-  id: string;
-  parentId: string | null;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+model WorkArchiveExportDocument {
+  id: ArchiveId;
+  parentId: ArchiveId | null;
+  @minLength(1) @maxLength(512)
   kind: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  @minLength(1) @maxLength(512)
   title: string;
   @maxLength(512)
   orderKey: string;
   markdown: string;
-  revisionId: string;
+  revisionId: ArchiveId;
+  ...Record<never>;
 }
 
-model WorkArchiveExportKnowledgeNode extends WorkArchiveKnowledgeNode {
-  id: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+model WorkArchiveExportKnowledgeNode {
+  id: ArchiveId;
+  @minLength(1) @maxLength(512)
   type: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  @minLength(1) @maxLength(512)
   name: string;
   attributes: JsonObject;
   status: "proposed" | "confirmed" | "retired";
+  ...Record<never>;
 }
 
-model WorkArchiveExportKnowledgeAlias extends WorkArchiveKnowledgeAlias {
-  id: string;
-  nodeId: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+model WorkArchiveExportKnowledgeAlias {
+  id: ArchiveId;
+  nodeId: ArchiveId;
+  @minLength(1) @maxLength(512)
   surface: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  @minLength(1) @maxLength(512)
   normalized: string;
   scope: string | null;
   status: "proposed" | "confirmed" | "ambiguous" | "retired";
+  ...Record<never>;
 }
 
-model WorkArchiveExportKnowledgeRelation extends WorkArchiveKnowledgeRelation {
-  id: string;
-  sourceId: string;
-  targetId: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+model WorkArchiveExportKnowledgeRelation {
+  id: ArchiveId;
+  sourceId: ArchiveId;
+  targetId: ArchiveId;
+  @minLength(1) @maxLength(512)
   type: string;
   attributes: JsonObject;
   validity: JsonObject;
   status: "proposed" | "confirmed" | "rejected" | "retired";
+  ...Record<never>;
 }
 
 model WorkArchiveExportKnowledge {
@@ -1398,43 +1257,47 @@ model WorkArchiveExportKnowledge {
   ...Record<never>;
 }
 
-model WorkArchiveExportAnchor extends WorkArchiveAnchor {
-  id: string;
-  documentId: string;
-  revisionId: string;
+model WorkArchiveExportAnchor {
+  id: ArchiveId;
+  documentId: ArchiveId;
+  revisionId: ArchiveId;
   @minValue(0) fromUtf16: int32;
   @minValue(0) toUtf16: int32;
   @pattern("^[0-9a-f]{64}$")
   quoteSha256: string;
   status: "proposed" | "confirmed" | "needs_review" | "orphaned";
+  ...Record<never>;
 }
 
-model WorkArchiveExportMention extends WorkArchiveMention {
-  evidenceId: string;
-  nodeId: string;
+model WorkArchiveExportMention {
+  evidenceId: ArchiveId;
+  nodeId: ArchiveId;
   status: "proposed" | "confirmed" | "ambiguous" | "rejected";
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  @minLength(1) @maxLength(512)
   source: string;
-  confidence: float64 | null;
+  confidence: UnitConfidence | null;
   extractorVersion: string | null;
+  ...Record<never>;
 }
 
-model WorkArchiveExportAssertion extends WorkArchiveAssertion {
-  id: string;
+model WorkArchiveExportAssertion {
+  id: ArchiveId;
   proposition: JsonObject;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  @minLength(1) @maxLength(512)
   modality: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  @minLength(1) @maxLength(512)
   perspective: string;
   narrativeTime: JsonObject;
-  confidence: float64 | null;
+  confidence: UnitConfidence | null;
   status: "proposed" | "confirmed" | "rejected" | "retired";
+  ...Record<never>;
 }
 
-model WorkArchiveExportAssertionEvidence extends WorkArchiveAssertionEvidence {
-  assertionId: string;
-  evidenceId: string;
+model WorkArchiveExportAssertionEvidence {
+  assertionId: ArchiveId;
+  evidenceId: ArchiveId;
   role: "supports" | "contradicts" | "quotes" | "context";
+  ...Record<never>;
 }
 
 model WorkArchiveExportUnresolvedEvidence {
@@ -1460,12 +1323,13 @@ model WorkArchiveExportEvidence {
   ...Record<never>;
 }
 
-model WorkArchiveExportModuleRecord extends WorkArchiveModuleRecord {
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+model WorkArchiveExportModuleRecord {
+  @minLength(1) @maxLength(512)
   moduleId: string;
-  @minLength(1) @maxLength(512) @pattern(".*\\S.*")
+  @minLength(1) @maxLength(512)
   key: string;
   value: JsonObject;
+  ...Record<never>;
 }
 
 model WorkArchiveExport {
@@ -1478,9 +1342,12 @@ model WorkArchiveExport {
   @maxItems(10000)
   moduleRecords: WorkArchiveExportModuleRecord[];
   @maxItems(10000)
-  omittedRecords: string[];
+  omittedRecords: ArchiveOmittedRecord[];
   ...Record<never>;
 }
+
+// Import and export share the same portable v1 wire shape.
+model WorkArchive is WorkArchiveExport;
 
 model WorkImportResult {
   project: Project;
@@ -1511,16 +1378,12 @@ model ChangeSetActionRequest {
 }
 
 model KnowledgeMergePreviewRequest {
-  @minLength(1)
-  @maxLength(512)
-  targetId: string;
+  targetId: PersistenceId;
   ...Record<never>;
 }
 
 model KnowledgeMergeRequest {
-  @minLength(1)
-  @maxLength(512)
-  targetId: string;
+  targetId: PersistenceId;
   confirm: true;
   @minValue(0)
   projectVersion: int32;
@@ -1601,6 +1464,13 @@ model McpJsonResponse {
   @body body: JsonObject;
 }
 
+model McpParseError {
+  jsonrpc: "2.0";
+  id: null;
+  error: { code: -32700; message: string; };
+  ...Record<never>;
+}
+
 model McpMethodDenied {
   @statusCode statusCode: 405;
   @body body: ApiError;
@@ -1617,19 +1487,18 @@ model JsonResponse {
 }
 
 model SaveDocumentRequest {
-  baseRevisionId: string;
+  baseRevisionId: PersistenceId;
   changes: DocumentChange[];
-  @doc("The runtime requires the lowercase SHA-256 of the resulting UTF-8 Markdown body; wire constraint detail remains incomplete at this baseline.")
+  @pattern("^[0-9a-f]{64}$")
   resultingSha256: string;
-  @doc("The runtime accepts at most 128 characters when supplied; wire constraint detail remains incomplete at this baseline.")
-  clientId?: string;
+  clientId?: PersistenceClientId;
   ...Record<never>;
 }
 
 model DocumentChange {
-  @doc("Nonnegative UTF-16 code-unit offset validated by the persistence runtime.")
+  @minValue(0)
   fromUtf16: int32;
-  @doc("Nonnegative UTF-16 code-unit offset validated by the persistence runtime.")
+  @minValue(0)
   toUtf16: int32;
   insert: string;
   ...Record<never>;

@@ -9,7 +9,7 @@ const { routes, schemas } = toFastifyRoutes(parse(readFileSync(new URL('../opena
 const inventory = JSON.parse(readFileSync(new URL('./fixtures/admitted-routes.json', import.meta.url), 'utf8')) as { current: string[] };
 const persistenceRoutes = routes.filter(({ url }) => url.startsWith('/api/v1/persistence/'));
 const projectsUrl = '/api/v1/persistence/projects';
-const documentUrl = `${projectsUrl}/project-1/documents/document-1`;
+const documentUrl = `${projectsUrl}/00000000-0000-4000-8000-000000000001/documents/00000000-0000-4000-8000-000000000002`;
 const saveOperation = 'persistence_document_patch';
 
 function createPersistenceFixture(t: TestContext, saveDocument?: RouteHandlerMethod) {
@@ -53,7 +53,7 @@ test('generated persistence method/path pairs register as explicit Fastify route
 });
 
 const saveBody = {
-  baseRevisionId: 'revision-1',
+  baseRevisionId: '00000000-0000-4000-8000-000000000003',
   changes: [{ fromUtf16: 0, toUtf16: 0, insert: 'New draft' }],
   resultingSha256: 'a'.repeat(64),
 };
@@ -85,23 +85,23 @@ test('generated save schema rejects malformed input before invoking the handler'
 test('generated save responses serialize the receipt and both conflict variants by status', async t => {
   const createdAt = '2026-11-23T00:00:00.000Z';
   const document = {
-    id: 'document-1',
-    projectId: 'project-1',
+    id: '00000000-0000-4000-8000-000000000002',
+    projectId: '00000000-0000-4000-8000-000000000001',
     parentId: null,
     kind: 'chapter',
     title: 'Opening',
     orderKey: '0001',
-    headRevisionId: 'revision-2',
+    headRevisionId: '00000000-0000-4000-8000-000000000004',
     version: 2,
     createdAt,
     updatedAt: createdAt,
     projectionMetadata: { generation: 2 },
   };
   const revision = {
-    id: 'revision-2',
-    projectId: 'project-1',
-    documentId: 'document-1',
-    parentRevisionId: 'revision-1',
+    id: '00000000-0000-4000-8000-000000000004',
+    projectId: '00000000-0000-4000-8000-000000000001',
+    documentId: '00000000-0000-4000-8000-000000000002',
+    parentRevisionId: '00000000-0000-4000-8000-000000000003',
     markdown: 'New draft',
     sha256: saveBody.resultingSha256,
     authorId: 'owner-1',
@@ -123,9 +123,9 @@ test('generated save responses serialize the receipt and both conflict variants 
     assert.equal(request.headers['idempotency-key'], saveHeaders['Idempotency-Key']);
     assert.equal(request.headers['x-client-id'], saveHeaders['X-Client-Id']);
     const { baseRevisionId } = request.body as typeof saveBody;
-    if (baseRevisionId === 'stale-revision') return reply.code(409).send(conflict);
-    if (baseRevisionId === 'reused-key') return reply.code(409).send(idempotencyConflict);
-    if (baseRevisionId === 'invalid-conflict') return reply.code(409).send({ ...conflict, fixtureOnly: true });
+    if (baseRevisionId === '00000000-0000-4000-8000-000000000006') return reply.code(409).send(conflict);
+    if (baseRevisionId === '00000000-0000-4000-8000-000000000007') return reply.code(409).send(idempotencyConflict);
+    if (baseRevisionId === '00000000-0000-4000-8000-000000000008') return reply.code(409).send({ ...conflict, fixtureOnly: true });
     return reply.code(200).send({ ...receipt, fixtureOnly: true });
   });
 
@@ -137,7 +137,7 @@ test('generated save responses serialize the receipt and both conflict variants 
     method: 'PATCH',
     url: documentUrl,
     headers: saveHeaders,
-    payload: { ...saveBody, baseRevisionId: 'stale-revision' },
+    payload: { ...saveBody, baseRevisionId: '00000000-0000-4000-8000-000000000006' },
   });
   assert.equal(stale.statusCode, 409, stale.payload);
   assert.deepEqual(stale.json(), conflict);
@@ -146,7 +146,7 @@ test('generated save responses serialize the receipt and both conflict variants 
     method: 'PATCH',
     url: documentUrl,
     headers: saveHeaders,
-    payload: { ...saveBody, baseRevisionId: 'reused-key' },
+    payload: { ...saveBody, baseRevisionId: '00000000-0000-4000-8000-000000000007' },
   });
   assert.equal(reusedKey.statusCode, 409, reusedKey.payload);
   assert.deepEqual(reusedKey.json(), idempotencyConflict);
@@ -155,7 +155,7 @@ test('generated save responses serialize the receipt and both conflict variants 
     method: 'PATCH',
     url: documentUrl,
     headers: saveHeaders,
-    payload: { ...saveBody, baseRevisionId: 'invalid-conflict' },
+    payload: { ...saveBody, baseRevisionId: '00000000-0000-4000-8000-000000000008' },
   });
   assert.equal(unexpectedField.statusCode, 500);
 });

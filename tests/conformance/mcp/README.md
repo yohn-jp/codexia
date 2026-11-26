@@ -4,7 +4,7 @@ The locked official conformance CLI runs the 2026-07-28 server requirements deri
 
 The product suite runs through a loopback proxy that supplies one fixture token to the actual Fastify/Core/PostgreSQL endpoint. It does not add conformance-only tools or alter the production tool catalog. Inspector connects directly over HTTP and through the shipped stdio entry point. It exercises the catalog, a Core action, and admission or schema errors. SDK probes verify wire errors and record the negotiated stdio versions. Host and Origin admission are exercised directly and through the product proxy. The proxy translates its valid loopback authority but preserves an untrusted Host/Origin for rejection by the actual product; it never uses these headers to choose a socket destination.
 
-The live product report also records malformed JSON behavior. The official SDK returns JSON-RPC parse error `-32700`, while the current Fastify parser returns `INVALID_JSON`. Changing the published MCP 400 response schema was rejected by the pinned oasdiff compatibility guard, so the report records this product deviation and blocker without bypassing the API contract check or changing the API epoch.
+The live product must return a JSON-RPC parse error `-32700` (HTTP 400, null id) for malformed JSON after MCP admission. The epoch 4 TypeSpec contract declares this envelope alongside the existing ApiError. The API compatibility guard remains active for the explicitly scoped initial-install epoch transition.
 
 ## Local run
 

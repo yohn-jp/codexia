@@ -12,8 +12,7 @@ Codexiaが所有するHTTPのmethodとpath、DTO、header、ステータス、�
 MCP の HTTP 入口は TypeSpec で定義し、JSON-RPC のペイロードは [MCP プロトコル契約](MCP-V2-MIGRATION.md) に従う。
 `POST /mcp` と作品別の POST 入口を公式 SDK に委譲する。
 同じ二つの URL に対する GET と DELETE は、認可されたリクエストにも 405 を返す。
-`x-codexia-validation-status` を付けた入力モデルは、互換基準の範囲で記述できる形状を収録している。
-実行時の必須項目や未知のキーの拒否は、各モデルの注記と対応する実装・試験で確認する。
+初回本番導入前の API epoch 4 では persistence の UUID、版番号、必須項目、長さ・範囲制約およびポータブルアーカイブの形状を TypeSpec 正本に記述する。MCP POST の 400 応答は、認可等の ApiError と JSON-RPC parse error の両方を明示する。
 
 ## 契約境界
 
@@ -182,6 +181,7 @@ Coreのoperation上限は書き込み内容の合計8,388,608 UTF-16コード単
    `pnpm --filter @codexia/app generate:http` と `pnpm --filter @codexia/app check-generated:http` でDesktop Webの生成クライアントとoperation照合を更新・検査する。
    iOSの再生成検査も実行する。
 4. 廃止予定を告知する場合はTypeSpecに廃止予定を記載する。互換性を壊す削除や変更は、利用者の移行とAPI epochの切替を規定する互換手順で扱う。
+5. 初回本番導入の契約是正に限り、基準コミット `ed11a58d1c92f749d67e2d0db2c3d251c0bc5c87` からの epoch 3 → 4 を認める。oasdiff の実行・結果保存は必須で、許容対象は persistence 入力制約・アーカイブ形状と MCP POST の 400 応答の是正に限定する。同一 epoch の破壊的変更、他の基準・epoch 遷移、認可・経路の破壊的変更は拒否する。既存稼働環境への非互換自動更新は許可しない。
 
 ## バックアップ管理API（採用済み目標・未実装）
 

@@ -59,7 +59,7 @@ HTTP契約の検証は既存Verifyの `unit-http-contract` と `typecheck-http-c
 - oasdiffは候補のTypeSpecから生成したOpenAPIを基準コミットのOpenAPIと比較する。
   移行前の基準にはGitに保存済みのOpenAPIを使い、移行後の基準はそのSHAの依存ロックと生成スクリプトで再生成する。
   pull requestはイベントの `pull_request.base.sha`、mainへのpushはイベントの `before` SHAを基準にする。
-  エラー級の非互換差分、イベントSHAの欠落、生成物とデプロイ互換設定のepoch不一致で失敗する。
+  エラー級の非互換差分、イベントSHAの欠落、生成物とデプロイ互換設定のepoch不一致で失敗する。初回本番導入に限る epoch 3 → 4 の限定是正は [API contract](../architecture/API-CONTRACT.md) に従い、基準 SHA と変更範囲を照合する。oasdiff 自体は省略しない。
 - Schemathesisは**隔離API**で実行する。書込み可能であるため本番や作者データに接続してはならない。Zod/TypeSpecの正常ケース、status/error/body、security testing、boundary/rate/invalid payload等を補強する。
 - Schemathesisによる拒否確認と、Codexiaのowner-only / MCP-proposal / project-BOLA / write preconditionを別々の独立したテストとして保持する。
 - HTTP error/codeやoptional responseがTypeSpec上で定義されていない場合、ツールがスキーマを自動修正するのではなくAPI-CONTRACTへ設計決定を戻す。
