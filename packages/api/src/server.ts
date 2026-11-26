@@ -38,6 +38,7 @@ import type {
   ProposeManuscriptRestoreInput,
   ReorderHierarchyInput,
 } from '@codexia/core';
+import { isPersistedProposalWithinSizeLimit } from '@codexia/core/proposal-size';
 import {
   type ChangeSetResult,
   type Persistence,
@@ -1622,7 +1623,6 @@ export function createServer(options: ApiServerOptions): Server {
         !/^[A-Za-z0-9!#$&^_.+-]{1,128}\/[A-Za-z0-9!#$&^_.+-]{1,128}$/u.test(item.mimeType) ||
         typeof item.dataBase64 !== 'string' ||
         !item.dataBase64 ||
-        item.dataBase64.length > Math.ceil((MAX_SCRATCH_ATTACHMENT_BYTES * 4) / 3) + 4 ||
         !hasBase64AlphabetAndPadding(item.dataBase64)
       ) {
         throw httpFailure(400, 'INVALID_SCRATCH_ATTACHMENT', 'Scratch attachment fields are invalid');
@@ -1636,8 +1636,10 @@ export function createServer(options: ApiServerOptions): Server {
         throw httpFailure(413, 'SCRATCH_ATTACHMENT_TOO_LARGE', 'Scratch attachments exceed the 8 MiB total limit');
       }
       const baseName = item.filename.split(/[\\/]/u).at(-1) ?? '';
-      const filename = baseName.replace(/[^\w.\-()\u3040-\u30ff\u4e00-\u9fff]+/gu, '_').slice(0, 120) || 'attachment.bin';
-      attachments.push({ filename, path: `meta/scratch/files/${id}-${filename}`, mimeType: item.mimeType, content });
+      const storageName = baseName.replace(/[^\w.\-()\u3040-\u30ff\u4e00-\u9fff]+/gu, '_').slice(0, 120) || 'attachment.bin';
+      const filename = baseName.trim() ? baseName : storageName;
+      const ordinal = String(attachments.length + 1).padStart(2, '0');
+      attachments.push({ filename, path: `meta/scratch/files/${id}-${ordinal}-${storageName}`, mimeType: item.mimeType, content });
     }
     if (!text.trim() && attachments.length === 0)
       throw httpFailure(400, 'INVALID_SCRATCH', 'Scratch text or at least one attachment is required');
@@ -1661,8 +1663,11 @@ export function createServer(options: ApiServerOptions): Server {
         );
     }
     markdownLines.push('---', '', ...(text.trimEnd() ? [text.trimEnd(), ''] : []));
-    for (const attachment of attachments)
-      markdownLines.push(`${attachment.mimeType.startsWith('image/') ? '!' : ''}[${attachment.filename}](${attachment.path})`, '');
+    for (const attachment of attachments) {
+      const label = attachment.filename.replace(/\p{Cc}/gu, ' ').replace(/[\\\[\]*_`~<>|&]/gu, '\\$&');
+      const destination = attachment.path.replaceAll('(', '%28').replaceAll(')', '%29');
+      markdownLines.push(`${attachment.mimeType.startsWith('image/') ? '!' : ''}[${label}](${destination})`, '');
+    }
     const markdown = markdownLines.join('\n');
     const writes: ChangeOperation['writes'] = [{ path: filePath, revision: old?.revision ?? null, content: markdown }];
     for (const attachment of attachments) {
@@ -1684,12 +1689,17 @@ export function createServer(options: ApiServerOptions): Server {
       writes,
       message: `scratch: ${id}`,
     };
-    const proposal = await options.store.propose(projectId, {
+    const proposalInput: ChangeProposal = {
       id: randomBytes(16).toString('hex'),
       snapshot: reader.snapshot,
       operations: [operation],
       source: 'author',
-    });
+    };
+    // With one operation, no deltas, and only string write contents, this exact normalized proposal cap
+    // also bounds the operation's UTF-16 content accounting (base64 writes expand raw bytes by 4/3).
+    if (!isPersistedProposalWithinSizeLimit(proposalInput))
+      throw httpFailure(413, 'SCRATCH_ATTACHMENT_TOO_LARGE', 'Scratch submission exceeds the 8 MiB persisted proposal limit');
+    const proposal = await options.store.propose(projectId, proposalInput);
     await options.store.approve(projectId, { proposalId: proposal.id, operationIds: [operation.id], authorScope });
     const receipt = await options.store.apply(projectId, operation);
     json(201, {
