@@ -162,16 +162,14 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
 
           try {
             const [changeSets, authoritative] = await Promise.all([
-              services.list(projectId, signal),
+              services.list(projectId, signal).catch(() => undefined),
               services.get(projectId, detail.changeSet.id, signal),
             ]);
-            if (
-              authoritative.changeSet.projectId !== projectId ||
-              authoritative.changeSet.id !== detail.changeSet.id ||
-              changeSets.some(item => item.projectId !== projectId)
-            ) {
-              throw new Error('ChangeSetの作品または提案識別子が一致しません。');
+            if (authoritative.changeSet.projectId !== projectId || authoritative.changeSet.id !== detail.changeSet.id) {
+              throw new Error('ChangeSet詳細の識別子が一致しません。');
             }
+            const list = changeSets?.every(item => item.projectId === projectId) ? changeSets : undefined;
+            const listRefreshMessage = list ? '' : ' 最新の一覧は再取得してください。';
             const result = authoritative;
             const denied = errorStatus(actionError) === 401 || errorStatus(actionError) === 403;
             const confirmed =
@@ -189,16 +187,16 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
                     : actionError && conflictStatus(actionError)
                       ? 'conflict'
                       : 'unknown',
-              changeSets,
+              changeSets: list,
               detail: result,
               message: confirmed
                 ? action === 'approve'
-                  ? '承認を確認しました。適用は別の明示操作です。'
+                  ? `承認を確認しました。適用は別の明示操作です。${listRefreshMessage}`
                   : action === 'reject'
-                    ? '却下を確認しました。正本への変更はありません。'
+                    ? `却下を確認しました。正本への変更はありません。${listRefreshMessage}`
                     : result.receipt?.replayed
-                      ? '適用receiptを再確認しました。'
-                      : '適用receiptを確認しました。'
+                      ? `適用receiptを再確認しました。${listRefreshMessage}`
+                      : `適用receiptを確認しました。${listRefreshMessage}`
                 : action === 'apply' && result.changeSet.status === 'approved' && !denied && !conflictStatus(actionError)
                   ? '適用receiptはまだ確認できません。再試行は同じChangeSet versionで行います。'
                   : messageFor(actionError ?? new Error('要求後の状態を確認できませんでした。'), action),
@@ -255,7 +253,16 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
         canWrite: event.type === 'LOAD.REQUESTED' ? (event.canWrite ?? context.canWrite) : context.canWrite,
         showCoreReviews: event.type === 'LOAD.REQUESTED' ? (event.showCoreReviews ?? context.showCoreReviews) : context.showCoreReviews,
       })),
-      beginInspect: assign(({ event }) => (event.type === 'SELECT.REQUESTED' ? { selectedId: event.id, detail: null, message: '' } : {})),
+      beginInspect: assign(({ context, event }) =>
+        event.type === 'SELECT.REQUESTED'
+          ? {
+              selectedId: event.id,
+              detail: null,
+              message: '',
+              applyVersion: event.id === context.selectedId ? context.applyVersion : null,
+            }
+          : {},
+      ),
       beginAction: assign(({ context, event }) => {
         if (event.type !== 'ACTION' || !context.detail) return {};
         return {
@@ -383,8 +390,7 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
                 coreReviews: result.coreReviews,
                 selectedId: result.selectedId,
                 detail: null,
-                applyVersion:
-                  result.selectedId !== context.detail?.changeSet.id || context.outcome?.kind !== 'unknown' ? null : context.applyVersion,
+                applyVersion: result.selectedId === context.selectedId ? context.applyVersion : null,
                 outcome: null,
                 message: '',
               };
@@ -410,12 +416,7 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
               const detail = event.output as NativeReviewDetail;
               return {
                 detail,
-                applyVersion:
-                  detail.changeSet.status === 'applied' ||
-                  detail.changeSet.id !== context.detail?.changeSet.id ||
-                  context.outcome?.kind !== 'unknown'
-                    ? null
-                    : context.applyVersion,
+                applyVersion: detail.changeSet.status === 'approved' ? context.applyVersion : null,
                 outcome: null,
                 message: '',
               };

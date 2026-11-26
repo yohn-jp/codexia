@@ -210,3 +210,48 @@ test('a valid apply receipt survives a failed projection refresh', async () => {
   assert.equal(actor.getSnapshot().context.detail?.receipt, receipt);
   actor.stop();
 });
+
+test('refreshing an uncertain apply keeps its original version', async () => {
+  const { actor, calls, load, setChangeSet } = harness({
+    async apply(_projectId, _id, version) {
+      calls.push({ action: 'apply', version });
+      throw new Error('response lost');
+    },
+  });
+  await load();
+  actor.send({ type: 'ACTION', action: 'apply' });
+  await waitFor(actor, snapshot => snapshot.matches('unknown'), { timeout: 1_000 });
+  setChangeSet({ ...changeSet, version: 8 });
+  await load();
+  actor.send({ type: 'ACTION', action: 'apply' });
+  await waitFor(actor, snapshot => snapshot.matches('unknown'), { timeout: 1_000 });
+  assert.deepEqual(calls, [
+    { action: 'apply', version: 7 },
+    { action: 'apply', version: 7 },
+  ]);
+  actor.stop();
+});
+
+test('a reconciled apply receipt survives a failed list refresh', async () => {
+  const appliedChangeSet = { ...changeSet, status: 'applied' } as ChangeSet;
+  const receipt = { changeSet: appliedChangeSet, results: [], replayed: false };
+  let applied = false;
+  const { actor, load } = harness({
+    async apply() {
+      applied = true;
+      throw new Error('response lost');
+    },
+    async list() {
+      throw new Error('projection unavailable');
+    },
+    async get() {
+      return applied ? { changeSet: appliedChangeSet, receipt } : { changeSet };
+    },
+  });
+  await load();
+  actor.send({ type: 'ACTION', action: 'apply' });
+  await waitFor(actor, snapshot => snapshot.context.outcome !== null, { timeout: 1_000 });
+  assert.equal(actor.getSnapshot().matches('confirmed'), true);
+  assert.equal(actor.getSnapshot().context.detail?.receipt, receipt);
+  actor.stop();
+});
