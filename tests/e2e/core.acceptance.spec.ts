@@ -228,6 +228,25 @@ preparedAuthorTest("revision history keeps immutable content through a foregroun
   expect((await f.fetch(`${documentPath(f)}?revision=${f.one.revision.id}`)).ok()).toBe(true);
 });
 
+preparedAuthorTest("a confirmed external revision keeps its single ellipsis in the open editor", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
+  const confirmed = "以前…の原稿";
+  const external = await replace(f, confirmed);
+  expect(external.revision.markdown).toBe(confirmed);
+  const latest = await replace(f, "編集後の原稿", external);
+  await reopen(page, f);
+  await expectEditor(page, latest.revision.markdown);
+
+  await openRevisionHistory(page);
+  const revision = page.getByRole("region", { name: "Revision履歴" }).locator(`article[data-revision-id="${external.revision.id}"]`);
+  await revision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元" }).click();
+  await expectEditor(page, confirmed);
+  await expectNoUnsavedDeviceChanges(page);
+  const restored = (await read(f)).revision;
+  expect(restored.markdown).toBe(confirmed);
+  expect(restored.id).not.toBe(external.revision.id);
+});
+
 test("same-origin stale tabs cannot replace an equal-generation journal draft", async ({ page, context, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
   const second = await context.newPage();
@@ -238,6 +257,19 @@ test("same-origin stale tabs cannot replace an equal-generation journal draft", 
     await expect.poll(async () => (await drafts(page)).some((d) => d.markdown === "First tab protected draft.")).toBe(true);
     await replaceEditor(second, "Stale tab different draft.");
     await expect(second.getByRole("alert")).toContainText("別タブ");
+    expect((await drafts(page)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("First tab protected draft.");
+    // The stale tab's manuscript surface is read-only, including formatting
+    // toolbar actions; the recovery draft must not be mutated.
+    const staleEditor = editor(second);
+    await staleEditor.focus();
+    await second.keyboard.type("x");
+    await expect(staleEditor).toHaveText("Stale tab different draft.");
+    const displayMenu = second.locator(".pg-editor-display-menu");
+    if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
+    const staleSymbol = displayMenu.getByRole("button", { name: "三点リーダーを挿入" });
+    await staleSymbol.evaluate((button: HTMLButtonElement) => button.click());
+    await expectEditor(second, "Stale tab different draft.");
+    await expect(staleSymbol).toBeDisabled();
     expect((await drafts(page)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("First tab protected draft.");
   } finally { gate.release(); await second.close(); }
 });

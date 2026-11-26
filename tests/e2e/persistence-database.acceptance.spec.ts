@@ -10,6 +10,59 @@ import { appendManuscript, createOAuthWritingFixture, expectDeviceDraft, expectN
 test.use({ preparedAuthorEntries: true });
 preparedAuthorTest.use({ preparedAuthorEntries: true });
 
+preparedAuthorTest("preserves unsent Knowledge forms per node while switching A to B and back", async ({ page, authorizeAuthor }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", `Knowledge draft isolation ${crypto.randomUUID()}`);
+  const nodeA = crypto.randomUUID() as KnowledgeNodeId;
+  const nodeB = crypto.randomUUID() as KnowledgeNodeId;
+  const persistence = createPostgresPersistence(databaseUrl!);
+  try {
+    await persistence.transaction(async transaction => {
+      await transaction.saveKnowledgeNode({ projectId: fixture.project.id as ProjectId, id: nodeA, type: "person", name: "Draft A", attributes: {}, status: "confirmed", expectedVersion: null });
+      await transaction.saveKnowledgeNode({ projectId: fixture.project.id as ProjectId, id: nodeB, type: "person", name: "Draft B", attributes: {}, status: "confirmed", expectedVersion: null });
+    });
+  } finally { await persistence.close(); }
+  await page.reload();
+  await authorizeAuthor("desktop", page, { continueCurrentPage: true });
+  await openResearchInspector(page);
+  const browse = page.locator(".pg-knowledge-list");
+  const detail = page.getByRole("region", { name: "Knowledge詳細" });
+  const relationTarget = detail.locator("form.kci__form--relation select");
+  const assertionStatement = detail.getByRole("textbox", { name: "命題", exact: true });
+  const assertionModality = detail.locator('section[aria-labelledby="kci-assertions-heading"] form select');
+  const selectNode = async (name: string) => {
+    const row = browse.locator("li").filter({ hasText: name });
+    await expect(row).toHaveCount(1);
+    await row.getByRole("button").first().click();
+    await expect(detail.getByRole("heading", { name, exact: true })).toBeVisible();
+    for (const label of ["別名を追加", "関係を追加", "命題候補を作成"]) {
+      await detail.locator("summary").filter({ hasText: label }).click();
+    }
+  };
+  await selectNode("Draft A");
+  await detail.getByLabel("別名候補").fill("A alias unsent");
+  await detail.getByLabel("関係の種類", { exact: true }).fill("knows unsent");
+  await relationTarget.selectOption(nodeB);
+  await assertionStatement.fill("A statement unsent");
+  await detail.getByLabel("視点", { exact: true }).fill("A perspective unsent");
+  await assertionModality.selectOption("hypothesis");
+
+  await selectNode("Draft B");
+  await expect(detail.getByLabel("別名候補", { exact: true })).toHaveValue("");
+  await expect(detail.getByLabel("関係の種類", { exact: true })).toHaveValue("");
+  await expect(relationTarget).toHaveValue("");
+  await expect(assertionStatement).toHaveValue("");
+  await expect(detail.getByLabel("視点", { exact: true })).toHaveValue("author");
+  await expect(assertionModality).toHaveValue("fact");
+  await selectNode("Draft A");
+  await expect(detail.getByLabel("別名候補", { exact: true })).toHaveValue("A alias unsent");
+  await expect(detail.getByLabel("関係の種類", { exact: true })).toHaveValue("knows unsent");
+  await expect(relationTarget).toHaveValue(nodeB);
+  await expect(assertionStatement).toHaveValue("A statement unsent");
+  await expect(detail.getByLabel("視点", { exact: true })).toHaveValue("A perspective unsent");
+  await expect(assertionModality).toHaveValue("hypothesis");
+});
+
 preparedAuthorTest("browser quota failure blocks remote writes until explicit draft re-protection succeeds", async ({ page, authorizeAuthor }) => {
   const original = "Before.";
   const appendedText = " After local quota failure.";
@@ -182,8 +235,13 @@ preparedAuthorTest("an anchor read failure leaves the confirmed manuscript reada
   await authorizeAuthor("desktop", page, { path: writingUrl });
   await expect(manuscriptEditor(page)).toContainText("Readable manuscript while evidence is unavailable.");
   await expect(page.getByRole("alert")).toContainText("根拠");
-  await page.getByRole("button", { name: "根拠を再試行", exact: true }).click();
+  await openResearchInspector(page);
+  const evidence = page.locator(".pg-knowledge section").filter({ has: page.getByRole("heading", { name: "本文の根拠", exact: true }) });
+  await expect(evidence.getByText("このRevisionにText Anchorはありません。", { exact: false })).toHaveCount(0);
+  await expect(evidence.getByText("Text Anchorを取得できませんでした。", { exact: false })).toBeVisible();
+  await evidence.getByRole("button", { name: "Text Anchorを再試行" }).click();
   await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(evidence.getByText("このRevisionにText Anchorはありません。", { exact: false })).toBeVisible();
   expect(anchorReads).toBe(2);
   await expect(manuscriptEditor(page)).toContainText("Readable manuscript while evidence is unavailable.");
 });
@@ -211,6 +269,10 @@ preparedAuthorTest("the manuscript opens and remains editable while its anchor r
     const editor = manuscriptEditor(page);
     await expect(editor).toHaveText(original);
     await expect(page.locator(".pg-editor-column").getByRole("status").filter({ hasText: "根拠を確認中" })).toBeVisible();
+    await openResearchInspector(page);
+    const evidence = page.locator(".pg-knowledge section").filter({ has: page.getByRole("heading", { name: "本文の根拠", exact: true }) });
+    await expect(evidence.getByText("このRevisionにText Anchorはありません。", { exact: false })).toHaveCount(0);
+    await expect(evidence.getByText("Text Anchorを読み込んでいます。", { exact: false })).toBeVisible();
     const commands = page.locator(".pg-editor-command-menu");
     if (!await commands.evaluate((element) => (element as HTMLDetailsElement).open)) await commands.locator("summary").click();
     await expect(commands.getByRole("button", { name: "選択範囲をText Anchorにする" })).toBeDisabled();
@@ -220,6 +282,7 @@ preparedAuthorTest("the manuscript opens and remains editable while its anchor r
     await expectDeviceDraft(page);
     releaseAnchors();
     await expect(page.locator(".pg-editor-column").getByRole("status").filter({ hasText: "根拠を確認中" })).toHaveCount(0);
+    await expect(evidence.getByText("このRevisionにText Anchorはありません。", { exact: false })).toBeVisible();
     await expect(editor).toHaveText(original + addition);
   } finally {
     releaseAnchors();

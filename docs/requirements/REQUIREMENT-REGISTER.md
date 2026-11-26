@@ -2515,7 +2515,7 @@ Checks that the retired Git selector cannot change the manuscript authority.
   **ID**: REQ-DATA-001
 - **Type**: File
   **Path**: tests/e2e/persistence-database.acceptance.spec.ts
-  **Lines**: 1576, 1576
+  **Lines**: 1639, 1639
 
 ## TEST-DATA-002-001
 
@@ -2731,7 +2731,7 @@ Checks recovery after a lost response to a committed save with the original oper
   **ID**: REQ-API-002
 - **Type**: File
   **Path**: tests/e2e/core.acceptance.spec.ts
-  **Lines**: 293, 293
+  **Lines**: 325, 325
 
 ## TEST-UI-001-001
 
@@ -2767,7 +2767,7 @@ Checks preservation and reconciliation of the newer draft after an uncertain sav
   **ID**: REQ-UI-002
 - **Type**: File
   **Path**: tests/e2e/core.acceptance.spec.ts
-  **Lines**: 366, 366
+  **Lines**: 398, 398
 
 ## TEST-UI-003-001
 

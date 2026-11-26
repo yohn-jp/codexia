@@ -323,7 +323,7 @@ globalStyle('.kci__technical pre', {
   whiteSpace: 'pre-wrap',
   overflowWrap: 'anywhere',
 });
-globalStyle('.kci__technical pre[tabindex="0"]:focus-visible', { outline: '3px solid var(--focus-ring)', outlineOffset: '2px' });
+globalStyle('.kci__technical pre:focus-visible', { outline: '3px solid var(--focus-ring)', outlineOffset: '2px' });
 globalStyle('.kci__technical code,\n.kci__neighbor code', { overflowWrap: 'anywhere' });
 globalStyle('.kci__alert', {
   display: 'grid',
