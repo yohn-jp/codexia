@@ -113,11 +113,14 @@ export const documentApi = {
       expectedVersion,
     } satisfies PersistenceDocumentDeleteRequest) as unknown as Promise<PersistenceDocumentEnvelope>,
 
-  createPersistenceDocument: (projectId: string, command: Omit<CreateDocumentCommand, 'projectId' | 'authorId'>, signal?: AbortSignal) =>
-    persistenceDocumentsPost(projectId, command satisfies PersistenceDocumentCreateRequest, {
+  createPersistenceDocument: (projectId: string, command: Omit<CreateDocumentCommand, 'projectId' | 'authorId'>, signal?: AbortSignal) => {
+    const { documentId, parentId, kind, title, orderKey, appendToEnd, markdown, idempotencyKey } = command;
+    const request = { documentId, parentId, kind, title, orderKey, appendToEnd, markdown } satisfies PersistenceDocumentCreateRequest;
+    return persistenceDocumentsPost(projectId, request, {
       ...apiOptions(signal),
-      headers: { 'Idempotency-Key': command.idempotencyKey },
-    }) as unknown as Promise<PersistenceDocumentWriteResult>,
+      headers: { 'Idempotency-Key': idempotencyKey },
+    }) as unknown as Promise<PersistenceDocumentWriteResult>;
+  },
 
   persistenceDocument: (projectId: string, documentId: string, signal?: AbortSignal, revisionId?: string) => {
     const params = revisionId ? { revision: revisionId } : undefined;
