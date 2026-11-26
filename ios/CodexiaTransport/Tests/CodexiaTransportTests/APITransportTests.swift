@@ -193,7 +193,7 @@ private func save() throws -> DocumentSave {
     let operation = try save()
     let cases = [
         (202, "accepted"), (400, "rejected"), (401, "unauthorized"), (403, "forbidden"), (404, "rejected"),
-        (409, "conflict"), (412, "preconditionFailed"), (503, "server"), (200, "invalidReceipt"),
+        (409, "conflict"), (412, "preconditionFailed"), (415, "rejected"), (503, "server"), (200, "invalidReceipt"),
     ]
     for (status, expected) in cases {
         await fixture.respond {

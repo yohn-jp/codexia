@@ -71,6 +71,8 @@ public struct DocumentSave: Sendable {
                 return .unauthorized
             case .notFound:
                 return .rejected(status: 404)
+            case .unsupportedMediaType:
+                return .rejected(status: 415)
             case .undocumented(let status, _):
                 return classify(status)
             }
