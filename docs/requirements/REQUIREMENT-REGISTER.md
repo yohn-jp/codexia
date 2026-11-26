@@ -1076,11 +1076,11 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 **Conformance status**: PARTIAL
 **Applicability**: CURRENT
 **Design owner**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx; WRT-01/REC-01 部分導入済み; ChangeSet・認証・バックアップは未実装
-**Verification identifiers**: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
+**Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx; app/src/persistence/native-review-machine.ts; app/src/settings/owner-passkey-reauth-machine.ts; app/src/settings/owner-grant-revocation-machine.ts
+**Verification identifiers**: app/src/persistence/native-review-machine.test.ts; app/src/settings/owner-passkey-reauth-machine.test.ts; app/src/settings/owner-grant-revocation-machine.test.ts; tests/e2e/native-review.acceptance.spec.ts; tests/e2e/oauth-web.acceptance.spec.ts
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
-**Comment**: ACCEPTED／XState v5 はWRT-01/REC-01で部分導入済み。ChangeSet・認証・バックアップへの展開は未実装; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+**Comment**: ACCEPTED／XState v5 はWRT-01/REC-01、Native ChangeSetレビュー、Passkey再認証、OAuth同意撤回で部分導入済み。バックアップは未実装; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
 原稿保存・復旧、ChangeSet、認証、バックアップの複雑な状態と失敗・競合・接続断を決定的な遷移と独立テストで検証し、未確認の副作用を成功表示にしない
 
@@ -1097,7 +1097,7 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 **MID**: 0c54e429ce48db0abde06145b4640017
 **UID**: OBL-REQ-UI-006-O01
 **Design reference**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx
+**Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx; app/src/persistence/native-review-machine.ts; app/src/settings/owner-passkey-reauth-machine.ts; app/src/settings/owner-grant-revocation-machine.ts
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1114,6 +1114,12 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 - **Type**: File
   **Path**: app/src/persistence/PersistenceWorkspace.tsx
   **Lines**: 439, 445
+- **Type**: File
+  **Path**: app/src/persistence/native-review-machine.ts
+- **Type**: File
+  **Path**: app/src/settings/owner-passkey-reauth-machine.ts
+- **Type**: File
+  **Path**: app/src/settings/owner-grant-revocation-machine.ts
 
 ## REQ-EXT-001
 
@@ -1258,7 +1264,7 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 **UID**: OBL-REQ-OPS-001-O01
 **Design reference**: [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md)
 **Implementation identifiers**: deploy/ansible/site.yml
-**Surface identifiers**: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/verify-base-tunnel-container.yml
+**Surface identifiers**: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/deploy-ssh-key.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/verify-base-tunnel-container.yml
 **Test IDs**: TEST-OPS-001-001
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1281,6 +1287,9 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 
 - **Type**: File
   **Path**: deploy/ansible/base-secrets.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/deploy-ssh-key.yml
 
 - **Type**: File
   **Path**: deploy/ansible/host-validate.yml

@@ -211,6 +211,21 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
     assert.ok(projectList.headers.authorization === `Bearer ${String(tokenResponse.access_token)}`, "the project list must use the OAuth access token");
     assert.equal(Boolean(projectList.headers.cookie), false, "the project list must omit the Better Auth session cookie");
 
+    const invalidLinkPage = await context.newPage();
+    const invalidLink = new URL(`${fixture.apiOrigin}/oauth/consent`);
+    const tamperedPrompt = new URLSearchParams(signedSearch);
+    tamperedPrompt.set("sig", "tampered-signature");
+    invalidLink.search = tamperedPrompt.toString();
+    const invalidContext = invalidLinkPage.waitForResponse(response =>
+      new URL(response.url()).pathname === "/api/auth/oauth2/consent-context",
+    );
+    await invalidLinkPage.goto(invalidLink.toString());
+    const invalidContextResponse = await invalidContext;
+    assert.ok(invalidContextResponse.status() >= 400 && invalidContextResponse.status() < 500, "the API must reject a tampered signed consent link");
+    await expect(invalidLinkPage.getByText("認可内容を確認できません。サインインをやり直してください。", { exact: true })).toBeVisible();
+    await expect(invalidLinkPage.getByRole("button", { name: "許可して続ける" })).toBeDisabled();
+    await invalidLinkPage.close();
+
     const projectTitle = `OAuth browser acceptance ${crypto.randomUUID()}`;
     await page.getByRole("button", { name: "最初の作品を作成" }).click();
     await page.getByLabel("作品名").fill(projectTitle);
@@ -377,9 +392,30 @@ ownerConsoleTest("Owner Console manages Passkeys and sessions and revokes an OAu
       await page.getByRole("button", { name: "パスキーを追加", exact: true }).click();
       await expect(passkeys.getByRole("heading", { name, exact: true })).toBeVisible();
     };
+    const cancelNextWebAuthn = async () => page.evaluate(() => {
+      const credentials = navigator.credentials;
+      const original = credentials.get.bind(credentials);
+      Object.defineProperty(credentials, "get", {
+        configurable: true,
+        value: async () => { throw new DOMException("user cancelled", "NotAllowedError"); },
+      });
+      (window as Window & { __restoreCredentialGet?: () => void }).__restoreCredentialGet = () => {
+        Object.defineProperty(credentials, "get", { configurable: true, value: original });
+      };
+    });
+    const restoreWebAuthn = async () => page.evaluate(() => (window as Window & { __restoreCredentialGet?: () => void }).__restoreCredentialGet?.());
     const firstAuthenticator = await newAuthenticator();
     await addPasskey("Console first key");
     await expect(page.getByRole("button", { name: "Console first keyを削除" })).toBeDisabled();
+    await cancelNextWebAuthn();
+    const sessionCheckAfterCancelledReauth = page.waitForResponse(response =>
+      new URL(response.url()).pathname === "/api/auth/codexia/owner-session",
+    );
+    await page.getByRole("button", { name: "パスキーで再認証", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("パスキー認証の完了を確認できませんでした。認証状態を再確認してください。");
+    expect((await sessionCheckAfterCancelledReauth).status()).toBe(200);
+    await expect(current).toBeVisible();
+    await restoreWebAuthn();
     const lastPasskeyDenied = await page.evaluate(async () => {
       const list = await fetch("/api/auth/passkey/list-user-passkeys");
       if (!list.ok) throw new Error("Owner Passkeys could not be listed");
@@ -422,6 +458,19 @@ ownerConsoleTest("Owner Console manages Passkeys and sessions and revokes an OAu
     await expect(consents.getByText(authorServer.webClientId, { exact: true })).toBeVisible();
     const revoke = consents.getByRole("button", { name: "同意を取り消す", exact: true });
     await expect(revoke).toBeVisible();
+    let revokeRequests = 0;
+    const observeRevoke = (request: import("@playwright/test").Request) => {
+      if (new URL(request.url()).pathname === "/api/auth/codexia/owner-security/revoke-consent") revokeRequests += 1;
+    };
+    page.on("request", observeRevoke);
+    await cancelNextWebAuthn();
+    await revoke.click();
+    await page.getByRole("button", { name: "パスキーで認証して取り消す", exact: true }).click();
+    await expect(page.getByText("パスキー認証はキャンセルされました。同意は取り消していません。", { exact: true })).toBeVisible();
+    await expect(consents.getByText(authorServer.webClientId, { exact: true })).toBeVisible();
+    expect(revokeRequests).toBe(0);
+    await restoreWebAuthn();
+    page.off("request", observeRevoke);
     await revoke.click();
     await page.getByRole("button", { name: "パスキーで認証して取り消す", exact: true }).click();
     await expect(consents.getByText(authorServer.webClientId, { exact: true })).toHaveCount(0);
