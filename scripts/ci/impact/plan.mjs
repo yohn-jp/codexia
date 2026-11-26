@@ -244,8 +244,8 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/release/frontend/verify-compatibility.mjs',
   'scripts/release/frontend/verify-compatibility.test.mjs',
 ]);
-// Standalone native iOS sources belong to the dedicated Xcode workflows, not
-// the Desktop/Core/Full verification graph. Unknown file kinds remain fail-closed.
+// Reviewed Native inputs keep Apple acceptance in the dedicated workflows.
+// SwiftPM inputs also select the Linux task below. Unknown inputs fail closed.
 export const NATIVE_IOS_WORKFLOW_INPUTS = Object.freeze([
   '.github/workflows/ios-api.yml',
   '.github/workflows/ios-editor.yml',
@@ -270,6 +270,12 @@ export function isNativeIosOwnedInput(file) {
 }
 
 const SWIFT_LINUX_INPUTS = new Set([
+  '.github/workflows/verify.yml',
+  'scripts/ci/certification/certify.mjs',
+  'scripts/ci/evidence/task-inputs.mjs',
+  'scripts/ci/execution/group.mjs',
+  'scripts/ci/impact/contract.mjs',
+  'scripts/ci/impact/plan.mjs',
   'scripts/ios/verify-linux-swift.sh',
   'scripts/ios/swift-linux-toolchain.json',
   'scripts/shared/python-env.sh',

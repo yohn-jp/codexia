@@ -687,7 +687,7 @@ test('CI contract-test changes select only root and coverage, including the iOS 
   assert.deepEqual(freeze.tasks, ['unit-root', 'coverage']);
   for (const file of ['scripts/ci/impact/plan.mjs', 'scripts/ci/evidence/proof-reuse.mjs', 'scripts/ci/impact/unknown.test.mjs']) {
     const result = await plan([...paths, file]);
-    assert.deepEqual(result.tasks, NON_SWIFT_TASKS, file);
+    assert.deepEqual(result.tasks, file === 'scripts/ci/impact/plan.mjs' ? VERIFICATION_TASKS : NON_SWIFT_TASKS, file);
     assert.equal(result.full_model_oci, true, file);
   }
 });
@@ -819,6 +819,9 @@ test('Linux Swift verification follows SwiftPM and generation inputs even in ful
       'packages/http-contract/openapi/codexia.openapi.yaml',
       'packages/http-contract/src/main.tsp',
       'scripts/ios/verify-linux-swift.sh',
+      '.github/workflows/verify.yml',
+      'scripts/ci/execution/group.mjs',
+      'scripts/ci/evidence/task-inputs.mjs',
     ]) {
       assert.ok((await plan([file], event)).tasks.includes('swift-linux'), event + ': ' + file);
     }
@@ -826,6 +829,7 @@ test('Linux Swift verification follows SwiftPM and generation inputs even in ful
       'ios/CodexiaApp/UITests/AuthoringFlowUITests.swift',
       '.github/workflows/ios-api.yml',
       'packages/api/src/server.ts',
+      'scripts/ci/dashboard/timing.mjs',
       'pnpm-lock.yaml',
       'docs/README.md',
     ]) {
