@@ -1505,11 +1505,11 @@ ownerは管理コンソールからS3互換バックアップ先のdraft/検証/
 **Conformance status**: UNMAPPED
 **Applicability**: FUTURE_TARGET
 **Design owner**: [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Backup](../deployment/BACKUP.md)
-**Implementation identifiers**: rootless executor; BKC-008〜010; protected host lock/durable runは追加未実装
+**Implementation identifiers**: BKC-008〜010; protected rootless executor; durable run queue; shared host lock
 **Verification identifiers**: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
-**Comment**: ACCEPTED／executor/画面/ジョブは**未実装**; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+**Comment**: BKC-008〜010とホスト実行基盤を実装。画面はIssue #666。実際の保管先と独立復旧ホストでの適合認定は別証拠を要する。
 
 ownerが手動保全を要求してrun/暗号文/独立復旧証拠を区別して確認でき、実副作用は既存host lock/backup.shと保護されたexecutorだけが実施。本番復元・遠隔削除をWebから禁止する
 
