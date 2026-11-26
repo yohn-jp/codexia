@@ -83,8 +83,9 @@ final class JournalSaveCoordinatorTests: XCTestCase {
             projectID: "project", clientID: "ios-test", journal: ProtectedDraftJournal(directory: root),
             api: APITransport(origin: origin).client)
         let recovered = try await restarted.recover(documentID: "document")
-        XCTAssertEqual(recovered?.text, "durable before process death")
+        XCTAssertEqual(recovered?.text, "durable before process deathかな")
         XCTAssertEqual(recovered?.state, .protected)
+        XCTAssertEqual(recovered?.restoreEditor().recoveredComposition, "durable before process deathかな")
         let expectedOperationID = try String(contentsOf: root.appendingPathComponent("expected-operation-id"), encoding: .utf8)
         XCTAssertEqual(recovered?.operationID, expectedOperationID)
     }
@@ -100,6 +101,8 @@ final class JournalSaveCoordinatorTests: XCTestCase {
             api: APITransport(origin: origin).client)
         var editor = EditorState(documentID: "document", text: "base")
         editor.edit("durable before process death")
+        try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: "revision-1", baseText: "base")
+        editor.updateComposition("durable before process deathかな")
         let protected = try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: "revision-1", baseText: "base")
         try Data(protected.operationID.utf8).write(to: root.appendingPathComponent("expected-operation-id"))
         _ = kill(getpid(), SIGKILL)
@@ -131,7 +134,8 @@ final class JournalSaveCoordinatorTests: XCTestCase {
             projectID: "project", clientID: "ios-test", journal: journal,
             api: APITransport(origin: origin).client)
         var editor = EditorState(documentID: "document", text: "基準稿")
-        editor.updateComposition("基準稿かな")
+        editor.edit("未送信の確定稿")
+        editor.updateComposition("未送信の確定稿かな")
 
         let protected = try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: "revision-1", baseText: "基準稿")
         let reopened = try JournalSaveCoordinator(authorID: "author", apiOrigin: origin,
@@ -139,9 +143,9 @@ final class JournalSaveCoordinatorTests: XCTestCase {
             api: APITransport(origin: origin).client)
         let recovered = try await reopened.recover(documentID: "document")
 
-        XCTAssertEqual(protected.text, "基準稿かな")
+        XCTAssertEqual(protected.text, "未送信の確定稿かな")
         XCTAssertEqual(protected.state, .protected)
-        XCTAssertEqual(recovered?.text, "基準稿かな")
+        XCTAssertEqual(recovered?.text, "未送信の確定稿かな")
         XCTAssertEqual(recovered?.state, .protected)
         XCTAssertFalse(editor.canLeave)
         guard case .nothingToSave = await reopened.save(documentID: "document") else {
@@ -150,11 +154,56 @@ final class JournalSaveCoordinatorTests: XCTestCase {
         let stillProtected = try await reopened.recover(documentID: "document")
         XCTAssertEqual(stillProtected?.operationID, protected.operationID)
 
-        editor.edit("基準稿かな")
+        editor = try XCTUnwrap(recovered).restoreEditor()
+        XCTAssertEqual(editor.recoveredComposition, protected.text)
+        XCTAssertEqual(editor.text, "未送信の確定稿")
+        XCTAssertTrue(editor.isCurrentVersionProtected)
+        XCTAssertFalse(editor.canLeave)
+        let unresolved = editor.snapshot
+        editor.edit("unexpected ordinary editor callback")
         editor.setComposing(false)
+        XCTAssertEqual(editor.snapshot, unresolved)
+        var cancelled = editor
+        cancelled.resolveRecoveredComposition(keepingText: false)
+        XCTAssertEqual(cancelled.snapshot.text, "未送信の確定稿")
+        XCTAssertGreaterThan(cancelled.snapshot.version, protected.version)
+        XCTAssertFalse(cancelled.isCurrentVersionProtected)
+
+        editor.resolveRecoveredComposition(keepingText: true)
+        XCTAssertFalse(editor.isComposing)
+        XCTAssertFalse(editor.isCurrentVersionProtected)
         let confirmed = try await reopened.protect(snapshot: editor.snapshot, baseRevisionID: "revision-1", baseText: "基準稿")
         XCTAssertNotEqual(confirmed.operationID, protected.operationID)
         XCTAssertEqual(confirmed.text, protected.text)
+    }
+
+    func testLegacyMarkedDraftRequiresExplicitConfirmationWithoutDiscardingUnknownBaseline() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let origin = URL(string: "https://api.example.test")!
+        let coordinator = try JournalSaveCoordinator(authorID: "author", apiOrigin: origin,
+            projectID: "project", clientID: "ios-test", journal: ProtectedDraftJournal(directory: root),
+            api: APITransport(origin: origin).client)
+        var editor = EditorState(documentID: "document", text: "base")
+        editor.updateComposition("local manuscript かな")
+        try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: "revision-1", baseText: "base")
+        let files = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+        let url = try XCTUnwrap(files.first)
+        let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+        var records = try XCTUnwrap(raw as? [[String: Any]])
+        records[0].removeValue(forKey: "compositionBaseText")
+        try JSONSerialization.data(withJSONObject: records).write(to: url, options: .atomic)
+
+        let recovered = try await coordinator.recover(documentID: "document")
+        editor = try XCTUnwrap(recovered).restoreEditor()
+        let unresolved = editor.snapshot
+        XCTAssertFalse(editor.canDiscardRecoveredComposition)
+        editor.resolveRecoveredComposition(keepingText: false)
+        XCTAssertEqual(editor.snapshot, unresolved)
+        editor.resolveRecoveredComposition(keepingText: true)
+        XCTAssertEqual(editor.text, "local manuscript かな")
+        XCTAssertFalse(editor.isComposing)
+        XCTAssertFalse(editor.isCurrentVersionProtected)
     }
 
     func testCanceledCompositionClearsTheLocalDraftWithoutSendingARevision() async throws {

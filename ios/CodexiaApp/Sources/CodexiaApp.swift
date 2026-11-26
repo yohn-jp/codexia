@@ -786,13 +786,7 @@ private final class ProductEditorModel: ObservableObject {
             let records = try await account.records(prepared, documentID: documentID, includeLocalBaseline: true)
             guard let latest = records.last else { return }
             let hasOnlyBaseline = records.count == 1 && latest.isLocalBaseline
-            state = EditorState(
-                recoveringDocumentID: latest.documentID,
-                text: hasOnlyBaseline ? baseText : latest.text,
-                version: latest.version,
-                sessionID: latest.sessionID,
-                alreadyCommitted: hasOnlyBaseline
-            )
+            state = latest.restoreEditor(confirmedText: hasOnlyBaseline ? baseText : nil)
             if hasOnlyBaseline { return }
             baseRevisionID = latest.baseRevisionID
             baseText = latest.baseText
@@ -811,11 +805,10 @@ private final class ProductEditorModel: ObservableObject {
             baseRevisionID: baseRevisionID,
             baseText: baseText
         )
-        if state.isCurrent(snapshot) {
-            var current = state
-            current.markProtected(snapshot)
-            state = current
-        }
+        guard state.snapshot == snapshot else { return }
+        var current = state
+        current.markProtected(snapshot)
+        state = current
         if pendingState != .conflict {
             pendingState = .protected
             if state.canLeave { saveMessage = "端末に保護済み。サーバーへの保存は未確認です。" }
@@ -824,11 +817,12 @@ private final class ProductEditorModel: ObservableObject {
 
     func scheduleProtection() {
         protectionTask?.cancel()
-        guard !state.isComposing, !state.canLeave else { return }
+        guard !state.isCurrentVersionProtected else { return }
         let snapshot = state.snapshot
         protectionTask = Task { @MainActor in
             do {
                 try await Task.sleep(for: .milliseconds(450))
+                guard state.snapshot == snapshot else { return }
                 try await protect(snapshot)
                 guard !Task.isCancelled, state.snapshot == snapshot else { return }
                 protectionTask = nil
@@ -836,6 +830,7 @@ private final class ProductEditorModel: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
+                guard !Task.isCancelled, state.snapshot == snapshot, !state.isCurrentVersionProtected else { return }
                 saveMessage = "入力を端末に保護できません。入力リスクがあります。"
             }
         }
@@ -843,9 +838,13 @@ private final class ProductEditorModel: ObservableObject {
 
     func protectBeforeBackground() async {
         protectionTask?.cancel()
-        guard !state.canLeave else { return }
-        do { try await protect(state.snapshot) }
-        catch { saveMessage = "バックグラウンド移行前に端末へ保護できませんでした。入力リスクがあります。" }
+        guard !isRestoring, !state.isCurrentVersionProtected else { return }
+        let snapshot = state.snapshot
+        do { try await protect(snapshot) }
+        catch {
+            guard state.snapshot == snapshot, !state.isCurrentVersionProtected else { return }
+            saveMessage = "バックグラウンド移行前に端末へ保護できませんでした。入力リスクがあります。"
+        }
     }
 
     func save() async {
@@ -860,6 +859,7 @@ private final class ProductEditorModel: ObservableObject {
             saveMessage = "端末に保護できないため、サーバーへ送信しませんでした。入力リスクがあります。"
             return
         }
+        guard state.snapshot == snapshot, state.canLeave else { return }
         let result = await account.save(prepared, documentID: documentID)
         await refreshJournalState()
         await handle(result)
@@ -867,7 +867,7 @@ private final class ProductEditorModel: ObservableObject {
     }
 
     func reconcile() async {
-        guard !saveIsInFlight else { return }
+        guard !saveIsInFlight, !state.isComposing else { return }
         saveIsInFlight = true
         defer { saveIsInFlight = false }
         let result = await account.reconcile(prepared, documentID: documentID)
@@ -878,6 +878,10 @@ private final class ProductEditorModel: ObservableObject {
 
     private func continueAutosave(after result: SaveDisposition) {
         guard case .saved = result, state.hasLocalEdits else { return }
+        if !state.isCurrentVersionProtected {
+            scheduleProtection()
+            return
+        }
         Task { [weak self] in await self?.saveProtectedChangesIfReady() }
     }
 
@@ -889,7 +893,8 @@ private final class ProductEditorModel: ObservableObject {
 
     private func handle(_ result: SaveDisposition) async {
         switch result {
-        case .saved(let receipt):
+        case .saved(let receipt, let submitted):
+            guard state.isCurrent(submitted) else { return }
             guard receipt.revision.documentId == documentID,
                   receipt.revision.projectId == projectID,
                   receipt.revision.id == receipt.document.headRevisionId else {
@@ -899,10 +904,10 @@ private final class ProductEditorModel: ObservableObject {
             }
             baseRevisionID = receipt.revision.id
             baseText = receipt.revision.markdown
-            if !state.isComposing, state.text.utf8.elementsEqual(receipt.revision.markdown.utf8) {
-                var current = state
-                current.markCommitted(state.snapshot)
-                state = current
+            var current = state
+            current.markCommitted(submitted)
+            state = current
+            if state.snapshot == submitted {
                 pendingState = nil
                 saveMessage = "サーバーに保存済み。revisionを確認しました。"
             } else {
@@ -948,6 +953,7 @@ private final class ProductEditorModel: ObservableObject {
     }
 
     func protectBeforeNavigation() async throws {
+        guard !isRestoring else { throw ProductAPIError.editorUnavailable }
         guard !state.isComposing else { throw ProductAPIError.compositionInProgress }
         if state.canLeave { return }
         let snapshot = state.snapshot
@@ -1057,9 +1063,6 @@ private struct ProductEditorScreen: View {
                     onProtect: { snapshot in try await model.protect(snapshot) }
                 )
                 .onChange(of: model.state.snapshot.version) { _, _ in model.scheduleProtection() }
-                .onChange(of: model.state.isComposing) { _, composing in
-                    if !composing { model.scheduleProtection() }
-                }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(model.saveMessage)
@@ -1069,7 +1072,7 @@ private struct ProductEditorScreen: View {
                             Button("サーバーへ保存") { Task { await model.save() } }
                                 .disabled(model.saveIsInFlight || model.state.isComposing || !model.state.hasLocalEdits || model.pendingState == .conflict)
                             Button("保存結果を照合") { Task { await model.reconcile() } }
-                                .disabled(model.saveIsInFlight || !model.canReconcile)
+                                .disabled(model.saveIsInFlight || model.state.isComposing || !model.canReconcile)
                             if model.pendingState == .conflict {
                                 Button("競合を確認") { showingConflict = true }
                             }

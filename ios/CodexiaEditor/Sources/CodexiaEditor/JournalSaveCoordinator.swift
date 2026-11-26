@@ -26,6 +26,7 @@ public struct DraftRecord: Codable, Sendable, Equatable {
     public let expectedReceiptAuthorID: String
     public let contentSHA256: String
     let isComposing: Bool?
+    let compositionBaseText: String?
     public var state: State
     public var saveRequest: Components.Schemas.SaveDocumentRequest
     public var receipt: Components.Schemas.SaveDocumentResponse?
@@ -40,10 +41,16 @@ public struct DraftRecord: Codable, Sendable, Equatable {
     public var isLocalBaseline: Bool {
         state == .protected && isComposing != true && text.utf8.elementsEqual(baseText.utf8)
     }
+
+    public func restoreEditor(confirmedText: String? = nil) -> EditorState {
+        if isComposing == true { return EditorState(recoveringComposition: self) }
+        return EditorState(recoveringDocumentID: documentID, text: confirmedText ?? text,
+                           version: version, sessionID: sessionID, alreadyCommitted: confirmedText != nil)
+    }
 }
 
 public enum SaveDisposition: Sendable {
-    case saved(Components.Schemas.SaveDocumentResponse)
+    case saved(Components.Schemas.SaveDocumentResponse, snapshot: EditorState.Snapshot)
     case pending(DocumentSave.Uncertainty)
     case accepted
     case unauthorized
@@ -158,8 +165,10 @@ fileprivate enum JournalBegin {
     case conflict
 }
 
-private struct DraftCommitReceipt: Encodable {
+private struct DraftCommitReceipt: Codable {
     let operationID: String
+    let sessionID: UUID?
+    let version: UInt64?
     let baseRevisionID: String
     let revisionID: String
     let contentSHA256: String
@@ -231,6 +240,14 @@ public actor ProtectedDraftJournal {
 
     fileprivate func insert(_ record: DraftRecord, scope: JournalScope) throws -> DraftRecord {
         var current = try records(scope: scope)
+        let receiptURL = try receiptURL(scope: scope)
+        if let data = try? Data(contentsOf: receiptURL),
+           let receipt = try? decoder.decode(DraftCommitReceipt.self, from: data),
+           receipt.sessionID == record.sessionID, let version = receipt.version,
+           !current.contains(where: { $0.operationID == receipt.operationID }),
+           record.version <= version || record.baseRevisionID == receipt.baseRevisionID {
+            throw DraftJournalError.staleSnapshot
+        }
         if let latest = current.last, latest.sessionID == record.sessionID, record.version < latest.version {
             throw DraftJournalError.staleSnapshot
         }
@@ -284,13 +301,14 @@ public actor ProtectedDraftJournal {
                 try write(current, scope: scope)
                 return false
             }
-            let receiptURL = try fileURL(scope: scope).deletingPathExtension().appendingPathExtension("receipt.json")
             try writeProtected(encoder.encode(DraftCommitReceipt(
                 operationID: record.operationID,
+                sessionID: record.sessionID,
+                version: record.version,
                 baseRevisionID: record.baseRevisionID,
                 revisionID: receipt.revision.id,
                 contentSHA256: record.contentSHA256
-            )), to: receiptURL)
+            )), to: receiptURL(scope: scope))
             current.remove(at: index)
             guard index < current.count, current[index].state == .protected else {
                 try write(current, scope: scope)
@@ -334,6 +352,10 @@ public actor ProtectedDraftJournal {
         }
         let name = scopeKey(scope)
         return directory.appendingPathComponent(name).appendingPathExtension("json")
+    }
+
+    private func receiptURL(scope: JournalScope) throws -> URL {
+        try fileURL(scope: scope).deletingPathExtension().appendingPathExtension("receipt.json")
     }
 
     private func scopeKey(_ scope: JournalScope) -> String {
@@ -398,6 +420,7 @@ public actor JournalSaveCoordinator {
             baseText: baseText, text: snapshot.text, operationID: UUID().uuidString, clientID: clientID,
             expectedReceiptAuthorID: expectedReceiptAuthorID, contentSHA256: hash,
             isComposing: snapshot.isComposing ? true : nil,
+            compositionBaseText: snapshot.compositionBaseText,
             state: .protected, saveRequest: request)
         return try await journal.insert(record, scope: scope)
     }
@@ -437,7 +460,7 @@ public actor JournalSaveCoordinator {
             baseRevisionID: currentRevisionID, baseText: currentText, text: snapshot.text,
             operationID: UUID().uuidString, clientID: clientID, expectedReceiptAuthorID: expectedReceiptAuthorID,
             contentSHA256: hash,
-            isComposing: nil, state: .protected, saveRequest: request)
+            isComposing: nil, compositionBaseText: nil, state: .protected, saveRequest: request)
         return try await journal.resolveConflict(scope: key, operationID: expectedOperationID, replacement: replacement)
     }
 
@@ -460,7 +483,9 @@ public actor JournalSaveCoordinator {
                 case .committed(let receipt):
                     let accepted = try await journal.finish(scope: key, operationID: record.operationID,
                         state: .committed, receipt: receipt, expectedAuthorID: record.expectedReceiptAuthorID)
-                    result = accepted ? .saved(receipt) : .atRisk
+                    let snapshot = EditorState.Snapshot(sessionID: record.sessionID, documentID: record.documentID,
+                        version: record.version, text: record.text, isComposing: false, compositionBaseText: nil)
+                    result = accepted ? .saved(receipt, snapshot: snapshot) : .atRisk
                 case .unknown(let uncertainty):
                     try await journal.finish(scope: key, operationID: record.operationID, state: .unknown)
                     result = .pending(uncertainty)
