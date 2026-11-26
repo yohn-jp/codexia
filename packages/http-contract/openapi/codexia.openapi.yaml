@@ -2568,6 +2568,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '409':
           description: The request conflicts with the current state of the server.
           content:
@@ -2575,6 +2581,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '413':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '415':
           description: Client error
           content:
             application/json:
@@ -2619,6 +2631,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
           description: Service unavailable.
           content:
@@ -2644,8 +2662,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '415':
+          description: Client error
           content:
             application/json:
               schema:
@@ -2675,6 +2711,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProjectResponse'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -2705,6 +2753,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -2713,6 +2767,12 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '409':
           description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '415':
+          description: Client error
           content:
             application/json:
               schema:
@@ -2742,6 +2802,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkArchiveExport'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -2779,8 +2845,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AssertionResponseBody'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
           content:
             application/json:
               schema:
@@ -2810,6 +2894,12 @@ paths:
                 $ref: '#/components/schemas/PersistenceAssertionEnvelope'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -2863,8 +2953,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AssertionEvidenceListBody'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
           content:
             application/json:
               schema:
@@ -2894,6 +3002,12 @@ paths:
                 $ref: '#/components/schemas/PersistenceEvidenceEnvelope'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -2948,6 +3062,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       tags:
         - persistence
       x-codexia-desktop-response-schema: '#/components/schemas/PersistenceChangeSetDesktopListBody'
@@ -2976,6 +3096,12 @@ paths:
                 $ref: '#/components/schemas/PersistenceChangeSetResultBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -3016,6 +3142,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PersistenceChangeSetResponseBody'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -3051,6 +3189,12 @@ paths:
                 $ref: '#/components/schemas/PersistenceChangeSetApplicationBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -3106,6 +3250,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -3153,6 +3303,12 @@ paths:
                 $ref: '#/components/schemas/PersistenceChangeSetApprovalBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -3226,6 +3382,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '409':
           description: The request conflicts with the current state of the server.
           content:
@@ -3257,6 +3419,12 @@ paths:
                 $ref: '#/components/schemas/SaveDocumentResponse'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -3310,8 +3478,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PersistenceDocumentGetResponse'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
           content:
             application/json:
               schema:
@@ -3351,6 +3537,12 @@ paths:
                 $ref: '#/components/schemas/SaveDocumentResponse'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -3398,6 +3590,12 @@ paths:
                 $ref: '#/components/schemas/PersistenceDocumentEnvelope'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -3470,8 +3668,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
           content:
             application/json:
               schema:
@@ -3501,6 +3711,12 @@ paths:
                 $ref: '#/components/schemas/PersistenceAnchorCreatedResponse'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -3558,6 +3774,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -3607,6 +3829,12 @@ paths:
                 $ref: '#/components/schemas/PersistenceAssertionEnvelope'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -3670,6 +3898,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -3716,6 +3950,12 @@ paths:
                 $ref: '#/components/schemas/PersistenceDocumentEnvelope'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -3769,6 +4009,12 @@ paths:
                 $ref: '#/components/schemas/SaveDocumentResponse'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -3828,6 +4074,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DocumentRevisionPageResponse'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -3897,6 +4155,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '409':
           description: The request conflicts with the current state of the server.
           content:
@@ -3937,8 +4201,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PersistenceNodeBody'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
           content:
             application/json:
               schema:
@@ -3968,6 +4250,12 @@ paths:
                 $ref: '#/components/schemas/PersistenceKnowledgeNodeEnvelope'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -4016,6 +4304,12 @@ paths:
                 $ref: '#/components/schemas/PersistenceKnowledgeAliasEnvelope'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -4070,8 +4364,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NodeEvidenceListBody'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request conflicts with the current state of the server.
           content:
             application/json:
               schema:
@@ -4106,6 +4418,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -4114,6 +4432,12 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '409':
           description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '415':
+          description: Client error
           content:
             application/json:
               schema:
@@ -4150,6 +4474,12 @@ paths:
                 $ref: '#/components/schemas/KnowledgeMergePreviewBody'
         '400':
           description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
           content:
             application/json:
               schema:
@@ -4202,6 +4532,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The server cannot find the requested resource.
           content:
@@ -4240,8 +4576,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PersistenceReviewFeedBody'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Access is forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: The server cannot find the requested resource.
           content:
             application/json:
               schema:
@@ -4263,6 +4617,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PersistenceStatusResponse'
+        '401':
+          description: Access is unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
           description: Service unavailable.
           content:

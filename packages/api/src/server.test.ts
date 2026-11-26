@@ -5019,3 +5019,52 @@ it('restores a manuscript revision only through an approved native ChangeSet and
     data: { changeSet: receipt.changeSet, replayed: true },
   });
 });
+
+it('does not activate the MCP module for a request cancelled during admission', { timeout: 30_000 }, async t => {
+  const staticDir = await mkdtemp(resolve(tmpdir(), 'codexia-cancel-mcp-admission-'));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const client = createSignedRequestFixture();
+  let markStarted!: () => void;
+  const started = new Promise<void>(resolve => {
+    markStarted = resolve;
+  });
+  let allowAdmission!: () => void;
+  const admissionGate = new Promise<void>(resolve => {
+    allowAdmission = resolve;
+  });
+  const cancelledHeaders = client.mcpHeaders();
+  const runtime = actionBoundaryRuntime(staticDir);
+  const activate = runtime.activate.bind(runtime);
+  let activations = 0;
+  runtime.activate = async moduleId => {
+    activations += 1;
+    return activate(moduleId);
+  };
+  const settings = testClientSettings('project-1', client.publicJwks, async token => {
+    if (`Bearer ${token}` === cancelledHeaders.Authorization) {
+      markStarted();
+      await admissionGate;
+    }
+    return client.isActive(token);
+  });
+  const api = await startCustomApi(makeSnapshotStore().store, staticDir, { ...settings, runtime, usageDirectory: staticDir });
+  t.after(async () => {
+    allowAdmission();
+    await api.close();
+  });
+  const disconnected = new Promise<void>(resolve => {
+    api.server.once('connection', socket => socket.once('close', resolve));
+  });
+  const cancelled = httpRequest(`${api.base}/mcp`, { headers: cancelledHeaders });
+  cancelled.on('error', () => {});
+  cancelled.end();
+  await started;
+  cancelled.destroy();
+  await disconnected;
+  allowAdmission();
+
+  const response = await fetch(`${api.base}/mcp`, { headers: client.mcpHeaders() });
+  assert.equal(response.status, 200);
+  await response.body?.cancel();
+  assert.equal(activations, 2, 'only the connected request activates the module and its HTTP contribution');
+});

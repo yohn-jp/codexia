@@ -23,7 +23,7 @@ test('projects obligations, reverse surfaces, and evidence links without conform
       source: { sourceSha: sha, worktreeClean: true, registerPath: 'docs/requirements/REQUIREMENT-REGISTER.md' },
       toolchain: { strictdocVersion: '0.32.1', requirementsLockSha256: createHash('sha256').update(readFileSync('scripts/strictdoc/requirements.lock.txt')).digest('hex') },
       traceability: { TRC01: { status: 'LOCAL_PASS' }, TRC02: { status: 'LOCAL_PASS' }, TRC07: { status: 'PENDING_PAGES_PUBLISH', staticStaging: 'PASSED', browserAcceptance: 'PASSED' }, gates: Object.fromEntries(Array.from({length: 8}, (_, index) => [`G${index}`, {status: index === 0 ? 'LOCAL_PASS' : index === 7 ? 'PARTIAL' : 'NOT_RUN', evidence: `Gate ${index} evidence` }])) },
-      obligationTrace: { rows: [{ requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', obligationText: 'Native UI remains separately accepted', decisionStatus: 'ACCEPTED', conformanceStatus: 'PARTIAL', applicability: 'CURRENT', requirementImplementationIdentifiers: ['Native state machine 未導入'], requirementComment: 'XState actorは目標・未実装', status: 'PARTIAL', designRefs: ['[Traceability design](STRICTDOC-TRACEABILITY.md)'], sourceRefs: [{ path: 'scripts/strictdoc/case-results.mjs', range: '17, 28' }], implementationIdentifiers: ['scripts/strictdoc/case-results.mjs'], surfaceIdentifiers: [], testIds: ['TEST-TRC-01-001', 'TEST-TRC-02-001', 'TEST-TRC-03-001'], exactRuns: [exactRun] }], gaps: ['OBL-REQ-UI-001-O01: no semantic/device acceptance'] },
+      obligationTrace: { rows: [{ requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', obligationText: 'Native UI remains separately accepted', decisionStatus: 'ACCEPTED', conformanceStatus: 'PARTIAL', applicability: 'CURRENT', requirementImplementationIdentifiers: ['Native state machine 未導入'], requirementComment: 'XState actorは目標・未実装', status: 'PARTIAL', designRefs: ['[Traceability design](STRICTDOC-TRACEABILITY.md)'], sourceRefs: [{ path: 'scripts/strictdoc/case-results.mjs', range: '17, 28' }], implementationIdentifiers: ['packages/api/src/job-history-store.ts: JobHistoryStore (target candidate)'], surfaceIdentifiers: [], testIds: ['TEST-TRC-01-001', 'TEST-TRC-02-001', 'TEST-TRC-03-001'], exactRuns: [exactRun] }], gaps: ['OBL-REQ-UI-001-O01: no semantic/device acceptance'] },
       reverseTrace: { rows: [
         { surface: { kind: 'mcpTool', id: 'list_projects' }, requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', status: 'UNVERIFIED', provenance: 'Literal registration', source: { path: 'scripts/strictdoc/reverse-trace.mjs', line: 18 }, testIds: ['TEST-TRC-01-001'], exactRuns: [exactRun] },
         { surface: { kind: 'mcpTool', id: 'unlinked.export' }, status: 'UNMAPPED', provenance: 'Literal registration', source: { path: 'scripts/strictdoc/reverse-trace.mjs', line: 19 }, inventoryClassification: 'candidate REQ-MCP-002; effect remains unverified', candidateRequirementIds: ['REQ-MCP-002'], testIds: [], exactRuns: [] },
@@ -91,6 +91,11 @@ test('projects obligations, reverse surfaces, and evidence links without conform
     assert.equal(traceJson.caseExecutions[2].exactRuns.length, 0, 'a skip must not create passing run evidence');
     assert.equal(traceJson.summary.evidenceFreshness.status, 'IN_PROGRESS');
     assert.equal(traceJson.summary.evidenceFreshness.sourceSha, sha);
+    assert.deepEqual(traceJson.obligations[0].implementationLinks, [{
+      identifier: 'packages/api/src/job-history-store.ts: JobHistoryStore (target candidate)',
+      path: 'packages/api/src/job-history-store.ts',
+      url: `https://github.com/yohn-jp/codexia/blob/${sha}/packages/api/src/job-history-store.ts`,
+    }]);
     assert.equal(traceJson.referenceAudit.broken.length, 0);
     assert.match(tracePage, /<search\b/u);
     assert.match(tracePage, /name="area"/u);
@@ -104,6 +109,7 @@ test('projects obligations, reverse surfaces, and evidence links without conform
     assert.match(tracePage, /宣言なしを実装済みとは扱いません/u);
 
     const staleReference = structuredClone(report);
+    staleReference.obligationTrace.rows[0].implementationIdentifiers.push('packages/api/src/missing-implementation.ts: MissingImplementation');
     staleReference.obligationTrace.rows[0].sourceRefs.push({ path: 'packages/api/src/missing-trace-target.ts' });
     staleReference.reverseTrace.gaps.push({ kind: 'BLOCKED', source: { path: 'packages/api/src/missing-gap-source.ts' } });
     staleReference.obligationTrace.gaps.push('OBL-REQ-UI-001-O01: no exact-source run evidence for TEST-TRC-02-001');
@@ -111,6 +117,7 @@ test('projects obligations, reverse surfaces, and evidence links without conform
     const staleSite = join(root, 'stale-reference');
     packSpecifications(staleSite, output, sha);
     const staleTrace = JSON.parse(readFileSync(join(staleSite, 'requirements/traceability/traceability.json'), 'utf8'));
+    assert.ok(staleTrace.referenceAudit.broken.some(item => item.kind === 'implementation' && item.path === 'packages/api/src/missing-implementation.ts'));
     assert.ok(staleTrace.referenceAudit.broken.some(item => item.path === 'packages/api/src/missing-trace-target.ts'));
     assert.ok(staleTrace.referenceAudit.broken.some(item => item.path === 'packages/api/src/missing-gap-source.ts'));
     assert.equal(staleTrace.summary.brokenReferenceCount, staleTrace.referenceAudit.broken.length);

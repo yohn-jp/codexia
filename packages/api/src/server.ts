@@ -767,8 +767,12 @@ export function createServer(options: ApiServerOptions): Server {
 
   const abortSignalFor = (request: IncomingMessage, response: ServerResponse): AbortSignal => {
     const controller = new AbortController();
-    requestControllers.add(controller);
     const abort = () => controller.abort(new Error('HTTP request was cancelled'));
+    if (request.aborted || response.destroyed) {
+      abort();
+      return controller.signal;
+    }
+    requestControllers.add(controller);
     const cleanup = () => requestControllers.delete(controller);
     request.once('aborted', () => {
       abort();
@@ -2808,6 +2812,7 @@ export function createServer(options: ApiServerOptions): Server {
       signal,
       parsedBody,
     }) => {
+      if (signal.aborted) return;
       const { moduleId, contributionId, effect } = contribution;
       const relativePath = contribution.relativePath
         .split('/')

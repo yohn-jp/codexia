@@ -593,7 +593,7 @@ jobs:
           path: ${{ steps.pnpm.outputs.store }}
           key: ${{ steps.dependencies.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@v7.0.2
-        if: always() && (matrix.group == 'core-reference' || matrix.group == 'full-reference')
+        if: always() && matrix.captureUiReview
         with:
           name: ui-refinement-visual-${{ matrix.group }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/ui-review-screens
