@@ -1,6 +1,6 @@
-import type { ComponentType, ReactNode, RefObject } from "react";
+import type { ComponentType, ReactNode, RefObject } from 'react';
 
-export type UiMode = "desktop";
+export type UiMode = 'desktop';
 
 /** A host-approved panel definition. The workspace stores its ID, never its renderer. */
 export interface WorkspacePanel {
