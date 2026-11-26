@@ -233,7 +233,7 @@ SQL
 verify_drill_candidate_api(){
   local candidate="$1" database="$2" history_volume="$3" api_name="$4"
   local auth_password app_password auth_secret oidc_secret=''
-  local env_file ready=false actual_image
+  local env_file ready=false actual_image database_id network_mode
   [[ "$candidate_api_ready" == true ]] || return 0
   [[ "$(podman inspect --format '{{.HostConfig.NetworkMode}}' "$database")" == none ]] ||
     die 'Restored database must be isolated from all networks before candidate API readiness'
@@ -269,9 +269,8 @@ verify_drill_candidate_api(){
   chmod 0600 "$env_file"
   printf '%s' "$app_password" > "$api_runtime_dir/app-password"
   chmod 0444 "$api_runtime_dir/app-password"
-  podman exec -i "$database" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d codexia \
-    -v auth_password="$auth_password" -v app_password="$app_password" <<'SQL' >/dev/null ||
-    die 'Could not provision isolated candidate API database roles'
+  if ! podman exec -i "$database" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d codexia \
+    -v auth_password="$auth_password" -v app_password="$app_password" <<'SQL' >/dev/null
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'codexia_auth') THEN
     RAISE EXCEPTION 'restored Better Auth schema is missing';
@@ -290,6 +289,9 @@ GRANT USAGE ON SCHEMA codexia_auth TO codexia_auth_runtime;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA codexia_auth TO codexia_auth_runtime;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA codexia_auth TO codexia_auth_runtime;
 SQL
+  then
+    die 'Could not provision isolated candidate API database roles'
+  fi
   assert_restore_resource_absent container "$api_name"
   api_created=true
   podman run -d --pull=never --name "$api_name" --label "$label=$suffix" \
@@ -300,7 +302,10 @@ SQL
     die 'Could not start the digest-pinned candidate API on the isolated restored database'
   actual_image="$(podman inspect --format '{{.Config.Image}}' "$api_name" 2>/dev/null || true)"
   [[ "$actual_image" == "$candidate" ]] || die 'Isolated candidate API image identity differs from the reviewed digest'
-  [[ "$(podman inspect --format '{{.HostConfig.NetworkMode}}' "$api_name" 2>/dev/null || true)" == "container:$database" ]] ||
+  database_id="$(podman inspect --format '{{.Id}}' "$database")"
+  network_mode="$(podman inspect --format '{{.HostConfig.NetworkMode}}' "$api_name")"
+  [[ "$database_id" =~ ^[a-f0-9]{64}$ &&
+     ( "$network_mode" == "container:$database_id" || "$network_mode" == "container:$database" ) ]] ||
     die 'Isolated candidate API escaped the restored database network namespace'
   for attempt in $(seq 1 60); do
     if [[ "$(podman inspect --format '{{.State.Running}}' "$api_name" 2>/dev/null || true)" != true ]]; then break; fi

@@ -441,13 +441,14 @@ const statePath = process.env.DRILL_FIXTURE_RESOURCES;
 const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
 state.images ||= {};
 fs.appendFileSync(process.env.DRILL_FIXTURE_COMMANDS, JSON.stringify(args) + '\\n');
-if (args.includes('-i') || verb === 'volume' && action === 'import') fs.readFileSync(0);
+const input = args.includes('-i') || verb === 'volume' && action === 'import' ? fs.readFileSync(0, 'utf8') : '';
+if (args.some(value => value.startsWith('auth_password=')) && !input.startsWith('DO $$ BEGIN\\n')) process.exit(2);
 const save = () => fs.writeFileSync(statePath, JSON.stringify(state));
 const id = value => value.split('=')[1];
 if (['container', 'volume'].includes(verb) && action === 'exists') process.exit(subject in state.resources ? 0 : 1);
 if (verb === 'volume' && action === 'create') state.resources[args.at(-1)] = id(args[3]);
 else if (verb === 'volume' && action === 'inspect' || verb === 'inspect') {
-  process.stdout.write(args.includes('{{.HostConfig.NetworkMode}}') ? (state.images[args.at(-1)] ? 'container:' + args.at(-1).replace(/-api$/u, '') : 'none') : args.includes('{{.State.Running}}') ? (process.env.DRILL_FIXTURE_API_EXITED ? 'false' : 'true') : args.includes('{{.Config.Image}}') ? state.images[args.at(-1)] : state.resources[args.at(-1)]);
+  process.stdout.write(args.includes('{{.HostConfig.NetworkMode}}') ? (state.images[args.at(-1)] ? 'container:' + 'd'.repeat(64) : 'none') : args.includes('{{.Id}}') ? 'd'.repeat(64) : args.includes('{{.State.Running}}') ? (process.env.DRILL_FIXTURE_API_EXITED ? 'false' : 'true') : args.includes('{{.Config.Image}}') ? state.images[args.at(-1)] : state.resources[args.at(-1)]);
 } else if (verb === 'run' && action === '-d') {
   const name = args[args.indexOf('--name') + 1];
   state.resources[name] = id(args[args.indexOf('--label') + 1]);
