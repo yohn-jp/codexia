@@ -47,16 +47,32 @@ function parseIdentity(value: unknown): OwnerIdentity {
   const status = value.provider.status;
   if (status !== 'not-configured' && status !== 'operator-configured-unverified') throw new Error('Invalid owner provider status');
   const clients = value.clients.map((row: unknown): OwnerOAuthClient => {
-    if (!isRecord(row) || typeof row.clientId !== 'string' || !row.clientId || typeof row.name !== 'string' ||
-        !stringList(row.scopes) || !stringList(row.redirectUris) || typeof row.disabled !== 'boolean') {
+    if (
+      !isRecord(row) ||
+      typeof row.clientId !== 'string' ||
+      !row.clientId ||
+      typeof row.name !== 'string' ||
+      !stringList(row.scopes) ||
+      !stringList(row.redirectUris) ||
+      typeof row.disabled !== 'boolean'
+    ) {
       throw new Error('Invalid owner OAuth client');
     }
     return { clientId: row.clientId, name: row.name, scopes: row.scopes, redirectUris: row.redirectUris, disabled: row.disabled };
   });
   const consents = value.consents.map((row: unknown): OwnerConsent => {
-    if (!isRecord(row) || typeof row.id !== 'string' || !row.id || typeof row.clientId !== 'string' || !row.clientId ||
-        !stringList(row.scopes) || typeof row.updatedAt !== 'string' || !Number.isFinite(Date.parse(row.updatedAt)) ||
-        typeof row.revision !== 'string' || !/^[A-Za-z0-9_-]{43}$/u.test(row.revision)) {
+    if (
+      !isRecord(row) ||
+      typeof row.id !== 'string' ||
+      !row.id ||
+      typeof row.clientId !== 'string' ||
+      !row.clientId ||
+      !stringList(row.scopes) ||
+      typeof row.updatedAt !== 'string' ||
+      !Number.isFinite(Date.parse(row.updatedAt)) ||
+      typeof row.revision !== 'string' ||
+      !/^[A-Za-z0-9_-]{43}$/u.test(row.revision)
+    ) {
       throw new Error('Invalid owner consent');
     }
     return { id: row.id, clientId: row.clientId, scopes: row.scopes, updatedAt: row.updatedAt, revision: row.revision };
@@ -65,7 +81,10 @@ function parseIdentity(value: unknown): OwnerIdentity {
 }
 
 async function readError(response: Response): Promise<OwnerSecurityRequestError> {
-  const body: unknown = await response.clone().json().catch(() => undefined);
+  const body: unknown = await response
+    .clone()
+    .json()
+    .catch(() => undefined);
   const code = isRecord(body) && typeof body.code === 'string' ? body.code : undefined;
   const message = isRecord(body) && typeof body.message === 'string' ? body.message : undefined;
   return new OwnerSecurityRequestError(response.status, code, message);

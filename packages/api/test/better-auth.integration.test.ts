@@ -672,21 +672,29 @@ test('Better Auth PKCE MCP client lists and invokes tools through central OAuth 
     const revokeGrantUrl = `${baseAuth}/codexia/owner-security/revoke-consent`;
     const revokeGrantBody = JSON.stringify(consentToWithdraw);
     const missingGrantOrigin = await apiRequest(revokeGrantUrl, {
-      method: 'POST', headers: { cookie: freshOwnerCookie, 'content-type': 'application/json' }, body: revokeGrantBody,
+      method: 'POST',
+      headers: { cookie: freshOwnerCookie, 'content-type': 'application/json' },
+      body: revokeGrantBody,
     });
     assert.equal(missingGrantOrigin.status, 403, 'grant withdrawal requires a same-origin CSRF signal');
     const foreignGrantOrigin = await apiRequest(revokeGrantUrl, {
-      method: 'POST', headers: { ...ownerManagementHeaders, origin: 'https://untrusted.example', 'content-type': 'application/json' }, body: revokeGrantBody,
+      method: 'POST',
+      headers: { ...ownerManagementHeaders, origin: 'https://untrusted.example', 'content-type': 'application/json' },
+      body: revokeGrantBody,
     });
     assert.equal(foreignGrantOrigin.status, 403, 'grant withdrawal rejects a foreign Origin');
     const bearerGrantRevoke = await apiRequest(revokeGrantUrl, {
-      method: 'POST', headers: { ...ownerManagementHeaders, authorization: `Bearer ${ownerGrant.accessToken}`, 'content-type': 'application/json' }, body: revokeGrantBody,
+      method: 'POST',
+      headers: { ...ownerManagementHeaders, authorization: `Bearer ${ownerGrant.accessToken}`, 'content-type': 'application/json' },
+      body: revokeGrantBody,
     });
     assert.equal(bearerGrantRevoke.status, 403, 'a bearer token cannot authorize browser grant management');
     assert.equal((await bearerGrantRevoke.json()).code, 'OWNER_SECURITY_COOKIE_REQUIRED');
     await fixture.ageOwnerSession();
     const staleGrantRevoke = await apiRequest(revokeGrantUrl, {
-      method: 'POST', headers: { ...ownerManagementHeaders, 'content-type': 'application/json' }, body: revokeGrantBody,
+      method: 'POST',
+      headers: { ...ownerManagementHeaders, 'content-type': 'application/json' },
+      body: revokeGrantBody,
     });
     assert.equal(staleGrantRevoke.status, 403, 'grant withdrawal requires fresh owner reauthentication');
     assert.equal((await staleGrantRevoke.json()).code, 'OWNER_SECURITY_REAUTH_REQUIRED');
@@ -694,14 +702,14 @@ test('Better Auth PKCE MCP client lists and invokes tools through central OAuth 
 
     const reauthenticatedOwnerCookie = await fixture.createFreshOwnerSession();
     const reauthenticatedHeaders = { cookie: reauthenticatedOwnerCookie, origin };
-    const refreshedSelection = (await (async () => {
+    const refreshedSelection = await (async () => {
       const response = await apiRequest(`${baseAuth}/codexia/owner-security/identity`, { headers: reauthenticatedHeaders });
       assert.equal(response.status, 200);
       const identity = (await response.json()) as { consents: Array<{ id: string; clientId: string; scopes: string[]; revision: string }> };
       const row = identity.consents.find(grant => grant.clientId === fixture.webClientId);
       assert.ok(row);
       return { id: row.id, clientId: row.clientId, scopes: row.scopes, revision: row.revision };
-    })());
+    })();
     const withdrawn = await apiRequest(revokeGrantUrl, {
       method: 'POST',
       headers: { ...reauthenticatedHeaders, 'content-type': 'application/json' },
@@ -712,9 +720,15 @@ test('Better Auth PKCE MCP client lists and invokes tools through central OAuth 
     const postWithdrawalIdentity = await apiRequest(`${baseAuth}/codexia/owner-security/identity`, { headers: reauthenticatedHeaders });
     assert.equal(postWithdrawalIdentity.status, 200);
     const postWithdrawal = (await postWithdrawalIdentity.json()) as { consents: Array<{ clientId: string }> };
-    assert.equal(postWithdrawal.consents.some(grant => grant.clientId === fixture.webClientId), false);
-    assert.equal((await apiRequest(`${origin}/api/session`, { headers: ownerGrantHeaders })).status, 401,
-      'an already issued web JWT is denied at API admission after its owner withdraws consent');
+    assert.equal(
+      postWithdrawal.consents.some(grant => grant.clientId === fixture.webClientId),
+      false,
+    );
+    assert.equal(
+      (await apiRequest(`${origin}/api/session`, { headers: ownerGrantHeaders })).status,
+      401,
+      'an already issued web JWT is denied at API admission after its owner withdraws consent',
+    );
     const inactiveGrantIntrospection = await apiRequest(`${baseAuth}/oauth2/introspect`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -726,8 +740,11 @@ test('Better Auth PKCE MCP client lists and invokes tools through central OAuth 
       }),
     });
     assert.equal(inactiveGrantIntrospection.status, 200);
-    assert.deepEqual(await inactiveGrantIntrospection.json(), { active: false },
-      'the withdrawn grant is inactive through OAuth introspection as well as API admission');
+    assert.deepEqual(
+      await inactiveGrantIntrospection.json(),
+      { active: false },
+      'the withdrawn grant is inactive through OAuth introspection as well as API admission',
+    );
     const withdrawnRefresh = await apiRequest(`${baseAuth}/oauth2/token`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -739,8 +756,11 @@ test('Better Auth PKCE MCP client lists and invokes tools through central OAuth 
       }),
     });
     assert.equal(withdrawnRefresh.status, 400, 'a refresh token from the withdrawn owner grant cannot mint another access token');
-    assert.equal((await apiRequest(`${origin}/api/session`, { headers: iosGrantHeaders })).status, 200,
-      'withdrawing the web grant leaves the owner’s separate iOS client grant active');
+    assert.equal(
+      (await apiRequest(`${origin}/api/session`, { headers: iosGrantHeaders })).status,
+      200,
+      'withdrawing the web grant leaves the owner’s separate iOS client grant active',
+    );
     const iosRefresh = await apiRequest(`${baseAuth}/oauth2/token`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },

@@ -432,14 +432,16 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
       codexiaAuthMethodsPlugin(Boolean(oidcIssuer), Boolean(bootstrap?.ownerSetup || config.installOwnerSetupSchema)),
       setupProvisioningSessionPlugin(() => bootstrap?.setupProvisioningOwner?.()),
       ...(normalOwnerId
-        ? [ownerSecurity({
-            origin: publicOrigin.origin,
-            ownerId: normalOwnerId,
-            oauthClientIds: config.ownerClientIds,
-            legacyOidcConfigured: Boolean(oidcIssuer),
-            revokeOAuthGrant: ({ clientId, subject, revokedAt }) =>
-              recordOwnerOAuthGrantRevocation(pool, { issuer, clientId, subject, revokedAt }),
-          })]
+        ? [
+            ownerSecurity({
+              origin: publicOrigin.origin,
+              ownerId: normalOwnerId,
+              oauthClientIds: config.ownerClientIds,
+              legacyOidcConfigured: Boolean(oidcIssuer),
+              revokeOAuthGrant: ({ clientId, subject, revokedAt }) =>
+                recordOwnerOAuthGrantRevocation(pool, { issuer, clientId, subject, revokedAt }),
+            }),
+          ]
         : []),
       passkey({
         rpID: passkeyRpId,

@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   fetchOwnerIdentity,
-  outcomeWasUnconfirmed,
-  OwnerSecurityRequestError,
-  revokeOwnerConsent,
   type OwnerConsent,
+  OwnerSecurityRequestError,
+  outcomeWasUnconfirmed,
+  revokeOwnerConsent,
 } from './owner-security-client';
 
 const consent: OwnerConsent = {
@@ -27,24 +27,44 @@ test('owner identity uses the same-origin cookie and exposes only whitelisted cl
     assert.equal(new Headers(init?.headers).has('authorization'), false);
     return Response.json({
       provider: { status: 'operator-configured-unverified', clientSecret: 'never-expose' },
-      clients: [{ clientId: 'web', name: 'Codexia Desktop', scopes: ['openid'], redirectUris: ['https://codexia.example/callback'], disabled: false, clientSecret: 'never-expose' }],
+      clients: [
+        {
+          clientId: 'web',
+          name: 'Codexia Desktop',
+          scopes: ['openid'],
+          redirectUris: ['https://codexia.example/callback'],
+          disabled: false,
+          clientSecret: 'never-expose',
+        },
+      ],
       consents: [{ ...consent, token: 'never-expose' }],
       unrelated: 'discarded',
     });
   });
   assert.deepEqual(identity, {
     provider: { status: 'operator-configured-unverified' },
-    clients: [{ clientId: 'web', name: 'Codexia Desktop', scopes: ['openid'], redirectUris: ['https://codexia.example/callback'], disabled: false }],
+    clients: [
+      { clientId: 'web', name: 'Codexia Desktop', scopes: ['openid'], redirectUris: ['https://codexia.example/callback'], disabled: false },
+    ],
     consents: [consent],
   });
 });
 
 test('owner identity fails closed for anonymous and malformed responses', async () => {
-  await assert.rejects(fetchOwnerIdentity(async () => new Response(null, { status: 401 })), OwnerSecurityRequestError);
+  await assert.rejects(
+    fetchOwnerIdentity(async () => new Response(null, { status: 401 })),
+    OwnerSecurityRequestError,
+  );
   await assert.rejects(fetchOwnerIdentity(async () => Response.json({ provider: { status: 'unknown' }, clients: [], consents: [] })));
-  await assert.rejects(fetchOwnerIdentity(async () => Response.json({
-    provider: { status: 'not-configured' }, clients: [], consents: [{ ...consent, scopes: [2] }],
-  })));
+  await assert.rejects(
+    fetchOwnerIdentity(async () =>
+      Response.json({
+        provider: { status: 'not-configured' },
+        clients: [],
+        consents: [{ ...consent, scopes: [2] }],
+      }),
+    ),
+  );
 });
 
 test('grant withdrawal sends only consent identity and requires the full revocation receipt', async () => {

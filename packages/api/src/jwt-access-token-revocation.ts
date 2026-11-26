@@ -1,10 +1,10 @@
-import { randomUUID } from "node:crypto";
-import type { JWTPayload } from "jose";
-import type { Pool } from "pg";
+import { randomUUID } from 'node:crypto';
+import type { JWTPayload } from 'jose';
+import type { Pool } from 'pg';
 
-const REVOCATION_TABLE = "codexia_auth.oauth_jwt_access_token_revocation";
+const REVOCATION_TABLE = 'codexia_auth.oauth_jwt_access_token_revocation';
 const MAX_REVOCATION_FORM_BYTES = 32 * 1024;
-const OWNER_GRANT_REVOCATION_JTI_PREFIX = "codexia-owner-grant-revocation:";
+const OWNER_GRANT_REVOCATION_JTI_PREFIX = 'codexia-owner-grant-revocation:';
 export const CODEXIA_OAUTH_ACCESS_TOKEN_LIFETIME_SECONDS = 300;
 
 export interface VerifiedJwtAccessToken extends JWTPayload {
@@ -49,8 +49,8 @@ interface RevocationForm {
 function decodeBasicClientId(value: string): string | undefined {
   if (!/^Basic\s+/iu.test(value)) return undefined;
   try {
-    const decoded = Buffer.from(value.replace(/^Basic\s+/iu, ""), "base64").toString("utf8");
-    const colon = decoded.indexOf(":");
+    const decoded = Buffer.from(value.replace(/^Basic\s+/iu, ''), 'base64').toString('utf8');
+    const colon = decoded.indexOf(':');
     if (colon <= 0) return undefined;
     return decodeURIComponent(decoded.slice(0, colon));
   } catch {
@@ -59,8 +59,8 @@ function decodeBasicClientId(value: string): string | undefined {
 }
 
 async function readRevocationForm(request: Request): Promise<RevocationForm | undefined> {
-  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/x-www-form-urlencoded")) return undefined;
-  const contentLength = request.headers.get("content-length");
+  if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/x-www-form-urlencoded')) return undefined;
+  const contentLength = request.headers.get('content-length');
   if (contentLength && /^\d+$/u.test(contentLength) && Number(contentLength) > MAX_REVOCATION_FORM_BYTES) return undefined;
   const reader = request.clone().body?.getReader();
   if (!reader) return undefined;
@@ -80,13 +80,18 @@ async function readRevocationForm(request: Request): Promise<RevocationForm | un
   } finally {
     reader.releaseLock();
   }
-  const form = new URLSearchParams(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), size).toString("utf8"));
-  const tokens = form.getAll("token");
-  const clientIds = form.getAll("client_id");
-  const hints = form.getAll("token_type_hint");
+  const form = new URLSearchParams(
+    Buffer.concat(
+      chunks.map(chunk => Buffer.from(chunk)),
+      size,
+    ).toString('utf8'),
+  );
+  const tokens = form.getAll('token');
+  const clientIds = form.getAll('client_id');
+  const hints = form.getAll('token_type_hint');
   if (tokens.length !== 1 || !tokens[0] || clientIds.length > 1 || hints.length > 1) return undefined;
 
-  const basicClientId = decodeBasicClientId(request.headers.get("authorization") ?? "");
+  const basicClientId = decodeBasicClientId(request.headers.get('authorization') ?? '');
   const formClientId = clientIds[0];
   if (basicClientId && formClientId && basicClientId !== formClientId) return undefined;
   const clientId = basicClientId ?? formClientId;
@@ -96,27 +101,31 @@ async function readRevocationForm(request: Request): Promise<RevocationForm | un
 
 function readOAuthError(response: Response): Promise<{ readonly error?: string } | undefined> {
   if (response.status < 400) return Promise.resolve(undefined);
-  return response.clone().json().then((body: unknown) => {
-    if (typeof body !== "object" || body === null || !("error" in body) || typeof body.error !== "string") return undefined;
-    return { error: body.error };
-  }).catch(() => undefined);
+  return response
+    .clone()
+    .json()
+    .then((body: unknown) => {
+      if (typeof body !== 'object' || body === null || !('error' in body) || typeof body.error !== 'string') return undefined;
+      return { error: body.error };
+    })
+    .catch(() => undefined);
 }
 
 function rfc7009Success(response: Response): Response {
   const headers = new Headers(response.headers);
-  headers.delete("content-type");
-  headers.delete("content-length");
-  headers.set("cache-control", "no-store");
-  headers.set("pragma", "no-cache");
+  headers.delete('content-type');
+  headers.delete('content-length');
+  headers.set('cache-control', 'no-store');
+  headers.set('pragma', 'no-cache');
   return new Response(null, { status: 200, headers });
 }
 
 function inactiveIntrospectionResponse(response: Response): Response {
   const headers = new Headers(response.headers);
-  headers.delete("content-length");
-  headers.set("content-type", "application/json");
-  headers.set("cache-control", "no-store");
-  headers.set("pragma", "no-cache");
+  headers.delete('content-length');
+  headers.set('content-type', 'application/json');
+  headers.set('cache-control', 'no-store');
+  headers.set('pragma', 'no-cache');
   return new Response(JSON.stringify({ active: false }), { status: response.status, headers });
 }
 
@@ -178,30 +187,39 @@ export function createJwtAccessTokenRevocationAdapter(options: JwtAccessTokenRev
     isRevoked,
     async handle(request: Request, handler: (request: Request) => Promise<Response>): Promise<Response> {
       const url = new URL(request.url);
-      const issuerPath = new URL(options.issuer).pathname.replace(/\/$/u, "");
-      const revokeRequest = request.method === "POST" && url.pathname === `${issuerPath}/oauth2/revoke`;
-      const introspectionRequest = request.method === "POST" && url.pathname === `${issuerPath}/oauth2/introspect`;
+      const issuerPath = new URL(options.issuer).pathname.replace(/\/$/u, '');
+      const revokeRequest = request.method === 'POST' && url.pathname === `${issuerPath}/oauth2/revoke`;
+      const introspectionRequest = request.method === 'POST' && url.pathname === `${issuerPath}/oauth2/introspect`;
       if (!revokeRequest && !introspectionRequest) return handler(request);
 
       const form = revokeRequest ? await readRevocationForm(request) : undefined;
       const response = await handler(request.clone());
       if (introspectionRequest && response.ok) {
-        const payload = await response.clone().json().catch(() => undefined) as {
-          active?: unknown;
-          iss?: unknown;
-          jti?: unknown;
-          client_id?: unknown;
-          sub?: unknown;
-          iat?: unknown;
-        } | undefined;
-        if (payload?.active === true && typeof payload.iss === "string" && typeof payload.jti === "string" &&
-            await isRevoked({
-              issuer: payload.iss,
-              jti: payload.jti,
-              ...(typeof payload.client_id === "string" ? { clientId: payload.client_id } : {}),
-              ...(typeof payload.sub === "string" ? { subject: payload.sub } : {}),
-              ...(typeof payload.iat === "number" ? { issuedAt: payload.iat } : {}),
-            })) {
+        const payload = (await response
+          .clone()
+          .json()
+          .catch(() => undefined)) as
+          | {
+              active?: unknown;
+              iss?: unknown;
+              jti?: unknown;
+              client_id?: unknown;
+              sub?: unknown;
+              iat?: unknown;
+            }
+          | undefined;
+        if (
+          payload?.active === true &&
+          typeof payload.iss === 'string' &&
+          typeof payload.jti === 'string' &&
+          (await isRevoked({
+            issuer: payload.iss,
+            jti: payload.jti,
+            ...(typeof payload.client_id === 'string' ? { clientId: payload.client_id } : {}),
+            ...(typeof payload.sub === 'string' ? { subject: payload.sub } : {}),
+            ...(typeof payload.iat === 'number' ? { issuedAt: payload.iat } : {}),
+          }))
+        ) {
           return inactiveIntrospectionResponse(response);
         }
         return response;
@@ -209,19 +227,27 @@ export function createJwtAccessTokenRevocationAdapter(options: JwtAccessTokenRev
       if (!form) return response;
 
       const oauthError = await readOAuthError(response);
-      if (oauthError?.error === "unsupported_token_type") {
+      if (oauthError?.error === 'unsupported_token_type') {
         try {
           const token = await options.verifyToken(form.token);
-          if (token.typ === "at+jwt" && token.iss === options.issuer && token.aud !== undefined &&
-              (Array.isArray(token.aud) ? token.aud.includes(options.audience) : token.aud === options.audience) &&
-              token.client_id === form.clientId && token.jti && token.sub &&
-              Number.isSafeInteger(token.iat) && Number.isSafeInteger(token.exp) && token.exp > token.iat) {
+          if (
+            token.typ === 'at+jwt' &&
+            token.iss === options.issuer &&
+            token.aud !== undefined &&
+            (Array.isArray(token.aud) ? token.aud.includes(options.audience) : token.aud === options.audience) &&
+            token.client_id === form.clientId &&
+            token.jti &&
+            token.sub &&
+            Number.isSafeInteger(token.iat) &&
+            Number.isSafeInteger(token.exp) &&
+            token.exp > token.iat
+          ) {
             await options.pool.query(`DELETE FROM ${REVOCATION_TABLE} WHERE expires_at <= CURRENT_TIMESTAMP`);
             await options.pool.query(
               `INSERT INTO ${REVOCATION_TABLE} (issuer, jti, client_id, subject, session_id, issued_at, expires_at)
                VALUES ($1, $2, $3, $4, $5, to_timestamp($6), to_timestamp($7))
                ON CONFLICT (issuer, jti) DO NOTHING`,
-              [token.iss, token.jti, token.client_id, token.sub, typeof token.sid === "string" ? token.sid : null, token.iat, token.exp],
+              [token.iss, token.jti, token.client_id, token.sub, typeof token.sid === 'string' ? token.sid : null, token.iat, token.exp],
             );
           }
           return rfc7009Success(response);
@@ -232,7 +258,7 @@ export function createJwtAccessTokenRevocationAdapter(options: JwtAccessTokenRev
         }
       }
 
-      if (oauthError?.error === "invalid_request" || oauthError?.error === "invalid_token") {
+      if (oauthError?.error === 'invalid_request' || oauthError?.error === 'invalid_token') {
         return rfc7009Success(response);
       }
       return response;
