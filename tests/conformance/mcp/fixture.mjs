@@ -35,6 +35,16 @@ if (process.argv.includes('--stdio')) {
 } else {
   const contribution = createMcpHttpContribution({ strict: true });
   const server = createHttpServer(async (incoming, outgoing) => {
+    // This is a loopback-only synthetic host, not the product's Fastify admission layer.
+    const host = `127.0.0.1:${server.address().port}`;
+    const origin = `http://${host}`;
+    if (incoming.headers.host !== host ||
+        (incoming.headers.origin !== undefined && incoming.headers.origin !== origin)) {
+      outgoing.writeHead(403, { 'content-type': 'application/json' });
+      outgoing.end(JSON.stringify({ code: 'FIXTURE_ORIGIN_DENIED' }));
+      incoming.resume();
+      return;
+    }
     const chunks = [];
     for await (const chunk of incoming) chunks.push(chunk);
     const requestBody = chunks.length ? Buffer.concat(chunks) : undefined;
@@ -42,7 +52,7 @@ if (process.argv.includes('--stdio')) {
     if (process.env.CODEXIA_MCP_FIXTURE_MUTATION && requestBody) {
       try { parsedBody = JSON.parse(requestBody.toString('utf8')); } catch { /* The stock suite also sends malformed JSON. */ }
     }
-    const request = new Request(`http://${incoming.headers.host}${incoming.url}`, {
+    const request = new Request(`${origin}${incoming.url}`, {
       method: incoming.method,
       headers: incoming.headers,
       ...(requestBody ? { body: requestBody, duplex: 'half' } : {}),
