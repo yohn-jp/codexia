@@ -54,8 +54,7 @@ test('frontend deploy rechecks producer artifact, exact main source and deployed
   });
   const freshness=workflow.jobs.deploy.steps.findIndex(step=>step.id==='freshness');
   const compatibilityIndex=workflow.jobs.deploy.steps.findIndex(step=>step.id==='compatibility');
-  const pause = workflow.jobs.deploy.steps.findIndex(step => step.env?.CODEXIA_EPOCH_CUTOVER_PAUSED);
-  assert.ok(pause >= 0 && freshness > pause && compatibilityIndex > freshness);
+  assert.ok(freshness >= 0 && compatibilityIndex > freshness);
   assert.equal(workflow.jobs.deploy.steps[compatibilityIndex].if,"steps.freshness.outputs.affected == 'true'");
   assert.match(admission.if,/conclusion == 'success'/u);
   const deploy=workflow.jobs.deploy;

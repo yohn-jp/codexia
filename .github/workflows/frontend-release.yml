@@ -346,10 +346,6 @@ jobs:
           node-version: '24.22.3'
       - name: Install frozen CI evidence dependencies
         run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
-      - name: Require ordinary production deployment to be available
-        env:
-          CODEXIA_EPOCH_CUTOVER_PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
-        run: test "${CODEXIA_EPOCH_CUTOVER_PAUSED:-}" != true
       - name: Recheck component source after acquiring the deployment slot
         id: freshness
         env:
@@ -421,12 +417,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           APPROVAL: ${{ inputs.approval_phrase }}
-          PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
           PREFLIGHT_RUN: ${{ inputs.preflight_run_id }}
           PLAN_SHA: ${{ inputs.plan_sha256 }}
         run: |
           set -euo pipefail
-          [[ "$APPROVAL" == PUBLISH_INITIAL_FRONTEND && "$PAUSED" != true ]]
+          [[ "$APPROVAL" == PUBLISH_INITIAL_FRONTEND ]]
           [[ "$PREFLIGHT_RUN" =~ ^[1-9][0-9]{0,15}$ && "$PLAN_SHA" =~ ^[a-f0-9]{64}$ ]]
           [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" == "$GITHUB_SHA" ]]
       - name: Resolve the exact protected Preflight producer and attempt
@@ -521,17 +516,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_PREFLIGHT_REQUEST: ${{ inputs.request }}
-          CODEXIA_CUTOVER_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_CUTOVER_CLOUDFLARE_TARGET }}
-          CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN }}
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
-          CODEXIA_CUTOVER_PRESERVATION: ${{ secrets.CODEXIA_CUTOVER_PRESERVATION }}
+          CODEXIA_DEPLOYMENT_PRESERVATION: ${{ secrets.CODEXIA_DEPLOYMENT_PRESERVATION }}
           CODEXIA_INITIAL_FRONTEND_APPROVAL: ${{ inputs.approval_phrase }}
           CODEXIA_BOOTSTRAP_PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
           CODEXIA_BOOTSTRAP_PREFLIGHT_ATTEMPT: ${{ steps.preflight.outputs.attempt }}
           CODEXIA_BOOTSTRAP_PLAN_SHA256: ${{ inputs.plan_sha256 }}
-          CODEXIA_EPOCH_CUTOVER_PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: node scripts/deployment/preflight/run.mjs initial-frontend

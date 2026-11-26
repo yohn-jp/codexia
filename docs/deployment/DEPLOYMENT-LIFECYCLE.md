@@ -33,7 +33,7 @@ Preflightは環境、host pin、観測時刻、source/candidate、現在のident
 | 経路 | 条件（先行条件は除外済み） | 実行と遷移先 |
 | --- | --- | --- |
 | R0 STOP / PREPARE | M未準備・異常、選択に必要な観測不明、解釈不能な操作記録、必要な承認・証明不足 | 無変更で停止。VM/SSH/edge/backupの前提を準備・調査し再観測 |
-| R1 RESUME / RECOVER | Tに既知の未完了操作あり | 同一操作の記録・現状態・fenceを照合して再開または切戻し。未知記録はR0 |
+| R1 RESUME / RECOVER | Tに既知の未完了操作あり | 同一操作の記録・現状態を照合して再開または切戻し。未知記録はR0 |
 | R2 RESTORE | 既存環境の復旧意図があり必要な保存状態が欠落・故障 | 独立backup・外部秘密管理から復元。必要なら先に基盤構築するが初回owner発行は禁止 |
 | R3 MAINTENANCE | H drift、A回復必要、B/F障害（既存データ・認証の非互換はR0） | 明示的な基盤修復・通常deploy復旧・owner回復のみ。非互換移行を実行しない |
 | R4 BOOTSTRAP | H未構築/部分構築、D未作成/新規空またはA未構成で、新規・既存採用・復旧の意図が確定。承認済みinstallでDの欠落を確認した場合は旧B/Aの残存より優先 | 必要なhost/secrets/base/auth-runtimeを収束。新規初期化を別承認。既存identity/ledger/資格情報保持 |
@@ -69,7 +69,9 @@ flowchart TD
     RESTORE --> OBS
     LOST -->|いいえ| EMPTYDB{"DB不在を確認・新規承認済み・基盤正常?"}
     EMPTYDB -->|はい| BOOT["R4: Bootstrap"]
-    EMPTYDB -->|いいえ| DRIFT{"drift・DB/Auth非互換・障害?"}
+    EMPTYDB -->|いいえ| INCOMPAT{"既存DB/Auth/Backend非互換?"}
+    INCOMPAT -->|はい| STOP
+    INCOMPAT -->|いいえ| DRIFT{"drift・障害?"}
     DRIFT -->|はい| MAINT["R3: 基盤修復・通常復旧"]
     DRIFT -->|いいえ| BASE{"基盤・DB・Auth runtime収束済み?"}
     BASE -->|いいえ| BOOT
@@ -79,13 +81,14 @@ flowchart TD
     SETUP --> OBS
     OWNER -->|いいえ / 既存・不明| STOP
     OWNER -->|はい| API{"cleanなAPI未配備?"}
-    API -->|はい| ACT["R6: 互換Frontend確認後の初回Backend activation"]
+    API -->|はい| FRONT{"互換Frontend稼働済み?"}
+    FRONT -->|いいえ| STOP
+    FRONT -->|はい| ACT["R6: 互換Frontend確認後の初回Backend activation"]
     API -->|いいえ| COMPAT{"通常release admission成立?"}
-    COMPAT -->|いいえ| CUT["R0: 非互換・必要なFrontend不在のため停止"]
+    COMPAT -->|いいえ| STOP
     COMPAT -->|はい| UPDATE["R8: 通常更新 / no-op"]
     MAINT --> OBS
     ACT --> ACCEPT["identity・health・Auth・データ・公開境界を検証"]
-    CUT --> ACCEPT
     UPDATE --> ACCEPT
     ACCEPT -->|不成立| REC
     ACCEPT -->|成立| ACTIVE["Active / 独立した本番受入"]

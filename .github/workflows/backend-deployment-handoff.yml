@@ -110,16 +110,12 @@ jobs:
         shell: bash
         env:
           CODEXIA_PUSH_DEPLOYMENT_ENABLED: ${{ vars.CODEXIA_PUSH_DEPLOYMENT_ENABLED }}
-          CODEXIA_EPOCH_CUTOVER_PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
           CODEXIA_MANUAL_ACTIVATION: ${{ github.event_name == 'workflow_dispatch' }}
           CODEXIA_INITIAL_INSTALL_APPROVED: ${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED }}
           CODEXIA_DATABASE_INITIALIZATION_APPROVED: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED }}
         run: |
           set -euo pipefail
-          if [[ "${CODEXIA_EPOCH_CUTOVER_PAUSED:-}" == true ]]; then
-            echo "Ordinary deployment is paused for coordinated API epoch maintenance." >&2
-            exit 1
-          fi
+
           if [[ "${CODEXIA_MANUAL_ACTIVATION:-false}" == true &&
                 ( "${CODEXIA_INITIAL_INSTALL_APPROVED:-}" != true || "${CODEXIA_DATABASE_INITIALIZATION_APPROVED:-}" != true ) ]]; then
             echo 'Protected first Backend activation requires first-install and database-use approvals.' >&2
@@ -220,9 +216,9 @@ jobs:
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
-          CODEXIA_CUTOVER_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_CUTOVER_CLOUDFLARE_TARGET }}
-          CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN }}
-          CODEXIA_CUTOVER_PRESERVATION: ${{ secrets.CODEXIA_CUTOVER_PRESERVATION }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN }}
+          CODEXIA_DEPLOYMENT_PRESERVATION: ${{ secrets.CODEXIA_DEPLOYMENT_PRESERVATION }}
           CODEXIA_INITIAL_INSTALL_APPROVED: ${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED }}
           CODEXIA_DATABASE_INITIALIZATION_APPROVED: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED }}
           VITE_CODEXIA_OAUTH_ISSUER: ${{ vars.VITE_CODEXIA_OAUTH_ISSUER }}

@@ -104,7 +104,7 @@ test('the protected enablement step opts in only for the literal true and record
   }
 });
 
-test('manual first activation fails closed when publication is disabled or maintenance is paused', t => {
+test('manual first activation fails closed when publication or required approval is disabled', t => {
   const step = handoff.jobs['deploy-production'].steps.find(step => step.id === 'deployment-gate');
   const directory = mkdtempSync(join(tmpdir(), 'codexia-first-deployment-gate-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -123,8 +123,6 @@ test('manual first activation fails closed when publication is disabled or maint
   assert.throws(() => runGate({}), rejectsWith(/requires CODEXIA_PUSH_DEPLOYMENT_ENABLED=true/u));
   assert.throws(() => runGate({ CODEXIA_PUSH_DEPLOYMENT_ENABLED: 'true', CODEXIA_DATABASE_INITIALIZATION_APPROVED: '' }),
     rejectsWith(/requires first-install and database-use approvals/u));
-  assert.throws(() => runGate({ CODEXIA_PUSH_DEPLOYMENT_ENABLED: 'true', CODEXIA_EPOCH_CUTOVER_PAUSED: 'true' }),
-    rejectsWith(/paused/u));
   runGate({ CODEXIA_PUSH_DEPLOYMENT_ENABLED: 'true' });
   assert.equal(readFileSync(output, 'utf8'), 'enabled=true\n');
 });

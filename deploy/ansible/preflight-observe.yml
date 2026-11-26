@@ -114,7 +114,7 @@
             - name: Read the existing Full writer
               ansible.builtin.command:
                 argv: [/bin/bash, -s]
-                stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/cutover-observe.sh', rstrip=false) }}"
+                stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/preflight-writer-observe.sh', rstrip=false) }}"
                 expand_argument_vars: false
               register: lifecycle_writer_result
               changed_when: false
