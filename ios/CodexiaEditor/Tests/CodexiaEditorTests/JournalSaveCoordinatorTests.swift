@@ -75,6 +75,17 @@ final class JournalSaveCoordinatorTests: XCTestCase {
         XCTAssertEqual(recovered?.text, "基準稿かな")
         XCTAssertEqual(recovered?.state, .protected)
         XCTAssertFalse(editor.canLeave)
+        guard case .nothingToSave = await reopened.save(documentID: "document") else {
+            return XCTFail("A marked-text entry must stay local even if the journal is asked to save")
+        }
+        let stillProtected = try await reopened.recover(documentID: "document")
+        XCTAssertEqual(stillProtected?.operationID, protected.operationID)
+
+        editor.edit("基準稿かな")
+        editor.setComposing(false)
+        let confirmed = try await reopened.protect(snapshot: editor.snapshot, baseRevisionID: "revision-1", baseText: "基準稿")
+        XCTAssertNotEqual(confirmed.operationID, protected.operationID)
+        XCTAssertEqual(confirmed.text, protected.text)
     }
 
     func testUnsubmittedSnapshotsCoalesceToLatestAndRecoveryUsesAppendOrder() async throws {

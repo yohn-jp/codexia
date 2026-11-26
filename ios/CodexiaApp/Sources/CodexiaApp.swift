@@ -896,7 +896,7 @@ private final class ProductEditorModel: ObservableObject {
             }
             baseRevisionID = receipt.revision.id
             baseText = receipt.revision.markdown
-            if state.text.utf8.elementsEqual(receipt.revision.markdown.utf8) {
+            if !state.isComposing, state.text.utf8.elementsEqual(receipt.revision.markdown.utf8) {
                 var current = state
                 current.markCommitted(state.snapshot)
                 state = current

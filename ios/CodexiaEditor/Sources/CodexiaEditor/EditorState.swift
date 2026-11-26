@@ -9,6 +9,7 @@ public struct EditorState {
         /// Immutable manuscript contents captured at `version` for durable protection.
         /// Later edits to `EditorState` never change this payload.
         public let text: String
+        let isComposing: Bool
     }
 
     public struct RemoteRequest {
@@ -21,7 +22,6 @@ public struct EditorState {
     private let session: UUID
     private var version: UInt64 = 0
     private var protectedVersion: UInt64 = 0
-    private var protectedCompositionText: String?
     private var committedVersion: UInt64? = 0
     private var focused = false
     public private(set) var isComposing = false
@@ -49,12 +49,12 @@ public struct EditorState {
     var sessionID: UUID { session }
 
     public var snapshot: Snapshot {
-        Snapshot(sessionID: session, documentID: documentID, version: version, text: compositionText ?? text)
+        Snapshot(sessionID: session, documentID: documentID, version: version, text: compositionText ?? text,
+                 isComposing: isComposing)
     }
     public var canLeave: Bool { version == protectedVersion && !isComposing }
     public var isCurrentVersionProtected: Bool {
-        guard version == protectedVersion else { return false }
-        return !isComposing || (compositionText != nil && protectedCompositionText == compositionText)
+        version == protectedVersion && (!isComposing || compositionText != nil)
     }
     public var hasLocalEdits: Bool { version != committedVersion }
 
@@ -63,8 +63,8 @@ public struct EditorState {
     }
 
     public mutating func edit(_ text: String) {
-        compositionText = nil
         guard !self.text.utf8.elementsEqual(text.utf8) else { return }
+        compositionText = nil
         self.text = text
         version += 1
         pendingRemote = nil
@@ -73,15 +73,18 @@ public struct EditorState {
     /// Capture UIKit's marked-text buffer for local protection without committing it as manuscript state.
     public mutating func updateComposition(_ text: String) {
         isComposing = true
+        if let current = compositionText, current.utf8.elementsEqual(text.utf8) { return }
         compositionText = text
-        applyPendingIfPossible()
+        version += 1
+        pendingRemote = nil
     }
 
     public mutating func setComposing(_ active: Bool) {
         isComposing = active
-        if !active {
+        if !active, compositionText != nil {
+            // Cancellation must replace any previously protected marked text.
             compositionText = nil
-            protectedCompositionText = nil
+            version += 1
         }
         applyPendingIfPossible()
     }
@@ -123,15 +126,12 @@ public struct EditorState {
         guard snapshot.sessionID == session, snapshot.documentID == documentID,
               snapshot.version <= version else { return }
         protectedVersion = max(protectedVersion, snapshot.version)
-        if isComposing, snapshot.version == version, snapshot.text == compositionText {
-            protectedCompositionText = snapshot.text
-        }
     }
 
     /// Call only after a validated server receipt confirms this snapshot was committed.
     public mutating func markCommitted(_ snapshot: Snapshot) {
         guard snapshot.sessionID == session, snapshot.documentID == documentID,
-              snapshot.version <= version else { return }
+              snapshot.version <= version, !snapshot.isComposing else { return }
         if let committedVersion {
             self.committedVersion = max(committedVersion, snapshot.version)
         } else {

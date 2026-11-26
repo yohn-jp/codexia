@@ -196,16 +196,23 @@ for (const kind of ["writing", "reading", "superseded reading"] as const) {
     });
     const panel = await openContinuePanel(page);
     const candidate = panel.locator("p").filter({ hasText: second.title });
+    const previousScene = page.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`);
+    const originalUrl = page.url();
+    const response = page.waitForResponse((item) => new URL(item.url()).pathname === path && item.request().method() === "GET");
     try {
       await candidate.getByRole("button", { name: kind === "writing" ? "続きを書く" : "読書位置を開く" }).click();
       await loadStarted;
       await expect(manuscriptEditor(page)).toHaveCount(0);
+      await expect(page.locator(".reading-pager")).toHaveCount(0);
+      await expect(previousScene).toHaveAttribute("aria-current", "page");
+      await expect(page).toHaveURL(originalUrl);
       if (kind === "superseded reading") {
-        await page.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`).click();
+        await previousScene.click();
       }
     } finally {
       releaseLoad();
     }
+    expect((await response).ok()).toBe(true);
     if (kind === "superseded reading") {
       await expect(page).toHaveURL(new RegExp(`/scenes/${scene.id}(?:\\?|$)`));
       await expect(manuscriptEditor(page)).toContainText("最初の本文。");

@@ -56,7 +56,12 @@ final class EditorStateTests: XCTestCase {
         XCTAssertTrue(state.isCurrentVersionProtected)
         state.updateComposition("originalかも")
         XCTAssertFalse(state.isCurrentVersionProtected)
+        XCTAssertGreaterThan(state.snapshot.version, protectedComposition.version)
         state.setComposing(false)
+        XCTAssertEqual(state.snapshot.text, "original")
+        state.markProtected(protectedComposition)
+        XCTAssertFalse(state.canLeave)
+        state.markProtected(state.snapshot)
         XCTAssertTrue(state.canLeave)
     }
 

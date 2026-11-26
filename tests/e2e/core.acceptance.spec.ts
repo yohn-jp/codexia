@@ -1237,16 +1237,38 @@ test("a root-only public share renders selectable scenes without an owner sessio
 });
 
 preparedAuthorTest("late document activation cannot replace explicit scene navigation", async ({ page, authorizeAuthor }) => {
-  const f = await fixture(page, authorizeAuthor); let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; }); let observed!: () => void; const seen = new Promise<void>((resolve) => { observed = resolve; });
-  await page.route(`**${documentPath(f)}`, async (route) => { if (route.request().method() !== "GET") return route.continue(); const response = await route.fetch(); observed(); await gate; await route.fulfill({ response }); });
+  const f = await fixture(page, authorizeAuthor);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let observed!: () => void;
+  const seen = new Promise<void>((resolve) => { observed = resolve; });
+  const targetPath = documentPath(f);
+  await page.route(`**${targetPath}`, async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    observed();
+    await gate;
+    await route.fulfill({ response });
+  });
   try {
-    await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
+    const sceneTwo = page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true });
+    await sceneTwo.click();
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
+    const confirmedUrl = page.url();
     const sceneOne = page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene One シーン", exact: true });
-    await sceneOne.click(); await seen;
-    await expect(sceneOne).toHaveAttribute("aria-current", "page");
-    await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible(); release();
+    await sceneOne.click();
+    await seen;
+    await expect(sceneTwo).toHaveAttribute("aria-current", "page");
+    await expect(sceneOne).not.toHaveAttribute("aria-current", "page");
+    await expect(page).toHaveURL(confirmedUrl);
+    await expectEditor(page, f.two.revision.markdown);
+    await sceneTwo.click();
+    const lateResponse = page.waitForResponse(response => new URL(response.url()).pathname === targetPath && response.request().method() === "GET");
+    release();
+    expect((await lateResponse).ok()).toBe(true);
+    await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
+    await expect(sceneTwo).toHaveAttribute("aria-current", "page");
+    await expect(page).toHaveURL(confirmedUrl);
     await expectEditor(page, f.two.revision.markdown);
   } finally { release(); }
 });
