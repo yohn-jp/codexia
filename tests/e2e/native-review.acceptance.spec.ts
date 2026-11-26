@@ -160,14 +160,14 @@ test("native rejection leaves canonical Knowledge unchanged and stale applicatio
   expect((await unchanged.json() as { nodes: Array<{ id: string }> }).nodes.some((node) => node.id === rejected.id)).toBe(false);
 
   await page.locator(".native-changeset-select").filter({ hasText: stale.changeSetId }).click();
+  await page.getByRole("button", { name: "承認する" }).click();
+  await expect(page.locator(".native-changeset-card")).toContainText("承認済み・未適用");
   const conflictingWrite = await author.fetch(`/api/v1/persistence/projects/${project.id}/nodes/${stale.id}`, {
     method: "PUT",
     headers: { Origin: author.origin },
     data: { type: "person", name: "別操作で先に確定", attributes: {}, status: "confirmed", expectedVersion: null },
   });
   expect(conflictingWrite.ok(), await conflictingWrite.text()).toBe(true);
-  await page.getByRole("button", { name: "承認する" }).click();
-  await expect(page.locator(".native-changeset-card")).toContainText("承認済み・未適用");
   await page.getByRole("button", { name: "承認済み提案を適用" }).click();
   await expect(page.getByRole("alert")).toContainText("前提条件が更新されています");
   const authoritative = await author.fetch(`/api/v1/persistence/projects/${project.id}/changesets/${stale.changeSetId}`);
