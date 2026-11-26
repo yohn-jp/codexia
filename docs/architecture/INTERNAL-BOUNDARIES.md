@@ -50,7 +50,7 @@ A 409 conflict preserves the current draft for explicit author recovery. A lost 
 
 - Keep the existing synchronous editor/session reference and bounded deferred React publication: render state is a projection, not a second write authority.
 - Extract **presentation-only** sections (library/outline, document/inspector, status/recovery visibility, and available panels) into small components receiving explicit data and callbacks. A component extracted solely for its line count is not an improvement.
-- Retain Desktop React Web. Retire the React Mobile entrypoint/Capacitor authoring implementation at the native cutover. Do not introduce viewport-switched React Mobile authoring or require SwiftUI to reuse Web components.
+- Desktop React Web is the supported authoring client during the iOS freeze. The [Desktop-only interim decision](IOS-SWIFTUI-ARCHITECTURE.md#7-implementation-slices-and-acceptance-gates) retired Mobile Web independently of native acceptance. Keep Desktop accessibility when resizing the browser. SwiftUI owns its own UI components.
 - Keep journal reconciliation and navigation guards owned once. If a self-contained application hook is extracted, it must not duplicate the session, timers, abort signals, author scope or polling across hooks.
 - Workspace layout and module panels consume permission-checked host contributions; they do not own manuscript durability, write receipts, database transactions or revision authority.
 

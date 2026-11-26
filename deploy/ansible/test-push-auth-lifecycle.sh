@@ -148,7 +148,7 @@ DOCKERFILE
   cat >"$tmp/enrollment/bootstrap.env" <<ENV
 CODEXIA_AUTH_BOOTSTRAP_ORIGIN=https://codexia-auth-registration:8443
 CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT=codexia-fixture-owner
-CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS=$origin/desktop,$origin/mobile
+CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS=$origin/desktop
 ENV
   chmod 0600 "$tmp/enrollment/bootstrap.env"
   cat > "$tmp/auth-stage.yml" <<YAML

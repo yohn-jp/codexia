@@ -107,10 +107,12 @@ globalStyle('.st-workspace-storage-state,\n.st-workspace-message,\n.st-workspace
 });
 globalStyle('.st-workspace-warning', { color: 'var(--error-text)', background: 'var(--error-bg)' });
 globalStyle('.st-workspace-message', { color: 'var(--accent-strong)' });
-globalStyle(
-  '.st-workspace-layout,\n.st-workspace-split,\n.st-workspace-resizable-panel,\n.st-workspace-stack,\n.st-workspace-tab-panel,\n.st-workspace-mobile-layout,\n.st-workspace-mobile-pane',
-  { width: '100%', height: '100%', minWidth: '0', minHeight: '0' },
-);
+globalStyle('.st-workspace-layout,\n.st-workspace-split,\n.st-workspace-resizable-panel,\n.st-workspace-stack,\n.st-workspace-tab-panel', {
+  width: '100%',
+  height: '100%',
+  minWidth: '0',
+  minHeight: '0',
+});
 globalStyle('.st-workspace-layout', { flex: '1 1 auto', overflow: 'hidden' });
 globalStyle('.st-workspace-split', { display: 'flex', overflow: 'hidden', background: 'var(--paper)' });
 globalStyle('.st-workspace-split-child', { display: 'contents' });
@@ -207,24 +209,6 @@ globalStyle('.st-workspace-tab[aria-selected="true"]', {
   fontWeight: '700',
 });
 globalStyle('.st-workspace-tab-panel', { flex: '1 1 auto', overflow: 'hidden' });
-globalStyle('.st-workspace-mobile-layout', { display: 'flex', flex: '1 1 auto', flexDirection: 'column', overflow: 'hidden' });
-globalStyle('.st-workspace-mobile-tabs', {
-  display: 'flex',
-  minWidth: '0',
-  flex: '0 0 auto',
-  gap: '0.35rem',
-  padding: '0.45rem',
-  overflowX: 'auto',
-  borderBottom: '1px solid var(--line)',
-  background: 'var(--toolbar-bg)',
-});
-globalStyle('.st-workspace-mobile-tabs button', { minHeight: '2.75rem', flex: '0 0 auto', whiteSpace: 'nowrap' });
-globalStyle('.st-workspace-mobile-tabs button[aria-selected="true"]', {
-  borderColor: 'var(--accent-strong)',
-  color: 'var(--accent-strong)',
-  fontWeight: '700',
-});
-globalStyle('.st-workspace-mobile-pane', { flex: '1 1 auto', overflow: 'auto' });
 globalStyle('.st-workspace-toolbar', { '@media': { '(max-width: 42rem)': { gap: '0.3rem', padding: '0.4rem' } } });
 globalStyle('.st-workspace-move-controls', { '@media': { '(max-width: 42rem)': { alignItems: 'stretch' } } });
 globalStyle('.st-workspace-move-controls label', {

@@ -752,12 +752,7 @@ function ShareLinksPanel({ context, tree }: { context: BrowserModuleContext; tre
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [revealed, setRevealed] = useState<{ url: string; proposalId: string; target: string } | null>(null);
-  const nativeConfig = (window as Window & { __CODEXIA_NATIVE_CONFIG__?: { publicReaderOrigin: string | null } }).__CODEXIA_NATIVE_CONFIG__;
-  const readerOrigin = publicReaderOrigin({
-    native: nativeConfig !== undefined,
-    configuredReaderOrigin: nativeConfig?.publicReaderOrigin ?? null,
-    currentOrigin: window.location.origin,
-  });
+  const readerOrigin = publicReaderOrigin({ currentOrigin: window.location.origin });
   const targets = useMemo(() => {
     const volumes = tree?.volumes ?? [];
     return {

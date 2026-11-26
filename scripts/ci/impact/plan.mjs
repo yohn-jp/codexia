@@ -14,14 +14,6 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'Dockerfile',
   'Dockerfile.backend',
   'app/**',
-  // Exclude native packaging only. The web build typechecks the shared bridge declarations.
-  '!app/native/README.md',
-  '!app/native/capacitor.config.ts',
-  '!app/native/package.json',
-  '!app/native/package-lock.json',
-  '!app/native/scripts/**',
-  '!app/native/plugins/codexia-auth/Package.swift',
-  '!app/native/plugins/codexia-auth/ios/**',
   'modules/**',
   'package.json',
   'packages/**',
@@ -297,7 +289,7 @@ function isChangedPath(file) {
 }
 
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
-export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci/dashboard/', 'scripts/deployment/cutover/', 'scripts/ios/', 'scripts/pages-ui/', 'scripts/ux-simulator/', 'app/native/']);
+export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci/dashboard/', 'scripts/deployment/cutover/', 'scripts/pages-ui/', 'scripts/ux-simulator/']);
 const uxProjectionDocuments = new Set(UX_PROJECTION_DOCUMENTS);
 const DB_CONTRACT_SOURCE_PATHS = new Set([
   'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md',

@@ -515,7 +515,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       },
       {
         ownerOidcSubject: subject,
-        webRedirectUris: [apiOrigin + '/desktop', apiOrigin + '/mobile'],
+        webRedirectUris: [apiOrigin + '/desktop'],
       },
     );
     bootstrapServer = createHttpServer(bootstrap.listener);

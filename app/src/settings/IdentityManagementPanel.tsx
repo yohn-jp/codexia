@@ -144,7 +144,7 @@ async function readPasskeyAuthRuntime(): Promise<{ oidcConfigured: boolean } | n
   }
 }
 
-export function IdentityManagementPanel({ placement }: { placement: 'desktop' | 'mobile' | 'console' }) {
+export function IdentityManagementPanel({ placement }: { placement: 'desktop' | 'console' }) {
   const [access, setAccess] = useState<OwnerAccess>({ status: 'checking' });
   const [dialogOpen, setDialogOpen] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -604,15 +604,6 @@ export function IdentityManagementPanel({ placement }: { placement: 'desktop' | 
   );
 
   if (placement === 'console') return <div className="identity-management">{content}</div>;
-
-  if (placement === 'mobile') {
-    return (
-      <section className="identity-management identity-management--mobile" aria-labelledby={`${panelId}-title`}>
-        <h2 id={`${panelId}-title`}>認証とセキュリティ</h2>
-        {content}
-      </section>
-    );
-  }
 
   return (
     <div className="identity-management identity-management--desktop">

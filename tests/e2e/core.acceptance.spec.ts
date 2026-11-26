@@ -1367,36 +1367,11 @@ preparedAuthorTest("a project containing only root scenes can export its full te
   for (const scene of [one, two]) expect(text).toContain(scene.revision.markdown.trim());
 });
 
-test("native publishing does not create a distributable link without a public reader origin", async ({ page, authorizeAuthor }) => {
+test("Desktop publishing preserves proposal, scope, expiration, reader isolation, and revocation", async ({ page, browser, authorizeAuthor }) => {
   test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
-  await page.addInitScript(() => {
-    (window as Window & { __CODEXIA_NATIVE_CONFIG__?: { publicReaderOrigin: string | null } }).__CODEXIA_NATIVE_CONFIG__ = { publicReaderOrigin: null };
-  });
-  const f = await fixture(page, authorizeAuthor);
-  const menu = page.locator(".st-workspace-panel-menu");
-  await menu.locator("summary").click();
-  await menu.getByRole("button", { name: "読み取り専用共有リンクを表示", exact: true }).click();
-  const panel = page.locator('[data-workspace-panel="module:publishing.share-links"]');
-  await panel.getByRole("combobox", { name: "範囲", exact: true }).selectOption("scene");
-  await expect(panel.getByRole("combobox", { name: "対象", exact: true })).toHaveValue(f.one.document.id);
-  await expect(panel.getByRole("status").filter({ hasText: "公開読者サイトのHTTPS URLが未設定" })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "リンク発行の提案を作成" })).toBeDisabled();
-  await expect(panel.locator("code")).toHaveCount(0);
-});
-
-test("native publishing uses the external reader origin and preserves proposal, scope, expiration, and revocation", async ({ page, browser, authorizeAuthor, authorServer }) => {
-  test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
-  const webViewOrigin = authorServer.apiOrigin;
-  const publicReaderOrigin = new URL(webViewOrigin);
-  publicReaderOrigin.protocol = "https:";
-  publicReaderOrigin.hostname = "reader.example.test";
-  await page.addInitScript((readerOrigin) => {
-    (window as Window & { __CODEXIA_NATIVE_CONFIG__?: { publicReaderOrigin: string | null } }).__CODEXIA_NATIVE_CONFIG__ = { publicReaderOrigin: readerOrigin };
-  }, publicReaderOrigin.origin);
   const author = await authorizeAuthor("desktop");
   const origin = new URL(page.url()).origin;
-  expect(origin).toBe(webViewOrigin);
-  expect(origin).not.toBe(publicReaderOrigin.origin);
+  const publicReaderOrigin = new URL(origin);
   const projectResponse = await author.fetch(`${origin}${rootPath}`, {
     method: "POST",
     data: { title: `Publishing root share ${randomUUID()}` },
@@ -1489,15 +1464,8 @@ test("native publishing uses the external reader origin and preserves proposal, 
 
   const issuedUrl = new URL(await panel.locator("code").innerText());
   expect(issuedUrl.origin).toBe(publicReaderOrigin.origin);
-  expect(issuedUrl.origin).not.toBe(origin);
   expect(issuedUrl.pathname).toBe(`/r/publishing/${projectId}/${actionBody.data.token}`);
   const readerContext = await browser.newContext();
-  await readerContext.route(`${publicReaderOrigin.origin}/**`, async (route) => {
-    const forwarded = new URL(route.request().url());
-    forwarded.protocol = "http:";
-    forwarded.hostname = new URL(webViewOrigin).hostname;
-    await route.fulfill({ response: await route.fetch({ url: forwarded.toString() }) });
-  });
   const readerPage = await readerContext.newPage();
   const publicReaderRequests: string[] = [];
   readerPage.on("request", (request) => {

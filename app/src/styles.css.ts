@@ -314,16 +314,6 @@ globalStyle('.cm-content', { minHeight: '55vh', padding: '0.9rem', whiteSpace: '
 globalStyle('.cm-line', { padding: '0' });
 globalStyle('.cm-placeholder', { color: 'var(--placeholder)', fontStyle: 'italic' });
 globalStyle('.editor-hint', { margin: '0', color: 'var(--muted)', fontSize: '0.8rem', lineHeight: '1.5' });
-globalStyle('.mobile-keyboard', { display: 'flex', flexWrap: 'wrap', gap: '0.35rem' });
-globalStyle('.mobile-keyboard button', {
-  minWidth: '2.8rem',
-  minHeight: '2.75rem',
-  padding: '0.35rem 0.5rem',
-  borderColor: 'var(--input-border)',
-  color: 'var(--accent-strong)',
-  background: 'var(--surface-subtle)',
-});
-globalStyle('.mobile-keyboard button:hover', { color: 'var(--button-foreground)' });
 globalStyle('.preview-column h2, .history-panel h2, .proposal-review h2', { margin: '0 0 0.65rem', fontSize: '1rem' });
 globalStyle('.manuscript-preview, .reading-view', {
   minHeight: '55vh',
@@ -552,7 +542,7 @@ globalStyle('.is-zen', {
   background: 'var(--page-bg)',
 });
 globalStyle(
-  '.is-zen .editor-header, .is-zen .durability-message, .is-zen .conflict, .is-zen .preview-column, .is-zen .editor-hint, .is-zen .scratch-panel, .is-zen .mobile-keyboard',
+  '.is-zen .editor-header, .is-zen .durability-message, .is-zen .conflict, .is-zen .preview-column, .is-zen .editor-hint, .is-zen .scratch-panel',
   { display: 'none' },
 );
 globalStyle('.is-zen .editor-columns', { display: 'block', minHeight: '80vh' });
@@ -585,9 +575,6 @@ globalStyle('.editor-header', { '@media': { '(max-width: 640px)': { alignItems: 
 globalStyle('.editor-actions', { '@media': { '(max-width: 640px)': { justifyContent: 'flex-start' } } });
 globalStyle('.manuscript-column, .preview-column', { '@media': { '(max-width: 640px)': { padding: '0.7rem' } } });
 globalStyle('.manuscript-input, .cm-scroller, .cm-content', { '@media': { '(max-width: 640px)': { minHeight: '48vh' } } });
-globalStyle('.mobile-keyboard', {
-  '@media': { '(max-width: 640px)': { position: 'sticky', zIndex: '1', bottom: '0', padding: '0.35rem 0', background: 'var(--paper)' } },
-});
 globalStyle('.typography-toolbar', { '@media': { '(max-width: 640px)': { gap: '0.3rem' } } });
 globalStyle('.typography-toolbar > button', { '@media': { '(max-width: 640px)': { minHeight: '2.75rem' } } });
 globalStyle('.proposal-dock', { '@media': { '(max-width: 640px)': { gridTemplateColumns: '1fr' } } });
@@ -596,7 +583,7 @@ globalStyle('*, *::before, *::after', {
 });
 globalStyle('body, .workspace, .writing-area', { '@media': { print: { background: 'white' } } });
 globalStyle(
-  '.topbar, .sidebar, .editor-header, .typography-toolbar, .durability-message, .status, .conflict, .editor-hint, .mobile-keyboard, .scratch-panel, .proposal-review, .contribution-host, .history-panel, .preview-column',
+  '.topbar, .sidebar, .editor-header, .typography-toolbar, .durability-message, .status, .conflict, .editor-hint, .scratch-panel, .proposal-review, .contribution-host, .history-panel, .preview-column',
   { '@media': { print: { display: 'none !important' } } },
 );
 globalStyle('.workspace-grid', { '@media': { print: { display: 'block', minHeight: '0' } } });
@@ -845,22 +832,6 @@ globalStyle('.pg-loading', {
   background: 'var(--paper)',
   boxShadow: '0 0.2rem 0.9rem var(--focus-shadow)',
 });
-globalStyle('.pg-mobile .pg-header', { alignItems: 'flex-start', flexDirection: 'column' });
-globalStyle('.pg-mobile .pg-header nav', { width: '100%', justifyContent: 'space-between' });
-globalStyle('.pg-mobile .pg-layout', { gridTemplateColumns: 'minmax(0, 1fr)' });
-globalStyle('.pg-mobile .pg-editor-column', { order: '1' });
-globalStyle('.pg-mobile .pg-library', { order: '2' });
-globalStyle('.pg-mobile .pg-knowledge', { order: '3' });
-globalStyle('.pg-mobile .pg-layout:not(.has-document) .pg-library', { order: '1' });
-globalStyle('.pg-mobile .pg-layout:not(.has-document) .pg-editor-column', { order: '2' });
-globalStyle('.pg-mobile .pg-editor', { padding: '0.75rem' });
-globalStyle('.pg-mobile .pg-editor-heading', { display: 'grid' });
-globalStyle('.pg-mobile .pg-save-state', { justifyItems: 'start', textAlign: 'left' });
-globalStyle(
-  '.pg-mobile .pg-editor .manuscript-input, .pg-mobile .pg-editor .cm-editor, .pg-mobile .pg-editor .cm-scroller, .pg-mobile .pg-editor .cm-content',
-  { minHeight: '52vh' },
-);
-globalStyle('.pg-mobile .pg-conflict-comparison', { gridTemplateColumns: '1fr' });
 globalStyle('.pg-desktop .pg-layout', {
   '@media': { '(max-width: 1000px)': { gridTemplateColumns: 'minmax(12rem, 15rem) minmax(0, 1fr)' } },
 });
