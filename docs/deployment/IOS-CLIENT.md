@@ -1,6 +1,6 @@
 # iOS native SwiftUI client — build, distribution and acceptance
 
-**Native SwiftUI is the approved iOS target. Physical-device acceptance remains pending during the iOS freeze.** The implementation architecture is [iOS SwiftUI architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.md). [User screen flows](../design/USER-SCREEN-FLOW.md), [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.md) and [Core](../architecture/CORE.md) remain normative for behavior and rights.
+**Native SwiftUI is the approved iOS target, but is not currently a supported authoring deliverable.** Native development and automatic Xcode validation are paused; native source exists, but implementation and physical-device acceptance remain incomplete. Native acceptance is deferred, not waived. The retained iOS workflows are manual-dispatch only. The implementation architecture is [iOS SwiftUI architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.md). [User screen flows](../design/USER-SCREEN-FLOW.md), [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.md) and [Core](../architecture/CORE.md) remain normative for behavior and rights.
 
 ## Goal and boundaries
 
@@ -8,9 +8,11 @@ Ship an installable **native SwiftUI** iOS application for a personally owned iP
 
 Web static assets remain under Cloudflare Access; the app uses an independently registered **public OAuth/PKCE iOS client** to reach the HTTPS API, subject to the same owner/project/effect authorization. The existing Web same-hostname deployment does **not** yet prove Access-independent API reachability; the required ingress and authorization cutover is governed by [deployment](README.md) and [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.md).
 
+The Mobile Web production route, launcher choice and authoring shell have been removed, and the legacy Capacitor IPA workflow is retired. Remaining old package/test material does not restore Mobile Web support or satisfy native acceptance. The acceptance gates below remain unchanged.
+
 ## Target native packaging
 
-- iOS minimum deployment target: **27.0**. Xcode 27, iOS 27 SDK and ARM64 macOS CI are the accepted target. Explicitly check minimum OS in the app/IPA. SwiftUI screen implementation is separate from the current app/native Capacitor project.
+- iOS minimum deployment target: **27.0**. Xcode 27, iOS 27 SDK and ARM64 macOS CI are the accepted target. Explicitly check minimum OS in the app/IPA. SwiftUI screen implementation is separate from the retained legacy `app/native` Capacitor project.
 - Build a SwiftUI executable/IPA from the **exact commit under test**. Record the Xcode/Swift toolchain, dependency lock/resolution, source revision, architectures, bundle ID, entitlements, build status, archive structure, artifact digest and retention policy.
 - Use generated Swift OpenAPI client DTOs from the same TypeSpec-derived OpenAPI 3.1 as Web; dependencies and compiler/toolchain compatibility must be pinned and validated. No iOS API schema fork or embedded credential.
 - Do not put Apple Account credentials, signing certificates, provisioning profiles, OAuth refresh tokens, bearer JWTs or user manuscripts in repository, GitHub Actions artifacts or distributed unsigned binaries.
@@ -18,7 +20,7 @@ Web static assets remain under Cloudflare Access; the app uses an independently 
 
 ## Authentication and network
 
-- Prefer a native system authentication flow with exact callback, discovery, PKCE S256, CSRF state, OAuth resource/scope checks and secure Keychain refresh-token rotation. Evaluate the current AppAuth-iOS integration for native-only reuse; a Capacitor bridge is not retained solely to preserve it.
+- Prefer a native system authentication flow with exact callback, discovery, PKCE S256, CSRF state, OAuth resource/scope checks and secure Keychain refresh-token rotation. The SwiftUI source uses `ASWebAuthenticationSession`; AppAuth-iOS remains in the legacy Capacitor bridge and may be evaluated for native-only reuse. The Capacitor bridge is not retained solely to preserve it.
 - Native HTTPS URLSession networking accepts only the configured API origin and approved API paths, rejects cross-origin redirects/ambient cookies, never uses the upstream IdP ID token as an API bearer, and separates the public reader URL origin.
 - Token expiry, cancellation, revoked credentials, API outage, lost response, conflict and logout must preserve recoverable pending drafts. Do not grant the app different API permissions from Desktop.
 - **Sign-out does not revoke already-issued API access tokens.** It clears client-side tokens and attempts the provider's refresh-token/session termination; an individual still-valid access token can be explicitly revoked through the authenticated RFC 7009 endpoint `/api/auth/oauth2/revoke`. Verify revocation separately from UI logout, and preserve unresolved drafts during either operation.

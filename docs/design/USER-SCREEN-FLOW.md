@@ -4,6 +4,8 @@
 
 **種別: 正本・規範的設計。** 本書は作者が Desktop Web（React）/ iOSアプリ（SwiftUI）から作品を利用する際の画面、遷移条件、失敗時の扱いを定義する。画面配置・内部 UI の実装をそのまま設計の正本にしない。[システム基本設計](../architecture/SYSTEM-DESIGN.md)、[UX 契約](UX-CONTRACT.md)、[情報設計](INFORMATION-ARCHITECTURE.md)に従う。
 
+**現行の提供範囲:** Windows Chromium上のDesktop Webが現在の対応済み作者用製品である。iOS SwiftUIは採用済みの設計目標だが、開発と自動Xcode検証が一時停止中で、実装・実機受入は未完了である。図とiOSの行は要求される将来の導線を示し、現在の提供や受入済み動作を主張しない。Mobile Webと `/mobile/` は製品導線から撤去済み。
+
 ## 起動から作品への遷移
 
 [利用画面の遷移図をSVGで開く](https://yohn-jp.github.io/codexia/architecture/#user-1)
@@ -87,7 +89,7 @@ flowchart TD
     REC --> WRITE
 ~~~
 
-Mobile Webの`/mobile/`・`?view=`・Ionic参照sheetは廃止対象の実装であり、正規製品導線ではない。画面の幅に応じてWebがモバイル執筆shellを自動選択する設計は採用しない。iOS画面の詳細は [iOS SwiftUI設計](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)。
+旧Mobile Webの`/mobile/`・`?view=`・Ionic参照sheetは現行mainの製品導線ではなく、互換性の約束もない。画面の幅に応じてWebがモバイル執筆shellを自動選択する設計は採用しない。iOS画面の詳細は [iOS SwiftUI設計](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)。
 
 ## 保存・復旧の状態遷移
 
@@ -123,4 +125,4 @@ stateDiagram-v2
 | optional module 不可 | 関連する panel のエラーに限定し、Core 原稿を利用可能に保つ |
 | 競合・回復保護に失敗 | 遷移を禁止し、原稿・journal・作業 context を残す |
 
-**受入証拠:** Desktop WebはWindows Chromiumを正式対象とし、Chromiumと実PostgreSQL、Windows固有の操作は実Windowsで、iOSはSimulatorに加えて物理iPhoneと実PostgreSQLで、OAuth/IME/保存追加入力/競合/応答喪失/アプリ復帰/作者切替/権限拒否を確認する。Mobile React向けviewport E2Eは受入対象としない。本書は画面操作の正本であり、上記がすべて実装・検証済みであるとの宣言ではない。
+**受入証拠:** Desktop WebはWindows Chromiumを正式対象とし、Chromiumと実PostgreSQL、Windows固有の操作は実Windowsで、iOSはSimulatorに加えて物理iPhoneと実PostgreSQLで、OAuth/IME/保存追加入力/競合/応答喪失/アプリ復帰/作者切替/権限拒否を確認する。Mobile React向けviewport E2Eは受入対象としない。iOSの受入は現在停止中であり、延期は免除ではない。本書は画面操作の正本であり、上記がすべて実装・検証済みであるとの宣言ではない。
