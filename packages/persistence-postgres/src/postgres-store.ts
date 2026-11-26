@@ -419,10 +419,20 @@ function mapAssertionEvidence(row: DbRow): AssertionEvidence {
   };
 }
 
+function databaseUnavailable(): PersistenceError {
+  return new PersistenceError('unavailable', 'PostgreSQL persistence is not ready');
+}
+
 function databaseError(error: unknown): unknown {
   if (error instanceof PersistenceError) return error;
   if (!error || typeof error !== 'object' || !('code' in error)) return error;
   const code = (error as { code?: unknown }).code;
+  if (
+    typeof code === 'string' &&
+    (/^08\d{3}$/u.test(code) || ['57P01', '57P02', '57P03', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT'].includes(code))
+  ) {
+    return databaseUnavailable();
+  }
   if (code === '23505') return new PersistenceError('conflict', 'A persistence constraint rejected the write');
   if (code === '23503' || code === '23514' || code === '22P02') {
     return new PersistenceError('validation', 'A persistence constraint rejected the write');
@@ -2916,8 +2926,16 @@ export class PostgresPersistence implements Persistence {
     return 'transition';
   }
 
+  private async acquireClient(): Promise<PoolClient> {
+    try {
+      return await this.pool.connect();
+    } catch {
+      throw databaseUnavailable();
+    }
+  }
+
   async read<T>(work: (reader: PersistenceReader) => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
+    const client = await this.acquireClient();
     try {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const reader = new PostgresTransaction(client, true);
@@ -2933,7 +2951,7 @@ export class PostgresPersistence implements Persistence {
   }
 
   async transaction<T>(work: (transaction: PersistenceTransaction) => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
+    const client = await this.acquireClient();
     try {
       await client.query('BEGIN');
       const transaction = new PostgresTransaction(client, false);

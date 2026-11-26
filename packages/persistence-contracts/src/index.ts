@@ -4,15 +4,15 @@ declare const idBrand: unique symbol;
 
 export type Id<Tag extends string> = string & { readonly [idBrand]: Tag };
 
-export type ProjectId = Id<"ProjectId">;
-export type DocumentId = Id<"DocumentId">;
-export type RevisionId = Id<"RevisionId">;
-export type KnowledgeNodeId = Id<"KnowledgeNodeId">;
-export type KnowledgeAliasId = Id<"KnowledgeAliasId">;
-export type KnowledgeRelationId = Id<"KnowledgeRelationId">;
-export type EvidenceId = Id<"EvidenceId">;
-export type AssertionId = Id<"AssertionId">;
-export type ChangeSetId = Id<"ChangeSetId">;
+export type ProjectId = Id<'ProjectId'>;
+export type DocumentId = Id<'DocumentId'>;
+export type RevisionId = Id<'RevisionId'>;
+export type KnowledgeNodeId = Id<'KnowledgeNodeId'>;
+export type KnowledgeAliasId = Id<'KnowledgeAliasId'>;
+export type KnowledgeRelationId = Id<'KnowledgeRelationId'>;
+export type EvidenceId = Id<'EvidenceId'>;
+export type AssertionId = Id<'AssertionId'>;
+export type ChangeSetId = Id<'ChangeSetId'>;
 export type ActorId = string;
 export type IdempotencyKey = string;
 
@@ -178,9 +178,9 @@ export interface DocumentHeadRevisionHash extends DocumentRevisionKey {
   sha256: string | null;
 }
 
-export type KnowledgeNodeStatus = "proposed" | "confirmed" | "retired";
-export type KnowledgeAliasStatus = "proposed" | "confirmed" | "ambiguous" | "retired";
-export type KnowledgeRelationStatus = "proposed" | "confirmed" | "rejected" | "retired";
+export type KnowledgeNodeStatus = 'proposed' | 'confirmed' | 'retired';
+export type KnowledgeAliasStatus = 'proposed' | 'confirmed' | 'ambiguous' | 'retired';
+export type KnowledgeRelationStatus = 'proposed' | 'confirmed' | 'rejected' | 'retired';
 
 export interface KnowledgeNode {
   id: KnowledgeNodeId;
@@ -263,9 +263,9 @@ export interface SaveKnowledgeRelationCommand {
   expectedVersion: number | null;
 }
 
-export type EvidenceStatus = "proposed" | "confirmed" | "needs_review" | "orphaned";
-export type MentionStatus = "proposed" | "confirmed" | "ambiguous" | "rejected";
-export type AssertionStatus = "proposed" | "confirmed" | "rejected" | "retired";
+export type EvidenceStatus = 'proposed' | 'confirmed' | 'needs_review' | 'orphaned';
+export type MentionStatus = 'proposed' | 'confirmed' | 'ambiguous' | 'rejected';
+export type AssertionStatus = 'proposed' | 'confirmed' | 'rejected' | 'retired';
 
 /** A text anchor is a revision-bound evidence location, not a semantic conclusion. */
 export interface EvidenceAnchor {
@@ -353,7 +353,7 @@ export interface SaveAssertionCommand {
   expectedVersion: number | null;
 }
 
-export type EvidenceRole = "supports" | "contradicts" | "quotes" | "context";
+export type EvidenceRole = 'supports' | 'contradicts' | 'quotes' | 'context';
 
 export interface AssertionEvidence {
   projectId: ProjectId;
@@ -370,18 +370,18 @@ export interface LinkAssertionEvidenceCommand {
   role: EvidenceRole;
 }
 
-export type ChangeSetStatus = "proposed" | "approved" | "applied" | "rejected";
+export type ChangeSetStatus = 'proposed' | 'approved' | 'applied' | 'rejected';
 
 export type ChangeSetResource =
-  | "document"
-  | "module_record"
-  | "knowledge_node"
-  | "knowledge_alias"
-  | "knowledge_relation"
-  | "evidence_anchor"
-  | "mention_link"
-  | "assertion"
-  | "assertion_evidence";
+  | 'document'
+  | 'module_record'
+  | 'knowledge_node'
+  | 'knowledge_alias'
+  | 'knowledge_relation'
+  | 'evidence_anchor'
+  | 'mention_link'
+  | 'assertion'
+  | 'assertion_evidence';
 
 export interface ChangeSetReadSetEntry {
   resource: ChangeSetResource;
@@ -404,12 +404,12 @@ export interface ChangeSetProvenance {
   details: JsonObject;
 }
 
-export const HIERARCHY_REORDER_SOURCE = "native-hierarchy-reorder";
-export const HIERARCHY_DELETE_SOURCE = "native-hierarchy-delete";
-export const HIERARCHY_CREATE_SOURCE = "native-hierarchy-create";
-export const CORE_DOCUMENT_PATHS = "core.document-paths";
-export const PUBLISHING_CHANGESET_SOURCE = "publishing.native";
-export const NLP_FEATURE_SETTINGS_CHANGESET_SOURCE = "nlp.feature-settings.native";
+export const HIERARCHY_REORDER_SOURCE = 'native-hierarchy-reorder';
+export const HIERARCHY_DELETE_SOURCE = 'native-hierarchy-delete';
+export const HIERARCHY_CREATE_SOURCE = 'native-hierarchy-create';
+export const CORE_DOCUMENT_PATHS = 'core.document-paths';
+export const PUBLISHING_CHANGESET_SOURCE = 'publishing.native';
+export const NLP_FEATURE_SETTINGS_CHANGESET_SOURCE = 'nlp.feature-settings.native';
 
 interface HierarchyParentReference {
   readonly documentId: DocumentId;
@@ -418,14 +418,14 @@ interface HierarchyParentReference {
 
 /** Fixed parent identities and the author-facing ID for an approved hierarchy create. */
 export type HierarchyDocumentCreate =
-  | { kind: "volume"; logicalId: string }
-  | { kind: "chapter"; logicalId: string; volume: HierarchyParentReference }
-  | { kind: "scene"; logicalId: string; volume: HierarchyParentReference; chapter: HierarchyParentReference };
+  | { kind: 'volume'; logicalId: string }
+  | { kind: 'chapter'; logicalId: string; volume: HierarchyParentReference }
+  | { kind: 'scene'; logicalId: string; volume: HierarchyParentReference; chapter: HierarchyParentReference };
 
 export function hierarchyDocumentPaths(scope: HierarchyDocumentCreate): { metadataPath: string; manuscriptPath?: string } {
-  if (scope.kind === "volume") return { metadataPath: `plot/volumes/${scope.logicalId}/volume.yaml` };
+  if (scope.kind === 'volume') return { metadataPath: `plot/volumes/${scope.logicalId}/volume.yaml` };
   const volumePath = `plot/volumes/${scope.volume.lookupId}`;
-  if (scope.kind === "chapter") return { metadataPath: `${volumePath}/chapters/${scope.logicalId}/chapter.yaml` };
+  if (scope.kind === 'chapter') return { metadataPath: `${volumePath}/chapters/${scope.logicalId}/chapter.yaml` };
   const { lookupId: chapter } = scope.chapter;
   return {
     metadataPath: `${volumePath}/chapters/${chapter}/scenes/${scope.logicalId}.yaml`,
@@ -434,20 +434,20 @@ export function hierarchyDocumentPaths(scope: HierarchyDocumentCreate): { metada
 }
 
 export type ChangeSetOperation =
-  | { type: "document.update"; command: UpdateDocumentCommand }
-  | { type: "document.delete"; command: DeleteDocumentCommand }
-  | { type: "module.record.save"; command: SaveModuleRecordCommand }
-  | { type: "document.create"; command: CreateDocumentCommand; hierarchy?: HierarchyDocumentCreate }
-  | { type: "document.save"; command: SaveDocumentCommand }
-  | { type: "document.restore"; command: RestoreDocumentRevisionCommand }
-  | { type: "knowledge.node.save"; command: SaveKnowledgeNodeCommand }
-  | { type: "knowledge.alias.save"; command: SaveKnowledgeAliasCommand }
-  | { type: "knowledge.relation.save"; command: SaveKnowledgeRelationCommand }
-  | { type: "evidence.anchor.save"; command: SaveEvidenceAnchorCommand }
-  | { type: "evidence.mention.save"; command: SaveMentionLinkCommand }
-  | { type: "evidence.assertion.save"; command: SaveAssertionCommand }
-  | { type: "evidence.assertion.link"; command: LinkAssertionEvidenceCommand }
-  | { type: "knowledge.merge"; command: KnowledgeMergeChangeCommand };
+  | { type: 'document.update'; command: UpdateDocumentCommand }
+  | { type: 'document.delete'; command: DeleteDocumentCommand }
+  | { type: 'module.record.save'; command: SaveModuleRecordCommand }
+  | { type: 'document.create'; command: CreateDocumentCommand; hierarchy?: HierarchyDocumentCreate }
+  | { type: 'document.save'; command: SaveDocumentCommand }
+  | { type: 'document.restore'; command: RestoreDocumentRevisionCommand }
+  | { type: 'knowledge.node.save'; command: SaveKnowledgeNodeCommand }
+  | { type: 'knowledge.alias.save'; command: SaveKnowledgeAliasCommand }
+  | { type: 'knowledge.relation.save'; command: SaveKnowledgeRelationCommand }
+  | { type: 'evidence.anchor.save'; command: SaveEvidenceAnchorCommand }
+  | { type: 'evidence.mention.save'; command: SaveMentionLinkCommand }
+  | { type: 'evidence.assertion.save'; command: SaveAssertionCommand }
+  | { type: 'evidence.assertion.link'; command: LinkAssertionEvidenceCommand }
+  | { type: 'knowledge.merge'; command: KnowledgeMergeChangeCommand };
 
 /** Server-derived immutable proposal payload for one atomic Knowledge merge. */
 export interface KnowledgeMergeChangeCommand {
@@ -457,7 +457,7 @@ export interface KnowledgeMergeChangeCommand {
   projectVersion: number;
   previewDigest: string;
   actorId: ActorId;
-  origin: "author" | "external-agent";
+  origin: 'author' | 'external-agent';
   auditId: string;
   generatedAliasId: KnowledgeAliasId;
   plan: JsonObject;
@@ -470,7 +470,7 @@ export interface ProposeKnowledgeMergeCommand {
   projectVersion: number;
   previewDigest: string;
   actorId: ActorId;
-  origin: "author" | "external-agent";
+  origin: 'author' | 'external-agent';
   idempotencyKey: IdempotencyKey;
 }
 
@@ -562,26 +562,48 @@ export interface PersistenceReader {
   getModuleRecord(projectId: ProjectId, moduleId: string, key: string): Promise<ModuleRecord | undefined>;
   listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]>;
   /** Count unresolved proposals in explicit project order, or all standalone projects in recent-project order when null; return only the bounded prefix. */
-  listProposalReviewQueue(projectIds: readonly ProjectId[] | null, moduleId: string, limit: number, options?: ProposalReviewQueueOptions): Promise<{
+  listProposalReviewQueue(
+    projectIds: readonly ProjectId[] | null,
+    moduleId: string,
+    limit: number,
+    options?: ProposalReviewQueueOptions,
+  ): Promise<{
     unresolvedCount: number;
     records: readonly { record: ModuleRecord; projectVersion: number }[];
   }>;
   /** Portable exchange excludes internal authority payloads at the SQL boundary. */
-  listPortableModuleRecords(projectId: ProjectId): Promise<{ records: readonly ModuleRecord[]; omittedAuthorityModules: readonly string[] }>;
+  listPortableModuleRecords(
+    projectId: ProjectId,
+  ): Promise<{ records: readonly ModuleRecord[]; omittedAuthorityModules: readonly string[] }>;
   getProject(projectId: ProjectId): Promise<Project | undefined>;
   listProjects(limit?: number): Promise<readonly Project[]>;
   /** Recent-project keyset page; `limit` includes the optional lookahead row. */
   listProjectPage?(limit: number, after?: ProjectPageCursor): Promise<readonly Project[]>;
   getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined>;
   listDocuments(projectId: ProjectId, parentId?: DocumentId | null, limit?: number): Promise<readonly Document[]>;
-  getRevision(projectId: ProjectId, documentId: DocumentId, revisionId: RevisionId, throughHead?: RevisionId): Promise<DocumentRevision | undefined>;
+  getRevision(
+    projectId: ProjectId,
+    documentId: DocumentId,
+    revisionId: RevisionId,
+    throughHead?: RevisionId,
+  ): Promise<DocumentRevision | undefined>;
   /** Resolve exact document/revision pairs in input order within the project scope. */
   getDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionLookup[]>;
   /** Resolve the hashes of exact pairs in input order without requesting revision bodies. */
   getDocumentHeadRevisionHashes(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionHash[]>;
-  listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string, throughHead?: RevisionId): Promise<DocumentRevisionPage>;
+  listRevisions(
+    projectId: ProjectId,
+    documentId: DocumentId,
+    limit: number,
+    before?: string,
+    throughHead?: RevisionId,
+  ): Promise<DocumentRevisionPage>;
   /** Globally bounded metadata from the ancestry of the supplied immutable heads, in input-document order for timestamp ties. */
-  listProjectRevisionHistory(projectId: ProjectId, heads: readonly DocumentRevisionKey[], limit: number): Promise<readonly Pick<DocumentRevision, "id" | "documentId" | "createdAt">[]>;
+  listProjectRevisionHistory(
+    projectId: ProjectId,
+    heads: readonly DocumentRevisionKey[],
+    limit: number,
+  ): Promise<readonly Pick<DocumentRevision, 'id' | 'documentId' | 'createdAt'>[]>;
   getKnowledgeNode(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<KnowledgeNode | undefined>;
   listKnowledgeNodes(projectId: ProjectId, limit?: number): Promise<readonly KnowledgeNode[]>;
   /** Bounded stable Knowledge browse; aliases are searched only within this project and node. */
@@ -601,7 +623,12 @@ export interface PersistenceReader {
   getEvidenceAnchor(projectId: ProjectId, evidenceId: EvidenceId): Promise<EvidenceAnchor | undefined>;
   /** All document identities with retained anchors, including logically deleted documents. */
   listEvidenceDocumentIds(projectId: ProjectId, limit?: number): Promise<readonly DocumentId[]>;
-  listDocumentEvidence(projectId: ProjectId, documentId: DocumentId, revisionId?: RevisionId, limit?: number): Promise<readonly EvidenceAnchor[]>;
+  listDocumentEvidence(
+    projectId: ProjectId,
+    documentId: DocumentId,
+    revisionId?: RevisionId,
+    limit?: number,
+  ): Promise<readonly EvidenceAnchor[]>;
   listEvidenceHistory(projectId: ProjectId, evidenceId: EvidenceId, limit?: number): Promise<readonly EvidenceAnchorHistory[]>;
   getMentionLink(projectId: ProjectId, evidenceId: EvidenceId, nodeId: KnowledgeNodeId): Promise<MentionLink | undefined>;
   listMentionLinks(projectId: ProjectId, evidenceId: EvidenceId, limit?: number): Promise<readonly MentionLink[]>;
@@ -648,11 +675,7 @@ export interface PersistenceTransaction extends PersistenceReader {
     expectedVersion: number;
     rejectedBy: ActorId;
   }): Promise<ChangeSet>;
-  applyChangeSet(command: {
-    projectId: ProjectId;
-    changeSetId: ChangeSetId;
-    expectedVersion: number;
-  }): Promise<ChangeSetApplicationResult>;
+  applyChangeSet(command: { projectId: ProjectId; changeSetId: ChangeSetId; expectedVersion: number }): Promise<ChangeSetApplicationResult>;
 }
 
 export interface Persistence {
@@ -666,11 +689,12 @@ export interface Persistence {
 }
 
 export type PersistenceErrorCode =
-  | "not_found"
-  | "conflict"
-  | "idempotency_conflict"
-  | "invalid_change_set_state"
-  | "validation";
+  | 'unavailable'
+  | 'not_found'
+  | 'conflict'
+  | 'idempotency_conflict'
+  | 'invalid_change_set_state'
+  | 'validation';
 
 export interface PersistenceErrorDetails {
   resource?: string;
@@ -680,7 +704,7 @@ export interface PersistenceErrorDetails {
 }
 
 export class PersistenceError extends Error {
-  readonly name = "PersistenceError";
+  readonly name = 'PersistenceError';
 
   constructor(
     readonly code: PersistenceErrorCode,
