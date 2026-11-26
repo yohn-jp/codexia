@@ -20,7 +20,9 @@ Codexia is a manuscript-centered writing environment whose documented mechanism 
 
 ## Operating Context
 
-- **Accepted target:** Windows Chromium (Chrome/Edge) Desktop Web (React/CodeMirror) and a separate **native iOS app (SwiftUI, with UIKit/TextKit where justified)**. Mobile Web/PWA authoring and Capacitor/WebView authoring are retired targets, pending implementation removal.
+- **Current supported authoring product:** Windows Chromium (Chrome/Edge) Desktop Web (React/CodeMirror).
+- **Accepted iOS target:** a separate native iOS app (SwiftUI, with UIKit/TextKit where justified). Native development and automatic Xcode validation are paused; implementation and physical-device acceptance remain incomplete, so iOS is not currently a supported authoring deliverable.
+- Mobile Web/PWA and Capacitor/WebView authoring have been retired from the product, including the `/mobile/` route and Mobile authoring shell.
 - Desktop and iOS **do not share UI components or client-side state implementation**. They share only the server API/domain requirements and manuscript protection semantics. The web Impeccable design system applies to Desktop Web; native iOS design/acceptance is governed by [iOS SwiftUI architecture](../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md). Android support is not implied.
 - Writing, reading, reference, and review are ways to work with the same manuscript context, not separate manuscript authorities.
 
@@ -28,7 +30,7 @@ Codexia is a manuscript-centered writing environment whose documented mechanism 
 
 - Manuscripts are organized as works with volume, chapter, and scene structure.
 - PostgreSQL is the sole manuscript authority. Git persistence, synchronization, history, and compatibility fallbacks are retired.
-- Desktop Web and native iOS have independent presentation, interaction and client-side authoring/recovery implementations. Both satisfy the same Core/API authorization, revision, durability and recovery contracts; PostgreSQL is the only authoritative manuscript store.
+- In the accepted target architecture, Desktop Web and native iOS have independent presentation, interaction and client-side authoring/recovery implementations. The current supported authoring product is Desktop Web; native iOS implementation and acceptance are incomplete. PostgreSQL is the only authoritative manuscript store.
 - Search, analysis, and assistant tools are optional; local writing must not depend on their availability. Sending manuscript content to an external assistant requires explicit consent.
 - Preserve Japanese text entry and composition, reading position, manuscript formatting, and safe recovery across navigation and platform surfaces.
 

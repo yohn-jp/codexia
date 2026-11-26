@@ -1,6 +1,6 @@
 # iOS native writing interactions
 
-**Accepted SwiftUI target; implementation and physical-device acceptance unverified.** This document supersedes Ionic React Mobile Web interactions. See [Native iOS architecture](IOS-SWIFTUI-ARCHITECTURE.md), [User flows](../design/USER-SCREEN-FLOW.md) and [UX contract](../design/UX-CONTRACT.md).
+**Accepted SwiftUI target; implementation and physical-device acceptance unverified. Native development and automatic Xcode validation are paused.** This document supersedes Ionic React Mobile Web interactions. See [Native iOS architecture](IOS-SWIFTUI-ARCHITECTURE.md), [User flows](../design/USER-SCREEN-FLOW.md) and [UX contract](../design/UX-CONTRACT.md).
 
 | Step | Native interaction and outcome |
 | --- | --- |
@@ -12,4 +12,4 @@
 | Background/relaunch | Recover local draft and unknown operation identity, distinguish unsaved from confirmed PostgreSQL revision |
 | Conflict | Preserve draft, base revision and operation identity; explicit author decision, never force-overwrite |
 
-SwiftUI owns presentation, the native authoring coordinator owns client recovery, and the Fastify/Core/API owns authorization, mutation and canonical storage. Verify physical-iPhone Japanese IME, keyboard, safe area, VoiceOver, long-text typing latency, memory and scroll hitches. Mobile React viewport/Ionic/WKWebView E2E is not accepted native evidence or a future release gate. Retire those legacy tests at the code cutover.
+SwiftUI owns presentation, the native authoring coordinator owns client recovery, and the Fastify/Core/API owns authorization, mutation and canonical storage. Verify physical-iPhone Japanese IME, keyboard, safe area, VoiceOver, long-text typing latency, memory and scroll hitches. Mobile React viewport/Ionic/WKWebView E2E is not accepted native evidence or a future release gate. The production Mobile Web route and authoring shell have been removed; any remaining mobile-specific tests are legacy cleanup, not current product or native acceptance evidence.

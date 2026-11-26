@@ -8,7 +8,7 @@
 
 最新の明示的なオーナー指示と受入済み製品契約を優先する。本書は情報設計・表示・操作の判断を固定し、[Core](../architecture/CORE.md)、[Internal boundaries](../architecture/INTERNAL-BOUNDARIES.md)、[Modular workspace](../architecture/MODULAR-WORKSPACE.md)、[Modules](../architecture/MODULES.md)の正本・保存・認可の意味を変更しない。[Authoring](../authoring.md)と[Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md)も併読する。
 
-**Desktop WebはWindows Chromium（Chrome/Edge）上のReact/CodeMirror、インストール型iOSはSwiftUI（編集面はUIKit/TextKit 2）**を採用する。Mobile React/Ionic/Capacitor WebView執筆は廃止対象であり、Mobile Web/PWA向けUIや狭幅React画面の検証を要求しない。クライアント間でReact部品・ローカル状態実装を共通化しない。共有するのはCore/API契約と保存・Revision・認可の意味論である。実装詳細は[iOS SwiftUI](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)。既存実装が移行済みという意味ではない。
+**現行の対応済み作者用製品はWindows Chromium（Chrome/Edge）上のDesktop React/CodeMirrorのみ。** インストール型iOS SwiftUI（編集面はUIKit/TextKit 2）は採用済みの設計目標だが、開発と自動Xcode検証が一時停止中で、実装と実機受入は未完了である。Mobile React/Ionic/Capacitor WebView執筆は製品導線から撤去済みであり、Mobile Web/PWA向けUIや狭幅React画面の検証を要求しない。クライアント間でReact部品・ローカル状態実装を共通化しない。共有するのはCore/API契約と保存・Revision・認可の意味論である。実装詳細は[iOS SwiftUI](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)。本書の体験保証は実装済み機能や受入完了を意味しない。
 
 配色、余白、画面割り、ナビゲーション、パネルの初期配置は本書の範囲で改善できる。プリセットを固定モードへ縮退させたり、対応済みの執筆・閲覧機能を見た目のために削除してはならない。
 
