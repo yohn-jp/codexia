@@ -123,7 +123,8 @@ function implementationLinksFor(identifiers, sourceSha, audit, obligationId) {
   for (const raw of identifiers ?? []) {
     const identifier = String(raw).trim();
     if (!identifier || /^UNMAPPED\b/iu.test(identifier)) continue;
-    const leadingToken = identifier.match(/^([^\s;、，]+)/u)?.[1] ?? identifier;
+    // A colon followed by whitespace introduces a symbol annotation.
+    const leadingToken = identifier.match(/^([^\s;、，]+?)(?=:\s|[\s;、，]|$)/u)?.[1] ?? identifier;
     const candidates = [leadingToken];
     if (lastDirectory && !leadingToken.includes('/')) candidates.push(posix.join(lastDirectory, leadingToken));
     const candidate = candidates.find(pathValue => repositoryPathInfo(posix.normalize(pathValue)));
