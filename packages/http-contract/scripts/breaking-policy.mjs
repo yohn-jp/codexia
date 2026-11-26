@@ -69,6 +69,23 @@ export function assertBreakingComparison({ stdout, status, transition }) {
     const outside = errors.filter(issue => {
       const path = issue?.path ?? '';
       const id = issue?.id ?? '';
+      // These exact response fingerprints describe the reviewed archive and MCP 400 corrections.
+      if (
+        issue.operation === 'GET' &&
+        path === '/api/v1/persistence/projects/{projectId}/archive' &&
+        id === 'response-property-any-of-added'
+      ) {
+        return !['138e377c02e8', '9abf9facdfc1', 'fb05c818ecf3'].includes(issue.fingerprint);
+      }
+      if (issue.operation === 'POST' && id === 'response-required-property-removed') {
+        const expected =
+          path === '/mcp'
+            ? ['f77122ab7504', 'c35b8b731e8f']
+            : path === '/api/projects/{projectId}/modules/mcp/streamable'
+              ? ['d8e15d2f1c0d', '4b5a75f1fb48']
+              : [];
+        return !expected.includes(issue.fingerprint);
+      }
       // Limit approval to persistence wire constraints and MCP POST responses.
       if (/^\/api\/v1\/persistence(?:\/|$)/u.test(path)) {
         return !/^(?:request-(?:body|property|parameter|header|additional-properties)|new-required-request-property|response-property-pattern|response-property-format|response-property-max|response-property-min)/u.test(

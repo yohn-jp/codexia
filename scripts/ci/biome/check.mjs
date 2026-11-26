@@ -35,7 +35,7 @@ for (const run of sarif.runs) {
     assert.match(result.ruleId ?? '', /^lint\//u, 'Only lint diagnostics may enter Code Scanning');
   }
 }
-const ciStatus = execute(['ci', ...scope]);
+const ciStatus = execute(['ci', ...scope, '--max-diagnostics=none']);
 assert.equal(ciStatus, 0, 'Biome CI detected a format, lint or import issue');
 assert.equal(lintStatus, 0, 'Biome lint failed even though the combined check passed');
 

@@ -151,9 +151,13 @@ export const documentApi = {
     documentId: string,
     command: Omit<RestoreDocumentRevisionCommand, 'projectId' | 'documentId' | 'authorId'>,
     signal?: AbortSignal,
-  ) =>
-    persistenceDocumentRestorePost(projectId, documentId, command satisfies PersistenceDocumentRestoreRequest, {
-      ...apiOptions(signal),
-      headers: { 'Idempotency-Key': command.idempotencyKey },
-    }) as unknown as Promise<PersistenceDocumentWriteResult>,
+  ) => {
+    const { baseRevisionId, sourceRevisionId, idempotencyKey } = command;
+    return persistenceDocumentRestorePost(
+      projectId,
+      documentId,
+      { baseRevisionId, sourceRevisionId } satisfies PersistenceDocumentRestoreRequest,
+      { ...apiOptions(signal), headers: { 'Idempotency-Key': idempotencyKey } },
+    ) as unknown as Promise<PersistenceDocumentWriteResult>;
+  },
 };

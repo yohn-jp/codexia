@@ -737,7 +737,10 @@ export function createServer(options: ApiServerOptions): Server {
       !error.validationContext &&
       (error instanceof SyntaxError || error.code === 'FST_ERR_CTP_INVALID_JSON_BODY' || error.code === 'FST_ERR_CTP_EMPTY_JSON_BODY')
     ) {
-      void reply.code(400).type('application/json; charset=utf-8').send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
+      void reply
+        .code(400)
+        .type('application/json; charset=utf-8')
+        .send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
       return;
     }
     let failure: HttpFailure;

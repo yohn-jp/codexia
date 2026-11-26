@@ -58,6 +58,9 @@ test('only the reviewed initial-install epoch transition permits scoped breaking
   };
   const check = (item, status = 1) => assertBreakingComparison({ stdout: JSON.stringify([item]), status, transition });
   assert.doesNotThrow(() => check(issue));
+  const mcp = { level: 3, id: 'response-required-property-removed', operation: 'POST', path: '/mcp', fingerprint: 'f77122ab7504' };
+  assert.doesNotThrow(() => check(mcp));
+  assert.throws(() => check({ ...mcp, fingerprint: 'unreviewed' }), /outside approved/u);
   assert.throws(() => check({ ...issue, path: '/api/auth/codexia/setup/complete' }), /outside approved/u);
   assert.throws(() => check({ ...issue, id: 'api-security-removed' }), /outside approved/u);
   assert.throws(() => check(issue, 2), /exit does not match/u);
