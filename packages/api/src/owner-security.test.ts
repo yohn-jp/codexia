@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { oauthProvider } from '@better-auth/oauth-provider';
 import { passkey } from '@better-auth/passkey';
 import { betterAuth } from 'better-auth';
@@ -186,9 +186,40 @@ test('identity reads only allowlisted clients and owner grants, with an unverifi
   assert.doesNotMatch(JSON.stringify(result), /sensitive-fixture-client-secret|clientSecret|not-the-owner/u);
 });
 
-test('withdrawing stored consent compares the owner, client, scopes and exact version before revoking the grant', async () => {
-  const { request, current, foreign, context, consentSelection, grantRevocations } = await fixture();
-  await context.adapter.create({ model: 'oauthClient', data: { clientId: webClientId, redirectUris: [`${origin}/callback`] } });
+const authTestDatabase = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
+const postgresSkip = authTestDatabase && process.env.CODEXIA_AUTH_TEST_DISPOSABLE === '1' ? false : 'requires a disposable auth database';
+
+async function postgresFixture(t: TestContext) {
+  assert.ok(authTestDatabase);
+  const url = new URL(authTestDatabase);
+  assert.match(url.protocol, /^postgres(?:ql)?:$/u);
+  assert.equal(url.search + url.hash, '');
+  const localDisposable = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && url.pathname === '/codexia_auth_test';
+  const ciDisposable = process.env.CI === 'true' && url.hostname === 'postgres' && /^\/codexia_ci_[a-f0-9]{32}$/u.test(url.pathname);
+  assert.ok(localDisposable || ciDisposable, 'owner security test requires an isolated disposable auth database');
+  const schema = `owner_security_test_${randomUUID().replaceAll('-', '')}`;
+  const admin = new Pool({ connectionString: authTestDatabase });
+  const scoped = new Pool({ connectionString: authTestDatabase, options: `-c search_path=${schema}` });
+  t.after(async () => {
+    try {
+      await scoped.end();
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    } finally {
+      await admin.end();
+    }
+  });
+  await admin.query(`CREATE SCHEMA ${schema}`);
+  return fixture(scoped);
+}
+
+// The exact revision delete compares persisted JSON arrays through Kysely.
+test('withdrawing stored consent compares the owner, client, scopes and exact version before revoking the grant', {
+  skip: postgresSkip,
+}, async t => {
+  const { request, current, foreign, context, consentSelection, grantRevocations } = await postgresFixture(t);
+  for (const clientId of [webClientId, iosClientId]) {
+    await context.adapter.create({ model: 'oauthClient', data: { clientId, redirectUris: [`${origin}/callback`] } });
+  }
   const updatedAt = new Date();
   const create = (userId: string, clientId: string) =>
     context.adapter.create({
@@ -227,31 +258,10 @@ test('withdrawing stored consent compares the owner, client, scopes and exact ve
   assert.deepEqual(left.map(({ id }) => id).sort(), [foreignConsent.id, otherConsent.id].sort());
 });
 
-const authTestDatabase = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
-
 test('PostgreSQL preserves a concurrently updated consent with the same timestamp', {
-  skip: authTestDatabase && process.env.CODEXIA_AUTH_TEST_DISPOSABLE === '1' ? false : 'requires a disposable auth database',
+  skip: postgresSkip,
 }, async t => {
-  assert.ok(authTestDatabase);
-  const url = new URL(authTestDatabase);
-  assert.match(url.protocol, /^postgres(?:ql)?:$/u);
-  assert.equal(url.search + url.hash, '');
-  const localDisposable = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && url.pathname === '/codexia_auth_test';
-  const ciDisposable = process.env.CI === 'true' && url.hostname === 'postgres' && /^\/codexia_ci_[a-f0-9]{32}$/u.test(url.pathname);
-  assert.ok(localDisposable || ciDisposable, 'owner security test requires an isolated disposable auth database');
-  const schema = `owner_security_test_${randomUUID().replaceAll('-', '')}`;
-  const admin = new Pool({ connectionString: authTestDatabase });
-  const scoped = new Pool({ connectionString: authTestDatabase, options: `-c search_path=${schema}` });
-  t.after(async () => {
-    try {
-      await scoped.end();
-      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-    } finally {
-      await admin.end();
-    }
-  });
-  await admin.query(`CREATE SCHEMA ${schema}`);
-  const { request, context, consentSelection, grantRevocations } = await fixture(scoped);
+  const { request, context, consentSelection, grantRevocations } = await postgresFixture(t);
   await context.adapter.create({ model: 'oauthClient', data: { clientId: webClientId, redirectUris: [`${origin}/callback`] } });
   const updatedAt = new Date(Math.floor(Date.now() / 1_000) * 1_000);
   const consent = await context.adapter.create({
