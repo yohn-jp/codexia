@@ -78,7 +78,7 @@ test('Octokit Link pagination visits every page and Codexia validates total_coun
     const page = Number(parsed.searchParams.get('page') ?? '1');
     requested.push(page);
     const jobs = page === 1 ? Array.from({ length: 100 }, (_, index) => ({ id: index + 1 })) : [{ id: 101 }];
-    const headers = page === 1 ? { link: '<https://api.github.com/repos/yohn-jp/codexia/actions/runs/77/jobs?per_page=100&page=2>; rel="next"' } : {};
+    const headers = page === 1 ? { link: '<https://api.github.com/repositories/1450072993/actions/runs/77/jobs?per_page=100&page=2>; rel="next"' } : {};
     return responseFor(url, { total_count: 101, jobs }, { headers });
   } });
   const jobs = await paginateActionsInventory(octokit, octokit.rest.actions.listJobsForWorkflowRun,
@@ -86,6 +86,45 @@ test('Octokit Link pagination visits every page and Codexia validates total_coun
   assert.deepEqual(requested, [1, 2]);
   assert.equal(jobs.length, 101);
   assert.deepEqual(jobs.slice(-2), [{ id: 100 }, { id: 101 }]);
+});
+
+test('Octokit follows repository-ID release pagination without leaving the canonical repository', async () => {
+  const requested = [];
+  const octokit = createGitHubOctokit({ token: 'read-token', fetchImpl: async (url, options) => {
+    const parsed = new URL(String(url));
+    requested.push(parsed.href);
+    assert.equal(new Headers(options.headers).get('authorization'), 'token read-token');
+    assert.equal(options.redirect, 'manual');
+    const page = Number(parsed.searchParams.get('page') ?? '1');
+    const releases = page === 1 ? Array.from({ length: 100 }, (_, index) => ({ id: index + 1 })) : [{ id: 101 }];
+    const headers = page === 1 ? { link: '<https://api.github.com/repositories/1450072993/releases?per_page=100&page=2>; rel="next"' } : {};
+    return responseFor(url, releases, { headers });
+  } });
+  const releases = await paginateGitHubArray(octokit, octokit.rest.repos.listReleases,
+    { owner: 'yohn-jp', repo: 'codexia' }, { maxItems: 1999 });
+  assert.deepEqual(requested, [
+    'https://api.github.com/repos/yohn-jp/codexia/releases?per_page=100',
+    'https://api.github.com/repositories/1450072993/releases?per_page=100&page=2',
+  ]);
+  assert.equal(releases.length, 101);
+  assert.deepEqual(releases.at(-1), { id: 101 });
+});
+
+test('Octokit rejects foreign numeric repository links and mutations through the canonical numeric alias', async () => {
+  let requestCount = 0;
+  const octokit = createGitHubOctokit({ token: 'read-token', fetchImpl: async url => {
+    requestCount++;
+    return responseFor(url, Array.from({ length: 100 }, (_, index) => ({ id: index + 1 })), {
+      headers: { link: '<https://api.github.com/repositories/14500729930/releases?per_page=100&page=2>; rel="next"' },
+    });
+  } });
+  await assert.rejects(paginateGitHubArray(octokit, octokit.rest.repos.listReleases,
+    { owner: 'yohn-jp', repo: 'codexia' }), /outside the canonical repository/u);
+  await assert.rejects(octokit.request('POST https://api.github.com/repositories/1450072993/releases', {}),
+    /outside the canonical repository/u);
+  await assert.rejects(octokit.request('GET https://attacker.invalid/repositories/1450072993/releases'),
+    /must stay on api.github.com/u);
+  assert.equal(requestCount, 1);
 });
 
 test('Octokit rejects missing or inconsistent pagination and stops on rate limiting', async () => {

@@ -3,6 +3,8 @@ import { Octokit } from '../ci/evidence/github-rest-sdk.mjs';
 
 const API_ORIGIN = 'https://api.github.com';
 const REPOSITORY_PATH = '/repos/yohn-jp/codexia/';
+// GitHub Link headers may address this repository by its immutable repository ID.
+const REPOSITORY_ID_PATH = '/repositories/1450072993/';
 
 /** Construct the repository-scoped Octokit instance used by automation scripts. */
 export function createGitHubOctokit({ token, fetchImpl = fetch, timeout = 15_000 } = {}) {
@@ -13,7 +15,10 @@ export function createGitHubOctokit({ token, fetchImpl = fetch, timeout = 15_000
   const guardedFetch = async (input, init = {}) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     assert.equal(url.origin, API_ORIGIN, 'GitHub REST requests must stay on api.github.com');
-    assert.ok(url.pathname.startsWith(REPOSITORY_PATH), 'GitHub REST request is outside the canonical repository');
+    const method = (init.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+    const canonicalPath = url.pathname.startsWith(REPOSITORY_PATH);
+    const canonicalReadAlias = method === 'GET' && url.pathname.startsWith(REPOSITORY_ID_PATH);
+    assert.ok(canonicalPath || canonicalReadAlias, 'GitHub REST request is outside the canonical repository');
     const timeoutSignal = AbortSignal.timeout(timeout);
     const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal;
     const response = await fetchImpl(input, { ...init, signal, redirect: 'manual' });
