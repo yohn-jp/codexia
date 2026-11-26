@@ -183,7 +183,6 @@ jobs:
           VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
           VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
           VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
-          VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
           VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
         run: node scripts/verification/artifacts/frontend.mjs select-promotion
   build:
@@ -237,7 +236,6 @@ jobs:
           VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
           VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
           VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
-          VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
           VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
         run: pnpm run build:frontend
       # Shared route/Worker checks are owned by Verify's unit-root task.
@@ -256,7 +254,6 @@ jobs:
           VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
           VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
           VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
-          VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
           VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
         run: node edge/frontend/test/static-smoke.mjs
       - name: Exercise OAuth authorization from static browser shells
@@ -357,7 +354,6 @@ jobs:
           VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
           VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
           VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
-          VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
           VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
         run: node scripts/verification/artifacts/frontend.mjs
       - name: Verify live backend API compatibility before switching UI
