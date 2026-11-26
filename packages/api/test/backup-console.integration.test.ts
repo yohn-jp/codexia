@@ -219,13 +219,10 @@ test('backup console requires owner proof, isolates credentials, and applies onl
   const { probeId: retentionProbeId } = (await retentionProbe.json()) as { probeId: string };
   await worker.processNext();
   assert.equal((await (await get('/config/probes/' + retentionProbeId)).json()).status, 'PASSED');
-  const retentionId = randomUUID();
-  assert.equal((await post('activate', { revision: 4, probeId: retentionProbeId, confirmed: true }, retentionId)).status, 202);
-  await worker.processNext();
-  const retentionStatus = await (await get('/status?requestId=' + retentionId)).json();
-  assert.equal(retentionStatus.activeRevision, 3);
-  assert.equal(retentionStatus.operation.status, 'BLOCKED');
-  assert.equal(retentionStatus.operation.reasonCode, 'retention_unverified');
+  const rejectedActivation = await post('activate', { revision: 4, probeId: retentionProbeId, confirmed: true });
+  assert.equal(rejectedActivation.status, 409);
+  assert.equal((await rejectedActivation.json()).code, 'BACKUP_RETENTION_UNVERIFIED');
+  assert.equal((await (await get('/status')).json()).activeRevision, 3);
   await workerPool.query("UPDATE codexia_backup.operations SET observed_at = now() - interval '20 minutes' WHERE id = $1", [
     retentionProbeId,
   ]);

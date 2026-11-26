@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createPublicKey } from 'node:crypto';
-import { lstat, readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open, readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
@@ -10,10 +11,11 @@ import { allowedBackupDestination, type BackupPolicy, backupPolicySchema } from 
 import {
   type BackupOperation,
   type BackupRevision,
-  backupProbeIsCurrent,
+  backupRetentionProven,
   backupTransaction,
   readBackupRevision,
   readBackupState,
+  readCurrentBackupProbe,
 } from './backup-console-store.js';
 import {
   type BackupCredential,
@@ -89,15 +91,10 @@ export class BackupConsoleExecutor {
           : await this.runProbe(client, revision!);
       await backupTransaction(client, async () => {
         const after = await this.blockedReason(client, operation, revision);
-        const retention = revision?.destination.retentionRequest;
         const evidence = 'evidence' in verdict ? verdict.evidence : undefined;
-        const retentionUnverified =
-          operation.kind === 'activate' &&
-          retention &&
-          ((retention.days !== undefined &&
-            (evidence?.objectLock !== 'enabled' || (evidence.defaultRetentionDays ?? 0) < retention.days)) ||
-            ((retention.generations ?? 1) > 1 && evidence?.bucketVersioning !== 'enabled'));
-        const blocked = after ?? (retentionUnverified && verdict.state === 'PASSED' ? 'retention_unverified' : null);
+        const retentionProven = backupRetentionProven(revision?.destination.retentionRequest, evidence);
+        const blocked =
+          after ?? (operation.kind === 'activate' && !retentionProven && verdict.state === 'PASSED' ? 'retention_unverified' : null);
         if (blocked || verdict.state !== 'PASSED' || operation.kind === 'probe') {
           if (!blocked && operation.kind === 'probe') {
             await client.query('UPDATE codexia_backup.state SET active_health = $1 WHERE active_revision = $2', [
@@ -145,7 +142,7 @@ export class BackupConsoleExecutor {
       if (active?.destination.offVmPolicy === 'required' && revision.destination.offVmPolicy === 'secondary') {
         return 'required_protection';
       }
-      if (!operation.probe_id || !(await backupProbeIsCurrent(client, operation.probe_id, operation.revision))) {
+      if (!operation.probe_id || !(await readCurrentBackupProbe(client, operation.probe_id, operation.revision))) {
         return 'probe_expired';
       }
     }
@@ -241,12 +238,13 @@ export function pythonBackupProbe(
         (error, stdout) => {
           try {
             const result = probeResponse.parse(JSON.parse(stdout));
+            const { cleanupStatus, bucketVersioning, objectLock, defaultRetentionDays } = result;
+            const evidence = { cleanupStatus, bucketVersioning, objectLock, defaultRetentionDays };
             if (result.status === 'PASSED' && !error) {
-              const { cleanupStatus, bucketVersioning, objectLock, defaultRetentionDays } = result;
               resolveResult({
                 state: 'PASSED',
                 reason: cleanupStatus === 'orphaned_unique_probe_key' ? cleanupStatus : null,
-                evidence: { cleanupStatus, bucketVersioning, objectLock, defaultRetentionDays },
+                evidence,
               });
               return;
             }
@@ -254,7 +252,7 @@ export function pythonBackupProbe(
             const blocked = ['redirect_rejected', 'dns_validation_failed', 'egress_policy_blocked', 'destination_not_allowed'].includes(
               reason,
             );
-            resolveResult({ state: result.status === 'BLOCKED' || blocked ? 'BLOCKED' : 'FAILED', reason });
+            resolveResult({ state: result.status === 'BLOCKED' || blocked ? 'BLOCKED' : 'FAILED', reason, evidence });
           } catch {
             resolveResult({ state: 'FAILED', reason: 'transport_failed' });
           }
@@ -282,11 +280,17 @@ export function pythonBackupProbe(
 }
 
 async function privateFile(path: string) {
-  const file = await lstat(path);
-  if (!isAbsolute(path) || !file.isFile() || file.uid !== process.getuid?.() || ![0o400, 0o600].includes(file.mode & 0o777)) {
-    throw new Error('Executor secrets must be protected files');
+  if (!isAbsolute(path)) throw new Error('Executor secrets must be protected files');
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const metadata = await file.stat();
+    if (!metadata.isFile() || metadata.uid !== process.getuid?.() || ![0o400, 0o600].includes(metadata.mode & 0o777)) {
+      throw new Error('Executor secrets must be protected files');
+    }
+    return await file.readFile('utf8');
+  } finally {
+    await file.close();
   }
-  return readFile(path, 'utf8');
 }
 
 const executorConfig = z.strictObject({

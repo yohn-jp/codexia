@@ -100,14 +100,30 @@ export async function readBackupOperation(client: Pool | PoolClient, id: string)
   return result ?? null;
 }
 
-export async function backupProbeIsCurrent(client: PoolClient, id: string, revision: number) {
-  const { rowCount } = await client.query(
-    `SELECT 1 FROM ${scope}operations
+export async function readCurrentBackupProbe(client: PoolClient, id: string, revision: number) {
+  const {
+    rows: [operation],
+  } = await client.query<BackupOperation>(
+    `SELECT * FROM ${scope}operations
      WHERE id = $1 AND kind = 'probe' AND state = 'PASSED' AND revision = $2
        AND observed_at > clock_timestamp() - make_interval(secs => $3)`,
     [id, revision, backupProbeLifetimeSeconds],
   );
-  return rowCount === 1;
+  return operation;
+}
+
+export function backupRetentionProven(
+  retention: BackupDestination['retentionRequest'],
+  evidence: { objectLock?: unknown; defaultRetentionDays?: unknown } | null | undefined,
+) {
+  // S3 versioning alone says nothing about the number of retained backup generations.
+  if (retention?.generations !== undefined) return false;
+  if (retention?.days === undefined) return true;
+  return (
+    evidence?.objectLock === 'enabled' &&
+    typeof evidence.defaultRetentionDays === 'number' &&
+    evidence.defaultRetentionDays >= retention.days
+  );
 }
 
 function viewOperation(operation: BackupOperation | null) {
@@ -247,11 +263,12 @@ export class BackupConsoleStore {
       if (current !== revision) throw kind === 'probe' ? stale() : conflict('BACKUP_REVISION_CHANGED');
       const settings = await readBackupRevision(client, current);
       if (!settings) throw conflict('BACKUP_DESTINATION_MISSING');
-      if (
-        kind === 'activate' &&
-        (state.active_revision === revision || !probeId || !(await backupProbeIsCurrent(client, probeId, revision)))
-      ) {
-        throw conflict('BACKUP_PROBE_REQUIRED');
+      if (kind === 'activate') {
+        const probe = probeId ? await readCurrentBackupProbe(client, probeId, revision) : undefined;
+        if (state.active_revision === revision || !probe) throw conflict('BACKUP_PROBE_REQUIRED');
+        if (!backupRetentionProven(settings.destination.retentionRequest, probe.evidence)) {
+          throw conflict('BACKUP_RETENTION_UNVERIFIED');
+        }
       }
       const active = kind === 'activate' ? await readBackupRevision(client, state.active_revision) : null;
       if (active?.destination.offVmPolicy === 'required' && settings.destination.offVmPolicy === 'secondary') {
