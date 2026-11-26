@@ -2677,7 +2677,7 @@ Checks verified owner enrollment and closure of the isolated setup endpoint.
   **ID**: REQ-AUTH-004
 - **Type**: File
   **Path**: packages/api/test/passkey-bootstrap.acceptance.test.ts
-  **Lines**: 923, 923
+  **Lines**: 924, 924
 
 ## TEST-AUTH-005-001
 
@@ -2695,7 +2695,7 @@ Checks fresh-owner authorization and preservation of the final passkey.
   **ID**: REQ-AUTH-005
 - **Type**: File
   **Path**: packages/api/src/owner-security.test.ts
-  **Lines**: 94, 94
+  **Lines**: 108, 108
 
 ## TEST-API-001-001
 
