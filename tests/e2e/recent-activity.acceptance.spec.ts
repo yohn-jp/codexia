@@ -435,6 +435,7 @@ test("recent activity ignores a delayed response for a document that is no longe
 test("recent activity ignores a delayed write response from an earlier visit to the same document", async ({ page, authorizeAuthor }) => {
   const f = await longFixture(authorizeAuthor, page);
   const activityPath = `/api/projects/${f.project.id}/recent-activity`;
+  const panel = await openContinuePanel(page);
 
   const editor = manuscriptEditor(page);
   await editor.press("Control+End");
@@ -465,7 +466,6 @@ test("recent activity ignores a delayed write response from an earlier visit to 
     };
     await select(f.second);
     await select(f.scene);
-    const panel = await openContinuePanel(page);
     const secondCandidate = panel.locator("p").filter({ hasText: f.second.title });
     await expect(secondCandidate.getByRole("button", { name: "読書位置を開く" })).toBeVisible();
 
@@ -476,6 +476,45 @@ test("recent activity ignores a delayed write response from an earlier visit to 
     expect((await delayedWrite).ok()).toBe(true);
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await expect(secondCandidate.getByRole("button", { name: "読書位置を開く" })).toBeVisible();
+  } finally {
+    release();
+    await page.unroute(`**${activityPath}`);
+  }
+});
+
+test("an older refresh failure does not override a successful current refresh", async ({ page, authorizeAuthor }) => {
+  const f = await longFixture(authorizeAuthor, page);
+  const activityPath = `/api/projects/${f.project.id}/recent-activity`;
+  const panel = await openContinuePanel(page);
+
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let refreshHeld = false;
+  await page.route(`**${activityPath}`, async (route) => {
+    if (refreshHeld || route.request().method() !== "GET") return route.continue();
+    refreshHeld = true;
+    await held;
+    await route.fulfill({ status: 500, json: { error: "delayed refresh failure" } });
+  });
+
+  const refresh = () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  const refreshResponse = (status: number) => page.waitForResponse((response) =>
+    new URL(response.url()).pathname === activityPath && response.request().method() === "GET" && response.status() === status);
+  try {
+    await refresh();
+    await expect.poll(() => refreshHeld).toBe(true);
+    await remotePosition(f.author, f.project.id, f.second.id, 4, 4, "desktop");
+
+    const current = refreshResponse(200);
+    await refresh();
+    await current;
+    await expect(panel.locator("p").filter({ hasText: f.second.title }).getByRole("button", { name: "読書位置を開く" })).toBeVisible();
+
+    const outdated = refreshResponse(500);
+    release();
+    await outdated;
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(panel.getByText("再開位置を同期できません:", { exact: false })).toHaveCount(0);
   } finally {
     release();
     await page.unroute(`**${activityPath}`);

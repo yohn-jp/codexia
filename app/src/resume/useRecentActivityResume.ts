@@ -181,23 +181,22 @@ export function useRecentActivityResume({
       if (document.visibilityState !== 'visible') return;
       const sequence = ++refreshSequenceRef.current;
       const startedAt = latestWriteVersionRef.current;
+      const isCurrentRefresh = () =>
+        alive &&
+        !controller.signal.aborted &&
+        sequence === refreshSequenceRef.current &&
+        startedAt === latestWriteVersionRef.current &&
+        bindingRef.current === captured;
       try {
         const response = await api.recentActivity(captured.projectId, controller.signal);
-        if (
-          alive &&
-          !controller.signal.aborted &&
-          sequence === refreshSequenceRef.current &&
-          startedAt === latestWriteVersionRef.current &&
-          bindingRef.current === captured
-        ) {
+        if (isCurrentRefresh()) {
           setItems(response.items);
           setSnapshotIdentityKey(captured.identityKey);
           setItemsProjectIdentityKey(captured.projectIdentityKey);
           setError('');
         }
       } catch (caught) {
-        if (!alive || controller.signal.aborted) return;
-        if (bindingRef.current === captured) {
+        if (isCurrentRefresh()) {
           setError(caught instanceof Error ? caught.message : '再開位置を読み込めませんでした。');
         }
       }
