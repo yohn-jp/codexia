@@ -8,12 +8,18 @@ const approved = 'a'.repeat(64);
 const timestamp = '2026-11-23T12:00:00.000Z';
 const origin = 'https://fixture.example.test';
 
-function fixture({ first = false, changeWorker = true } = {}) {
+function fixture({ first = false, changeWorker = true, retainedBackendFirstFrontend = false } = {}) {
   const calls = [];
+  const priorIdentity = { epoch: 1 };
+  const unitSha256 = 'b'.repeat(64);
+  const containerId = 'c'.repeat(64);
   const plan = {
     environment: { origin },
-    prior: { image: first ? null : 'installed', workerVersion: first ? null : 'old' },
-    candidate: { image: 'certified', workerVersion: changeWorker ? 'new' : 'old', frontendArtifact: { artifactDigest: approved } },
+    prior: { image: first ? null : 'installed', workerVersion: first || retainedBackendFirstFrontend ? null : 'old',
+      identity: priorIdentity, unitSha256, containerId },
+    candidate: { image: retainedBackendFirstFrontend ? 'installed' : 'certified',
+      workerVersion: changeWorker ? 'new' : 'old', identity: priorIdentity,
+      frontendArtifact: { artifactDigest: approved } },
   };
   let phase = null;
   let owner = null;
@@ -27,10 +33,18 @@ function fixture({ first = false, changeWorker = true } = {}) {
     operation: 'advance',
     plan, planSha256: approved, request: {},
     async host(action, request) {
-      if (action === 'observe') return { phase, planSha256: owner, outcome, phaseChangedAt: timestamp, reactivationStartedAt, retainedCandidateWorker, reactivationWindow };
+      if (action === 'observe') return { phase, planSha256: owner, outcome, phaseChangedAt: timestamp,
+        reactivationStartedAt, retainedCandidateWorker, reactivationWindow,
+        ...(retainedBackendFirstFrontend ? { apiRunning: true, apiVerified: true, tunnelRunning: true,
+          priorImage: plan.prior.image, priorUnitSha256: plan.prior.unitSha256,
+          priorContainerId: plan.prior.containerId, priorIdentity: plan.prior.identity } : {}) };
       calls.push(action);
       if (owner && owner !== approved) throw new Error('foreign plan');
       if (action === 'admit') owner = approved;
+      const frontendRetry = action === 'recover' && request.frontendRetry === true;
+      if (frontendRetry) {
+        retainedCandidateWorker = request.retainedCandidateWorker;
+      }
       if (action === 'checkpoint' && phase === 'safe-stopped') {
         reactivationStartedAt = timestamp;
         retainedCandidateWorker = request.retainedCandidateWorker;
@@ -40,6 +54,7 @@ function fixture({ first = false, changeWorker = true } = {}) {
       phase = { admit: 'intent', checkpoint: 'checkpointed', apply: 'candidate-ready',
         'open-tunnel': outcome + '-tunnel', publishing: outcome + '-publishing', finish: 'finished',
         'recover-quiesce': 'recovering', recover: first ? 'safe-stopped' : 'prior-ready' }[action];
+      if (frontendRetry) phase = 'checkpointed';
       if (cut.failAfter === action) throw new Error('connection lost');
       return { status: phase };
     },
@@ -68,7 +83,13 @@ function fixture({ first = false, changeWorker = true } = {}) {
     async restoreProof() { return {}; },
   };
   return { cut, calls, compete() { owner = 'foreign'; phase = 'intent'; },
-    switchWorker() { workerVersion = plan.candidate.workerVersion; } };
+    seedRetainedBackend({ journalPhase = 'candidate-tunnel', worker = null } = {}) {
+      owner = approved;
+      phase = journalPhase;
+      workerVersion = worker;
+      fenced = true;
+    },
+    switchWorker(version = plan.candidate.workerVersion) { workerVersion = version; } };
 }
 
 function accept(cut, outcome = 'candidate') {
@@ -205,6 +226,87 @@ test('recovery rejects a different healthy API at the recorded prior outcome', a
   const before = [...calls];
   await assert.rejects(advancePair({ ...cut, operation: 'recover' }), /prior API identity drifted/u);
   assert.deepEqual(calls, before);
+});
+
+test('R7 recovery pins the retained Backend and records the existing checkpoint for advance', async () => {
+  const { cut, calls, seedRetainedBackend } = fixture({ retainedBackendFirstFrontend: true });
+  seedRetainedBackend({ journalPhase: 'candidate-tunnel' });
+
+  const recovered = await advancePair({ ...cut, operation: 'recover' });
+
+  assert.equal(recovered.status, 'checkpointed');
+  assert.equal(recovered.nextOperation, 'advance');
+  assert.deepEqual(calls, ['recover']);
+  const observed = await cut.host('observe', {});
+  assert.equal(observed.phase, 'checkpointed');
+  assert.equal(observed.retainedCandidateWorker, false);
+  assert.ok((await cut.verifyIngress()).fence.enabled);
+  await assert.rejects(advancePair({ ...cut, operation: 'reconcile' }), /No recorded publication/u);
+  cut.independent = true;
+  cut.expired = true;
+  await assert.rejects(advancePair(cut), /expired/u);
+  cut.expired = false;
+  assert.deepEqual(calls, ['recover']);
+
+  assert.equal((await advancePair(cut)).status, 'awaiting-functional-acceptance');
+  assert.deepEqual(calls.slice(-3), ['apply', 'open-tunnel', 'deploy']);
+  assert.ok((await cut.verifyIngress()).fence.enabled);
+  accept(cut);
+  assert.equal((await advancePair(cut)).status, 'finished');
+  assert.ok(!(await cut.verifyIngress()).fence.enabled);
+});
+
+test('R7 recovery accepts a late candidate Worker behind the fence and retains its artifact binding', async () => {
+  const { cut, calls, seedRetainedBackend } = fixture({ retainedBackendFirstFrontend: true });
+  seedRetainedBackend({ journalPhase: 'candidate-tunnel', worker: 'new' });
+
+  const recovered = await advancePair({ ...cut, operation: 'recover' });
+
+  assert.equal(recovered.status, 'checkpointed');
+  assert.equal(recovered.nextOperation, 'advance');
+  assert.deepEqual(calls, ['recover']);
+  assert.equal((await cut.host('observe', {})).retainedCandidateWorker, true);
+  const repeated = await advancePair({ ...cut, operation: 'recover' });
+  assert.equal(repeated.status, 'checkpointed');
+  assert.equal(repeated.nextOperation, 'advance');
+  assert.equal((await cut.host('observe', {})).retainedCandidateWorker, true);
+  cut.independent = true;
+  assert.equal((await advancePair(cut)).status, 'awaiting-functional-acceptance');
+  assert.deepEqual(calls, ['recover', 'recover', 'apply', 'open-tunnel']);
+  assert.ok((await cut.verifyIngress()).fence.enabled);
+});
+
+test('R7 recovery rejects Worker drift and recovers idempotently after a lost host response', async () => {
+  const drift = fixture({ retainedBackendFirstFrontend: true });
+  drift.seedRetainedBackend({ journalPhase: 'candidate-tunnel', worker: 'foreign' });
+  await assert.rejects(advancePair({ ...drift.cut, operation: 'recover' }), /Worker drifted before Frontend recovery/u);
+  assert.deepEqual(drift.calls, []);
+
+  const interrupted = fixture({ retainedBackendFirstFrontend: true });
+  interrupted.seedRetainedBackend({ journalPhase: 'prior-ready' });
+  interrupted.cut.failAfter = 'recover';
+  await assert.rejects(advancePair({ ...interrupted.cut, operation: 'recover' }), /connection lost/u);
+  interrupted.cut.failAfter = null;
+  const resumed = await advancePair({ ...interrupted.cut, operation: 'recover' });
+  assert.equal(resumed.status, 'checkpointed');
+  assert.equal(resumed.nextOperation, 'advance');
+  assert.deepEqual(interrupted.calls, ['recover', 'recover']);
+});
+
+test('recovery promotes the existing prior pair and verifies acceptance before opening it', async () => {
+  const { cut, calls } = fixture();
+  cut.independent = true;
+  await advancePair(cut);
+
+  const recovery = { ...cut, operation: 'recover' };
+  const waiting = await advancePair(recovery);
+  assert.equal(waiting.status, 'awaiting-functional-acceptance');
+  assert.equal(waiting.outcome, 'prior');
+  assert.deepEqual(calls.slice(-4), ['recover-quiesce', 'recover', 'open-tunnel', 'deploy']);
+  assert.ok((await cut.verifyIngress()).fence.enabled);
+  accept(recovery, 'prior');
+  assert.equal((await advancePair(recovery)).status, 'finished');
+  assert.ok(!(await cut.verifyIngress()).fence.enabled);
 });
 
 test('first activation restarts from the safe stop behind the existing fence and takes a fresh checkpoint', async () => {

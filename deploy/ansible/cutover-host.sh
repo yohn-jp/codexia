@@ -802,6 +802,31 @@ def recover_quiesce(plan, journal):
 
 
 def recover(request, plan, journal):
+    if request.get("frontendRetry") is True:
+        require(plan["priorImage"] is not None and not changes_backend(plan),
+                "Frontend retry recovery requires a retained Backend")
+        retained_candidate_worker = request.get("retainedCandidateWorker")
+        require(type(retained_candidate_worker) is bool,
+                "Frontend retry requires an observed Worker state")
+        require(journal["phase"] in ("intent", "checkpointed", "candidate-ready",
+                                     "candidate-tunnel", "recovering", "prior-ready"),
+                "This checkpoint does not permit a frontend retry")
+        require(not journal["requiresRestore"], "Frontend retry cannot skip a required restoration")
+        if "retainedCandidateWorker" in journal:
+            require(journal["retainedCandidateWorker"] is not True or retained_candidate_worker is True,
+                    "A retained candidate Worker cannot be discarded during frontend retry")
+            require(journal["phase"] == "candidate-tunnel" or
+                    journal["retainedCandidateWorker"] is retained_candidate_worker,
+                    "Retained Worker state changed during frontend retry")
+        require_retained_pair(plan)
+        journal.pop("recoveryStartedAt", None)
+        journal.pop("recoveryReceiptSha256", None)
+        journal.pop("restoreReceiptSha256", None)
+        journal.pop("tunnelOpenedAt", None)
+        transition(journal, "checkpointed", requiresRestore=False,
+                   retainedCandidateWorker=retained_candidate_worker)
+        emit({**phase_status(journal), "nextOperation": "advance"})
+        return
     if plan["priorImage"] is None:
         require(journal["phase"] in ("recovering", "safe-stopped"), "Quiesce the first activation before safe stop")
         quiesce()
