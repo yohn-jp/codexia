@@ -1,6 +1,6 @@
-import type { ComponentType, ReactNode, RefObject } from "react";
+import type { ComponentType, ReactNode, RefObject } from 'react';
 
-export type UiMode = "desktop";
+export type UiMode = 'desktop';
 
 /** A host-approved panel definition. The workspace stores its ID, never its renderer. */
 export interface WorkspacePanel {
@@ -15,6 +15,8 @@ export interface WorkspacePanel {
 export interface WorkspacePanelRequest {
   id: string;
   sequence: number;
+  /** Choose the focus target after the requested panel is revealed. */
+  getFocusTarget?: (panel: HTMLElement) => HTMLElement | undefined;
 }
 
 /** Production Desktop UI assembled by the application controller. */
