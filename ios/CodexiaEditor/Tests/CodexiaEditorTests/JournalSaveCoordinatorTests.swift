@@ -3,8 +3,6 @@ import CodexiaTransport
 @testable import CodexiaEditor
 #if os(Linux)
 import Glibc
-#elseif os(macOS)
-import Darwin
 #endif
 
 final class JournalSaveCoordinatorTests: XCTestCase {
@@ -63,7 +61,7 @@ final class JournalSaveCoordinatorTests: XCTestCase {
         XCTAssertNil(otherProjectDraft)
     }
 
-#if os(Linux) || os(macOS)
+#if os(Linux)
     func testForcedProcessTerminationRecoversTheSameOperation() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

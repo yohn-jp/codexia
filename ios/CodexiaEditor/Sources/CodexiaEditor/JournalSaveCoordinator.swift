@@ -31,6 +31,11 @@ public struct DraftRecord: Codable, Sendable, Equatable {
     public var receipt: Components.Schemas.SaveDocumentResponse?
     public var conflict: Components.Schemas.SaveConflictResponse?
 
+    fileprivate func saveOperation() throws -> DocumentSave {
+        try DocumentSave(projectID: projectID, documentID: documentID,
+            operationID: operationID, clientID: clientID, body: saveRequest)
+    }
+
     // Keep the cancellation version on disk so a delayed marked-text write cannot restore it.
     public var isLocalBaseline: Bool {
         state == .protected && isComposing != true && text.utf8.elementsEqual(baseText.utf8)
@@ -198,7 +203,13 @@ public actor ProtectedDraftJournal {
                 && !$0.expectedReceiptAuthorID.isEmpty }) else {
                 throw DraftJournalError.corruptRecord
             }
-            return records
+            return records.map { stored in
+                guard let conflict = stored.conflict else { return stored }
+                // Older versions stored the 409 comparison before checking its identity.
+                var record = stored
+                record.conflict = (try? record.saveOperation())?.validatedConflict(conflict)
+                return record
+            }
         }
         catch { throw DraftJournalError.corruptRecord }
     }
@@ -445,9 +456,7 @@ public actor JournalSaveCoordinator {
                 let conflictRecord = try await journal.records(scope: key).first(where: { $0.state == .conflict })
                 result = .conflict(conflictRecord?.conflict)
             case .record(let record):
-                let save = try DocumentSave(projectID: projectID, documentID: documentID,
-                    operationID: record.operationID, clientID: record.clientID, body: record.saveRequest)
-                switch try await save.submit(using: api) {
+                switch try await record.saveOperation().submit(using: api) {
                 case .committed(let receipt):
                     let accepted = try await journal.finish(scope: key, operationID: record.operationID,
                         state: .committed, receipt: receipt, expectedAuthorID: record.expectedReceiptAuthorID)

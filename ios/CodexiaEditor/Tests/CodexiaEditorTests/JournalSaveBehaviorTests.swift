@@ -209,6 +209,45 @@ final class JournalSaveBehaviorTests: XCTestCase {
         XCTAssertEqual(exchanges[0].payload, exchanges[1].payload)
     }
 
+    func testRecoveryHidesForeignComparisonFromLegacyConflictRecord() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = JournalSaveFixture()
+        let remote = try JSONSerialization.jsonObject(with: makeReceipt(
+            markdown: "first", sha256: "a7937b64b8caa58f03721bb6bacf5c78cb235febe0e70b1b84cd99541461a08e",
+            parent: baseRevision, revision: "head-at-conflict"
+        ))
+        let conflict = responseJSON(["code": "PERSISTENCE_CONFLICT", "error": "stale", "details": NSNull(), "current": remote])
+        await fixture.append(.status(409, conflict))
+        let coordinator = try makeCoordinator(journal: ProtectedDraftJournal(directory: root), transport: fixture)
+        var editor = EditorState(documentID: "document", text: "base")
+        editor.edit("local")
+        let original = try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: baseRevision, baseText: "base")
+        guard case .conflict(let response) = await coordinator.save(documentID: "document") else {
+            return XCTFail("Expected a stale-base conflict")
+        }
+        XCTAssertEqual(response?.current?.revision?.id, "head-at-conflict")
+
+        let reopened = try makeCoordinator(journal: ProtectedDraftJournal(directory: root), transport: fixture)
+        let valid = try await reopened.recover(documentID: "document")
+        XCTAssertEqual(valid?.conflict?.current?.revision?.id, "head-at-conflict")
+        let file = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
+        var records = try JSONDecoder().decode([DraftRecord].self, from: Data(contentsOf: file))
+        records[0].conflict?.current?.revision?.projectId = "foreign-project"
+        try JSONEncoder().encode(records).write(to: file, options: .atomic)
+
+        let recovered = try await reopened.recover(documentID: "document")
+        XCTAssertEqual(recovered?.text, "local")
+        XCTAssertEqual(recovered?.operationID, original.operationID)
+        XCTAssertEqual(recovered?.state, .conflict)
+        XCTAssertNil(recovered?.conflict)
+        guard case .conflict(nil) = await reopened.reconcile(documentID: "document") else {
+            return XCTFail("The conflict must still require resolution without rejected comparison data")
+        }
+        let exchanges = await fixture.recordedExchanges()
+        XCTAssertEqual(exchanges.count, 1)
+    }
+
     func testConflictRequiresExplicitFreshHeadResolution() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
