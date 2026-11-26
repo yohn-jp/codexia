@@ -9,7 +9,7 @@ This document owns the **iOS frontend implementation design**. [System design](S
 - **Retire Mobile Web/PWA as a supported authoring product.** Ionic React, the React Mobile shell, Capacitor/WebView authoring, the /mobile/ route and their viewport-driven browser acceptance are **legacy implementation, not the target**. Do not build a second mobile React app or a permanent React/Swift fallback. No Android deliverable is implied.
 - **Core/PostgreSQL remains the only authoritative manuscript store.** Native local drafts are recoverable pending work, not replicated manuscript authority. The iOS app is an authenticated API client, never a local Core, direct DB client, VM operator or MCP writer.
 - A built or installable IPA is not proof that SwiftUI screens, Japanese text editing, recovery and security work on a physical iPhone. Preserve the distinction in every milestone.
-- This design decision does not assert that the existing TypeScript/Capacitor implementation has already been replaced. Its removal is an implementation task after a native replacement is accepted, not a compatibility obligation.
+- The Desktop-only interim decision in section 7 governs Mobile Web retirement while native acceptance is paused.
 
 ## 2. Target system and responsibilities
 
@@ -85,7 +85,7 @@ flowchart TD
 
 - **No React Mobile-size UI validation target:** remove Mobile Web 320/375/390/430 CSS-px screenshots, emulated mobile Chromium/WebKit acceptance, Ionic gesture tests and mobile WebView packaging checks **when their legacy implementation is retired**. Do not delete general browser security, Desktop Web, /console or public-reader tests merely because their viewport is narrow. For iOS, require Simulator and physical-iPhone evidence; emulated mobile WebKit is not native device evidence. The author Desktop WebKit compatibility requirement is independently retired per [System design](SYSTEM-DESIGN.md); [E2E execution](../verification/E2E-EXECUTION.md) governs Chromium-only browser CI; native-device obligations remain independent. macOS native is a separate future decision; macOS Xcode CI for iOS remains required.
 - Maintain Core/Full and API schema/authorization verification; do not change or weaken the #652 workstream, CI evidence ownership or exact-source rule. A doc-only adoption is **not** implementation completion; the existing legacy tests may still run until the code cutover.
-- Any API-generator scope conflict with existing [HTTP migration workstream](HTTP-PLATFORM-MIGRATION.md) or Issue #660 must be explicitly reconciled before implementation. No generated Swift client is claimed available today.
+- The Swift client is generated from the OpenAPI contract and committed under [CodexiaAPI](../../ios/CodexiaTransport/Sources/CodexiaAPI). N0 requires regeneration and operation coverage for the evaluated source. Native runtime and device acceptance follow N1–N4.
 
 ## 8. Explicit non-goals
 
