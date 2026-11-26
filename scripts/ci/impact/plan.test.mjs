@@ -557,6 +557,22 @@ test('OAuth browser acceptance is selected in both profile browser lanes', async
   assert.ok(!selected.tasks.includes('unit-api'));
 });
 
+test('UI review screenshot upload follows selected visual tasks in the browser matrix', async () => {
+  const workflow = parse(readFileSync(new URL('../../../.github/workflows/verify.yml', import.meta.url), 'utf8'));
+  const upload = workflow.jobs.browser.steps.find(step => step.with?.name?.startsWith('ui-refinement-visual-'));
+  const { verificationPlanOutputs } = await import('./plan.mjs');
+
+  for (const [file, captureUiReview] of [['recent-activity', false], ['redesign-visual', true]]) {
+    const selected = await plan([`tests/e2e/${file}.acceptance.spec.ts`]);
+    const browser = JSON.parse(verificationPlanOutputs(selected).browser);
+    assert.deepEqual(browser, ['core', 'full'].map(profile => ({
+      group: `${profile}-reference`, profile, captureUiReview,
+    })));
+  }
+  assert.equal(upload.if, 'always() && matrix.captureUiReview');
+  assert.equal(upload.with['if-no-files-found'], 'error');
+});
+
 test('every selected task has one execution group and every exclusion has a reason', async () => {
   const { VERIFICATION_GROUPS } = await import('./contract.mjs');
   const selected = await plan(['app/src/editor/SceneEditor.tsx']);

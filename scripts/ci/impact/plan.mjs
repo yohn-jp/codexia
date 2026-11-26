@@ -521,7 +521,12 @@ export function verificationPlanOutputs(plan) {
     build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),
     oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
     browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'ui-v1']
-      .filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => ({ group: `${profile}-${id}`, profile })))),
+      .filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => {
+        const group = `${profile}-${id}`;
+        const visualTask = `browser-${profile}-redesign-visual`;
+        const captureUiReview = VERIFICATION_GROUPS[`browser-${group}`].includes(visualTask) && plan.tasks.includes(visualTask);
+        return { group, profile, captureUiReview };
+      }))),
     full_model_oci: String(plan.full_model_oci),
   };
 }
