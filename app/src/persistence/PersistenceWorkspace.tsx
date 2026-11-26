@@ -1790,7 +1790,7 @@ export function PersistenceWorkspace({
             : minimalTextChanges(current.baseMarkdown, current.markdown),
         generation: current.generation,
         idempotencyKey: crypto.randomUUID(),
-        clientId: clientIdRef.current ?? crypto.randomUUID(),
+        clientId: clientIdRef.current || crypto.randomUUID(),
       };
       clientIdRef.current = pending.clientId;
       pendingSaveRef.current.set(pendingKey, pending);
