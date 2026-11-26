@@ -2695,7 +2695,7 @@ Checks fresh-owner authorization and preservation of the final passkey.
   **ID**: REQ-AUTH-005
 - **Type**: File
   **Path**: packages/api/src/owner-security.test.ts
-  **Lines**: 94, 94
+  **Lines**: 108, 108
 
 ## TEST-API-001-001
 

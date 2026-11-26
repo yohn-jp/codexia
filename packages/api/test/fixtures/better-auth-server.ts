@@ -58,6 +58,7 @@ export interface BetterAuthFixture {
   readonly audience: string;
   readonly idpIssuer: string;
   readonly webClientId: string;
+  readonly iosClientId: string;
   readonly mcpClientId?: string;
   readonly mcpProjectId?: string;
   readonly unassignedMcpProjectId?: string;
@@ -68,6 +69,11 @@ export interface BetterAuthFixture {
   ownerSessionCookie(): string;
   expireOwnerFreshProof(): Promise<void>;
   issueOwnerAccessToken(): Promise<string>;
+  issueOwnerOAuthTokens(): Promise<{ accessToken: string; refreshToken: string }>;
+  prepareOwnerAuthorizationCode(): Promise<() => Promise<Response>>;
+  issueIosOAuthTokens(): Promise<{ accessToken: string; refreshToken: string }>;
+  createFreshOwnerSession(): Promise<string>;
+  ageOwnerSession(): Promise<void>;
   issueForeignClientAccessToken(): Promise<string>;
   issueMcpAccessToken(): Promise<{ accessToken: string; refreshToken: string }>;
   refreshMcpAccessToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }>;
@@ -638,7 +644,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     apiServer = makeApi();
     apiBackendPort = await listen(apiServer);
 
-    async function issueAccessToken(clientId: string, path: string, scopes = `openid ${CODEXIA_OWNER_SCOPE} offline_access`) {
+    async function prepareAuthorizationCode(clientId: string, path: string, scopes = `openid ${CODEXIA_OWNER_SCOPE} offline_access`) {
       // Browser tests can revoke the fixture's previous owner session along with other devices.
       if ((await fixtureOwnerSession(productionCookie))?.user.id !== ownerSubject) {
         productionCookie = await signInFixtureOwner();
@@ -646,7 +652,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       const cookie = productionCookie.header();
       const verifier = randomBytes(32).toString('base64url');
       const state = randomUUID();
-      const redirectUri = new URL(path, apiOrigin).href;
+      const redirectUri = path.includes(':') ? path : new URL(path, apiOrigin).href;
       const authorization = await fetch(
         `${issuer}/oauth2/authorize?${new URLSearchParams({
           response_type: 'code',
@@ -679,7 +685,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       const callback = new URL(granted.url ?? '', apiOrigin);
       const code = callback.searchParams.get('code');
       if (
-        `${callback.origin}${callback.pathname}` !== redirectUri ||
+        callback.href.split(/[?#]/u, 1)[0] !== redirectUri ||
         !code ||
         callback.searchParams.get('state') !== state ||
         callback.searchParams.get('iss') !== issuer
@@ -687,18 +693,24 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
         throw new Error('OAuth consent did not return the bound authorization code');
       }
 
-      const tokenResponse = await fetch(`${issuer}/oauth2/token`, {
-        method: 'POST',
-        redirect: 'manual',
-        body: new URLSearchParams({
-          grant_type: 'authorization_code',
-          client_id: clientId,
-          code,
-          redirect_uri: redirectUri,
-          code_verifier: verifier,
-          resource: audience,
-        }),
-      });
+      return () =>
+        fetch(`${issuer}/oauth2/token`, {
+          method: 'POST',
+          redirect: 'manual',
+          body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            client_id: clientId,
+            code,
+            redirect_uri: redirectUri,
+            code_verifier: verifier,
+            resource: audience,
+          }),
+        });
+    }
+
+    async function issueAccessToken(clientId: string, path: string, scopes?: string) {
+      const exchange = await prepareAuthorizationCode(clientId, path, scopes);
+      const tokenResponse = await exchange();
       if (!tokenResponse.ok) throw new Error(`OAuth token exchange failed (${tokenResponse.status})`);
       const token = (await tokenResponse.json()) as { access_token?: string; refresh_token?: string; token_type?: string };
       if (!token.access_token || token.token_type !== 'Bearer') throw new Error('OAuth token exchange did not issue an API bearer token');
@@ -712,6 +724,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       audience,
       idpIssuer,
       webClientId: registered.webClientId,
+      iosClientId: registered.iosClientId,
       ...(mcpClient ? { mcpClientId: mcpClient.client_id } : {}),
       ...(mcpProjectId ? { mcpProjectId } : {}),
       ...(unassignedMcpProjectId ? { unassignedMcpProjectId } : {}),
@@ -730,6 +743,20 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
         });
       },
       issueOwnerAccessToken: async () => (await issueAccessToken(registered.webClientId, '/desktop')).accessToken,
+      issueOwnerOAuthTokens: async () => issueAccessToken(registered.webClientId, '/desktop'),
+      prepareOwnerAuthorizationCode: async () => prepareAuthorizationCode(registered.webClientId, '/desktop'),
+      issueIosOAuthTokens: async () => issueAccessToken(registered.iosClientId, 'jp.yohn.codexia:/oauth2redirect'),
+      async createFreshOwnerSession() {
+        productionCookie = await signInFixtureOwner();
+        return productionCookie.header();
+      },
+      async ageOwnerSession() {
+        const current = await fixtureOwnerSession(productionCookie);
+        if (!current) throw new Error('Fixture owner session is unavailable');
+        await (await runtime!.auth.$context).internalAdapter.updateSession(current.session.token, {
+          createdAt: new Date(Date.now() - 6 * 60_000),
+        });
+      },
       issueForeignClientAccessToken: async () => (await issueAccessToken(foreignClient.client_id, '/foreign-client')).accessToken,
       async issueMcpAccessToken() {
         if (!mcpClient) throw new Error('MCP OAuth client was not registered in this fixture');

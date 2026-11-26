@@ -464,16 +464,24 @@ test('Better Auth PKCE MCP client lists and invokes tools through central OAuth 
       ).status,
       403,
     );
-    assert.equal((await apiRequest(`${baseAuth}/codexia/owner-security/identity`, { headers: ownerHeaders })).status, 404);
+    const ownerIdentityResponse = await apiRequest(`${baseAuth}/codexia/owner-security/identity`, { headers: ownerHeaders });
+    assert.equal(ownerIdentityResponse.status, 200);
+    const ownerIdentity = (await ownerIdentityResponse.json()) as {
+      provider: { status: string };
+      clients: Array<{ clientId: string; name: string; redirectUris: string[]; disabled: boolean }>;
+      consents: Array<{ id: string; clientId: string; scopes: string[]; revision: string }>;
+    };
+    assert.equal(ownerIdentity.provider.status, 'operator-configured-unverified');
+    assert.ok(ownerIdentity.clients.some(client => client.clientId === fixture.webClientId));
+    assert.ok(ownerIdentity.consents.some(consent => consent.clientId === fixture.webClientId));
+    assert.doesNotMatch(JSON.stringify(ownerIdentity), /clientSecret|sensitive|fixture-introspector-secret/u);
     assert.equal(
       (
-        await apiRequest(`${baseAuth}/codexia/owner-security/revoke-consent`, {
-          method: 'POST',
-          headers: { ...ownerHeaders, 'content-type': 'application/json' },
-          body: '{}',
+        await apiRequest(`${baseAuth}/codexia/owner-security/identity`, {
+          headers: { ...ownerHeaders, origin: 'https://untrusted.example' },
         })
       ).status,
-      404,
+      403,
     );
 
     const refreshResponse = await apiRequest(`${baseAuth}/oauth2/token`, {
@@ -637,6 +645,137 @@ test('Better Auth PKCE MCP client lists and invokes tools through central OAuth 
       headers: { authorization: `Bearer ${String(refreshed.access_token)}` },
     });
     assert.equal(revokedSession.status, 401);
+
+    const ownerGrant = await fixture.issueOwnerOAuthTokens();
+    const iosGrant = await fixture.issueIosOAuthTokens();
+    const exchangePendingCode = await fixture.prepareOwnerAuthorizationCode();
+    const ownerGrantHeaders = { authorization: `Bearer ${ownerGrant.accessToken}` };
+    const iosGrantHeaders = { authorization: `Bearer ${iosGrant.accessToken}` };
+    assert.equal((await apiRequest(`${origin}/api/session`, { headers: ownerGrantHeaders })).status, 200);
+    assert.equal((await apiRequest(`${origin}/api/session`, { headers: iosGrantHeaders })).status, 200);
+
+    const freshOwnerCookie = await fixture.createFreshOwnerSession();
+    const ownerManagementHeaders = { cookie: freshOwnerCookie, origin };
+    const readOwnerIdentity = async () => {
+      const response = await apiRequest(`${baseAuth}/codexia/owner-security/identity`, { headers: ownerManagementHeaders });
+      assert.equal(response.status, 200);
+      return (await response.json()) as {
+        consents: Array<{ id: string; clientId: string; scopes: string[]; revision: string }>;
+      };
+    };
+    const grantSelection = async () => {
+      const identity = await readOwnerIdentity();
+      const grant = identity.consents.find(row => row.clientId === fixture.webClientId);
+      assert.ok(grant, 'the owner can read their web OAuth grant');
+      return { id: grant.id, clientId: grant.clientId, scopes: grant.scopes, revision: grant.revision };
+    };
+    const consentToWithdraw = await grantSelection();
+    const revokeGrantUrl = `${baseAuth}/codexia/owner-security/revoke-consent`;
+    const revokeGrantBody = JSON.stringify(consentToWithdraw);
+    const missingGrantOrigin = await apiRequest(revokeGrantUrl, {
+      method: 'POST',
+      headers: { cookie: freshOwnerCookie, 'content-type': 'application/json' },
+      body: revokeGrantBody,
+    });
+    assert.equal(missingGrantOrigin.status, 403, 'grant withdrawal requires a same-origin CSRF signal');
+    const foreignGrantOrigin = await apiRequest(revokeGrantUrl, {
+      method: 'POST',
+      headers: { ...ownerManagementHeaders, origin: 'https://untrusted.example', 'content-type': 'application/json' },
+      body: revokeGrantBody,
+    });
+    assert.equal(foreignGrantOrigin.status, 403, 'grant withdrawal rejects a foreign Origin');
+    const bearerGrantRevoke = await apiRequest(revokeGrantUrl, {
+      method: 'POST',
+      headers: { ...ownerManagementHeaders, authorization: `Bearer ${ownerGrant.accessToken}`, 'content-type': 'application/json' },
+      body: revokeGrantBody,
+    });
+    assert.equal(bearerGrantRevoke.status, 403, 'a bearer token cannot authorize browser grant management');
+    assert.equal((await bearerGrantRevoke.json()).code, 'OWNER_SECURITY_COOKIE_REQUIRED');
+    await fixture.ageOwnerSession();
+    const staleGrantRevoke = await apiRequest(revokeGrantUrl, {
+      method: 'POST',
+      headers: { ...ownerManagementHeaders, 'content-type': 'application/json' },
+      body: revokeGrantBody,
+    });
+    assert.equal(staleGrantRevoke.status, 403, 'grant withdrawal requires fresh owner reauthentication');
+    assert.equal((await staleGrantRevoke.json()).code, 'OWNER_SECURITY_REAUTH_REQUIRED');
+    assert.equal((await apiRequest(`${origin}/api/session`, { headers: ownerGrantHeaders })).status, 200);
+
+    const reauthenticatedOwnerCookie = await fixture.createFreshOwnerSession();
+    const reauthenticatedHeaders = { cookie: reauthenticatedOwnerCookie, origin };
+    const refreshedSelection = await (async () => {
+      const response = await apiRequest(`${baseAuth}/codexia/owner-security/identity`, { headers: reauthenticatedHeaders });
+      assert.equal(response.status, 200);
+      const identity = (await response.json()) as { consents: Array<{ id: string; clientId: string; scopes: string[]; revision: string }> };
+      const row = identity.consents.find(grant => grant.clientId === fixture.webClientId);
+      assert.ok(row);
+      return { id: row.id, clientId: row.clientId, scopes: row.scopes, revision: row.revision };
+    })();
+    const withdrawn = await apiRequest(revokeGrantUrl, {
+      method: 'POST',
+      headers: { ...reauthenticatedHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify(refreshedSelection),
+    });
+    assert.equal(withdrawn.status, 200, JSON.stringify(await withdrawn.clone().json()));
+    assert.deepEqual(await withdrawn.json(), { consentRemoved: true, grantRevoked: true });
+    const postWithdrawalIdentity = await apiRequest(`${baseAuth}/codexia/owner-security/identity`, { headers: reauthenticatedHeaders });
+    assert.equal(postWithdrawalIdentity.status, 200);
+    const postWithdrawal = (await postWithdrawalIdentity.json()) as { consents: Array<{ clientId: string }> };
+    assert.equal(
+      postWithdrawal.consents.some(grant => grant.clientId === fixture.webClientId),
+      false,
+    );
+    assert.equal(
+      (await apiRequest(`${origin}/api/session`, { headers: ownerGrantHeaders })).status,
+      401,
+      'an already issued web JWT is denied at API admission after its owner withdraws consent',
+    );
+    const inactiveGrantIntrospection = await apiRequest(`${baseAuth}/oauth2/introspect`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: fixture.introspectionClientId,
+        client_secret: fixture.introspectionClientSecret,
+        token: ownerGrant.accessToken,
+        token_type_hint: 'access_token',
+      }),
+    });
+    assert.equal(inactiveGrantIntrospection.status, 200);
+    assert.deepEqual(
+      await inactiveGrantIntrospection.json(),
+      { active: false },
+      'the withdrawn grant is inactive through OAuth introspection as well as API admission',
+    );
+    const withdrawnRefresh = await apiRequest(`${baseAuth}/oauth2/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: fixture.webClientId,
+        refresh_token: ownerGrant.refreshToken,
+        resource: fixture.audience,
+      }),
+    });
+    assert.equal(withdrawnRefresh.status, 400, 'a refresh token from the withdrawn owner grant cannot mint another access token');
+    const withdrawnCode = await exchangePendingCode();
+    assert.equal(withdrawnCode.status, 400, 'a code issued before withdrawal cannot mint a new grant');
+    assert.equal((await withdrawnCode.json()).error, 'invalid_grant');
+    assert.equal(
+      (await apiRequest(`${origin}/api/session`, { headers: iosGrantHeaders })).status,
+      200,
+      'withdrawing the web grant leaves the owner’s separate iOS client grant active',
+    );
+    const iosRefresh = await apiRequest(`${baseAuth}/oauth2/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: fixture.iosClientId,
+        refresh_token: iosGrant.refreshToken,
+        resource: fixture.audience,
+      }),
+    });
+    assert.equal(iosRefresh.status, 200, 'withdrawing the web grant leaves the iOS refresh-token family usable');
   } finally {
     if (previousWindow === undefined) delete (globalThis as unknown as { window?: unknown }).window;
     else (globalThis as unknown as { window: unknown }).window = previousWindow;

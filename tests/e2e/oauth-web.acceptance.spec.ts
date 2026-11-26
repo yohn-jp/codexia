@@ -269,19 +269,18 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
     }
 
     await test.step("owner settings show the saved app consent after recovering from a list outage", async () => {
-      const consentPath = "/api/auth/oauth2/get-consents";
+      const consentPath = "/api/auth/codexia/owner-security/identity";
       const temporaryOutage = (route: Route) => route.fulfill({ status: 503, json: { error: "Unavailable" } });
       await page.route(`**${consentPath}`, temporaryOutage, { times: 1 });
       await page.getByRole("button", { name: "認証・セキュリティ", exact: true }).click();
       const settings = page.getByRole("dialog", { name: "認証とセキュリティ" });
-      await expect(settings.getByText("所有者との連携はこの画面では未確認です。", { exact: false })).toBeVisible();
       await expect(settings.getByRole("alert")).toHaveText("同意を読み込めませんでした。");
       const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === consentPath && response.ok());
       await settings.getByRole("button", { name: "同意を再読み込み" }).click();
       const response = await loaded;
       expect(response.request().headers().authorization).toBeUndefined();
       const consent = settings.getByRole("list", { name: "保存したアプリ同意" }).getByRole("listitem")
-        .filter({ has: page.getByRole("heading", { name: fixture.webClientId, exact: true }) });
+        .filter({ has: page.getByText(fixture.webClientId, { exact: true }) });
       await expect(consent).toContainText("codexia:api");
       await page.keyboard.press("Escape");
       await expect(settings).not.toBeVisible();
@@ -339,7 +338,7 @@ const ownerConsoleTest = test.extend<{ authorServer: BetterAuthFixture }>({
   },
 });
 
-ownerConsoleTest("Owner Console manages Passkeys and sessions and shows the read-only identity projection", async ({ page, authorServer }) => {
+ownerConsoleTest("Owner Console manages Passkeys and sessions and revokes an OAuth grant after Passkey authentication", async ({ page, authorServer }) => {
   // The first fixture runtime registers clients. The restart starts the ordinary
   // runtime with the confirmed owner and registered clients already configured.
   await authorServer.restartApi();
@@ -405,23 +404,28 @@ ownerConsoleTest("Owner Console manages Passkeys and sessions and shows the read
     await page.getByRole("button", { name: "保存", exact: true }).click();
     await expect(passkeys.getByRole("heading", { name: "Console renamed key" })).toBeVisible();
     await expect(page.getByRole("alert")).toContainText("操作の応答を確認できませんでした。再取得した一覧で状態を確認してください。");
-    await page.getByRole("button", { name: "Console second keyを削除" }).click();
+    await page.getByRole("button", { name: "Console renamed keyを削除" }).click();
     await page.getByRole("button", { name: "削除する", exact: true }).click({ timeout: 8_000 });
     await expect(passkeys.getByRole("listitem")).toHaveCount(1);
-    await expect(page.getByRole("button", { name: "Console renamed keyを削除" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Console second keyを削除" })).toBeDisabled();
 
     await page.getByRole("button", { name: "他のすべてのセッションを終了", exact: true }).click();
     await page.getByRole("button", { name: "他のセッションを終了する", exact: true }).click();
     await expect(sessions.getByRole("listitem")).toHaveCount(1);
     await expect(current).toBeVisible();
+
+    await page.getByRole("link", { name: "連携ID", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "外部IDプロバイダー", exact: true })).toBeVisible();
+    await expect(page.getByText("運用者による設定があります。所有者との連携はこの画面では未確認です。", { exact: true })).toBeVisible();
+    const consents = page.getByRole("list", { name: "保存したアプリ同意" });
+    await expect(consents.getByText(authorServer.webClientId, { exact: true })).toBeVisible();
+    const revoke = consents.getByRole("button", { name: "同意を取り消す", exact: true });
+    await expect(revoke).toBeVisible();
+    await revoke.click();
+    await page.getByRole("button", { name: "パスキーで認証して取り消す", exact: true }).click();
+    await expect(consents.getByText(authorServer.webClientId, { exact: true })).toHaveCount(0);
+    await expect(page.getByText("同意と発行済みOAuth grantを取り消しました。", { exact: true })).toBeVisible();
   } finally {
     await authenticator.detach();
   }
-
-  await page.getByRole("link", { name: "連携ID", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "外部IDプロバイダー", exact: true })).toBeVisible();
-  await expect(page.getByText("運用者による設定があります。所有者との連携はこの画面では未確認です。", { exact: true })).toBeVisible();
-  const consents = page.getByRole("list", { name: "保存したアプリ同意" });
-  await expect(consents.getByRole("heading", { name: authorServer.webClientId, exact: true })).toBeVisible();
-  await expect(consents.getByRole("button")).toHaveCount(0);
 });
