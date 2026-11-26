@@ -2,14 +2,6 @@
 
 The [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) owns when backup, independent recovery evidence and restore are required for route admission and coordinated activation. Backup is a prerequisite in the [compatible update state machine](UPDATE-FLOW.md), and recovery acceptance is required by the [initial deployment state machine](INITIAL-DEPLOYMENT-FLOW.md). A verified ciphertext file alone is not proof of independent-host recoverability.
 
-## Accepted target: one PostgreSQL application-state recovery source
-
-[Data model — REQ-DATA-005](../architecture/DATA-MODEL.md) owns the approved target of consolidating all recovery-required server application state into one PostgreSQL cluster. Once migrated and independently verified, application-state disaster recovery must not depend on the former host-history volume or derived caches. Infrastructure configuration, recovery keys, credentials and independently protected evidence remain separately recoverable. Author-facing [open work export](../authoring-portable.md) is data portability, not operational recovery.
-
-The current logical DB + history + age backup and protected host lock remain the only admitted path until a separately approved replacement has passed isolated clean-VM restore, off-VM protection, key custody, integrity/authenticity, failure and deployment admission tests. Evaluate established PostgreSQL physical backup/WAL/PITR tools (e.g. pgBackRest or WAL-G) under that change; neither product nor a new encryption/retention policy is selected here. Do not retire the existing backup or its S3/restore obligations merely because a DB migration is complete.
-
-## Current protected backup contract
-
 The only backup executable is [`deploy/backup/backup.sh`](../../deploy/backup/backup.sh). It belongs to the GitHub Actions → Tailscale → SSH → Ansible → rootless Podman Quadlet push deployment. No pull updater, timer, signed-channel controller, compatibility handler or legacy proxy controls this backup.
 
 The Ansible `deploy` stage creates or validates a private backup directory (default `/home/codexia/backups`). A local directory or an independently mounted remote filesystem is supported; remote NFS/CIFS/SSHFS destinations undergo additional host-identity validation. If the installed API image changes, deployment is serialized under `~/.local/state/codexia-deploy/host.lock`, the API and Tunnel are stopped, and the helper's `backup-locked` command is invoked with an explicitly inherited lock descriptor. Backup must confirm the API writer is quiesced, encrypt the PostgreSQL logical dump, history volume and manifest with `age`, publish ciphertext checksums atomically at the selected destination, and verify fingerprints before proceeding. A backup failure fails closed before candidate activation. **A local backup does not survive loss of the VM or its disk; independently preserve ciphertext off-VM before treating it as disaster-recovery evidence.**
@@ -19,6 +11,12 @@ An independent `restore-drill` stage decrypts a **v2** artifact on an isolated r
 Use an approved protected Ansible inventory and independently supplied recipient/recovery identity. Only the holder of the external backup encryption private key can perform the restore drill.
 
 The deployment backup is a pre-rollout recovery point for the database and history resources. PostgreSQL roles and Podman secrets require separate recovery. Current push deployment admission rejects migration-fingerprint, API-epoch, and persistence-format changes. These changes require a separately reviewed operation with its own approval, encrypted pre-change backup, migration verification, and tested restore procedure.
+
+## Accepted target: one PostgreSQL application-state recovery source
+
+[Data model — REQ-DATA-005](../architecture/DATA-MODEL.md) owns the approved target of consolidating all recovery-required server application state into one PostgreSQL cluster. Once migrated and independently verified, application-state disaster recovery must not depend on the former host-history volume or derived caches. Infrastructure configuration, recovery keys, credentials and independently protected evidence remain separately recoverable. Author-facing [open work export](../authoring-portable.md) is data portability, not operational recovery.
+
+The current logical DB + history + age backup and protected host lock remain the only admitted path until a separately approved replacement has passed isolated clean-VM restore, off-VM protection, key custody, integrity/authenticity, failure and deployment admission tests. Evaluate established PostgreSQL physical backup/WAL/PITR tools (e.g. pgBackRest or WAL-G) under that change; neither product nor a new encryption/retention policy is selected here. Do not retire the existing backup or its S3/restore obligations merely because a DB migration is complete.
 
 ## Verify a candidate ledger on a restored backup
 
