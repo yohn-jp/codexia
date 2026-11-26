@@ -37,7 +37,7 @@ Preflightは環境、host pin、観測時刻、source/candidate、現在のident
 | R2 RESTORE | 既存環境の復旧意図があり必要な保存状態が欠落・故障 | 独立backup・外部秘密管理から復元。必要なら先に基盤構築するが初回owner発行は禁止 |
 | R3 MAINTENANCE | H drift、D既存非互換、確認済み旧認証方式からの変更、既存A回復必要、B停止・障害・残存状態またはF障害 | 明示保守・復旧・移行。先行保全・互換性判定。既存owner回復を新規登録と分離 |
 | R4 BOOTSTRAP | H未構築/部分構築、D未作成/新規空またはA未構成で、新規・既存採用・復旧の意図が確定。承認済みinstallでDの欠落を確認した場合は旧B/Aの残存より優先 | 必要なhost/secrets/base/auth-runtimeを収束。新規初期化を別承認。既存identity/ledger/資格情報保持 |
-| R5 OWNER_SETUP | 承認済み新規installでA登録待ちまたはactivation未準備、あるいはB setup-only | 制限付きsetup UI/APIと一回限りgrant。本人登録、client検証、保護されたactivation preparation。既存ownerを再発行しない |
+| R5 OWNER_SETUP | 承認済み新規installでA登録待ちまたはactivation未準備、あるいはB setup-only | 通常Frontendの認定済みFullアーカイブを必要時に先行配備。同じFull Backendのsetup-only APIと一回限りgrantで本人登録、client検証、保護されたactivation preparation。既存ownerを再発行しない |
 | R6 ACTIVATE | H/D/A検証済み、B clean未配備 | F互換なら既存初回Backend配備。F未配備/非互換ならpair activation。初回・DB使用承認、backup |
 | R7 CUTOVER | B通常稼働だが非互換、F未配備、またはF非互換かつ通常Frontend admissionが成立しない | 既存データ/owner保持、必要な移行・協調配備。既に互換な側を無用に再配備しない |
 | R8 UPDATE / VERIFY | B通常稼働・互換、Fが正常で通常admission成立 | 変更のあるcomponentのみ通常互換更新。完全同一ならno-op＋health/identity検証 |
@@ -50,7 +50,7 @@ VMの利用履歴や旧API epochではなく現在のDB状態を判定する。�
 
 DB不在が確定した旧配備では、旧epoch・旧owner・旧API稼働記録は新しいDBの互換条件としない。既知の未完了操作はR1を優先し、不明な操作記録・基盤drift・対象所有者不一致は停止する。R4の保護された実行系統はproduction queueとcanonical host lockの下でDB不在を再検証し、Tunnel/APIを停止して旧API slotおよびDBに束縛された旧owner/setup/release状態だけを整理し、既存のclean target検証を満たす。PostgreSQL cluster・他DB・role・Secret・外部Tunnel/Access設定・独立backupは保持する。処理中断時は再観測し、不在が維持されている場合に限り整理を再開できること。既に作成・初期化されたDBは通常の新規空・install intentに束縛された再開契約に従い、暗黙に破棄しない。
 
-既存BootstrapのDB初期化承認を用い、DB再作成固有の重複承認や旧epoch移行契約を要求しない。認定済みFull imageで現行schema/ledgerとBetter Authを初期化し、R5でownerを登録、R6で互換Frontendとactivationを行う。旧Frontendの存在はR4の妨げではない。通常update/adoptではDB不在を自動的な新規installへ読み替えない。
+既存BootstrapのDB初期化承認を用い、DB再作成固有の重複承認や旧epoch移行契約を要求しない。認定済みFull imageで現行schema/ledgerとBetter Authを初期化し、R5で通常Frontendを配備してownerを登録、R6で既に互換なFrontendを維持してBackend activationを行う。旧Frontendの存在はR4の妨げではない。通常update/adoptではDB不在を自動的な新規installへ読み替えない。
 
 ### 統合Deployment経路
 
@@ -75,7 +75,7 @@ flowchart TD
     BASE -->|いいえ| BOOT
     BOOT --> OBS
     BASE -->|はい| OWNER{"owner activation準備済み?"}
-    OWNER -->|いいえ / 新規承認済み| SETUP["R5: 限定公開・owner登録<br/>activation preparation"]
+    OWNER -->|いいえ / 新規承認済み| SETUP["R5: 通常Frontend・setup-only API<br/>owner登録・activation preparation"]
     SETUP --> OBS
     OWNER -->|いいえ / 既存・不明| STOP
     OWNER -->|はい| API{"cleanなAPI未配備?"}
@@ -179,7 +179,7 @@ Bootstrap入力Full digestは既存release handoffの証明書・発行元・mai
 
 通常Frontendは稼働Backendと既存Frontend identityを、通常Backendは互換な稼働Frontendを要求する。両方が未配備または旧epochが非互換なら通常経路は使わない。初回と保守のpair経路は、旧稼働identityの一致ではなく、**独立に認定された候補pair、確定した初期状態、明示承認、隔離・復旧条件**に基づく専用Admissionを持つ。通常更新チェックを無効化しない。
 
-新規owner登録用Frontendが未配備/非互換なら、認定済み静的assetsを事前stageし、same-originのsetupルートと必要APIのみを制限付きで公開する。既存writer/ownerを保持する必要がある場合は別clean targetを使う。業務・通常OAuth/MCP経路は公開しない。setup-only API、Access/TLS/RP ID、登録キー追加認可、拒否経路を実測して本人へ引き渡す。登録後は既存の `--prepare-activation` 相当でowner/client検証、setup-only API/Tunnel停止、通常認証設定確定、clean API slotへの復帰を行う。
+新規owner登録では通常の `codexia-frontend` Worker・Full Frontendアーカイブ・canonical UI/Access/Tunnel経路のみを用いる。専用setup Worker、別Environment、別Frontendビルド、登録のためのTerraform経路切替を禁止する。R4後、確認済みR5（新規install、owner登録待ち、通常writer不在）に限り、`codexia-production` の保護されたFrontend workflowは認定済み候補を通常Workerへ配備できる。通常更新のlive Backend互換性Admissionは変更せず、初回配備は認定済み候補pair、fresh plan、Accessとcanonical route、version単調性でAdmissionする。既存writer/ownerを保持する必要がある場合は新規登録を行わない。通常業務/OAuth/MCP APIはsetup-only Backendが拒否し、public protocol bypassは通常runtime受入まで無効とする。setup-only API、Access/TLS/RP ID、登録キー追加認可、拒否経路を実測して本人へ引き渡す。登録後は既存の `--prepare-activation` 相当でowner/client検証、setup-only API/Tunnel停止、通常認証設定確定、clean API slotへの復帰を行う。FrontendとUI経路は維持しR6で同じ認定Full Backendを通常起動する。
 
 ### 制限付き初回配備・協調切替・切戻し
 
@@ -191,7 +191,7 @@ flowchart TD
     PIN --> PRIOR["旧状態・独立復旧証拠<br/>または承認済み新規空状態"]
     PRIOR --> LOCK["共通production slot・保守記録<br/>鮮度再照合・Ingress fence"]
     LOCK --> SETUP{"新規owner登録が必要?"}
-    SETUP -->|はい| LIMITED["setup-only UI/API限定公開<br/>owner本人登録・準備完了"]
+    SETUP -->|はい| LIMITED["通常Frontend + setup-only API<br/>owner本人登録・準備完了"]
     LIMITED --> CHANGE{"writerまたはDBの変更が必要?"}
     SETUP -->|いいえ| CHANGE
     CHANGE -->|はい| QUIESCE["writer / setup-only停止<br/>host lock・backup"]
@@ -231,7 +231,7 @@ CIは認定済み候補、使い捨てUbuntu/rootless Podman/PostgreSQL 17、Clo
 
 | ケース | 必要な検証 |
 | --- | --- |
-| 空VM・外部Tunnelのみ・canonical VM Tunnelのみ | 必要な基盤だけ収束、既存Tunnel保持、未配備pairから限定setup/activation、通常運用到達 |
+| 空VM・外部Tunnelのみ・canonical VM Tunnelのみ | 必要な基盤だけ収束、既存Tunnel保持、未配備pairから通常Frontend・setup-only API・activation、通常運用到達 |
 | 部分構築・既存互換DB・既存owner | 冪等採用、owner/cluster/Secret/データ保持、登録キー再発行なし |
 | 非canonical基盤・未知状態・欠落identity | 拒否、暗黙削除なし、旧形式/真の不在とAccess拒否・到達不能の区別 |
 | 旧epoch/非互換schema・片側のみ配備 | 通常release拒否、fence内協調切替、必要な側のみ更新、writer/データ保全 |

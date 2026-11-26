@@ -19,7 +19,7 @@ flowchart TD
     DB -->|既存ownerを復旧済み| RESTORED["既存owner/Passkey/clientを検証<br/>新しい初期キーは生成しない"]
     DB -->|復旧途中/不整合| STOP2["停止: 復旧が先<br/>セットアップ画面でownerを再作成しない"]
     EMPTY --> GRANT["CSPRNG 256-bitの一回限りキーを発行<br/>hash保存・秘密経路で所有者に渡す"]
-    GRANT --> SETUPONLY["setup-only API + Tunnelと認定済みFrontend<br/>必要なsetup経路のみ制限付き公開"]
+    GRANT --> SETUPONLY["通常Frontend + 同じFull Backendのsetup-only API<br/>既存Access・Tunnel経路"]
     SETUPONLY --> KEY["所有者本人: ブラウザーでキー入力"]
     KEY --> PASS{"キー検証・WebAuthn Passkey ceremony"}
     PASS -->|中断・期限切れ・競合| RETRY["状態再照合・必要なら明示再発行<br/>owner二重作成は拒否"]
@@ -57,7 +57,7 @@ flowchart TD
 | `deploy` | protected GitHub Environment と証明済み Full digest | migration・auth・origin・API ready | durable transaction record に従い復旧 |
 | 公開受入 | 実 VM、Cloudflare、実ブラウザー、独立復元ホスト | API・OAuth・reboot・バックアップの観測 | fixture 成功だけで受入扱いしない |
 
-管理経路は **GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet**。公開 UI/認証入口は Cloudflare **Workers Static Assets**、API origin は Cloudflare Tunnel。`/console`と`/console/setup`はWorkersからの静的アプリルートであり、登録キー検証はVMのFastify/Better AuthとPostgreSQLが担当する。Cloudflare Terraform / Access policy は別承認・別検証を要する。MCP は管理 VM の初期構築経路ではない。
+管理経路は **GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet**。公開 UI/認証入口は Cloudflare **Workers Static Assets**、API origin は Cloudflare Tunnel。`/console`と`/console/setup`は通常の `codexia-frontend` Worker の同じFull静的アーカイブ・Desktopアプリルートであり、登録キー検証はVMのFastify/Better AuthとPostgreSQLが担当する。初回登録専用Worker・Environment・Terraform経路切替・別Frontendビルドを設けない。Cloudflare Terraform / Access policy は別承認・別検証を要する。MCP は管理 VM の初期構築経路ではない。
 
 ## VMの入力契約と担当者の作業（合意済み目標）
 
@@ -78,7 +78,7 @@ flowchart TD
 `auth-runtime` 後に、通常運用と同じ Fastify と Better Auth を **setup-only モード**で起動し、Cloudflare Tunnel 経由で限定公開する。
 許可するのは、セットアップ状態の取得、キーの認可、Passkey の登録、登録完了確認に必要な認証 API と readiness に限る。
 作品 API、MCP、owner 設定変更、任意のサインアップ、一般向け OAuth クライアント登録は 403 や 503 で拒否する。
-公開前に Workers の静的ルート、Access の経路とオリジン境界、WebAuthn の RP ID と HTTPS オリジンを検証する。Frontendが存在しない・非互換の場合は、[初回協調配備](DEPLOYMENT-LIFECYCLE.md#初回協調配備と非互換切替)の認定済みassetsと限定setup経路を用意し、通常のFrontend releaseに互換性チェックを迂回させない。
+公開前に Workers の静的ルート、Access の経路とオリジン境界、WebAuthn の RP ID と HTTPS オリジンを検証する。Frontendが存在しない・候補と異なる場合は、R4後の確認済み新規install・owner未登録・通常API未稼働を根拠に、[R5の初回Frontend配備](PRODUCTION-BOOTSTRAP.md#publishing-the-normal-frontend-for-first-owner-enrollment)で認定済みFullアーカイブを通常Workerへ配備する。通常のFrontend releaseの互換性チェックは変更しない。既存のUI/Access/Tunnel経路は登録前後で同一とし、登録前の業務API拒否はBackendが強制する。
 Access に加えてセットアップキーによる認可を要求し、キーは登録フォームに入力する。
 登録した Passkey と対応する owner は、登録が完了した時点で確定する。
 
@@ -88,7 +88,7 @@ Access に加えてセットアップキーによる認可を要求し、キー�
 
 ## 宣言的な初期化と公開の責務分離
 
-**採用済み設計:** 宣言的inventoryと承認で新規VMへ`bootstrap`一操作で`host → secrets → base → auth-runtime`を順序どおり収束させる。初回キーはAnsible管理下で安全に生成・配送するが、ownerをAnsibleは作成しない。本人によるWorkers上のセットアップUI/Better AuthでのPasskey登録を経て、保護されたactivation preparationでowner/clientを照合しsetup-onlyを停止した後、別途承認された本番activationに進む。新規・復旧・通常更新を混同せず、再適用は冪等。秘密情報や既存データを無条件に初期化しない。既存VMで専用DBの不在が確認された場合も、[R4のDB不在時再初期化](DEPLOYMENT-LIFECYCLE.md#db不在時の再初期化r4) に従い同じ新規導入を実行する。
+**採用済み設計:** 宣言的inventoryと承認で新規VMへ`bootstrap`一操作で`host → secrets → base → auth-runtime`を順序どおり収束させる。初回キーはAnsible管理下で安全に生成・配送するが、ownerをAnsibleは作成しない。通常Frontendを配備し、同じFull Backend imageをcanonical API slotのsetup-onlyモードで起動する。本人による通常Workers上の `/console/setup` / Better AuthでのPasskey登録を経て、保護されたactivation preparationでowner/clientを照合しsetup-onlyを停止した後、別途承認された本番activationに進む。通常FrontendやTerraform経路の再配備・切替は不要。新規・復旧・通常更新を混同せず、再適用は冪等。秘密情報や既存データを無条件に初期化しない。既存VMで専用DBの不在が確認された場合も、[R4のDB不在時再初期化](DEPLOYMENT-LIFECYCLE.md#db不在時の再初期化r4) に従い同じ新規導入を実行する。
 
 **運用受入:** `bootstrap` は `host`、`secrets`、`base`、承認済みの `auth-runtime` を順に実行する。新規導入で承認を明示すると、同一オリジンの setup-only API と暗号化した一回限りのキー配送を構成できる。[認証運用手順](../../deploy/ansible/AUTH-RUNTIME.md)に従い、Cloudflare 経路、使い捨て VM と実ブラウザーで受入を確認する。SSH ポートフォワード方式は移行中の既存手順として維持する。`inspect`、個別ステージ、`deploy-lifecycle-fixture`、`restore-drill` は引き続き利用できる。
 
