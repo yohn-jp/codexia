@@ -23,6 +23,11 @@ interface OwnerSecurityPolicyOptions {
 interface OwnerSecurityOptions extends OwnerSecurityPolicyOptions {
   readonly oauthClientIds: readonly string[];
   readonly legacyOidcConfigured: boolean;
+  readonly revokeOAuthGrant: (input: {
+    readonly clientId: string;
+    readonly subject: string;
+    readonly revokedAt: Date;
+  }) => Promise<void>;
 }
 
 interface OAuthClient {
@@ -156,20 +161,49 @@ export function ownerSecurity(options: OwnerSecurityOptions) {
         // Its where-clause transformer does not serialize string[] values as its writer does.
         const storedArray = (value: string[] | null | undefined) => value == null ? null
           : adapter.id === "kysely" ? JSON.stringify(value) : value;
-        const deleted = await adapter.deleteMany({
-          model: "oauthConsent",
+        const consentRevisionWhere = [
+          ...where,
+          { field: "updatedAt", value: consent.updatedAt },
+          { field: "scopes", value: storedArray(consent.scopes) },
+          { field: "referenceId", value: consent.referenceId ?? null },
+          { field: "resources", value: storedArray(consent.resources) },
+          { field: "requestedUserInfoClaims", value: storedArray(consent.requestedUserInfoClaims) },
+        ];
+        // Write the online JWT cutoff first. If any later write fails, access remains
+        // denied rather than leaving a withdrawn grant usable through an old token.
+        const revokedAt = new Date();
+        await options.revokeOAuthGrant({ clientId, subject: user.id, revokedAt });
+        await adapter.deleteMany({
+          model: "oauthAccessToken",
           where: [
-            ...where,
-            { field: "updatedAt", value: consent.updatedAt },
-            { field: "scopes", value: storedArray(consent.scopes) },
-            { field: "referenceId", value: consent.referenceId ?? null },
-            { field: "resources", value: storedArray(consent.resources) },
-            { field: "requestedUserInfoClaims", value: storedArray(consent.requestedUserInfoClaims) },
+            { field: "clientId", value: clientId },
+            { field: "userId", value: user.id },
           ],
         });
+        const refreshWhere = [
+          { field: "clientId", value: clientId },
+          { field: "userId", value: user.id },
+          { field: "revoked", operator: "eq" as const, value: null },
+        ];
+        await adapter.updateMany({ model: "oauthRefreshToken", where: refreshWhere, update: { revoked: revokedAt } });
+        // A concurrent refresh can finish between the initial access-token
+        // cleanup and refresh invalidation. Repeat both writes to catch rows it
+        // committed while the family was being withdrawn.
+        await adapter.deleteMany({
+          model: "oauthAccessToken",
+          where: [
+            { field: "clientId", value: clientId },
+            { field: "userId", value: user.id },
+          ],
+        });
+        await adapter.updateMany({ model: "oauthRefreshToken", where: refreshWhere, update: { revoked: revokedAt } });
+
+        const deleted = await adapter.deleteMany({
+          model: "oauthConsent",
+          where: consentRevisionWhere,
+        });
         if (deleted !== 1) reject("CONFLICT", "OWNER_SECURITY_CONSENT_CHANGED");
-        // This withdraws the persisted approval. The OAuth protocol owns already issued tokens.
-        return ctx.json({ consentRemoved: true });
+        return ctx.json({ consentRemoved: true, grantRevoked: true });
       }),
     },
   };

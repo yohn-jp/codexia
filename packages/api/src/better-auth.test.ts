@@ -72,13 +72,13 @@ test("Better Auth validates Passkey owner bootstrap identity before opening Post
   }), /email/u);
 });
 
-test("normal Better Auth registers the owner security policy without adding management endpoints", async () => {
+test("normal Better Auth registers the owner security endpoints only for the established owner runtime", async () => {
   const runtime = createBetterAuthRuntime({ ...baseConfig, ownerSubject: "established-owner" });
   try {
     const context = await runtime.auth.$context;
     assert.equal(context.hasPlugin("codexia-owner-security"), true);
-    assert.equal("ownerSecurityIdentity" in runtime.auth.api, false);
-    assert.equal("ownerSecurityRevokeConsent" in runtime.auth.api, false);
+    assert.equal("ownerSecurityIdentity" in runtime.auth.api, true);
+    assert.equal("ownerSecurityRevokeConsent" in runtime.auth.api, true);
   } finally { await runtime.pool.end(); }
 });
 

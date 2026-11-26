@@ -17,9 +17,14 @@ import { genericOAuth, jwt } from 'better-auth/plugins';
 import { decodeJwt, decodeProtectedHeader } from 'jose';
 import { Pool } from 'pg';
 import { CODEXIA_AUTH_SCHEMA } from './auth-schema.js';
-import { createJwtAccessTokenRevocationAdapter, type VerifiedJwtAccessToken } from './jwt-access-token-revocation.js';
+import {
+  CODEXIA_OAUTH_ACCESS_TOKEN_LIFETIME_SECONDS,
+  createJwtAccessTokenRevocationAdapter,
+  recordOwnerOAuthGrantRevocation,
+  type VerifiedJwtAccessToken,
+} from './jwt-access-token-revocation.js';
 import { CODEXIA_OWNER_SCOPE } from './oauth-owner.js';
-import { ownerSecurityPolicy } from './owner-security.js';
+import { ownerSecurity } from './owner-security.js';
 import { consumeOwnerSetupGrant, ownerSetupSchema, ownerSetupTableExists, type SetupRegistration } from './owner-setup-store.js';
 
 export { CODEXIA_OWNER_SCOPE };
@@ -426,7 +431,16 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     plugins: [
       codexiaAuthMethodsPlugin(Boolean(oidcIssuer), Boolean(bootstrap?.ownerSetup || config.installOwnerSetupSchema)),
       setupProvisioningSessionPlugin(() => bootstrap?.setupProvisioningOwner?.()),
-      ...(normalOwnerId ? [ownerSecurityPolicy({ origin: publicOrigin.origin, ownerId: normalOwnerId })] : []),
+      ...(normalOwnerId
+        ? [ownerSecurity({
+            origin: publicOrigin.origin,
+            ownerId: normalOwnerId,
+            oauthClientIds: config.ownerClientIds,
+            legacyOidcConfigured: Boolean(oidcIssuer),
+            revokeOAuthGrant: ({ clientId, subject, revokedAt }) =>
+              recordOwnerOAuthGrantRevocation(pool, { issuer, clientId, subject, revokedAt }),
+          })]
+        : []),
       passkey({
         rpID: passkeyRpId,
         rpName: 'Codexia',
@@ -634,7 +648,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
       oauthProvider({
         loginPage: '/oauth/login',
         consentPage: '/oauth/consent',
-        accessTokenExpiresIn: 300,
+        accessTokenExpiresIn: CODEXIA_OAUTH_ACCESS_TOKEN_LIFETIME_SECONDS,
         refreshTokenExpiresIn: 30 * 24 * 60 * 60,
         requireOpenidScope: true,
         allowPublicClientPrelogin: true,
@@ -643,7 +657,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
           {
             identifier: audience,
             name: 'Codexia API',
-            accessTokenTtl: 300,
+            accessTokenTtl: CODEXIA_OAUTH_ACCESS_TOKEN_LIFETIME_SECONDS,
             allowedScopes: [CODEXIA_OWNER_SCOPE, ...CODEXIA_MCP_SCOPES, 'offline_access'],
           },
         ],
@@ -958,7 +972,13 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
           },
         });
         if (typeof payload.iss !== 'string' || typeof payload.jti !== 'string') return false;
-        return !(await accessTokenRevocation.isRevoked(payload.iss, payload.jti));
+        return !(await accessTokenRevocation.isRevoked({
+          issuer: payload.iss,
+          jti: payload.jti,
+          ...(typeof payload.client_id === 'string' ? { clientId: payload.client_id } : {}),
+          ...(typeof payload.sub === 'string' ? { subject: payload.sub } : {}),
+          ...(typeof payload.iat === 'number' ? { issuedAt: payload.iat } : {}),
+        }));
       } catch (error) {
         const statusCode =
           typeof error === 'object' && error !== null && 'statusCode' in error

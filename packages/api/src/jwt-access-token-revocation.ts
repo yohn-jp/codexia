@@ -1,8 +1,11 @@
+import { randomUUID } from "node:crypto";
 import type { JWTPayload } from "jose";
 import type { Pool } from "pg";
 
 const REVOCATION_TABLE = "codexia_auth.oauth_jwt_access_token_revocation";
 const MAX_REVOCATION_FORM_BYTES = 32 * 1024;
+const OWNER_GRANT_REVOCATION_JTI_PREFIX = "codexia-owner-grant-revocation:";
+export const CODEXIA_OAUTH_ACCESS_TOKEN_LIFETIME_SECONDS = 300;
 
 export interface VerifiedJwtAccessToken extends JWTPayload {
   readonly iss: string;
@@ -20,6 +23,21 @@ export interface JwtAccessTokenRevocationOptions {
   readonly audience: string;
   readonly pool: Pool;
   readonly verifyToken: (token: string) => Promise<VerifiedJwtAccessToken>;
+}
+
+export interface OAuthTokenRevocationCheck {
+  readonly issuer: string;
+  readonly jti: string;
+  readonly clientId?: string;
+  readonly subject?: string;
+  readonly issuedAt?: number;
+}
+
+export interface OwnerOAuthGrantRevocation {
+  readonly issuer: string;
+  readonly clientId: string;
+  readonly subject: string;
+  readonly revokedAt: Date;
 }
 
 interface RevocationForm {
@@ -125,11 +143,33 @@ export async function pruneExpiredJwtAccessTokenRevocations(pool: Pool): Promise
   return result.rowCount ?? 0;
 }
 
+/**
+ * Store a cutoff for a withdrawn owner/client grant. Better Auth JWT access
+ * tokens are not persisted, so a marker invalidates every token for this
+ * exact owner/client issued through the cutoff in the existing online store.
+ */
+export async function recordOwnerOAuthGrantRevocation(pool: Pool, revocation: OwnerOAuthGrantRevocation): Promise<void> {
+  const markerJti = `${OWNER_GRANT_REVOCATION_JTI_PREFIX}${randomUUID()}`;
+  const expiresAt = new Date(revocation.revokedAt.getTime() + CODEXIA_OAUTH_ACCESS_TOKEN_LIFETIME_SECONDS * 1_000);
+  await pool.query(
+    `INSERT INTO ${REVOCATION_TABLE} (issuer, jti, client_id, subject, issued_at, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (issuer, jti) DO NOTHING`,
+    [revocation.issuer, markerJti, revocation.clientId, revocation.subject, revocation.revokedAt, expiresAt],
+  );
+}
+
 export function createJwtAccessTokenRevocationAdapter(options: JwtAccessTokenRevocationOptions) {
-  const isRevoked = async (issuer: string, jti: string): Promise<boolean> => {
+  const isRevoked = async ({ issuer, jti, clientId, subject, issuedAt }: OAuthTokenRevocationCheck): Promise<boolean> => {
     const result = await options.pool.query(
-      `SELECT 1 FROM ${REVOCATION_TABLE} WHERE issuer = $1 AND jti = $2 AND expires_at > CURRENT_TIMESTAMP LIMIT 1`,
-      [issuer, jti],
+      `SELECT 1 FROM ${REVOCATION_TABLE}
+       WHERE issuer = $1 AND expires_at > CURRENT_TIMESTAMP AND (
+         jti = $2 OR (
+           left(jti, length($6)) = $6 AND client_id = $3 AND subject = $4 AND issued_at >= to_timestamp($5)
+         )
+       )
+       LIMIT 1`,
+      [issuer, jti, clientId ?? null, subject ?? null, issuedAt ?? null, OWNER_GRANT_REVOCATION_JTI_PREFIX],
     );
     return result.rowCount === 1;
   };
@@ -150,9 +190,18 @@ export function createJwtAccessTokenRevocationAdapter(options: JwtAccessTokenRev
           active?: unknown;
           iss?: unknown;
           jti?: unknown;
+          client_id?: unknown;
+          sub?: unknown;
+          iat?: unknown;
         } | undefined;
         if (payload?.active === true && typeof payload.iss === "string" && typeof payload.jti === "string" &&
-            await isRevoked(payload.iss, payload.jti)) {
+            await isRevoked({
+              issuer: payload.iss,
+              jti: payload.jti,
+              ...(typeof payload.client_id === "string" ? { clientId: payload.client_id } : {}),
+              ...(typeof payload.sub === "string" ? { subject: payload.sub } : {}),
+              ...(typeof payload.iat === "number" ? { issuedAt: payload.iat } : {}),
+            })) {
           return inactiveIntrospectionResponse(response);
         }
         return response;

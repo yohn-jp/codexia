@@ -14,6 +14,7 @@ const webClientId = "codexia-web";
 const iosClientId = "codexia-ios";
 
 async function fixture(database?: Pool) {
+  const grantRevocations: Array<{ clientId: string; subject: string; revokedAt: Date }> = [];
   const auth = betterAuth({
     ...(database ? { database } : {}),
     baseURL: `${origin}/api/auth`,
@@ -28,7 +29,13 @@ async function fixture(database?: Pool) {
         consentPage: "/oauth/consent",
         scopes: ["openid", "offline_access", "author"],
       }),
-      ownerSecurity({ origin, ownerId, oauthClientIds: [webClientId, iosClientId], legacyOidcConfigured: true }),
+      ownerSecurity({
+        origin,
+        ownerId,
+        oauthClientIds: [webClientId, iosClientId],
+        legacyOidcConfigured: true,
+        async revokeOAuthGrant(input) { grantRevocations.push(input); },
+      }),
     ],
   });
   const context = await auth.$context;
@@ -61,7 +68,7 @@ async function fixture(database?: Pool) {
     assert.ok(row);
     return { id: row.id, clientId: row.clientId, scopes: row.scopes, revision: row.revision };
   }
-  return { context, current, other, foreign, request, consentSelection };
+  return { context, current, other, foreign, request, consentSelection, grantRevocations };
 }
 
 test("owner management rejects cross-origin, missing-origin writes, bearer and foreign sessions", async () => {
@@ -142,8 +149,8 @@ test("identity reads only allowlisted clients and owner grants, with an unverifi
   assert.doesNotMatch(JSON.stringify(result), /sensitive-fixture-client-secret|clientSecret|not-the-owner/u);
 });
 
-test("withdrawing stored consent compares the owner, client, scopes and exact version", async () => {
-  const { request, current, foreign, context, consentSelection } = await fixture();
+test("withdrawing stored consent compares the owner, client, scopes and exact version before revoking the grant", async () => {
+  const { request, current, foreign, context, consentSelection, grantRevocations } = await fixture();
   await context.adapter.create({ model: "oauthClient", data: { clientId: webClientId, redirectUris: [`${origin}/callback`] } });
   const updatedAt = new Date();
   const create = (userId: string, clientId: string) => context.adapter.create({
@@ -154,6 +161,7 @@ test("withdrawing stored consent compares the owner, client, scopes and exact ve
   const otherConsent = await create(ownerId, iosClientId);
   const path = "/codexia/owner-security/revoke-consent";
   const body = await consentSelection(consent.id);
+  assert.equal((await request(path, { body, headers: foreign.headers })).status, 403);
   assert.equal((await request(path, { body: { ...body, id: foreignConsent.id } })).status, 404);
   assert.equal((await request(path, { body: { ...body, clientId: iosClientId } })).status, 404);
   assert.equal((await request(path, { body: { ...body, scopes: ["openid"] } })).status, 409);
@@ -162,10 +170,15 @@ test("withdrawing stored consent compares the owner, client, scopes and exact ve
   const currentSelection = await consentSelection(consent.id);
   await context.internalAdapter.updateSession(current.token, { createdAt: new Date(Date.now() - 6 * 60_000) });
   assert.equal((await request(path, { body: currentSelection })).status, 403);
+  assert.equal(grantRevocations.length, 0);
   await context.internalAdapter.updateSession(current.token, { createdAt: new Date() });
   const receipt = await request(path, { body: currentSelection });
   assert.equal(receipt.status, 200);
-  assert.deepEqual(await receipt.json(), { consentRemoved: true });
+  assert.deepEqual(await receipt.json(), { consentRemoved: true, grantRevoked: true });
+  assert.equal(grantRevocations.length, 1);
+  assert.equal(grantRevocations[0]?.clientId, webClientId);
+  assert.equal(grantRevocations[0]?.subject, ownerId);
+  assert.ok(grantRevocations[0]?.revokedAt instanceof Date);
   assert.equal((await request(path, { body })).status, 404);
   const left = await context.adapter.findMany<{ id: string }>({ model: "oauthConsent" });
   assert.deepEqual(left.map(({ id }) => id).sort(), [foreignConsent.id, otherConsent.id].sort());
