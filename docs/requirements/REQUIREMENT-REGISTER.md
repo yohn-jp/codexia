@@ -2677,7 +2677,7 @@ Checks verified owner enrollment and closure of the isolated setup endpoint.
   **ID**: REQ-AUTH-004
 - **Type**: File
   **Path**: packages/api/test/passkey-bootstrap.acceptance.test.ts
-  **Lines**: 923, 923
+  **Lines**: 924, 924
 
 ## TEST-AUTH-005-001
 
