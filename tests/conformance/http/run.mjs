@@ -14,6 +14,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const openApiPath = resolve(root, 'packages/http-contract/openapi/codexia.openapi.yaml');
 const databaseUrl = process.env.CODEXIA_HTTP_CONFORMANCE_DATABASE_URL;
 assert.ok(databaseUrl, 'CODEXIA_HTTP_CONFORMANCE_DATABASE_URL must point to a dedicated disposable PostgreSQL database');
+assert.match(URL.parse(databaseUrl)?.pathname ?? '', /^\/codexia_perf_http_conformance(?:_[a-z0-9_]+)?$/u,
+  'The database must be dedicated to HTTP conformance');
 
 // Reuse the existing test fixture's explicit disposable database guard.
 process.env.CODEXIA_AUTH_TEST_DATABASE_URL = databaseUrl;
@@ -340,12 +342,16 @@ async function inspectHar(path, expectedBodyType) {
 }
 
 async function copyRedactedFile(source, destination, values) {
+  let original;
   try {
-    const original = await readFile(source, 'utf8');
-    await writeFile(destination, redactSensitive(original, values));
-  } catch {
+    original = await readFile(source, 'utf8');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
     // Schemathesis can omit its report on schema or startup errors; the sanitized log remains evidence.
+    await rm(destination, { force: true });
+    return;
   }
+  await writeFile(destination, redactSensitive(original, values));
 }
 
 function redactSensitive(value, values) {
