@@ -145,6 +145,9 @@ private let receipt = """
 private let conflict = """
     {"code":"PERSISTENCE_CONFLICT","error":"Revision changed","details":null,"current":null}
     """
+private let conflictWithCurrent = """
+    {"code":"PERSISTENCE_CONFLICT","error":"Revision changed","details":{"currentRevisionId":"rev-current"},"current":{"document":{"id":"document","projectId":"project","parentId":null,"kind":"scene","title":"原稿","orderKey":"0","headRevisionId":"rev-current","version":2,"createdAt":"2026-11-23T00:00:00Z","updatedAt":"2026-11-23T00:00:00Z"},"revision":{"id":"rev-current","projectId":"project","documentId":"document","parentRevisionId":"rev-base","markdown":"server version","sha256":"\(digest)","authorId":"author","createdAt":"2026-11-23T00:00:00Z"}}}
+    """
 
 private func json(_ status: Int, _ content: String) -> (HTTPResponse, HTTPBody?) {
     (.init(status: .init(code: status), headerFields: [.contentType: "application/json"]), HTTPBody(content))
@@ -230,6 +233,38 @@ private func save() throws -> DocumentSave {
     let client = try APITransport(origin: origin, accessToken: nil, transport: fixture).client
     guard case .conflict(nil) = try await save().submit(using: client) else {
         Issue.record("Expected a conflict with no current revision"); return
+    }
+}
+
+@Test func staleBaseConflictPreservesOnlyCurrentComparisonDataForTheRequestedDocument() async throws {
+    let fixture = FixtureTransport { json(409, conflictWithCurrent) }
+    let client = try APITransport(origin: origin, accessToken: nil, transport: fixture).client
+    guard case .conflict(let valid) = try await save().submit(using: client),
+          let valid, let current = valid.current, let revision = current.revision else {
+        Issue.record("Expected the matching current document and revision"); return
+    }
+    #expect(current.document.id == "document")
+    #expect(current.document.projectId == "project")
+    #expect(current.document.headRevisionId == revision.id)
+    #expect(revision.id == "rev-current")
+    #expect(revision.projectId == "project")
+    #expect(revision.documentId == "document")
+
+    let mismatchedResponses = [
+        conflictWithCurrent.replacingOccurrences(of: #""id":"document""#, with: #""id":"other-document""#),
+        conflictWithCurrent.replacingOccurrences(of: #""projectId":"project""#, with: #""projectId":"other-project""#),
+        conflictWithCurrent.replacingOccurrences(of: #""documentId":"document""#, with: #""documentId":"other-document""#),
+        conflictWithCurrent.replacingOccurrences(of: #""projectId":"project","documentId":"document""#, with: #""projectId":"other-project","documentId":"document""#),
+        conflictWithCurrent.replacingOccurrences(of: #""headRevisionId":"rev-current""#, with: #""headRevisionId":"other-revision""#),
+        conflictWithCurrent.replacingOccurrences(of: #""id":"rev-current""#, with: #""id":"other-revision""#),
+        conflictWithCurrent.replacingOccurrences(of: #""id":"rev-current","projectId":"project""#, with: #""id":"rev-current","projectId":"other-project""#),
+    ]
+    for payload in mismatchedResponses {
+        await fixture.respond { json(409, payload) }
+        guard case .conflict(nil) = try await save().submit(using: client) else {
+            Issue.record("A mismatched comparison response must remain a conflict without exposing its data")
+            return
+        }
     }
 }
 
