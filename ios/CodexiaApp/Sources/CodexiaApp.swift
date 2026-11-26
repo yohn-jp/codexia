@@ -202,7 +202,7 @@ private final class AccountSession: ObservableObject {
         }
         switch output {
         case .ok(let response): return try response.body.json.documents
-        case .undocumented(statusCode: 401, _):
+        case .unauthorized:
             status = .reauthenticationRequired
             throw OAuthError.signInRequired
         default: throw ProductAPIError.unexpectedResponse
@@ -225,7 +225,7 @@ private final class AccountSession: ObservableObject {
                   revision.projectId == projectID, revision.documentId == documentID,
                   !revision.id.isEmpty else { throw ProductAPIError.unexpectedResponse }
             return LoadedSceneDocument(id: document.id, title: document.title, text: revision.markdown, revisionID: revision.id)
-        case .undocumented(statusCode: 401, _):
+        case .unauthorized:
             status = .reauthenticationRequired
             throw OAuthError.signInRequired
         case .notFound: throw ProductAPIError.documentNotFound
