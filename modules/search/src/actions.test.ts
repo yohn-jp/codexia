@@ -238,6 +238,43 @@ test('search.terms.resolve applies whole-string Unicode normalization and preser
   assert.equal(text, original);
 });
 
+test('search.terms.resolve preserves source spans after compatibility composition across graphemes', async () => {
+  const targetPath = 'manuscript/vol-main/ch-main-1/sc-1.md';
+  const text = 'ㄱㅏ / 東京 / 😀東京 / ㍿';
+  const reader = makeReader({
+    [targetPath]: text,
+    [TERM_REGISTRY_PATH]: JSON.stringify({
+      schemaVersion: 1,
+      terms: [
+        { id: 'hangul', canonical: '가', aliases: [], targetPath },
+        { id: 'tokyo', canonical: '東京', aliases: [], targetPath },
+        { id: 'company', canonical: '株式会社', aliases: [], targetPath },
+      ],
+    }),
+  });
+  const actions = createSearchActions(
+    moduleContext(async () => {
+      throw new Error('unused');
+    }),
+    new SnapshotIndexCache(),
+  );
+  const resolve = findAction(actions, 'search.terms.resolve');
+  const out = await resolve.invoke(resolve.inputSchema.parse({ text }), actionContext(reader));
+  assert.ok(out.ok);
+  if (out.ok) {
+    const data = out.data as { spans: Array<{ start: number; end: number; termId: string }> };
+    assert.deepEqual(
+      data.spans.map(({ start, end, termId }) => [termId, text.slice(start, end)]),
+      [
+        ['hangul', 'ㄱㅏ'],
+        ['tokyo', '東京'],
+        ['tokyo', '東京'],
+        ['company', '㍿'],
+      ],
+    );
+  }
+});
+
 test('module disposal aborts and invalidates active index work', async () => {
   let release!: () => void;
   let started!: () => void;
