@@ -6,9 +6,7 @@ import { test } from 'node:test';
 import { componentReleaseAffected } from '../../release/components/impact.mjs';
 import { VERIFICATION_TASKS } from './contract.mjs';
 import { UX_PROJECTION_DOCUMENTS } from '../evidence/task-inputs.mjs';
-const require = createRequire(new URL('../../../packages/core/package.json', import.meta.url));
-const { parse } = require('yaml');
-const NON_SWIFT_TASKS = VERIFICATION_TASKS.filter(task => task !== 'swift-linux');
+const { parse } = createRequire(new URL('../../../packages/core/package.json', import.meta.url))('yaml');
 
 function matchesWorkflowPaths(patterns, files) {
   return files.some(file => {
@@ -425,6 +423,8 @@ test('shared app changes retain both profile browser coverage without backend un
   }
   assert.ok(!selected.tasks.includes('unit-api'));
 });
+
+const NON_SWIFT_TASKS = VERIFICATION_TASKS.filter(task => task !== 'swift-linux');
 
 test('main, manual, shared contracts, lockfiles, manifests and unknown files fail closed to full verification', async () => {
   for (const [files, event] of [
