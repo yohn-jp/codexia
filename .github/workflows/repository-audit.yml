@@ -260,7 +260,7 @@ jobs:
         env:
           GRAPHIFY_BACKEND: none
         run: |
-          bash scripts/shared/python-env.sh create python "$RUNNER_TEMP/graphify" 'graphifyy[sql,terraform]==0.9.115'
+          bash scripts/shared/python-env.sh create python "$RUNNER_TEMP/graphify" 'graphifyy[sql,terraform]==0.9.120'
           excludes=('tests/**' 'evidence/**' '.agents/**' 'docs/**' '**/*.test.*' '**/*.spec.*')
           exclude_args=()
           for pattern in "${excludes[@]}"; do
@@ -269,7 +269,7 @@ jobs:
           timeout 600s "$RUNNER_TEMP/graphify/bin/graphify" extract . --code-only \
             --out "$RUNNER_TEMP/graphify-out" \
             --max-workers 2 "${exclude_args[@]}"
-          timeout 120s "$RUNNER_TEMP/graphify/bin/graphify" cluster-only "$RUNNER_TEMP/graphify-out" --no-label
+          timeout 120s "$RUNNER_TEMP/graphify/bin/graphify" cluster-only "$RUNNER_TEMP/graphify-out"
           "$RUNNER_TEMP/graphify/bin/python" scripts/graphify-pages/candidates.py \
             "$RUNNER_TEMP/graphify-out/graphify-out/candidates.json" "${exclude_args[@]}"
           node scripts/graphify-pages/pack.mjs \

@@ -1,0 +1,186 @@
+
+<style>
+  #cx-community-launch { padding: 10px 12px; display: grid; gap: 6px; border-bottom: 1px solid var(--border); }
+  #cx-community-launch button, #cx-community-dialog button, #cx-community-dialog select, #cx-community-dialog input {
+    font: inherit; padding: .45rem .65rem; color: var(--text); background: var(--panel); border: 1px solid var(--input-border); border-radius: 5px;
+  }
+  #cx-community-launch button, #cx-community-dialog button { cursor: pointer; }
+  #cx-community-dialog button:disabled { opacity: .55; cursor: default; }
+  #cx-community-launch a, #cx-community-dialog a { color: var(--text); text-decoration: underline; text-underline-offset: .18em; }
+  #cx-community-launch :focus-visible, #cx-community-dialog :focus-visible { outline: 2px solid #4E79A7; outline-offset: 3px; }
+  #cx-community-dialog { width: min(1120px, calc(100% - 24px)); max-height: calc(100% - 24px); margin: auto; padding: 1rem; background: var(--bg); color: var(--text); border: 1px solid var(--input-border); border-radius: 10px; overflow: auto; }
+  #cx-community-dialog::backdrop { background: rgba(0,0,0,.65); }
+  #cx-community-dialog header, #cx-community-dialog .cx-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin: .5rem 0; }
+  #cx-community-dialog header h1 { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 1.3rem; }
+  #cx-community-dialog h2 { font-size: 1rem; margin: .85rem 0 .35rem; }
+  #cx-community-dialog p { line-height: 1.5; margin: .4rem 0; overflow-wrap: anywhere; }
+  #cx-community-dialog select, #cx-community-dialog input { max-width: 100%; min-width: 0; }
+  #cx-community-dialog .cx-detail-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 1rem; }
+  #cx-community-graph { height: 360px; border: 1px solid var(--input-border); border-radius: 6px; }
+  #cx-community-members, #cx-community-edges { list-style: none; max-height: 360px; overflow: auto; border: 1px solid var(--input-border); border-radius: 6px; }
+  #cx-community-dialog li { padding: .6rem; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; line-height: 1.4; }
+  #cx-community-dialog li:last-child { border-bottom: 0; }
+  #cx-community-dialog small { display: block; color: var(--text-2); margin-top: .2rem; }
+  #cx-community-dialog .cx-note { color: var(--text-2); font-size: .9rem; }
+  @media (max-width: 760px) { #cx-community-dialog .cx-detail-grid { grid-template-columns: minmax(0,1fr); } #cx-community-graph { height: 270px; } }
+</style>
+<div id="cx-community-launch">
+  <button id="cx-community-open" type="button">Explore communities</button>
+  <a href="./">File Explorer</a>
+  <span id="cx-community-status" role="status"></span>
+</div>
+<dialog id="cx-community-dialog" aria-labelledby="cx-community-title">
+  <header><h1 id="cx-community-title">Community detail</h1><button id="cx-community-close" type="button">Back to overview</button></header>
+  <div class="cx-controls"><label for="cx-community-select">Community</label><select id="cx-community-select"></select></div>
+  <p id="cx-community-summary" role="status"></p>
+  <p class="cx-note">Hub-derived names and static relationships from Graphify, not confirmed runtime dependencies. Only indexed repository files and their observed edges are shown.</p>
+  <p class="cx-note">Source <code id="cx-community-sha"></code></p>
+  <div class="cx-controls"><label for="cx-community-search">Find members</label><input id="cx-community-search" type="search" placeholder="Symbol or file path"><button id="cx-members-prev" type="button">Previous</button><button id="cx-members-next" type="button">Next</button><span id="cx-members-count" role="status"></span></div>
+  <div class="cx-detail-grid">
+    <section aria-labelledby="cx-graph-heading"><h2 id="cx-graph-heading">Internal graph</h2><div id="cx-community-graph"></div><p id="cx-graph-count" class="cx-note"></p></section>
+    <section aria-labelledby="cx-members-heading"><h2 id="cx-members-heading">Members · File Explorer</h2><ul id="cx-community-members"></ul></section>
+  </div>
+  <h2>Observed relationships</h2>
+  <div class="cx-controls"><label for="cx-edge-direction">Relationship scope</label><select id="cx-edge-direction"><option value="internal">Internal</option><option value="outgoing">Outgoing to other communities</option><option value="incoming">Incoming from other communities</option></select><button id="cx-edges-prev" type="button">Previous</button><button id="cx-edges-next" type="button">Next</button><span id="cx-edges-count" role="status"></span></div>
+  <ul id="cx-community-edges"></ul>
+</dialog>
+<script id="cx-community-data" type="application/json">__GRAPHIFY_COMMUNITY_JSON__</script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const data = JSON.parse($('cx-community-data').textContent);
+  const groups = new Map(data.groups.map(group => [String(group.id), group]));
+  const nodes = data.nodes;
+  const edgesByGroup = new Map(data.groups.map(group => [group.id, { internal: [], incoming: [], outgoing: [] }]));
+  for (const edge of data.edges) {
+    const from = nodes[edge[0]].community, to = nodes[edge[1]].community;
+    if (from === to) edgesByGroup.get(from).internal.push(edge);
+    else { edgesByGroup.get(from).outgoing.push(edge); edgesByGroup.get(to).incoming.push(edge); }
+  }
+  const dialog = $('cx-community-dialog');
+  const select = $('cx-community-select');
+  const launch = $('cx-community-launch');
+  const PAGE = 60;
+  const EDGE_LIMIT = 250;
+  let group, memberPage = 0, edgePage = 0, detailNetwork;
+  const name = item => item.name + ' (#' + item.id + ')' + (item.scope ? ' · ' + item.scope : '');
+  for (const item of data.groups) {
+    const option = document.createElement('option');
+    option.value = String(item.id); option.textContent = name(item) + ' · ' + item.members.length + ' indexed';
+    select.append(option);
+  }
+  if ($('sidebar')) $('sidebar').prepend(launch);
+  $('cx-community-sha').textContent = data.sourceSha;
+  $('cx-community-open').disabled = !groups.size;
+  if (!groups.size) $('cx-community-status').textContent = 'No community assignments available.';
+  function anchor(node) {
+    const link = document.createElement('a');
+    const params = new URLSearchParams({ file: node.path });
+    if (node.symbol) params.set('symbol', node.symbol);
+    link.href = './?' + params.toString();
+    link.textContent = node.label;
+    link.title = node.path;
+    return link;
+  }
+  function line(text) { const li = document.createElement('li'); li.textContent = text; return li; }
+  function updatePages(prefix, page, total) {
+    const start = page * PAGE;
+    $(prefix + '-count').textContent = total ? (start + 1) + '–' + Math.min(start + PAGE, total) + ' of ' + total : '0 indexed results';
+    $(prefix + '-prev').disabled = page === 0;
+    $(prefix + '-next').disabled = start + PAGE >= total;
+  }
+  function renderMembers() {
+    const q = $('cx-community-search').value.trim().toLowerCase();
+    const members = group.members.filter(id => !q || (nodes[id].label + ' ' + nodes[id].path).toLowerCase().includes(q));
+    memberPage = Math.min(memberPage, Math.max(0, Math.ceil(members.length / PAGE) - 1));
+    const visible = members.slice(memberPage * PAGE, (memberPage + 1) * PAGE);
+    const list = $('cx-community-members');
+    list.replaceChildren();
+    for (const id of visible) {
+      const node = nodes[id], item = document.createElement('li'), link = anchor(node);
+      link.id = 'cx-member-' + id; item.append(link);
+      const path = document.createElement('small'); path.textContent = node.path; item.append(path); list.append(item);
+    }
+    if (!visible.length) list.append(line('No indexed members match this selection.'));
+    updatePages('cx-members', memberPage, members.length);
+    const visibleIds = new Set(visible);
+    const internal = edgesByGroup.get(group.id).internal;
+    const local = internal.filter(edge => visibleIds.has(edge[0]) && visibleIds.has(edge[1]));
+    if (detailNetwork) { detailNetwork.destroy(); detailNetwork = undefined; }
+    const host = $('cx-community-graph'); host.replaceChildren();
+    $('cx-graph-count').textContent = visible.length + ' of ' + group.members.length + ' indexed members; ' + Math.min(local.length, EDGE_LIMIT) + ' of ' + internal.length + ' internal edges drawn. Remaining observed edges are available below.';
+    if (!visible.length || typeof vis === 'undefined') {
+      host.textContent = visible.length ? 'Graph renderer unavailable; member and relationship lists remain usable.' : 'No indexed members to draw.';
+      return;
+    }
+    const dark = document.documentElement.getAttribute('data-theme') !== 'light';
+    detailNetwork = new vis.Network(host, {
+      nodes: visible.map(id => ({ id, label: nodes[id].label, title: nodes[id].path, color: dark ? '#5c8fc1' : '#315d8c', font: { color: dark ? '#f0f0f0' : '#222222' } })),
+      edges: local.slice(0, EDGE_LIMIT).map(([from, to, relation]) => ({ from, to, title: relation, arrows: 'to' })),
+    }, { nodes: { shape: 'dot', size: 11 }, edges: { smooth: false }, physics: { stabilization: { iterations: 150 } }, interaction: { hover: true } });
+    detailNetwork.on('click', event => { if (event.nodes.length) $('cx-member-' + event.nodes[0])?.focus(); });
+  }
+  function renderEdges() {
+    const edges = edgesByGroup.get(group.id)[$('cx-edge-direction').value];
+    edgePage = Math.min(edgePage, Math.max(0, Math.ceil(edges.length / PAGE) - 1));
+    const list = $('cx-community-edges'); list.replaceChildren();
+    for (const [from, to, relation] of edges.slice(edgePage * PAGE, (edgePage + 1) * PAGE)) {
+      const item = document.createElement('li'), a = nodes[from], b = nodes[to];
+      item.append(anchor(a), document.createTextNode(' → ' + relation + ' → '), anchor(b));
+      const paths = document.createElement('small'); paths.textContent = a.path + ' → ' + b.path; item.append(paths);
+      if (a.community !== b.community) {
+        const other = groups.get(String(a.community === group.id ? b.community : a.community));
+        const button = document.createElement('button'); button.type = 'button'; button.textContent = name(other);
+        button.addEventListener('click', () => navigate(String(other.id))); item.append(button);
+      }
+      list.append(item);
+    }
+    if (!edges.length) list.append(line('No observed indexed edges in this scope.'));
+    updatePages('cx-edges', edgePage, edges.length);
+  }
+  function render(id) {
+    group = groups.get(id);
+    if (!group) {
+      if (detailNetwork) { detailNetwork.destroy(); detailNetwork = undefined; }
+      if (dialog.open) { dialog.close(); $('cx-community-open').focus(); }
+      $('cx-community-status').textContent = id === null ? '' : 'Community is unavailable in this source snapshot.';
+      return;
+    }
+    $('cx-community-status').textContent = '';
+    select.value = id;
+    $('cx-community-title').textContent = name(group);
+    $('cx-community-summary').textContent = group.members.length + ' indexed / ' + group.total + ' Graphify members · ' + (group.total - group.members.length) + ' outside the published file index';
+    memberPage = edgePage = 0; $('cx-community-search').value = ''; $('cx-edge-direction').value = 'internal';
+    if (!dialog.open) dialog.showModal();
+    renderMembers(); renderEdges();
+  }
+  function navigate(id) {
+    const url = new URL(location.href);
+    if (id === null) url.searchParams.delete('community'); else url.searchParams.set('community', id);
+    if (url.href !== location.href) history.pushState(null, '', url);
+    render(id);
+  }
+  $('cx-community-open').addEventListener('click', () => navigate(select.value));
+  $('cx-community-close').addEventListener('click', () => navigate(null));
+  dialog.addEventListener('cancel', event => { event.preventDefault(); navigate(null); });
+  select.addEventListener('change', () => navigate(select.value));
+  $('cx-community-search').addEventListener('input', () => { memberPage = 0; renderMembers(); });
+  $('cx-members-prev').addEventListener('click', () => { memberPage--; renderMembers(); });
+  $('cx-members-next').addEventListener('click', () => { memberPage++; renderMembers(); });
+  $('cx-edge-direction').addEventListener('change', () => { edgePage = 0; renderEdges(); });
+  $('cx-edges-prev').addEventListener('click', () => { edgePage--; renderEdges(); });
+  $('cx-edges-next').addEventListener('click', () => { edgePage++; renderEdges(); });
+  window.addEventListener('popstate', () => render(new URLSearchParams(location.search).get('community')));
+  // Graphify 0.9.120 exposes these bindings in its native HTML.
+  // Register after the upstream selection handler; the standalone inspector still works without it.
+  if (typeof vis !== 'undefined' && typeof network !== 'undefined' && typeof nodesDS !== 'undefined') {
+    network.on('click', event => {
+      if (!event.nodes.length) return;
+      const node = nodesDS.get(event.nodes[0]);
+      if (node && groups.has(String(node.community))) navigate(String(node.community));
+    });
+  }
+  const requested = new URLSearchParams(location.search).get('community');
+  if (requested !== null) render(requested);
+})();
+</script>

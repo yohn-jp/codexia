@@ -10,12 +10,12 @@ const sha = 'a'.repeat(40);
 const trackedFiles = new Set(['packages/api/server.ts', 'packages/core/db.ts', 'modules/story/scene.ts']);
 const graph = {
   nodes: [
-    { id: 'a', label: 'server.ts', source_file: 'packages/api/server.ts', file_type: 'code' },
-    { id: 'a2', label: 'startServer', source_file: 'packages/api/server.ts', file_type: 'code' },
-    { id: 'b', label: 'loadFromDb', source_file: 'packages/core/db.ts', file_type: 'code' },
-    { id: 'c', label: '</script><script>alert(1)</script>$& $$ $` __GRAPHIFY_SOURCE_LINKS__', source_file: 'modules/story/scene.ts', file_type: 'code' },
+    { id: 'a', label: 'server.ts', source_file: 'packages/api/server.ts', file_type: 'code', community: 0, community_name: 'startServer' },
+    { id: 'a2', label: 'startServer', source_file: 'packages/api/server.ts', file_type: 'code', community: 0, community_name: 'startServer' },
+    { id: 'b', label: 'loadFromDb', source_file: 'packages/core/db.ts', file_type: 'code', community: 1, community_name: 'loadFromDb' },
+    { id: 'c', label: '</script><script>alert(1)</script>$& $$ $` __GRAPHIFY_SOURCE_LINKS__', source_file: 'modules/story/scene.ts', file_type: 'code', community: 0, community_name: 'startServer' },
     { id: 'external', label: 'pkg', file_type: 'concept', external: true },
-    { id: 'bad', label: 'secret', source_file: '/private/home/secret.ts' },
+    { id: 'bad', label: 'secret', source_file: '/private/home/secret.ts', community: 0, community_name: 'startServer' },
     { id: 'artifact', label: 'dist file', source_file: 'packages/core/dist/index.js' },
     { id: 'dependency', label: 'node:fs', source_file: 'node:fs' },
   ],
@@ -47,7 +47,7 @@ test('indexes source files, symbols and directed cross-file references without c
   assert.ok(!result.files.some(f => f.path.includes('private') || f.path.includes('/dist/') || f.path.startsWith('node:')));
 });
 
-test('publishes a searchable file explorer and keeps native community graph intact', async t => {
+test('publishes a searchable file explorer and augments the native community graph', async t => {
   const root = await mkdtemp(join(tmpdir(), 'graphify-pages-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const source = join(root, 'source');
@@ -59,7 +59,18 @@ test('publishes a searchable file explorer and keeps native community graph inta
   const published = join(root, 'site', 'graph');
   assert.deepEqual((await readdir(published)).sort(), ['analysis.mjs', 'communities.html', 'index.html', 'source.json']);
   assert.equal(result.path, join(published, 'index.html'));
-  assert.deepEqual(await readFile(join(published, 'communities.html')), generatedHtml);
+  const community = await readFile(join(published, 'communities.html'), 'utf8');
+  assert.ok(community.startsWith(generatedHtml.toString().split('</body>')[0]));
+  assert.match(community, /id="cx-community-dialog"/);
+  assert.match(community, /network\.on\('click'/);
+  assert.doesNotMatch(community, /<script>alert\(1\)<\/script>/);
+  const communityData = JSON.parse(community.match(/<script id="cx-community-data" type="application\/json">([\s\S]*?)<\/script>/)[1]);
+  assert.deepEqual(communityData.groups.map(group => [group.name, group.total, group.members.length]), [['startServer', 4, 3], ['loadFromDb', 1, 1]]);
+  assert.ok(!communityData.nodes.some(node => node.path.includes('private')));
+  assert.equal(communityData.nodes.find(node => node.label === 'startServer').symbol, 'packages/api/server.ts::a2');
+  assert.equal(communityData.nodes.find(node => node.label === 'server.ts').symbol, null);
+  assert.ok(communityData.edges.some(([from, to, relation]) => communityData.nodes[from].community !== communityData.nodes[to].community && relation === 'calls'));
+  assert.ok(communityData.edges.some(([from, to, relation]) => communityData.nodes[from].community === communityData.nodes[to].community && relation === 'calls'));
   assert.deepEqual(await readFile(join(published, 'analysis.mjs')), await readFile(new URL('./analysis.mjs', import.meta.url)));
   const explorer = await readFile(join(published, 'index.html'), 'utf8');
   assert.match(explorer, /Graphify File Explorer/);
@@ -101,10 +112,10 @@ test('validates a same-SHA Graphify candidate inventory and publishes measured c
   t.after(() => rm(root, { recursive: true, force: true }));
   const source = join(root, 'source');
   await mkdir(source);
-  await writeFile(join(source, 'graph.html'), '<html>' + 'Graphify native '.repeat(30) + '</html>');
+  await writeFile(join(source, 'graph.html'), '<html><body>' + 'Graphify native '.repeat(30) + '</body></html>');
   await writeFile(join(source, 'graph.json'), JSON.stringify({ ...graph, built_at_commit: sha }));
   const candidates = {
-    schemaVersion: 1, sourceSha: sha, generator: 'graphify.detect', generatorVersion: '0.9.115',
+    schemaVersion: 1, sourceSha: sha, generator: 'graphify.detect', generatorVersion: '0.9.120',
     codeOnly: true, excludes: [...EXCLUSION_PATTERNS], files: [...trackedFiles],
   };
   const candidateFile = join(root, 'candidates.json');
