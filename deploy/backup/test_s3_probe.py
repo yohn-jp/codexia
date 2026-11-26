@@ -41,6 +41,35 @@ class Client:
 
 
 class S3ProbeTests(unittest.TestCase):
+    def test_object_lock_retention_supports_days_and_conservative_years(self) -> None:
+        class RetentionClient:
+            def __init__(self, default: dict):
+                self.default = default
+
+            def get_bucket_versioning(self, **kwargs):
+                return {"Status": "Enabled"}
+
+            def get_object_lock_configuration(self, **kwargs):
+                return {"ObjectLockConfiguration": {
+                    "ObjectLockEnabled": "Enabled",
+                    "Rule": {"DefaultRetention": self.default},
+                }}
+
+        for default, expected in (
+            ({"Mode": "COMPLIANCE", "Days": 30}, 30),
+            ({"Mode": "COMPLIANCE", "Years": 1}, 365),
+            ({"Mode": "COMPLIANCE", "Years": 2}, 730),
+            ({"Mode": "COMPLIANCE", "Years": True}, None),
+            ({"Mode": "COMPLIANCE", "Years": 0}, None),
+            ({"Mode": "COMPLIANCE", "Days": 30, "Years": 1}, None),
+        ):
+            with self.subTest(default=default):
+                result = s3_probe._observe_retention_capabilities(
+                    RetentionClient(default), DRAFT, {},
+                )
+                self.assertEqual(result["objectLock"], "enabled")
+                self.assertEqual(result["defaultRetentionDays"], expected)
+
     def test_admission_rejects_bucket_prefix_and_endpoint_escape(self) -> None:
         with self.assertRaisesRegex(s3_probe.ProbeError, "destination_not_allowed"):
             s3_probe.validate_destination({**DRAFT, "bucket": "other-bucket"}, POLICY)
