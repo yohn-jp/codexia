@@ -279,8 +279,12 @@ def _observe_retention_capabilities(client: Any, profile: dict[str, Any], reques
         result["objectLock"] = "enabled" if configuration.get("ObjectLockEnabled") == "Enabled" else "disabled"
         default = configuration.get("Rule", {}).get("DefaultRetention", {})
         days = default.get("Days")
-        if isinstance(days, int) and not isinstance(days, bool):
+        years = default.get("Years")
+        if type(days) is int and days > 0 and years is None:
             result["defaultRetentionDays"] = days
+        elif type(years) is int and years > 0 and days is None:
+            # A calendar year always covers at least 365 days, including leap years.
+            result["defaultRetentionDays"] = years * 365
     except Exception as error:
         code = getattr(error, "response", {}).get("Error", {}).get("Code") if isinstance(getattr(error, "response", None), dict) else None
         if code == "ObjectLockConfigurationNotFoundError":
