@@ -435,11 +435,11 @@ async function writePromotionOutputs(file,output){
 }
 
 /** Read the independently built main archive when ordinary deployment is paused. */
-export async function verifyCutoverFrontendArtifact(input, { env = process.env, fetchImpl = fetch, expectedEpoch } = {}) {
+export async function verifyLifecycleFrontendArtifact(input, { env = process.env, fetchImpl = fetch, expectedEpoch } = {}) {
   assert.ok(Number.isSafeInteger(expectedEpoch) && expectedEpoch > 0, 'Expected frontend API epoch is invalid');
-  assert.equal(env.GITHUB_REPOSITORY, repository, 'Cutover frontend repository mismatch');
-  assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Cutover frontend verification requires main');
-  assert.ok(readFrontendOAuthConfig(env), 'Cutover requires the approved public frontend OAuth configuration');
+  assert.equal(env.GITHUB_REPOSITORY, repository, 'Lifecycle frontend repository mismatch');
+  assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Lifecycle frontend verification requires main');
+  assert.ok(readFrontendOAuthConfig(env), 'Lifecycle requires the approved public frontend OAuth configuration');
   const id = positiveInteger(input.artifactId, 'Frontend artifact ID');
   const runId = positiveInteger(input.runId, 'Frontend producer run ID');
   const verifyRunId = positiveInteger(input.verifyRunId, 'Frontend Verify run ID');
@@ -481,13 +481,13 @@ export async function verifyCutoverFrontendArtifact(input, { env = process.env, 
   const bytes = await downloadArtifact(artifact, repository, token, fetchImpl, { maxArchive: MAX_ASSET_ARCHIVE });
   const destination = fileURLToPath(new URL('../../../app/dist/', import.meta.url));
   const extracted = await extractArtifactFiles(bytes, destination, { maxArchive: MAX_ASSET_ARCHIVE, maxUncompressed: MAX_ASSET_BYTES });
-  assert.ok(!extracted.some(file=>file.startsWith('mobile/')),'Retired Mobile Web output in cutover artifact');
+  assert.ok(!extracted.some(file=>file.startsWith('mobile/')),'Retired Mobile Web output in lifecycle artifact');
   const identity = assertFrontendIdentity(JSON.parse(readFileSync(path.join(destination, 'desktop/update-identity.json'), 'utf8')));
   assertFrontendOAuthConfigIdentity(identity, env);
   assert.equal(identity.version, readComponentVersion('frontend', String(run.run_number)), 'Frontend version differs from the producer');
   assert.equal(identity.sourceSha, sourceSha, 'Frontend archive source differs from the producer');
-  assert.equal(identity.profile, 'full', 'Cutover requires a Full frontend');
-  assert.equal(identity.apiEpoch, expectedEpoch, 'Cutover requires the selected frontend API epoch');
+  assert.equal(identity.profile, 'full', 'Lifecycle requires a Full frontend');
+  assert.equal(identity.apiEpoch, expectedEpoch, 'Lifecycle requires the selected frontend API epoch');
   return { identity, artifactId: id, artifactDigest: input.artifactDigest, runId, verifyRunId, producerAttempt: attempt };
 }
 

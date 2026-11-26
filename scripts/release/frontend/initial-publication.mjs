@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { assertBackendIdentity, assertFrontendIdentity, readFrontendReleaseConfiguration } from '../frontend/verify-compatibility.mjs';
+import { assertFrontendIdentity, readFrontendReleaseConfiguration } from '../frontend/verify-compatibility.mjs';
 import { readRegularFile } from '../../shared/read-regular-file.mjs';
 import { assertProbeDenied, IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, readLiveJson } from '../../verification/infrastructure/identity-probe-client.mjs';
 
@@ -20,52 +20,26 @@ const [identities, routes, protocols] = await Promise.all([
 const worker = 'codexia-frontend';
 const publicationControls = ['_headers', '_redirects'];
 const frontendAssets = fileURLToPath(new URL('../../../app/dist/', import.meta.url));
-const phase = 'http_request_firewall_custom';
 const identityPaths = Object.values(identities).map(({ path }) => path);
-const protocolPaths = Object.values(protocols).map(({ path }) => path);
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const hexId = /^[a-f0-9]{32}$/u;
 const workerIdPattern = /^[a-zA-Z0-9_-]{1,128}$/u;
-const fenceRef = 'codexia-epoch-cutover';
-const fenceDescription = 'Codexia maintenance fence';
-export const FENCE_RESPONSE = Object.freeze({ status_code: 403, content_type: 'text/plain', content: fenceDescription });
 const api = 'https://api.cloudflare.com/client/v4';
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
 function parseOrigin(origin) {
   let parsed;
-  try { parsed = new URL(origin); } catch { throw new Error('Cutover requires a valid HTTPS application origin'); }
+  try { parsed = new URL(origin); } catch { throw new Error('Deployment requires a valid HTTPS application origin'); }
   assert.ok(parsed.protocol === 'https:' && parsed.href === `https://${parsed.hostname}/` &&
     /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])$/u.test(parsed.hostname) && !isIP(parsed.hostname),
-  'Cutover requires a valid HTTPS application origin');
+  'Deployment requires a valid HTTPS application origin');
   return parsed;
-}
-
-function matchRequest(method, path) {
-  return `http.request.method eq "${method}" and http.request.uri.path eq "${path}" and raw.http.request.uri.path eq "${path}"`;
-}
-
-export function buildFenceExpression(origin, acceptance = []) {
-  const { hostname } = parseOrigin(origin);
-  assert.ok(Array.isArray(acceptance), 'Cutover acceptance exceptions must be an array');
-  const exceptions = identityPaths.map(path => `(${matchRequest('GET', path)})`);
-  const approved = acceptance.map(({ ip, method, path }) => {
-    assert.ok(isIP(ip) && !ip.includes('%'), 'Each cutover acceptance exception requires a single source IP');
-    assert.ok(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'].includes(method), 'Invalid cutover acceptance method');
-    assert.ok(typeof path === 'string' && /^\/[a-zA-Z0-9._~/-]*$/u.test(path) &&
-      !path.startsWith('//') && new URL(path, origin).pathname === path, 'Each cutover acceptance exception requires an exact path');
-    return `(ip.src eq ${ip} and ${matchRequest(method, path)})`;
-  });
-  exceptions.push(...new Set(approved.sort()));
-  const expression = `(http.host eq "${hostname}" and not (${exceptions.join(' or ')}))`;
-  assert.ok(expression.length <= 4096, 'Cutover fence expression exceeds the Cloudflare limit');
-  return expression;
 }
 
 function candidateTag(artifactDigest) {
   assert.ok(typeof artifactDigest === 'string' && /^sha256:[a-f0-9]{64}$/u.test(artifactDigest),
     'Frontend artifact SHA-256 digest is invalid');
-  return `cutover-${artifactDigest.slice(7)}`;
+  return `frontend-${artifactDigest.slice(7)}`;
 }
 
 async function readCertifiedPublicationControls(directory = frontendAssets) {
@@ -74,7 +48,7 @@ async function readCertifiedPublicationControls(directory = frontendAssets) {
 }
 
 async function runWranglerUpload({ accountId, workerToken, tag }) {
-  const output = await mkdtemp(join(tmpdir(), 'codexia-cutover-wrangler-'));
+  const output = await mkdtemp(join(tmpdir(), 'codexia-frontend-wrangler-'));
   const outputFile = join(output, 'versions.ndjson');
   const root = fileURLToPath(new URL('../../../', import.meta.url));
   try {
@@ -167,25 +141,16 @@ function assertPolicyIds(policies, expected) {
   }
 }
 
-function assertCutoverBackendIdentity(identity) {
-  assert.ok(Number.isSafeInteger(identity?.apiEpoch) && identity.apiEpoch > 0, 'Live backend API epoch is missing or invalid for cutover');
-  assert.ok(identity.name === 'codexia' && identity.profile === 'full' &&
-    typeof identity.version === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(identity.version),
-  'Live Full backend identity is invalid');
-  return identity;
-}
-
-export function createCloudflareCutover({
-  origin, accountId, zoneId, tunnelId, fenceRuleId, acceptance = [],
+export function createDeploymentEdge({
+  origin, accountId, zoneId, tunnelId,
   authorPolicyId, ciPolicyId, tunnelTeamName, publicProtocolEnabled,
-  readToken, workerToken, fenceToken, accessEnv = process.env, fetchImpl = fetch,
+  readToken, workerToken, accessEnv = process.env, fetchImpl = fetch,
   uploadVersion = runWranglerUpload, uploadInitialVersion = runInitialWorkerUpload,
   readInitialWorkerControls = readCertifiedPublicationControls,
 }) {
   const target = parseOrigin(origin);
-  assert.ok(hexId.test(accountId) && hexId.test(zoneId) && uuid.test(tunnelId) && hexId.test(fenceRuleId),
-    'Cloudflare cutover resource IDs are invalid');
-  const expression = buildFenceExpression(target, acceptance);
+  assert.ok(hexId.test(accountId) && hexId.test(zoneId) && uuid.test(tunnelId),
+    'Cloudflare deployment resource IDs are invalid');
   const accountPath = `/accounts/${accountId}`;
   const zonePath = `/zones/${zoneId}`;
   const workerPath = `${accountPath}/workers/scripts/${worker}`;
@@ -270,36 +235,6 @@ export function createCloudflareCutover({
       { includeModules });
   }
 
-  async function observeFence() {
-    const ruleset = await result('fence rule', `${zonePath}/rulesets/phases/${phase}/entrypoint`);
-    const rule = ruleset.rules?.[0];
-    const response = rule?.action_parameters?.response;
-    assert.ok(ruleset.phase === phase && ruleset.kind === 'zone' && hexId.test(ruleset.id) &&
-      rule?.id === fenceRuleId && rule.ref === fenceRef && rule.description === fenceDescription &&
-      rule.expression === expression && rule.action === 'block' && typeof rule.enabled === 'boolean' &&
-      response?.status_code === FENCE_RESPONSE.status_code && response?.content_type === FENCE_RESPONSE.content_type &&
-      response?.content === FENCE_RESPONSE.content, 'Cloudflare maintenance fence definition or position differs from the approved rule');
-    return { rulesetId: ruleset.id, ruleId: rule.id, enabled: rule.enabled };
-  }
-
-  async function setFence(enabled) {
-    const current = await observeFence();
-    if (current.enabled === enabled) return current;
-    try {
-      await result('fence update', `${zonePath}/rulesets/${current.rulesetId}/rules/${fenceRuleId}`, {
-        method: 'PATCH', token: fenceToken,
-        body: { enabled, ref: fenceRef, description: fenceDescription, expression, action: 'block',
-          action_parameters: { response: FENCE_RESPONSE } },
-      });
-    } catch {
-      // A lost response can follow a committed update. Reconcile using the read credential.
-    }
-    const observed = await observeFence();
-    assert.ok(observed.rulesetId === current.rulesetId && observed.enabled === enabled,
-      'Cloudflare maintenance fence did not reach the requested state');
-    return observed;
-  }
-
   async function assertWorkerArtifact({ versionId, artifactDigest, initialWorkerId, initialControls }) {
     const tag = candidateTag(artifactDigest);
     const version = await readNormalVersion(versionId, { initialWorkerId, includeModules: initialControls !== undefined });
@@ -374,20 +309,11 @@ export function createCloudflareCutover({
     return after;
   }
 
-  async function deploy(input) {
-    return promoteVersion(input, async after => {
-      assert.ok((await observeFence()).enabled, after
-        ? 'Cloudflare maintenance fence changed while switching the Worker'
-        : 'Cloudflare maintenance fence must be active before switching the Worker');
-    });
-  }
-
   // The R5 controller has already admitted a certified fresh installation.
-  // Reuse the immutable version uploader and promotion sink without toggling
-  // a maintenance fence; the normal Access topology is required throughout.
+  // The normal Access topology is required throughout publication.
   async function deployForOwnerEnrollment({ observed, staged, artifactDigest }) {
     assert.ok(observed?.workerId && observed.routesReady && observed.publicProtocolEnabled === false &&
-      observed.fence?.enabled === false && observed.backend === null, 'Owner enrollment requires protected canonical ingress');
+      observed.backend === null, 'Owner enrollment requires protected canonical ingress');
     await assertWorkerArtifact({ ...staged, artifactDigest, initialWorkerId: observed.workerId });
     const fromVersionId = observed.deployment?.versionId ?? null;
     const toVersionId = staged.versionId;
@@ -400,54 +326,6 @@ export function createCloudflareCutover({
     });
   }
 
-  async function verifyFenced() {
-    assert.ok((await observeFence()).enabled, 'Cloudflare maintenance fence is not active');
-    const checks = [
-      ...['/', '/desktop', '/api/projects', '/health/ready', ...protocolPaths.map(path => path.replace(/\*$/u, 'cutover-probe'))]
-        .map(path => ['GET', path]),
-      ...identityPaths.flatMap(path => [['OPTIONS', path], ['GET', path + '/']]),
-    ];
-    const evidence = [];
-    for (const [method, path] of checks) {
-      const response = await fetchImpl(new URL(path, target), {
-        method, redirect: 'manual', cache: 'no-store', headers: { 'Cache-Control': 'no-cache' },
-        signal: AbortSignal.timeout(15_000),
-      });
-      assert.ok(response.status === FENCE_RESPONSE.status_code && await response.text() === FENCE_RESPONSE.content,
-        `Maintenance fence denial could not be proven for ${method} ${path}`);
-      evidence.push({ method, path, status: response.status, ray: response.headers.get('cf-ray') });
-    }
-    return evidence;
-  }
-
-  async function verifyUnfenced() {
-    assert.ok(!(await observeFence()).enabled, 'Cloudflare maintenance fence is still enabled');
-    const response = await fetchImpl(new URL('/desktop', target), {
-      method: 'GET', redirect: 'manual', cache: 'no-store', headers: { 'Cache-Control': 'no-cache' },
-      signal: AbortSignal.timeout(15_000),
-    });
-    const body = await response.text();
-    let redirect;
-    try {
-      const location = response.headers.get('location');
-      if (location) redirect = new URL(location, target);
-    } catch {
-      throw new Error('Invalid anonymous desktop redirect after fence removal');
-    }
-    const accessRedirect = [301, 302, 303, 307, 308].includes(response.status) && redirect?.protocol === 'https:' &&
-      (redirect.origin === target.origin || redirect.hostname.endsWith('.cloudflareaccess.com')) &&
-      /^\/cdn-cgi\/access\/login(?:\/|$)/u.test(redirect.pathname);
-    assert.ok(body !== FENCE_RESPONSE.content && (accessRedirect || [401, 403].includes(response.status)),
-      'Cloudflare fence removal or anonymous desktop denial could not be proven');
-    return { status: response.status, ray: response.headers.get('cf-ray') };
-  }
-
-  async function assertNoFenceSkippingIpRules() {
-    const allowLists = await Promise.all([accountPath, zonePath].map(path =>
-      list('IP Access rules', `${path}/firewall/access_rules/rules?mode=whitelist`)));
-    assert.ok(allowLists.every(items => items.length === 0), 'Cloudflare IP Access Allow rules can skip the maintenance fence');
-  }
-
   async function observeIngress({ lifecycle = false } = {}) {
     assert.ok(uuid.test(authorPolicyId) && uuid.test(ciPolicyId) && authorPolicyId !== ciPolicyId &&
       typeof publicProtocolEnabled === 'boolean' && /^[a-z0-9-]+$/u.test(tunnelTeamName ?? ''),
@@ -457,8 +335,7 @@ export function createCloudflareCutover({
     const enabledProtocols = publicProtocolEnabled ? Object.keys(protocols).sort().map(key => protocols[key]) : [];
     const expectedPaths = ['', ...identityPaths, ...enabledProtocols.map(item => item.path)];
     // Positive absence requires an authenticated inventory, not a 404, failed
-    // identity probe, or denied token. Strict cutover calls retain their
-    // existing requirement for a deployed Worker.
+    // identity probe, or denied token.
     const workers = await readWorkerInventory();
     const normalWorker = workers.find(item => item.name === worker);
     const scriptPresent = normalWorker !== undefined;
@@ -466,7 +343,7 @@ export function createCloudflareCutover({
     if (normalWorker) {
       assertPrivateWorker(normalWorker.subdomain);
     }
-    const [dns, workerRoutes, domains, applications, tunnel, deployment, fence] = await Promise.all([
+    const [dns, workerRoutes, domains, applications, tunnel, deployment] = await Promise.all([
       list('proxied application DNS', `${zonePath}/dns_records?name=${host}`),
       result('Worker routes', `${zonePath}/workers/routes`),
       Promise.all([
@@ -475,8 +352,7 @@ export function createCloudflareCutover({
       ]),
       list('Access applications', `${accountPath}/access/apps`),
       result('Tunnel configuration', `${accountPath}/cfd_tunnel/${tunnelId}/configurations`),
-      scriptPresent ? observeDeployment({ allowAbsent: lifecycle }) : null, observeFence(),
-      assertNoFenceSkippingIpRules(),
+      scriptPresent ? observeDeployment({ allowAbsent: lifecycle }) : null,
     ]);
     assert.ok(dns.length === 1 && dns[0].name === host && dns[0].proxied === true && dns[0].type === 'CNAME' &&
       dns[0].content === `${tunnelId}.cfargotunnel.com`, 'Application DNS must be the pinned proxied Tunnel CNAME');
@@ -539,28 +415,12 @@ export function createCloudflareCutover({
     const workerId = normalWorker?.id ?? null;
     const topology = { dns: dns[0].id, workerId, workerRoutes: routePlan,
       access: relevantPolicies.sort((a, b) => a.path.localeCompare(b.path)), tunnel: tunnel.config,
-      fence: { rulesetId: fence.rulesetId, ruleId: fence.ruleId, expression },
     };
     const ingressDigest = `sha256:${createHash('sha256').update(JSON.stringify(canonical(topology))).digest('hex')}`;
-    return { observedAt: new Date().toISOString(), origin: target.origin, deployment, fence, ingressDigest,
+    return { observedAt: new Date().toISOString(), origin: target.origin, deployment, ingressDigest,
       ...(lifecycle ? { scriptPresent, workerId, workerNeverDeployed: normalWorker?.deployed_on === null,
         routesReady: scriptPresent && routePlan.length > 0,
         publicProtocolEnabled } : {}) };
-  }
-
-  async function observe({ allowLegacyBackend = false } = {}) {
-    const { origin: liveOrigin, clientId, clientSecret } = readFrontendReleaseConfiguration(accessEnv);
-    assert.ok(liveOrigin.origin === target.origin,
-      'Protected identity origin differs from the pinned Cloudflare hostname');
-    const [ingress, live] = await Promise.all([
-      observeIngress(),
-      probeScopedIdentityAccess({ origin: liveOrigin, credentials: { clientId, clientSecret }, fetchImpl, checkBoundary: true,
-        validateBackend: allowLegacyBackend ? assertCutoverBackendIdentity : assertBackendIdentity,
-        validateFrontend: assertFrontendIdentity }),
-    ]);
-    const after = await observeDeployment();
-    assert.deepEqual(ingress.deployment, after, 'Active Worker deployment changed during protected identity observation');
-    return { ...ingress, backend: live.backend, frontend: live.deployed };
   }
 
   async function observeLifecycle({ backendExpected, ownerSetup = false }) {
@@ -575,7 +435,7 @@ export function createCloudflareCutover({
       checkBoundary: true, includeBackend: false, includeFrontend: false });
     assert.deepEqual(boundary, {});
     if (ownerSetup) {
-      assert.ok(!ingress.publicProtocolEnabled && !ingress.fence.enabled, 'Owner setup requires protected canonical ingress');
+      assert.ok(!ingress.publicProtocolEnabled, 'Owner setup requires protected canonical ingress');
       await Promise.all(['/console/setup', '/api/auth/codexia/setup/status', '/api/projects',
         '/api/auth/oauth2/authorize', '/mcp'].flatMap(path => [
         assertProbeDenied(path, liveOrigin, null, fetchImpl),
@@ -610,13 +470,12 @@ export function createCloudflareCutover({
     }
     if (!backendExpected && backend !== null) throw new Error('Public backend contradicts observed host absence');
     const after = await observeIngress({ lifecycle: true });
-    assert.deepEqual({ deployment: ingress.deployment, fence: ingress.fence, ingressDigest: ingress.ingressDigest,
-      scriptPresent: ingress.scriptPresent }, { deployment: after.deployment, fence: after.fence,
+    assert.deepEqual({ deployment: ingress.deployment, ingressDigest: ingress.ingressDigest,
+      scriptPresent: ingress.scriptPresent }, { deployment: after.deployment,
       ingressDigest: after.ingressDigest, scriptPresent: after.scriptPresent }, 'Ingress changed during observation');
     return { ...after, frontendState, frontend, backend };
   }
 
-  return { observe, observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, assertWorkerArtifact, fence: () => setFence(true),
-    unfence: () => setFence(false), verifyFenced, verifyUnfenced, deploy, deployForOwnerEnrollment,
+  return { observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, assertWorkerArtifact, deployForOwnerEnrollment,
     readInitialWorkerControls };
 }

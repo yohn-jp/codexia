@@ -143,8 +143,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
     }
     if (state.H !== 'ready' && state.H !== 'unknown') changeAxes.push('infrastructure');
   }
-  if (edge && taggedHash.test(edge.ingressDigest ?? '') && typeof edge.fence?.enabled === 'boolean') {
-    if (edge.fence.enabled && state.T === 'none') state.T = 'unknown'; // Orphan fence: no implicit authorization.
+  if (edge && taggedHash.test(edge.ingressDigest ?? '')) {
     if (edge.frontendState === 'absent' && edge.deployment === null) {
       state.F = 'absent';
       changeAxes.push('frontend');
@@ -196,7 +195,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
         owner: host.database.ownerBindingSha256 ?? null, settings: host.database.settingsSha256 ?? null } : null),
       backendSha256: hash(host ? { observed: host.backend, publication: hash(installedCertificate) } : null), frontendSha256: hash(edge ? {
         state: edge.frontendState, deployment: edge.deployment, identity: publicFrontendEvidence(edge.frontend) } : null),
-      ingressSha256: hash(edge ? { origin: edge.origin, ingressDigest: edge.ingressDigest, fence: edge.fence } : null),
+      ingressSha256: hash(edge ? { origin: edge.origin, ingressDigest: edge.ingressDigest } : null),
       transactionSha256: host ? digestEvidence(host.transaction) : null,
       infrastructureSha256: host ? digestEvidence({ state: host.H, topology: host.topology }) : null,
       // Only an authenticated preservation receipt can be supplied by the
@@ -211,7 +210,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
   const result = createDeploymentPlan({ observation, target, intent, window, now, evidenceBlockers: blockers });
   return { ...result, evidence: {
     host, edge: edge ? { observedAt: edge.observedAt, origin: edge.origin, deployment: edge.deployment,
-      fence: edge.fence, ingressDigest: edge.ingressDigest, frontendState: edge.frontendState,
+      ingressDigest: edge.ingressDigest, frontendState: edge.frontendState,
       routesReady: edge.routesReady, publicProtocolEnabled: edge.publicProtocolEnabled,
       frontend: publicFrontendEvidence(edge.frontend), backend: edge.backend } : null,
     sourceBackendCertificateSha256: hash(installedCertificate),

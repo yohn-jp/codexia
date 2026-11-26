@@ -32,7 +32,7 @@ function fixture() {
         authSchemaSha256: schema, ownerBindingSha256: 'sha256:' + h('d') },
       backend: { state: 'running', writer: { image: image('d'), identity, authMode: 'better-auth' } } },
     edge: { observedAt: now.toISOString(), origin: 'https://example.test', ingressDigest: 'sha256:' + h('e'),
-      fence: { enabled: false }, deployment: { versionId: 'version-one' }, frontendState: 'running',
+      deployment: { versionId: 'version-one' }, frontendState: 'running',
       frontend, backend: { name: 'codexia', version: '1.0.0', profile: 'full', apiEpoch: 2, standaloneOAuth: true } },
     hostPinSha256: h('f'), candidateBackend, candidateFrontend: { identity: frontend, artifactDigest: h('1'),
       runId: 1, verifyRunId: 2, artifactId: 3 }, priorBackend: candidateBackend, authSchemas: [schema],
@@ -148,12 +148,12 @@ test('noncompatible epoch, persistence and auth changes are observed but never a
   assert.equal(planFromObservations(changed).plan.candidateRoute, 'R0');
   assert.ok(planFromObservations(changed).plan.observation.changeAxes.includes('auth-schema'));
 });
-test('unknown edge, contradictory identity, orphan fence, unverified publication and recovery never authorize changes', () => {
+test('unknown edge, contradictory identity, unverified publication and recovery never authorize changes', () => {
   for (const change of [
     f => { f.edge = null; },
     f => { f.edge.frontendState = 'unknown'; },
     f => { f.edge.backend.version = '0.1.0'; },
-    f => { f.edge.fence.enabled = true; },
+    f => { f.edge.ingressDigest = null; },
     f => {
       f.priorBackend = null;
       f.candidateBackend = { ...f.candidateBackend, image: image('9'),

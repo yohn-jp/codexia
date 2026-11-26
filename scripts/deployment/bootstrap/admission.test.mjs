@@ -127,7 +127,7 @@ const backendImage = 'ghcr.io/yohn-jp/codexia-backend@sha256:' + 'c'.repeat(64);
 const ledger = [{ version: '0001-initial.sql', checksum: 'd'.repeat(64) }];
 const installation = { clusterId: '123', databaseOid: '456', image: backendImage };
 
-function observedSetup(database, backend = { state: 'absent' }, intent = 'install') {
+function observedSetup(database, backend = { state: 'absent' }, intent = 'install', frontendReady = false) {
   const origin = 'https://example.invalid';
   const publicConfig = frontendOAuthConfigIdentity({
     VITE_CODEXIA_OAUTH_ISSUER: origin + '/api/auth',
@@ -150,8 +150,10 @@ function observedSetup(database, backend = { state: 'absent' }, intent = 'instal
       observedAt: at, topology, backend, transaction: null,
       database: { state: 'initialized', clusterId: installation.clusterId, ledger, ...database },
     },
-    edge: { observedAt: at, origin, ingressDigest: 'sha256:' + hash, fence: { enabled: false },
-      deployment: null, frontendState: 'absent', frontend: null, backend: null },
+    edge: { observedAt: at, origin, ingressDigest: 'sha256:' + hash,
+      deployment: frontendReady ? { versionId: 'version' } : null, frontendState: frontendReady ? 'running' : 'absent',
+      frontend: frontendReady ? { format: 'codexia-frontend-identity/v1', version: '1.0.0', sourceSha: 'b'.repeat(40),
+        profile: 'full', apiEpoch: 2, oauthConfigIdentity: publicConfig } : null, backend: null },
     candidateBackend: { image: backendImage, verifiedMainSha: 'a'.repeat(40), identity: {
       format: 'codexia-backend-identity/v1', version: '1.0.0', sourceSha: 'a'.repeat(40),
       profile: 'full', platform: 'linux/amd64', migrationFingerprint: migrationSetFingerprint(ledger),
@@ -310,7 +312,7 @@ test('Preflight admits resuming activation preparation without owner reissuance 
   assert.deepEqual(admitBootstrap({ ...afterSettings, mode: 'prepare-activation' }), {
     route: 'R5', stages: [], installIntent: false,
   });
-  const prepared = observedSetup({ ...enrolled, authState: 'ready', settingsSha256: hash });
+  const prepared = observedSetup({ ...enrolled, authState: 'ready', settingsSha256: hash }, { state: 'absent' }, 'install', true);
   assert.equal(prepared.plan.candidateRoute, 'R6');
   assert.equal(prepared.plan.route, 'R0');
   assert.ok(prepared.plan.blockers.includes('missing-preservation-evidence'));
@@ -320,7 +322,7 @@ test('Preflight admits resuming activation preparation without owner reissuance 
 test('R5 normal frontend publication requires protected canonical ingress and an observed identity', () => {
   const candidate = { format: 'codexia-frontend-identity/v1', sourceSha: 'a'.repeat(40),
     version: '1.2.3', profile: 'full', apiEpoch: 3 };
-  const empty = { routesReady: true, publicProtocolEnabled: false, fence: { enabled: false },
+  const empty = { routesReady: true, publicProtocolEnabled: false, 
     backend: null, frontendState: 'absent', deployment: null, frontend: null };
   assert.equal(initialFrontendNeedsPublication(empty, candidate), true);
   assert.throws(() => assertInitialFrontendReady(empty, candidate), /certified candidate/u);
@@ -330,7 +332,7 @@ test('R5 normal frontend publication requires protected canonical ingress and an
   assert.equal(initialFrontendNeedsPublication({ ...deployed, frontend: { ...candidate, version: '1.2.2' } }, candidate), true);
   assert.throws(() => initialFrontendNeedsPublication({ ...deployed, frontend: { ...candidate, version: '1.2.4' } }, candidate), /older/u);
   for (const changed of [
-    { routesReady: false }, { publicProtocolEnabled: true }, { fence: { enabled: true } },
+    { routesReady: false }, { publicProtocolEnabled: true },
     { backend: {} }, { frontendState: 'unknown' },
   ]) assert.throws(() => initialFrontendNeedsPublication({ ...empty, ...changed }, candidate));
 });

@@ -60,7 +60,7 @@ export function ownerSetupFrontendBindings(identity, origin) {
 /** R5 has its own exact-plan admission; the ordinary release gate is unchanged. */
 export function initialFrontendNeedsPublication(edge, candidate) {
   assert.ok(edge?.routesReady && edge.publicProtocolEnabled === false &&
-    edge.fence?.enabled === false && edge.backend === null,
+    edge.backend === null,
   'Initial frontend requires protected canonical ingress and no ordinary API writer');
   if (edge.frontendState === 'absent') {
     assert.equal(edge.deployment, null, 'Frontend absence must be positively observed');

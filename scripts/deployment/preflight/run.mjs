@@ -120,14 +120,14 @@ async function certifiedAuthSchemas(sourceSha) {
 
 export async function readLifecycleCandidate(request) {
   runBinding();
-  const { verifyCutoverBackendPublication } = await import('../handoff/verify-push.mjs');
-  const { verifyCutoverFrontendArtifact } = await import('../../verification/artifacts/frontend.mjs');
+  const { verifyLifecycleBackendPublication } = await import('../handoff/verify-push.mjs');
+  const { verifyLifecycleFrontendArtifact } = await import('../../verification/artifacts/frontend.mjs');
   const { selectReleaseSource } = await import('../../release/components/source-gate.mjs');
   const main = await mainSource();
-  const backend = await verifyCutoverBackendPublication(request.backendPublisherRunId);
+  const backend = await verifyLifecycleBackendPublication(request.backendPublisherRunId);
   const candidateBackend = backend.fullCertificate;
   const authSchemas = await certifiedAuthSchemas(candidateBackend.verifiedMainSha);
-  const candidateFrontend = await verifyCutoverFrontendArtifact(request.frontend, {
+  const candidateFrontend = await verifyLifecycleFrontendArtifact(request.frontend, {
     expectedEpoch: candidateBackend.identity.apiEpoch,
   });
   const gitSync = (...args) => execFileSync('git', args, { encoding: 'utf8', timeout: 60_000 });
@@ -137,7 +137,7 @@ export async function readLifecycleCandidate(request) {
   if (request.priorBackendPublisherRunId === request.backendPublisherRunId) priorBackend = candidateBackend;
   else if (request.priorBackendPublisherRunId) {
     try {
-      priorBackend = (await verifyCutoverBackendPublication(request.priorBackendPublisherRunId)).fullCertificate;
+      priorBackend = (await verifyLifecycleBackendPublication(request.priorBackendPublisherRunId)).fullCertificate;
     } catch { /* normalized plan retains the unverified-source blocker */ }
   }
   await mainSource();
@@ -170,15 +170,15 @@ async function planObservation({ bootstrapMode } = {}) {
     const host = receipt.host;
     assert.equal(host.format, 'codexia-lifecycle-host/v1');
     stage = 'edge-observation';
-    const { createCloudflareCutover } = await import('../../release/cutover/cloudflare.mjs');
-    const config = JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET);
-    assert.ok(config && Object.keys(config).every(key => ['accountId','zoneId','tunnelId','fenceRuleId',
-      'acceptance','authorPolicyId','ciPolicyId','tunnelTeamName','publicProtocolEnabled'].includes(key)),
+    const { createDeploymentEdge } = await import('../../release/frontend/initial-publication.mjs');
+    const config = JSON.parse(env.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET);
+    assert.ok(config && Object.keys(config).every(key => ['accountId','zoneId','tunnelId',
+      'authorPolicyId','ciPolicyId','tunnelTeamName','publicProtocolEnabled'].includes(key)),
     'Invalid protected Cloudflare target');
-    const edgeReader = createCloudflareCutover({
+    const edgeReader = createDeploymentEdge({
       ...config,
       origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
-      readToken: env.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN,
+      readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN,
       ...(bootstrapMode === 'publish-frontend' ? { workerToken: env.CLOUDFLARE_API_TOKEN } : {}),
     });
     let edge = null;
@@ -194,7 +194,7 @@ async function planObservation({ bootstrapMode } = {}) {
     const result = planFromObservations({ host, edge, hostPinSha256: receipt.hostPinSha256,
       candidateBackend, candidateFrontend, authSchemas, priorBackend: candidate.priorBackend,
       intent: request.intent, window: request.window ?? null,
-      preservationReceipt: readPreservationEvidence(env.CODEXIA_CUTOVER_PRESERVATION, host) });
+      preservationReceipt: readPreservationEvidence(env.CODEXIA_DEPLOYMENT_PRESERVATION, host) });
     await mainSource();
     if (bootstrapMode) {
       stage = 'bootstrap-admission';
@@ -218,7 +218,6 @@ async function planObservation({ bootstrapMode } = {}) {
       });
       if (bootstrapMode === 'publish-frontend') {
         assert.equal(env.CODEXIA_INITIAL_FRONTEND_APPROVAL, 'PUBLISH_INITIAL_FRONTEND');
-        assert.notEqual(env.CODEXIA_EPOCH_CUTOVER_PAUSED, 'true', 'Production deployment is paused');
         assert.equal(request.intent, 'install');
         assert.ok(env.CLOUDFLARE_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID === config.accountId,
           'Canonical Worker publication credential and account must match the protected target');
