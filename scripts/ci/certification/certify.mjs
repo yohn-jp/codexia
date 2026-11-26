@@ -5,10 +5,9 @@ import { appendFile, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { CERTIFICATION_DEPENDENCIES } from '../impact/contract.mjs';
 import { validateVerificationPlan, assertExactPrImpact, readVerificationFiles } from '../impact/plan.mjs';
-import { assertDeploymentFixtureJobs, assertPlanEvidence } from '../evidence/validation.mjs';
+import { assertPlanEvidence } from '../evidence/validation.mjs';
 import { assertProfileArtifactEvidence } from '../evidence/profile-artifact.mjs';
 import { resolveProducerJobAttempts } from '../evidence/artifact-selection.mjs';
-import { deploymentImpactForSource } from '../impact/migration-contracts.mjs';
 import { assertReusedCoverageProof } from '../evidence/proof-reuse.mjs';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
@@ -59,10 +58,6 @@ if (rootReports.length === 1) {
   }
 }
 assertPlanEvidence(plan, jobs, reports);
-assertDeploymentFixtureJobs(jobs, await deploymentImpactForSource({
-  event: plan.event, sha: plan.sha,
-  base: plan.event === 'pull_request' ? process.env.CODEXIA_EXPECTED_BASE : process.env.CODEXIA_PUSH_BASE,
-}));
 const reusedCoverageReports = reports.filter(report => report.results?.some(result => result.inputProof?.reusedFrom));
 assert.ok(reusedCoverageReports.length <= 1, 'Duplicate task proof consumption reports');
 if (reusedCoverageReports.length === 1) {

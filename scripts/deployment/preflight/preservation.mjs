@@ -1,4 +1,4 @@
-import { digestEvidence } from './coordinator.mjs';
+import { digestEvidence } from './evidence-digest.mjs';
 
 const hash = /^[a-f0-9]{64}$/u;
 
@@ -7,7 +7,7 @@ const hash = /^[a-f0-9]{64}$/u;
 export function readPreservationEvidence(raw, host) {
   if (!raw) return null;
   const evidence = JSON.parse(raw);
-  if (!evidence || evidence.format !== 'codexia-cutover-preservation/v1' ||
+  if (!evidence || evidence.format !== 'codexia-deployment-preservation/v1' ||
       evidence.sourceHostId !== host?.hostId || evidence.databaseSha256 !== digestEvidence(host?.database ?? null) ||
       !hash.test(evidence.independentBackupEvidenceSha256 ?? '') ||
       Object.keys(evidence).length !== 4) return null;

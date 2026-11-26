@@ -80,14 +80,14 @@ esac
 STUB
 chmod +x "$scratch/bin/"*
 
-if ! result="$(bash ./cutover-observe.sh)"; then
+if ! result="$(bash ./preflight-writer-observe.sh)"; then
   echo 'Expected a complete read-only observation for the canonical running writer' >&2
   exit 1
 fi
 node - "$result" <<'JS'
 const assert = require('node:assert/strict');
 const result = JSON.parse(process.argv[2]);
-assert.equal(result.format, 'codexia-cutover-host-observation/v1');
+assert.equal(result.format, 'codexia-writer-observation/v1');
 assert.match(result.observedAt, /^\d{4}-\d\d-\d\dT/);
 assert.match(result.hostId, /^[a-f0-9]{64}$/);
 assert.equal(result.writer.containerId, process.env.TEST_WRITER_ID);
@@ -117,13 +117,13 @@ expect_denial() {
   fi
 }
 
-expect_denial env TEST_IMAGE_BINDING="ghcr.io/yohn-jp/codexia-backend@sha256:$(printf 'e%.0s' {1..64})" bash ./cutover-observe.sh
-expect_denial env TEST_LEDGER='[]' bash ./cutover-observe.sh
-expect_denial env TEST_OWNER_MATCH=f bash ./cutover-observe.sh
-expect_denial env TEST_AUTH_DATABASE_URL='postgres://codexia_auth_runtime:fixture@unreviewed.example:5432/codexia' bash ./cutover-observe.sh
+expect_denial env TEST_IMAGE_BINDING="ghcr.io/yohn-jp/codexia-backend@sha256:$(printf 'e%.0s' {1..64})" bash ./preflight-writer-observe.sh
+expect_denial env TEST_LEDGER='[]' bash ./preflight-writer-observe.sh
+expect_denial env TEST_OWNER_MATCH=f bash ./preflight-writer-observe.sh
+expect_denial env TEST_AUTH_DATABASE_URL='postgres://codexia_auth_runtime:fixture@unreviewed.example:5432/codexia' bash ./preflight-writer-observe.sh
 
-expect_denial env TEST_EXTRA_WRITER=true bash ./cutover-observe.sh
-expect_denial env TEST_TUNNEL_EXISTS=false bash ./cutover-observe.sh
+expect_denial env TEST_EXTRA_WRITER=true bash ./preflight-writer-observe.sh
+expect_denial env TEST_TUNNEL_EXISTS=false bash ./preflight-writer-observe.sh
 
-stopped_tunnel="$(TEST_TUNNEL_UNIT=inactive TEST_TUNNEL_EXISTS=false bash ./cutover-observe.sh)"
+stopped_tunnel="$(TEST_TUNNEL_UNIT=inactive TEST_TUNNEL_EXISTS=false bash ./preflight-writer-observe.sh)"
 node -e 'require("node:assert/strict").deepEqual(JSON.parse(process.argv[1]).tunnel, {unitState:"inactive",containerRunning:false})' "$stopped_tunnel"

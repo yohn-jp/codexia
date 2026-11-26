@@ -1,7 +1,7 @@
 # 初期デプロイの遷移設計
 
 新規 VM を Ansible で構成し、Cloudflare Workers の `/console/setup` から登録キーと Passkey で初回所有者を登録する。
-本書は、新規 VM の構築から PostgreSQL、本人認証、API の公開までの状態、遷移、停止条件を定める規範的設計である。[本番Deploymentライフサイクル](DEPLOYMENT-LIFECYCLE.md) が全状態の経路選択、初回pair activation、保守・復旧・排他の横断契約を所有する。
+本書は、新規 VM の構築から PostgreSQL、本人認証、API の公開までの状態、遷移、停止条件を定める規範的設計である。[本番Deploymentライフサイクル](DEPLOYMENT-LIFECYCLE.md) が全状態の経路選択、初回Backend activation、保守・復旧・排他の横断契約を所有する。
 SSH ポートフォワード方式も移行中の運用手順として利用できる。[システム基本設計](../architecture/SYSTEM-DESIGN.md) [IaC](IAC.md) [Push deployment](PUSH-DEPLOYMENT.md) [Ansible 運用](../../deploy/ansible/README.md) [認証初期化](../../deploy/ansible/AUTH-RUNTIME.md)
 
 ## 初期構築・公開までの状態遷移
@@ -29,9 +29,9 @@ flowchart TD
     CLIENT -->|不整合| STOP3["停止: 本番公開しない<br/>登録結果の再検証"]
     CLIENT -->|準備完了| PREP["保護されたactivation preparation<br/>setup-only停止・初回本番配備承認待ち"]
     RESTORED --> PREP
-    PREP --> CERT{"認証済みmain Full digest/証明書<br/>DB/認証/バックアップ/公開承認OK?"}
+    PREP --> CERT{"認証済みmain Full digest/証明書<br/>互換Frontend・DB/認証/バックアップ/公開承認OK?"}
     CERT -->|いいえ| STOP4["停止: セットアップ以外の業務APIは公開しない"]
-    CERT -->|はい| DEPLOY["保護された初回activation・暗号化backup<br/>互換UIならdeploy / 未配備・非互換ならpair経路"]
+    CERT -->|はい| DEPLOY["保護された初回activation・暗号化backup<br/>互換UIを再確認してBackend deploy"]
     DEPLOY --> HEALTH{"API・認証・Tunnel・UI正常?"}
     HEALTH -->|いいえ| STOP5["停止/切戻し・transaction復旧<br/>owner DBは初期化しない"]
     HEALTH -->|はい| ACT["setup APIの登録権限を無効化<br/>通常のownerログイン・/consoleへ"]

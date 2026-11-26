@@ -5,10 +5,10 @@ set -euo pipefail
 deny() { printf '%s\n' "$1" >&2; exit 1; }
 
 [[ $# == 0 && "$(id -un)" == codexia && "${HOME:-}" == /* ]] ||
-  deny 'Cutover observation requires the canonical codexia SSH identity'
+  deny 'Writer observation requires the canonical codexia SSH identity'
 lock="$HOME/.local/state/codexia-deploy/host.lock"
 [[ -f "$lock" && ! -L "$lock" && -d "$HOME/.local/share/containers/storage" ]] ||
-  deny 'Cutover observation requires the existing rootless runtime and deployment lock'
+  deny 'Writer observation requires the existing rootless runtime and deployment lock'
 exec 9<"$lock"
 flock --shared --nonblock 9 || deny 'A deployment or backup is holding the host lock'
 
@@ -209,7 +209,7 @@ try {
   requireEvidence(observeWriter() === firstWriter && digest(privateFile(unit)) === quadletSha256 &&
     systemd('ActiveState', 'codexia-tunnel.service') === unitState && tunnelIsRunning() === containerRunning);
   console.log(JSON.stringify({
-    format: 'codexia-cutover-host-observation/v1',
+    format: 'codexia-writer-observation/v1',
     observedAt: new Date().toISOString(),
     host,
     hostId: hash(machineId),
@@ -218,7 +218,7 @@ try {
     tunnel: { unitState, containerRunning },
   }));
 } catch {
-  console.error(`Cutover host observation failed: ${stage}`);
+  console.error(`Writer observation failed: ${stage}`);
   process.exitCode = 1;
 }
 NODE

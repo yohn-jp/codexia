@@ -2,7 +2,7 @@
 
 > A pristine approved VM supports browser enrollment through `/console/setup` and a restricted setup-only API. The legacy SSH-forward procedure remains available during the transition. Both enrollment procedures lead to the separately approved production activation. [Initial deployment](INITIAL-DEPLOYMENT-FLOW.md) · [Enrollment procedure](../../deploy/ansible/AUTH-RUNTIME.md#first-owner-through-the-browser)
 
-**Normative lifecycle diagrams:** [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) owns cross-component route selection, initial pair activation, incompatible cutover, shared exclusion and resumption. [Pristine VM / first owner activation](INITIAL-DEPLOYMENT-FLOW.md) and [Certified compatible update / rollback](UPDATE-FLOW.md). The owner enrollment, candidate admission and interruption semantics below must be read as implementations of those transitions, not as an alternative design.
+**Normative lifecycle diagrams:** [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) owns cross-component route selection, first Backend activation, incompatible-release refusal, shared exclusion and resumption. [Pristine VM / first owner activation](INITIAL-DEPLOYMENT-FLOW.md) and [Certified compatible update / rollback](UPDATE-FLOW.md). The owner enrollment, candidate admission and interruption semantics below must be read as implementations of those transitions, not as an alternative design.
 
 The backend release workflow publishes Core and Full images by immutable OCI digest and emits certificates bound to successful exact-main verification, the producer artifact and inspected image identities. A separate read-only handoff workflow rechecks the backend publication, artifact receipt and both images before exposing deployment inputs. The production job rechecks the certified backend against current main inside the deployment queue, connects to the `yohnark.github` tailnet using GitHub OIDC, checks the pinned SSH host key for the declared VM, verifies the live UI epoch and Access boundary, and runs Ansible as `codexia`. Cloudflare Tunnel remains the application ingress; it is not used for VM management.
 
@@ -76,7 +76,7 @@ For a prepared owner, open [Production Access Preflight](../../.github/workflows
 - `deployment.approval` contains that digest as `planSha256` and the approved `grants` array `["first-install","database-use","publication"]`.
 - `artifacts` contains the same `backendPublisherRunId` and `frontend` artifact reference used by Preflight.
 
-The protected job uses the existing production queue, Access checks and Backend deployment transaction. It reverifies both certified artifacts, the live deployment and the independent preservation reference from the production Environment. Before applying the candidate it rechecks the host, logical database and prepared owner under the shared host lock. Use [coordinated pair activation](#coordinated-pair-activation-and-cutover) when the deployed Frontend is missing or incompatible.
+The protected job uses the existing production queue, Access checks and Backend deployment transaction. It reverifies both certified artifacts, the live deployment and the independent preservation reference from the production Environment. Before applying the candidate it rechecks the host, logical database and prepared owner under the shared host lock. If the deployed Frontend is missing or incompatible, stop without mutation and reobserve R5 completion. Do not invoke a coordinated pair activation.
 
 Ansible verifies the staged private settings and protected Podman secrets, takes the encrypted backup, and verifies the owner, registered clients, API resources and introspection credentials before installing the candidate. The API repeats the client and credential checks on startup.
 
@@ -88,13 +88,11 @@ Inspect the target data and retain an independent backup before adopting an exis
 
 ## Database and schema maintenance boundary
 
-After initial schema creation, image-only `deploy` supports only an unchanged migration fingerprint, API epoch, and persistence format. The owning migration change needs an independently reviewed and explicitly approved procedure that defines a pre-change encrypted backup, migration execution and verification, and a tested restore path. The [isolated restore drill](BACKUP.md#verify-a-candidate-ledger-on-a-restored-backup) can verify the candidate ledger against a restored backup copy. PostgreSQL roles and Podman secrets require separate recovery. Production activation remains subject to the compatibility gates and the separately approved paired activation procedure below.
+After initial schema creation, image-only `deploy` supports only an unchanged migration fingerprint, API epoch, and persistence format. The owning migration change needs an independently reviewed and explicitly approved procedure that defines a pre-change encrypted backup, migration execution and verification, and a tested restore path. The [isolated restore drill](BACKUP.md#verify-a-candidate-ledger-on-a-restored-backup) can verify the candidate ledger against a restored backup copy. PostgreSQL roles and Podman secrets require separate recovery. Production activation remains subject to the compatibility gates and the existing protected first Backend activation or compatible update path.
 
-## Coordinated pair activation and cutover
+## Incompatible release refusal
 
-Use [protected pair maintenance](EPOCH-CUTOVER.md) to activate a first pair or apply a registered incompatible release transition. When both components are already compatible, use the ordinary release lanes. First-install and database-use approvals apply to a clean, owner-prepared API slot. Changes to an installed release use the maintenance and recovery approvals.
-
-An old authentication installation that needs a new owner uses a separately approved clean target and registered data transfer. For an existing Better Auth owner who has lost a device, use [device-loss recovery](../../deploy/ansible/AUTH-RUNTIME.md#existing-owner-device-loss-recovery).
+There is no coordinated pair or epoch-transition deployment path. Refuse an incompatible installed environment without modifying its writer, database or owner. A separately authorized clean install is available only after positively observing database absence; existing-data recovery remains a distinct operation.
 
 ## Acceptance order
 

@@ -31,7 +31,6 @@ jobs:
       oci: ${{ steps.taskproof.outputs.oci || steps.select.outputs.oci }}
       browser: ${{ steps.taskproof.outputs.browser || steps.select.outputs.browser }}
       full_model_oci: ${{ steps.select.outputs.full_model_oci }}
-      deployment_fixtures: ${{ steps.migrations.outputs.fixtures }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -54,11 +53,6 @@ jobs:
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/ci/impact/plan.mjs
-      - name: Validate compatibility changes and select deployment fixtures
-        id: migrations
-        env:
-          CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: node scripts/ci/impact/migration-contracts.mjs
       - name: Install frozen CI evidence dependencies
         run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
       - name: Resolve exact-base task input proof
@@ -92,16 +86,6 @@ jobs:
       actions: read
       pull-requests: read
     uses: ./.github/workflows/full-model-oci-acceptance.yml
-  deployment_cutover:
-    name: deployment-cutover
-    needs:
-      - plan
-    if: needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && needs.plan.outputs.deployment_fixtures != '[]'
-    permissions:
-      contents: read
-    uses: ./.github/workflows/epoch-cutover-fixture.yml
-    with:
-      fixtures: ${{ needs.plan.outputs.deployment_fixtures }}
   biome:
     name: biome
     needs:
@@ -651,7 +635,6 @@ jobs:
     if: ${{ always() && !cancelled() }}
     needs:
       - plan
-      - deployment_cutover
       - biome
       - unit
       - types

@@ -4,7 +4,7 @@ import { appendFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { selectReleaseSource } from '../../release/components/source-gate.mjs';
-import { createHandoffDeploymentOutputs, verifyCutoverBackendPublication } from '../handoff/verify-push.mjs';
+import { createHandoffDeploymentOutputs, verifyLifecycleBackendPublication } from '../handoff/verify-push.mjs';
 import { assertDeploymentPlanApproval, assertDeploymentPlanBinding } from '../preflight/plan.mjs';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 
@@ -63,7 +63,7 @@ async function main(stage, env) {
   const request = parsePreflightRequest(JSON.stringify({ ...input.artifacts, intent: deployment.plan.intent,
     window: deployment.plan.window }));
   if (stage === 'certify') {
-    const release = createHandoffDeploymentOutputs(await verifyCutoverBackendPublication(request.backendPublisherRunId));
+    const release = createHandoffDeploymentOutputs(await verifyLifecycleBackendPublication(request.backendPublisherRunId));
     await appendFile(env.GITHUB_OUTPUT, `full-image=${release.fullImage}\nfull-api-epoch=${release.fullApiEpoch}\n` +
       `verified-main-sha=${release.verifiedMainSha}\nproducer-sha=${release.producerSha}\nfull-certificate=${release.fullCertificate}\n`);
     return;
@@ -71,22 +71,22 @@ async function main(stage, env) {
 
   assert.equal(stage, 'admit');
   assert.equal(env.CODEXIA_FIRST_ACTIVATION_APPROVAL, 'ACTIVATE_CODEXIA_BACKEND');
-  const { createCloudflareCutover } = await import('../../release/cutover/cloudflare.mjs');
+  const { createDeploymentEdge } = await import('../../release/frontend/initial-publication.mjs');
   const { planFromObservations } = await import('../preflight/observe.mjs');
-  const { readPreservationEvidence } = await import('../cutover/preservation.mjs');
+  const { readPreservationEvidence } = await import('../preflight/preservation.mjs');
   const releases = await readLifecycleCandidate(request);
   assert.deepEqual(releases.candidateBackend, JSON.parse(Buffer.from(env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, 'base64')),
     'Reverified backend certificate differs from the verified deployment handoff');
   const { host, hostPinSha256 } = await readLifecycleHost({
     inventory: join(env.RUNNER_TEMP, 'codexia-first-activation-inventory.yml'), targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST,
   });
-  const edge = await createCloudflareCutover({ ...JSON.parse(env.CODEXIA_CUTOVER_CLOUDFLARE_TARGET),
+  const edge = await createDeploymentEdge({ ...JSON.parse(env.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET),
     origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
-    readToken: env.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN,
+    readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN,
   }).observeLifecycle({ backendExpected: host.backend.state === 'running' });
   const { plan: current } = planFromObservations({ host, edge, hostPinSha256, ...releases,
     intent: request.intent, window: request.window,
-    preservationReceipt: readPreservationEvidence(env.CODEXIA_CUTOVER_PRESERVATION, host) });
+    preservationReceipt: readPreservationEvidence(env.CODEXIA_DEPLOYMENT_PRESERVATION, host) });
   const evidence = admitBackendActivation({ deployment, current, host, flags: {
     initialInstall: env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
     databaseUse: env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',

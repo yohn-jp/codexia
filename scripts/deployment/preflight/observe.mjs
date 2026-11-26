@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
-import { digestEvidence } from '../cutover/coordinator.mjs';
-import { resolveMigrationContracts } from '../cutover/transitions.mjs';
+import { digestEvidence } from './evidence-digest.mjs';
 import { parsePublicFrontendConfigIdentity } from '../../build/frontend/oauth-config.mjs';
 import { validateBackendIdentity } from '../../release/backend/update-identity.mjs';
 import { assertFrontendIdentity, assertFrontendReleaseAdmission } from '../../release/frontend/verify-compatibility.mjs';
@@ -70,7 +69,7 @@ function stateDatabase(database, target, intent) {
 // supplied state, certificate body, digest-only backup claim or transition.
 export function planFromObservations({ host, edge, hostPinSha256, candidateBackend,
   candidateFrontend, authSchemas, priorBackend = null, intent, window = null,
-  preservationReceipt = null, resolveTransition = resolveMigrationContracts, now = new Date() }) {
+  preservationReceipt = null, now = new Date() }) {
   assert.ok(rawHash.test(hostPinSha256));
   const installed = host?.backend;
   const installedCertificate = installed?.state === 'running' && installed.writer.image === candidateBackend.image
@@ -85,7 +84,6 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
   const state = { ...unknown };
   const changeAxes = [];
   let frontendAdmission = 'unknown';
-  let source = null;
   const blockers = [];
   if (host?.format === 'codexia-lifecycle-host/v1' && rawHash.test(host.hostId ?? '')) {
     state.M = host.M;
@@ -102,8 +100,6 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       const identity = validateBackendIdentity(writer.identity);
       assert.equal(identity.profile, 'full');
       assert.ok(image.test(writer.image));
-      source = { backend: identity, image: writer.image, authMode: writer.authMode,
-        authSchemaSha256: host.database?.authSchemaSha256 ?? null };
       if (!installedCertificate || installedCertificate.image !== writer.image ||
           !isDeepStrictEqual(installedCertificate.identity, identity)) {
         blockers.push('unverified-installed-backend-publication');
@@ -147,8 +143,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
     }
     if (state.H !== 'ready' && state.H !== 'unknown') changeAxes.push('infrastructure');
   }
-  if (edge && taggedHash.test(edge.ingressDigest ?? '') && typeof edge.fence?.enabled === 'boolean') {
-    if (edge.fence.enabled && state.T === 'none') state.T = 'unknown'; // Orphan fence: no implicit authorization.
+  if (edge && taggedHash.test(edge.ingressDigest ?? '')) {
     if (edge.frontendState === 'absent' && edge.deployment === null) {
       state.F = 'absent';
       changeAxes.push('frontend');
@@ -161,7 +156,6 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       if (!compatibleOAuth && !changeAxes.includes('oauth-contract')) {
         changeAxes.push('oauth-contract');
       }
-      if (source) source.frontend = publicFrontendEvidence(deployed);
       state.F = deployed.apiEpoch === desired.apiEpoch && compatibleOAuth
         ? 'compatible' : 'incompatible';
       try {
@@ -201,7 +195,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
         owner: host.database.ownerBindingSha256 ?? null, settings: host.database.settingsSha256 ?? null } : null),
       backendSha256: hash(host ? { observed: host.backend, publication: hash(installedCertificate) } : null), frontendSha256: hash(edge ? {
         state: edge.frontendState, deployment: edge.deployment, identity: publicFrontendEvidence(edge.frontend) } : null),
-      ingressSha256: hash(edge ? { origin: edge.origin, ingressDigest: edge.ingressDigest, fence: edge.fence } : null),
+      ingressSha256: hash(edge ? { origin: edge.origin, ingressDigest: edge.ingressDigest } : null),
       transactionSha256: host ? digestEvidence(host.transaction) : null,
       infrastructureSha256: host ? digestEvidence({ state: host.H, topology: host.topology }) : null,
       // Only an authenticated preservation receipt can be supplied by the
@@ -213,14 +207,10 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       host.backend.writer.identity.migrationFingerprint !== migrationSetFingerprint(host.database.ledger)) {
     blockers.push('writer-ledger-identity-mismatch');
   }
-  const matches = resolveTransition({ source, target: targetIdentity, state, changeAxes: observation.changeAxes });
-  assert.ok(Array.isArray(matches), 'Invalid transition resolution');
-  if (matches.length > 1) blockers.push('ambiguous-transition');
-  const transition = matches.length === 1 ? matches[0] : null;
-  const result = createDeploymentPlan({ observation, target, intent, window, transition, now, evidenceBlockers: blockers });
+  const result = createDeploymentPlan({ observation, target, intent, window, now, evidenceBlockers: blockers });
   return { ...result, evidence: {
     host, edge: edge ? { observedAt: edge.observedAt, origin: edge.origin, deployment: edge.deployment,
-      fence: edge.fence, ingressDigest: edge.ingressDigest, frontendState: edge.frontendState,
+      ingressDigest: edge.ingressDigest, frontendState: edge.frontendState,
       routesReady: edge.routesReady, publicProtocolEnabled: edge.publicProtocolEnabled,
       frontend: publicFrontendEvidence(edge.frontend), backend: edge.backend } : null,
     sourceBackendCertificateSha256: hash(installedCertificate),

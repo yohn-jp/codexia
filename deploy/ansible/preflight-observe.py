@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Supplement the canonical Ansible inspect and cutover observations.
+"""Supplement the canonical Ansible inspect and writer observations.
 
 Only existing files, containers, systemd state and read-only SQL are queried.
 No Podman storage initialization, image pull, owner operation or backup creation.
@@ -86,33 +86,21 @@ def user_exists(name):
 
 def observe_transaction(state_dir):
     require(metadata(state_dir / "backup-transaction") is None)
-    journals = []
-    for name, expected, phases in (
-        ("deploy-transaction.json", "codexia-deploy-transaction/v1", ("pending", "committed")),
-        ("cutover-transaction.json", "codexia-cutover-host/v1",
-         ("intent", "quiescing", "checkpointed", "activating", "candidate-ready", "candidate-tunnel",
-          "candidate-publishing", "recovering", "safe-stopped", "prior-ready", "prior-tunnel", "prior-publishing")),
-    ):
-        path = state_dir / name
-        if metadata(path) is None:
-            continue
+    # No retired operation can be interpreted or resumed by ordinary deployment.
+    require(metadata(state_dir / "cutover-transaction.json") is None)
+    path = state_dir / "deploy-transaction.json"
+    if metadata(path) is not None:
         data = json.loads(private_text(path))
-        require(data.get("format") == expected and data.get("phase") in phases)
-        if expected == "codexia-cutover-host/v1":
-            require(isinstance(data.get("plan"), dict)
-                    and re.fullmatch(r"[a-f0-9]{64}", data["plan"].get("planSha256", ""))
-                    and type(data.get("requiresRestore")) is bool)
-        else:
-            require(all(type(data.get(k)) is bool for k in
-                        ("hadUnit", "tunnelWasActive", "apiLinkCreated", "tunnelLinkCreated", "releasePresent")))
-        journals.append({"format": expected, "phase": data["phase"], "sha256": digest(data)})
-    require(len(journals) <= 1)
+        require(data.get("format") == "codexia-deploy-transaction/v1"
+                and data.get("phase") in ("pending", "committed"))
+        require(all(type(data.get(k)) is bool for k in
+                    ("hadUnit", "tunnelWasActive", "apiLinkCreated", "tunnelLinkCreated", "releasePresent")))
+        return {"format": "codexia-deploy-transaction/v1", "phase": data["phase"], "sha256": digest(data)}
     # An orphan temporary journal or rollback snapshot is not proof of a clean slot.
-    if not journals:
-        for name in ("deploy-transaction.json.tmp", "deployed-release.json.tmp",
-                     "rollback-api.container", "rollback-release.json"):
-            require(metadata(state_dir / name) is None)
-    return journals[0] if journals else None
+    for name in ("deploy-transaction.json.tmp", "deployed-release.json.tmp",
+                 "rollback-api.container", "rollback-release.json"):
+        require(metadata(state_dir / name) is None)
+    return None
 
 
 def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_query, volume_layout,
@@ -314,7 +302,7 @@ def observe():
         residues = [units / "codexia-api.container", units / "default.target.wants/codexia-api.service",
                     state_dir / "deployed-release.json"]
         # The activation symlink is expected on an installed system; presence is
-        # enough to rule out a clean slot, and its target is checked by cutover.
+        # enough to rule out a clean slot, and its target is checked by writer observation.
         residue = any(os.path.lexists(p) for p in residues)
         storage = home / ".local/share/containers/storage"
         store = metadata(storage)

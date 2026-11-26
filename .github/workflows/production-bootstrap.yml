@@ -48,6 +48,9 @@ on:
       - deploy/ansible/test_owner_setup.py
       - deploy/ansible/auth-runtime*
       - deploy/ansible/preflight-observe*
+      - deploy/ansible/preflight-writer-observe.sh
+      - deploy/ansible/test-preflight-writer-observe.sh
+      - scripts/release/frontend/initial-publication*.mjs
       - scripts/deployment/bootstrap/**
       - scripts/deployment/preflight/**
       - deploy/ansible/site.yml
@@ -91,7 +94,10 @@ jobs:
             "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i deploy/ansible/inventory.example.yml "deploy/ansible/$playbook.yml" --syntax-check
           done
 
-      - name: Reject bootstrap between durable cutover phases
+      - name: Verify read-only writer observation
+        run: bash deploy/ansible/test-preflight-writer-observe.sh
+
+      - name: Reject bootstrap when a retired transaction remains
         run: |
           set -euo pipefail
           fixture=$(mktemp -d)
@@ -105,7 +111,7 @@ jobs:
             exit 1
           fi
           cat "$fixture/result"
-          grep -F 'An unfinished coordinated cutover must be recovered before ordinary convergence.' "$fixture/result"
+          grep -F 'Retired deployment journal requires explicit operator recovery before ordinary convergence.' "$fixture/result"
           if grep -F 'TASK [Converge the rootless host account and dependencies]' "$fixture/result"; then exit 1; fi
 
   runtime-identity:
@@ -161,7 +167,6 @@ jobs:
           REQUESTED_SHA: ${{ inputs.main_sha }}
           BOOTSTRAP_MODE: ${{ inputs.mode }}
           BOOTSTRAP_ENABLED: ${{ vars.CODEXIA_BOOTSTRAP_ENABLED }}
-          CODEXIA_EPOCH_CUTOVER_PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
           DATABASE_GATE: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED }}
           INIT_REQUESTED: ${{ inputs.initialize_database }}
           PLAN_SHA256: ${{ inputs.plan_sha256 }}
@@ -179,7 +184,6 @@ jobs:
             [[ "$INIT_REQUESTED" == false ]]
             exit 0
           fi
-          [[ "${CODEXIA_EPOCH_CUTOVER_PAUSED:-}" != true ]] || { echo 'Bootstrap is paused for coordinated API epoch maintenance.' >&2; exit 1; }
           [[ "$BOOTSTRAP_ENABLED" == true && "$PLAN_SHA256" =~ ^[a-f0-9]{64}$ && "$PREFLIGHT_RUN" =~ ^[1-9][0-9]{0,15}$ && -n "$LIFECYCLE_REQUEST" ]] || {
             echo 'Protected enablement and reviewed lifecycle plan are required.' >&2; exit 1;
           }
@@ -311,8 +315,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_PREFLIGHT_REQUEST: ${{ inputs.request }}
-          CODEXIA_CUTOVER_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_CUTOVER_CLOUDFLARE_TARGET }}
-          CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN }}
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}

@@ -32,7 +32,7 @@ function fixture() {
         authSchemaSha256: schema, ownerBindingSha256: 'sha256:' + h('d') },
       backend: { state: 'running', writer: { image: image('d'), identity, authMode: 'better-auth' } } },
     edge: { observedAt: now.toISOString(), origin: 'https://example.test', ingressDigest: 'sha256:' + h('e'),
-      fence: { enabled: false }, deployment: { versionId: 'version-one' }, frontendState: 'running',
+      deployment: { versionId: 'version-one' }, frontendState: 'running',
       frontend, backend: { name: 'codexia', version: '1.0.0', profile: 'full', apiEpoch: 2, standaloneOAuth: true } },
     hostPinSha256: h('f'), candidateBackend, candidateFrontend: { identity: frontend, artifactDigest: h('1'),
       runId: 1, verifyRunId: 2, artifactId: 3 }, priorBackend: candidateBackend, authSchemas: [schema],
@@ -75,7 +75,6 @@ test('verified missing logical database selects approved fresh bootstrap, not an
   assert.equal(plan.candidateRoute, 'R4');
   assert.deepEqual(plan.blockers, ['approval-required']);
   assert.deepEqual(plan.requiredApprovals, ['bootstrap', 'database-initialization']);
-  assert.equal(plan.requiresTransition, false);
   assert.equal(plan.observation.state.F, 'incompatible');
   f.intent = 'update';
   assert.equal(planFromObservations(f).plan.candidateRoute, 'R0');
@@ -104,6 +103,8 @@ test('verified empty and partial infrastructure, owner setup, first activation a
   assert.deepEqual(planFromObservations(f).plan.blockers, ['approval-required']);
   f.host.backend = { state: 'absent' };
   f.host.database.authState = 'ready';
+  assert.equal(planFromObservations(f).plan.candidateRoute, 'R0');
+  f.edge = { ...fixture().edge, backend: null };
   const activation = planFromObservations(f).plan;
   assert.equal(activation.candidateRoute, 'R6');
   assert.equal(activation.route, 'R0');
@@ -111,11 +112,11 @@ test('verified empty and partial infrastructure, owner setup, first activation a
   const ui = fixture();
   absentFrontend(ui);
   ui.priorBackend = null;
-  assert.equal(planFromObservations(ui).plan.candidateRoute, 'R7');
-  assert.deepEqual(planFromObservations(ui).plan.blockers, ['approval-required']);
+  assert.equal(planFromObservations(ui).plan.candidateRoute, 'R0');
+  assert.ok(planFromObservations(ui).plan.blockers.includes('state-or-intent-not-admitted'));
   assert.equal(planFromObservations(ui).plan.requiresPreservation, false);
 });
-test('epoch-only transition is distinct from persistence, schema and auth changes', () => {
+test('noncompatible epoch, persistence and auth changes are observed but never admitted', () => {
   const f = fixture();
   const prior = { ...f.priorBackend, image: image('9'),
     identity: { ...f.priorBackend.identity, version: '0.9.0', apiEpoch: 1 } };
@@ -124,16 +125,12 @@ test('epoch-only transition is distinct from persistence, schema and auth change
   f.edge.backend = { ...f.edge.backend, apiEpoch: 1, version: '0.9.0' };
   f.edge.frontend = { ...f.edge.frontend, apiEpoch: 1, version: '0.9.0' };
   const blocked = planFromObservations(f).plan;
-  assert.equal(blocked.candidateRoute, 'R7');
+  assert.equal(blocked.candidateRoute, 'R0');
   assert.equal(blocked.route, 'R0');
-  assert.ok(blocked.blockers.includes('unsupported-transition'));
+  assert.ok(blocked.blockers.includes('state-or-intent-not-admitted'));
   assert.deepEqual(blocked.observation.changeAxes, ['backend', 'frontend', 'api-epoch']);
-  f.resolveTransition = () => [{ contractSha256: h('7'), dataConversion: false }];
   f.preservationReceipt = { verified: true };
-  assert.equal(planFromObservations(f).plan.candidateRoute, 'R7');
-  assert.deepEqual(planFromObservations(f).plan.blockers, ['approval-required']);
-  f.resolveTransition = () => [{ contractSha256: h('7'), dataConversion: false }, { contractSha256: h('8'), dataConversion: false }];
-  assert.ok(planFromObservations(f).plan.blockers.includes('ambiguous-transition'));
+  assert.equal(planFromObservations(f).plan.candidateRoute, 'R0');
   const legacy = fixture();
   legacy.host.backend.writer = { image: prior.image, identity: { ...prior.identity, persistenceFormat: 1 }, authMode: 'legacy' };
   legacy.priorBackend = { ...prior, identity: legacy.host.backend.writer.identity };
@@ -141,22 +138,22 @@ test('epoch-only transition is distinct from persistence, schema and auth change
   legacy.edge.backend = { ...f.edge.backend, standaloneOAuth: false };
   legacy.edge.frontend = f.edge.frontend;
   const migration = planFromObservations(legacy).plan;
-  assert.equal(migration.candidateRoute, 'R3');
+  assert.equal(migration.candidateRoute, 'R0');
   assert.ok(migration.observation.changeAxes.includes('persistence-format'));
   assert.ok(!migration.observation.changeAxes.includes('sql-ledger'));
   assert.equal(migration.observation.state.D, 'incompatible');
   assert.ok(migration.observation.changeAxes.includes('auth-mode'));
   const changed = fixture();
   changed.host.database.authSchemaSha256 = 'sha256:' + h('6');
-  assert.equal(planFromObservations(changed).plan.candidateRoute, 'R3');
+  assert.equal(planFromObservations(changed).plan.candidateRoute, 'R0');
   assert.ok(planFromObservations(changed).plan.observation.changeAxes.includes('auth-schema'));
 });
-test('unknown edge, contradictory identity, orphan fence, unverified publication and recovery never authorize changes', () => {
+test('unknown edge, contradictory identity, unverified publication and recovery never authorize changes', () => {
   for (const change of [
     f => { f.edge = null; },
     f => { f.edge.frontendState = 'unknown'; },
     f => { f.edge.backend.version = '0.1.0'; },
-    f => { f.edge.fence.enabled = true; },
+    f => { f.edge.ingressDigest = null; },
     f => {
       f.priorBackend = null;
       f.candidateBackend = { ...f.candidateBackend, image: image('9'),

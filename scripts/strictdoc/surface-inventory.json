@@ -35,16 +35,6 @@
     },
     {
       "kind": "ansibleSource",
-      "id": "deploy/ansible/cutover-host.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/cutover-observe.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
       "id": "deploy/ansible/deploy-lifecycle-fixture.yml",
       "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
     },

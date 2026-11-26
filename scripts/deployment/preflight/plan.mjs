@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { digestEvidence } from '../cutover/coordinator.mjs';
+import { digestEvidence } from './evidence-digest.mjs';
 
 // Normalized observations are produced by trusted read-only adapters, not by a
 // workflow dispatch request. Unknown is distinct from positively observed absence.
@@ -16,7 +16,7 @@ const axes = Object.keys(STATES);
 const intents = ['install', 'adopt', 'update', 'maintenance', 'restore'];
 const systems = Object.freeze({
   R0: null, R1: 'recovery', R2: 'recovery', R3: 'recovery',
-  R4: 'bootstrap', R5: 'bootstrap', R6: 'bootstrap', R7: 'cutover', R8: 'update',
+  R4: 'bootstrap', R5: 'bootstrap', R6: 'bootstrap', R8: 'update',
 });
 const hashPattern = /^[a-f0-9]{64}$/u;
 const changes = Object.freeze(['backend', 'frontend', 'api-epoch', 'oauth-contract',
@@ -24,7 +24,7 @@ const changes = Object.freeze(['backend', 'frontend', 'api-epoch', 'oauth-contra
 const mutationApprovals = Object.freeze({
   R0: [], R1: ['recovery'], R2: ['recovery'], R3: ['maintenance'],
   R4: ['bootstrap'], R5: ['owner-enrollment'], R6: ['first-install', 'database-use', 'publication'],
-  R7: ['maintenance'], R8: [],
+  R8: [],
 });
 
 function requireCondition(condition, message) {
@@ -72,8 +72,8 @@ export function selectRoute(state, intent, frontendAdmission, bootstrapResume = 
   if (['absent', 'pristine'].includes(D) &&
       (['ready', 'legacy', 'unprepared'].includes(A) || ['setup', 'compatible', 'incompatible'].includes(B))) return 'R0';
   if (['compatible', 'incompatible'].includes(B) && ['absent', 'pending', 'unprepared'].includes(A)) return 'R0';
-  if (H === 'drift' || D === 'incompatible' || ['legacy', 'incompatible', 'recovery'].includes(A) ||
-      B === 'fault' || F === 'fault') return 'R3';
+  if (D === 'incompatible' || ['legacy', 'incompatible'].includes(A) || B === 'incompatible') return 'R0';
+  if (H === 'drift' || A === 'recovery' || B === 'fault' || F === 'fault') return 'R3';
   if (bootstrapResume && intent === 'install' && H === 'ready' && D === 'compatible' &&
       A === 'absent' && B === 'absent') return 'R4';
   if (['absent', 'partial'].includes(H) || ['absent', 'pristine'].includes(D) || A === 'absent') {
@@ -89,11 +89,10 @@ export function selectRoute(state, intent, frontendAdmission, bootstrapResume = 
       ['absent', 'setup'].includes(B) ? 'R5' : 'R0';
   }
   if (A !== 'ready' || H !== 'ready' || D !== 'compatible') return 'R0';
-  if (B === 'absent') return 'R6';
-  if (B === 'incompatible' || F === 'absent') return 'R7';
+  if (B === 'absent') return F === 'compatible' ? 'R6' : 'R0';
+  if (F === 'absent') return 'R0';
   if (F === 'incompatible') {
     if (frontendAdmission === 'allowed') return 'R8';
-    if (frontendAdmission === 'denied') return 'R7';
     return 'R0';
   }
   return frontendAdmission === 'allowed' ? 'R8' : 'R0';
@@ -145,23 +144,17 @@ function validateWindow(window) {
 
 // This is a planning interface, not an approval issuer. The caller must supply
 // evidence from existing authenticated release and state observers. A digest
-// establishes identity, not the authenticity of evidence. The transition
-// resolution is provided by the same static resolver the executor will use.
+// establishes identity, not the authenticity of evidence.
 export function createDeploymentPlan({ observation, target, intent, window = null,
-  transition = null, now = new Date(), maxAgeMs = 5 * 60_000, evidenceBlockers = [] }) {
+  now = new Date(), maxAgeMs = 5 * 60_000, evidenceBlockers = [] }) {
   validateObservation(observation);
   validateTarget(target);
   assertFreshObservationTime(observation.observedAt, { now, maxAgeMs });
   if (window !== null) validateWindow(window);
-  if (transition !== null) {
-    requireCondition(record(transition, ['contractSha256', 'dataConversion']) &&
-      typeof transition.contractSha256 === 'string' && hashPattern.test(transition.contractSha256) &&
-      typeof transition.dataConversion === 'boolean', 'Invalid resolved transition');
-  }
   const candidateRoute = selectRoute(observation.state, intent, observation.frontendAdmission, observation.bootstrapResume !== undefined);
   const { binding, state } = observation;
   const knownBlockers = ['unverified-installed-backend-publication', 'stale-backend-candidate',
-    'stale-or-conflicting-frontend-candidate', 'writer-ledger-identity-mismatch', 'ambiguous-transition', 'recovery-plan-required'];
+    'stale-or-conflicting-frontend-candidate', 'writer-ledger-identity-mismatch', 'recovery-plan-required'];
   requireCondition(Array.isArray(evidenceBlockers) && evidenceBlockers.every(reason => knownBlockers.includes(reason)) &&
     new Set(evidenceBlockers).size === evidenceBlockers.length, 'Invalid external evidence blockers');
   const blockers = [...evidenceBlockers].sort();
@@ -173,36 +166,27 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
       !binding.frontendSha256 || !binding.transactionSha256) blockers.push('incomplete-state-evidence');
   const changeAxes = changes.filter(key => observation.changeAxes.includes(key));
   const migrationAxes = ['api-epoch', 'oauth-contract', 'sql-ledger', 'persistence-format', 'auth-schema', 'auth-mode'];
-  const requiresTransition = ['R3', 'R7'].includes(candidateRoute) &&
-    (changeAxes.some(key => migrationAxes.includes(key)) || state.D === 'incompatible' ||
-      ['legacy', 'incompatible'].includes(state.A) || state.B === 'incompatible');
-  if (requiresTransition && !transition) blockers.push('unsupported-transition');
-  if (transition && !requiresTransition) blockers.push('unexpected-transition');
   if (candidateRoute === 'R8' && changeAxes.some(key => migrationAxes.includes(key))) blockers.push('incompatible-ordinary-update');
-  if (transition?.dataConversion && !changeAxes.some(key => ['sql-ledger', 'persistence-format', 'auth-mode'].includes(key))) {
-    blockers.push('unexpected-data-conversion');
-  }
-  const requiresPreservation = ['R6', 'R3', 'R2'].includes(candidateRoute) ||
-    (candidateRoute === 'R7' && (changeAxes.includes('backend') || requiresTransition));
+  const requiresPreservation = ['R6', 'R3', 'R2'].includes(candidateRoute);
   if (requiresPreservation && !binding.backupSha256) blockers.push('missing-preservation-evidence');
-  if (['R1', 'R2', 'R3', 'R6', 'R7'].includes(candidateRoute) &&
+  if (['R1', 'R2', 'R3', 'R6'].includes(candidateRoute) &&
       (window === null || timestamp(window.notAfter) < now.getTime())) blockers.push('missing-or-expired-window');
   const requiredApprovals = [...mutationApprovals[candidateRoute]];
   if (candidateRoute === 'R4' && (observation.bootstrapResume || ['absent', 'pristine'].includes(state.D))) {
     requiredApprovals.push('database-initialization');
   }
-  const candidateSystem = candidateRoute === 'R3' && requiresTransition ? 'cutover' : systems[candidateRoute];
+  const candidateSystem = systems[candidateRoute];
   if (requiredApprovals.length) blockers.push('approval-required');
   const route = blockers.length ? 'R0' : candidateRoute;
   const plan = { format: 'codexia-deployment-plan/v1', observation: { ...observation, changeAxes },
     evidenceBlockers: [...evidenceBlockers].sort(),
-    target, intent, window, transition, candidateRoute, candidateSystem, route,
+    target, intent, window, candidateRoute, candidateSystem, route,
     system: route === 'R0' ? null : candidateSystem,
     requiredApprovals, blockers,
     noOp: route === 'R8' && changeAxes.length === 0,
     authorization: 'pending',
     requiredAcceptance: ['identity', 'health', 'access-boundary', 'single-writer', 'data-and-auth'],
-    requiresTransition, requiresPreservation };
+    requiresPreservation };
   return { plan, planSha256: digestEvidence(plan) };
 }
 

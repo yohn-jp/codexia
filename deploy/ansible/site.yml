@@ -52,7 +52,7 @@
       ansible.builtin.include_tasks: inspect.yml
       when: codexia_stage == 'inspect'
 
-    - name: Inspect the durable cutover journal before ordinary convergence
+    - name: Inspect the retired deployment journal before ordinary convergence
       ansible.builtin.stat:
         path: "{{ home }}/.local/state/codexia-deploy/cutover-transaction.json"
         follow: false
@@ -61,14 +61,14 @@
         get_attributes: false
       become: "{{ ansible_facts.user_id != (codexia_service_user | default('codexia')) }}"
       become_user: root
-      register: codexia_cutover_journal
+      register: codexia_retired_journal
       when: codexia_stage in ['bootstrap', 'host', 'secrets', 'base', 'auth-runtime']
 
-    - name: Reject ordinary convergence during durable cutover maintenance
+    - name: Reject ordinary convergence when a retired deployment journal remains
       ansible.builtin.assert:
         that:
-          - not codexia_cutover_journal.stat.exists
-        fail_msg: An unfinished coordinated cutover must be recovered before ordinary convergence.
+          - not codexia_retired_journal.stat.exists
+        fail_msg: Retired deployment journal requires explicit operator recovery before ordinary convergence.
       when: codexia_stage in ['bootstrap', 'host', 'secrets', 'base', 'auth-runtime']
 
     - name: Require the certified browser client before fresh install convergence

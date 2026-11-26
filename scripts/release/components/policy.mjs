@@ -1,4 +1,9 @@
-import { DEPLOYMENT_FIXTURE_CALLER, DEPLOYMENT_FIXTURE_JOB, REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS } from '../../ci/impact/contract.mjs';
+import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS } from '../../ci/impact/contract.mjs';
+
+// Historical publication certificates may contain the retired supplemental lane.
+// Validate its original conclusion; this reader cannot select or execute it.
+const DEPLOYMENT_FIXTURE_CALLER = 'deployment-cutover';
+const DEPLOYMENT_FIXTURE_JOB = DEPLOYMENT_FIXTURE_CALLER + ' / Verify selected deployment fixtures';
 
 /** @typedef {{id: number, head_sha: string, head_branch: string, event: string, status: string, conclusion: string | null}} VerificationRun */
 /** @param {unknown} value @returns {value is Record<string, unknown>} */

@@ -244,10 +244,10 @@ async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = 
 }
 
 /** Verify a selected completed production publisher in a separately approved maintenance run. */
-export async function verifyCutoverBackendPublication(publisherRunId, { env = process.env, fetchImpl = fetch } = {}) {
-  assert.equal(env.GITHUB_REPOSITORY, REPOSITORY, 'Cutover backend repository mismatch');
-  assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Cutover backend verification requires main');
-  assert.ok(positive(publisherRunId), 'Cutover backend publisher run ID is invalid');
+export async function verifyLifecycleBackendPublication(publisherRunId, { env = process.env, fetchImpl = fetch } = {}) {
+  assert.equal(env.GITHUB_REPOSITORY, REPOSITORY, 'Lifecycle backend repository mismatch');
+  assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Lifecycle backend verification requires main');
+  assert.ok(positive(publisherRunId), 'Lifecycle backend publisher run ID is invalid');
   const token = env.GH_TOKEN;
   assert.ok(token, 'Actions read token is required');
   const selected = await githubJson('actions/runs/' + publisherRunId, token, fetchImpl);
