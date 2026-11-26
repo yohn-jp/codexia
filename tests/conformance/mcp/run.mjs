@@ -140,13 +140,23 @@ async function verifyAdmissionError(result, endpoint, token, expectedStatus, exp
 
 // Connect to the actual loopback socket even when the test deliberately forges Host.
 async function discoverWithHeaders(endpoint, token, headers) {
-  const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover' });
+  const body = JSON.stringify({
+    jsonrpc: '2.0', id: 1, method: 'server/discover',
+    params: { _meta: {
+      'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+      'io.modelcontextprotocol/clientInfo': { name: 'codexia-admission-probe', version: '1.0.0' },
+      'io.modelcontextprotocol/clientCapabilities': {},
+    } },
+  });
   return new Promise((resolveRequest, rejectRequest) => {
     const request = httpRequest(endpoint, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+        'MCP-Protocol-Version': '2026-07-28',
+        'Mcp-Method': 'server/discover',
         'Content-Length': Buffer.byteLength(body),
         ...headers,
       },
