@@ -533,6 +533,12 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   const [message, setMessage] = useState('');
   const [panelQuery, setPanelQuery] = useState('');
   const [changing, setChanging] = useState(false);
+  const [panelFocus, setPanelFocus] = useState<{
+    panelId: string;
+    sequence: number;
+    getFocusTarget: WorkspacePanelRequest['getFocusTarget'];
+    isCurrent: () => boolean;
+  }>();
   const changingRef = useRef(false);
   const workspaceRef = useRef<HTMLElement | null>(null);
   const panelMenuRef = useRef<HTMLDetailsElement | null>(null);
@@ -625,25 +631,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       setFloating(current => (isCurrent() ? current.filter(item => item.panelId !== panelId) : current));
       if (getFocusTarget) setMaximizedPanelId(current => (isCurrent() && current !== panelId ? null : current));
       onActivePanelChange?.(panelId);
-      window.requestAnimationFrame(() => {
-        if (!isCurrent()) return;
-        const element = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>('[data-workspace-panel]') ?? []).find(
-          candidate => candidate.dataset.workspacePanel === panelId,
-        );
-        if (!element) return;
-        const focusTarget = getFocusTarget?.(element) ?? element;
-        focusTarget.focus();
-        if (getFocusTarget && document.activeElement !== focusTarget) {
-          window.requestAnimationFrame(() => {
-            if (!isCurrent()) return;
-            const currentPanel = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>('[data-workspace-panel]') ?? []).find(
-              candidate => candidate.dataset.workspacePanel === panelId,
-            );
-            if (!currentPanel) return;
-            (getFocusTarget(currentPanel) ?? currentPanel).focus();
-          });
-        }
-      });
+      setPanelFocus({ panelId, sequence, getFocusTarget, isCurrent });
     };
     void reveal();
   }, [
@@ -658,6 +646,23 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
     changing,
     onActivePanelChange,
   ]);
+
+  useLayoutEffect(() => {
+    if (!panelFocus || requestedPanel?.sequence !== panelFocus.sequence || !panelFocus.isCurrent()) return;
+    // The panel's DOM and any preserved content are available after React commits its layout.
+    const element = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>('[data-workspace-panel]') ?? []).find(
+      candidate => candidate.dataset.workspacePanel === panelFocus.panelId,
+    );
+    if (!element) return;
+    const target = panelFocus.getFocusTarget?.(element) ?? element;
+    target.focus();
+    if (panelFocus.getFocusTarget && document.activeElement !== target) {
+      const frame = window.requestAnimationFrame(() => {
+        if (panelFocus.isCurrent() && target.isConnected) target.focus();
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+  }, [panelFocus, requestedPanel?.sequence]);
 
   const changePreset = (preset: Exclude<WorkspacePreset, 'custom'>): void => {
     void changeLayout(
