@@ -85,6 +85,7 @@ def user_exists(name):
 
 
 def observe_transaction(state_dir):
+    require(metadata(state_dir / "backup-transaction") is None)
     journals = []
     for name, expected, phases in (
         ("deploy-transaction.json", "codexia-deploy-transaction/v1", ("pending", "committed")),

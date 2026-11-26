@@ -720,6 +720,9 @@ run_deploy "$update_key" false
 observe_runtime compatible-update "$update_key"
 set_state compatible_update PASS "$initial_key to $update_key activated the verified digest as the sole healthy API writer"
 
+source "$repo_root/deploy/ansible/test-push-backup-host-lifecycle.sh"
+verify_backup_host_lifecycle "$update_key" "$initial_key"
+
 # Deliberately alter only a disposable image entrypoint to exercise real rollback.
 failed_context="$build_context/failed"
 rootless mkdir -p "$failed_context"

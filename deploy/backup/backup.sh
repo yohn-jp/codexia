@@ -92,6 +92,22 @@ case "$operation" in
     validate_artifact "$2"
     exit 0
     ;;
+  validate-independent-artifact)
+    [[ $# == 3 && "$2" == /* && -d "$2" && ! -L "$2" && "${3%/*}" == "$2" ]] ||
+      die 'Use an artifact on the protected independent mount'
+    mount_id="$(findmnt -M "$2" -n -o ID)" || die 'The approved independent mount is absent'
+    [[ "$mount_id" =~ ^[0-9]+$ && "$(findmnt -T "$3" -n -o ID)" == "$mount_id" ]] ||
+      die 'The artifact is not on the approved independent mount'
+    case "$(findmnt -M "$2" -n -o FSTYPE)" in
+      nfs|nfs4|cifs|fuse.sshfs|sshfs) ;;
+      *) die 'The approved independent destination is not a remote filesystem';;
+    esac
+    digest="$(validate_artifact "$3")"
+    [[ "$(findmnt -M "$2" -n -o ID)" == "$mount_id" && "$(findmnt -T "$3" -n -o ID)" == "$mount_id" ]] ||
+      die 'The independent mount changed during verification'
+    printf '%s\n' "$digest"
+    exit 0
+    ;;
   validate-destination)
     [[ $# == 2 ]] || die 'Usage: validate-destination /absolute/backup/directory'
     backup_directory "$2"

@@ -5,7 +5,7 @@ state_dir="$HOME/.local/state/codexia-deploy"
 unit_dir="$HOME/.config/containers/systemd"
 for marker in "$unit_dir/codexia-api.container" "$unit_dir/default.target.wants/codexia-api.service" \
               "$state_dir"/{deploy-transaction.json,deployed-release.json}{,.tmp} \
-              "$state_dir"/{rollback-api.container,rollback-release.json}; do
+              "$state_dir"/{rollback-api.container,rollback-release.json,backup-transaction}; do
   if [[ -e "$marker" || -L "$marker" ]]; then
     echo "Initial setup requires a clean API target; installation state exists at $marker" >&2
     exit 1

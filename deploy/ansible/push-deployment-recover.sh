@@ -50,7 +50,9 @@ const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (value.format !== 'codexia-deploy-transaction/v1' || !['pending', 'committed'].includes(value.phase) ||
     typeof value.hadUnit !== 'boolean' || typeof value.tunnelWasActive !== 'boolean' ||
     typeof value.apiLinkCreated !== 'boolean' || typeof value.tunnelLinkCreated !== 'boolean' ||
-    typeof value.releasePresent !== 'boolean') process.exit(2);
+    typeof value.releasePresent !== 'boolean' ||
+    (value.backupRunId !== undefined && (typeof value.backupRunId !== 'string' ||
+      !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value.backupRunId)))) process.exit(2);
 let previousImage = '';
 if (value.phase === 'pending' && value.hadUnit) {
   const unitInfo = fs.lstatSync(process.argv[4]);
@@ -77,7 +79,8 @@ if (value.phase === 'pending' && value.hadUnit) {
   previousImage = image;
 }
 process.stdout.write([value.format, value.phase, value.hadUnit, value.tunnelWasActive,
-  value.apiLinkCreated, value.tunnelLinkCreated, value.releasePresent, previousImage || '-'].join('\n'));
+  value.apiLinkCreated, value.tunnelLinkCreated, value.releasePresent,
+  previousImage || '-', value.backupRunId ?? '-'].join('\n'));
 NODE
 )"
 then
@@ -85,7 +88,7 @@ then
   exit 1
 fi
 mapfile -t recovery_fields <<< "$recovery"
-[[ "${recovery_fields[0]:-}" == codexia-deploy-transaction/v1 && ${#recovery_fields[@]} == 8 ]] || {
+[[ "${recovery_fields[0]:-}" == codexia-deploy-transaction/v1 && ${#recovery_fields[@]} == 9 ]] || {
   echo 'Invalid deployment transaction intent' >&2
   exit 1
 }
@@ -226,6 +229,12 @@ fi
 
 if [[ "$tunnel_was_active" == true && "$had_unit" == true ]]; then
   systemctl --user start codexia-tunnel.service
+fi
+if [[ "${recovery_fields[8]}" != '-' ]]; then
+  "$HOME/.local/bin/codexia-backup-control" deploy-interrupted "${recovery_fields[8]}" || {
+    echo 'Backup run reconciliation is pending; deployment recovery state retained' >&2
+    exit 1
+  }
 fi
 
 rm -f -- "$intent" "$intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json"

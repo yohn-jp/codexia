@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const backupProgram = path.join(root, 'deploy/backup/backup.sh');
+const backupRunner = path.join(root, 'deploy/backup/backup-runner.sh');
 const shellQuote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 
 async function createFixture() {
@@ -22,7 +23,7 @@ async function createFixture() {
   await writeFile(lockFile, '');
   const commands = {
     age: '#!/bin/sh\nexit 0\n',
-    findmnt: '#!/bin/sh\nfor format do :; done\ncase "$format" in FSTYPE) printf nfs;; SOURCE) printf 192.0.2.55:/backup;; *) exit 2;; esac\n',
+    findmnt: '#!/bin/sh\nfor format do :; done\ncase "$format" in ID) printf 123;; FSTYPE) printf nfs;; SOURCE) printf 192.0.2.55:/backup;; *) exit 2;; esac\n',
     getent: '#!/bin/sh\nprintf "192.0.2.55 STREAM backup.example 192.0.2.55\\n"\n',
     ip: '#!/bin/sh\nprintf "2: lo inet 127.0.0.1/8 scope host lo\\n"\n',
     podman: '#!/bin/sh\nexit 1\n',
@@ -56,6 +57,84 @@ function invokeBackup(fixture, { activeUnits = '', approved = true, lockFile = f
     },
   });
 }
+
+test('the protected run shares the deploy lock and recovers both services after SIGKILL', async t => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.directory, { recursive: true, force: true }));
+  const run = '1485f702-eb68-4854-979d-fad9fd12d90d';
+  const source = 'a'.repeat(40);
+  const digest = 'sha256:' + 'b'.repeat(64);
+  const manifest = 'c'.repeat(64);
+  const trace = path.join(fixture.directory, 'trace');
+  const localBin = path.join(fixture.home, '.local/bin');
+  await mkdir(localBin, { recursive: true });
+  await Promise.all(['trace', 'api', 'tunnel'].map(name => writeFile(path.join(fixture.directory, name), '')));
+  const scripts = {
+    [path.join(fixture.bin, 'systemctl')]: [
+      'for unit; do :; done',
+      'case "$unit" in codexia-api.service) state="$FIXTURE/api";; codexia-tunnel.service) state="$FIXTURE/tunnel";; *) exit 4;; esac',
+      'case "$2" in is-active) [[ -f "$state" ]] || exit 3;; start) touch "$state";; stop) rm -f "$state";; reset-failed) :;; *) exit 4;; esac',
+    ],
+    [path.join(fixture.bin, 'podman')]: [
+      'case "$*" in',
+      '*update-identity.json) echo \'{"format":"codexia-backend-identity/v1","profile":"full","sourceSha":"' + source + '"}\';;',
+      '*ImageName*) echo ghcr.io/yohn-jp/codexia-backend@' + digest + ';;',
+      '*Health.Status*) [[ -f "$FIXTURE/api" ]] && echo healthy;;',
+      '*) exit 4;; esac',
+    ],
+    [path.join(localBin, 'codexia-backup')]: [
+      'case "$1" in validate-destination) exit 0;; validate-artifact) echo ' + manifest + '; exit 0;; backup-locked) :;; *) exit 2;; esac',
+      '[[ ! -e "$FIXTURE/api" && ! -e "$FIXTURE/tunnel" ]] || exit 2',
+      'echo backup >> "$FIXTURE/trace"',
+      'if [[ "$KILL_RUNNER" == 1 ]]; then kill -KILL "$RUNNER_PID"; exit 137; fi',
+      'archive="$2/codexia-20261126T000000Z-' + run + '"',
+      'mkdir -p "$archive"',
+      'printf "Encrypted backup committed: %s\\nPublished checksum manifest sha256: %s\\n" "$archive" ' + manifest,
+    ],
+    [path.join(localBin, 'codexia-backup-control')]: [
+      'echo "$*" >> "$FIXTURE/trace"',
+      'if [[ "$1" == manual-finish ]]; then',
+      '  [[ -f "$FIXTURE/api" && -f "$FIXTURE/tunnel" ]] || exit 2',
+      '  if [[ "$KILL_UPLOAD" == 1 ]]; then kill -KILL "$RUNNER_PID"; fi',
+      'fi',
+    ],
+  };
+  for (const [file, lines] of Object.entries(scripts)) {
+    await writeFile(file, '#!/bin/bash\n' + lines.join('\n') + '\n');
+    await chmod(file, 0o700);
+  }
+  const env = {
+    ...process.env,
+    HOME: fixture.home,
+    CODEXIA_PUSH_STATE_DIR: fixture.stateDir,
+    CODEXIA_BACKUP_DESTINATION: fixture.backupDestination,
+    CODEXIA_BACKUP_AGE_RECIPIENT: 'age1test',
+    FIXTURE: fixture.directory,
+    PATH: fixture.bin + ':' + process.env.PATH,
+  };
+  const invoke = (setup, args) => spawnSync('bash', [
+    '-c', setup + '\nexport RUNNER_PID=$$\nexec bash "$@"', 'fixture', backupRunner, ...args,
+  ], { encoding: 'utf8', env, timeout: 10_000 });
+  const contention = invoke('exec 8>>"$CODEXIA_PUSH_STATE_DIR/host.lock"; flock -n 8', [run]);
+  assert.equal(contention.status, 75, contention.stderr);
+  assert.equal(await readFile(trace, 'utf8'), '');
+
+  const killed = invoke('export KILL_RUNNER=1', [run]);
+  assert.equal(killed.signal, 'SIGKILL', killed.stderr);
+  assert.deepEqual((await readFile(trace, 'utf8')).trim().split('\n'), ['manual-start ' + run + ' ' + source + ' ' + digest, 'backup']);
+  const recovered = invoke('', ['recover']);
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.match(await readFile(trace, 'utf8'), new RegExp('manual-interrupted ' + run));
+  await Promise.all(['api', 'tunnel'].map(name => readFile(path.join(fixture.directory, name))));
+
+  const transferKilled = invoke('export KILL_UPLOAD=1', [run]);
+  assert.equal(transferKilled.signal, 'SIGKILL', transferKilled.stderr);
+  const completed = invoke('', ['recover']);
+  assert.equal(completed.status, 0, completed.stderr);
+  const transfers = (await readFile(trace, 'utf8')).split('\n').filter(line => line.startsWith('manual-finish '));
+  assert.equal(transfers.length, 2, 'recovery must retry the same run after local publication');
+  assert.equal(transfers[0], transfers[1], 'the run UUID, artifact path and manifest digest remain fixed');
+});
 
 async function installFingerprintBackupCommands(fixture, { database, history }) {
   const dbCalls = path.join(fixture.directory, 'database-fingerprint-calls');
@@ -158,6 +237,14 @@ test('encrypted backup verification accepts read-only artifacts without weakenin
     const verified = invokeValidation(fixture, 'validate-artifact', archive);
     assert.equal(verified.status, 0, verified.stderr);
     assert.match(verified.stdout, /^[a-f0-9]{64}\n$/u);
+    const independent = () => spawnSync('bash', [
+      backupProgram, 'validate-independent-artifact', fixture.backupDestination, archive,
+    ], { encoding: 'utf8', env: { ...process.env, PATH: fixture.bin + ':' + process.env.PATH } });
+    const onRemoteMount = independent();
+    assert.equal(onRemoteMount.status, 0, onRemoteMount.stderr);
+    assert.equal(onRemoteMount.stdout, verified.stdout);
+    await writeFile(path.join(fixture.bin, 'findmnt'), '#!/bin/sh\nfor format do :; done\ncase "$format" in ID) printf 123;; FSTYPE) printf ext4;; *) exit 2;; esac\n');
+    assert.notEqual(independent().status, 0, 'a local filesystem cannot satisfy secondary preservation');
     if (process.getuid?.() !== 0) {
       const unwritable = invokeValidation(fixture, 'validate-destination', archive);
       assert.notEqual(unwritable.status, 0, 'Creating a backup still requires a writable destination');
