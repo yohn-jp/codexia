@@ -964,13 +964,16 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === '1')
     const applicationCheckpoint = await inspectFreshPostgresSchema(databaseUrl);
     assert.equal(applicationCheckpoint.pristine, false);
     assert.match(applicationCheckpoint.fingerprint, /^sha256:[a-f0-9]{64}$/u);
-    const databaseIdentitySql = 'SELECT system_identifier::text || chr(58) || ' +
+    const databaseIdentitySql =
+      'SELECT system_identifier::text || chr(58) || ' +
       '(SELECT oid::text FROM pg_database WHERE datname=current_database()) AS identity FROM pg_control_system()';
     const databaseIdentity = (await database.query<{ identity: string }>(databaseIdentitySql)).rows[0]?.identity;
     assert.match(databaseIdentity ?? '', /^[1-9][0-9]{0,19}:[1-9][0-9]{0,9}$/u);
 
     const password = randomBytes(32).toString('base64url');
-    await database.query(`CREATE ROLE codexia_auth_runtime LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);
+    await database.query(
+      `CREATE ROLE codexia_auth_runtime LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`,
+    );
     createdRole = true;
     await database.query('CREATE SCHEMA codexia_auth AUTHORIZATION codexia_auth_runtime');
     const authNamespaceCheckpoint = await database.query<{ pristine: boolean }>(`
@@ -983,8 +986,7 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === '1')
         AND NOT EXISTS (SELECT FROM pg_type t WHERE t.typnamespace=n.oid) AS pristine
       FROM pg_namespace n WHERE n.nspname='codexia_auth'
     `);
-    assert.equal(authNamespaceCheckpoint.rows[0]?.pristine, true,
-      'interrupted R4 checkpoint must be an empty auth namespace');
+    assert.equal(authNamespaceCheckpoint.rows[0]?.pristine, true, 'interrupted R4 checkpoint must be an empty auth namespace');
     const runtimeDatabase = new URL(databaseUrl);
     runtimeDatabase.username = 'codexia_auth_runtime';
     runtimeDatabase.password = password;
