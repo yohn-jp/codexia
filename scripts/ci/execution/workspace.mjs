@@ -334,7 +334,10 @@ async function checkCoverage() {
   const actualWorkspacePaths = ['app'];
   for (const area of ['packages', 'modules']) {
     const entries = await readdir(path.join(root, area), { withFileTypes: true });
-    actualWorkspacePaths.push(...entries.filter((entry) => entry.isDirectory()).map((entry) => `${area}/${entry.name}`));
+    for (const entry of entries.filter((candidate) => candidate.isDirectory())) {
+      const packageEntries = await readdir(path.join(root, area, entry.name));
+      if (packageEntries.includes('package.json')) actualWorkspacePaths.push(`${area}/${entry.name}`);
+    }
   }
   const declaredPaths = WORKSPACES.map(({ path: workspacePath }) => workspacePath);
   const missingTargets = actualWorkspacePaths.filter((workspacePath) => !declaredPaths.includes(workspacePath));
