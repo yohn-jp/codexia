@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { confirmAssertion, mergeKnowledgeEntities, validateKnowledgeGraph, type Assertion, type KnowledgeEdge, type KnowledgeGraph, type KnowledgeNode } from "./knowledge/index.js";
+import { confirmAssertion, validateKnowledgeGraph, type Assertion, type KnowledgeEdge, type KnowledgeGraph, type KnowledgeNode } from "./knowledge/index.js";
 import {
   advanceProjectSourceRevision,
   advanceSourceRevision,
@@ -98,88 +98,6 @@ test("author confirmation does not erase negation or uncertainty in an assertion
   assert.equal(confirmedSpeculation.status, "confirmed");
   assert.equal(confirmedSpeculation.modality, "possible");
   assert.equal(speculative.status, "proposed", "confirmation returns a new assertion");
-});
-
-test("explicit entity merge keeps history, relations and references without confirming mentions", () => {
-  const personA = authorNode("person-a", "佐藤", ["さとう"]);
-  const personB = authorNode("person-b", "佐藤", ["サトウ"]);
-  const place = { ...authorNode("place-1", "図書館"), type: "location" };
-  const edge: KnowledgeEdge = {
-    id: "edge-1",
-    sourceNodeId: personA.id,
-    targetNodeId: place.id,
-    type: "visits",
-    attributes: { frequency: "often" },
-    status: "canonical",
-    provenance: { kind: "author", authorId: "author-1" },
-  };
-  const knowledge = emptyKnowledge([personA, personB, place], [edge]);
-  validateKnowledgeGraph(knowledge);
-
-  let evidence = advanceSourceRevision({
-    graph: createEvidenceGraph("project-1"),
-    revision: revision("r1", null, 10),
-    changes: [],
-  });
-  const sourceAnchor = createTextAnchor({
-    graph: evidence,
-    id: "anchor-sato",
-    documentId: "doc-1",
-    revisionId: "r1",
-    fromUtf16: 0,
-    toUtf16: 2,
-    quoteHash: "sato-hash",
-  });
-  evidence = {
-    ...evidence,
-    anchors: [sourceAnchor],
-    assertions: [{
-      id: "assertion-place",
-      proposition: { subjectEntityId: personA.id, predicate: "visits", object: { kind: "entity", entityId: place.id } },
-      modality: "possible",
-      perspective: { kind: "character", entityId: personA.id },
-      status: "proposed",
-      provenance: { kind: "analysis", extractor: "parser", extractorVersion: "1", sourceRevisionId: "r1", confidence: 0.6 },
-    }],
-  };
-  const dictionary = buildMentionDictionary([personA, personB]);
-  const candidate = findMentionCandidates(dictionary, "佐藤が来た。")[0]!;
-  const mention: Mention = createMentionFromCandidate({
-    id: "mention-sato",
-    anchorId: "anchor-sato",
-    sourceRevisionId: "r1",
-    candidate,
-  });
-  evidence = { ...evidence, mentions: [mention] };
-  assert.equal(mention.status, "ambiguous");
-
-  const result = mergeKnowledgeEntities({
-    knowledge,
-    evidence,
-    fromNodeId: personA.id,
-    intoNodeId: personB.id,
-    authorId: "author-1",
-  });
-  const merged = result.knowledge.nodes.find((node) => node.id === personA.id)!;
-  const survivor = result.knowledge.nodes.find((node) => node.id === personB.id)!;
-  assert.equal(merged.status, "merged");
-  assert.equal(merged.mergedIntoId, personB.id);
-  assert.equal(merged.mergedBy, "author-1");
-  assert.ok(survivor.aliases.includes("さとう"));
-  assert.ok(survivor.aliases.includes("サトウ"));
-  assert.equal(result.knowledge.edges[0]?.sourceNodeId, personB.id);
-  assert.deepEqual(result.evidence.mentions[0]?.candidateNodeIds, [personB.id]);
-  assert.equal(result.evidence.mentions[0]?.status, "candidate");
-  assert.equal(result.evidence.mentions[0]?.resolvedNodeId, undefined);
-  assert.equal(result.evidence.assertions[0]?.proposition.subjectEntityId, personB.id);
-  assert.equal(result.evidence.assertions[0]?.modality, "possible");
-
-  const index = buildReferenceIndex(result.knowledge, result.evidence);
-  const references = findReferencesToNode(index, personB.id);
-  assert.ok(references.some((reference) => reference.relation === "edge-source"));
-  assert.ok(references.some((reference) => reference.relation === "mention"));
-  assert.ok(references.some((reference) => reference.relation === "assertion-subject"));
-  assert.equal(findReferencesToNode(index, personA.id).length, references.length);
 });
 
 test("source revision changes rebase safe anchors and stale changed evidence until orphaned", () => {
@@ -301,7 +219,7 @@ test("reverse index does not infer assertions from mentions and confirms only se
   assert.throws(() => confirmMention(mention, "person-c", "author-1"), /not a candidate/);
 });
 
-test("analysis cannot directly mark a node canonical and entity merges require an author", () => {
+test("graph validation and confirmation reject invalid provenance, status, and scope", () => {
   const analysisNode: KnowledgeNode = {
     ...authorNode("person-proposed", "Ari"),
     status: "canonical",
@@ -309,9 +227,6 @@ test("analysis cannot directly mark a node canonical and entity merges require a
   };
   assert.throws(() => validateKnowledgeGraph(emptyKnowledge([analysisNode])), /author confirmation/);
   const knowledge = emptyKnowledge([authorNode("one", "One"), authorNode("two", "Two")]);
-  const evidence = createEvidenceGraph("project-1");
-  assert.throws(() => mergeKnowledgeEntities({ knowledge, evidence, fromNodeId: "one", intoNodeId: "two", authorId: "" }), /author/);
-  assert.throws(() => mergeKnowledgeEntities({ knowledge, evidence, fromNodeId: "one", intoNodeId: "one", authorId: "author-1" }), /itself/);
   assert.throws(() => confirmAssertion({
     id: "assertion-1",
     proposition: { subjectEntityId: "one", predicate: "is", object: { kind: "value", value: true } },

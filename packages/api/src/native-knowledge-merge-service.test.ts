@@ -5,7 +5,7 @@ import type { AssertionId, EvidenceId, KnowledgeAliasId, KnowledgeNodeId, Knowle
 import { PersistenceError } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { approveNativeChangeSet, applyNativeChangeSet } from "./native-knowledge-service.js";
-import { applyKnowledgeMerge } from "./knowledge-merge.js";
+import { applyKnowledgeMerge } from "@codexia/persistence-postgres/knowledge-merge";
 import { previewNativeKnowledgeMerge, proposeNativeKnowledgeMerge } from "./native-knowledge-merge-service.js";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
@@ -25,6 +25,7 @@ test("native Knowledge merge is one approved transaction with stable receipt and
   const thirdId = randomUUID() as KnowledgeNodeId;
   const relationId = randomUUID() as KnowledgeRelationId;
   const evidenceId = randomUUID() as EvidenceId;
+  const proposedEvidenceId = randomUUID() as EvidenceId;
   const assertionId = randomUUID() as AssertionId;
   await persistence.transaction(async tx => {
     const document = await tx.createDocument({ projectId: project.id, kind: "scene", title: "Scene", orderKey: "0001", markdown: "The source appears.", authorId: "author", idempotencyKey: randomUUID() });
@@ -32,10 +33,13 @@ test("native Knowledge merge is one approved transaction with stable receipt and
     await tx.saveKnowledgeNode({ projectId: project.id, id: targetId, type: "character", name: "Target", attributes: {}, status: "confirmed", expectedVersion: null });
     await tx.saveKnowledgeNode({ projectId: project.id, id: thirdId, type: "character", name: "Third", attributes: {}, status: "confirmed", expectedVersion: null });
     await tx.saveKnowledgeAlias({ projectId: project.id, id: randomUUID() as KnowledgeAliasId, nodeId: sourceId, surface: "S", normalized: "s", scope: null, status: "confirmed" });
+    await tx.saveKnowledgeAlias({ projectId: project.id, id: randomUUID() as KnowledgeAliasId, nodeId: targetId, surface: "T", normalized: "t", scope: null, status: "confirmed" });
     await tx.saveKnowledgeRelation({ projectId: project.id, id: relationId, sourceId, targetId: thirdId, type: "knows", attributes: {}, validity: {}, status: "confirmed", expectedVersion: null });
     await tx.saveEvidenceAnchor({ projectId: project.id, id: evidenceId, documentId: document.document.id, revisionId: document.revision.id, fromUtf16: 0, toUtf16: 3, quoteSha256: createHash("sha256").update("The").digest("hex"), status: "confirmed", expectedVersion: null });
     await tx.saveMentionLink({ projectId: project.id, evidenceId, nodeId: sourceId, status: "confirmed", source: "extractor", confidence: 1, extractorVersion: null });
-    await tx.saveAssertion({ projectId: project.id, id: assertionId, proposition: { nodeId: sourceId, predicate: "appears" }, modality: "certain", perspective: "author", narrativeTime: {}, confidence: null, status: "confirmed", expectedVersion: null });
+    await tx.saveEvidenceAnchor({ projectId: project.id, id: proposedEvidenceId, documentId: document.document.id, revisionId: document.revision.id, fromUtf16: 4, toUtf16: 10, quoteSha256: createHash("sha256").update("source").digest("hex"), status: "confirmed", expectedVersion: null });
+    await tx.saveMentionLink({ projectId: project.id, evidenceId: proposedEvidenceId, nodeId: sourceId, status: "proposed", source: "extractor", confidence: 0.6, extractorVersion: null });
+    await tx.saveAssertion({ projectId: project.id, id: assertionId, proposition: { nodeId: sourceId, predicate: "appears" }, modality: "possible", perspective: "author", narrativeTime: {}, confidence: null, status: "proposed", expectedVersion: null });
   });
   const projectVersion = (await persistence.read(reader => reader.getProject(project.id)))!.version;
   const preview = await previewNativeKnowledgeMerge(persistence, project.id, sourceId, targetId, projectVersion);
@@ -82,7 +86,7 @@ test("native Knowledge merge is one approved transaction with stable receipt and
   assert.equal(rolledBack.source?.status, "confirmed");
   assert.equal(rolledBack.target?.version, 1);
   assert.equal(rolledBack.sourceAliases.length, 1);
-  assert.equal(rolledBack.targetAliases.length, 0);
+  assert.deepEqual(rolledBack.targetAliases.map(alias => alias.surface), ["T"]);
   assert.equal(rolledBack.records.length, 0);
   assert.equal(rolledBack.relation?.sourceId, sourceId);
   assert.equal(rolledBack.mentionLinks.length, 1);
@@ -103,10 +107,12 @@ test("native Knowledge merge is one approved transaction with stable receipt and
     source: await reader.getKnowledgeNode(project.id, sourceId), target: await reader.getKnowledgeNode(project.id, targetId),
     aliases: await reader.listKnowledgeAliases(project.id, targetId), records: await reader.listModuleRecords(project.id, "core.knowledge-merge"),
     relation: (await reader.listKnowledgeRelations(project.id, targetId))[0], mentions: await reader.listMentionLinks(project.id, evidenceId),
+    proposedMentions: await reader.listMentionLinks(project.id, proposedEvidenceId),
     assertion: await reader.getAssertion(project.id, assertionId), anchor: await reader.getEvidenceAnchor(project.id, evidenceId), history: await reader.listEvidenceHistory(project.id, evidenceId),
   }));
   assert.equal(after.source?.status, "retired");
-  assert.ok(after.aliases.some(alias => alias.surface === "S"));
+  assert.equal(after.source?.attributes.mergedInto, targetId);
+  assert.deepEqual(after.aliases.map(alias => alias.surface).sort(), ["S", "Source", "T"]);
   assert.equal(after.records.length, 1);
   assert.equal(after.records[0]?.key, mergeResult.auditId);
   assert.equal(after.records[0]?.value.authorId, "author");
@@ -118,7 +124,12 @@ test("native Knowledge merge is one approved transaction with stable receipt and
   assert.equal(submissionReplay.changeSet.status, "applied");
   assert.equal(after.relation?.sourceId, targetId);
   assert.deepEqual(after.mentions.map(link => link.nodeId).sort(), [sourceId, targetId].sort());
+  assert.ok(after.mentions.every(link => link.status === "confirmed"));
+  assert.deepEqual(after.proposedMentions.map(link => link.nodeId).sort(), [sourceId, targetId].sort());
+  assert.ok(after.proposedMentions.every(link => link.status === "proposed"));
   assert.equal(after.assertion?.proposition.nodeId, targetId);
+  assert.equal(after.assertion?.modality, "possible");
+  assert.equal(after.assertion?.status, "proposed");
   assert.equal(after.anchor?.revisionId, after.history[0]?.revisionId);
 });
 

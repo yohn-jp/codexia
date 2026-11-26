@@ -1,6 +1,5 @@
 export { KnowledgeGraphError, confirmAssertion, confirmKnowledgeEdge, confirmKnowledgeNode, resolveKnowledgeNodeId, validateKnowledgeGraph } from "./graph.js";
 export { normalizeKnowledgeName, normalizeKnowledgeSurface } from "./identity.js";
-export { mergeKnowledgeEntities, type MergeKnowledgeEntitiesInput, type MergeKnowledgeEntitiesResult } from "./merge.js";
 export type {
   AnalysisProvenance,
   Assertion,
