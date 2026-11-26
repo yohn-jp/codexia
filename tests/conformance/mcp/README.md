@@ -21,4 +21,4 @@ CODEXIA_MCP_CONFORMANCE_DATABASE_URL='postgres://test-user:test-password@127.0.0
   node --import tsx tests/conformance/mcp/run.mjs
 ```
 
-The runner creates a fresh subdirectory under `CODEXIA_CI_REPORT_DIR`, which defaults to the ignored `test-results/conformance/mcp`. Open `report.json` for the outcome and use the remainder of that subdirectory for official CLI logs and checks. Unsuccessful required checks cause a nonzero exit.
+The runner creates a fresh subdirectory under `CODEXIA_CI_REPORT_DIR`, which defaults to the ignored `test-results/conformance/mcp`. Open `report.json` for the outcome and use the remainder of that subdirectory for official CLI logs and checks. The scenario summary records successful scenarios with official warnings as `SUCCESS_WITH_WARNINGS`. The authorization summary is partial when the executed checks pass and the DNS-rebinding check is excluded. Required failures and exclusions cause a nonzero exit.

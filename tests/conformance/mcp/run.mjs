@@ -120,7 +120,11 @@ async function runOfficialScenario({ target, url, scenario, classification, reas
   const hasFailingCheck = Boolean(checks?.some(check => check.status === 'FAILURE'));
   const hasPassingBehaviorCheck = Boolean(checks?.some(check =>
     !['wire-schema-valid', 'wire-schema-harness-error'].includes(check.id) && check.status === 'SUCCESS'));
-  const status = result.code !== 0 || hasFailingCheck ? 'FAILURE' : skipped ? 'SKIPPED' : hasPassingBehaviorCheck ? 'SUCCESS' : checks?.length ? 'NO_PASSING_CHECK' : 'NO_REPORT';
+  let status = 'NO_REPORT';
+  if (result.code !== 0 || hasFailingCheck) status = 'FAILURE';
+  else if (skipped) status = 'SKIPPED';
+  else if (hasPassingBehaviorCheck) status = checks.some(check => check.status === 'WARNING') ? 'SUCCESS_WITH_WARNINGS' : 'SUCCESS';
+  else if (checks?.length) status = 'NO_PASSING_CHECK';
   const toolCount = scenario === 'tools-list' ? checks?.find(check => check.id === 'tools-list')?.details?.toolCount : undefined;
   return {
     target, classification, scenario, ...(reason ? { reason } : {}), force,
@@ -144,15 +148,15 @@ async function runOfficialMatrix(target, url, rawRoot) {
       rawRoot, force: true,
     }));
   }
-  const failuresInRequired = required.filter(item => item.status !== 'SUCCESS');
+  const eligibleRequiredPassed = required.every(item => item.status === 'SUCCESS' || item.status === 'SUCCESS_WITH_WARNINGS');
   const counts = items => items.reduce((summary, item) => ({ ...summary, [item.status]: (summary[item.status] ?? 0) + 1 }), {});
   return {
     requirements: '2026-07-28',
     required: { attempted: required.length, counts: counts(required), results: required },
     unscored: { attempted: unscored.length, counts: counts(unscored), results: unscored },
     excluded: excludedScenarios,
-    eligibleRequiredPassed: failuresInRequired.length === 0,
-    fullRequirementSetPassed: failuresInRequired.length === 0 && excludedScenarios.length === 0,
+    eligibleRequiredPassed,
+    fullRequirementSetPassed: eligibleRequiredPassed && excludedScenarios.length === 0,
   };
 }
 
@@ -298,8 +302,8 @@ try {
     manifest: '@modelcontextprotocol/conformance requirements/2026-07-28.yaml',
     ...syntheticConformance,
   };
-  if (!syntheticConformance.eligibleRequiredPassed) failures.push(`official eligible required 2026-07-28 synthetic SDK fixture scenarios failed; see the per-scenario native reports`);
-  if (!syntheticConformance.fullRequirementSetPassed) failures.push('full 2026-07-28 requirement set is not certified because the required dns-rebinding-protection scenario is excluded by task safety scope');
+  if (!syntheticConformance.eligibleRequiredPassed) failures.push('official eligible required 2026-07-28 synthetic SDK fixture scenarios failed; see the per-scenario native reports');
+  if (syntheticConformance.excluded.length) failures.push('full 2026-07-28 requirement set is not certified because the required dns-rebinding-protection scenario is excluded by task safety scope');
 
   mutationFixture = await startProtocolFixture(true);
   const mutationDir = resolve(rawReports, 'official-tools-list-deliberate-mutation');
@@ -383,7 +387,7 @@ try {
     ...productConformance,
   };
   if (!productConformance.eligibleRequiredPassed) failures.push('official eligible required 2026-07-28 live product scenarios failed; see the per-scenario native reports');
-  if (!productConformance.fullRequirementSetPassed) failures.push('full 2026-07-28 product requirement set is not certified because the required dns-rebinding-protection scenario is excluded by task safety scope');
+  if (productConformance.excluded.length) failures.push('full 2026-07-28 product requirement set is not certified because the required dns-rebinding-protection scenario is excluded by task safety scope');
   const productToolListCheck = productConformance.required.results.find(item => item.scenario === 'tools-list');
   evidence.productToolsListScenario = {
     exitCode: productToolListCheck?.exitCode ?? null,
@@ -391,7 +395,9 @@ try {
     toolCount: productToolListCheck?.toolCount ?? null,
     target: 'loopback auth proxy to isolated live Fastify/Core/PostgreSQL MCP endpoint',
   };
-  if (productToolListCheck?.status !== 'SUCCESS') failures.push(`official product tools-list scenario failed (${productToolListCheck?.status ?? 'NO_REPORT'}); see product tools-list report`);
+  if (!['SUCCESS', 'SUCCESS_WITH_WARNINGS'].includes(productToolListCheck?.status)) {
+    failures.push(`official product tools-list scenario failed (${productToolListCheck?.status ?? 'NO_REPORT'}); see product tools-list report`);
+  }
 
   const path = `/mcp?projectId=${encodeURIComponent(liveHost.projectId)}`;
   const httpTarget = ['--transport', 'http', '--server-url', `${liveHost.baseUrl}${path}`];
@@ -515,7 +521,7 @@ try {
   if (rawReports) await guarded('publish native reports', () => publishOfficialEvidence(rawReports));
   if (tempRoot) await guarded('remove fixture directory', () => rm(tempRoot, { recursive: true, force: true }));
   evidence.inspector.status = evidence.inspector.http && evidence.inspector.stdio ? 'PASSED' : 'INCOMPLETE';
-  evidence.authorization.status = ['owner', 'wrongScope', 'expired', 'unassignedProject', 'readScope', 'originPolicy'].every(key => evidence.authorization[key]) ? 'PASSED' : 'INCOMPLETE';
+  evidence.authorization.status = ['owner', 'wrongScope', 'expired', 'unassignedProject', 'readScope', 'originPolicy'].every(key => evidence.authorization[key]) ? 'PARTIAL' : 'INCOMPLETE';
   evidence.authorization.excluded = excludedScenarios;
   evidence.contract.status = evidence.contract.wire ? 'PASSED' : 'INCOMPLETE';
   evidence.stdioProtocolProbe.status = evidence.stdioProtocolProbe.legacy && evidence.stdioProtocolProbe.modern ? 'PASSED' : 'INCOMPLETE';
