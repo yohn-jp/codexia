@@ -37,6 +37,7 @@ export async function planKnowledgeMerge(
   if (sourceId === targetId) throw new PersistenceError('validation', 'Select two different nodes');
   const source = requireValue(await reader.getKnowledgeNode(projectId, sourceId), 'Source Knowledge not found');
   const target = requireValue(await reader.getKnowledgeNode(projectId, targetId), 'Target Knowledge not found');
+  if (source.id === target.id) throw new PersistenceError('validation', 'Select two different nodes');
   const sourceAliases = await reader.listKnowledgeAliases(projectId, sourceId, MAX_ALIAS_INVENTORY);
   const targetAliases = await reader.listKnowledgeAliases(projectId, targetId, MAX_ALIAS_INVENTORY);
   const sourceRelations = await reader.listKnowledgeRelations(projectId, sourceId, MAX_RELATION_INVENTORY);
