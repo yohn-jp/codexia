@@ -243,6 +243,8 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/verification/infrastructure/public-oauth-edge.test.mjs',
   'scripts/release/frontend/verify-compatibility.mjs',
   'scripts/release/frontend/verify-compatibility.test.mjs',
+  'scripts/ios/verify-linux-swift.sh',
+  'scripts/ios/swift-linux-toolchain.json',
 ]);
 // Reviewed Native inputs keep Apple acceptance in the dedicated workflows.
 // SwiftPM inputs also select the Linux task below. Unknown inputs fail closed.

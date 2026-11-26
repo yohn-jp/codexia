@@ -425,6 +425,7 @@ test('shared app changes retain both profile browser coverage without backend un
 });
 
 const NON_SWIFT_TASKS = VERIFICATION_TASKS.filter(task => task !== 'swift-linux');
+const SWIFT_LINUX_RECIPES = ['scripts/ios/verify-linux-swift.sh', 'scripts/ios/swift-linux-toolchain.json'];
 
 test('main, manual, shared contracts, lockfiles, manifests and unknown files fail closed to full verification', async () => {
   for (const [files, event] of [
@@ -596,6 +597,7 @@ test('known operational inputs retain root proof without unrelated browser or OC
     ].includes(file)) expected.push('requirements-trace');
     if (file.startsWith('deploy/ansible/') && /\.ya?ml$/u.test(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf') && !expected.includes('requirements-trace')) expected.push('requirements-trace');
+    if (SWIFT_LINUX_RECIPES.includes(file)) expected.push('swift-linux');
     assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
   }
@@ -818,7 +820,7 @@ test('Linux Swift verification follows SwiftPM and generation inputs even in ful
       'ios/CodexiaTransport/normalize-openapi.py',
       'packages/http-contract/openapi/codexia.openapi.yaml',
       'packages/http-contract/src/main.tsp',
-      'scripts/ios/verify-linux-swift.sh',
+      ...SWIFT_LINUX_RECIPES,
       '.github/workflows/verify.yml',
       'scripts/ci/execution/group.mjs',
       'scripts/ci/evidence/task-inputs.mjs',
