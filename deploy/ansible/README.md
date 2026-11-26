@@ -1,12 +1,12 @@
 # Codexia Ansible push deployment
 
-> On a pristine approved VM, the browser enrollment flow uses a one-time setup key and a restricted Fastify API behind Cloudflare. The SSH-forward enrollment procedure remains available during the transition. See [first owner through the browser](AUTH-RUNTIME.md#first-owner-through-the-browser) and the [initial deployment design](../../docs/deployment/INITIAL-DEPLOYMENT-FLOW.md).
+> On a pristine approved VM, the browser enrollment flow uses a one-time setup key and a restricted Fastify API behind Cloudflare. The protected production workflow uses the normal same-origin frontend. See [first owner through the browser](AUTH-RUNTIME.md#first-owner-through-the-browser) and the [initial deployment design](../../docs/deployment/INITIAL-DEPLOYMENT-FLOW.md).
 
 The [initial deployment state machine](../../docs/deployment/INITIAL-DEPLOYMENT-FLOW.md) and [compatible update/rollback state machine](../../docs/deployment/UPDATE-FLOW.md) are normative. The implemented `bootstrap` stage converges approved host, secrets, base, and auth-runtime tasks; owner enrollment and protected application activation remain separate.
 
 The protected GitHub Actions → Tailscale → SSH workflow is the only deployment controller. Under the rootless `codexia` service account, Ansible converges PostgreSQL, API and Tunnel Quadlets. `site.yml` rejects the obsolete pull-updater stages.
 
-Use a private inventory with pinned SSH host keys, externally supplied protected secrets and an explicit stage:
+The protected controller generates its inventory and pins SSH. An isolated stage test can use its own inventory:
 
 ```bash
 ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e codexia_stage=inspect
@@ -20,15 +20,9 @@ The `deploy` stage requires a certified immutable Full image, main-source proven
 
 ## Bring up a new VM
 
-Use the [example inventory](inventory.example.yml) with the VM's management address, pinned SSH host key, existing bootstrap login with sudo, service UID/GID and private credential file paths. Set `codexia_deploy_ssh_public_key` to the public half of the protected workflow key, or provision that SSH access externally. Ansible installs the declared key with OpenSSH's `restrict` option on the service account. The bootstrap administrator retains its own management SSH connection.
+Start [Protected production Bootstrap](../../docs/deployment/PRODUCTION-BOOTSTRAP.md) with the pinned administrator login and approved target. The controller derives the deployment public key in the runtime Environment, generates the Ansible inventory, and installs the key with OpenSSH's `restrict` option. On an approved fresh VM the rootless service generates its DB and authentication credentials. R4 encrypts these values for independent recovery before provisioning the DB. The [example inventory](inventory.example.yml) describes the individual stages used by disposable hosts and explicit recovery operations.
 
-For a new host, enable the host, service-account creation, secrets, base, and database initialization approvals in the private inventory. Set `codexia_auth_runtime_approved: true` to include authentication and `codexia_auth_bootstrap_image` to the reviewed Full digest. Set the enrollment inputs for [browser setup](AUTH-RUNTIME.md#first-owner-through-the-browser) or [legacy SSH-forward setup](AUTH-RUNTIME.md#legacy-initial-owner-and-oauth-client-registration) before applying the inventory from the reviewed checkout.
-
-```bash
-ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e codexia_stage=bootstrap
-```
-
-The play provisions the host, rootless credentials, networks, volumes, PostgreSQL and Tunnel definition in order. When authentication is approved it also fetches the pinned Full image on demand, initializes a pristine application database, and stages the auth schema, secrets and enrollment inputs. Browser setup starts the restricted API and Tunnel for enrollment. Follow its preparation step after the owner registers, or complete the legacy procedure if using SSH enrollment.
+A fresh R4 ends with the DB and authentication schema prepared. R5 opens the restricted API for the [browser handoff](AUTH-RUNTIME.md#first-owner-through-the-browser) after the certified frontend is available.
 
 After enrollment and preparation, the protected production workflow can activate the certified image with the two first-install approvals and handle subsequent compatible updates. See the [first activation procedure](../../docs/deployment/PUSH-DEPLOYMENT.md#first-application-activation).
 

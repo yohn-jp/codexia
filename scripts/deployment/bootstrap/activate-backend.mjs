@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { appendFile, writeFile } from 'node:fs/promises';
+import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { selectReleaseSource } from '../../release/components/source-gate.mjs';
@@ -54,14 +54,15 @@ async function main(stage, env) {
     await appendFile(env.GITHUB_OUTPUT, 'current=true\n');
     return;
   }
-  const input = JSON.parse(env.CODEXIA_FIRST_ACTIVATION_REQUEST);
-  assert.deepEqual(Object.keys(input).sort(), ['artifacts', 'deployment']);
+  const receipt = JSON.parse(await readFile(join(env.RUNNER_TEMP, 'reviewed-preflight/codexia-lifecycle-preflight.json'), 'utf8'));
   const { parsePreflightRequest, readLifecycleCandidate, readLifecycleHost } = await import('../preflight/run.mjs');
-  const deployment = input.deployment;
-  assertBackendOnly(deployment?.plan);
+  const request = parsePreflightRequest(JSON.stringify(receipt.request));
+  const { plan, planSha256 } = receipt;
+  assertBackendOnly(plan);
+  assert.equal(request.intent, plan.intent);
+  assert.deepEqual(request.window, plan.window);
+  const deployment = { plan, planSha256, approval: { planSha256, grants: ['first-install', 'database-use', 'publication'] } };
   assertDeploymentPlanBinding(deployment);
-  const request = parsePreflightRequest(JSON.stringify({ ...input.artifacts, intent: deployment.plan.intent,
-    window: deployment.plan.window }));
   if (stage === 'certify') {
     const release = createHandoffDeploymentOutputs(await verifyLifecycleBackendPublication(request.backendPublisherRunId));
     await appendFile(env.GITHUB_OUTPUT, `full-image=${release.fullImage}\nfull-api-epoch=${release.fullApiEpoch}\n` +
@@ -73,7 +74,7 @@ async function main(stage, env) {
   assert.equal(env.CODEXIA_FIRST_ACTIVATION_APPROVAL, 'ACTIVATE_CODEXIA_BACKEND');
   const { createDeploymentEdge } = await import('../../release/frontend/initial-publication.mjs');
   const { planFromObservations } = await import('../preflight/observe.mjs');
-  const { readPreservationEvidence } = await import('../preflight/preservation.mjs');
+  const { findPreservationEvidence } = await import('../preflight/preservation.mjs');
   const releases = await readLifecycleCandidate(request);
   assert.deepEqual(releases.candidateBackend, JSON.parse(Buffer.from(env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, 'base64')),
     'Reverified backend certificate differs from the verified deployment handoff');
@@ -84,14 +85,17 @@ async function main(stage, env) {
     origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
     readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN,
   }).observeLifecycle({ backendExpected: host.backend.state === 'running' });
+  const preservationReceipt = await findPreservationEvidence(host);
+  assert.ok(preservationReceipt, 'First activation requires an independent restore for this prepared database');
   const { plan: current } = planFromObservations({ host, edge, hostPinSha256, ...releases,
     intent: request.intent, window: request.window,
-    preservationReceipt: readPreservationEvidence(env.CODEXIA_DEPLOYMENT_PRESERVATION, host) });
+    preservationReceipt });
   const evidence = admitBackendActivation({ deployment, current, host, flags: {
     initialInstall: env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
     databaseUse: env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
   } });
-  await writeFile(join(env.RUNNER_TEMP, 'codexia-first-activation.json'), JSON.stringify(evidence) + '\n',
+  await writeFile(join(env.RUNNER_TEMP, 'codexia-first-activation.json'), JSON.stringify({ ...evidence, databaseFingerprint: preservationReceipt.databaseFingerprint,
+    historyFingerprint: preservationReceipt.historyFingerprint }) + '\n',
     { flag: 'wx', mode: 0o600 });
   console.log('Protected R6 Backend-only activation admitted against the deployed Frontend.');
 }

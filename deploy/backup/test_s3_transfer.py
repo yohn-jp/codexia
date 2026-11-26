@@ -28,6 +28,13 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+class DefaultProfileTest(unittest.TestCase):
+    def test_default_aws_profile_supplies_sdk_addressing_style(self):
+        profile = s3_transfer.validate_profile({"schemaVersion": 1, "provider": "aws-s3", "region": "us-east-1",
+                                                "bucket": "fixture-bucket", "prefix": "fixture"})
+        self.assertEqual(profile["addressingStyle"], "virtual")
+
+
 class FakeClientError(Exception):
     def __init__(self, code: str):
         super().__init__(code)

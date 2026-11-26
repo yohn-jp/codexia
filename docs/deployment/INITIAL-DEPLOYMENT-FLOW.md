@@ -2,7 +2,7 @@
 
 新規 VM を Ansible で構成し、Cloudflare Workers の `/console/setup` から登録キーと Passkey で初回所有者を登録する。
 本書は、新規 VM の構築から PostgreSQL、本人認証、API の公開までの状態、遷移、停止条件を定める規範的設計である。[本番Deploymentライフサイクル](DEPLOYMENT-LIFECYCLE.md) が全状態の経路選択、初回Backend activation、保守・復旧・排他の横断契約を所有する。
-SSH ポートフォワード方式も移行中の運用手順として利用できる。[システム基本設計](../architecture/SYSTEM-DESIGN.md) [IaC](IAC.md) [Push deployment](PUSH-DEPLOYMENT.md) [Ansible 運用](../../deploy/ansible/README.md) [認証初期化](../../deploy/ansible/AUTH-RUNTIME.md)
+本番の初回登録は通常の HTTPS オリジンを使う。[システム基本設計](../architecture/SYSTEM-DESIGN.md) [IaC](IAC.md) [Push deployment](PUSH-DEPLOYMENT.md) [Ansible 運用](../../deploy/ansible/README.md) [認証初期化](../../deploy/ansible/AUTH-RUNTIME.md)
 
 ## 初期構築・公開までの状態遷移
 
@@ -10,7 +10,7 @@ SSH ポートフォワード方式も移行中の運用手順として利用で�
 
 ```mermaid
 flowchart TD
-    PRE["VMはAnsibleからSSH接続可能<br/>sudo・適合OS・管理経路あり"] --> INPUT["private inventory / ホスト鍵pin / Secrets供給<br/>新規 or 既存復旧モードを宣言"]
+    PRE["VMはAnsibleからSSH接続可能<br/>sudo・適合OS・管理経路あり"] --> INPUT["保護環境の接続先・ホスト鍵pin / Gitの共通設定<br/>新規 or 既存復旧モードを宣言"]
     INPUT --> CHECK{"inspect: 対象・DB/volume・復旧意図は一致?"}
     CHECK -->|不明/不一致| STOP1["停止: 既存状態を破棄・初期化しない"]
     CHECK -->|はい| BOOT["Ansible bootstrap<br/>host → secrets → base → auth-runtime"]
@@ -46,10 +46,10 @@ flowchart TD
 
 | 遷移 | 実行権限・入力 | 成功判定 | 失敗時 |
 | --- | --- | --- | --- |
-| `bootstrap` | 既存 bootstrap管理者、承認済み private inventory | host/secrets/base と許可した auth-runtime を順序どおり収束 | 途中で失敗した状態を観測し、同じ inventory の明示的な再適用に限定 |
-| `inspect` | bootstrap またはサービス利用者、private inventory | サポート対象 OS、所有 ID、既存資源の観測 | 読取専用で中断 |
+| `bootstrap` | 既存の管理者SSH、承認済み計画、runnerが生成したinventory | host/secrets/base と許可した auth-runtime を順序どおり収束 | 途中で失敗した状態を観測し、同じ対象・既存の秘密を再照合 |
+| `inspect` | 該当するSSH利用者とホスト鍵pin | サポート対象 OS、所有 ID、既存資源の観測 | 読取専用で中断 |
 | `host` | 必要な sudo とアカウント作成承認 | rootless user、Podman/systemd 条件 | UID 衝突や既存 unit の予期せぬ自動起動を拒否 |
-| `secrets` | mode 0400/0600 の保護 credential ファイルと承認 | Podman secret の内容・所有が一致 | 不足・異なる secret を自動修復・rotation しない |
+| `secrets` | 外部Tunnel資格情報、新規生成または既存採用の承認 | Podman secret の内容・所有が一致 | 不足・異なる secret を自動修復・rotation しない |
 | `base` | network/volume/PG/Tunnel の所望状態 | 固定 volume、Podman、PostgreSQL 17 の同一性 | 既存 DB・container drift を拒否 |
 | `auth-runtime` | 審査済み Full digest、DB・認証初期化承認 | 原稿 migration ledger、別 auth role/schema、秘密設定 | API は非公開のまま停止 |
 | 初回キー発行 | Ansibleの承認済み新規構築、空の正本DB、CSPRNG | 256-bit一回限りキーのハッシュ保存、期限と配送先の明示、setup-only入口の検証 | 既存owner・復旧中なら発行禁止。ログ/CI artifactに平文キーを出さない |
@@ -65,13 +65,25 @@ flowchart TD
 
 | 順番 | 誰が | 実行・入力 | 誰に何を引き渡すか |
 | --- | --- | --- | --- |
-| 1 | インフラ管理者 | VMのSSH到達、sudo、ホスト鍵pin、公開FQDN・TLS/Access経路、秘密情報の供給元を準備 | Ansibleコントローラーへinventoryと承認済み環境 |
+| 1 | インフラ管理者 | VMのSSH到達、sudo、ホスト鍵pin、公開FQDN・TLS/Access経路、秘密情報の供給元を準備 | 保護環境へ接続情報・外部資格情報・受取公開鍵を登録 |
 | 2 | Ansible/構築担当 | inspect → bootstrapでOS・DB・Auth・Quadletを収束。DBが新規か復旧か判定する | 「初回登録待ち」「既存owner復旧待ち」「停止」の機械可読な結果 |
 | 3A | 新規DBの場合: Ansible | ownerを**作成せず**、256-bit CSPRNG初期キーを一回だけ生成しハッシュを認証DBに記録。平文は保護された一回限りの配送経路で所有者本人に渡す | 本人に`/console/setup`、初期キー、有効期限。CIログやURLには載せない |
 | 3B | 既存DBの復旧の場合: 復旧担当 | DB/原稿履歴、owner ID、Passkey/OAuth client、PostgreSQL role、Podman secretを独立バックアップ・秘密管理から復旧・検証 | ownerへ既存資格情報によるログイン確認。**新しい登録キーは発行しない** |
 | 4 | 初回owner本人 | Workersで配信される`/console/setup`からキー検証・Passkey登録 | Better Auth上の唯一のownerと登録消費の確定結果 |
 | 5 | 構築担当/保護されたAPI | Web/iOS/内省クライアントの登録とresource/redirectをAPI側で照合。OIDCは任意で、認証後に`/console/identity`から設定 | 保護された初回deployの入力条件と確認状態 |
 | 6 | 保護されたGitHub Actions | 配備承認、証明済みdigest、DB schema/backup、Cloudflare/Tunnel、health確認 | 本番owner login可能な`/console`。setup側の登録権限を閉じる |
+
+### 初回入力と秘密の管理
+
+| 管理元 | 登録・生成する情報 | 利用先と再実行時の扱い |
+| --- | --- | --- |
+| Git | サービスの UID/GID、公開 origin、Web・iOS・内省 client ID、callback、scope | Frontend のビルド・検証と Ansible の登録設定が同じ [本番設定](../../deploy/production.json) を読む。 |
+| インフラ管理者・保護環境 | VM の管理先、独立に確認した SSH host key、管理者と配備用の別々の SSH 鍵、Tailscale OIDC、Access・Tunnel の資格情報 | 管理者は sudo、配備用アカウントは rootless。R4 は配備用公開鍵を導出して VM に登録し、別ジョブから実際に接続を確認する。 |
+| VM 上の R4 | PostgreSQL 管理・アプリ・認証ロールのパスワード、Better Auth secret、内省 secret | 生成を許すのは承認済みの新規状態に限る。PostgreSQL と Podman が同じ値を使い、再実行時は既存値を採用する。部分欠損や所有権の不一致は復旧へ戻す。 |
+| 復旧担当 | 初回から書き込める S3 保存先と制限付き資格情報、age の受取公開鍵、独立環境に保持した復号鍵 | R4 で資格情報を暗号化して転送・読み戻しし、別環境から復号する。R5 完了後に DB・履歴を別の v2 バックアップとして保存・復元する。owner のログイン前に両方の保管先を用意する。 |
+| owner 本人 | 登録キー配送用の公開鍵、ブラウザーで作成する Passkey | 登録キーは R5 で一回発行する。登録完了後の R6 は既存の owner と client を検証する。 |
+
+運用者は導入意図・対象の計画・必要な変更を承認する。CI は認定済みの成果物、source、run、digest を解決し、同じ main からの観測と照合する。VM ごとの inventory は実行時に作成する。設定項目と各 Environment の権限は [本番 Bootstrap 手順](PRODUCTION-BOOTSTRAP.md) に従う。
 
 **初回登録時の起動モード**
 
@@ -88,9 +100,9 @@ Access に加えてセットアップキーによる認可を要求し、キー�
 
 ## 宣言的な初期化と公開の責務分離
 
-**採用済み設計:** 宣言的inventoryと承認で新規VMへ`bootstrap`一操作で`host → secrets → base → auth-runtime`を順序どおり収束させる。初回キーはAnsible管理下で安全に生成・配送するが、ownerをAnsibleは作成しない。通常Frontendを配備し、同じFull Backend imageをcanonical API slotのsetup-onlyモードで起動する。本人による通常Workers上の `/console/setup` / Better AuthでのPasskey登録を経て、保護されたactivation preparationでowner/clientを照合しsetup-onlyを停止した後、別途承認された本番activationに進む。通常FrontendやTerraform経路の再配備・切替は不要。新規・復旧・通常更新を混同せず、再適用は冪等。秘密情報や既存データを無条件に初期化しない。既存VMで専用DBの不在が確認された場合も、[R4のDB不在時再初期化](DEPLOYMENT-LIFECYCLE.md#db不在時の再初期化r4) に従い同じ新規導入を実行する。
+**採用済み設計:** Gitでレビューした共通設定と保護環境の承認で新規VMへ`bootstrap`一操作で`host → secrets → base → auth-runtime`を順序どおり収束させる。初回キーはAnsible管理下で安全に生成・配送するが、ownerをAnsibleは作成しない。通常Frontendを配備し、同じFull Backend imageをcanonical API slotのsetup-onlyモードで起動する。本人による通常Workers上の `/console/setup` / Better AuthでのPasskey登録を経て、保護されたactivation preparationでowner/clientを照合しsetup-onlyを停止した後、別途承認された本番activationに進む。通常FrontendやTerraform経路の再配備・切替は不要。新規・復旧・通常更新を混同せず、再適用は冪等。秘密情報や既存データを無条件に初期化しない。既存VMで専用DBの不在が確認された場合も、[R4のDB不在時再初期化](DEPLOYMENT-LIFECYCLE.md#db不在時の再初期化r4) に従い同じ新規導入を実行する。
 
-**運用受入:** `bootstrap` は `host`、`secrets`、`base`、承認済みの `auth-runtime` を順に実行する。新規導入で承認を明示すると、同一オリジンの setup-only API と暗号化した一回限りのキー配送を構成できる。[認証運用手順](../../deploy/ansible/AUTH-RUNTIME.md)に従い、Cloudflare 経路、使い捨て VM と実ブラウザーで受入を確認する。SSH ポートフォワード方式は移行中の既存手順として維持する。`inspect`、個別ステージ、`deploy-lifecycle-fixture`、`restore-drill` は引き続き利用できる。
+**運用受入:** `bootstrap` は `host`、`secrets`、`base`、承認済みの `auth-runtime` を順に実行する。新規導入で承認を明示すると、同一オリジンの setup-only API と暗号化した一回限りのキー配送を構成できる。[認証運用手順](../../deploy/ansible/AUTH-RUNTIME.md)に従い、Cloudflare 経路、使い捨て VM と実ブラウザーで受入を確認する。`inspect`、個別ステージ、`deploy-lifecycle-fixture`、`restore-drill` は引き続き利用できる。
 
 初回 API container が存在しない `deploy` では、保護環境の `CODEXIA_INITIAL_INSTALL_APPROVED=true` と `CODEXIA_DATABASE_INITIALIZATION_APPROVED=true` が必要で、いずれもデフォルト false。承認しても migration/所有者の検証を迂回しない。成功後は false に戻す。再試行時は既存 transaction とデータを観測してから行う。Bootstrap中断の再開条件、証明済みFull artifact、保護されたowner引き渡しと独立activation起動は [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) に従う。
 
@@ -109,7 +121,7 @@ stateDiagram-v2
     SetupExposed --> OwnerReady : Passkey + ownerを原子的に確定
     SetupExposed --> Blocked : キー失効・不正な状態
     OwnerReady --> ActivationPending : client照合・setup停止・認証設定確定
-    ActivationPending --> Active : 保護された初回activation・必要時pair配備
+    ActivationPending --> Active : 保護された初回activation・既存互換Frontendを確認
     Active --> Accepted : 公開経路・再起動・独立restore実測
     SSHReady --> Blocked : 接続・ホスト証明失敗
     DataReady --> Blocked : 不明なDB・migration不一致

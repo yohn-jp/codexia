@@ -48,6 +48,17 @@ else
   flock --exclusive --nonblock 9 || die 'Another Codexia deployment or backup holds the host lock'
 fi
 
+read_auth_password(){
+  case "${CODEXIA_AUTH_PASSWORD_SOURCE:-stdin}" in
+    stdin) IFS= read -r auth_password_b64 || die 'Auth password input is missing' ;;
+    podman) auth_password_b64="$("$HOME/.local/bin/codexia-bootstrap-secrets" auth-password)" || die 'Cannot read the installed Auth database credential' ;;
+    *) die 'Unknown Auth database credential source' ;;
+  esac
+  [[ "$auth_password_b64" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || die 'Auth password input is invalid'
+  auth_password="$(printf '%s' "$auth_password_b64" | base64 --decode)" || die 'Auth password input is invalid'
+  [[ -n "$auth_password" && ! "$auth_password" =~ [[:cntrl:]] ]] || die 'Auth password input is invalid'
+}
+
 admin_psql(){
   podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia'
 }
@@ -325,10 +336,7 @@ SQL
     verify_empty_auth_resume "$4" "$5"
     ;;
   verify)
-    IFS= read -r auth_password_b64 || die 'Auth password input is missing'
-    [[ "$auth_password_b64" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || die 'Auth password input is invalid'
-    auth_password="$(printf '%s' "$auth_password_b64" | base64 --decode)" || die 'Auth password input is invalid'
-    [[ -n "$auth_password" && ! "$auth_password" =~ [[:cntrl:]] ]] || die 'Auth password input is invalid'
+    read_auth_password
     assert_role_security
     runtime_user="$(printf '%s\n' "$auth_password" | podman exec -i codexia-db sh -ec '
       IFS= read -r PGPASSWORD || exit 72
@@ -350,10 +358,7 @@ SQL
   converge)
     if [[ $# == 5 ]]; then verify_bootstrap_resume "$4" "$5"; fi
     if [[ $# == 6 ]]; then verify_empty_auth_resume "$4" "$5"; fi
-    IFS= read -r auth_password_b64 || die 'Auth password input is missing'
-    [[ "$auth_password_b64" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || die 'Auth password input is invalid'
-    auth_password="$(printf '%s' "$auth_password_b64" | base64 --decode)" || die 'Auth password input is invalid'
-    [[ -n "$auth_password" && ! "$auth_password" =~ [[:cntrl:]] ]] || die 'Auth password input is invalid'
+    read_auth_password
     {
       printf "\\set auth_password_b64 '%s'\n" "$auth_password_b64"
       cat <<'SQL'

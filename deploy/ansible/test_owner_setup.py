@@ -41,6 +41,11 @@ class OwnerSetupTests(unittest.TestCase):
         self.executable("podman", r'''#!/bin/bash
 set -eu
 case "$1" in
+    secret)
+        if [[ "$2" == exists ]]; then exit 1; fi
+        [[ "$2" == inspect ]] && shift 2
+        python3 -c 'import json, sys; print(json.dumps([{"ID": name + "-id", "Spec": {"Name": name}} for name in sys.argv[1:]]))' "$@"
+        ;;
     exec)
         if [[ "$2" == codexia-api ]]; then
             echo probe >>"$TRACE"
@@ -177,6 +182,21 @@ esac
         self.assertEqual(resumed.returncode, 0, resumed.stderr)
         self.assertEqual(self.trace.read_text().splitlines(), ["clean", "clean", "ledger", "migrated"])
         self.assertEqual(marker.read_text(), "123\n")
+
+    def test_replaced_credential_after_restore_check_blocks_grant_under_the_lock(self):
+        self.private_file(self.state / "owner-setup.intent", f"123:456:{IMAGE}\n")
+        self.environment["CODEXIA_OWNER_SETUP_ESCROW_IDS_SHA256"] = "a" * 64
+        denied = self.run_setup("--converge", "NEW_APPROVED", "age1fixture")
+        self.assertIn("Escrow identity changed", denied.stderr)
+        self.assertNotEqual(denied.returncode, 0)
+        self.assertFalse(self.trace.exists())
+        names = ["codexia-postgres-admin-password", "codexia-postgres-app-password", "codexia-auth-database-url",
+                 "codexia-auth-secret", "codexia-oauth-introspection-client-secret", "codexia-tunnel-token"]
+        identity = "".join(f"{name} {name}-id\n" for name in sorted(names))
+        self.environment["CODEXIA_OWNER_SETUP_ESCROW_IDS_SHA256"] = hashlib.sha256(identity.encode()).hexdigest()
+        allowed = self.run_setup("--converge", "NEW_APPROVED", "age1fixture")
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        self.assertIn("issued", self.trace.read_text())
 
     def test_initialized_schema_with_matching_intent_can_issue_only_first_grant(self):
         self.private_file(self.state / "owner-setup.intent", f"123:456:{IMAGE}\n")

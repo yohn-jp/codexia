@@ -35,6 +35,11 @@
     },
     {
       "kind": "ansibleSource",
+      "id": "deploy/ansible/bootstrap-secret-escrow.yml",
+      "classification": "REQ-OPS-001 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
       "id": "deploy/ansible/deploy-lifecycle-fixture.yml",
       "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
     },
@@ -80,6 +85,11 @@
     },
     {
       "kind": "ansibleSource",
+      "id": "deploy/ansible/managed-bootstrap-secrets.yml",
+      "classification": "REQ-OPS-001 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
       "id": "deploy/ansible/owner-setup.yml",
       "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
     },
@@ -117,6 +127,11 @@
       "kind": "ansibleSource",
       "id": "deploy/ansible/verify-base-tunnel-container.yml",
       "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
+      "id": "deploy/ansible/verify-bootstrap-escrow.yml",
+      "classification": "REQ-OPS-001 candidate; host execution remains unverified"
     },
     {
       "kind": "ansibleSource",

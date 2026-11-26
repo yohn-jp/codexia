@@ -218,6 +218,7 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
     ca_bundle = value.get("caBundle")
     if ca_bundle is not None and (not isinstance(ca_bundle, str) or not os.path.isabs(ca_bundle)):
         _fail("S3 CA bundle path must be absolute")
+    value["addressingStyle"] = addressing
     value["allowedPrivateAddresses"] = list(validate_private_addresses(value.get("allowedPrivateAddresses", [])))
     value["multipartThresholdBytes"] = threshold
     value["multipartPartBytes"] = part_size

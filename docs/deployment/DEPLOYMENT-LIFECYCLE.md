@@ -128,10 +128,14 @@ Workflowファイル数は固定しない。論理モードと権限・承認・
 | 実行経路 | 実行者・入力 | 完了と引き渡し |
 | --- | --- | --- |
 | Production Preflight | 保護された読取専用運用者、対象pin、読取権限 | 状態・経路判定。VM接続/syntaxだけでは完了しない |
-| Production Bootstrap | 独立管理者・sudo、private inventory、stage別承認、認定済みFull | host/secrets/base/auth-runtime、初回登録待ち/既存owner検証/停止。通常APIは起動しない |
+| Production Bootstrap | 独立管理者・sudo、Gitの共通設定と保護環境から生成したinventory、stage別承認、認定済みFull | host/secrets/base/auth-runtime、初回登録待ち/既存owner検証/停止。通常APIは起動しない |
 | Production Activation | 保護運用者、rootless配備identity、初回・DB使用・公開の別承認、owner本人 | setup-onlyを閉じ、互換な通常Frontendを維持し、認定済みBackendを通常deployで有効化 |
 | Production Update | 認定済みmainのcomponent release、保護された有効化承認 | 互換Backend/Frontend更新、no-op、rollback |
 | Production Maintenance / Recovery | 明示保守/復旧承認、Cloudflare管理権限、復旧証拠 | 基盤修復、DB/Auth復元、通常deployの切戻し。非互換移行は実行しない |
+
+初回導入では Preflight が認定済みの候補を解決し、リポジトリ・main・run・attempt・管理経路に結び付けた計画を発行する。運用者は計画の実行 ID を選択する。実行系統はその計画を取得し、production queue 内で再観測した host・DB・owner・edge・成果物と比較する。承認のみを待つ計画はレビューに進める。観測不能・実体の不一致があれば実行を停止する。
+
+R4 の資格情報は VM で生成または採用し、age 暗号化、S3 読み戻し、独立検証を行う。R5 で検証済みの資格情報を照合する。R6 の保全証拠は、owner 登録後に停止した DB・履歴を取得し、S3 から別環境に復元したジョブが発行する。R6 は同じ host・DB・owner の証拠を自動取得し、host lock 内で DB と履歴の fingerprint を照合する。資格情報の検証と DB 復元にはそれぞれの証拠が必要である。
 
 Bootstrap入力Full digestは既存release handoffの証明書・発行元・main tree/producer・profile・embedded identityに照合してからDB/auth migration、setup-only APIに使う。digest形式や指定だけでは認定しない。保護controllerからowner状態を照会し暗号化grantを秘密経路で引き渡す。本人登録後に既存activation preparationを実行し、owner subjectを手転記・生成しない。Bootstrap成功や登録完了を次のreleaseイベントの自然発生に依存させず、既存の正確な証明済み成果物を再検証して別承認のactivationを起動できること。
 

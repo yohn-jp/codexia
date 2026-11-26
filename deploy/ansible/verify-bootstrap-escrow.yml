@@ -1,0 +1,24 @@
+---
+- name: Verify independent credential recovery before initial frontend publication
+  hosts: codexia
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    codexia_stage: verify-escrow
+  tasks:
+    - name: Identify the pinned runtime connection
+      ansible.builtin.setup:
+        gather_subset: ['!all', '!min', user]
+    - name: Require the canonical rootless identity on a single VM
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - ansible_facts.user_id == 'codexia'
+          - ansible_facts.user_dir == '/home/codexia'
+    - name: Verify current recovery evidence without changing the host
+      ansible.builtin.include_tasks:
+        file: bootstrap-secret-escrow.yml
+        apply:
+          environment:
+            HOME: /home/codexia
+            XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.user_uid }}"

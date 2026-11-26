@@ -1,0 +1,10 @@
+{
+  "publicOrigin": "https://codexia.yohn.jp",
+  "desktopCallbackPath": "/desktop",
+  "webClientId": "codexia-web",
+  "iosClientId": "codexia-ios",
+  "introspectionClientId": "codexia-resource-server",
+  "scopes": "openid codexia:api",
+  "serviceUid": 1001,
+  "serviceGid": 1001
+}

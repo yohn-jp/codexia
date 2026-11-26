@@ -29,6 +29,16 @@
           - codexia_owner_setup_operation != 'owner-setup' or codexia_owner_setup_age_recipient is match('^age1[0-9a-z]+$')
         fail_msg: Owner handoff requires the pinned rootless account, certified Full image and protected enrollment approval.
 
+    - name: Check the independently recovered credential generation before owner mutation
+      ansible.builtin.include_tasks:
+        file: bootstrap-secret-escrow.yml
+        apply:
+          become: true
+          become_user: "{{ codexia_service_user }}"
+          environment:
+            HOME: "{{ owner_setup_home }}"
+            XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid }}"
+
     - name: Run the canonical operator operation under its host lock
       become: true
       become_user: "{{ codexia_service_user }}"
@@ -39,12 +49,13 @@
         XDG_STATE_HOME: "{{ owner_setup_home }}/.local/state"
         XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid }}"
         DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ codexia_service_uid }}/bus"
+        CODEXIA_OWNER_SETUP_ESCROW_IDS_SHA256: "{{ (bootstrap_escrow_snapshot.stdout | from_json).idsSha256 }}"
         CODEXIA_OWNER_SETUP_EXPECTED_ORIGIN: "{{ codexia_owner_setup_expected_origin }}"
         CODEXIA_OWNER_SETUP_EXPECTED_WEB_CLIENT_ID: "{{ codexia_owner_setup_expected_web_client_id }}"
         CODEXIA_OWNER_SETUP_EXPECTED_WEB_REDIRECT_URIS: "{{ codexia_owner_setup_expected_web_redirect_uris | join(',') }}"
         CODEXIA_OWNER_SETUP_EXPECTED_CHECKPOINT: "{{ codexia_expected_owner_setup_checkpoint | to_json }}"
       ansible.builtin.command:
-        argv: "{{ [owner_setup_home + '/.local/bin/codexia-owner-setup'] + owner_setup_operations[codexia_owner_setup_operation] }}"
+        argv: "{{ ['bash', '-c', lookup('ansible.builtin.file', playbook_dir + '/owner-setup.sh'), 'codexia-owner-setup'] + owner_setup_operations[codexia_owner_setup_operation] }}"
         expand_argument_vars: false
       register: owner_setup_command
       changed_when: owner_setup_command.stdout != ''

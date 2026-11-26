@@ -31,6 +31,20 @@ else
   exec 9>"$state_dir/host.lock"
 fi
 flock --exclusive --nonblock 9 || die 'Another Codexia operation holds the deployment host lock'
+# The independent restore proof was verified off-VM. Rebind it to these
+# immutable Podman identities while holding the lock used for the mutation.
+if [[ -v CODEXIA_OWNER_SETUP_ESCROW_IDS_SHA256 ]]; then
+  [[ "$CODEXIA_OWNER_SETUP_ESCROW_IDS_SHA256" =~ ^[a-f0-9]{64}$ ]] || die 'Invalid approved escrow identity'
+  escrow_names=(codexia-postgres-admin-password codexia-postgres-app-password codexia-auth-database-url
+    codexia-auth-secret codexia-oauth-introspection-client-secret codexia-tunnel-token)
+  if podman secret exists codexia-oidc-client-secret; then
+    escrow_names+=(codexia-oidc-client-secret)
+  else
+    [[ "$?" == 1 ]] || die 'Cannot observe optional credential'
+  fi
+  actual_ids=$(podman secret inspect "${escrow_names[@]}" | jq -er '.[] | .Spec.Name + " " + .ID' | LC_ALL=C sort | sha256sum)
+  [[ "${actual_ids%% *}" == "$CODEXIA_OWNER_SETUP_ESCROW_IDS_SHA256" ]] || die 'Escrow identity changed after restore verification'
+fi
 present() { [[ -e "$1" || -L "$1" ]]; }
 private_file() { [[ -f "$1" && ! -L "$1" && -O "$1" && "$(stat -c %a -- "$1")" == 600 ]]; }
 for journal in {deployed-release,deploy-transaction,cutover-transaction}.json; do

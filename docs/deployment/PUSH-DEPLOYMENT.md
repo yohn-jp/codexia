@@ -15,10 +15,9 @@ Configure these names in the `codexia-production` GitHub Environment. Never put 
 | Name | GitHub type | Purpose |
 | --- | --- | --- |
 | `TS_OAUTH_CLIENT_ID` | Secret | Existing Tailscale GitHub OIDC client. |
-| `CODEXIA_PUBLIC_ORIGIN` | Variable | HTTPS origin used by the production job to check the deployed UI/API epoch and Access boundary. |
 | `CODEXIA_ACCESS_CLIENT_ID` | Secret | Existing Cloudflare Access service-token ID used by the read-only live compatibility preflight. |
 | `CODEXIA_ACCESS_CLIENT_SECRET` | Secret | Existing Cloudflare Access service-token secret used by the read-only live compatibility preflight. |
-| `CODEXIA_DEPLOY_SSH_PRIVATE_KEY` | Secret | Dedicated Ed25519 key used only by the production deployment job. Declare its public key as `codexia_deploy_ssh_public_key` in the private bootstrap inventory. |
+| `CODEXIA_DEPLOY_SSH_PRIVATE_KEY` | Secret | Dedicated Ed25519 key used only by the production deployment job. R4 derives its public key in this Environment and registers it on the VM. |
 | `CODEXIA_DEPLOY_SSH_KNOWN_HOSTS` | Variable | Independently verified OpenSSH host key pin for the VM. A pin with a single literal address or hostname also declares the destination. |
 | `CODEXIA_DEPLOY_HOST` | Variable | Tailnet address or hostname to select when the pin file is hashed or covers multiple hosts. The selected host must match the pin. |
 | `CODEXIA_BACKUP_DESTINATION` | Variable | Absolute directory for encrypted backups; defaults to `/home/codexia/backups` (created with mode 0700). Remote storage is optional. |
@@ -60,23 +59,9 @@ The backup fixture mounts an SSHFS export served by a separate container on the 
 
 ## First application activation
 
-Start with an Ubuntu 26.04 x86-64 VM on the tailnet, a pinned SSH connection for a bootstrap administrator with sudo, and an available compatible frontend. Supply the protected credential files, service UID/GID, deployment public key, immutable certified Full image and backup settings in the [private inventory](../../deploy/ansible/inventory.example.yml). The bootstrap administrator and the rootless `codexia` service account can be different users.
+On the supported VM, run [Protected production Bootstrap](PRODUCTION-BOOTSTRAP.md) through R4 and R5. It executes `auth-runtime` before `deploy`, verifies the certified Full image and initializes the approved pristine database. Complete Passkey enrollment through the normal frontend, then run activation preparation. The setup-only API and Tunnel stop and the independent recovery job verifies the enrolled DB and history.
 
-Run the following command from the prepared control node. The `bootstrap` operation uses the declared host, credential and base approvals and runs `auth-runtime` before `deploy` when `codexia_auth_runtime_approved=true`. On an empty volume, approve database initialization and set `codexia_auth_bootstrap_image` to the reviewed Full digest. Set the inputs for [browser enrollment](../../deploy/ansible/AUTH-RUNTIME.md#first-owner-through-the-browser) or [legacy SSH-forward enrollment](../../deploy/ansible/AUTH-RUNTIME.md#legacy-initial-owner-and-oauth-client-registration). Bootstrap obtains the image, initializes the application ledger and provisions the separate auth role and schema. Existing volumes are checked against the declared PostgreSQL identity, ownership, layout and migration ledger before adoption.
-
-```sh
-ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e codexia_stage=bootstrap
-```
-
-Complete the selected enrollment procedure and its activation preparation. Browser enrollment uses the setup-only service to register the owner and prepare runtime activation. The legacy procedure prepares the normal runtime by reapplying the inventory with the recorded owner ID.
-
-For a prepared owner, open [Production Access Preflight](../../.github/workflows/production-preflight.yml) in lifecycle mode with the runtime management identity and the selected certified Backend and Frontend references. Review the R6 plan, its maintenance window and preservation evidence. When Preflight reports a clean API slot and a compatible deployed Frontend, manually dispatch [Codexia Backend Deployment](../../.github/workflows/backend-deployment-handoff.yml) from main with both first-activation approvals. Enter `ACTIVATE_CODEXIA_BACKEND` and supply the JSON request with these fields.
-
-- `deployment.plan` and `deployment.planSha256` contain the reviewed Preflight plan and digest.
-- `deployment.approval` contains that digest as `planSha256` and the approved `grants` array `["first-install","database-use","publication"]`.
-- `artifacts` contains the same `backendPublisherRunId` and `frontend` artifact reference used by Preflight.
-
-The protected job uses the existing production queue, Access checks and Backend deployment transaction. It reverifies both certified artifacts, the live deployment and the independent preservation reference from the production Environment. Before applying the candidate it rechecks the host, logical database and prepared owner under the shared host lock. If the deployed Frontend is missing or incompatible, stop without mutation and reobserve R5 completion. Do not invoke a coordinated pair activation.
+With the runtime identity, run [Production Access Preflight](../../.github/workflows/production-preflight.yml) for the install intent and the approved activation window. Review the R6 plan. Dispatch [Codexia Backend Deployment](../../.github/workflows/backend-deployment-handoff.yml) from the same main with its `preflight_run_id` and `ACTIVATE_CODEXIA_BACKEND`. The protected job retrieves the immutable plan, checks the live compatible frontend and recertifies the candidate. Inside the production queue it verifies the independently restored recovery point. Under the host lock it rechecks the database, prepared owner, settings, database and history fingerprints before activating the Backend. If the source or data changed, take a new [first activation recovery point](BACKUP.md#initial-recovery-before-activation) and review a new plan.
 
 Ansible verifies the staged private settings and protected Podman secrets, takes the encrypted backup, and verifies the owner, registered clients, API resources and introspection credentials before installing the candidate. The API repeats the client and credential checks on startup.
 
