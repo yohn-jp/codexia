@@ -38,7 +38,13 @@ import type {
   ProposeManuscriptRestoreInput,
   ReorderHierarchyInput,
 } from '@codexia/core';
-import type { ChangeSetResult, Persistence, ProjectId, ProjectPageCursor } from '@codexia/persistence-contracts';
+import {
+  type ChangeSetResult,
+  type Persistence,
+  PersistenceError,
+  type ProjectId,
+  type ProjectPageCursor,
+} from '@codexia/persistence-contracts';
 import {
   createPostgresPersistence,
   migratePostgresDatabase,
@@ -719,6 +725,8 @@ export function createServer(options: ApiServerOptions): Server {
   app.setErrorHandler((error: Error & { statusCode?: number; validationContext?: string }, _request, reply) => {
     let failure: HttpFailure;
     if (isHttpFailure(error)) failure = error;
+    else if (error instanceof PersistenceError && error.code === 'unavailable')
+      failure = httpFailure(503, 'PERSISTENCE_UNAVAILABLE', error.message);
     else if (error.statusCode === 413) failure = httpFailure(413, 'BODY_TOO_LARGE', 'Request body is too large');
     else if (error.statusCode === 415) failure = httpFailure(415, 'JSON_REQUIRED', 'Send a JSON request body');
     else if (error.validationContext) {

@@ -142,6 +142,9 @@ function errorResponse(error: unknown): PersistenceRouteResponse {
     return { status: error.code === 'snapshot_unavailable' ? 409 : 400, body: { error: error.message, code: error.code.toUpperCase() } };
   if (error instanceof RouteFailure) return { status: error.status, body: { error: error.message, code: error.code } };
   if (error instanceof PersistenceError) {
+    if (error.code === 'unavailable') {
+      return { status: 503, body: { error: error.message, code: 'PERSISTENCE_UNAVAILABLE' } };
+    }
     const status = error.code === 'not_found' ? 404 : error.code === 'validation' ? 400 : 409;
     const code =
       error.code === 'not_found'
