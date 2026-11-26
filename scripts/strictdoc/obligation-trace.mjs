@@ -55,6 +55,13 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
     if (scenarioById.has(scenario.UID)) violations.push(`Duplicate TEST-ID ${scenario.UID}`);
     scenarioById.set(scenario.UID, scenario);
   }
+  const seenRunEvidence = new Set();
+  for (const evidence of runEvidence) {
+    if (!scenarioById.has(evidence.testId)) violations.push(`Exact-source evidence refers to unknown TEST-ID ${String(evidence.testId)}`);
+    const identity = [evidence.testId, evidence.repository, evidence.sourceSha, evidence.runId, evidence.attempt, evidence.job, evidence.task].join('\0');
+    if (seenRunEvidence.has(identity)) violations.push(`Duplicate exact-source run evidence for ${String(evidence.testId)}`);
+    seenRunEvidence.add(identity);
+  }
   const obligationIds = new Set();
   const rows = [];
   for (const obligation of obligations) {
@@ -99,6 +106,7 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
       if (!scenarioParents.includes(requirementId)) violations.push(`${obligation.UID} TEST-ID ${id} is not parented by ${requirementId}`);
       if (requirement && !declaredTestIds(requirement).includes(id)) violations.push(`${obligation.UID} TEST-ID ${id} is not declared by ${requirementId}`);
     }
+    if (new Set(testIds).size !== testIds.length) violations.push(`${obligation.UID} contains duplicate TEST-ID references`);
     const exactRuns = runEvidence.filter((evidence) => testIds.includes(evidence.testId) && exactRunIsSourceBound(evidence, evidence.testId, { expectedRepository, expectedSourceSha }));
     for (const evidence of runEvidence.filter((item) => testIds.includes(item.testId) && !exactRunIsSourceBound(item, item.testId, { expectedRepository, expectedSourceSha }))) {
       violations.push(`${obligation.UID} has incomplete or invalid exact-source run evidence for ${evidence.testId}`);

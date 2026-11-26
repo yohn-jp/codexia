@@ -26,9 +26,9 @@ The browser reconciles its journal before presenting an editor as recovered and 
 
 Project versions and document revision IDs fence writes. When another operation has changed the selected base version, Codexia reports a conflict and keeps the author's text for review. It does not automatically merge manuscript prose or overwrite a newer revision.
 
-## Desktop and mobile
+## Desktop authoring
 
-Choose Desktop or Mobile explicitly; the selection is remembered for this origin. The `/desktop/` and `/mobile/` routes select separately built shells sharing the same project, save, review and recovery services. Viewport size does not choose a shell.
+The current browser authoring UI is Desktop, served at `/desktop/`. The former Mobile Web shell and `/mobile/` route have been retired; they are not supported browser entry points. Native iOS is a separate accepted target, but development and automatic Xcode validation are paused and device acceptance is incomplete. This browser guide and the local preview do not describe or accept the iOS app.
 
 The editor supports Japanese manuscript typography, ruby and vertical reading. Finish an IME composition before navigation that would unmount the editor; blocked navigation keeps the active text.
 
@@ -36,7 +36,7 @@ The editor supports Japanese manuscript typography, ruby and vertical reading. F
 
 Writing, Research and Review presets assemble independent Editor, Outline, Inspector, History and Review panels. Desktop panel grips and dock targets, plus keyboard-accessible move controls, support splits, tabs, ordering, resizing and visibility.
 
-**Save layout** stores the arrangement for the author and desktop/mobile device class in this browser, separately from draft recovery and PostgreSQL. A malformed layout falls back to a Core preset while preserving the stored value until an explicit replacement save. Missing optional contributions do not prevent other panels from working.
+**Save layout** stores the arrangement for the author in this browser, separately from draft recovery and PostgreSQL. A malformed layout falls back to a Core preset while preserving the stored value until an explicit replacement save. Missing optional contributions do not prevent other panels from working.
 
 ## Search and terminology
 

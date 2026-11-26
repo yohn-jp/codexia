@@ -227,7 +227,7 @@ op getWritingStats(@path projectId: string, @query snapshot?: string, @query pro
 @route("/api/projects/{projectId}/scratch") @post @operationId("project_scratch_post")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-runtime-response-deviation", "Runtime returns HTTP 201; the approved baseline success response is 200. The baseline 200 remains documented for API-epoch compatibility comparison.")
-op createScratch(@path projectId: string, @body body: JsonObject): ScratchCreateBody | { @statusCode _: 201; @body body: ScratchCreateBody; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
+op createScratch(@path projectId: string, @body body: JsonObject): ScratchCreateBody | { @statusCode _: 201; @body body: ScratchCreateBody; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 413; @body body: ApiError; };
 
 @tag("reviews") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/projects/{projectId}/review-queue") @get @operationId("project_review_queue_get")

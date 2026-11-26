@@ -1,27 +1,36 @@
-import { createHash } from "node:crypto";
+import { createHash } from 'node:crypto';
 import {
-  BUILTIN_MODULE_IDS,
-  MAX_PROPOSAL_EVIDENCE_BYTES,
   assertChangeOperation,
   assertProjectPath,
-  snapshotKey,
+  BUILTIN_MODULE_IDS,
   type ChangeOperation,
   type ChangeProposal,
+  MAX_PROPOSAL_EVIDENCE_BYTES,
   type ProposalEvidence,
   type SnapshotId,
-} from "@codexia/contracts";
+  snapshotKey,
+} from '@codexia/contracts';
 
 export const MAX_PROPOSAL_BYTES = 8 * 1024 * 1024;
 
+/** Uses the same normalized UTF-8 envelope accounting as persisted proposal validation. */
+export function isPersistedProposalWithinSizeLimit(proposal: ChangeProposal): boolean {
+  return Buffer.byteLength(JSON.stringify(normalizedProposal(proposal)), 'utf8') <= MAX_PROPOSAL_BYTES;
+}
+
 export function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
 export function isSnapshotId(value: unknown): value is SnapshotId {
   const snapshot = asRecord(value);
-  return !!snapshot && typeof snapshot.projectId === "string" && !!snapshot.projectId && Number.isSafeInteger(snapshot.projectVersion) && Number(snapshot.projectVersion) >= 0;
+  return (
+    !!snapshot &&
+    typeof snapshot.projectId === 'string' &&
+    !!snapshot.projectId &&
+    Number.isSafeInteger(snapshot.projectVersion) &&
+    Number(snapshot.projectVersion) >= 0
+  );
 }
 
 export function canonicalJson(value: unknown): string {
@@ -29,7 +38,11 @@ export function canonicalJson(value: unknown): string {
     if (Array.isArray(item)) return item.map(normalize);
     const record = asRecord(item);
     if (record) {
-      return Object.fromEntries(Object.keys(record).sort().map((key) => [key, normalize(record[key])]));
+      return Object.fromEntries(
+        Object.keys(record)
+          .sort()
+          .map(key => [key, normalize(record[key])]),
+      );
     }
     return item;
   };
@@ -37,9 +50,9 @@ export function canonicalJson(value: unknown): string {
 }
 
 export function isJsonValue(value: unknown, active = new WeakSet<object>(), depth = 0): boolean {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value !== "object" || depth > 32) return false;
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'object' || depth > 32) return false;
   if (active.has(value)) return false;
   if (!Array.isArray(value)) {
     const prototype = Object.getPrototypeOf(value);
@@ -47,21 +60,26 @@ export function isJsonValue(value: unknown, active = new WeakSet<object>(), dept
   }
   active.add(value);
   const valid = Array.isArray(value)
-    ? value.every((item) => isJsonValue(item, active, depth + 1))
-    : Object.values(value as Record<string, unknown>).every((item) => isJsonValue(item, active, depth + 1));
+    ? value.every(item => isJsonValue(item, active, depth + 1))
+    : Object.values(value as Record<string, unknown>).every(item => isJsonValue(item, active, depth + 1));
   active.delete(value);
   return valid;
 }
 
 export function assertUserOperationPaths(operation: ChangeOperation): void {
-  const reserved = ["meta/scriptorium/operations", "meta/scriptorium/publications", "meta/scriptorium/proposals", "meta/scriptorium/knowledge-context"];
+  const reserved = [
+    'meta/scriptorium/operations',
+    'meta/scriptorium/publications',
+    'meta/scriptorium/proposals',
+    'meta/scriptorium/knowledge-context',
+  ];
   for (const write of operation.writes) {
     const filePath = write.path.toLowerCase();
-    if (reserved.some((root) => filePath === root || filePath.startsWith(`${root}/`))) {
-      throw new Error("Change operations cannot modify Core authority metadata");
+    if (reserved.some(root => filePath === root || filePath.startsWith(`${root}/`))) {
+      throw new Error('Change operations cannot modify Core authority metadata');
     }
-    if (write.encoding === "base64" && Buffer.from(write.content ?? "", "base64").toString("base64") !== write.content) {
-      throw new Error("Binary change content must use canonical base64 encoding");
+    if (write.encoding === 'base64' && Buffer.from(write.content ?? '', 'base64').toString('base64') !== write.content) {
+      throw new Error('Binary change content must use canonical base64 encoding');
     }
   }
 }
@@ -74,23 +92,31 @@ export function normalizedOperation(operation: ChangeOperation): ChangeOperation
     baseProjectVersion: operation.baseProjectVersion,
     effect: operation.effect,
     reads: operation.reads.map(({ path, revision }) => ({ path, revision })),
-    ...(operation.readScopes === undefined ? {} : {
-      readScopes: operation.readScopes.map(({ prefix, revision }) => ({ prefix, revision })),
-    }),
-    ...(operation.readDocumentSets === undefined ? {} : {
-      readDocumentSets: operation.readDocumentSets.map(({ kind, parentId, documentIds }) => ({
-        kind, parentId, documentIds: [...documentIds].sort(),
-      })),
-    }),
+    ...(operation.readScopes === undefined
+      ? {}
+      : {
+          readScopes: operation.readScopes.map(({ prefix, revision }) => ({ prefix, revision })),
+        }),
+    ...(operation.readDocumentSets === undefined
+      ? {}
+      : {
+          readDocumentSets: operation.readDocumentSets.map(({ kind, parentId, documentIds }) => ({
+            kind,
+            parentId,
+            documentIds: [...documentIds].sort(),
+          })),
+        }),
     ...(operation.readKnowledgeRevision === undefined ? {} : { readKnowledgeRevision: operation.readKnowledgeRevision }),
-    writes: operation.writes.map((change) => ({
+    writes: operation.writes.map(change => ({
       path: change.path,
       revision: change.revision,
       content: change.content,
       ...(change.encoding === undefined ? {} : { encoding: change.encoding }),
-      ...(change.textChanges === undefined ? {} : {
-        textChanges: change.textChanges.map(({ fromUtf16, toUtf16, insert }) => ({ fromUtf16, toUtf16, insert })),
-      }),
+      ...(change.textChanges === undefined
+        ? {}
+        : {
+            textChanges: change.textChanges.map(({ fromUtf16, toUtf16, insert }) => ({ fromUtf16, toUtf16, insert })),
+          }),
     })),
     message: operation.message,
     ...(operation.evidenceIds === undefined ? {} : { evidenceIds: [...operation.evidenceIds] }),
@@ -98,7 +124,9 @@ export function normalizedOperation(operation: ChangeOperation): ChangeOperation
 }
 
 export function operationDigest(operation: ChangeOperation): string {
-  return createHash("sha256").update(JSON.stringify(normalizedOperation(operation))).digest("hex");
+  return createHash('sha256')
+    .update(JSON.stringify(normalizedOperation(operation)))
+    .digest('hex');
 }
 
 export function normalizedProposal(proposal: ChangeProposal): ChangeProposal {
@@ -112,48 +140,76 @@ export function normalizedProposal(proposal: ChangeProposal): ChangeProposal {
 }
 
 export function proposalDigest(proposal: ChangeProposal): string {
-  return createHash("sha256").update(canonicalJson(normalizedProposal(proposal))).digest("hex");
+  return createHash('sha256')
+    .update(canonicalJson(normalizedProposal(proposal)))
+    .digest('hex');
 }
 
 export function assertPersistedProposal(value: unknown): asserts value is ChangeProposal {
   const proposal = asRecord(value);
-  if (!proposal || typeof proposal.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(proposal.id) ||
-      !isSnapshotId(proposal.snapshot) || !Array.isArray(proposal.operations) || !proposal.operations.length ||
-      proposal.operations.length > 256 || !["author", "module", "mcp"].includes(proposal.source as string)) {
-    throw new Error("Invalid proposal envelope");
+  if (
+    !proposal ||
+    typeof proposal.id !== 'string' ||
+    !/^[A-Za-z0-9_-]{1,128}$/.test(proposal.id) ||
+    !isSnapshotId(proposal.snapshot) ||
+    !Array.isArray(proposal.operations) ||
+    !proposal.operations.length ||
+    proposal.operations.length > 256 ||
+    !['author', 'module', 'mcp'].includes(proposal.source as string)
+  ) {
+    throw new Error('Invalid proposal envelope');
   }
   const operationIds = new Set<string>();
   for (const candidate of proposal.operations) {
     assertChangeOperation(candidate);
     assertUserOperationPaths(candidate);
     const operation = candidate as ChangeOperation;
-    if (operationIds.has(operation.id) || operation.baseProjectVersion !== (proposal.snapshot as SnapshotId).projectVersion ||
-        operation.projectId !== (proposal.snapshot as SnapshotId).projectId) {
-      throw new Error("Proposal operation binding mismatch");
+    if (
+      operationIds.has(operation.id) ||
+      operation.baseProjectVersion !== (proposal.snapshot as SnapshotId).projectVersion ||
+      operation.projectId !== (proposal.snapshot as SnapshotId).projectId
+    ) {
+      throw new Error('Proposal operation binding mismatch');
     }
     operationIds.add(operation.id);
   }
   const evidence = proposal.evidence ?? [];
-  if (!Array.isArray(evidence) || !isJsonValue(evidence) ||
-      Buffer.byteLength(JSON.stringify(evidence), "utf8") > MAX_PROPOSAL_EVIDENCE_BYTES) {
-    throw new Error("Invalid proposal evidence");
+  if (
+    !Array.isArray(evidence) ||
+    !isJsonValue(evidence) ||
+    Buffer.byteLength(JSON.stringify(evidence), 'utf8') > MAX_PROPOSAL_EVIDENCE_BYTES
+  ) {
+    throw new Error('Invalid proposal evidence');
   }
   const evidenceIds = new Set<string>();
   const evidenceById = new Map<string, ProposalEvidence>();
   for (const itemValue of evidence) {
     const item = asRecord(itemValue);
-    if (!item || typeof item.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(item.id) || evidenceIds.has(item.id) ||
-        !isSnapshotId(item.snapshot) || snapshotKey(item.snapshot) !== snapshotKey(proposal.snapshot as SnapshotId) ||
-        !BUILTIN_MODULE_IDS.some((module) => module === item.module) ||
-        typeof item.kind !== "string" || !item.kind.trim() || item.kind.length > 128 || !Array.isArray(item.paths) || item.paths.length > 512 ||
-        !Object.prototype.hasOwnProperty.call(item, "details")) {
-      throw new Error("Invalid proposal evidence record");
+    if (
+      !item ||
+      typeof item.id !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(item.id) ||
+      evidenceIds.has(item.id) ||
+      !isSnapshotId(item.snapshot) ||
+      snapshotKey(item.snapshot) !== snapshotKey(proposal.snapshot as SnapshotId) ||
+      !BUILTIN_MODULE_IDS.some(module => module === item.module) ||
+      typeof item.kind !== 'string' ||
+      !item.kind.trim() ||
+      item.kind.length > 128 ||
+      !Array.isArray(item.paths) ||
+      item.paths.length > 512 ||
+      !Object.hasOwn(item, 'details')
+    ) {
+      throw new Error('Invalid proposal evidence record');
     }
     for (const fileValue of item.paths) {
       const file = asRecord(fileValue);
-      if (!file || typeof file.path !== "string" || (file.revision !== null &&
-          (typeof file.revision !== "string" || !/^[a-f0-9]{64}$/.test(file.revision)))) {
-        throw new Error("Invalid proposal evidence path");
+      if (
+        !file ||
+        typeof file.path !== 'string' ||
+        (file.revision !== null && (typeof file.revision !== 'string' || !/^[a-f0-9]{64}$/.test(file.revision)))
+      ) {
+        throw new Error('Invalid proposal evidence path');
       }
       assertProjectPath(file.path);
     }
@@ -162,17 +218,20 @@ export function assertPersistedProposal(value: unknown): asserts value is Change
   }
   for (const candidate of proposal.operations) {
     const operation = candidate as ChangeOperation;
-    if (operation.evidenceIds?.some((id) => !evidenceIds.has(id))) throw new Error("Missing proposal evidence reference");
+    if (operation.evidenceIds?.some(id => !evidenceIds.has(id))) throw new Error('Missing proposal evidence reference');
     for (const id of operation.evidenceIds ?? []) {
       const item = evidenceById.get(id)!;
       for (const path of item.paths) {
-        const boundByPath = [...operation.reads, ...operation.writes].some((read) => read.path === path.path && read.revision === path.revision);
-        const boundByScope = operation.readScopes?.some(({ prefix }) => path.path === prefix || path.path.startsWith(`${prefix}/`)) ?? false;
-        if (!boundByPath && !boundByScope) throw new Error("Proposal evidence must be bound by exact operation read preconditions");
+        const boundByPath = [...operation.reads, ...operation.writes].some(
+          read => read.path === path.path && read.revision === path.revision,
+        );
+        const boundByScope =
+          operation.readScopes?.some(({ prefix }) => path.path === prefix || path.path.startsWith(`${prefix}/`)) ?? false;
+        if (!boundByPath && !boundByScope) throw new Error('Proposal evidence must be bound by exact operation read preconditions');
       }
     }
   }
-  if (Buffer.byteLength(JSON.stringify(normalizedProposal(proposal as unknown as ChangeProposal)), "utf8") > MAX_PROPOSAL_BYTES) {
-    throw new Error("Persisted proposal exceeds its size limit");
+  if (!isPersistedProposalWithinSizeLimit(proposal as unknown as ChangeProposal)) {
+    throw new Error('Persisted proposal exceeds its size limit');
   }
 }

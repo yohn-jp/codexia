@@ -17,7 +17,7 @@ flowchart TD
     RETRY --> SESSION
 ```
 
-現行mainに残る`/mobile/`選択は旧実装であり、採用目標ではない。Native iOSは別NavigationStackとprotected draft journalを所有する。
+現行mainのWeb入口はDesktopのみで、Mobile Web shellと`/mobile/` routeは製品導線から撤去済みである。Native iOSは別NavigationStackとprotected draft journalを所有する設計目標で、実装・実機受入は未完了のまま開発と自動Xcode検証が一時停止中である。
 
 ## AUTH-01 — Passkey / OIDC本人ログイン【実装】
 
@@ -282,7 +282,7 @@ flowchart TD
     CHECK -->|いいえ| NOTICE["保存失敗を表示 / 原稿は維持"]
     TYPE -->|認証・セキュリティ| OWNER{"Better Auth owner session?"}
     OWNER -->|いいえ| LOGIN["下書きを守って再認証"]
-    OWNER -->|はい| PANEL["Desktop Web dialog（旧Mobile設定は廃止対象）"]
+    OWNER -->|はい| PANEL["Desktop Web dialog（旧Mobile設定routeは撤去済み）"]
     PANEL -->|Passkey/session操作| VERIFY["server認可・fresh proof・結果再取得"]
     VERIFY --> PANEL
     PANEL -->|閉じる| RETURN

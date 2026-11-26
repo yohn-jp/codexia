@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./proposal-size": {
+      "types": "./dist/proposal-size.d.ts",
+      "import": "./dist/proposal-size.js"
+    },
     "./evidence": {
       "types": "./dist/evidence/index.d.ts",
       "import": "./dist/evidence/index.js"

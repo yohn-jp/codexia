@@ -3632,22 +3632,126 @@ describe('Codexia HTTP boundary', () => {
         text: '',
         source: 'camera',
         sceneId: 'scene-one',
-        attachments: [{ filename: '../../note.png', mimeType: 'image/png', dataBase64: raw.toString('base64') }],
+        attachments: [
+          { filename: '../../note.png', mimeType: 'image/png', dataBase64: raw.toString('base64') },
+          { filename: 'note.png', mimeType: 'image/png', dataBase64: raw.toString('base64') },
+        ],
       }),
     });
     assert.equal(response.status, 201);
     const result = (await response.json()) as { attachments: Array<{ path: string; filename: string }>; proposal: ChangeProposal };
     assert.equal(result.attachments[0]?.filename.includes('/'), false);
+    assert.equal(result.attachments[0]?.filename, 'note.png');
+    assert.deepEqual(
+      result.attachments.map(({ filename }) => filename),
+      ['note.png', 'note.png'],
+    );
+    assert.notEqual(result.attachments[0]?.path, result.attachments[1]?.path);
     assert.equal(result.proposal.source, 'author');
     const writes = fixture.proposed[0]?.operations[0]?.writes ?? [];
     const attachment = writes.find(write => write.encoding === 'base64');
     assert.ok(attachment);
     assert.equal(Buffer.from(attachment.content ?? '', 'base64').toString('hex'), raw.toString('hex'));
-    assert.ok(writes.some(write => write.path.endsWith('.md') && write.content?.includes('![')));
+    const markdown = writes.find(write => write.path.endsWith('.md'))?.content ?? '';
+    assert.ok(markdown.includes('filename: "note.png"'));
+    assert.equal((markdown.match(/!\[note\.png\]/g) ?? []).length, 2);
     assert.equal(fixture.approvals[0]?.authorScope, 'owner');
   });
 
-  it('passes a large canonical base64 attachment through the bounded validator unchanged', async t => {
+  it('preserves scratch attachments in PostgreSQL and enforces the proposal and HTTP size boundaries', async t => {
+    const native = await nativeProject(t, 'Scratch attachment paths');
+    const staticDir = await mkdtemp(resolve(tmpdir(), 'codexia-api-native-scratch-'));
+    t.after(() => rm(staticDir, { recursive: true, force: true }));
+    const settings = testClientSettings(native.project.id, signedRequests.publicJwks, signedRequests.isActive);
+    const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence, ...settings });
+    t.after(apiServer.close);
+    const owner = signedRequests.ownerHeaders();
+    const postScratch = (body: string) =>
+      fetch(`${apiServer.base}/api/projects/${native.project.id}/scratch`, {
+        method: 'POST',
+        headers: { Authorization: owner.Authorization, 'Content-Type': 'application/json', Origin: apiServer.base },
+        body,
+      });
+    const attachmentBytes = [Buffer.from([10, 20, 30]), Buffer.from([40, 50, 60]), Buffer.from([70, 80, 90]), Buffer.from([100, 110, 120])];
+    const response = await postScratch(
+      JSON.stringify({
+        text: 'Persist attachments',
+        attachments: [
+          { filename: 'slide.png', mimeType: 'image/png', dataBase64: attachmentBytes[0]!.toString('base64') },
+          { filename: 'slide.png', mimeType: 'image/png', dataBase64: attachmentBytes[1]!.toString('base64') },
+          { filename: 'a b.png', mimeType: 'image/png', dataBase64: attachmentBytes[2]!.toString('base64') },
+          { filename: 'a?b.png', mimeType: 'image/png', dataBase64: attachmentBytes[3]!.toString('base64') },
+        ],
+      }),
+    );
+    assert.equal(response.status, 201);
+    const result = (await response.json()) as { path: string; attachments: Array<{ filename: string; path: string }> };
+    assert.deepEqual(
+      result.attachments.map(({ filename }) => filename),
+      ['slide.png', 'slide.png', 'a b.png', 'a?b.png'],
+    );
+    assert.equal(new Set(result.attachments.map(({ path }) => path)).size, 4);
+    const reader = await native.store.reader(native.project.id);
+    assert.deepEqual(
+      await Promise.all(
+        result.attachments.map(async attachment => Buffer.from((await reader.read(attachment.path, 'base64'))?.content ?? '', 'base64')),
+      ),
+      attachmentBytes,
+    );
+    const scratch = (await reader.read(result.path))?.content ?? '';
+    const frontMatterPaths = [...scratch.matchAll(/^    path: "([^"]+)"$/gmu)].map(([, path]) => path);
+    assert.deepEqual(
+      frontMatterPaths,
+      result.attachments.map(({ path }) => path),
+    );
+    const expectedLinks = result.attachments.map(({ filename, path }) => `![${filename}](${path})`);
+    let linkOffset = -1;
+    for (const link of expectedLinks) {
+      const offset = scratch.indexOf(link, linkOffset + 1);
+      assert.ok(offset > linkOffset, `expected ordered markdown link ${link}`);
+      linkOffset = offset;
+    }
+
+    const text = 'Near the normalized proposal limit';
+    const sendBoundaryAttachment = (data: Buffer) =>
+      postScratch(
+        JSON.stringify({
+          text,
+          attachments: [{ filename: 'max.bin', mimeType: 'application/octet-stream', dataBase64: data.toString('base64') }],
+        }),
+      );
+    const probe = Buffer.from([1, 2, 3]);
+    const probeResponse = await sendBoundaryAttachment(probe);
+    assert.equal(probeResponse.status, 201);
+    const probeResult = (await probeResponse.json()) as { proposal: ChangeProposal };
+    const probeBase64 = probe.toString('base64');
+    const envelopeOverhead = Buffer.byteLength(JSON.stringify(probeResult.proposal), 'utf8') - probeBase64.length;
+    const proposalLimit = 8 * 1024 * 1024;
+    const maxRawLength = Math.floor((proposalLimit - envelopeOverhead) / 4) * 3;
+    const maxRaw = Buffer.alloc(maxRawLength, 0x5a);
+    const maxEncodedLength = maxRaw.toString('base64').length;
+    assert.ok(envelopeOverhead + maxEncodedLength <= proposalLimit);
+    assert.ok(envelopeOverhead + Buffer.alloc(maxRawLength + 1).toString('base64').length > proposalLimit);
+    const maxResponse = await sendBoundaryAttachment(maxRaw);
+    assert.equal(maxResponse.status, 201);
+    const maxResult = (await maxResponse.json()) as { attachments: Array<{ path: string }>; proposal: ChangeProposal };
+    assert.equal(Buffer.byteLength(JSON.stringify(maxResult.proposal), 'utf8'), envelopeOverhead + maxEncodedLength);
+    const freshReader = await native.store.reader(native.project.id);
+    assert.deepEqual(Buffer.from((await freshReader.read(maxResult.attachments[0]!.path, 'base64'))!.content!, 'base64'), maxRaw);
+    const rejectedResponse = await sendBoundaryAttachment(Buffer.alloc(maxRawLength + 1, 0x5a));
+    assert.equal(rejectedResponse.status, 413);
+    assert.equal(((await rejectedResponse.json()) as { code?: string }).code, 'SCRATCH_ATTACHMENT_TOO_LARGE');
+
+    const maxHttpBody = JSON.stringify({ text: 'At the Fastify body limit' }).padEnd(12 * 1024 * 1024);
+    const maxHttpResponse = await postScratch(maxHttpBody);
+    assert.equal(maxHttpResponse.status, 201);
+    await maxHttpResponse.json();
+    const rejectedHttpResponse = await postScratch(`${maxHttpBody} `);
+    assert.equal(rejectedHttpResponse.status, 413);
+    assert.equal(((await rejectedHttpResponse.json()) as { code?: string }).code, 'BODY_TOO_LARGE');
+  });
+
+  it('rejects a canonical payload that exceeds the persisted proposal cap before calling Core', async t => {
     const staticDir = await mkdtemp(resolve(tmpdir(), 'codexia-api-large-scratch-'));
     tempDirs.push(staticDir);
     const fixture = makeSnapshotStore();
@@ -3668,17 +3772,34 @@ describe('Codexia HTTP boundary', () => {
         attachments: [{ filename: 'large.bin', mimeType: 'application/octet-stream', dataBase64 }],
       }),
     });
+    assert.equal(response.status, 413);
+    assert.equal(((await response.json()) as { code?: string }).code, 'SCRATCH_ATTACHMENT_TOO_LARGE');
+    assert.equal(fixture.proposed.length, 0);
+    assert.equal(fixture.approvals.length, 0);
+  });
+
+  it('accepts a large canonical attachment below the persisted proposal cap', async t => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), 'codexia-api-large-scratch-accepted-'));
+    tempDirs.push(staticDir);
+    const fixture = makeSnapshotStore();
+    const apiServer = await startCustomApi(fixture.store, staticDir);
+    t.after(apiServer.close);
+    const owner = signedRequests.ownerHeaders();
+    const raw = Buffer.alloc(6_289_500, 0x5a);
+    const dataBase64 = raw.toString('base64');
+    assert.equal(dataBase64.length % 4, 0);
+    const response = await fetch(`${apiServer.base}/api/projects/project-1/scratch`, {
+      method: 'POST',
+      headers: { Authorization: owner.Authorization, 'Content-Type': 'application/json', Origin: apiServer.base },
+      body: JSON.stringify({
+        text: 'Large canonical attachment',
+        attachments: [{ filename: 'large.bin', mimeType: 'application/octet-stream', dataBase64 }],
+      }),
+    });
     assert.equal(response.status, 201);
     await response.arrayBuffer();
     const attachment = fixture.proposed[0]?.operations[0]?.writes.find(write => write.encoding === 'base64');
-    assert.ok(attachment);
-    assert.equal(attachment.content, dataBase64);
-    assert.equal(
-      createHash('sha256')
-        .update(Buffer.from(attachment.content ?? '', 'base64'))
-        .digest('hex'),
-      createHash('sha256').update(raw).digest('hex'),
-    );
+    assert.equal(attachment?.content, dataBase64);
     assert.equal(fixture.approvals.length, 1);
   });
 
@@ -3719,19 +3840,21 @@ describe('Codexia HTTP boundary', () => {
     const apiServer = await startCustomApi(fixture.store, staticDir);
     t.after(apiServer.close);
     const owner = signedRequests.ownerHeaders();
-    const dataBase64 = Buffer.alloc(8 * 1024 * 1024 + 1, 0x5a).toString('base64');
-    const requestBody = JSON.stringify({
-      text: 'Over the raw attachment cap',
-      attachments: [{ filename: 'large.bin', mimeType: 'application/octet-stream', dataBase64 }],
-    });
-    assert.ok(Buffer.byteLength(requestBody) < 12 * 1024 * 1024, 'the request remains within the existing JSON parser cap');
-    const response = await fetch(`${apiServer.base}/api/projects/project-1/scratch`, {
-      method: 'POST',
-      headers: { Authorization: owner.Authorization, 'Content-Type': 'application/json', Origin: apiServer.base },
-      body: requestBody,
-    });
-    assert.equal(response.status, 413);
-    assert.equal(((await response.json()) as { code?: string }).code, 'SCRATCH_ATTACHMENT_TOO_LARGE');
+    for (const overBy of [1, 10]) {
+      const dataBase64 = Buffer.alloc(8 * 1024 * 1024 + overBy, 0x5a).toString('base64');
+      const requestBody = JSON.stringify({
+        text: 'Over the raw attachment cap',
+        attachments: [{ filename: 'large.bin', mimeType: 'application/octet-stream', dataBase64 }],
+      });
+      assert.ok(Buffer.byteLength(requestBody) < 12 * 1024 * 1024, 'the request remains within the existing JSON parser cap');
+      const response = await fetch(`${apiServer.base}/api/projects/project-1/scratch`, {
+        method: 'POST',
+        headers: { Authorization: owner.Authorization, 'Content-Type': 'application/json', Origin: apiServer.base },
+        body: requestBody,
+      });
+      assert.equal(response.status, 413);
+      assert.equal(((await response.json()) as { code?: string }).code, 'SCRATCH_ATTACHMENT_TOO_LARGE');
+    }
     assert.equal(fixture.proposed.length, 0);
     assert.equal(fixture.approvals.length, 0);
   });

@@ -1,6 +1,6 @@
 # XState v5 状態機械の採用・所有権・検証契約
 
-**種別: 採用済み目標・未導入。** 状態の意味・許される操作とエラー時の復旧は [Interaction contract](INTERACTION-CONTRACT.md)、[Screen State Atlas](SCREEN-STATE-ATLAS.md)、[Core](../architecture/CORE.md)、[Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md)、[Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md) が先に決める。XState v5はその一部を**実行可能な状態機械に写像する**ため採用する。既存React UIの単純なローカル状態を機械的に全面置換しない。
+**種別: 採用済み技術・部分導入済み。** DesktopのWRT-01/REC-01原稿保存・復旧では、XState v5 machineを [`persistence-save-machine.ts`](../../app/src/application/persistence-save-machine.ts) と [`PersistenceWorkspace.tsx`](../../app/src/persistence/PersistenceWorkspace.tsx) で使用する。他の領域への導入は未完了の設計目標であり、本書の受入条件がすべて検証済みという意味ではない。状態の意味・許される操作とエラー時の復旧は [Interaction contract](INTERACTION-CONTRACT.md)、[Screen State Atlas](SCREEN-STATE-ATLAS.md)、[Core](../architecture/CORE.md)、[Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md)、[Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md) が先に決める。XStateは複雑な遷移だけを**実行可能な状態機械に写像する**ため採用する。既存React UIの単純なローカル状態を機械的に全面置換しない。
 
 ## 対象と不変条件
 
@@ -48,4 +48,4 @@
 | XST-005 | ChangeSet/auth/backupへの展開はそれぞれの状態正本と比較し、重複stateや不要なglobal actorを追加しない |
 | XST-006 | 決定したXState version、API、採用範囲、追加したCI source/test identityをexact-sourceで検証 |
 
-本書は**導入方針を確定する設計**であり、実際のmachine、テスト、UIを実装済みとはみなさない。
+DesktopのWRT-01/REC-01保存・復旧machine、React adapter、関連するmachine testは実装済みである。これはXST-001〜006の全受入条件を満たしたという認定ではない。ChangeSet、認証、backup workflowへの適用は未実装である。ネイティブSwiftUIクライアントにはReact/XState runtimeを導入しない。

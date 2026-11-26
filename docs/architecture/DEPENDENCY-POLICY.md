@@ -62,7 +62,7 @@ Desktop Reactは **TypeScript 7 + Vite 8 + vanilla-extract** を正本とする�
 
 - 保持する制約: PKCE S256、予測困難な`state`、タブ単位・有効期限付きトランザクション、callbackでの`state`・`iss`（RFC 9207）・redirect照合、`resource`（RFC 8707）・API audience、認可サーバーとendpointの厳密な同一オリジン、tokenのメモリ保持、誤応答時のfail-closed。
 - 比較対象の[`openid-client`](https://github.com/panva/openid-client) `6.9.1`はプロトコル処理を高レベルに抽象化するが、この用途では既存の個別制約を明示して監査することを優先し、**採用しない**。セキュリティ品質が劣るという判断ではない。
-- iOSのAppAuth-iOS資産はSwiftUI Native認証での再利用可否を検証する。OS認証とKeychainを維持するためにCapacitor bridgeを残さない。iOSのSwift typed clientはWeb Orvalとは別に同じOpenAPIから生成する。Better Authのclient helperはAPIアクセストークン取得契約の置換対象として選ばない。
+- 現行SwiftUI iOS appは`ASWebAuthenticationSession`とnative transportを使う。AppAuth-iOS/Capacitor auth sourceはretired `app/native` bridgeに残るもので、current app dependencyではない。既存AppAuth資産のnative-only再利用を評価する場合も、OS認証とKeychainの境界を保ち、旧Capacitor bridgeを維持する理由にしない。iOSのSwift typed clientはWeb Orvalとは別に同じOpenAPIから生成する。Better Authのclient helperはAPIアクセストークン取得契約の置換対象として選ばない。
 - 受入: 正常なAuthorization Code + PKCEに加え、state不一致・リプレイ・期限切れ・iss不一致・endpoint変更・不正token type・redirect逸脱・token漏えいが拒否されることをブラウザーで確認する。
 
 ### ZIP：`@zip.js/zip.js`を採用
@@ -107,12 +107,12 @@ GitHub APIのbearer tokenを署名付きArtifactのリダイレクト先へ転�
 
 ### 今回の確定済み追加採用ターゲット
 
-- **XState v5**：原稿保存・復旧等の複雑な状態遷移に採用。React 19の単純なlocal UI stateを全置換しない。状態の意味は [XState状態機械設計](../design/XSTATE-STATE-MACHINE-CONTRACT.md) に従う。実装PR時にv5最新stableとReact adapterの整合を検証し、宣言とlockfile、[依存台帳](DEPENDENCY-INVENTORY.md)を更新する。
+- **XState v5**：DesktopのWRT-01/REC-01保存・復旧machineに導入済み。React 19の単純なlocal UI stateを全置換しない。状態の意味と未導入領域は [XState状態機械設計](../design/XSTATE-STATE-MACHINE-CONTRACT.md) に従う。追加導入時はv5 stableとReact adapterの整合を検証し、宣言・lockfile・[依存台帳](DEPENDENCY-INVENTORY.md)を更新する。
 - **S3互換API client**：既存のage暗号化バックアップをoff-VMへ送る**バックアップ専用executor**で維持管理される公式SDK/成熟ライブラリを選ぶ。S3署名/リトライ/TLS/redirectを独自実装しない。AWS S3と互換providerの両方で検査し、具体的パッケージとバージョンを導入PRで確定。詳細は [バックアップ管理契約](BACKUP-CONSOLE-CONTRACT.md)。
 
 ## 4. 追加採用しないもの
 
-- **追加のOAuthフレームワーク／認証基盤**: Better Auth、AppAuth-iOS、`jose`、MCP SDKを維持し、ブラウザーのプロトコル処理だけを選定対象にする。
+- **追加のOAuthフレームワーク／認証基盤**: 現行のBetter Auth、`jose`、MCP SDKの役割を維持し、ブラウザーのプロトコル処理だけを選定対象にする。AppAuth-iOSはretired `app/native` bridgeに残る依存であり、現在のSwiftUI appの依存ではない。
 - **`fs-extra`、`write-file-atomic`の一括導入**: ライブラリ名だけではTOCTOUは消えない。openした同一ディスクリプタによる検査・利用、ディレクトリの信頼性、権限、fsync・原子的置換の契約を評価する。
 - **ORM／第二のDBアクセス正本**: 既存PostgreSQLのトランザクション、マイグレーション台帳、モデル境界を置き換えない。新しいルーティングフレームワークや状態管理基盤も導入しない。
 - **一括リトライライブラリ**: OAuthやCI証拠の操作に無条件リトライ・リダイレクト・副作用再実行を追加しない。必要な処理だけ、冪等性を証明して選定する。

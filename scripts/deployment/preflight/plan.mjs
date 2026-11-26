@@ -108,11 +108,15 @@ function validateObservation(observation) {
   timestamp(observation.observedAt);
   const { binding, changeAxes, bootstrapResume } = observation;
   if (fields.includes('bootstrapResume')) {
-    requireCondition(record(bootstrapResume, ['clusterId', 'databaseOid', 'image', 'migrationFingerprint']) &&
+    const resumeFields = Object.hasOwn(bootstrapResume ?? {}, 'checkpoint')
+      ? ['clusterId', 'databaseOid', 'image', 'migrationFingerprint', 'checkpoint']
+      : ['clusterId', 'databaseOid', 'image', 'migrationFingerprint'];
+    requireCondition(record(bootstrapResume, resumeFields) &&
       typeof bootstrapResume.clusterId === 'string' && /^[1-9][0-9]{0,19}$/u.test(bootstrapResume.clusterId) &&
       typeof bootstrapResume.databaseOid === 'string' && /^[1-9][0-9]{0,9}$/u.test(bootstrapResume.databaseOid) &&
       typeof bootstrapResume.image === 'string' && /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u.test(bootstrapResume.image) &&
-      typeof bootstrapResume.migrationFingerprint === 'string' && /^sha256:[a-f0-9]{64}$/u.test(bootstrapResume.migrationFingerprint),
+      typeof bootstrapResume.migrationFingerprint === 'string' && /^sha256:[a-f0-9]{64}$/u.test(bootstrapResume.migrationFingerprint) &&
+      (!Object.hasOwn(bootstrapResume, 'checkpoint') || bootstrapResume.checkpoint === 'empty-auth-schema'),
     'Invalid bootstrap continuation evidence');
   }
   // Digests refer to verified redacted evidence held by the existing owning

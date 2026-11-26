@@ -41,7 +41,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Creative workspace information architecture | [Information architecture](design/INFORMATION-ARCHITECTURE.md) — design proposal |
 | Desktop writing | [Desktop authoring](design/DESKTOP-AUTHORING.md) — design proposal |
 | Knowledge and review | [Knowledge and review](design/KNOWLEDGE-REVIEW.md) — design proposal |
-| iOS native writing | [iOS authoring](design/MOBILE-AUTHORING.md) — SwiftUI/TextKit target, not accepted on device |
+| iOS native writing | [iOS authoring](design/MOBILE-AUTHORING.md) — SwiftUI/TextKit target; development and automatic Xcode validation paused, not accepted on device |
 | Visual system history | [Visual system](design/VISUAL-SYSTEM.md) — existing proposals, comparisons and decision history; not the visual source of truth |
 | Interaction and recovery states | [Interaction contract](design/INTERACTION-CONTRACT.md) — design proposal |
 | Trial-reading files and reader links | [Publishing design](design/PUBLISHING.md) |
