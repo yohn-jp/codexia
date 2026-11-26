@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
@@ -11,17 +12,35 @@ const producerName = 'types-trace';
 const artifactName = 'ci-evidence-types-trace';
 const task = 'requirements-trace';
 
-export function selectTraceVerifyRun(runs, { sourceSha, repositoryId, event }) {
+function latestTraceVerifyRun(runs, { sourceSha, repositoryId, event }) {
   const matches = runs.filter(run => run.event === event && run.path === workflow && run.head_sha === sourceSha &&
     run.repository?.id === repositoryId && run.head_repository?.id === repositoryId &&
     (event === 'pull_request' || run.head_branch === 'main'));
   const newest = matches.toSorted((a, b) => b.run_number - a.run_number)[0];
-  if (!newest || newest.status !== 'completed' || newest.conclusion !== 'success') return null;
+  if (!newest) return null;
   assert.ok(Number.isSafeInteger(newest.id) && newest.id > 0 && Number.isSafeInteger(newest.run_number) &&
     newest.run_number > 0 && Number.isSafeInteger(newest.run_attempt) && newest.run_attempt > 0,
   'Invalid Verify run identity');
   assert.equal(matches.filter(run => run.run_number === newest.run_number).length, 1, 'Ambiguous Verify run identity');
   return newest;
+}
+
+export function selectTraceVerifyRun(runs, expected) {
+  const newest = latestTraceVerifyRun(runs, expected);
+  return newest?.status === 'completed' && newest.conclusion === 'success' ? newest : null;
+}
+
+export async function waitForTraceVerifyRun(readRuns, expected, { waitSeconds = 0, pause = delay } = {}) {
+  assert.ok(Number.isSafeInteger(waitSeconds) && waitSeconds >= 0 && waitSeconds <= 300, 'Invalid Verify observation timeout');
+  const deadline = performance.now() + waitSeconds * 1000;
+  do {
+    const newest = latestTraceVerifyRun(await readRuns(), expected);
+    if (newest?.status === 'completed') return newest.conclusion === 'success' ? newest : null;
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) return null;
+    await pause(Math.min(15_000, remaining));
+  } while (performance.now() < deadline);
+  return null;
 }
 
 function assertTraceCertification(certification, run) {
@@ -60,15 +79,15 @@ export function summarizeCertifiedTrace({ expected, run, certification, producer
   };
 }
 
-async function readReceipt(expected, token) {
+async function readReceipt(expected, token, waitSeconds) {
   const { repository, repositoryId, sourceSha, event } = expected;
   const github = createGitHubOctokit({ token });
   const [owner, repo] = repository.split('/');
   const target = { owner, repo };
   const actions = github.rest.actions;
-  const runs = await paginateActionsInventory(github, actions.listWorkflowRuns,
+  const readRuns = () => paginateActionsInventory(github, actions.listWorkflowRuns,
     { ...target, workflow_id: 'verify.yml', head_sha: sourceSha, event }, 'workflow_runs');
-  const run = selectTraceVerifyRun(runs, expected);
+  const run = await waitForTraceVerifyRun(readRuns, expected, { waitSeconds });
   if (!run) return { status: 'NOT_AVAILABLE', sourceSha };
   const args = { ...target, run_id: run.id };
   const [latestJobs, artifacts] = await Promise.all([
@@ -94,13 +113,14 @@ async function main() {
   const [sourceSha, event, output, ...extra] = process.argv.slice(2);
   const { GH_TOKEN: token, GITHUB_REPOSITORY: repository, GITHUB_REPOSITORY_ID: id } = process.env;
   const repositoryId = Number(id);
+  const waitSeconds = Number(process.env.CODEXIA_TRACE_VERIFY_WAIT_SECONDS ?? 0);
   assert.match(sourceSha ?? '', /^[a-f0-9]{40}$/u);
   assert.ok(['push', 'pull_request', 'workflow_dispatch'].includes(event) && output && extra.length === 0,
     'Usage: trace-receipt.mjs SHA EVENT OUTPUT');
   assert.equal(repository, 'yohn-jp/codexia');
   assert.ok(Number.isSafeInteger(repositoryId) && repositoryId > 0, 'Missing repository ID');
   assert.ok(token, 'GitHub Actions read token is required');
-  const receipt = await readReceipt({ sourceSha, event, repository, repositoryId }, token).catch(error => {
+  const receipt = await readReceipt({ sourceSha, event, repository, repositoryId }, token, waitSeconds).catch(error => {
     console.error('Verify trace artifact was not authenticated:', error.message);
     return { status: 'NOT_AVAILABLE', sourceSha };
   });

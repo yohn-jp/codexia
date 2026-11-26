@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { selectTraceVerifyRun, summarizeCertifiedTrace } from './trace-receipt.mjs';
+import { selectTraceVerifyRun, summarizeCertifiedTrace, waitForTraceVerifyRun } from './trace-receipt.mjs';
 
 const sourceSha = 'a'.repeat(40);
 const repository = 'yohn-jp/codexia';
@@ -59,4 +59,17 @@ test('rejects foreign artifacts, stale source, skipped certification, mismatched
   assert.throws(() => summarizeCertifiedTrace({ ...inputs, producer: { run_attempt: 2 } }), /producer attempt/iu);
   const trace = { ...inputs.trace, caseExecutions: [{ testId: 'TEST-TRC-01-001', result: 'SKIPPED' }] };
   assert.throws(() => summarizeCertifiedTrace({ ...inputs, trace }), /required trace case/iu);
+});
+
+test('a Pages build waits for the current exact Verify run and stops on a terminal result', async () => {
+  const inProgress = { ...run, status: 'in_progress', conclusion: null };
+  const failed = { ...run, conclusion: 'failure' };
+  const batches = [[inProgress], [run]];
+  const waits = [];
+  const options = { waitSeconds: 120, pause: async milliseconds => { waits.push(milliseconds); } };
+  assert.equal(await waitForTraceVerifyRun(async () => batches.shift(), expected, options), run);
+  assert.equal(waits.length, 1);
+  assert.equal(await waitForTraceVerifyRun(async () => [failed], expected, options), null);
+  assert.equal(waits.length, 1, 'a terminal failure must not wait or fall back to another run');
+  assert.equal(await waitForTraceVerifyRun(async () => [inProgress], expected), null);
 });
