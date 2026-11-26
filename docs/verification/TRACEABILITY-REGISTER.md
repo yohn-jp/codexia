@@ -18,35 +18,22 @@
 
 **明示された未実装範囲:** S3互換バックアップの転送・隔離復元、XState v5 actor/state machine、owner backup console/executorの設計目標はRequirement Registerの実装記述で未実装と明記されている。これらの記述は現在の状態を利用者へ示す根拠であり、周辺の既存ファイルやテスト候補から実装済み・適合済みを推定しない。
 
-## 作業開始時baselineと再生成値
+## 現行 source の生成結果
 
-baselineは作業開始時のmain `af9a7115383e16f45299695af59645ad44af4998` から採取した。表の作業値も同main基点のPR変更をrebaseする前にStrictDoc reportから採取した。その後mainは `3f2129291316151c91f3b1a57c4bb4bcbe2da08e` まで進み、PRはそのHEADへrebaseした。ユーザーの指示でrebase後の追加テスト・report生成を行わないため、表の作業値をrebase後の現在値として読まない。PR CIが正確な新source SHAでHTML/JSONとtrace reportを再生成する。
+公開 dashboard と同階層の `traceability.json` は、対象 SHA ごとに要求数、義務数、surface の逆引き、TEST-ID と検証結果を集計する。
+`UNMAPPED` は義務への対応が台帳に記録されていない状態を示す。
+`DEVIATION` は inventory または契約照合で明示された不一致を示す。
+要求正本に記録された未実装宣言は別欄に残す。
 
-| 指標 | 作業開始時main | rebase前worktree | 読み方 |
-| --- | ---: | ---: | --- |
-| Requirement / obligation | 33 / 43 | 33 / 44 | 要求数は不変。REQ-TRACE-001にdashboard義務を1件追加 |
-| Obligation conformance: MAPPED_UNVERIFIED | 24 | 24 | 対応情報あり。適合認定ではない |
-| Obligation conformance: PARTIAL | 15 | 16 | 追跡段階の欠落または部分状態 |
-| Obligation conformance: UNMAPPED | 4 | 4 | accepted obligation mappingの不足。実装不存在の断定ではない |
-| Obligation conformance: VERIFIED | 0 | 0 | exact-source認定へ昇格していない |
-| obligationTrace rows: PARTIAL / MAPPED_UNVERIFIED | 36 / 7 | 36 / 8 | projection上のリンク・テスト状態 |
-| TEST-ID付き義務 / unique TEST-ID | 7 / 10 | 8 / 11 | TEST-TRC-08-001を追加 |
-| scoped local case result | 10/10 PASSED | 11/11 PASSED | caseExecutionsの観測。製品適合の証明範囲とは別 |
-| exact-source GitHub run | 0 | 0 (`NOT_RUN`) | skipやlocal runはhosted evidenceに数えない |
-| reverse rows / unique surface identities | 622 / 614 | 646 / 638 | raw rowsは重複relationを含む。surface identityで集約した値も併記 |
-| linked reverse rows / unique linked surfaces | 56 / 52 | 58 / 54 | OBLへ明示リンクされた行・surface |
-| unique surfaces without obligation link | 562 | 584 | candidate REQだけではlinked扱いにしない |
-| reverse inventory classification exposed | 0 | 423 unique surfaces | 正規inventory classificationをreverse outputへ射影 |
-| candidate REQ surfaced (not accepted links) | 0 | 66 unique surfaces | candidateとaccepted relationを分離 |
-| GitHub Actions workflow definitions discovered / explicitly linked | 0 / 0 | 30 / 2 | workflow YAMLの列挙。実行済みrun数ではない |
-| Registerにある明示的な未実装宣言 | page projectionなし | 4 requirements | conformance statusとは別の注記。明示的な登録記述だけを抽出 |
-| obligation gaps / reverse gaps | 59 / 644 | 60 / 668 | gapは状態別に表示。根拠のない解消はしない |
-| explicit NOT_APPLICABLE surface | 0 | 0 | 適用外と明示されたsource surfaceはない |
-| broken repository source/design/test references | 既存page projectionなし | 0 | checkoutで解決できるファイル参照を検査 |
+義務に付けた TEST-ID には、既存テストの宣言名、リポジトリ内パス、宣言行、検証する条件を記録する。
+一つのケースが確認できる範囲は、そのケースが実際に観測する条件までである。
+未導入の XState v5、S3 互換バックアップの転送・隔離復元、owner backup console/executor には、実装または証拠の欠落が残る。
+正式な HTTP/MCP 適合性試験、性能検証、実機・運用証拠のうち exact-source の実行結果を取り込めていないものも未検証のままとする。
 
-rebase前に観測した4件のrequirement conformance `UNMAPPED` は `REQ-UI-006`、`REQ-OPS-004`、`REQ-OPS-005`、`REQ-QUAL-003`。加えて `REQ-OPS-003` のS3拡張もRequirement Registerのobligation statementに未実装と明記されている。rebase前のtrace projectionは `REQ-UI-006`、`REQ-OPS-003`、`REQ-OPS-004`、`REQ-OPS-005` の明示句を別欄・別filterで提示する。`UNMAPPED`と「明示的未実装宣言」は異なる属性である。`REQ-QUAL-003`は対応source参照が未接続だが、ここから製品コード不存在は断定しない。
-
-作業開始時のreverse outputが `DEVIATION` と数えた2件は、`PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}` のinventory記述 `UNMAPPED: detailed obligation mapping remains unassigned` を仕様逸脱として誤分類したものだった。修正後はこれを `UNMAPPED` gapとして表し、`DEVIATION`はsource inventoryまたはruntime contract scanが明示した場合に限る。未接続のobligation mappingを逸脱と数えず、同時に仕様逸脱が存在しないことを広範な証明として扱わない。
+検証結果は G0〜G7 の項目ごとに、どの証拠を取得できたかで読む。
+StrictDoc の検査は G0 のうち UID・relation・出力再現性を扱う。
+G7 には未接続の実装面、未実行のテスト、証拠を得られていない義務を残す。
+その他のゲートは [仕様ツールの受入設計](SPECIFICATION-TOOLING-ACCEPTANCE.md) が要求する実行証拠を確認できた範囲で判定する。
 
 ## MCP v2 migration verification crosswalk
 
@@ -103,7 +90,9 @@ MCP-specific source mapping was refreshed against integrated source `f4e574ec` (
 既存の `requirements-trace` はnodeの義務ID、設計・実装参照、surface identifier、TEST-IDを`trace-report.json`の`obligationTrace`に出力し、実装側から見つかった要素と義務の対応を`reverseTrace`に記録する。`caseExecutions`はテスト名と宣言source/rangeを保ち、未実行・skip・TODO・曖昧な対応をPASSに集約しない。両方向の表は同じ義務IDで照合でき、識別子が分からない要素や観測限界は生成結果のgapに残る。
 
 `caseExecutions` の結果は、そのテストケースが実際に実行されたことを示す。
-GitHub Actions 上の実行では同じレポートの `execution` が source SHA、run、attempt、job、task を保持し、既存の Verify が選択した証拠 ZIP の ID・ダイジェストと照合する。
+GitHub Actions 上の実行では同じレポートの `execution` が source SHA、run、attempt、job、task を保持する。
+Pages は、同一 SHA の Verify が認定した証拠 ZIP を既存の artifact 選択・検証処理で照合できた場合に、該当する CASE の run・attempt・artifact ID・ダイジェストを表示する。
+証拠が取得できない場合は `NOT_AVAILABLE` とし、Pages の生成時に観測したテスト結果は生成 run の結果として扱う。
 製品側の各義務は、実装の識別子、必要な試験とその証明力、対応する環境と証拠が揃うまで、既存の適合状態を保つ。
 `/requirements/traceability/`は既存三projectionから同じsource SHAの静的HTML/JSONを作り、StrictDoc Matrix/Deep Trace/Coverage/HTML/JSONを直接開ける。Pages publisherの既存browser suiteは、検索、area/status/surface filter、双方向anchor、詳細開閉、mobile table scroll、LikeC4 provenanceをChromiumで確認する。
 公開PagesはStrictDocとtraceabilityのHTML/JSONを既存publisherから配布する。`NOT_RUN`のPRローカルreportをGitHub run証拠として扱わない。
