@@ -120,6 +120,9 @@ export function isTaskInputDocument(file, task) {
 }
 const DB_CONTRACT_TOOLCHAIN = JSON.parse(readFileSync(new URL('../../../packages/persistence-postgres/tests/db-contract/toolchain.json', import.meta.url), 'utf8'));
 const POSTGRES_CI_IMAGE = DB_CONTRACT_TOOLCHAIN.postgresImage;
+const SWIFT_LINUX_TOOLCHAIN_PATH = 'scripts/ios/swift-linux-toolchain.json';
+const swiftTestPath = /^ios\/(?:CodexiaEditor|CodexiaTransport)\/Tests\//u;
+const swiftDependencyPath = /^ios\/(?:CodexiaEditor|CodexiaTransport)\/Package\.(?:swift|resolved)$/u;
 
 export function taskGroup(task) {
   const groups = Object.keys(VERIFICATION_GROUPS).filter(group => VERIFICATION_GROUPS[group].includes(task));
@@ -159,6 +162,7 @@ export function taskInvocation(task, executable = process.execPath) {
   const overrides = taskOverrides(task);
   const environmentKeys = Object.keys(overrides).sort();
   if (task === 'biome-ci') return { executable, arguments: ['scripts/ci/biome/check.mjs'], environmentKeys: ['CODEXIA_CI_REPORT_DIR'] };
+  if (task === 'swift-linux') return { executable: 'bash', arguments: ['scripts/ios/verify-linux-swift.sh'], environmentKeys };
   if (task === 'db-contract') return { executable: 'pnpm', arguments: ['--filter', '@codexia/persistence-postgres', 'run', 'test:db-contract'], environmentKeys: ['CODEXIA_CI_REPORT_DIR'] };
   if (Object.hasOwn(CONFORMANCE_TASKS, task)) return {
     executable, arguments: ['--import', 'tsx', CONFORMANCE_TASKS[task]], environmentKeys: ['CODEXIA_CI_REPORT_DIR'],
@@ -228,7 +232,7 @@ function taskEnvironment(task, group, runtime) {
     imageOS: runtime.imageOS ?? null, imageVersion: runtime.imageVersion ?? null }, env };
 }
 
-function taskProducerRecipe(task) {
+function taskProducerRecipe(task, swiftToolchain) {
   const group = taskGroup(task);
   const prerequisites = [];
   const profile = requiredBuildProfile(group);
@@ -253,6 +257,7 @@ function taskProducerRecipe(task) {
   }
   if (task.startsWith('oci-')) external.push('docker:ubuntu-24.04-host');
   if (task === 'architecture-g5') external.push(THREAGILE_IMAGE);
+  if (swiftToolchain) external.push(`${swiftToolchain.url}#sha256=${swiftToolchain.sha256}`);
   return { group, task, prerequisites: [...new Set(prerequisites)].sort(), external,
     runnerClass: group.startsWith('browser-') ? 'pinned-playwright-container' : 'ubuntu-24.04' };
 }
@@ -291,16 +296,19 @@ export function captureTaskInputSource({ root, sha, runtime }) {
     const group = taskGroup(task);
     const executable = tree.filter(({ file }) => isTaskInputDocument(file, task));
     const source = sha256(entries(executable));
-    const tests = sha256(entries(executable.filter(({ file }) => testFilePattern.test(file))));
-    const dependencies = sha256(entries(executable.filter(({ file }) => dependencyPath(file))));
+    const swift = task === 'swift-linux';
+    const swiftToolchain = swift ? JSON.parse(readGit(root, 'show', sha + ':' + SWIFT_LINUX_TOOLCHAIN_PATH)) : null;
+    const tests = sha256(entries(executable.filter(({ file }) => swift ? swiftTestPath.test(file) : testFilePattern.test(file))));
+    const dependencies = sha256(entries(executable.filter(({ file }) => swift ? swiftDependencyPath.test(file) : dependencyPath(file))));
     const normalizedInvocations = Array.isArray(invocations) ? invocations : [invocations];
     const canonicalInvocations = normalizedInvocations.map(invocation => ({ ...invocation,
       executable: invocation.executable === runtime.execPath ? 'node' : invocation.executable }));
     return {
-      source, tests, dependencies, environment: sha256(taskEnvironment(task, group, runtime)), toolchain,
+      source, tests, dependencies, environment: sha256(taskEnvironment(task, group, runtime)),
+      toolchain: swiftToolchain ? sha256({ toolchain, swift: swiftToolchain }) : toolchain,
       recipe: sha256({ task, group, workflowJob: taskWorkflowJob(task), invocation: canonicalInvocations,
         groupPreparation: 'scripts/ci/execution/workspace.mjs prepare selected-group', concurrencyLimit: 2 }),
-      producers: sha256(taskProducerRecipe(task)),
+      producers: sha256(taskProducerRecipe(task, swiftToolchain)),
     };
   };
 }

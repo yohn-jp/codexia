@@ -5,8 +5,8 @@ import { VERIFICATION_GROUPS } from '../impact/contract.mjs';
 import { assertPlanEvidence } from './validation.mjs';
 
 const sha = 'a'.repeat(40);
-const fixture = event => {
-  const plan = createVerificationPlan({ files: ['modules/search/src/browser.ts'], event, sha });
+const fixture = (event, files = ['modules/search/src/browser.ts']) => {
+  const plan = createVerificationPlan({ files, event, sha });
   return {
     plan,
     jobs: ['plan', ...plan.groups].map(name => ({ name, head_sha: sha, status: 'completed', conclusion: 'success' })),
@@ -67,4 +67,23 @@ test('only unselected matrix placeholders may be skipped; executed extras fail',
   assert.doesNotThrow(() => assertPlanEvidence(plan, jobs, reports));
   jobs.at(-1).conclusion = 'success';
   assert.throws(() => assertPlanEvidence(plan, jobs, reports));
+});
+
+test('Swift Linux evidence is required only for a selected task in the shared unit group', () => {
+  for (const event of ['pull_request', 'push']) {
+    const source = ['docs/architecture/SYSTEM-DESIGN.md'];
+    const unrelated = fixture(event, source);
+    const architecture = unrelated.reports.find(report => report.group === 'unit-architecture');
+    assert.deepEqual(architecture.results.map(result => result.task), ['architecture-g5']);
+    assert.doesNotThrow(() => assertPlanEvidence(unrelated.plan, unrelated.jobs, unrelated.reports));
+    architecture.results.push({ task: 'swift-linux', status: 'passed' });
+    assert.throws(() => assertPlanEvidence(unrelated.plan, unrelated.jobs, unrelated.reports), /omitted or duplicated/);
+
+    const selected = fixture(event, [...source, 'ios/CodexiaTransport/Package.swift']);
+    const shared = selected.reports.find(report => report.group === 'unit-architecture');
+    assert.deepEqual(shared.results.map(result => result.task), ['architecture-g5', 'swift-linux']);
+    assert.doesNotThrow(() => assertPlanEvidence(selected.plan, selected.jobs, selected.reports));
+    shared.results.pop();
+    assert.throws(() => assertPlanEvidence(selected.plan, selected.jobs, selected.reports), /omitted or duplicated/);
+  }
 });

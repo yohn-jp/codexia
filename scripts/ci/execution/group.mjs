@@ -90,6 +90,10 @@ async function executeTaskInContext(task, index, scope) {
   if (!blocked) {
     try {
       if (task === 'biome-ci') await run(process.execPath, ['scripts/ci/biome/check.mjs'], { CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
+      else if (task === 'swift-linux') {
+        const { executable, arguments: args } = taskInvocation(task);
+        await run(executable, args);
+      }
       else if (Object.hasOwn(CONFORMANCE_TASKS, task)) {
         const { executable, arguments: args } = taskInvocation(task);
         await run(executable, args, { CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
