@@ -381,6 +381,24 @@ from botocore.exceptions import SSLError
 try:
     profile = s3_transfer.load_profile(pathlib.Path(profile_path))
     transfer = s3_transfer.S3BackupTransfer(profile, _allow_private_test_addresses=True)
+    rejected_profiles = {
+        'bucket': {**profile, 'bucket': profile['bucket'] + '-wrong'},
+        'prefix': {**profile, 'prefix': 'codexia/not-authorized'},
+    }
+    for label, rejected_profile in rejected_profiles.items():
+        rejected_receipt = pathlib.Path(receipt_path).with_name(f'{backup_id}-{label}-rejected.json')
+        try:
+            s3_transfer.S3BackupTransfer(
+                rejected_profile, _allow_private_test_addresses=True,
+            ).upload_artifact(
+                pathlib.Path(artifact), backup_id=backup_id,
+                source_identity=source_identity, receipt_path=rejected_receipt,
+            )
+        except s3_transfer.TransferError:
+            if rejected_receipt.exists():
+                raise s3_transfer.TransferError(f'Wrong S3 {label} unexpectedly wrote an external receipt')
+        else:
+            raise s3_transfer.TransferError(f'Fixture S3 accepted a wrong {label}')
     untrusted_profile = {**profile, 'caBundle': untrusted_ca}
     untrusted_client = s3_transfer.S3BackupTransfer(
         untrusted_profile, _allow_private_test_addresses=True,
@@ -454,6 +472,7 @@ try:
         'multipartEtagObserved': head['ETag'],
         'receiptMode': '0600', 'writerDeletePermission': 'denied',
         'writerMultipartListingPermission': 'denied', 'multipartAbort': 'verified',
+        'wrongBucketRejected': True, 'wrongPrefixRejected': True,
     }, sort_keys=True))
 except s3_transfer.TransferError as error:
     print(str(error), file=sys.stderr)
