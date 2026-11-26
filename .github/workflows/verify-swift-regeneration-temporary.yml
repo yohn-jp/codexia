@@ -1,0 +1,32 @@
+name: Verify isolated Swift contract regeneration
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: ["feat/665-backup-console"]
+permissions:
+  contents: read
+jobs:
+  regenerate:
+    if: github.event.pull_request.head.ref == 'codex/verify-897-swift-regeneration' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    container: swift:6.2.1
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Regenerate from the pinned OpenAPI and Swift package lock
+        run: |
+          swift --version
+          bash ios/CodexiaTransport/generate.sh
+          git diff --binary -- ios/CodexiaTransport/Sources/CodexiaAPI > swift-regeneration.patch
+          git diff --stat -- ios/CodexiaTransport/Sources/CodexiaAPI
+          test -s swift-regeneration.patch
+          bash ios/CodexiaTransport/generate.sh --check
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: swift-regeneration-patch
+          path: swift-regeneration.patch
+          retention-days: 1
+          if-no-files-found: error
