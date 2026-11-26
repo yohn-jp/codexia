@@ -1650,6 +1650,19 @@ model SaveConflictResponse {
   ...Record<never>;
 }
 
+model SaveIdempotencyConflictResponse {
+  code: "IDEMPOTENCY_CONFLICT";
+  error: string;
+  details?: JsonObject | null;
+  ...Record<never>;
+}
+
+@oneOf
+union SaveDocumentConflictResponse {
+  staleBase: SaveConflictResponse,
+  idempotencyKey: SaveIdempotencyConflictResponse,
+}
+
 model PersistenceDocument {
   id: string;
   projectId: string;

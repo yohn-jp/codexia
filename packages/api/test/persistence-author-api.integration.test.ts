@@ -102,6 +102,16 @@ async function exercisePublicApiAdapter(base: string, token: string) {
         error instanceof Error && 'status' in error && error.status === 409 && 'code' in error && error.code === 'PERSISTENCE_CONFLICT',
     );
 
+    await assert.rejects(
+      api.savePersistenceDocument(project.id, created.document.id, {
+        ...saveCommand,
+        changes: [{ fromUtf16: 0, toUtf16: 0, insert: 'another edit' }],
+        resultingSha256: sha256(`another edit${initialMarkdown}`),
+      }),
+      (error: unknown) =>
+        error instanceof Error && 'status' in error && error.status === 409 && 'code' in error && error.code === 'IDEMPOTENCY_CONFLICT',
+    );
+
     const current = await api.persistenceDocument(project.id, created.document.id);
     assert.equal(current.revision?.id, firstSave.revision.id);
     assert.equal(current.revision?.markdown, updatedMarkdown);

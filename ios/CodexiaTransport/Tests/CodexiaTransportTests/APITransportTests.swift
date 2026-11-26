@@ -217,6 +217,22 @@ private func save() throws -> DocumentSave {
     }
 }
 
+@Test func reusedSaveKeyDecodesAsAConflictWithoutACurrentRevision() async throws {
+    let message = "The save key identifies another operation"
+    let payload = #"{"code":"IDEMPOTENCY_CONFLICT","error":"The save key identifies another operation"}"#
+    let body = try JSONDecoder().decode(Components.Schemas.SaveDocumentConflictResponse.self, from: Data(payload.utf8))
+    guard case .SaveIdempotencyConflictResponse(let reusedKey) = body else {
+        Issue.record("Expected the generated idempotency conflict variant"); return
+    }
+    #expect(reusedKey.error == message)
+
+    let fixture = FixtureTransport { json(409, payload) }
+    let client = try APITransport(origin: origin, accessToken: nil, transport: fixture).client
+    guard case .conflict(nil) = try await save().submit(using: client) else {
+        Issue.record("Expected a conflict with no current revision"); return
+    }
+}
+
 @Test func cancellationAndOfflineNeverRetryAutomatically() async throws {
     let fixture = FixtureTransport { throw URLError(.notConnectedToInternet) }
     let client = try APITransport(origin: origin, accessToken: nil, transport: fixture).client
