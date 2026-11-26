@@ -1,4 +1,5 @@
 import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS } from '../../ci/impact/contract.mjs';
+import { normalizeVerificationJobs } from '../../ci/evidence/job-name.mjs';
 
 // Historical publication certificates may contain the retired supplemental lane.
 // Validate its original conclusion; this reader cannot select or execute it.
@@ -40,6 +41,7 @@ export function releaseVerificationState(runs, sha) {
 /** @param {unknown} jobs @param {readonly string[]} expectedNames @param {readonly string[]} optionalSkippedNames */
 function assertNamedJobs(jobs, expectedNames, optionalSkippedNames = []) {
   if (!Array.isArray(jobs)) throw new Error('Invalid release verification jobs response');
+  jobs = normalizeVerificationJobs(jobs);
   const required = new Set(expectedNames);
   if (required.size !== expectedNames.length) throw new Error('Canonical release verification job set contains duplicates');
   const optionalSkipped = new Set(optionalSkippedNames);
@@ -78,7 +80,14 @@ export function assertVerificationLeafJobs(jobs) {
 // The compact path requires positive certification-step evidence, never skipped status alone.
 export const REUSED_MAIN_SKIPPED_JOBS = Object.freeze([
   'full-model-oci', 'biome', 'unit-${{ matrix.group }}', 'types-${{ matrix.group }}',
+  'profile-core', 'profile-full', 'oci-${{ matrix.profile }}',
+]);
+export const LEGACY_REUSED_MAIN_SKIPPED_JOBS = Object.freeze([
+  'full-model-oci', 'biome', 'unit-${{ matrix.group }}', 'types-${{ matrix.group }}',
   'build-${{ matrix.profile }}', 'oci-${{ matrix.profile }}', 'browser-${{ matrix.group }}',
+]);
+export const ALLOWED_SKIPPED_VERIFICATION_JOBS = Object.freeze([
+  ...REUSED_MAIN_SKIPPED_JOBS, ...LEGACY_REUSED_MAIN_SKIPPED_JOBS,
 ]);
 export const REUSED_MAIN_CERT_STEP = 'Certify reused merged PR proof';
 
@@ -93,8 +102,13 @@ export function assertVerificationJobs(jobs) {
     if (reuseSteps.length !== 1 || reuseSteps[0]?.status !== 'completed') throw new Error('Ambiguous reused main certification');
     const normal = steps.filter(step => step.name === 'Certify every required exact-source matrix element');
     if (normal.length !== 1 || normal[0]?.status !== 'completed' || normal[0]?.conclusion !== 'skipped') throw new Error('Conflicting main certification modes');
-    assertNamedJobs(jobs, ['plan', 'certification'], [...REUSED_MAIN_SKIPPED_JOBS, DEPLOYMENT_FIXTURE_CALLER]);
-    if (jobs.filter(job => !record(job) || job.name !== DEPLOYMENT_FIXTURE_CALLER).length !== 2 + REUSED_MAIN_SKIPPED_JOBS.length) throw new Error('Incomplete compact main verification inventory');
+    const hasProfileCallers = jobs.some(job => record(job) &&
+      (job.name === 'profile-core' || job.name === 'profile-full'));
+    const placeholders = hasProfileCallers ? REUSED_MAIN_SKIPPED_JOBS : LEGACY_REUSED_MAIN_SKIPPED_JOBS;
+    assertNamedJobs(jobs, ['plan', 'certification'], [...placeholders, DEPLOYMENT_FIXTURE_CALLER]);
+    if (jobs.filter(job => !record(job) || job.name !== DEPLOYMENT_FIXTURE_CALLER).length !== 2 + placeholders.length) {
+      throw new Error('Incomplete compact main verification inventory');
+    }
     return;
   }
   // Main Verify skips the PR-only call; the standalone workflow owns matching main pushes.
