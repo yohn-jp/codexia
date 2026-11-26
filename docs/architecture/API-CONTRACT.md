@@ -3,7 +3,7 @@
 **種別: 規範的API設計。** この文書は操作の意味、競合・冪等性、互換性、検証義務を定める。principalとURLごとの許可・拒否は [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md)、OAuthとBetter Authのプロトコルは [API AuthN/AuthZ](API-AUTHN-AUTHZ.md) と [MCP OAuth](MCP-OAUTH.md)、Coreの変更とreceiptの意味は [Core](CORE.md) が正本である。
 
 Codexiaが所有するHTTPのmethodとpath、DTO、header、ステータス、エラー、securityの正本は [TypeSpec](../../packages/http-contract/src/main.tsp) とする。
-[生成したOpenAPI](../../packages/http-contract/openapi/codexia.openapi.yaml) から各操作のHTTP表現を参照できる。
+公開中の [API Reference](https://yohn-jp.github.io/codexia/api/) で各操作のHTTP表現を参照できる。ローカルでは `pnpm --filter @codexia/http-contract generate` で同じリビジョンのOpenAPIを生成する。
 
 契約は90パスの115操作を収録する。
 [ルート照合用の一覧](../../packages/http-contract/test/fixtures/admitted-routes.json) は、現行の公開・登録範囲104操作と、未実装のバックアップ管理11操作を区別する。

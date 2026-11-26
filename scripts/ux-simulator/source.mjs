@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -33,12 +34,10 @@ export function createSource(rootLocation) {
     }
   }
   function list(dir) {
-    const entries = readdirSync(filename(dir), { withFileTypes: true });
-    return entries.flatMap((entry) => {
-      const path = dir + '/' + entry.name;
-      if (entry.isDirectory() && !['node_modules', 'dist', 'build', '.build', '.git'].includes(entry.name)) return list(path);
-      return entry.isFile() && isPath(path) ? [path] : [];
-    }).sort();
+    filename(dir);
+    // A published source location must refer to a tracked path at the certified SHA.
+    const tracked = execFileSync('git', ['-c', 'safe.directory=' + root, 'ls-files', '-z', '--', dir], { cwd: root, encoding: 'utf8' });
+    return tracked.split('\0').filter(isPath).sort();
   }
   function location(path, needle) {
     if (!exists(path)) return null;

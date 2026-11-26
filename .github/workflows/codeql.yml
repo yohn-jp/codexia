@@ -34,6 +34,16 @@ jobs:
           CODEXIA_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
           CODEXIA_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
         run: node scripts/ci/impact/security-admission.mjs
+      - uses: actions/setup-node@v7.1.0
+        if: steps.scope.outputs.codeql == 'true'
+        with:
+          node-version: 24.22.3
+      - name: Materialize the Desktop HTTP client for analysis
+        if: steps.scope.outputs.codeql == 'true'
+        run: |
+          corepack enable
+          pnpm --filter '@codexia/app...' --fail-if-no-match install --frozen-lockfile
+          pnpm --filter @codexia/app generate:http
       - uses: github/codeql-action/init@v4
         if: steps.scope.outputs.codeql == 'true'
         with:

@@ -2,7 +2,7 @@
 
 **種別: ビューアーの検証・運用手順。** 設計上の正本は [画面状態遷移図](../design/SCREEN-STATE-ATLAS.md)、[全画面操作台帳](../design/SCREEN-CONTROL-CATALOG.md)、[URL/API認可](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md)、[システム設計](../architecture/SYSTEM-DESIGN.md)、[LikeC4 system model](../architecture/likec4/model.likec4)、[利用画面](../design/USER-SCREEN-FLOW.md)、[管理画面](../design/ADMIN-SCREEN-FLOW.md)、[初期デプロイ](../deployment/INITIAL-DEPLOYMENT-FLOW.md)、[更新](../deployment/UPDATE-FLOW.md)、[本番Deploymentライフサイクル](../deployment/DEPLOYMENT-LIFECYCLE.md) と、それらが参照する領域設計書にある。LikeC4 モデルが `system-1` のシステム構造・信頼境界と `system-3` の運用トポロジーを定義する。Mermaid 図は各設計書の原文に従う。
 
-[Architecture Atlas（公開版）](https://yohn-jp.github.io/codexia/architecture/) は Repository Audit Pages に同梱する開発者向けの設計ビューアーで、システム構造、信頼境界、状態・画面遷移、データモデル、デプロイ手順を閲覧できる。詳細画面の全図を含む表示件数はビルド時のmanifestから取得し、文書更新に伴う追加にも対応する。カテゴリから図を選び、拡大・縮小し、元の設計書を開ける。LikeC4 ビューでノードと関係を探索し、Mermaid ビューでは SVG 単体を開ける。初回所有者のウィザードとコンソールの遷移は`#admin-4`・`#admin-5`、VM再構築は`#first-3`、統合Deployment経路と協調切替は`#lifecycle-1`・`#lifecycle-2`で直接参照できる。個別の図は `#user-1`、`#admin-1`、`#first-1`、`#update-1` などの hash で直接開ける。
+[Architecture Atlas（公開版）](https://yohn-jp.github.io/codexia/architecture/) は Repository Audit Pages に同梱する開発者向けの設計ビューアーで、システム構造、信頼境界、状態・画面遷移、データモデル、デプロイ手順を閲覧できる。詳細画面の全図を含む表示件数はビルド時のmanifestから取得し、文書更新に伴う追加にも対応する。カテゴリから図を選び、拡大・縮小し、元の設計書を開ける。LikeC4 ビューでノードと関係を探索し、Mermaid ビューでは SVG 単体を開ける。初回所有者のウィザードとコンソールの遷移は`#admin-4`・`#admin-5`、VM再構築は`#first-3`、統合Deployment経路は`#lifecycle-1`で直接参照できる。個別の図は `#user-1`、`#admin-1`、`#first-1`、`#update-1` などの hash で直接開ける。
 
 図はカテゴリと検索語で絞り込める。
 画面 ID に対応する操作台帳がある場合は、実装と設計目標の記載を SHA 固定の表の行と共に表示する。

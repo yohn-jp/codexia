@@ -6,7 +6,7 @@ import { readRegularFile } from '../shared/read-regular-file.mjs';
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, '../..');
 
-async function walkFiles(root, relative) {
+async function walkFiles(root, relative, skipDirectory) {
   const absolute = path.join(root, relative);
   let entries;
   try { entries = await readdir(absolute, { withFileTypes: true }); }
@@ -14,8 +14,9 @@ async function walkFiles(root, relative) {
   const files = [];
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const file = path.join(relative, entry.name);
-    if (entry.isDirectory()) files.push(...await walkFiles(root, file));
-    else if (entry.isFile()) files.push(file);
+    if (entry.isDirectory()) {
+      if (!skipDirectory?.(file, entry.name)) files.push(...await walkFiles(root, file, skipDirectory));
+    } else if (entry.isFile()) files.push(file);
   }
   return files;
 }
@@ -100,7 +101,8 @@ export async function discoverPlatformSurfaces({
   const root = path.resolve(repositoryRoot);
   const surfaces = [];
   const limitations = [];
-  const iosFiles = (await walkFiles(root, nativeIosRoot)).filter(file => file.includes('/Sources/') && file.endsWith('.swift'));
+  const iosFiles = (await walkFiles(root, nativeIosRoot, (file, name) =>
+    name === '.build' || file.endsWith('/Sources/CodexiaAPI/Generated'))).filter(file => file.includes('/Sources/') && file.endsWith('.swift'));
   for (const file of iosFiles) surfaces.push(...nativeIosViews(await readRegularFile(path.join(root, file)), file));
   if (iosFiles.length === 0) limitations.push({ area: 'native-ios', reason: `Canonical Native iOS source tree is empty: ${nativeIosRoot}` });
   limitations.push({ area: 'native-ios-runtime', reason: 'SwiftUI source declarations do not prove iOS build, physical-device behavior, IME, or acceptance execution.' });
@@ -125,10 +127,11 @@ export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, b
   const surfaces = [];
   const limitations = [];
   const openapiPath = 'packages/http-contract/openapi/codexia.openapi.yaml';
+  const admittedPath = 'packages/http-contract/test/fixtures/admitted-routes.json';
   try {
-    const admitted = JSON.parse(await readRegularFile(path.join(root, 'packages/http-contract/test/fixtures/admitted-routes.json')));
+    const admitted = JSON.parse(await readRegularFile(path.join(root, admittedPath)));
     await readRegularFile(path.join(root, openapiPath));
-    surfaces.push(...operationSurfaces(admitted, openapiPath));
+    surfaces.push(...operationSurfaces(admitted, admittedPath));
   } catch {
     limitations.push({ area: 'http', reason: 'Generated OpenAPI/admitted route inventory is missing; no contract operations inferred.' });
   }
@@ -139,7 +142,7 @@ export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, b
     for (const route of generated.routes ?? []) {
       const id = `${route.method} ${route.url.replace(/:([A-Za-z][A-Za-z0-9_]*)/gu, '{$1}')}`;
       if (route.contractStatus === 'target') continue;
-      surfaces.push({ kind: 'httpRuntimeRoute', id, operationId: route.operationId, contractStatus: route.contractStatus, source: { path: generatedContractPath }, provenance: `Generated Fastify registration with operationId ${route.operationId}; server registration resolves handlers by operationId and fails closed when a handler is missing.` });
+      surfaces.push({ kind: 'httpRuntimeRoute', id, operationId: route.operationId, contractStatus: route.contractStatus, source: { path: 'packages/api/src/http-contract.ts' }, provenance: `Generated Fastify registration (${generatedContractPath}) with operationId ${route.operationId}; server registration resolves handlers by operationId and fails closed when a handler is missing.` });
     }
   } catch {
     limitations.push({ area: 'http', reason: `Generated Fastify HTTP contract is missing or invalid: ${generatedContractPath}` });
@@ -176,7 +179,8 @@ export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, b
     try { surfaces.push(...controlSurfaces(await readRegularFile(path.join(root, file)), file)); }
     catch { limitations.push({ area: 'ui', reason: `${file} is missing.` }); }
   }
-  const appFiles = (await walkFiles(root, 'app/src')).filter((file) => /\.(tsx|jsx|ts|js)$/u.test(file) && !/\.test\./u.test(file));
+  const appFiles = (await walkFiles(root, 'app/src', file =>
+    file === 'app/src/generated/http' || file === 'app/src/generated/auth-methods')).filter((file) => /\.(tsx|jsx|ts|js)$/u.test(file) && !/\.test\./u.test(file));
   for (const file of appFiles) surfaces.push(...implementationControlReferences(await readRegularFile(path.join(root, file)), file));
   limitations.push({ area: 'ui-runtime', reason: 'A source control-ID reference does not prove rendered UI behavior; browser acceptance and explicit control bindings are required for runtime UI evidence.' });
 

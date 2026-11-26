@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.json && node scripts/build-views.mjs",
+    "build": "pnpm run typecheck && node scripts/build-views.mjs --prepared",
     "generate:http": "node scripts/generate-http.mjs",
-    "check-generated:http": "node scripts/generate-http.mjs --check",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check-generated:http": "pnpm run generate:http && node scripts/generate-http.mjs --check",
+    "typecheck": "pnpm run generate:http && tsc -p tsconfig.json --noEmit",
     "test": "pnpm run check-generated:http && node --import tsx --test 'src/**/*.test.{ts,tsx}'"
   },
   "dependencies": {
@@ -34,6 +34,7 @@
     "zod": "catalog:production"
   },
   "devDependencies": {
+    "@codexia/http-contract": "workspace:*",
     "@types/react": "catalog:development",
     "@types/react-dom": "catalog:development",
     "@vanilla-extract/css": "1.21.3",

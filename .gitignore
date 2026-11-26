@@ -27,3 +27,14 @@ playwright-report/
 
 /artifacts/
 /results/
+
+# Derived from the TypeSpec HTTP contract by the pinned generators.
+/packages/http-contract/openapi/codexia.openapi.yaml
+/packages/api/src/generated/http-contract.json
+/app/src/generated/http/
+/app/src/generated/auth-methods/
+/ios/CodexiaTransport/Sources/CodexiaAPI/Generated/
+/packages/http-contract/openapi/.generate-*/
+/packages/api/src/generated/.generate-*/
+/app/src/generated/.http-*/
+/app/src/generated/.auth-*/

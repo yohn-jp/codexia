@@ -42,7 +42,7 @@ Cloudflare Worker Static Assetsは画面を配信し、API、MCP、OAuth metadat
 
 ## HTTP APIの認可マトリクス
 
-[TypeSpecから生成するワイヤ契約](../../packages/http-contract/openapi/codexia.openapi.yaml) はmethod/pathと資格のHTTP上の表現を定める。
+[TypeSpecで定義するワイヤ契約](../../packages/http-contract/src/main.tsp) はmethod/pathと資格のHTTP上の表現を定める。
 同じbearer形式でも、許可するprincipalや作品はこの表と個別の規則で決まる。
 静的APIリファレンスは契約を表示し、アクセスの許可はAPIの入場制御と業務処理が判断する。
 

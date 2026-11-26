@@ -26,6 +26,8 @@ async function makeWorkspaceFixture(rootTestScript) {
   const projectRoot = await mkdtemp(path.join(tmpdir(), 'codexia-ci-workspace-fixture-'));
   await mkdir(path.join(projectRoot, 'scripts/ci/execution'), { recursive: true });
   await mkdir(path.join(projectRoot, 'scripts/ci/impact'), { recursive: true });
+  await mkdir(path.join(projectRoot, 'scripts/ci/evidence'), { recursive: true });
+  await copyFile(path.join(root, 'scripts/ci/evidence/coverage-inputs.mjs'), path.join(projectRoot, 'scripts/ci/evidence/coverage-inputs.mjs'));
   await copyFile(runner, path.join(projectRoot, 'scripts/ci/execution/workspace.mjs'));
   await copyFile(path.join(root, 'scripts/ci/impact/contract.mjs'), path.join(projectRoot, 'scripts/ci/impact/contract.mjs'));
   await copyFile(path.join(root, 'scripts/ci/execution/parallel.mjs'), path.join(projectRoot, 'scripts/ci/execution/parallel.mjs'));
@@ -65,6 +67,8 @@ test('coverage admits the current workspace and rejects a new unmapped package',
 
   const fixture = await makeWorkspaceFixture('pnpm run test:scripts');
   t.after(() => rm(fixture.projectRoot, { recursive: true, force: true }));
+  const init = spawnSync('git', ['init', '-q'], { cwd: fixture.projectRoot });
+  assert.equal(init.status, 0, init.stderr?.toString());
   const unknown = path.join(fixture.projectRoot, 'packages/unmapped-fixture');
   await mkdir(unknown);
   await writeFile(path.join(unknown, 'package.json'), JSON.stringify({ name: '@codexia/unmapped-fixture' }));

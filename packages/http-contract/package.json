@@ -4,13 +4,15 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "pnpm run typecheck && pnpm run check-generated && pnpm run lint",
-    "check-breaking": "node scripts/check-breaking.mjs",
-    "check-generated": "node scripts/check-generated.mjs && node scripts/generate-fastify.mjs --check",
-    "lint": "redocly lint openapi/codexia.openapi.yaml --config redocly.yaml",
+    "build": "pnpm run check-generated && tsc -p tsconfig.json && pnpm run lint:generated",
+    "check-breaking": "pnpm run generate:openapi && node scripts/check-breaking.mjs",
+    "check-generated": "pnpm run generate && node scripts/generate-fastify.mjs --check",
+    "lint": "pnpm run generate:openapi && pnpm run lint:generated",
     "typecheck": "tsp compile src/main.tsp --no-emit && tsc -p tsconfig.json",
-    "test": "node --test test/*.test.mjs test/*.test.ts && pnpm run lint && pnpm run check-generated && pnpm run check-breaking",
-    "generate": "tsp compile src/main.tsp && node scripts/generate-fastify.mjs"
+    "test": "pnpm run check-generated && node --test test/*.test.mjs test/*.test.ts && pnpm run lint:generated && node scripts/check-breaking.mjs",
+    "generate": "node scripts/generate-fastify.mjs",
+    "generate:openapi": "node scripts/generate-openapi.mjs",
+    "lint:generated": "redocly lint openapi/codexia.openapi.yaml --config redocly.yaml"
   },
   "devDependencies": {
     "@redocly/cli": "2.82.0",

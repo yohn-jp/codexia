@@ -51,3 +51,13 @@ profiles/*/generated
 
 evidence
 artifacts
+
+# Rebuild HTTP contract artifacts from the frozen build dependency closure.
+packages/http-contract/openapi/codexia.openapi.yaml
+packages/api/src/generated/http-contract.json
+app/src/generated/http
+app/src/generated/auth-methods
+packages/http-contract/openapi/.generate-*
+packages/api/src/generated/.generate-*
+app/src/generated/.http-*
+app/src/generated/.auth-*

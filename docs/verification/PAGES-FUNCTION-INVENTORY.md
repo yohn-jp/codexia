@@ -26,7 +26,7 @@ PR の `repository-audit-screenshots` には検証時の画面を保存する。
 
 ## API Reference の観測
 
-`/api/` はPagesと同一source SHAの`@codexia/http-contract check-generated`でTypeSpecとの生成一致を確認したOpenAPI 3.1を、Scalar 1.83.0でローカルbundleとして表示する。
+`/api/` はPagesのsource SHAに固定したTypeSpecとロック済みの依存関係からOpenAPI 3.1を生成し、Scalar 1.83.0のローカルbundleで表示する。
 OpenAPIのsecurity scheme、operation、parameter、request/response schema、HTTP status/error responseを読める。
 公開画面は現在登録される契約と採用目標の操作を区別する。Fastify 実装では current の操作を生成ルートとスキーマから登録する。動作適合と本番受入は個別の検証証拠を参照する。
 security schemeは値を入力するUIを出さず、名称・方式・cookie名の読み取り専用要約を表示する。
@@ -35,7 +35,7 @@ Pages生成時に認証operationのrequest/response例を除き、契約に含�
 ScalarのTry It操作、認証値入力、Authorize controls、AI操作を無効化し、Content Security Policyの`connect-src 'self'`で外部fetchを制限する。
 security schemeやerror semanticsは文書に残し、認証値や保護されたschemaの実行時取得は行わない。
 
-`api/manifest.json`にはPages source SHA、TypeSpec OpenAPI入力のpathとSHA-256、Scalar npm integrity、npm lockのpathとSHA-256、bundle出力のSHA-256を記録する。
+`api/manifest.json`にはPages source SHA、TypeSpecから生成したOpenAPIの出力先pathと公開用加工前のSHA-256、Scalar npm integrity、npm lockのpathとSHA-256、bundle出力のSHA-256を記録する。
 `site-manifest.json`も同じScalar manifestを保持し、artifact verifierが固定された入力・lock・出力を照合する。
 esbuild bundleのEOF legal noticesを残し、ScalarのMIT licenseを`api/THIRD_PARTY_NOTICES.txt`として同一digest registryに含める。
 PRでは従来の`repository-audit-preview` artifactにのみ格納し、`main`の同じpublisherだけがPagesへ公開する。

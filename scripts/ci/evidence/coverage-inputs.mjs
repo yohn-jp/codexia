@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -28,6 +29,22 @@ async function walkTestFiles(root, directory) {
   return output.sort(([a], [b]) => a.localeCompare(b));
 }
 
+// Filter the Git index (also available in a sparse checkout). A force-added
+// generated file must invalidate a reused coverage proof as well as a fresh run.
+export function trackedHttpOutputs(root) {
+  const swiftRoot = 'ios/CodexiaTransport/Sources/CodexiaAPI/';
+  const outputs = [
+    'packages/http-contract/openapi/codexia.openapi.yaml', 'packages/api/src/generated/http-contract.json',
+    'app/src/generated/http/', 'app/src/generated/auth-methods/', swiftRoot + 'Generated/',
+    ...['Client', 'Types', 'Types+Operations', 'Types+Components',
+      ...['Headers', 'Parameters', 'RequestBodies', 'Responses', 'Schemas'].map(type => 'Types+Components+' + type),
+    ].map(name => swiftRoot + name + '.swift'),
+  ];
+  return execFileSync('git', ['-c', 'safe.directory=' + path.resolve(root), 'ls-files', '-z', '--', ...outputs], {
+    cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
+  }).split('\0').filter(Boolean);
+}
+
 /** Build a conservative report-only closure for the static full-plan coverage task. */
 export async function captureCoverageInputClosure({ root, runtime, invocation, workflowJob }) {
   const sourcePaths = ['scripts/ci/execution/workspace.mjs', 'scripts/ci/impact/contract.mjs', 'scripts/ci/execution/parallel.mjs',
@@ -54,7 +71,7 @@ export async function captureCoverageInputClosure({ root, runtime, invocation, w
   }
   workspaceDirectories.push('app');
   const closure = {
-    source: digest(await fileDigests(sourcePaths)),
+    source: digest({ files: await fileDigests(sourcePaths), trackedHttpOutputs: trackedHttpOutputs(root) }),
     tests: digest(tests),
     dependencies: digest(await fileDigests(manifestPaths)),
     environment: digest({ cwd: root, platform: runtime.platform, arch: runtime.arch }),

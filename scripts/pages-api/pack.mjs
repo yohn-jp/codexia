@@ -6,6 +6,7 @@ import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, rea
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readApprovedOpenapi } from '../../packages/http-contract/scripts/approved-openapi.mjs';
 import { containsCredentialPattern } from '../audit/publication-policy.mjs';
 import { apiReferencePage, decoratePage } from '../pages-ui/navigation.mjs';
 
@@ -18,10 +19,8 @@ const routesRelative = 'packages/http-contract/test/fixtures/admitted-routes.jso
 const contractPackageRelative = 'packages/http-contract/package.json';
 const lockRelative = 'pnpm-lock.yaml';
 const scalarVersion = '1.83.0';
-const contractPath = join(root, contractRelative);
 const scalarPackagePath = join(root, 'scripts/pages-api/node_modules/@scalar/api-reference/package.json');
 const lockPath = join(root, 'scripts/pages-api/package-lock.json');
-const source = readFileSync(contractPath);
 const lock = readFileSync(lockPath);
 const lockData = JSON.parse(lock.toString('utf8'));
 const scalarLock = lockData.packages?.['node_modules/@scalar/api-reference'];
@@ -202,7 +201,7 @@ export async function pack(sitePath, sourceSha) {
   assert.match(sourceSha, /^[a-f0-9]{40}$/u, 'Expected exact 40-character source SHA');
   assert.equal(packageInfo.version, scalarVersion, 'Unexpected Scalar version');
   assert.equal(packageInfo.name, '@scalar/api-reference', 'Unexpected Scalar package identity');
-  assert.deepEqual(source, committedFile(sourceSha, contractRelative), 'Working OpenAPI bytes do not match the exact source SHA');
+  const source = readApprovedOpenapi(root, sourceSha);
   assert.deepEqual(lock, committedFile(sourceSha, 'scripts/pages-api/package-lock.json'), 'Scalar npm lock bytes do not match the exact source SHA');
   const admittedBytes = committedFile(sourceSha, routesRelative);
   const typespecPackageBytes = committedFile(sourceSha, contractPackageRelative);

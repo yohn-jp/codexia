@@ -30,6 +30,8 @@ on:
       - 'tests/**'
       - 'scripts/pages-api/**'
       - 'packages/http-contract/**'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
       - 'pnpm-lock.yaml'
       - 'scripts/code-scanning-pages/**'
       - 'scripts/verification/artifacts/pages-smoke.mjs'
@@ -249,6 +251,8 @@ jobs:
           echo "PUPPETEER_EXECUTABLE_PATH=$CHROME" >> "$GITHUB_ENV"
       - name: Prepare specification output
         run: mkdir -p "$RUNNER_TEMP/site"
+      - name: Generate the HTTP surfaces for requirements trace
+        run: pnpm --filter @codexia/http-contract generate
       - name: Verify and stage StrictDoc requirements
         env:
           CODEXIA_STRICTDOC_CHROMIUM: ${{ env.CODEXIA_E2E_CHROMIUM }}
@@ -261,6 +265,7 @@ jobs:
           GRAPHIFY_BACKEND: none
         run: |
           bash scripts/shared/python-env.sh create python "$RUNNER_TEMP/graphify" 'graphifyy[sql,terraform]==0.9.120'
+          # Graphify honors .gitignore for generated contract outputs.
           excludes=('tests/**' 'evidence/**' '.agents/**' 'docs/**' '**/*.test.*' '**/*.spec.*')
           exclude_args=()
           for pattern in "${excludes[@]}"; do
@@ -324,7 +329,7 @@ jobs:
         run: npm ci --prefix scripts/pages-api --ignore-scripts --no-audit --no-fund
       - name: Test Scalar publication policy
         run: node --test scripts/pages-api/*.test.mjs
-      - name: Verify committed OpenAPI matches the TypeSpec source
+      - name: Generate and verify deterministic HTTP contract artifacts
         run: pnpm --filter @codexia/http-contract check-generated
       - name: Install the isolated audit tool
         run: |

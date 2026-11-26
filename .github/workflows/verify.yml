@@ -190,11 +190,16 @@ jobs:
       - name: Install frozen dependencies
         env:
           UNIT_GROUP: ${{ matrix.group }}
+          SWIFT_SELECTED: ${{ contains(fromJSON(needs.plan.outputs.plan).tasks, 'swift-linux') }}
         run: |
           set -euo pipefail
           case "$UNIT_GROUP" in
             architecture)
-              pnpm --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
+              if [[ "$SWIFT_SELECTED" == true ]]; then
+                pnpm --filter '@codexia/http-contract...' --filter @codexia/ci-evidence --fail-if-no-match install --frozen-lockfile --prefer-offline
+              else
+                pnpm --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
+              fi
               ;;
             api)
               # unit-api integration tests import the public app adapter; install
@@ -329,6 +334,9 @@ jobs:
           key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Generate the HTTP surfaces for requirements trace
+        if: matrix.group == 'trace'
+        run: pnpm --filter @codexia/http-contract generate
       - name: Install pinned StrictDoc and Chromium
         if: matrix.group == 'trace'
         run: |

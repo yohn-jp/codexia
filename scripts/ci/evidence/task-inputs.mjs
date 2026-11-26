@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { CONFORMANCE_TASKS, VERIFICATION_GROUPS, requiredBuildProfile } from '../impact/contract.mjs';
+import { CONFORMANCE_TASKS, VERIFICATION_GROUPS, requiredBuildProfile, isFastifyGenerationInput, isOpenApiGenerationInput } from '../impact/contract.mjs';
 import { browserRuntimeRequirements } from '../browser/image-digests.mjs';
 import { THREAGILE_IMAGE } from '../../architecture/constants.mjs';
 
@@ -98,7 +98,7 @@ export const REQUIREMENTS_TRACE_SURFACE_FILES = Object.freeze([
 const requirementsTraceSurfaces = new Set(REQUIREMENTS_TRACE_SURFACE_FILES);
 
 export function isRequirementsTraceInput(file) {
-  return requirementsTraceDocuments.has(file) || requirementsTraceSurfaces.has(file) ||
+  return requirementsTraceDocuments.has(file) || requirementsTraceSurfaces.has(file) || isFastifyGenerationInput(file) ||
     (file.startsWith('ios/') && /\.swift$/u.test(file)) ||
     (file.startsWith('deploy/ansible/') && /\.ya?ml$/u.test(file)) ||
     (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf')) ||
@@ -299,7 +299,7 @@ export function captureTaskInputSource({ root, sha, runtime }) {
     const swift = task === 'swift-linux';
     const swiftToolchain = swift ? JSON.parse(readGit(root, 'show', sha + ':' + SWIFT_LINUX_TOOLCHAIN_PATH)) : null;
     const tests = sha256(entries(executable.filter(({ file }) => swift ? swiftTestPath.test(file) : testFilePattern.test(file))));
-    const dependencies = sha256(entries(executable.filter(({ file }) => swift ? swiftDependencyPath.test(file) : dependencyPath(file))));
+    const dependencies = sha256(entries(executable.filter(({ file }) => swift ? swiftDependencyPath.test(file) || (isOpenApiGenerationInput(file) && dependencyPath(file)) : dependencyPath(file))));
     const normalizedInvocations = Array.isArray(invocations) ? invocations : [invocations];
     const canonicalInvocations = normalizedInvocations.map(invocation => ({ ...invocation,
       executable: invocation.executable === runtime.execPath ? 'node' : invocation.executable }));
