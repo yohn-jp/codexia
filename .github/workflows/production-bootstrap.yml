@@ -411,6 +411,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      id-token: write
 
   initial-preservation:
     name: Preserve the enrolled database before first publication
