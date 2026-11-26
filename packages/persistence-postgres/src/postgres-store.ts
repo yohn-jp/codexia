@@ -48,6 +48,7 @@ import {
   type JsonObject,
   type KnowledgeAlias,
   type KnowledgeMergeChangeCommand,
+  type KnowledgeMergeResult,
   type KnowledgeNode,
   type KnowledgeNodeId,
   type KnowledgeNodeSearch,
@@ -1221,7 +1222,7 @@ class PostgresTransaction implements PersistenceTransaction {
       changeSetId,
     ]);
     const row = result.rows[0];
-    if (row?.status !== 'applied') return undefined;
+    if (!row || row.status !== 'applied') return undefined;
     const stored = asJsonObject(row.application_result) as unknown as Omit<ChangeSetApplicationResult, 'replayed'>;
     return { ...stored, replayed: false };
   }
@@ -1580,7 +1581,7 @@ class PostgresTransaction implements PersistenceTransaction {
         await this.query('SELECT count(*)::integer AS active_count FROM document WHERE project_id = $1 AND deleted_at IS NULL', [
           command.projectId,
         ])
-      ).rows[0]?.active_count,
+      ).rows[0]!.active_count,
     );
     if (activeDocuments >= MAX_ACTIVE_DOCUMENTS_PER_PROJECT) {
       throw new PersistenceError('conflict', `Project is limited to at most ${MAX_ACTIVE_DOCUMENTS_PER_PROJECT} active documents`, {
@@ -1675,7 +1676,7 @@ class PostgresTransaction implements PersistenceTransaction {
          WHERE project_id = $1 AND id = $2 AND version = $3 RETURNING version`,
         [projectId, anchor.id, anchor.version, nextRevisionId, fromUtf16, toUtf16, quoteSha256, status],
       );
-      const version = asNumber(updated.rows[0]?.version);
+      const version = asNumber(updated.rows[0]!.version);
       await this.query(
         `INSERT INTO anchor_history(project_id, evidence_id, document_id, version, revision_id, from_utf16, to_utf16, status)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -2515,9 +2516,14 @@ class PostgresTransaction implements PersistenceTransaction {
     const currentVolume = volume && documentById.get(volume.documentId);
     const currentChapter = chapter && documentById.get(chapter.documentId);
     if (
-      (volume && (currentVolume?.kind !== 'volume' || currentVolume.parentId !== null || !matchesLookup(currentVolume, volume.lookupId))) ||
+      (volume &&
+        (!currentVolume ||
+          currentVolume.kind !== 'volume' ||
+          currentVolume.parentId !== null ||
+          !matchesLookup(currentVolume, volume.lookupId))) ||
       (chapter &&
-        (currentChapter?.kind !== 'chapter' ||
+        (!currentChapter ||
+          currentChapter.kind !== 'chapter' ||
           currentChapter.parentId !== volume?.documentId ||
           !matchesLookup(currentChapter, chapter.lookupId)))
     ) {

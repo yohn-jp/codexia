@@ -86,10 +86,10 @@ after(async () => {
 });
 
 test('fresh schema initialization is transactional, repeatable and rejects untracked or partial schemas', async t => {
-  const db = `codexia_fresh_${randomUUID().replaceAll('-', '')}`;
+  const db = 'codexia_fresh_' + randomUUID().replaceAll('-', '');
   await directPool.query(`CREATE DATABASE "${db}"`);
   const target = new URL(connectionString);
-  target.pathname = `/${db}`;
+  target.pathname = '/' + db;
   const pool = new Pool({ connectionString: target.toString() });
   t.after(async () => {
     await pool.end();
@@ -352,28 +352,28 @@ test('Knowledge browse searches literals and aliases, pages 501 nodes in stable 
   const loaded: string[] = [];
   let after: { name: string; id: KnowledgeNodeId } | undefined;
   for (const expectedCount of [101, 101, 101, 101, 97]) {
-    const page = await persistence.read(reader => reader.searchKnowledgeNodes?.(project.id, { limit: 101, after }));
+    const page = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 101, after }));
     assert.equal(page.length, expectedCount);
     loaded.push(...page.map(node => node.id));
     const last = page.at(-1)!;
     after = { name: last.name, id: last.id };
   }
-  assert.deepEqual(await persistence.read(reader => reader.searchKnowledgeNodes?.(project.id, { limit: 101, after })), []);
+  assert.deepEqual(await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 101, after })), []);
   assert.deepEqual(loaded, ids);
-  const literal = await persistence.read(reader => reader.searchKnowledgeNodes?.(project.id, { query: '%_!', limit: 10 }));
+  const literal = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { query: '%_!', limit: 10 }));
   assert.deepEqual(
     literal.map(node => node.id),
     [ids[500]],
   );
-  const alias = await persistence.read(reader => reader.searchKnowledgeNodes?.(project.id, { query: 'literal%_!alias', limit: 10 }));
+  const alias = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { query: 'literal%_!alias', limit: 10 }));
   assert.deepEqual(
     alias.map(node => node.id),
     [ids[500]],
   );
-  const scoped = await persistence.read(reader => reader.searchKnowledgeNodes?.(project.id, { query: 'Unrelated', limit: 10 }));
+  const scoped = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { query: 'Unrelated', limit: 10 }));
   assert.deepEqual(scoped, []);
   const filtered = await persistence.read(reader =>
-    reader.searchKnowledgeNodes?.(project.id, { type: 'person', status: 'confirmed', limit: 10 }),
+    reader.searchKnowledgeNodes!(project.id, { type: 'person', status: 'confirmed', limit: 10 }),
   );
   assert.ok(filtered.length > 0);
   assert.ok(filtered.every(node => node.type === 'person' && node.status === 'confirmed'));
@@ -404,29 +404,29 @@ test('Knowledge search returns retired nodes only for the explicit retired filte
         name,
         attributes: {},
         status: 'retired',
-        expectedVersion: current?.version,
+        expectedVersion: current!.version,
       }),
     );
     nodes.push(await persistence.read(reader => reader.getKnowledgeNode(project.id, id)));
   }
   const firstPage = await persistence.read(reader =>
-    reader.searchKnowledgeNodes?.(project.id, { status: 'retired', query: 'Ada', limit: 1 }),
+    reader.searchKnowledgeNodes!(project.id, { status: 'retired', query: 'Ada', limit: 1 }),
   );
   assert.equal(firstPage.length, 1);
   const secondPage = await persistence.read(reader =>
-    reader.searchKnowledgeNodes?.(project.id, {
+    reader.searchKnowledgeNodes!(project.id, {
       status: 'retired',
       query: 'Ada',
       limit: 10,
-      after: { name: firstPage[0]?.name, id: firstPage[0]?.id },
+      after: { name: firstPage[0]!.name, id: firstPage[0]!.id },
     }),
   );
   assert.deepEqual(
     [firstPage[0], ...secondPage].map(node => node.id),
-    nodes.map(node => node?.id),
+    nodes.map(node => node!.id),
   );
-  assert.deepEqual(await persistence.read(reader => reader.searchKnowledgeNodes?.(project.id, { status: 'confirmed', limit: 10 })), []);
-  assert.deepEqual(await persistence.read(reader => reader.searchKnowledgeNodes?.(project.id, { limit: 10 })), []);
+  assert.deepEqual(await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { status: 'confirmed', limit: 10 })), []);
+  assert.deepEqual(await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 10 })), []);
 });
 
 test('Knowledge keyset cursors use PostgreSQL lower semantics and preserve custom node types', async () => {
@@ -446,7 +446,7 @@ test('Knowledge keyset cursors use PostgreSQL lower semantics and preserve custo
       });
     }
   });
-  const all = await persistence.read(reader => reader.searchKnowledgeNodes?.(project.id, { limit: 10 }));
+  const all = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 10 }));
   assert.deepEqual(
     all.map(node => node.type),
     names.map(() => 'my_custom_type'),
@@ -454,19 +454,19 @@ test('Knowledge keyset cursors use PostgreSQL lower semantics and preserve custo
   const paged: KnowledgeNodeId[] = [];
   let after: { name: string; id: KnowledgeNodeId } | undefined;
   for (let count = 0; count < names.length; count++) {
-    const page = await persistence.read(reader => reader.searchKnowledgeNodes?.(project.id, { limit: 1, after }));
+    const page = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 1, after }));
     assert.equal(page.length, 1);
     const last = page[0]!;
     paged.push(last.id);
     after = { name: last.name, id: last.id };
   }
-  assert.deepEqual(await persistence.read(reader => reader.searchKnowledgeNodes?.(project.id, { limit: 1, after })), []);
+  assert.deepEqual(await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 1, after })), []);
   assert.deepEqual(
     paged,
     all.map(node => node.id),
   );
   assert.deepEqual(new Set(paged), new Set(ids));
-  const custom = await persistence.read(reader => reader.searchKnowledgeNodes?.(project.id, { type: 'my_custom_type', limit: 10 }));
+  const custom = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { type: 'my_custom_type', limit: 10 }));
   assert.equal(custom.length, names.length);
 });
 
@@ -771,7 +771,7 @@ test('document saves advance persistent anchors atomically and revoke stale ment
   assert.equal(evidence.links[0]?.status, 'confirmed');
   assert.equal(evidence.history.length, 2);
 
-  const range = { fromUtf16: evidence.anchor?.fromUtf16, toUtf16: evidence.anchor?.toUtf16 };
+  const range = { fromUtf16: evidence.anchor!.fromUtf16, toUtf16: evidence.anchor!.toUtf16 };
   const afterReplacement = `${afterPrefix.slice(0, range.fromUtf16)}大阪${afterPrefix.slice(range.toUtf16)}`;
   const replacementSave = saveCommand(
     project.id,
@@ -833,14 +833,14 @@ test('concurrent exact retries replay one document creation and one edit', async
     persistence.transaction(tx => tx.createDocument(creation)),
     persistence.transaction(tx => tx.createDocument(creation)),
   ]);
-  assert.equal(created[0]?.document.id, created[1]?.document.id);
-  assert.equal(created[0]?.revision.id, created[1]?.revision.id);
+  assert.equal(created[0]!.document.id, created[1]!.document.id);
+  assert.equal(created[0]!.revision.id, created[1]!.revision.id);
   assert.deepEqual(created.map(x => x.replayed).sort(), [false, true]);
 
   const command = saveCommand(
     project.id,
-    created[0]?.document.id,
-    created[0]?.revision.id,
+    created[0]!.document.id,
+    created[0]!.revision.id,
     'original edited',
     [{ fromUtf16: 8, toUtf16: 8, insert: ' edited' }],
     `save-${randomUUID()}`,
@@ -849,9 +849,9 @@ test('concurrent exact retries replay one document creation and one edit', async
     persistence.transaction(tx => tx.saveDocument(command)),
     persistence.transaction(tx => tx.saveDocument(command)),
   ]);
-  assert.equal(saved[0]?.revision.id, saved[1]?.revision.id);
+  assert.equal(saved[0]!.revision.id, saved[1]!.revision.id);
   assert.deepEqual(saved.map(x => x.replayed).sort(), [false, true]);
-  const history = await persistence.read(reader => reader.listRevisions(project.id, created[0]?.document.id, 10));
+  const history = await persistence.read(reader => reader.listRevisions(project.id, created[0]!.document.id, 10));
   assert.equal(history.revisions.length, 2);
 });
 
