@@ -2,7 +2,7 @@
 
 **種別: 採用済みの機能・安全設計、実装未完了。** 本書は `/console/backups` の**運用設定・S3保管先・ジョブ要求・監視**についての責務境界、バックエンド契約、受入条件を所有する。画面のIDと操作は [Screen control catalog](../design/SCREEN-CONTROL-CATALOG.md)、状態遷移図は [Screen State Atlas](../design/SCREEN-STATE-ATLAS.md)、権限の正本は [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md)、生成する暗号化アーティファクトと実復旧は [Backup](../deployment/BACKUP.md)、初期配備/更新とhost lockは [Push deployment](../deployment/PUSH-DEPLOYMENT.md) に従う。
 
-対象は**単一ownerのインストール**。OWNER-SESSIONはバックアップ先をUIから**指定・検証・有効化**し、保全状態と証拠を参照できる。一方、ownerセッション/公開HTTP APIはOPERATOR、SSH、Ansible、Podman、PG管理者、S3 bucket管理者の資格ではない。**本番DBの復元、任意コマンド実行、IAM/Object Lock変更、秘密鍵の読取、保全済みオブジェクトの削除を管理画面に提供しない。** 現行アプリに以下の画面/API/ジョブはなく、実装したと扱わない。
+対象は**単一ownerのインストール**。OWNER-SESSIONはバックアップ先をUIから**指定・検証・有効化**し、保全状態と証拠を参照できる。一方、ownerセッション/公開HTTP APIはOPERATOR、SSH、Ansible、Podman、PG管理者、S3 bucket管理者の資格ではない。**本番DBの復元、任意コマンド実行、IAM/Object Lock変更、秘密鍵の読取、保全済みオブジェクトの削除を管理画面に提供しない。** BKC-001〜007の導入条件と運用手順は [Backup console provisioning](../../deploy/backup/CONSOLE.md) を参照。
 
 ## 配備との一意の責務分担
 
@@ -39,7 +39,7 @@ S3互換endpointへのprobeと転送は固定のegress policyを持つserver-sid
 
 ## Web APIの目標契約
 
-**全て未実装。** `/api/console/backups/*` はCloudflare Tunnelを経由するFastify上の**OWNER-SESSION専用のcookie/CSRF保護経路**。OWNER-API bearer、MCP bearer、SETUP、ANON、SHARE-READER、EDGE-CIには権限を与えない。fresh reauthenticationはcredentialの登録/再設定、activate、disable、手動バックアップ要求時に**API側で**検査する。新しい外部管理APIやshell実行RPCは作らない。
+**BKC-001〜007はoperatorによる明示的な有効化が必要。BKC-008〜010は実装対象外。** `/api/console/backups/*` はCloudflare Tunnelを経由するFastify上の**OWNER-SESSION専用のcookie/CSRF保護経路**。OWNER-API bearer、MCP bearer、SETUP、ANON、SHARE-READER、EDGE-CIには権限を与えない。fresh reauthenticationはcredentialの登録/再設定、activate、disable、手動バックアップ要求時に**API側で**検査する。新しい外部管理APIやshell実行RPCは作らない。
 
 | Operation ID | Method / path | 行為・成功応答 | 必須の拒否条件 |
 | --- | --- | --- | --- |

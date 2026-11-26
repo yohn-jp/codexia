@@ -785,10 +785,25 @@ extension Components {
             }
             /// - Remark: Generated from `#/components/schemas/AwsS3BackupConfigDraft/credentialMode`.
             public var credentialMode: Components.Schemas.AwsS3BackupConfigDraft.credentialModePayload
+            /// - Remark: Generated from `#/components/schemas/AwsS3BackupConfigDraft/addressing`.
+            @frozen public enum addressingPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case path_hyphen_style = "path-style"
+                case virtual_hyphen_hosted_hyphen_style = "virtual-hosted-style"
+            }
+            /// - Remark: Generated from `#/components/schemas/AwsS3BackupConfigDraft/addressing`.
+            public var addressing: Components.Schemas.AwsS3BackupConfigDraft.addressingPayload?
+            /// - Remark: Generated from `#/components/schemas/AwsS3BackupConfigDraft/schedule`.
+            @frozen public enum schedulePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case disabled = "disabled"
+            }
+            /// - Remark: Generated from `#/components/schemas/AwsS3BackupConfigDraft/schedule`.
+            public var schedule: Components.Schemas.AwsS3BackupConfigDraft.schedulePayload?
             /// - Remark: Generated from `#/components/schemas/AwsS3BackupConfigDraft/accessKeyId`.
             public var accessKeyId: Swift.String?
             /// - Remark: Generated from `#/components/schemas/AwsS3BackupConfigDraft/secretAccessKey`.
             public var secretAccessKey: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/AwsS3BackupConfigDraft/sessionToken`.
+            public var sessionToken: Swift.String?
             /// - Remark: Generated from `#/components/schemas/AwsS3BackupConfigDraft/offVmPolicy`.
             @frozen public enum offVmPolicyPayload: String, Codable, Hashable, Sendable, CaseIterable {
                 case required = "required"
@@ -824,8 +839,11 @@ extension Components {
             ///   - bucket:
             ///   - prefix:
             ///   - credentialMode:
+            ///   - addressing:
+            ///   - schedule:
             ///   - accessKeyId:
             ///   - secretAccessKey:
+            ///   - sessionToken:
             ///   - offVmPolicy:
             ///   - retentionRequest:
             public init(
@@ -834,8 +852,11 @@ extension Components {
                 bucket: Swift.String,
                 prefix: Swift.String,
                 credentialMode: Components.Schemas.AwsS3BackupConfigDraft.credentialModePayload,
+                addressing: Components.Schemas.AwsS3BackupConfigDraft.addressingPayload? = nil,
+                schedule: Components.Schemas.AwsS3BackupConfigDraft.schedulePayload? = nil,
                 accessKeyId: Swift.String? = nil,
                 secretAccessKey: Swift.String? = nil,
+                sessionToken: Swift.String? = nil,
                 offVmPolicy: Components.Schemas.AwsS3BackupConfigDraft.offVmPolicyPayload,
                 retentionRequest: Components.Schemas.AwsS3BackupConfigDraft.retentionRequestPayload? = nil
             ) {
@@ -844,8 +865,11 @@ extension Components {
                 self.bucket = bucket
                 self.prefix = prefix
                 self.credentialMode = credentialMode
+                self.addressing = addressing
+                self.schedule = schedule
                 self.accessKeyId = accessKeyId
                 self.secretAccessKey = secretAccessKey
+                self.sessionToken = sessionToken
                 self.offVmPolicy = offVmPolicy
                 self.retentionRequest = retentionRequest
             }
@@ -855,8 +879,11 @@ extension Components {
                 case bucket
                 case prefix
                 case credentialMode
+                case addressing
+                case schedule
                 case accessKeyId
                 case secretAccessKey
+                case sessionToken
                 case offVmPolicy
                 case retentionRequest
             }
@@ -918,6 +945,260 @@ extension Components {
             public var credentialConfigured: Swift.Bool
             /// - Remark: Generated from `#/components/schemas/BackupConfigView/revision`.
             public var revision: Swift.Int32
+            /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft`.
+            public struct draftPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/provider`.
+                @frozen public enum providerPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case aws_hyphen_s3 = "aws-s3"
+                    case s3_hyphen_compatible = "s3-compatible"
+                }
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/provider`.
+                public var provider: Components.Schemas.BackupConfigView.draftPayload.providerPayload
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/endpoint`.
+                public var endpoint: Swift.String
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/region`.
+                public var region: Swift.String
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/bucket`.
+                public var bucket: Swift.String
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/prefix`.
+                public var prefix: Swift.String
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/addressing`.
+                @frozen public enum addressingPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case path_hyphen_style = "path-style"
+                    case virtual_hyphen_hosted_hyphen_style = "virtual-hosted-style"
+                }
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/addressing`.
+                public var addressing: Components.Schemas.BackupConfigView.draftPayload.addressingPayload
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/credentialMode`.
+                @frozen public enum credentialModePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case operator_hyphen_role = "operator-role"
+                    case sealed_hyphen_access_hyphen_key = "sealed-access-key"
+                }
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/credentialMode`.
+                public var credentialMode: Components.Schemas.BackupConfigView.draftPayload.credentialModePayload
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/credentialConfigured`.
+                public var credentialConfigured: Swift.Bool
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/offVmPolicy`.
+                @frozen public enum offVmPolicyPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case required = "required"
+                    case secondary = "secondary"
+                }
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/offVmPolicy`.
+                public var offVmPolicy: Components.Schemas.BackupConfigView.draftPayload.offVmPolicyPayload
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/retentionRequest`.
+                public struct retentionRequestPayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `retentionRequestPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/retentionRequest`.
+                public var retentionRequest: Components.Schemas.BackupConfigView.draftPayload.retentionRequestPayload?
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/schedule`.
+                @frozen public enum schedulePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case disabled = "disabled"
+                }
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/schedule`.
+                public var schedule: Components.Schemas.BackupConfigView.draftPayload.schedulePayload
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft/revision`.
+                public var revision: Swift.Int32
+                /// Creates a new `draftPayload`.
+                ///
+                /// - Parameters:
+                ///   - provider:
+                ///   - endpoint:
+                ///   - region:
+                ///   - bucket:
+                ///   - prefix:
+                ///   - addressing:
+                ///   - credentialMode:
+                ///   - credentialConfigured:
+                ///   - offVmPolicy:
+                ///   - retentionRequest:
+                ///   - schedule:
+                ///   - revision:
+                public init(
+                    provider: Components.Schemas.BackupConfigView.draftPayload.providerPayload,
+                    endpoint: Swift.String,
+                    region: Swift.String,
+                    bucket: Swift.String,
+                    prefix: Swift.String,
+                    addressing: Components.Schemas.BackupConfigView.draftPayload.addressingPayload,
+                    credentialMode: Components.Schemas.BackupConfigView.draftPayload.credentialModePayload,
+                    credentialConfigured: Swift.Bool,
+                    offVmPolicy: Components.Schemas.BackupConfigView.draftPayload.offVmPolicyPayload,
+                    retentionRequest: Components.Schemas.BackupConfigView.draftPayload.retentionRequestPayload? = nil,
+                    schedule: Components.Schemas.BackupConfigView.draftPayload.schedulePayload,
+                    revision: Swift.Int32
+                ) {
+                    self.provider = provider
+                    self.endpoint = endpoint
+                    self.region = region
+                    self.bucket = bucket
+                    self.prefix = prefix
+                    self.addressing = addressing
+                    self.credentialMode = credentialMode
+                    self.credentialConfigured = credentialConfigured
+                    self.offVmPolicy = offVmPolicy
+                    self.retentionRequest = retentionRequest
+                    self.schedule = schedule
+                    self.revision = revision
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case provider
+                    case endpoint
+                    case region
+                    case bucket
+                    case prefix
+                    case addressing
+                    case credentialMode
+                    case credentialConfigured
+                    case offVmPolicy
+                    case retentionRequest
+                    case schedule
+                    case revision
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupConfigView/draft`.
+            public var draft: Components.Schemas.BackupConfigView.draftPayload?
+            /// - Remark: Generated from `#/components/schemas/BackupConfigView/active`.
+            public struct activePayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/provider`.
+                @frozen public enum providerPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case aws_hyphen_s3 = "aws-s3"
+                    case s3_hyphen_compatible = "s3-compatible"
+                }
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/provider`.
+                public var provider: Components.Schemas.BackupConfigView.activePayload.providerPayload
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/endpoint`.
+                public var endpoint: Swift.String
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/region`.
+                public var region: Swift.String
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/bucket`.
+                public var bucket: Swift.String
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/prefix`.
+                public var prefix: Swift.String
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/addressing`.
+                @frozen public enum addressingPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case path_hyphen_style = "path-style"
+                    case virtual_hyphen_hosted_hyphen_style = "virtual-hosted-style"
+                }
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/addressing`.
+                public var addressing: Components.Schemas.BackupConfigView.activePayload.addressingPayload
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/credentialMode`.
+                @frozen public enum credentialModePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case operator_hyphen_role = "operator-role"
+                    case sealed_hyphen_access_hyphen_key = "sealed-access-key"
+                }
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/credentialMode`.
+                public var credentialMode: Components.Schemas.BackupConfigView.activePayload.credentialModePayload
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/credentialConfigured`.
+                public var credentialConfigured: Swift.Bool
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/offVmPolicy`.
+                @frozen public enum offVmPolicyPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case required = "required"
+                    case secondary = "secondary"
+                }
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/offVmPolicy`.
+                public var offVmPolicy: Components.Schemas.BackupConfigView.activePayload.offVmPolicyPayload
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/retentionRequest`.
+                public struct retentionRequestPayload: Codable, Hashable, Sendable {
+                    /// A container of undocumented properties.
+                    public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                    /// Creates a new `retentionRequestPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - additionalProperties: A container of undocumented properties.
+                    public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                        self.additionalProperties = additionalProperties
+                    }
+                    public init(from decoder: any Swift.Decoder) throws {
+                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                    }
+                    public func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeAdditionalProperties(additionalProperties)
+                    }
+                }
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/retentionRequest`.
+                public var retentionRequest: Components.Schemas.BackupConfigView.activePayload.retentionRequestPayload?
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/schedule`.
+                @frozen public enum schedulePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case disabled = "disabled"
+                }
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/schedule`.
+                public var schedule: Components.Schemas.BackupConfigView.activePayload.schedulePayload
+                /// - Remark: Generated from `#/components/schemas/BackupConfigView/active/revision`.
+                public var revision: Swift.Int32
+                /// Creates a new `activePayload`.
+                ///
+                /// - Parameters:
+                ///   - provider:
+                ///   - endpoint:
+                ///   - region:
+                ///   - bucket:
+                ///   - prefix:
+                ///   - addressing:
+                ///   - credentialMode:
+                ///   - credentialConfigured:
+                ///   - offVmPolicy:
+                ///   - retentionRequest:
+                ///   - schedule:
+                ///   - revision:
+                public init(
+                    provider: Components.Schemas.BackupConfigView.activePayload.providerPayload,
+                    endpoint: Swift.String,
+                    region: Swift.String,
+                    bucket: Swift.String,
+                    prefix: Swift.String,
+                    addressing: Components.Schemas.BackupConfigView.activePayload.addressingPayload,
+                    credentialMode: Components.Schemas.BackupConfigView.activePayload.credentialModePayload,
+                    credentialConfigured: Swift.Bool,
+                    offVmPolicy: Components.Schemas.BackupConfigView.activePayload.offVmPolicyPayload,
+                    retentionRequest: Components.Schemas.BackupConfigView.activePayload.retentionRequestPayload? = nil,
+                    schedule: Components.Schemas.BackupConfigView.activePayload.schedulePayload,
+                    revision: Swift.Int32
+                ) {
+                    self.provider = provider
+                    self.endpoint = endpoint
+                    self.region = region
+                    self.bucket = bucket
+                    self.prefix = prefix
+                    self.addressing = addressing
+                    self.credentialMode = credentialMode
+                    self.credentialConfigured = credentialConfigured
+                    self.offVmPolicy = offVmPolicy
+                    self.retentionRequest = retentionRequest
+                    self.schedule = schedule
+                    self.revision = revision
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case provider
+                    case endpoint
+                    case region
+                    case bucket
+                    case prefix
+                    case addressing
+                    case credentialMode
+                    case credentialConfigured
+                    case offVmPolicy
+                    case retentionRequest
+                    case schedule
+                    case revision
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupConfigView/active`.
+            public var active: Components.Schemas.BackupConfigView.activePayload?
             /// Creates a new `BackupConfigView`.
             ///
             /// - Parameters:
@@ -928,6 +1209,8 @@ extension Components {
             ///   - prefix:
             ///   - credentialConfigured:
             ///   - revision:
+            ///   - draft:
+            ///   - active:
             public init(
                 provider: Components.Schemas.BackupConfigView.providerPayload? = nil,
                 endpoint: Swift.String? = nil,
@@ -935,7 +1218,9 @@ extension Components {
                 bucket: Swift.String? = nil,
                 prefix: Swift.String? = nil,
                 credentialConfigured: Swift.Bool,
-                revision: Swift.Int32
+                revision: Swift.Int32,
+                draft: Components.Schemas.BackupConfigView.draftPayload? = nil,
+                active: Components.Schemas.BackupConfigView.activePayload? = nil
             ) {
                 self.provider = provider
                 self.endpoint = endpoint
@@ -944,6 +1229,8 @@ extension Components {
                 self.prefix = prefix
                 self.credentialConfigured = credentialConfigured
                 self.revision = revision
+                self.draft = draft
+                self.active = active
             }
             public enum CodingKeys: String, CodingKey {
                 case provider
@@ -952,6 +1239,133 @@ extension Components {
                 case bucket
                 case prefix
                 case credentialConfigured
+                case revision
+                case draft
+                case active
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/BackupDestinationView`.
+        public struct BackupDestinationView: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/provider`.
+            @frozen public enum providerPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case aws_hyphen_s3 = "aws-s3"
+                case s3_hyphen_compatible = "s3-compatible"
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/provider`.
+            public var provider: Components.Schemas.BackupDestinationView.providerPayload
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/endpoint`.
+            public var endpoint: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/region`.
+            public var region: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/bucket`.
+            public var bucket: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/prefix`.
+            public var prefix: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/addressing`.
+            @frozen public enum addressingPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case path_hyphen_style = "path-style"
+                case virtual_hyphen_hosted_hyphen_style = "virtual-hosted-style"
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/addressing`.
+            public var addressing: Components.Schemas.BackupDestinationView.addressingPayload
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/credentialMode`.
+            @frozen public enum credentialModePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case operator_hyphen_role = "operator-role"
+                case sealed_hyphen_access_hyphen_key = "sealed-access-key"
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/credentialMode`.
+            public var credentialMode: Components.Schemas.BackupDestinationView.credentialModePayload
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/credentialConfigured`.
+            public var credentialConfigured: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/offVmPolicy`.
+            @frozen public enum offVmPolicyPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case required = "required"
+                case secondary = "secondary"
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/offVmPolicy`.
+            public var offVmPolicy: Components.Schemas.BackupDestinationView.offVmPolicyPayload
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/retentionRequest`.
+            public struct retentionRequestPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `retentionRequestPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/retentionRequest`.
+            public var retentionRequest: Components.Schemas.BackupDestinationView.retentionRequestPayload?
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/schedule`.
+            @frozen public enum schedulePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case disabled = "disabled"
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/schedule`.
+            public var schedule: Components.Schemas.BackupDestinationView.schedulePayload
+            /// - Remark: Generated from `#/components/schemas/BackupDestinationView/revision`.
+            public var revision: Swift.Int32
+            /// Creates a new `BackupDestinationView`.
+            ///
+            /// - Parameters:
+            ///   - provider:
+            ///   - endpoint:
+            ///   - region:
+            ///   - bucket:
+            ///   - prefix:
+            ///   - addressing:
+            ///   - credentialMode:
+            ///   - credentialConfigured:
+            ///   - offVmPolicy:
+            ///   - retentionRequest:
+            ///   - schedule:
+            ///   - revision:
+            public init(
+                provider: Components.Schemas.BackupDestinationView.providerPayload,
+                endpoint: Swift.String,
+                region: Swift.String,
+                bucket: Swift.String,
+                prefix: Swift.String,
+                addressing: Components.Schemas.BackupDestinationView.addressingPayload,
+                credentialMode: Components.Schemas.BackupDestinationView.credentialModePayload,
+                credentialConfigured: Swift.Bool,
+                offVmPolicy: Components.Schemas.BackupDestinationView.offVmPolicyPayload,
+                retentionRequest: Components.Schemas.BackupDestinationView.retentionRequestPayload? = nil,
+                schedule: Components.Schemas.BackupDestinationView.schedulePayload,
+                revision: Swift.Int32
+            ) {
+                self.provider = provider
+                self.endpoint = endpoint
+                self.region = region
+                self.bucket = bucket
+                self.prefix = prefix
+                self.addressing = addressing
+                self.credentialMode = credentialMode
+                self.credentialConfigured = credentialConfigured
+                self.offVmPolicy = offVmPolicy
+                self.retentionRequest = retentionRequest
+                self.schedule = schedule
+                self.revision = revision
+            }
+            public enum CodingKeys: String, CodingKey {
+                case provider
+                case endpoint
+                case region
+                case bucket
+                case prefix
+                case addressing
+                case credentialMode
+                case credentialConfigured
+                case offVmPolicy
+                case retentionRequest
+                case schedule
                 case revision
             }
         }
@@ -967,25 +1381,70 @@ extension Components {
             public var state: Components.Schemas.BackupOperationReceipt.statePayload
             /// - Remark: Generated from `#/components/schemas/BackupOperationReceipt/createdAt`.
             public var createdAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/BackupOperationReceipt/requestId`.
+            public var requestId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BackupOperationReceipt/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case QUEUED = "QUEUED"
+                case RUNNING = "RUNNING"
+                case PASSED = "PASSED"
+                case FAILED = "FAILED"
+                case BLOCKED = "BLOCKED"
+                case APPLIED = "APPLIED"
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupOperationReceipt/status`.
+            public var status: Components.Schemas.BackupOperationReceipt.statusPayload?
+            /// - Remark: Generated from `#/components/schemas/BackupOperationReceipt/phase`.
+            @frozen public enum phasePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case probe = "probe"
+                case activate = "activate"
+                case disable = "disable"
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupOperationReceipt/phase`.
+            public var phase: Components.Schemas.BackupOperationReceipt.phasePayload?
+            /// - Remark: Generated from `#/components/schemas/BackupOperationReceipt/observedAt`.
+            public var observedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/BackupOperationReceipt/reasonCode`.
+            public var reasonCode: Swift.String?
             /// Creates a new `BackupOperationReceipt`.
             ///
             /// - Parameters:
             ///   - operationId:
             ///   - state:
             ///   - createdAt:
+            ///   - requestId:
+            ///   - status:
+            ///   - phase:
+            ///   - observedAt:
+            ///   - reasonCode:
             public init(
                 operationId: Swift.String,
                 state: Components.Schemas.BackupOperationReceipt.statePayload,
-                createdAt: Foundation.Date
+                createdAt: Foundation.Date,
+                requestId: Swift.String? = nil,
+                status: Components.Schemas.BackupOperationReceipt.statusPayload? = nil,
+                phase: Components.Schemas.BackupOperationReceipt.phasePayload? = nil,
+                observedAt: Foundation.Date? = nil,
+                reasonCode: Swift.String? = nil
             ) {
                 self.operationId = operationId
                 self.state = state
                 self.createdAt = createdAt
+                self.requestId = requestId
+                self.status = status
+                self.phase = phase
+                self.observedAt = observedAt
+                self.reasonCode = reasonCode
             }
             public enum CodingKeys: String, CodingKey {
                 case operationId
                 case state
                 case createdAt
+                case requestId
+                case status
+                case phase
+                case observedAt
+                case reasonCode
             }
         }
         /// - Remark: Generated from `#/components/schemas/BackupProbeReceipt`.
@@ -1000,25 +1459,70 @@ extension Components {
             public var state: Components.Schemas.BackupProbeReceipt.statePayload
             /// - Remark: Generated from `#/components/schemas/BackupProbeReceipt/createdAt`.
             public var createdAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/BackupProbeReceipt/requestId`.
+            public var requestId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BackupProbeReceipt/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case QUEUED = "QUEUED"
+                case RUNNING = "RUNNING"
+                case PASSED = "PASSED"
+                case FAILED = "FAILED"
+                case BLOCKED = "BLOCKED"
+                case APPLIED = "APPLIED"
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupProbeReceipt/status`.
+            public var status: Components.Schemas.BackupProbeReceipt.statusPayload?
+            /// - Remark: Generated from `#/components/schemas/BackupProbeReceipt/phase`.
+            @frozen public enum phasePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case probe = "probe"
+                case activate = "activate"
+                case disable = "disable"
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupProbeReceipt/phase`.
+            public var phase: Components.Schemas.BackupProbeReceipt.phasePayload?
+            /// - Remark: Generated from `#/components/schemas/BackupProbeReceipt/observedAt`.
+            public var observedAt: Foundation.Date?
+            /// - Remark: Generated from `#/components/schemas/BackupProbeReceipt/reasonCode`.
+            public var reasonCode: Swift.String?
             /// Creates a new `BackupProbeReceipt`.
             ///
             /// - Parameters:
             ///   - probeId:
             ///   - state:
             ///   - createdAt:
+            ///   - requestId:
+            ///   - status:
+            ///   - phase:
+            ///   - observedAt:
+            ///   - reasonCode:
             public init(
                 probeId: Swift.String,
                 state: Components.Schemas.BackupProbeReceipt.statePayload,
-                createdAt: Foundation.Date
+                createdAt: Foundation.Date,
+                requestId: Swift.String? = nil,
+                status: Components.Schemas.BackupProbeReceipt.statusPayload? = nil,
+                phase: Components.Schemas.BackupProbeReceipt.phasePayload? = nil,
+                observedAt: Foundation.Date? = nil,
+                reasonCode: Swift.String? = nil
             ) {
                 self.probeId = probeId
                 self.state = state
                 self.createdAt = createdAt
+                self.requestId = requestId
+                self.status = status
+                self.phase = phase
+                self.observedAt = observedAt
+                self.reasonCode = reasonCode
             }
             public enum CodingKeys: String, CodingKey {
                 case probeId
                 case state
                 case createdAt
+                case requestId
+                case status
+                case phase
+                case observedAt
+                case reasonCode
             }
         }
         /// - Remark: Generated from `#/components/schemas/BackupRunReceipt`.
@@ -1177,10 +1681,25 @@ extension Components {
             }
             /// - Remark: Generated from `#/components/schemas/CompatibleS3BackupConfigDraft/credentialMode`.
             public var credentialMode: Components.Schemas.CompatibleS3BackupConfigDraft.credentialModePayload
+            /// - Remark: Generated from `#/components/schemas/CompatibleS3BackupConfigDraft/addressing`.
+            @frozen public enum addressingPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case path_hyphen_style = "path-style"
+                case virtual_hyphen_hosted_hyphen_style = "virtual-hosted-style"
+            }
+            /// - Remark: Generated from `#/components/schemas/CompatibleS3BackupConfigDraft/addressing`.
+            public var addressing: Components.Schemas.CompatibleS3BackupConfigDraft.addressingPayload?
+            /// - Remark: Generated from `#/components/schemas/CompatibleS3BackupConfigDraft/schedule`.
+            @frozen public enum schedulePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case disabled = "disabled"
+            }
+            /// - Remark: Generated from `#/components/schemas/CompatibleS3BackupConfigDraft/schedule`.
+            public var schedule: Components.Schemas.CompatibleS3BackupConfigDraft.schedulePayload?
             /// - Remark: Generated from `#/components/schemas/CompatibleS3BackupConfigDraft/accessKeyId`.
             public var accessKeyId: Swift.String?
             /// - Remark: Generated from `#/components/schemas/CompatibleS3BackupConfigDraft/secretAccessKey`.
             public var secretAccessKey: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/CompatibleS3BackupConfigDraft/sessionToken`.
+            public var sessionToken: Swift.String?
             /// - Remark: Generated from `#/components/schemas/CompatibleS3BackupConfigDraft/offVmPolicy`.
             @frozen public enum offVmPolicyPayload: String, Codable, Hashable, Sendable, CaseIterable {
                 case required = "required"
@@ -1217,8 +1736,11 @@ extension Components {
             ///   - bucket:
             ///   - prefix:
             ///   - credentialMode:
+            ///   - addressing:
+            ///   - schedule:
             ///   - accessKeyId:
             ///   - secretAccessKey:
+            ///   - sessionToken:
             ///   - offVmPolicy:
             ///   - retentionRequest:
             public init(
@@ -1228,8 +1750,11 @@ extension Components {
                 bucket: Swift.String,
                 prefix: Swift.String,
                 credentialMode: Components.Schemas.CompatibleS3BackupConfigDraft.credentialModePayload,
+                addressing: Components.Schemas.CompatibleS3BackupConfigDraft.addressingPayload? = nil,
+                schedule: Components.Schemas.CompatibleS3BackupConfigDraft.schedulePayload? = nil,
                 accessKeyId: Swift.String? = nil,
                 secretAccessKey: Swift.String? = nil,
+                sessionToken: Swift.String? = nil,
                 offVmPolicy: Components.Schemas.CompatibleS3BackupConfigDraft.offVmPolicyPayload,
                 retentionRequest: Components.Schemas.CompatibleS3BackupConfigDraft.retentionRequestPayload? = nil
             ) {
@@ -1239,8 +1764,11 @@ extension Components {
                 self.bucket = bucket
                 self.prefix = prefix
                 self.credentialMode = credentialMode
+                self.addressing = addressing
+                self.schedule = schedule
                 self.accessKeyId = accessKeyId
                 self.secretAccessKey = secretAccessKey
+                self.sessionToken = sessionToken
                 self.offVmPolicy = offVmPolicy
                 self.retentionRequest = retentionRequest
             }
@@ -1251,8 +1779,11 @@ extension Components {
                 case bucket
                 case prefix
                 case credentialMode
+                case addressing
+                case schedule
                 case accessKeyId
                 case secretAccessKey
+                case sessionToken
                 case offVmPolicy
                 case retentionRequest
             }
