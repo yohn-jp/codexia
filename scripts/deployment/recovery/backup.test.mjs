@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const backupProgram = path.join(root, 'deploy/backup/backup.sh');
+const backupRunner = path.join(root, 'deploy/backup/backup-runner.sh');
+const backupControl = path.join(root, 'deploy/backup/backup-control.sh');
 const shellQuote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 
 async function createFixture() {
@@ -17,12 +19,12 @@ async function createFixture() {
   const stateDir = path.join(home, '.local/state/codexia-deploy');
   const backupDestination = path.join(directory, 'backup');
   const bin = path.join(directory, 'bin');
-  await Promise.all([mkdir(stateDir, { recursive: true }), mkdir(backupDestination), mkdir(bin)]);
+  await Promise.all([mkdir(stateDir, { recursive: true, mode: 0o700 }), mkdir(backupDestination), mkdir(bin)]);
   const lockFile = path.join(stateDir, 'host.lock');
   await writeFile(lockFile, '');
   const commands = {
     age: '#!/bin/sh\nexit 0\n',
-    findmnt: '#!/bin/sh\nfor format do :; done\ncase "$format" in FSTYPE) printf nfs;; SOURCE) printf 192.0.2.55:/backup;; *) exit 2;; esac\n',
+    findmnt: '#!/bin/sh\nfor format do :; done\ncase "$format" in ID) printf 123;; FSTYPE) printf nfs;; SOURCE) printf 192.0.2.55:/backup;; *) exit 2;; esac\n',
     getent: '#!/bin/sh\nprintf "192.0.2.55 STREAM backup.example 192.0.2.55\\n"\n',
     ip: '#!/bin/sh\nprintf "2: lo inet 127.0.0.1/8 scope host lo\\n"\n',
     podman: '#!/bin/sh\nexit 1\n',
@@ -56,6 +58,126 @@ function invokeBackup(fixture, { activeUnits = '', approved = true, lockFile = f
     },
   });
 }
+
+test('operator startup persists push admission before the console executor can activate a destination', async t => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.directory, { recursive: true, force: true }));
+  const config = path.join(fixture.home, '.config', 'codexia-backup');
+  const marker = path.join(fixture.stateDir, 'backup-admission-enabled');
+  await mkdir(config, { recursive: true, mode: 0o700 });
+  const control = path.join(config, 'backup-console-control.js');
+  await writeFile(path.join(config, 'executor.env'), 'CODEXIA_BACKUP_EXECUTOR_ENTRYPOINT=' + control + '\n', { mode: 0o600 });
+  await writeFile(control, 'throw new Error("Unexpected control command");\n');
+  await writeFile(path.join(config, 'backup-console-executor.js'),
+    'if (!require("node:fs").existsSync(' + JSON.stringify(marker) + ')) process.exit(2);\n');
+  const boot = spawnSync('bash', [backupControl], {
+    encoding: 'utf8', env: { ...process.env, HOME: fixture.home },
+  });
+  assert.equal(boot.status, 0, boot.stderr);
+  assert.equal(await readFile(marker, 'utf8'), '');
+});
+
+test('the protected run shares the deploy lock and recovers both services after SIGKILL', async t => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.directory, { recursive: true, force: true }));
+  const run = '1485f702-eb68-4854-979d-fad9fd12d90d';
+  const publishedRun = '1485f702-eb68-4854-979d-fad9fd12d90e';
+  const transferRun = '1485f702-eb68-4854-979d-fad9fd12d90f';
+  const source = 'a'.repeat(40);
+  const digest = 'sha256:' + 'b'.repeat(64);
+  const manifest = 'c'.repeat(64);
+  const trace = path.join(fixture.directory, 'trace');
+  const localBin = path.join(fixture.home, '.local/bin');
+  const launcher = path.join(fixture.bin, 'run-backup-fixture');
+  await mkdir(localBin, { recursive: true });
+  await symlink(process.execPath, path.join(fixture.bin, 'node'));
+  await Promise.all(['trace', 'api', 'tunnel'].map(name => writeFile(path.join(fixture.directory, name), '')));
+  const scripts = {
+    [launcher]: [
+      'if [[ "$1" == lock ]]; then exec 8>>"$CODEXIA_PUSH_STATE_DIR/host.lock"; /usr/bin/flock -n 8 || exit; fi',
+      'shift',
+      'export RUNNER_PID=$$',
+      'exec /bin/bash "$@"',
+    ],
+    [path.join(fixture.bin, 'systemctl')]: [
+      'for unit; do :; done',
+      'case "$unit" in codexia-api.service) state="$FIXTURE/api";; codexia-tunnel.service) state="$FIXTURE/tunnel";; *) exit 4;; esac',
+      'case "$2" in is-active) [[ -f "$state" ]] || exit 3;; start) touch "$state";; stop) rm -f "$state";; reset-failed) :;; *) exit 4;; esac',
+    ],
+    [path.join(fixture.bin, 'podman')]: [
+      'case "$*" in',
+      '*update-identity.json) echo \'{"format":"codexia-backend-identity/v1","profile":"full","sourceSha":"' + source + '"}\';;',
+      '*ImageName*) echo ghcr.io/yohn-jp/codexia-backend@' + digest + ';;',
+      '*Health.Status*) [[ -f "$FIXTURE/api" ]] && echo healthy;;',
+      '*) exit 4;; esac',
+    ],
+    [path.join(localBin, 'codexia-backup')]: [
+      'case "$1" in validate-destination) exit 0;; validate-artifact) echo ' + manifest + '; exit 0;; backup-locked) :;; *) exit 2;; esac',
+      '[[ ! -e "$FIXTURE/api" && ! -e "$FIXTURE/tunnel" ]] || exit 2',
+      'echo backup >> "$FIXTURE/trace"',
+      'if [[ "$KILL_RUNNER" == 1 ]]; then kill -KILL "$RUNNER_PID"; exit 137; fi',
+      'for artifact_id; do :; done',
+      'archive="$2/$artifact_id"',
+      'mkdir -p "$archive"',
+      'if [[ "$KILL_PUBLISHED" == 1 ]]; then kill -KILL "$RUNNER_PID"; exit 137; fi',
+      'printf "Encrypted backup committed: %s\\nPublished checksum manifest sha256: %s\\n" "$archive" ' + manifest,
+    ],
+    [path.join(localBin, 'codexia-backup-control')]: [
+      'echo "$*" >> "$FIXTURE/trace"',
+      'if [[ "$1" == manual-finish ]]; then',
+      '  [[ -f "$FIXTURE/api" && -f "$FIXTURE/tunnel" ]] || exit 2',
+      '  if [[ "$KILL_UPLOAD" == 1 ]]; then kill -KILL "$RUNNER_PID"; fi',
+      'fi',
+    ],
+  };
+  for (const [file, lines] of Object.entries(scripts)) {
+    await writeFile(file, '#!/bin/bash\n' + lines.join('\n') + '\n');
+    await chmod(file, 0o700);
+  }
+  const env = {
+    HOME: fixture.home,
+    CODEXIA_PUSH_STATE_DIR: fixture.stateDir,
+    CODEXIA_BACKUP_DESTINATION: fixture.backupDestination,
+    CODEXIA_BACKUP_AGE_RECIPIENT: 'age1test',
+    FIXTURE: fixture.directory,
+    PATH: `${fixture.bin}:/usr/bin:/bin`,
+  };
+  const invoke = (mode, ...args) => spawnSync('/bin/bash', [launcher, mode, backupRunner, ...args], {
+    encoding: 'utf8',
+    env: {
+      ...env,
+      KILL_RUNNER: mode === 'before-publication' ? '1' : '0',
+      KILL_PUBLISHED: mode === 'after-publication' ? '1' : '0',
+      KILL_UPLOAD: mode === 'during-upload' ? '1' : '0',
+    },
+    timeout: 10_000,
+  });
+  const contention = invoke('lock', run);
+  assert.equal(contention.status, 75, contention.stderr);
+  assert.equal(await readFile(trace, 'utf8'), '');
+
+  const killed = invoke('before-publication', run);
+  assert.equal(killed.signal, 'SIGKILL', killed.stderr);
+  assert.deepEqual((await readFile(trace, 'utf8')).trim().split('\n'), ['manual-start ' + run + ' ' + source + ' ' + digest, 'backup']);
+  const recovered = invoke('recover', 'recover');
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.match(await readFile(trace, 'utf8'), new RegExp('manual-interrupted ' + run));
+  await Promise.all(['api', 'tunnel'].map(name => readFile(path.join(fixture.directory, name))));
+
+  const publicationKilled = invoke('after-publication', publishedRun);
+  assert.equal(publicationKilled.signal, 'SIGKILL', publicationKilled.stderr);
+  const publicationRecovered = invoke('recover', 'recover');
+  assert.equal(publicationRecovered.status, 0, publicationRecovered.stderr);
+  assert.match(await readFile(trace, 'utf8'), new RegExp('manual-finish ' + publishedRun + ' .+ ' + manifest));
+
+  const transferKilled = invoke('during-upload', transferRun);
+  assert.equal(transferKilled.signal, 'SIGKILL', transferKilled.stderr);
+  const completed = invoke('recover', 'recover');
+  assert.equal(completed.status, 0, completed.stderr);
+  const transfers = (await readFile(trace, 'utf8')).split('\n').filter(line => line.startsWith('manual-finish ' + transferRun));
+  assert.equal(transfers.length, 2, 'recovery must retry the same run after local publication');
+  assert.equal(transfers[0], transfers[1], 'the run UUID, artifact path and manifest digest remain fixed');
+});
 
 async function installFingerprintBackupCommands(fixture, { database, history }) {
   const dbCalls = path.join(fixture.directory, 'database-fingerprint-calls');
@@ -158,6 +280,14 @@ test('encrypted backup verification accepts read-only artifacts without weakenin
     const verified = invokeValidation(fixture, 'validate-artifact', archive);
     assert.equal(verified.status, 0, verified.stderr);
     assert.match(verified.stdout, /^[a-f0-9]{64}\n$/u);
+    const independent = () => spawnSync('bash', [
+      backupProgram, 'validate-independent-artifact', fixture.backupDestination, archive,
+    ], { encoding: 'utf8', env: { ...process.env, PATH: fixture.bin + ':' + process.env.PATH } });
+    const onRemoteMount = independent();
+    assert.equal(onRemoteMount.status, 0, onRemoteMount.stderr);
+    assert.equal(onRemoteMount.stdout, verified.stdout);
+    await writeFile(path.join(fixture.bin, 'findmnt'), '#!/bin/sh\nfor format do :; done\ncase "$format" in ID) printf 123;; FSTYPE) printf ext4;; *) exit 2;; esac\n');
+    assert.notEqual(independent().status, 0, 'a local filesystem cannot satisfy secondary preservation');
     if (process.getuid?.() !== 0) {
       const unwritable = invokeValidation(fixture, 'validate-destination', archive);
       assert.notEqual(unwritable.status, 0, 'Creating a backup still requires a writable destination');
@@ -308,6 +438,8 @@ test('restore drill verifies fingerprints before success evidence or candidate-l
     const identity = path.join(fixture.directory, 'identity');
     const commands = path.join(fixture.directory, 'commands.jsonl');
     const scratch = path.join(fixture.directory, 'resources.json');
+    const runtimeSettings = path.join(fixture.directory, 'runtime.env');
+    const introspectionSecret = path.join(fixture.directory, 'introspection-secret');
     const digest = contents => createHash('sha256').update(contents).digest('hex');
     const originalContents = [
       ['database.dump.age', 'database dump'], ['history.tar.age', 'history archive'],
@@ -321,15 +453,22 @@ const args = process.argv.slice(2);
 const [verb, action, subject] = args;
 const statePath = process.env.DRILL_FIXTURE_RESOURCES;
 const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+state.images ||= {};
 fs.appendFileSync(process.env.DRILL_FIXTURE_COMMANDS, JSON.stringify(args) + '\\n');
-if (args.includes('-i') || verb === 'volume' && action === 'import') fs.readFileSync(0);
+const input = args.includes('-i') || verb === 'volume' && action === 'import' ? fs.readFileSync(0, 'utf8') : '';
+if (args.some(value => value.startsWith('auth_password=')) && !input.startsWith('DO $$ BEGIN\\n')) process.exit(2);
 const save = () => fs.writeFileSync(statePath, JSON.stringify(state));
 const id = value => value.split('=')[1];
 if (['container', 'volume'].includes(verb) && action === 'exists') process.exit(subject in state.resources ? 0 : 1);
 if (verb === 'volume' && action === 'create') state.resources[args.at(-1)] = id(args[3]);
 else if (verb === 'volume' && action === 'inspect' || verb === 'inspect') {
-  process.stdout.write(args.includes('{{.HostConfig.NetworkMode}}') ? 'none' : state.resources[args.at(-1)]);
-} else if (verb === 'run' && action === '-d') state.resources[args[args.indexOf('--name') + 1]] = id(args[args.indexOf('--label') + 1]);
+  process.stdout.write(args.includes('{{.HostConfig.NetworkMode}}') ? (state.images[args.at(-1)] ? 'container:' + 'd'.repeat(64) : 'none') : args.includes('{{.Id}}') ? 'd'.repeat(64) : args.includes('{{.State.Running}}') ? (process.env.DRILL_FIXTURE_API_EXITED ? 'false' : 'true') : args.includes('{{.Config.Image}}') ? state.images[args.at(-1)] : state.resources[args.at(-1)]);
+} else if (verb === 'run' && action === '-d') {
+  const name = args[args.indexOf('--name') + 1];
+  state.resources[name] = id(args[args.indexOf('--label') + 1]);
+  if (args.at(-1).startsWith('ghcr.io/')) state.images[name] = args.at(-1);
+}
+else if (verb === 'run' && args.includes('--name')) state.resources[args[args.indexOf('--name') + 1]] = id(args[args.indexOf('--label') + 1]);
 else if (verb === 'run' && args.includes('/bin/bash')) {
   if (process.env.DRILL_FIXTURE_FAIL_HISTORY_FINGERPRINT) process.exit(125);
   if (!process.env.DRILL_FIXTURE_EMPTY_HISTORY) {
@@ -337,6 +476,9 @@ else if (verb === 'run' && args.includes('/bin/bash')) {
   }
 }
 else if (verb === 'run' && args.at(-1).includes('verifyPostgresSchema')) process.stdout.write(process.env.DRILL_FIXTURE_LEDGER + '\\n');
+else if (verb === 'exec' && args.some(value => value.includes('/health/ready'))) {
+  if (process.env.DRILL_FIXTURE_FAIL_API_READINESS) process.exit(125);
+}
 else if (verb === 'exec' && args.includes('sh')) {
   if (process.env.DRILL_FIXTURE_FAIL_DATABASE_FINGERPRINT) process.exit(125);
   if (!process.env.DRILL_FIXTURE_EMPTY_DATABASE) {
@@ -350,7 +492,7 @@ save();
     const ledger = 'sha256:' + 'b'.repeat(64);
     const run = async (options, {
       wrongDatabase = false, wrongHistory = false, emptyDatabase = false, emptyHistory = false,
-      failDatabaseFingerprint = false, failHistoryFingerprint = false, ledgerResult = ledger,
+      failDatabaseFingerprint = false, failHistoryFingerprint = false, failApiReadiness = false, ledgerResult = ledger,
     } = {}) => {
       await writeFile(scratch, JSON.stringify({ resources: {} }));
       await writeFile(commands, '');
@@ -373,6 +515,8 @@ save();
           DRILL_FIXTURE_EMPTY_HISTORY: emptyHistory ? '1' : '',
           DRILL_FIXTURE_FAIL_DATABASE_FINGERPRINT: failDatabaseFingerprint ? '1' : '',
           DRILL_FIXTURE_FAIL_HISTORY_FINGERPRINT: failHistoryFingerprint ? '1' : '',
+          DRILL_FIXTURE_FAIL_API_READINESS: failApiReadiness ? '1' : '',
+          DRILL_FIXTURE_API_EXITED: failApiReadiness ? '1' : '',
         },
       });
       assert.deepEqual(JSON.parse(await readFile(scratch, 'utf8')).resources, {});
@@ -397,6 +541,54 @@ save();
     assert.ok(candidateChecks[1].some(argument => argument.includes('default_transaction_read_only')));
     assert.ok(candidateChecks.every(call => call.includes('--read-only') && call.includes('--pull=never')));
     assert.ok(candidateChecks.every(call => !call.includes('--apply') && !call.includes('--volume')));
+    await writeFile(runtimeSettings, [
+      'CODEXIA_PUBLIC_ORIGIN=https://fixture.example.test',
+      'CODEXIA_OIDC_ISSUER=https://identity.example.test',
+      'CODEXIA_OIDC_CLIENT_ID=fixture-web',
+      'CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID=fixture-introspection',
+      'CODEXIA_OAUTH_OWNER_SUBJECT=fixture-owner',
+      'CODEXIA_OAUTH_OWNER_CLIENT_IDS=fixture-web,fixture-ios',
+      '',
+    ].join('\n'), { mode: 0o600 });
+    await writeFile(introspectionSecret, 'fixture-introspection-secret-with-enough-length', { mode: 0o600 });
+    const apiReadyArgs = [
+      ...readOnlyArgs, '--candidate-api-ready', '--candidate-runtime-settings', runtimeSettings,
+      '--candidate-introspection-secret-file', introspectionSecret,
+    ];
+    const apiReady = await run(apiReadyArgs);
+    assert.equal(apiReady.status, 0, apiReady.stderr);
+    assert.ok(apiReady.stdout.includes('Isolated candidate API readiness verified'));
+    const apiStart = apiReady.calls.find(call => call[0] === 'run' && call.includes('--name') && call.includes(candidate));
+    assert.ok(apiStart);
+    const restoredDatabase = apiReady.calls.find(call => call[0] === 'run' && call[1] === '-d');
+    const apiDatabaseName = restoredDatabase[restoredDatabase.indexOf('--name') + 1];
+    assert.equal(apiStart[apiStart.indexOf('--network') + 1], `container:${apiDatabaseName}`);
+    assert.ok(apiStart.includes('--read-only') && apiStart.includes('--pull=never'));
+    assert.ok(apiStart.some(argument => argument.startsWith('--env-file')));
+    assert.ok(apiReady.calls.filter(call => call[0] === 'exec').length >= 2);
+    await writeFile(runtimeSettings, [
+      'CODEXIA_PUBLIC_ORIGIN=https://fixture.example.test',
+      'CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID=fixture-introspection',
+      'CODEXIA_OAUTH_OWNER_SUBJECT=fixture-owner',
+      'CODEXIA_OAUTH_OWNER_CLIENT_IDS=fixture-web,fixture-ios',
+      '',
+    ].join('\n'), { mode: 0o600 });
+    const passkeyOnly = await run(apiReadyArgs);
+    assert.equal(passkeyOnly.status, 0, passkeyOnly.stderr);
+    assert.ok(passkeyOnly.stdout.includes('Isolated candidate API readiness verified'));
+    await writeFile(runtimeSettings, [
+      'CODEXIA_PUBLIC_ORIGIN=https://fixture.example.test',
+      'CODEXIA_OIDC_ISSUER=https://identity.example.test',
+      'CODEXIA_OIDC_CLIENT_ID=fixture-web',
+      'CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID=fixture-introspection',
+      'CODEXIA_OAUTH_OWNER_SUBJECT=fixture-owner',
+      'CODEXIA_OAUTH_OWNER_CLIENT_IDS=fixture-web,fixture-ios',
+      '',
+    ].join('\n'), { mode: 0o600 });
+    const unhealthyApi = await run(apiReadyArgs, { failApiReadiness: true });
+    assert.equal(unhealthyApi.status, 1);
+    assert.match(unhealthyApi.stderr, /candidate API readiness/u);
+    assert.doesNotMatch(unhealthyApi.stdout, /Isolated candidate API readiness verified/u);
     const wrongLedger = await run(readOnlyArgs, { ledgerResult: 'sha256:' + 'c'.repeat(64) });
     assert.equal(wrongLedger.status, 1);
     assert.doesNotMatch(wrongLedger.stdout, /verified/u);

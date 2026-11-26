@@ -78,7 +78,7 @@ IDは重複させず、表示名や説明を変えるときも維持する。
 | API-PUBLIC-001 | GET /api/public/projects/:p/modules/:module/* | SHARE-READER | packages/api/src/server.ts、各公開module | INCOMPLETE |
 | API-BACKUP-CONSOLE-001 | GET /api/console/backups/status、GET /api/console/backups/config、PUT /api/console/backups/config/draft | OWNER-SESSION、If-Matchと書込時のfresh | [Backup console](BACKUP-CONSOLE-CONTRACT.md)・将来のFastify route | **BKC-001〜003。operatorによる有効化が必要** |
 | API-BACKUP-CONSOLE-002 | POST /api/console/backups/config/probes、GET .../config/probes/:id、POST .../config/{activate,disable} | OWNER-SESSION＋probe/revisionとfreshの適用 | [Backup console](BACKUP-CONSOLE-CONTRACT.md) | **BKC-004〜007。operatorによる有効化が必要** |
-| API-BACKUP-CONSOLE-003 | POST /api/console/backups/runs、GET /api/console/backups/runs、GET /api/console/backups/runs/:id、GET /api/console/backups/recovery | OWNER-SESSION。OPERATOR権限に昇格不可 | [Backup console](BACKUP-CONSOLE-CONTRACT.md) | **目標/未実装。BKC-008〜010** |
+| API-BACKUP-CONSOLE-003 | POST /api/console/backups/runs、GET /api/console/backups/runs、GET /api/console/backups/runs/:id、GET /api/console/backups/recovery | OWNER-SESSION。OPERATOR権限に昇格不可 | [Backup console](BACKUP-CONSOLE-CONTRACT.md) | **BKC-008〜010。operatorによる有効化が必要** |
 | API-SETUP-001 | /api/auth/codexia/setup/* | 可否の公開応答とSETUP transactionを分離 | [AuthN/AuthZ](API-AUTHN-AUTHZ.md)、`packages/api/src/owner-setup.ts` | setup専用routeを実装。保護された稼働環境での登録受入は別途確認 |
 
 この表の分類IDは設計上の参照に使用する。

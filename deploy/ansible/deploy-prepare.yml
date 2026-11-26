@@ -10,6 +10,15 @@
   register: codexia_deploy_recovery
   changed_when: "'RECOVERED_PREVIOUS_RELEASE' in codexia_deploy_recovery.stdout or 'CLEANED_COMMITTED_TRANSACTION' in codexia_deploy_recovery.stdout"
 
+- name: Resume an interrupted backup before observing the installed API
+  ansible.builtin.command:
+    argv: [bash, -s, --, recover]
+    stdin: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/backup/backup-runner.sh') }}"
+  environment:
+    HOME: "{{ home }}"
+  changed_when: false
+  no_log: true
+
 - name: Create push deployment state directories
   ansible.builtin.file:
     path: "{{ item.path }}"
@@ -21,13 +30,17 @@
     - {path: "{{ home }}/.local/state/codexia-deploy", mode: '0700'}
     - {path: "{{ home }}/.local/bin", mode: '0700'}
 
-- name: Install the encrypted backup helper for the rootless deployment identity
+- name: Install the backup helpers for the rootless deployment identity
   ansible.builtin.copy:
-    src: "{{ repo_root }}/deploy/backup/backup.sh"
-    dest: "{{ home }}/.local/bin/codexia-backup"
+    src: "{{ repo_root }}/deploy/backup/{{ item.src }}"
+    dest: "{{ home }}/.local/bin/{{ item.dest }}"
     owner: codexia
     group: "{{ codexia_service_group | default('codexia') }}"
     mode: '0700'
+  loop:
+    - {src: backup.sh, dest: codexia-backup}
+    - {src: backup-runner.sh, dest: codexia-backup-runner}
+    - {src: backup-control.sh, dest: codexia-backup-control}
 
 - name: Install the interrupted deployment recovery helper
   ansible.builtin.copy:

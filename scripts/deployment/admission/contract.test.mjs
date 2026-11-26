@@ -303,14 +303,19 @@ test('first activation checks the real transaction window after backup and readi
     'api_link_created=true; tunnel_link_created=true',
     'candidate_image=fixture-image; first_activation="{}"; approved_not_before=1000; approved_not_after=2000',
     'clock=1500; backup_program=backup_fixture; backup_destination="$FIXTURE"; backup_recipient=fixture; lock_file="$FIXTURE/lock"',
-    'date() { printf "%s\\n" "$clock"; }',
-    'backup_fixture() { echo backup >> "$trace"; if [[ "$SCENARIO" == backup ]]; then clock=2001; fi; }',
+    'backup_control=control_fixture; backup_runner=runner_fixture; backup_run_id=; backup_pending_id=',
+    'if [[ "$SCENARIO" == off-vm ]]; then backup_run_id=1485f702-eb68-4854-979d-fad9fd12d90d; fi',
+    'runner_fixture() { cat >/dev/null; printf "%s\\n" "$FIXTURE/archive" abc123; }',
+    'control_fixture() { printf "%s\\n" "$*" >> "$trace"; [[ "$1" != deploy-finish ]]; }',
+    'date() { if [[ -f "$FIXTURE/clock" ]]; then cat "$FIXTURE/clock"; else printf "%s\\n" "$clock"; fi; }',
+    'backup_fixture() { echo backup >> "$trace"; if [[ "$SCENARIO" == backup ]]; then echo 2001 > "$FIXTURE/clock"; fi; }',
     'run_auth_cli() { echo auth >> "$trace"; }',
+    'install_wants_links() { :; }',
     'podman() { case "$*" in *State.Health.Status*) echo healthy;; *ImageName*) echo "$candidate_image";; run*) echo ledger >> "$trace";; *) return 99;; esac; }',
     'systemctl() { printf "%s\\n" "$*" >> "$trace"; if [[ "$*" == "--user start codexia-api.service" && "$SCENARIO" == startup ]]; then clock=2001; fi; if [[ "$*" == "--user start codexia-api.service" && "$SCENARIO" == stop-failure ]]; then clock=2001; fi; if [[ "$*" == "--user stop codexia-api.service" && "$SCENARIO" == stop-failure ]]; then return 1; fi; }',
     'test -f "$candidate_unit"',
   ].join('\n') + '\n';
-  for (const scenario of ['backup', 'startup', 'stop-failure', 'within-window']) {
+  for (const scenario of ['backup', 'startup', 'stop-failure', 'within-window', 'off-vm']) {
     const fixture = path.join(directory, scenario);
     mkdirSync(fixture);
     for (const name of ['candidate.container', 'api.service', 'tunnel.service', 'deploy-transaction.json',
@@ -324,10 +329,16 @@ test('first activation checks the real transaction window after backup and readi
     assert.equal(result.status, scenario === 'within-window' ? 0 : 1, scenario + ': ' + result.stderr);
     const calls = readFileSync(path.join(fixture, 'trace'), 'utf8');
     assert.match(calls, /^backup$/mu);
-    assert.match(calls, /^ledger$/mu);
-    assert.equal(calls.includes('--user start codexia-api.service'), scenario !== 'backup');
+    if (scenario === 'off-vm') {
+      assert.match(calls, /^deploy-finish 1485f702-eb68-4854-979d-fad9fd12d90d .+\/archive abc123$/mu);
+      assert.doesNotMatch(calls, /^ledger$/mu);
+      assert.match(result.stderr, /Off-VM backup admission failed; candidate was not applied/u);
+    } else {
+      assert.match(calls, /^ledger$/mu);
+    }
+    assert.equal(calls.includes('--user start codexia-api.service'), !['backup', 'off-vm'].includes(scenario));
     assert.equal(calls.includes('--user start codexia-tunnel.service'), scenario === 'within-window');
-    if (scenario !== 'within-window') assert.match(result.stderr, /First activation approval window expired before publication/u);
+    if (!['within-window', 'off-vm'].includes(scenario)) assert.match(result.stderr, /First activation approval window expired before publication/u);
     const retained = scenario === 'within-window' || scenario === 'stop-failure';
     assert.equal(existsSync(path.join(fixture, 'active.container')), retained);
     for (const name of ['deploy-transaction.json', 'api.service', 'tunnel.service']) {

@@ -39,7 +39,7 @@ S3互換endpointへのprobeと転送は固定のegress policyを持つserver-sid
 
 ## Web APIの目標契約
 
-**BKC-001〜007はoperatorによる明示的な有効化が必要。BKC-008〜010は実装対象外。** `/api/console/backups/*` はCloudflare Tunnelを経由するFastify上の**OWNER-SESSION専用のcookie/CSRF保護経路**。OWNER-API bearer、MCP bearer、SETUP、ANON、SHARE-READER、EDGE-CIには権限を与えない。fresh reauthenticationはcredentialの登録/再設定、activate、disable、手動バックアップ要求時に**API側で**検査する。新しい外部管理APIやshell実行RPCは作らない。
+**BKC-001〜010はoperatorによる明示的な有効化が必要。** `/api/console/backups/*` はCloudflare Tunnelを経由するFastify上の**OWNER-SESSION専用のcookie/CSRF保護経路**。OWNER-API bearer、MCP bearer、SETUP、ANON、SHARE-READER、EDGE-CIには権限を与えない。fresh reauthenticationはcredentialの登録/再設定、activate、disable、手動バックアップ要求時に**API側で**検査する。新しい外部管理APIやshell実行RPCは作らない。
 
 | Operation ID | Method / path | 行為・成功応答 | 必須の拒否条件 |
 | --- | --- | --- | --- |

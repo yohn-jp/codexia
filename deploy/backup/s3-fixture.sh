@@ -11,6 +11,28 @@ mc_sha256='01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891'
 mc_url="https://github.com/minio/mc/releases/download/$mc_version/mc.linux-amd64.$mc_version"
 
 die(){ printf '%s\n' "$*" >&2; exit 1; }
+transfer_only=false
+transfer_artifact=''
+transfer_source_identity=''
+transfer_output=''
+if [[ "${1:-}" == --transfer-only ]]; then
+  [[ $# == 4 ]] || die 'Usage: s3-fixture.sh --transfer-only /absolute/codexia-backup-artifact <source-sha> /absolute/private-output-dir'
+  transfer_only=true
+  transfer_artifact="$2"
+  transfer_source_identity="$3"
+  transfer_output="$4"
+  [[ "$transfer_artifact" == /* && -d "$transfer_artifact" && ! -L "$transfer_artifact" ]] || die 'Transfer-only mode requires an absolute ciphertext artifact directory'
+  [[ "$transfer_source_identity" =~ ^[a-f0-9]{40}$ ]] || die 'Transfer-only mode requires a source SHA identity'
+  [[ "$transfer_output" == /* && -d "$transfer_output" && ! -L "$transfer_output" ]] || die 'Transfer-only mode requires an existing private output directory'
+  [[ "$(stat -Lc '%a' -- "$transfer_output")" == 700 && "$(stat -Lc '%u' -- "$transfer_output")" == "$(id -u)" ]] || die 'Transfer-only output directory must be owned by this user with mode 0700'
+  [[ -z "$(find "$transfer_output" -mindepth 1 -maxdepth 1 -print -quit)" ]] || die 'Transfer-only output directory must be empty'
+  transfer_backup_name="$(basename -- "$transfer_artifact")"
+  [[ "$transfer_backup_name" == codexia-* ]] || die 'Transfer-only artifact directory must use its canonical codexia backup ID'
+  transfer_backup_id="${transfer_backup_name#codexia-}"
+  [[ "$transfer_backup_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ && "$transfer_backup_id" != *..* ]] || die 'Transfer-only backup ID is invalid'
+elif [[ $# != 0 ]]; then
+  die 'Usage: s3-fixture.sh [--transfer-only /absolute/codexia-backup-artifact <source-sha> /absolute/private-output-dir]'
+fi
 for command in docker openssl curl sha256sum python3 tar git flock find grep sed cut basename cmp; do
   command -v "$command" >/dev/null || die "Missing fixture dependency: $command"
 done
@@ -168,6 +190,7 @@ cat > "$profile_path" <<EOF
 EOF
 chmod 0600 "$profile_path"
 
+if [[ "$transfer_only" != true ]]; then
 docker run --pull=missing -d --name "$source_db" --network none \
   -e POSTGRES_DB=codexia -e POSTGRES_HOST_AUTH_METHOD=trust \
   -v "$database_volume:/var/lib/postgresql/data" "$pg_image" >/dev/null
@@ -197,6 +220,7 @@ SQL
 docker run --rm --pull=never --network none --user 0:0 \
   -v "$history_volume:/history" --entrypoint /bin/bash "$pg_image" \
   -euo pipefail -c 'mkdir -m 0700 -p /history/jobs; printf "%s\n" "synthetic restore fixture" > /history/jobs/fixture.json; chown -R 1000:1000 /history; chmod 0700 /history /history/jobs; chmod 0600 /history/jobs/fixture.json' >/dev/null
+fi
 
 "$script_dir/install-s3-runtime.sh" "$work/tools/python-env" >/dev/null
 python_bin="$work/tools/python-env/bin/python"
@@ -205,6 +229,13 @@ python_bin="$work/tools/python-env/bin/python"
   "$python_bin" -B -m unittest -v \
     deploy.backup.test_s3_admission.ProxyAdmissionTests.test_pinned_sdk_uses_direct_tls_with_ambient_proxies_set
 )
+if [[ "$transfer_only" == true ]]; then
+  artifact="$transfer_artifact"
+  backup_id="$transfer_backup_id"
+  source_identity="$transfer_source_identity"
+  receipt_path="$transfer_output/receipt-$backup_id.json"
+  download_dir="$transfer_output"
+else
 age_dir="$work/tools/age"
 mkdir -m 0700 "$age_dir"
 curl --fail --silent --show-error --location --retry 3 --connect-timeout 10 --max-time 120 \
@@ -366,14 +397,17 @@ artifact="$(find "$work/artifacts" -mindepth 1 -maxdepth 1 -type d -name 'codexi
 backup_id="$(basename -- "$artifact" | sed 's/^codexia-//')"
 source_identity="$(git -C "$repo_root" rev-parse HEAD)"
 [[ "$source_identity" =~ ^[a-f0-9]{40}$ ]] || die 'Could not determine the fixture source identity'
-artifact_hash="$(sha256sum "$artifact/SHA256SUMS" | cut -d' ' -f1)"
 receipt_path="$work/receipts/$backup_id.json"
+download_dir="$work/downloads"
+fi
+artifact_hash="$(sha256sum "$artifact/SHA256SUMS" | cut -d' ' -f1)"
 
 AWS_ACCESS_KEY_ID="$writer_user" AWS_SECRET_ACCESS_KEY="$writer_secret" \
 "$python_bin" - "$script_dir" "$profile_path" "$artifact" "$backup_id" \
-  "$source_identity" "$receipt_path" "$certs/untrusted-ca.crt" <<'PY'
+  "$source_identity" "$receipt_path" "$certs/untrusted-ca.crt" "$download_dir" "$transfer_only" <<'PY'
 import json, pathlib, sys
-script_dir, profile_path, artifact, backup_id, source_identity, receipt_path, untrusted_ca = sys.argv[1:]
+script_dir, profile_path, artifact, backup_id, source_identity, receipt_path, untrusted_ca, download_dir, mode = sys.argv[1:]
+full_lane = mode != 'true'
 sys.path.insert(0, script_dir)
 import s3_transfer
 from botocore.exceptions import SSLError
@@ -381,6 +415,24 @@ from botocore.exceptions import SSLError
 try:
     profile = s3_transfer.load_profile(pathlib.Path(profile_path))
     transfer = s3_transfer.S3BackupTransfer(profile, _allow_private_test_addresses=True)
+    rejected_profiles = {
+        'bucket': {**profile, 'bucket': profile['bucket'] + '-wrong'},
+        'prefix': {**profile, 'prefix': 'codexia/not-authorized'},
+    }
+    for label, rejected_profile in rejected_profiles.items():
+        rejected_receipt = pathlib.Path(receipt_path).with_name(f'{backup_id}-{label}-rejected.json')
+        try:
+            s3_transfer.S3BackupTransfer(
+                rejected_profile, _allow_private_test_addresses=True,
+            ).upload_artifact(
+                pathlib.Path(artifact), backup_id=backup_id,
+                source_identity=source_identity, receipt_path=rejected_receipt,
+            )
+        except s3_transfer.TransferError:
+            if rejected_receipt.exists():
+                raise s3_transfer.TransferError(f'Wrong S3 {label} unexpectedly wrote an external receipt')
+        else:
+            raise s3_transfer.TransferError(f'Fixture S3 accepted a wrong {label}')
     untrusted_profile = {**profile, 'caBundle': untrusted_ca}
     untrusted_client = s3_transfer.S3BackupTransfer(
         untrusted_profile, _allow_private_test_addresses=True,
@@ -398,73 +450,85 @@ try:
     )
     restored = transfer.download_artifact(
         backup_id=backup_id, receipt_path=pathlib.Path(receipt_path),
-        output_dir=pathlib.Path(receipt_path).parent.parent / 'downloads',
+        output_dir=pathlib.Path(download_dir),
     )
     if s3_transfer.validate_artifact(restored)['sha256sumsSha256'] != receipt['sha256sumsSha256']:
         raise s3_transfer.TransferError('Downloaded artifact does not match the external receipt')
     client = transfer.client
     object_record = receipt['objects']['database.dump.age']
-    if object_record['size'] <= profile['multipartThresholdBytes']:
-        raise s3_transfer.TransferError('Fixture database dump did not exercise multipart upload')
-    head = client.head_object(Bucket=profile['bucket'], Key=object_record['key'])
-    if '-' not in str(head.get('ETag', '')).strip('"'):
-        raise s3_transfer.TransferError('Silo did not report a multipart ETag for the database artifact')
-    try:
-        client.list_multipart_uploads(Bucket=profile['bucket'], Prefix=profile['prefix'] + '/')
-    except Exception as error:
-        if s3_transfer._error_code(error) not in ('AccessDenied', '403'):
-            raise s3_transfer.TransferError('Multipart listing denial probe returned an unexpected result') from error
-    else:
-        raise s3_transfer.TransferError('Fixture writer unexpectedly has multipart listing permission')
-    interrupted_key = f"{profile['prefix']}/{source_identity}/{backup_id}/INTERRUPTED-MULTIPART-PROBE"
-    interrupted = client.create_multipart_upload(Bucket=profile['bucket'], Key=interrupted_key)
-    client.upload_part(
-        Bucket=profile['bucket'], Key=interrupted_key, UploadId=interrupted['UploadId'],
-        PartNumber=1, Body=b'x' * (5 * 1024 * 1024),
-    )
-    client.abort_multipart_upload(
-        Bucket=profile['bucket'], Key=interrupted_key, UploadId=interrupted['UploadId'],
-    )
-    try:
-        client.head_object(Bucket=profile['bucket'], Key=interrupted_key)
-    except Exception as error:
-        if s3_transfer._error_code(error) not in ('404', 'NoSuchKey', 'NotFound'):
-            raise s3_transfer.TransferError('Multipart abort left an unexpected provider error') from error
-    else:
-        raise s3_transfer.TransferError('Aborted multipart upload became a visible object')
-    probe_key = f"{profile['prefix']}/{source_identity}/{backup_id}/DELETE-DENY-PROBE"
-    client.put_object(Bucket=profile['bucket'], Key=probe_key, Body=b'fixture probe', IfNoneMatch='*')
-    try:
-        client.delete_object(Bucket=profile['bucket'], Key=probe_key)
-    except Exception as error:
-        if s3_transfer._error_code(error) not in ('AccessDenied', '403'):
-            raise s3_transfer.TransferError('Delete denial probe returned an unexpected result') from error
-    else:
-        raise s3_transfer.TransferError('Fixture writer unexpectedly has object delete permission')
-    transfer.upload_artifact(
-        pathlib.Path(artifact), backup_id=backup_id,
-        source_identity=source_identity, receipt_path=pathlib.Path(receipt_path),
-    )
-    if pathlib.Path(receipt_path).stat().st_mode & 0o777 != 0o600:
-        raise s3_transfer.TransferError('External receipt file is not mode 0600')
-    print(json.dumps({
+    evidence = {
         'status': 'VERIFIED', 'provider': 'Silo', 'backupId': backup_id,
         'manifestSha256': receipt['sha256sumsSha256'],
         'databaseCiphertextBytes': object_record['size'],
-        'multipartEtagObserved': head['ETag'],
-        'receiptMode': '0600', 'writerDeletePermission': 'denied',
-        'writerMultipartListingPermission': 'denied', 'multipartAbort': 'verified',
-    }, sort_keys=True))
+        'receiptMode': '0600', 'wrongBucketRejected': True, 'wrongPrefixRejected': True,
+    }
+    if full_lane:
+        if object_record['size'] <= profile['multipartThresholdBytes']:
+            raise s3_transfer.TransferError('Fixture database dump did not exercise multipart upload')
+        head = client.head_object(Bucket=profile['bucket'], Key=object_record['key'])
+        if '-' not in str(head.get('ETag', '')).strip('"'):
+            raise s3_transfer.TransferError('Silo did not report a multipart ETag for the database artifact')
+        try:
+            client.list_multipart_uploads(Bucket=profile['bucket'], Prefix=profile['prefix'] + '/')
+        except Exception as error:
+            if s3_transfer._error_code(error) not in ('AccessDenied', '403'):
+                raise s3_transfer.TransferError('Multipart listing denial probe returned an unexpected result') from error
+        else:
+            raise s3_transfer.TransferError('Fixture writer unexpectedly has multipart listing permission')
+        interrupted_key = f"{profile['prefix']}/{source_identity}/{backup_id}/INTERRUPTED-MULTIPART-PROBE"
+        interrupted = client.create_multipart_upload(Bucket=profile['bucket'], Key=interrupted_key)
+        client.upload_part(
+            Bucket=profile['bucket'], Key=interrupted_key, UploadId=interrupted['UploadId'],
+            PartNumber=1, Body=b'x' * (5 * 1024 * 1024),
+        )
+        client.abort_multipart_upload(
+            Bucket=profile['bucket'], Key=interrupted_key, UploadId=interrupted['UploadId'],
+        )
+        try:
+            client.head_object(Bucket=profile['bucket'], Key=interrupted_key)
+        except Exception as error:
+            if s3_transfer._error_code(error) not in ('404', 'NoSuchKey', 'NotFound'):
+                raise s3_transfer.TransferError('Multipart abort left an unexpected provider error') from error
+        else:
+            raise s3_transfer.TransferError('Aborted multipart upload became a visible object')
+        probe_key = f"{profile['prefix']}/{source_identity}/{backup_id}/DELETE-DENY-PROBE"
+        client.put_object(Bucket=profile['bucket'], Key=probe_key, Body=b'fixture probe', IfNoneMatch='*')
+        try:
+            client.delete_object(Bucket=profile['bucket'], Key=probe_key)
+        except Exception as error:
+            if s3_transfer._error_code(error) not in ('AccessDenied', '403'):
+                raise s3_transfer.TransferError('Delete denial probe returned an unexpected result') from error
+        else:
+            raise s3_transfer.TransferError('Fixture writer unexpectedly has object delete permission')
+        transfer.upload_artifact(
+            pathlib.Path(artifact), backup_id=backup_id,
+            source_identity=source_identity, receipt_path=pathlib.Path(receipt_path),
+        )
+        evidence.update({
+            'multipartEtagObserved': head['ETag'], 'writerDeletePermission': 'denied',
+            'writerMultipartListingPermission': 'denied', 'multipartAbort': 'verified',
+        })
+    if pathlib.Path(receipt_path).stat().st_mode & 0o777 != 0o600:
+        raise s3_transfer.TransferError('External receipt file is not mode 0600')
+    print(json.dumps(evidence, sort_keys=True))
 except s3_transfer.TransferError as error:
     print(str(error), file=sys.stderr)
     raise SystemExit(1)
 PY
 
-restored_artifact="$work/downloads/codexia-$backup_id"
+restored_artifact="$download_dir/codexia-$backup_id"
 [[ -d "$restored_artifact" && ! -L "$restored_artifact" ]] || die 'S3 transfer did not publish the restored ciphertext directory'
 cmp -- "$artifact/SHA256SUMS" "$restored_artifact/SHA256SUMS" || die 'S3 download changed the checksum manifest'
 downloaded_hash="$(sha256sum "$restored_artifact/SHA256SUMS" | cut -d' ' -f1)"
 [[ "$downloaded_hash" == "$artifact_hash" ]] || die 'S3 download manifest digest differs from the source artifact'
+if [[ "$transfer_only" == true ]]; then
+  [[ -f "$receipt_path" && ! -L "$receipt_path" && "$(stat -Lc '%a' -- "$receipt_path")" == 600 ]] || die 'Transfer-only mode did not preserve its protected external receipt'
+  printf 'S3 transfer-only verified: Silo upload, readback, protected receipt, and exact ciphertext download.\n'
+  printf 'Downloaded artifact: %s\nExternal receipt: %s\nSHA256SUMS: %s\n' \
+    "$restored_artifact" "$receipt_path" "$downloaded_hash"
+  printf '%s\n' 'AWS S3: NOT_RUN (no AWS sandbox or credentials were provisioned).'
+  exit 0
+fi
 if ! PATH="$work/shims:$age_dir:$PATH" bash "$backup_script" drill \
   "$restored_artifact" "$identity" --approved >"$work/restore.log" 2>&1; then
   cat "$work/restore.log" >&2

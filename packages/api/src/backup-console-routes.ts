@@ -78,8 +78,73 @@ const allowedDestination = z.strictObject({
   prefix,
   credentialModes: z.array(credentialMode).min(1),
 });
-export const backupPolicySchema = z.object({ destinations: z.array(allowedDestination).min(1) });
+const maintenanceWindow = z
+  .strictObject({
+    id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
+    timeZone: z.string().min(1).max(128),
+    daysOfWeek: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+    start: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),
+    durationMinutes: z.number().int().min(1).max(360),
+  })
+  .superRefine((window, context) => {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone: window.timeZone }).format(0);
+    } catch {
+      context.addIssue({ code: 'custom', message: 'Invalid maintenance window timezone' });
+    }
+  });
+export const backupPolicySchema = z
+  .strictObject({
+    destinations: z.array(allowedDestination).min(1),
+    maintenanceWindows: z.array(maintenanceWindow).max(16).default([]),
+    scheduleWindowId: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,64}$/u)
+      .optional(),
+  })
+  .superRefine((policy, context) => {
+    const ids = policy.maintenanceWindows.map(window => window.id);
+    if (new Set(ids).size !== ids.length) context.addIssue({ code: 'custom', message: 'Maintenance window IDs must be unique' });
+    if (policy.scheduleWindowId && !ids.includes(policy.scheduleWindowId))
+      context.addIssue({ code: 'custom', message: 'Scheduled backup window must be approved' });
+  });
 export type BackupPolicy = z.infer<typeof backupPolicySchema>;
+
+export function allowedBackupMaintenanceWindow(policy: BackupPolicy, id: string, at = new Date()) {
+  return backupMaintenanceWindowSlot(policy, id, at)?.open ?? false;
+}
+
+export function backupMaintenanceWindowSlot(policy: BackupPolicy, id: string, at = new Date()) {
+  const window = policy.maintenanceWindows.find(candidate => candidate.id === id);
+  if (!window) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: window.timeZone,
+    weekday: 'short',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(at);
+  const value = (type: string) => parts.find(part => part.type === type)?.value;
+  const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(value('weekday') ?? '');
+  const hour = Number(value('hour'));
+  const minute = Number(value('minute'));
+  const date = `${value('year')}-${value('month')}-${value('day')}`;
+  const start = Number(window.start.slice(0, 2)) * 60 + Number(window.start.slice(3, 5));
+  const current = hour * 60 + minute;
+  const startDay = window.daysOfWeek.find(startDay => {
+    const offset = (weekday - startDay + 7) % 7;
+    return offset * 1440 + current - start >= 0 && offset * 1440 + current - start < window.durationMinutes;
+  });
+  let slotDate = date;
+  if (startDay !== undefined && weekday !== startDay) {
+    const [year, month, day] = date.split('-').map(Number);
+    slotDate = new Date(Date.UTC(year!, month! - 1, day!) - 86_400_000).toISOString().slice(0, 10);
+  }
+  return { slotKey: `${id}:${slotDate}`, localDate: slotDate, open: startDay !== undefined };
+}
 
 export function allowedBackupDestination(destination: BackupDestination, policy: BackupPolicy) {
   return policy.destinations.some(
@@ -255,5 +320,31 @@ export function registerBackupConsole(
         });
       });
     }
+    app.post(path + '/runs', { ...wire('runs_post'), bodyLimit: 4096 }, async (request, reply) => {
+      if (request.validationError) return invalid();
+      const requestId = request.headers['idempotency-key'];
+      const input = z
+        .strictObject({ maintenanceWindowId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u), confirmed: z.literal(true) })
+        .safeParse(request.body);
+      if (typeof requestId !== 'string' || !requestIdPattern.test(requestId) || !input.success) return invalid();
+      const previous = await store().existingRun(requestId, input.data.maintenanceWindowId);
+      if (!previous && !allowedBackupMaintenanceWindow(configuration().policy, input.data.maintenanceWindowId))
+        return reject(409, 'BACKUP_MAINTENANCE_WINDOW_CLOSED');
+      const run = await store().enqueueRun(requestId, input.data.maintenanceWindowId);
+      return reply.code(202).send({ runId: run.id, state: 'queued', createdAt: run.created_at.toISOString() });
+    });
+    app.get(path + '/runs', wire('runs_get'), async request => {
+      const query = z
+        .strictObject({ cursor: uuid.optional(), limit: z.coerce.number().int().min(1).max(100).default(50) })
+        .safeParse(request.query);
+      if (!query.success) return invalid();
+      return store().listRuns(query.data.cursor, query.data.limit);
+    });
+    app.get(path + '/runs/:runId', wire('run_get'), async request => {
+      const params = z.object({ runId: uuid }).safeParse(request.params);
+      if (!params.success) return reject(404, 'BACKUP_RUN_NOT_FOUND');
+      return store().run(params.data.runId);
+    });
+    app.get(path + '/recovery', wire('recovery_get'), async () => store().recovery());
   });
 }

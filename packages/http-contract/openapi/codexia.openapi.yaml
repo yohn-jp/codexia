@@ -5086,6 +5086,26 @@ components:
         createdAt:
           type: string
           format: date-time
+        requestId:
+          type: string
+        status:
+          type: string
+          enum:
+            - QUEUED
+            - RUNNING
+            - UNKNOWN
+            - FAILED
+            - BLOCKED
+            - REMOTE_VERIFIED
+        phase:
+          type: string
+        reasonCode:
+          anyOf:
+            - type: string
+            - type: 'null'
+        observedAt:
+          type: string
+          format: date-time
       unevaluatedProperties:
         not: {}
     ChangeSetActionRequest:

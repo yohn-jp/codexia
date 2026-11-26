@@ -377,6 +377,7 @@
     cmd: |
       set -Eeuo pipefail
       state_dir={{ (home + '/.local/state/codexia-deploy') | quote }}
+      export CODEXIA_PUSH_STATE_DIR="$state_dir"
       unit_dir={{ quadlet_dir | quote }}
       active_unit="$unit_dir/codexia-api.container"
       wants_dir="$unit_dir/default.target.wants"
@@ -384,10 +385,15 @@
       tunnel_wants_link="$wants_dir/codexia-tunnel.service"
       candidate_unit={{ (home + '/.local/state/codexia-deploy/' + codexia_candidate_unit_filename) | quote }}
       backup_program={{ (home + '/.local/bin/codexia-backup') | quote }}
+      backup_runner={{ (home + '/.local/bin/codexia-backup-runner') | quote }}
+      backup_control={{ (home + '/.local/bin/codexia-backup-control') | quote }}
+      backup_settings={{ (home + '/.config/codexia-backup/executor.env') | quote }}
       backup_destination={{ codexia_backup_destination | quote }}
       backup_recipient={{ codexia_backup_recipient | quote }}
       candidate_image={{ codexia_image | quote }}
       candidate_identity={{ (codexia_candidate_identity_file.content | b64decode | from_json) | to_json | quote }}
+      candidate_source_sha={{ codexia_source_sha | quote }}
+      prior_source_sha={{ ((codexia_current_identity_result.stdout | from_json).sourceSha if codexia_current_container_exists.rc == 0 else codexia_source_sha) | quote }}
       require_tunnel={{ 'false' if (codexia_lifecycle_fixture | default(false) | bool) else 'true' }}
       auth_settings_file={{ (home + '/.config/codexia-auth/runtime-' + codexia_auth_settings_sha256 + '.env') | quote }}
       auth_settings_digest={{ codexia_auth_settings_sha256 | quote }}
@@ -408,6 +414,24 @@
       [[ ! -e "$state_dir/cutover-transaction.json" && ! -L "$state_dir/cutover-transaction.json" ]] ||
         stale_admission 'coordinated API epoch maintenance is pending'
       [[ ! -e "$transaction_intent" && ! -L "$transaction_intent" ]] || stale_admission 'a deployment transaction needs recovery'
+      [[ ! -e "$state_dir/backup-transaction" && ! -L "$state_dir/backup-transaction" ]] ||
+        stale_admission 'a backup transaction needs recovery'
+      backup_admission_marker="$state_dir/backup-admission-enabled"
+      if [[ -e "$backup_settings" || -L "$backup_settings" ]]; then
+        if [[ ! -e "$backup_admission_marker" && ! -L "$backup_admission_marker" ]]; then
+          (umask 077; set -o noclobber; : > "$backup_admission_marker")
+          sync -f "$state_dir"
+        fi
+      fi
+      backup_admission_enabled=false
+      if [[ -e "$backup_admission_marker" || -L "$backup_admission_marker" ]]; then
+        [[ -f "$backup_admission_marker" && ! -L "$backup_admission_marker" && -O "$backup_admission_marker" &&
+           -f "$backup_settings" && ! -L "$backup_settings" ]] || {
+          echo 'Off-VM backup admission failed; candidate was not applied' >&2
+          exit 1
+        }
+        backup_admission_enabled=true
+      fi
       if ! podman volume exists codexia-history; then
         echo 'Deployment base runtime requires the rootless history volume' >&2
         exit 1
@@ -624,9 +648,14 @@
       if [[ "$release_present" == true ]]; then
         cp --preserve=mode,ownership "$release_state" "$state_dir/rollback-release.json"
       fi
-      if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" <<'NODE'
+      backup_pending_id=''
+      backup_run_id=''
+      if [[ "$backup_admission_enabled" == true ]]; then
+        backup_pending_id="$(cat /proc/sys/kernel/random/uuid)"
+      fi
+      if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" "$backup_pending_id" <<'NODE'
       const fs = require('node:fs');
-      const [target, hadUnit, tunnelWasActive, apiLinkCreated, tunnelLinkCreated, releasePresent] = process.argv.slice(2);
+      const [target, hadUnit, tunnelWasActive, apiLinkCreated, tunnelLinkCreated, releasePresent, backupRunId] = process.argv.slice(2);
       const asBoolean = value => {
         if (value === 'true') return true;
         if (value === 'false') return false;
@@ -635,14 +664,14 @@
       fs.writeFileSync(target, JSON.stringify({format: 'codexia-deploy-transaction/v1', phase: 'pending',
         hadUnit: asBoolean(hadUnit), tunnelWasActive: asBoolean(tunnelWasActive),
         apiLinkCreated: asBoolean(apiLinkCreated), tunnelLinkCreated: asBoolean(tunnelLinkCreated),
-        releasePresent: asBoolean(releasePresent)}) + '\n', {mode: 0o600, flag: 'wx'});
+        releasePresent: asBoolean(releasePresent), ...(backupRunId && {backupRunId})}) + '\n',
+        {mode: 0o600, flag: 'wx', flush: true});
       NODE
       then
         echo 'Could not record the deployment transaction intent' >&2
         exit 1
       fi
-      # Record which links recovery owns before creating either one.
-      install_wants_links
+      sync -f "$state_dir"
       restore_previous(){
         local restore_status=0
         if [[ "$tunnel_present" == true ]]; then systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || restore_status=1; fi
@@ -682,6 +711,11 @@
           fi
         fi
         if [[ "$restore_status" == 0 ]]; then
+          if [[ -n "$backup_pending_id" ]]; then
+            "$backup_control" deploy-interrupted "$backup_pending_id" || restore_status=1
+          fi
+        fi
+        if [[ "$restore_status" == 0 ]]; then
           rm -f -- "$transaction_intent" "$transaction_intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json" || restore_status=1
         fi
         return "$restore_status"
@@ -692,16 +726,49 @@
         echo 'First activation approval window expired before publication; deployment stopped' >&2
         exit 1
       }
+      if [[ -n "$backup_pending_id" ]]; then
+        prior_digest=-
+        if [[ "$had_unit" == true ]]; then prior_digest="${current_image##*@}"; fi
+        if ! backup_run_id="$("$backup_control" deploy-start "$backup_pending_id" "$prior_source_sha" \
+          "$prior_digest" "$candidate_source_sha" "${candidate_image##*@}")" ||
+          [[ "$backup_run_id" != "$backup_pending_id" && "$backup_run_id" != NONE ]]; then
+          # The existing writer and activation links have not changed. Clear
+          # the intent only after the protected store has reconciled the run.
+          if "$backup_control" deploy-interrupted "$backup_pending_id"; then
+            rm -f -- "$transaction_intent" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json"
+          fi
+          echo 'Off-VM backup admission failed; candidate was not applied' >&2
+          exit 1
+        fi
+        if [[ "$backup_run_id" == NONE ]]; then backup_run_id=''; fi
+      fi
+      # Record which links recovery owns before creating either one.
+      install_wants_links
       if { [[ "$tunnel_present" == true ]] && ! systemctl --user stop codexia-tunnel.service >/dev/null 2>&1; } ||
          { [[ "$had_unit" == true ]] && ! systemctl --user stop codexia-api.service >/dev/null 2>&1; }; then
         echo 'Could not stop the active API and Tunnel; deployment transaction remains pending for recovery' >&2
         exit 1
       fi
-      if ! "$backup_program" backup-locked "$backup_destination" "$backup_recipient" \
-        --approved --lock-file "$lock_file" --lock-fd 9; then
+      if ! backup_output="$("$backup_program" backup-locked "$backup_destination" "$backup_recipient" \
+        --approved --lock-file "$lock_file" --lock-fd 9)"; then
+        if [[ -n "$backup_run_id" ]]; then "$backup_control" deploy-fail "$backup_run_id" backup_failed || :; fi
         restore_previous || echo 'Previous API recovery failed after backup failure' >&2
         echo 'Encrypted backup failed; candidate was not applied' >&2
         exit 1
+      fi
+      if [[ -n "$backup_run_id" ]]; then
+        if ! artifact="$("$backup_runner" artifact "$backup_destination" <<< "$backup_output")"; then
+          "$backup_control" deploy-fail "$backup_run_id" backup_failed || :
+          restore_previous || echo 'Previous API recovery failed after backup failure' >&2
+          echo 'Encrypted backup failed; candidate was not applied' >&2
+          exit 1
+        fi
+        mapfile -t artifact_fields <<< "$artifact"
+        if ! "$backup_control" deploy-finish "$backup_run_id" "${artifact_fields[0]}" "${artifact_fields[1]}"; then
+          restore_previous || echo 'Previous API recovery failed after off-VM backup verification' >&2
+          echo 'Off-VM backup admission failed; candidate was not applied' >&2
+          exit 1
+        fi
       fi
       if ! run_auth_cli /app/node_modules/@codexia/api/dist/verify-auth-clients.js; then
         restore_previous || echo 'Previous API recovery failed after Better Auth registration verification failure' >&2
@@ -755,11 +822,12 @@
           exit 1
         fi
       fi
-      if ! node - "$candidate_image" "$current_image" "$candidate_identity" "$auth_settings_digest" > "$release_state.tmp" <<'NODE'
-      const [image, previousImage, identity, authSettingsSha256] = process.argv.slice(2);
+      if ! node - "$candidate_image" "$current_image" "$candidate_identity" "$auth_settings_digest" "$backup_run_id" > "$release_state.tmp" <<'NODE'
+      const [image, previousImage, identity, authSettingsSha256, backupRunId] = process.argv.slice(2);
       if (!/^[a-f0-9]{64}$/.test(authSettingsSha256)) process.exit(2);
       process.stdout.write(JSON.stringify({format: 'codexia-push-deployment/v1', image, previousImage,
-        identity: JSON.parse(identity), authMode: "better-auth", authSettingsSha256}) + '\n');
+        identity: JSON.parse(identity), authMode: "better-auth", authSettingsSha256,
+        ...(backupRunId && {backupRunId})}) + '\n');
       NODE
       then
         restore_previous || echo 'Previous API recovery failed after release record failure' >&2
@@ -809,6 +877,7 @@
          'base runtime admission (PostgreSQL)' if 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet' in (codexia_deploy_transaction.stderr | default('')) else
          'base runtime admission (Tunnel)' if 'Deployment base runtime requires the rootless Tunnel Quadlet' in (codexia_deploy_transaction.stderr | default('')) else
          'base runtime admission (generated units)' if 'Deployment base runtime requires canonical generated PostgreSQL and Tunnel units' in (codexia_deploy_transaction.stderr | default('')) else
+         'off-VM backup admission' if 'Off-VM backup admission failed; candidate was not applied' in (codexia_deploy_transaction.stderr | default('')) else
          'encrypted backup' if 'Encrypted backup failed; candidate was not applied' in (codexia_deploy_transaction.stderr | default('')) else
          'fresh database schema initialization' if 'Fresh database initialization failed' in (codexia_deploy_transaction.stderr | default('')) else
          'candidate API startup' if 'Candidate API failed to start' in (codexia_deploy_transaction.stderr | default('')) else

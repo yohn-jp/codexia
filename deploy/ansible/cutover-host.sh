@@ -1025,6 +1025,7 @@ def main():
     require(QUADLETS.is_absolute() and QUADLETS.is_dir() and not QUADLETS.is_symlink() and
             SYSTEMD.is_absolute(), "Cutover requires canonical absolute Quadlet and systemd paths")
     require(not present(STATE / "deploy-transaction.json"), "An ordinary deployment transaction is still pending")
+    require(not present(STATE / "backup-transaction"), "A backup transaction is still pending")
     require(len(sys.argv) in (2, 3), "Usage: cutover-host.sh ACTION [INPUT.json]")
     require(output((*PODMAN, "info", "--format", "{{.Host.Security.Rootless}}"),
                    "Could not determine Podman runtime identity") == "true", "Cutover requires the rootless Podman runtime")

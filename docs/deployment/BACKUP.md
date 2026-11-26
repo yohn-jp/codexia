@@ -2,11 +2,13 @@
 
 The [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) owns when backup, independent recovery evidence and restore are required for route admission and coordinated activation. Backup is a prerequisite in the [compatible update state machine](UPDATE-FLOW.md), and recovery acceptance is required by the [initial deployment state machine](INITIAL-DEPLOYMENT-FLOW.md). A verified ciphertext file alone is not proof of independent-host recoverability.
 
-The only backup executable is [`deploy/backup/backup.sh`](../../deploy/backup/backup.sh). It belongs to the GitHub Actions → Tailscale → SSH → Ansible → rootless Podman Quadlet push deployment. No pull updater, timer, signed-channel controller, compatibility handler or legacy proxy controls this backup.
+[`deploy/backup/backup.sh`](../../deploy/backup/backup.sh) is the canonical producer. The protected Ansible push transaction and the operator-provisioned backup executor invoke it under the same host lock. The executor can request backups in operator-approved maintenance windows.
 
 The Ansible `deploy` stage creates or validates a private backup directory (default `/home/codexia/backups`). A local directory or an independently mounted remote filesystem is supported; remote NFS/CIFS/SSHFS destinations undergo additional host-identity validation. If the installed API image changes, deployment is serialized under `~/.local/state/codexia-deploy/host.lock`, the API and Tunnel are stopped, and the helper's `backup-locked` command is invoked with an explicitly inherited lock descriptor. Backup must confirm the API writer is quiesced, encrypt the PostgreSQL logical dump, history volume and manifest with `age`, publish ciphertext checksums atomically at the selected destination, and verify fingerprints before proceeding. A backup failure fails closed before candidate activation. **A local backup does not survive loss of the VM or its disk; independently preserve ciphertext off-VM before treating it as disaster-recovery evidence.**
 
 An independent `restore-drill` stage decrypts a **v2** artifact on an isolated recovery host, imports it into disposable PostgreSQL/history resources, checks the logical database and history fingerprints, and removes the temporary resources. It never restores production data or writes credentials to the repository. Versions preceding v2 and the retired updater's rollback receipts are deliberately unsupported.
+
+An operator can extend the isolated drill with `--candidate-full-image` and `--candidate-ledger` for the exact reviewed Full image. The `--candidate-api-ready` check also takes `--candidate-runtime-settings` and `--candidate-introspection-secret-file`, both protected recovery inputs for the restored Better Auth catalog. It verifies API readiness against the restored PostgreSQL and history during the drill.
 
 Use an approved protected Ansible inventory and independently supplied recipient/recovery identity. Only the holder of the external backup encryption private key can perform the restore drill.
 
@@ -27,7 +29,7 @@ After verifying the restored database and history fingerprints, the drill checks
 
 **運用設定UIの正本:** [バックアップ管理コンソール設計](../architecture/BACKUP-CONSOLE-CONTRACT.md)。ownerは`/console/backups`からS3の保存先・credential（write-only）・要求する保持期間・検証・有効化・run状態を操作する。通常の保存先指定にSSH/Ansible編集を要求しない。一方、既存の暗号化アーティファクト生成・host lock・writer停止は`backup.sh`が所有し、実本番復元やVM/IAM変更は引き続き保護されたOPERATORの経路で行う。local stagingとage受取公開鍵はoperator-controlledでありWeb変更を禁止する。
 
-ローカル/独立mount先に加えて、独立した転送コマンドで **S3 API互換ストレージをオフVM保管先に使える**。転送アダプターは既存のv2 artifactを扱う。`backup.sh`、Ansible deployment admission、owner consoleからの呼び出しは設計対象である。クラウドベンダー、バケット名、リージョン、保持期間、RPO/RTOは配備先の運用方針で決める。
+ローカルまたは独立mount先で生成したv2 artifactは、S3 API互換ストレージへ転送できる。保護されたexecutorとAnsibleのデプロイ受入は、同じ`backup.sh`と転送アダプターを使う。クラウドベンダー、バケット名、リージョン、保持期間、RPO/RTOは配備先の運用方針で決める。
 
 ### 機能・データフロー
 
@@ -113,4 +115,4 @@ It starts the pinned Silo S3-compatible service on loopback with a temporary CA,
 | BACKUP-S3-006 | 必須S3保管先の障害時はデプロイ停止。任意保管先の場合も監査可能な失敗を記録 |
 | BACKUP-S3-007 | bucket credential、age秘密鍵、原稿平文がログ・CI artifact・公開Pagesへ出ない |
 
-この機能は [External interfaces](../architecture/EXTERNAL-INTERFACES.md) の `EXT-OPS-003`、[Requirements](../requirements/REQUIREMENT-REGISTER.md) の `REQ-OPS-003` と関連付ける。Production useにはprotected backup executorからの呼出し、Ansible admission接続、AWS S3での独立受入が別途必要であり、このtransport adapter単体をoff-VM disaster-recovery証拠として扱わない。
+本番のDR受入には、実際の保管先での転送・読み戻しと、独立したホストでの復元ドリルの証拠が必要になる。S3互換fixtureで確認できる範囲は、使用した互換実装とその隔離復元環境に限られる。[External interfaces](../architecture/EXTERNAL-INTERFACES.md)（`EXT-OPS-003`）と [Requirements](../requirements/REQUIREMENT-REGISTER.md)（`REQ-OPS-003`）を参照。

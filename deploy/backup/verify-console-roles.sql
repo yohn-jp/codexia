@@ -18,6 +18,18 @@ BEGIN
     OR has_column_privilege(api, 'codexia_backup.credentials', 'envelope', 'SELECT')
     OR has_column_privilege(api, 'codexia_backup.state', 'active_revision', 'UPDATE')
     OR has_column_privilege(api, 'codexia_backup.operations', 'state', 'UPDATE')
+    OR has_any_column_privilege(api, 'codexia_backup.runs', 'UPDATE,REFERENCES')
+    OR has_table_privilege(api, 'codexia_backup.runs', 'DELETE,TRUNCATE')
+    OR EXISTS (
+      SELECT FROM unnest(ARRAY['source_sha', 'image_digest', 'candidate_source_sha', 'candidate_image_digest',
+                              'state', 'phase', 'reason_code', 'manifest_sha256', 'evidence']) AS column_name
+      WHERE has_column_privilege(api, 'codexia_backup.runs', column_name, 'INSERT')
+    )
+    OR has_any_column_privilege(api, 'codexia_backup.restore_drills', 'INSERT,UPDATE,REFERENCES')
+    OR has_table_privilege(api, 'codexia_backup.restore_drills', 'DELETE,TRUNCATE')
+    OR NOT has_column_privilege(api, 'codexia_backup.runs', 'request_id', 'INSERT')
+    OR NOT has_column_privilege(executor, 'codexia_backup.runs', 'evidence', 'UPDATE')
+    OR NOT has_column_privilege(executor, 'codexia_backup.restore_drills', 'receipt_sha256', 'INSERT')
     OR has_column_privilege(executor, 'codexia_backup.state', 'draft_revision', 'UPDATE')
     OR has_any_column_privilege(executor, 'codexia_backup.credentials', 'INSERT,UPDATE,REFERENCES')
     OR EXISTS (

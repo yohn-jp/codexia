@@ -28,6 +28,25 @@ export interface BackupOperation {
   created_at: Date;
   observed_at: Date;
 }
+export type BackupRunState = 'QUEUED' | 'RUNNING' | 'UNKNOWN' | 'FAILED' | 'BLOCKED' | 'REMOTE_VERIFIED';
+export interface BackupRun {
+  id: string;
+  request_id: string;
+  kind: 'manual' | 'scheduled' | 'deploy';
+  revision: number | null;
+  maintenance_window_id: string | null;
+  state: BackupRunState;
+  phase: string;
+  reason_code: string | null;
+  source_sha: string | null;
+  image_digest: string | null;
+  candidate_source_sha: string | null;
+  candidate_image_digest: string | null;
+  manifest_sha256: string | null;
+  evidence: Record<string, unknown> | null;
+  created_at: Date;
+  observed_at: Date;
+}
 export interface BackupRevision {
   revision: number;
   destination: BackupDestination;
@@ -43,6 +62,7 @@ interface State {
   executor_live: boolean;
   executor_key_ids: string[];
   executor_operator_origin: string | null;
+  run_executor_enabled: boolean;
 }
 
 export class BackupConsoleError extends Error {
@@ -183,12 +203,24 @@ export class BackupConsoleStore {
   async status(requestId?: string) {
     const {
       rows: [state],
-    } = await this.pool.query<State & { operation: Record<string, unknown> | null }>(
+    } = await this.pool.query<
+      State & {
+        operation: Record<string, unknown> | null;
+        last_verified_run: BackupRun | null;
+        last_restore_drill: Record<string, unknown> | null;
+      }
+    >(
       `SELECT s.*, COALESCE(executor_seen_at > clock_timestamp() - interval '90 seconds', false) AS executor_live,
          CASE WHEN o.id IS NOT NULL THEN jsonb_build_object(
            'operationId', o.id, 'requestId', o.request_id, 'revision', o.revision, 'status', o.state,
            'phase', o.kind, 'reasonCode', o.reason_code, 'observedAt', o.observed_at
-         ) END AS operation
+         ) END AS operation,
+         (SELECT to_jsonb(r) FROM codexia_backup.runs r WHERE r.state = 'REMOTE_VERIFIED'
+          ORDER BY r.observed_at DESC LIMIT 1) AS last_verified_run,
+         (SELECT jsonb_build_object('runId', r.id, 'sourceSha', d.source_sha, 'manifestSha256', d.manifest_sha256,
+           'receiptSha256', d.receipt_sha256, 'observedAt', d.observed_at)
+          FROM codexia_backup.restore_drills d JOIN codexia_backup.runs r ON r.id = d.run_id
+          ORDER BY d.observed_at DESC LIMIT 1) AS last_restore_drill
        FROM ${scope}state s LEFT JOIN ${scope}operations o ON o.request_id = $1`,
       [requestId ?? null],
     );
@@ -200,8 +232,8 @@ export class BackupConsoleStore {
       status: state.active_revision === null ? 'DISABLED' : 'ACTIVE',
       degraded: state.active_revision !== null && (!state.executor_live || !state.active_usable || state.active_health !== 'ready'),
       appliedAt: state.applied_at?.toISOString() ?? null,
-      lastVerifiedOffVmBackup: 'unknown',
-      restoreDrill: 'unknown',
+      lastVerifiedOffVmBackup: state.last_verified_run ? viewRun(state.last_verified_run) : 'unknown',
+      restoreDrill: state.last_restore_drill ?? 'unknown',
       staging: 'unknown',
       ...(requestId ? { operation: state.operation } : {}),
     };
@@ -249,6 +281,114 @@ export class BackupConsoleStore {
     return { ...viewOperation(operation), probeId: operation.id };
   }
 
+  async enqueueRun(requestId: string, maintenanceWindowId: string): Promise<BackupRun> {
+    return this.mutate(async client => {
+      const existing = await this.existingRun(requestId, maintenanceWindowId, client);
+      if (existing) {
+        return existing;
+      }
+      const state = await readBackupState(client);
+      if (!state.executor_live || !state.run_executor_enabled) throw new BackupConsoleError(503, 'BACKUP_EXECUTOR_UNAVAILABLE');
+      const settings = await readBackupRevision(client, state.active_revision);
+      if (!settings) throw conflict('BACKUP_DESTINATION_MISSING');
+      if (!state.active_usable || state.active_health !== 'ready') throw conflict('BACKUP_DESTINATION_UNAVAILABLE');
+      const { rowCount: operationCount } = await client.query(
+        "SELECT 1 FROM codexia_backup.operations WHERE state IN ('QUEUED', 'RUNNING')",
+      );
+      const { rowCount: runCount } = await client.query("SELECT 1 FROM codexia_backup.runs WHERE state IN ('QUEUED', 'RUNNING')");
+      if (operationCount || runCount) throw conflict('BACKUP_OPERATION_IN_PROGRESS');
+      const {
+        rows: [run],
+      } = await client.query<BackupRun>(
+        `INSERT INTO codexia_backup.runs (id, request_id, kind, revision, maintenance_window_id)
+         VALUES ($1, $2, 'manual', $3, $4) RETURNING *`,
+        [randomUUID(), requestId, state.active_revision, maintenanceWindowId],
+      );
+      if (!run) throw unavailable();
+      return run;
+    });
+  }
+
+  async existingRun(requestId: string, maintenanceWindowId: string, client: Pool | PoolClient = this.pool) {
+    const {
+      rows: [existing],
+    } = await client.query<BackupRun>('SELECT * FROM codexia_backup.runs WHERE request_id = $1', [requestId]);
+    if (existing && (existing.kind !== 'manual' || existing.maintenance_window_id !== maintenanceWindowId))
+      throw conflict('BACKUP_REQUEST_REUSED');
+    return existing ?? null;
+  }
+
+  async listRuns(cursor?: string, limit = 50) {
+    const { rows } = await this.pool.query<BackupRun>(
+      `SELECT run.* FROM codexia_backup.runs run
+       WHERE $1::uuid IS NULL OR (run.created_at, run.id) < (
+         SELECT anchor.created_at, anchor.id FROM codexia_backup.runs anchor WHERE anchor.id = $1
+       )
+       ORDER BY run.created_at DESC, run.id DESC LIMIT $2`,
+      [cursor ?? null, limit + 1],
+    );
+    const page = rows.slice(0, limit);
+    return { runs: page.map(viewRun), nextCursor: rows.length > limit ? (page.at(-1)?.id ?? null) : null };
+  }
+
+  async run(id: string) {
+    const {
+      rows: [run],
+    } = await this.pool.query<BackupRun>('SELECT * FROM codexia_backup.runs WHERE id = $1', [id]);
+    if (!run) throw new BackupConsoleError(404, 'BACKUP_RUN_NOT_FOUND');
+    return viewRun(run);
+  }
+
+  async recovery() {
+    const {
+      rows: [drill],
+    } = await this.pool.query<{
+      run_id: string;
+      source_sha: string;
+      manifest_sha256: string;
+      receipt_sha256: string;
+      observed_at: Date;
+      api_ready: boolean;
+    }>(
+      `SELECT run_id, source_sha, manifest_sha256, receipt_sha256, observed_at, api_ready FROM codexia_backup.restore_drills
+       ORDER BY observed_at DESC LIMIT 1`,
+    );
+    const {
+      rows: [latest],
+    } = await this.pool.query<{ id: string; source_sha: string | null; manifest_sha256: string | null; observed_at: Date }>(
+      "SELECT id, source_sha, manifest_sha256, observed_at FROM codexia_backup.runs WHERE state = 'REMOTE_VERIFIED' ORDER BY observed_at DESC LIMIT 1",
+    );
+    const evidence = drill
+      ? {
+          status: drill.api_ready ? 'DRILL_PASSED' : 'partial',
+          runId: drill.run_id,
+          sourceSha: drill.source_sha,
+          manifestSha256: drill.manifest_sha256,
+          receiptSha256: drill.receipt_sha256,
+          observedAt: drill.observed_at.toISOString(),
+        }
+      : null;
+    const current = Boolean(drill && latest && drill.run_id === latest.id && drill.manifest_sha256 === latest.manifest_sha256);
+    const missingConditions = [
+      ...(!latest ? ['verified_off_vm_backup'] : []),
+      ...(!current ? ['independent_restore_drill_for_latest_backup'] : []),
+      ...(current && !drill?.api_ready ? ['candidate_api_readiness'] : []),
+    ];
+    return {
+      status: current && evidence ? evidence.status : evidence ? 'stale' : 'unknown',
+      restoreDrill: evidence ?? 'unknown',
+      lastVerifiedOffVmBackup: latest
+        ? {
+            runId: latest.id,
+            sourceSha: latest.source_sha,
+            manifestSha256: latest.manifest_sha256,
+            observedAt: latest.observed_at.toISOString(),
+          }
+        : 'unknown',
+      missingConditions,
+    };
+  }
+
   async enqueue(kind: Kind, requestId: string, revision: number, probeId?: string): Promise<BackupOperation> {
     return this.mutate(async client => {
       const existing = await this.request(requestId, client);
@@ -277,6 +417,8 @@ export class BackupConsoleStore {
       if (kind === 'disable' && settings.destination.offVmPolicy === 'required') {
         throw conflict('BACKUP_REQUIRED_PROTECTION');
       }
+      const { rowCount: runCount } = await client.query("SELECT 1 FROM codexia_backup.runs WHERE state IN ('QUEUED', 'RUNNING')");
+      if (runCount) throw conflict('BACKUP_OPERATION_IN_PROGRESS');
       if (!state.executor_live) throw new BackupConsoleError(503, 'BACKUP_EXECUTOR_UNAVAILABLE');
       if (
         kind !== 'disable' &&
@@ -315,4 +457,25 @@ export class BackupConsoleStore {
       client.release();
     }
   }
+}
+
+function viewRun(run: BackupRun) {
+  const iso = (value: Date | string) => (value instanceof Date ? value.toISOString() : new Date(value).toISOString());
+  return {
+    runId: run.id,
+    requestId: run.request_id,
+    revision: run.revision,
+    maintenanceWindowId: run.maintenance_window_id,
+    status: run.state,
+    phase: run.phase,
+    reasonCode: run.reason_code,
+    sourceSha: run.source_sha,
+    imageDigest: run.image_digest,
+    candidateSourceSha: run.candidate_source_sha,
+    candidateImageDigest: run.candidate_image_digest,
+    manifestSha256: run.manifest_sha256,
+    offVmConfirmation: run.evidence,
+    observedAt: iso(run.observed_at),
+    createdAt: iso(run.created_at),
+  };
 }

@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+state_dir="$HOME/.local/state/codexia-deploy"
+export CODEXIA_PUSH_STATE_DIR="$state_dir"
+backup_program="$HOME/.local/bin/codexia-backup"
+control="$HOME/.local/bin/codexia-backup-control"
+intent="$state_dir/backup-transaction"
+lock_file="$state_dir/host.lock"
+readonly uuid='^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+readonly image_pattern='^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$'
+
+die(){ echo "$*" >&2; exit 1; }
+exists(){ [[ -e "$1" || -L "$1" ]]; }
+private_file(){ [[ -f "$1" && ! -L "$1" && -O "$1" && "$(stat -c %a -- "$1")" == 600 ]]; }
+
+read_artifact(){
+  local destination_dir="$1" artifact_dir digest extra
+  IFS= read -r artifact_dir && IFS= read -r digest && ! IFS= read -r extra || return 1
+  artifact_dir="${artifact_dir#Encrypted backup committed: }"
+  digest="${digest#Published checksum manifest sha256: }"
+  [[ "${artifact_dir##*/}" =~ ^codexia-[0-9]{8}T[0-9]{6}Z-[a-f0-9-]{36}$ &&
+     "${artifact_dir%/*}" == "$destination_dir" && "$digest" =~ ^[a-f0-9]{64}$ ]] || return 1
+  [[ "$("$backup_program" validate-artifact "$artifact_dir")" == "$digest" ]] || return 1
+  printf '%s\n%s\n' "$artifact_dir" "$digest"
+}
+
+# The locked push transaction uses the same canonical producer output check.
+if [[ "${1:-}" == artifact && $# == 2 ]]; then
+  read_artifact "$2"
+  exit
+fi
+
+[[ $# == 1 && ( "$1" == recover || "$1" =~ $uuid ) ]] || die 'Invalid backup run request'
+if ! exists "$intent" && [[ "$1" == recover ]]; then exit 0; fi
+[[ "$state_dir" == /* && -d "$state_dir" && ! -L "$state_dir" && -O "$state_dir" &&
+   "$(stat -c %a -- "$state_dir")" == 700 ]] || die 'Invalid private backup state directory'
+if exists "$lock_file"; then
+  [[ -f "$lock_file" && ! -L "$lock_file" && -O "$lock_file" ]] || die 'Unsafe backup host lock'
+fi
+exec 9>>"$lock_file"
+flock --exclusive --nonblock 9 || exit 75
+
+resume_services(){
+  local image="$1" tunnel_active="$2" actual
+  if ! systemctl --user is-active --quiet codexia-api.service; then
+    systemctl --user reset-failed codexia-api.service >/dev/null 2>&1 || :
+    systemctl --user start codexia-api.service || return 1
+  fi
+  actual="$(podman inspect --format '{{.ImageName}}' codexia-api)" || return 1
+  [[ "$actual" == "$image" && "$(podman inspect --format '{{.State.Health.Status}}' codexia-api)" == healthy ]] || return 1
+  if [[ "$tunnel_active" == true ]]; then
+    systemctl --user start codexia-tunnel.service || return 1
+  fi
+}
+
+clear_intent(){
+  rm -- "$intent" && sync -f "$state_dir"
+}
+
+write_intent() (
+  temporary=
+  temporary="$(mktemp "$state_dir/.backup-transaction.XXXXXXXX")"
+  trap 'rm -f -- "$temporary"' EXIT
+  printf '%s\n' "$@" > "$temporary"
+  sync -f "$temporary"
+  mv -T -- "$temporary" "$intent"
+  sync -f "$state_dir"
+  trap - EXIT
+)
+
+finish_transfer(){
+  local status=0
+  if "$control" manual-finish "$@"; then
+    clear_intent || die 'Could not remove the completed backup intent'
+    return 0
+  else
+    status=$?
+  fi
+  [[ "$status" == 1 ]] || die 'Backup transfer reconciliation is pending'
+  "$control" manual-interrupted "$1" || die 'Backup run reconciliation is pending'
+  clear_intent || die 'Could not remove the reconciled backup intent'
+  return 1
+}
+
+if exists "$intent"; then
+  private_file "$intent" || die 'Unsafe pending backup intent'
+  mapfile -t pending < "$intent"
+  [[ "${#pending[@]}" -ge 4 && "${#pending[@]}" -le 5 && "${pending[0]}" =~ $uuid && "${pending[1]}" =~ $image_pattern &&
+     ( "${pending[2]}" == true || "${pending[2]}" == false ) ]] || die 'Invalid pending backup intent'
+  [[ "${pending[3]}" == /* && "${pending[3]##*/}" =~ ^codexia-[0-9]{8}T[0-9]{6}Z-${pending[0]}$ ]] ||
+    die 'Invalid pending backup artifact path'
+  resume_services "${pending[1]}" "${pending[2]}" || die 'Backup service recovery is pending'
+  digest=
+  if exists "${pending[3]}"; then
+    digest="$("$backup_program" validate-artifact "${pending[3]}")" || digest=
+  fi
+  if [[ "$digest" =~ ^[a-f0-9]{64}$ && "$digest" == "${pending[4]:-$digest}" ]]; then
+    # Publication is atomic at the path recorded before writer quiesce.
+    finish_transfer "${pending[0]}" "${pending[3]}" "$digest" || :
+  else
+    "$control" manual-interrupted "${pending[0]}" || die 'Backup run reconciliation is pending'
+    clear_intent
+  fi
+fi
+[[ "$1" != recover ]] || exit 0
+
+for transaction in deploy-transaction.json cutover-transaction.json; do
+  if exists "$state_dir/$transaction"; then exit 75; fi
+done
+run_id="$1"
+destination="${CODEXIA_BACKUP_DESTINATION:?Protected staging directory is required}"
+recipient="${CODEXIA_BACKUP_AGE_RECIPIENT:?Protected age recipient is required}"
+"$backup_program" validate-destination "$destination" >/dev/null
+systemctl --user is-active --quiet codexia-api.service
+[[ "$(podman inspect --format '{{.State.Health.Status}}' codexia-api)" == healthy ]] || die 'The backup requires a healthy API'
+image="$(podman inspect --format '{{.ImageName}}' codexia-api)"
+[[ "$image" =~ $image_pattern ]] || die 'The backup requires an immutable API image'
+source_sha="$(podman exec codexia-api cat /app/update-identity.json | node -e '
+  const value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+  if (value.format !== "codexia-backend-identity/v1" || value.profile !== "full" ||
+      !/^[a-f0-9]{40}$/.test(value.sourceSha)) process.exit(2);
+  process.stdout.write(value.sourceSha);
+')"
+tunnel_active=false
+tunnel_status=0
+systemctl --user is-active --quiet codexia-tunnel.service || tunnel_status=$?
+case "$tunnel_status" in
+  0) tunnel_active=true;;
+  3) ;;
+  *) die 'Could not observe Tunnel state for backup';;
+esac
+"$control" manual-start "$run_id" "$source_sha" "${image##*@}" >/dev/null
+
+# Persist the service state before changing either unit. Keep it through remote
+# verification so a process death cannot leave a running receipt unaccounted for.
+artifact_id="codexia-$(date -u +%Y%m%dT%H%M%SZ)-$run_id"
+artifact_path="$destination/$artifact_id"
+write_intent "$run_id" "$image" "$tunnel_active" "$artifact_path"
+
+if { [[ "$tunnel_active" == true ]] && ! systemctl --user stop codexia-tunnel.service; } ||
+   ! systemctl --user stop codexia-api.service; then
+  resume_services "$image" "$tunnel_active" || die 'Backup service recovery is pending'
+  "$control" manual-fail "$run_id" quiesce_failed
+  clear_intent
+  die 'Could not quiesce services for backup'
+fi
+result=
+if output="$("$backup_program" backup-locked "$destination" "$recipient" --approved --lock-file "$lock_file" --lock-fd 9 --artifact-id "$artifact_id")"; then
+  result="$(read_artifact "$destination" <<< "$output")" || result=
+fi
+if [[ -n "$result" ]]; then
+  mapfile -t artifact <<< "$result"
+  [[ "${artifact[0]}" == "$artifact_path" ]] || die 'The backup produced an unexpected artifact path'
+  write_intent "$run_id" "$image" "$tunnel_active" "${artifact[@]}"
+fi
+resume_services "$image" "$tunnel_active" || die 'Backup service recovery is pending'
+if [[ -z "$result" ]]; then
+  "$control" manual-fail "$run_id" backup_failed
+  clear_intent
+  die 'Encrypted backup failed'
+fi
+finish_transfer "$run_id" "${artifact[@]}" || die 'Remote backup verification failed'
