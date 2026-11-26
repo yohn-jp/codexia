@@ -144,6 +144,17 @@ class BootstrapControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "runtime SSH public key is invalid"):
             bootstrap.prepare(self.env)
 
+    def test_bootstrap_refuses_inventory_key_different_from_production_credential(self):
+        self.env["CODEXIA_BOOTSTRAP_MODE"] = "bootstrap"
+        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = self.image
+        self.certify()
+        inventory = yaml.safe_load(self.contents["inventory.yml"])
+        inventory["all"]["children"]["codexia"]["vars"]["codexia_deploy_ssh_public_key"] = "ssh-ed25519 DifferentKey"
+        self.contents["inventory.yml"] = yaml.safe_dump(inventory).encode()
+        self.set_bundle()
+        with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "Inventory runtime public key differs"):
+            bootstrap.prepare(self.env)
+
     def test_bootstrap_refuses_format_valid_digest_without_candidate_verification(self):
         self.env["CODEXIA_BOOTSTRAP_MODE"] = "bootstrap"
         self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = self.image

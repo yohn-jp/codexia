@@ -233,7 +233,13 @@ async function planObservation({ bootstrapMode } = {}) {
         console.log('Certified canonical frontend and immutable release record verified for initial owner enrollment');
         return;
       }
-      if (bootstrapMode === 'owner-setup') assertInitialFrontendReady(edge, candidateFrontend.identity);
+      if (bootstrapMode === 'owner-setup') {
+        assertInitialFrontendReady(edge, candidateFrontend.identity);
+        const { initialFrontendRelease } = await import('../bootstrap/publish-frontend.mjs');
+        const { assertComponentReleaseRecorded } = await import('../../release/components/record.mjs');
+        await assertComponentReleaseRecorded(initialFrontendRelease(candidateFrontend),
+          { github: createGitHubOctokit({ token: env.GH_TOKEN }) });
+      }
       const overrides = bootstrapMode === 'bootstrap' ? {
         codexia_bootstrap_stages: admission.stages,
         codexia_owner_setup_install_intent: admission.installIntent,

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { buildFenceExpression, createCloudflareCutover, FENCE_RESPONSE } from './cloudflare.mjs';
+import { publishInitialFrontend } from '../../deployment/bootstrap/publish-frontend.mjs';
 
 const origin = 'https://cutover.example.com';
 const accountId = 'a'.repeat(32);
@@ -41,6 +42,7 @@ function fixture() {
     scriptAbsent: false, inventoryDenied: false, backendAbsent: false, frontendDenied: false,
     workerId, initialUpload: null, previousDeploymentEvidence: false, controlsChanged: false,
     setupRoutes: false, setupExposed: false,
+    candidateIdentity: null, rejectPromotion: false, uploadCount: 0,
     publicEpoch: 1, publicAuth: ['cookie-owner', 'bearer-read-compute-propose'] };
   const rule = () => ({
     id: fenceRuleId,
@@ -58,11 +60,13 @@ function fixture() {
     readToken: 'read-secret', workerToken: 'worker-secret', fenceToken: 'waf-secret',
     accessEnv: { CODEXIA_PUBLIC_ORIGIN: origin, CODEXIA_ACCESS_CLIENT_ID: 'identity-id', CODEXIA_ACCESS_CLIENT_SECRET: 'identity-secret' },
     uploadVersion: async ({ tag }) => {
+      state.uploadCount++;
       state.uploadTag = tag;
       return newVersion;
     },
     readInitialWorkerControls: async () => controlsSha256,
     uploadInitialVersion: async ({ workerId: targetWorker, tag, initialControls }) => {
+      state.uploadCount++;
       state.initialUpload = { targetWorker, tag, initialControls };
       state.uploadTag = tag;
       return newVersion;
@@ -78,6 +82,7 @@ function fixture() {
         }
         if (init.headers['CF-Access-Client-Id'] && target.pathname === '/desktop/update-identity.json') {
           if (state.frontendDenied) return new Response('Denied', { status: 403 });
+          if (state.candidateIdentity && state.activeVersion === newVersion) return Response.json(state.candidateIdentity);
           return Response.json({ format: 'codexia-frontend-identity/v1', version: '1.0.0', profile: 'full', sourceSha: 'f'.repeat(40), apiEpoch: 1 });
         }
         return new Response(state.enabled ? FENCE_RESPONSE.content : 'Cloudflare Access denied', { status: 403 });
@@ -99,6 +104,7 @@ function fixture() {
       }
       if (path === workerPath + '/deployments') {
         if (method === 'POST') {
+          if (state.rejectPromotion) return new Response('Unavailable', { status: 503 });
           state.activeVersion = writes.at(-1).body.versions[0].version_id;
           if (state.replyLost) throw new Error('connection reset');
         }
@@ -327,4 +333,86 @@ test('lifecycle observation preserves legacy backend identity and does not infer
   assert.equal(observed.backend.apiEpoch, 1);
   assert.equal(observed.backend.standaloneOAuth, false);
   assert.deepEqual(writes, []);
+});
+
+// Execute the same R5 publication controller and Cloudflare adapter used by the
+// protected dispatch, with only the external HTTP/upload/record boundaries replaced.
+const enrollmentCandidate = {
+  identity: { format: 'codexia-frontend-identity/v1', sourceSha: 'a'.repeat(40),
+    version: '1.2.3', profile: 'full', apiEpoch: 3 },
+  artifactDigest: artifactDigest.slice(7), artifactId: 70, runId: 80, producerAttempt: 2,
+};
+
+async function enrollmentFixture({ empty = false } = {}) {
+  const f = fixture();
+  f.state.backendAbsent = true;
+  f.state.candidateIdentity = enrollmentCandidate.identity;
+  if (empty) f.state.activeVersion = null;
+  const records = [];
+  const observe = () => f.client.observeLifecycle({ backendExpected: false, ownerSetup: true });
+  const publish = async (overrides = {}) => publishInitialFrontend({
+    edge: f.client, observed: await observe(), candidate: enrollmentCandidate,
+    assertCurrentSource: async () => {}, recordRelease: async record => records.push(record),
+    ...overrides,
+  });
+  return { ...f, records, observe, publish };
+}
+
+test('R5 publishes the first version of the canonical private Worker and records its certified source', async () => {
+  const f = await enrollmentFixture({ empty: true });
+  assert.deepEqual(await f.publish(), { deployed: true, releaseTag: 'frontend-v1.2.3' });
+  assert.equal(f.state.initialUpload.targetWorker, workerId);
+  assert.equal(f.state.activeVersion, newVersion);
+  assert.equal(f.state.uploadCount, 1);
+  assert.deepEqual(f.writes.map(({ method, auth }) => [method, auth]), [['POST', 'Bearer worker-secret']]);
+  assert.equal(f.records[0].targetSha, enrollmentCandidate.identity.sourceSha);
+  assert.equal(f.records[0].metadata.worker, 'codexia-frontend');
+  assert.equal(f.records[0].metadata.requiredApiEpoch, 3);
+  assert.equal(f.state.enabled, false);
+});
+
+test('R5 replaces only the observed older Worker version and reconciles a lost promotion response', async () => {
+  const f = await enrollmentFixture();
+  f.state.replyLost = true;
+  assert.equal((await f.publish()).deployed, true);
+  assert.equal(f.state.initialUpload, null);
+  assert.equal(f.state.uploadCount, 1);
+  assert.equal(f.state.activeVersion, newVersion);
+  assert.equal(f.records.length, 1);
+  assert.equal(f.writes.length, 1);
+  assert.equal((await f.publish()).deployed, false);
+  assert.equal(f.state.uploadCount, 1);
+  assert.equal(f.writes.length, 1);
+  assert.deepEqual(f.records[1], f.records[0]);
+});
+
+test('R5 never records failed publication; retries an already active version when recording failed', async () => {
+  const f = await enrollmentFixture({ empty: true });
+  f.state.rejectPromotion = true;
+  await assert.rejects(f.publish());
+  assert.equal(f.state.activeVersion, null);
+  assert.equal(f.records.length, 0);
+  f.state.rejectPromotion = false;
+  await assert.rejects(f.publish({ recordRelease: async () => { throw new Error('record unavailable'); } }), /record unavailable/u);
+  assert.equal(f.state.activeVersion, newVersion);
+  const uploads = f.state.uploadCount;
+  const writes = f.writes.length;
+  assert.equal((await f.publish()).deployed, false);
+  assert.equal(f.state.uploadCount, uploads);
+  assert.equal(f.writes.length, writes);
+  assert.equal(f.records.length, 1);
+});
+
+test('R5 refuses changed ingress before promotion and never records an unverified candidate', async () => {
+  const f = await enrollmentFixture();
+  let sourceChecks = 0;
+  await assert.rejects(f.publish({ assertCurrentSource: async () => {
+    if (++sourceChecks === 2) f.state.alias = true;
+  } }), /alternate ingress/u);
+  assert.equal(f.writes.length, 0);
+  assert.equal(f.records.length, 0);
+  f.state.alias = false;
+  f.state.candidateIdentity = { ...enrollmentCandidate.identity, apiEpoch: 2 };
+  await assert.rejects(f.publish(), /API epoch|identity|immutable/u);
+  assert.equal(f.records.length, 0);
 });

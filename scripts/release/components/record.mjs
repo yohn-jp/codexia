@@ -74,6 +74,17 @@ async function main(){
   await recordComponentRelease(release,{github});
 }
 
+export async function assertComponentReleaseRecorded(release,{github}){
+  const [owner,repo]=repository.split('/');
+  const {data:ref}=await github.rest.git.getRef({owner,repo,ref:'tags/'+release.tag});
+  assert.equal(ref?.object?.type,'commit');
+  assert.equal(ref.object.sha,release.targetSha,'Component version already belongs to a different source');
+  const {data:existing}=await github.rest.repos.getReleaseByTag({owner,repo,tag:release.tag});
+  assert.equal(existing.tag_name,release.tag);
+  assert.equal(existing.body,release.body,'Existing component release binds different metadata');
+  assert.equal(existing.draft,false);
+}
+
 // Shared immutable tag and release writer. The caller must first certify the
 // producer and verify the deployed identity in its protected release lane.
 export async function recordComponentRelease(release,{github}){
@@ -104,6 +115,7 @@ export async function recordComponentRelease(release,{github}){
       draft:false,prerelease:false,make_latest:'false'});}
     catch(error){throw new Error('Component release API request failed'+(Number.isSafeInteger(error?.status)?': HTTP '+error.status:''),{cause:error});}
   }
+  await assertComponentReleaseRecorded(release,{github});
   console.log('Recorded '+release.title+' from '+release.targetSha);
 }
 
