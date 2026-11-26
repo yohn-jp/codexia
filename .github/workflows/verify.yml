@@ -263,10 +263,41 @@ jobs:
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
+      - uses: actions/setup-python@v6.1.0
+        id: conformance_python
+        if: matrix.group == 'api' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'http-conformance')
+        continue-on-error: true
+        with:
+          python-version: '3.12'
+      # The group runner reports an unsuccessful setup as blocked for its own task.
+      # Keep collecting evidence from the other selected tasks on this runner.
+      - name: Prepare Schemathesis and its disposable database
+        id: http_conformance_setup
+        if: steps.conformance_python.outcome == 'success'
+        continue-on-error: true
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/schemathesis" --require-hashes -r tests/conformance/http/requirements.lock.txt
+          docker exec "$POSTGRES_CONTAINER" createdb -U codexia codexia_perf_http_conformance
+          echo "SCHEMATHESIS_BIN=$RUNNER_TEMP/schemathesis/bin/schemathesis" >> "$GITHUB_ENV"
+          echo 'CODEXIA_HTTP_CONFORMANCE_DATABASE_URL=postgres://codexia:codexia@127.0.0.1:5432/codexia_perf_http_conformance' >> "$GITHUB_ENV"
+      - name: Prepare MCP conformance tools and their disposable database
+        id: mcp_conformance_setup
+        if: matrix.group == 'api' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'mcp-conformance')
+        continue-on-error: true
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          npm ci --prefix tests/conformance/mcp --ignore-scripts --no-audit --no-fund
+          docker exec "$POSTGRES_CONTAINER" createdb -U codexia codexia_perf_mcp_conformance
+          echo 'CODEXIA_MCP_CONFORMANCE_DATABASE_URL=postgres://codexia:codexia@127.0.0.1:5432/codexia_perf_mcp_conformance' >> "$GITHUB_ENV"
       - name: Run selected validations
         env:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
+          CODEXIA_CI_HTTP_CONFORMANCE_SETUP: ${{ steps.http_conformance_setup.outcome }}
+          CODEXIA_CI_MCP_CONFORMANCE_SETUP: ${{ steps.mcp_conformance_setup.outcome }}
         run: node scripts/ci/execution/group.mjs "unit-${{ matrix.group }}"
       - uses: actions/upload-artifact@v7.0.2
         if: always()

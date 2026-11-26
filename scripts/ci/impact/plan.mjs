@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BROWSER_SHARDS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES } from './contract.mjs';
+import { BROWSER_SHARDS, CONFORMANCE_TASKS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES } from './contract.mjs';
 import { ROOT_VERIFICATION_DOCUMENTS, UX_PROJECTION_DOCUMENTS, isNonExecutableDocumentation, isRequirementsTraceInput, taskGroup, taskWorkflowJob } from '../evidence/task-inputs.mjs';
 
 export const FULL_MODEL_OCI_PATHS = Object.freeze([
@@ -300,6 +300,15 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
     if (file === 'biome.json' ||
         (/^(?:app|packages|modules|edge\/frontend)\//u.test(file) && /\.(?:[cm]?js|jsx|[cm]?ts|tsx)$/u.test(file))) add('biome-ci');
     if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..') || file.includes('\\')) { full = true; break; }
+    const conformanceTask = Object.entries(CONFORMANCE_TASKS).find(([, entry]) => file.startsWith(`${path.dirname(entry)}/`));
+    if (conformanceTask) {
+      add(conformanceTask[0]);
+      continue;
+    }
+    if (file === 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md') add(...Object.keys(CONFORMANCE_TASKS));
+    if (file === 'docs/architecture/HTTP-PLATFORM-MIGRATION.md' || HTTP_CONTRACT_ROUTE_SOURCE_PATHS.has(file) ||
+        file.startsWith('packages/http-contract/')) add('http-conformance');
+    if (file === 'docs/architecture/MCP-V2-MIGRATION.md' || file.startsWith('modules/mcp/')) add('mcp-conformance');
     if (file.startsWith('scripts/ux-simulator/')) {
       add('unit-root');
       continue;

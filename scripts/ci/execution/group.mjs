@@ -3,14 +3,14 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
-import { VERIFICATION_GROUPS, requiredBuildProfile, requiresWorkspacePreparation } from '../impact/contract.mjs';
+import { CONFORMANCE_TASKS, VERIFICATION_GROUPS, requiredBuildProfile, requiresWorkspacePreparation } from '../impact/contract.mjs';
 import { planDigest, validateVerificationPlan } from '../impact/plan.mjs';
 import { assertProfileReceipt } from '../evidence/profile-artifact.mjs';
 import { runBounded } from './parallel.mjs';
 import { withBrowserFixture } from '../browser/fixture.mjs';
 import { assertTaskProducerInventory, sanitizeProducerArguments, selectEquivalentTaskProofs } from '../evidence/input-proof.mjs';
 import { captureCoverageInputClosure, coverageInputProof, coverageInvocation, coverageRuntime } from '../evidence/coverage-inputs.mjs';
-import { captureTaskInputSource, taskInputProof } from '../evidence/task-inputs.mjs';
+import { captureTaskInputSource, taskInputProof, taskInvocation } from '../evidence/task-inputs.mjs';
 
 const group = process.argv[2];
 const plan = validateVerificationPlan(JSON.parse(readFileSync(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -28,6 +28,10 @@ const groupInvocations = [];
 let groupPreparationError;
 let taskProofClosureFor;
 const reportDirectory = process.env.CODEXIA_CI_REPORT_DIR ?? path.resolve('ci-results', group);
+const conformanceSetup = new Map([
+  ['http-conformance', process.env.CODEXIA_CI_HTTP_CONFORMANCE_SETUP],
+  ['mcp-conformance', process.env.CODEXIA_CI_MCP_CONFORMANCE_SETUP],
+]);
 mkdirSync(reportDirectory, { recursive: true });
 const run = (command, args, extraEnv = {}) => new Promise((resolve, reject) => {
   const active = taskInvocationContext.getStore();
@@ -77,12 +81,19 @@ function executeTask(task, index) {
 async function executeTaskInContext(task, index, scope) {
   const started = Date.now();
   let error = preparationError || (task !== 'coverage' && (groupPreparationError || groupPreparation.get(task)?.error)) || undefined;
+  if (conformanceSetup.has(task) && process.env.GITHUB_ACTIONS === 'true' && conformanceSetup.get(task) !== 'success') {
+    error ??= 'Official tool or disposable database setup did not complete';
+  }
   let blocked = Boolean(error || (task === 'audit-core' && completed.get('build-core')?.status !== 'passed' && tasks.includes('build-core')));
   if (blocked && !error) error = 'Core build prerequisite failed';
   let inputProof;
   if (!blocked) {
     try {
       if (task === 'biome-ci') await run(process.execPath, ['scripts/ci/biome/check.mjs'], { CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
+      else if (Object.hasOwn(CONFORMANCE_TASKS, task)) {
+        const { executable, arguments: args } = taskInvocation(task);
+        await run(executable, args, { CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
+      }
       else if (task.startsWith('unit-')) await node('scripts/ci/execution/workspace.mjs', 'unit', task.slice(5));
       else if (task === 'db-contract') {
         await run('pnpm', ['--filter', '@codexia/persistence-postgres', 'run', 'test:db-contract'], {

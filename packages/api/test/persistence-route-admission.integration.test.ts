@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { type TestContext, test } from 'node:test';
-import type { ProjectId } from '@codexia/persistence-contracts';
+import type { KnowledgeNodeId, ProjectId } from '@codexia/persistence-contracts';
 import { createPostgresPersistence } from '@codexia/persistence-postgres';
 import { startBetterAuthFixture } from './fixtures/better-auth-server.js';
 
@@ -83,4 +83,62 @@ test('PostgreSQL document list honors the requested project version', async t =>
 
   const invalid = await fetch(`${documentsUrl}?projectVersion=0`, { headers: ownerHeaders });
   assert.equal(invalid.status, 400);
+});
+
+test('Knowledge merge reports missing entities and stale previews as declared client errors', async t => {
+  const { base, ownerHeaders, persistence } = await startAuthorApi(t);
+  const project = await persistence.transaction(tx => tx.createProject({ title: 'Merge rejection fixture' }));
+  const sourceId = randomUUID() as KnowledgeNodeId;
+  const targetId = randomUUID() as KnowledgeNodeId;
+  const missingId = randomUUID();
+  await persistence.transaction(async tx => {
+    for (const [id, name] of [
+      [sourceId, 'Source'],
+      [targetId, 'Target'],
+    ] as const) {
+      await tx.saveKnowledgeNode({
+        projectId: project.id,
+        id,
+        name,
+        type: 'lore',
+        attributes: {},
+        status: 'confirmed',
+        expectedVersion: null,
+      });
+    }
+  });
+  const preview = (projectId: string, source: string, target: string) =>
+    fetch(`${base}/api/v1/persistence/projects/${projectId}/nodes/${source}/merge-preview`, {
+      method: 'POST',
+      headers: ownerHeaders,
+      body: JSON.stringify({ targetId: target }),
+    });
+  for (const [projectId, source, target, status, code] of [
+    [randomUUID(), sourceId, targetId, 404, 'PERSISTENCE_NOT_FOUND'],
+    [project.id, missingId, targetId, 404, 'PERSISTENCE_NOT_FOUND'],
+    [project.id, sourceId, missingId, 404, 'PERSISTENCE_NOT_FOUND'],
+    [project.id, sourceId, sourceId, 400, 'PERSISTENCE_VALIDATION'],
+    [project.id, '0', targetId, 400, 'PERSISTENCE_VALIDATION'],
+  ] as const) {
+    const response = await preview(projectId, source, target);
+    assert.equal(response.status, status);
+    assert.equal(((await response.json()) as { code: string }).code, code);
+  }
+  const valid = await preview(project.id, sourceId, targetId);
+  assert.equal(valid.status, 200);
+  const { projectVersion, previewDigest } = (await valid.json()) as { projectVersion: number; previewDigest: string };
+  const stale = await fetch(`${base}/api/v1/persistence/projects/${project.id}/nodes/${sourceId}/merge`, {
+    method: 'POST',
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      targetId,
+      confirm: true,
+      projectVersion,
+      previewDigest: previewDigest === '0'.repeat(64) ? '1'.repeat(64) : '0'.repeat(64),
+    }),
+  });
+  assert.equal(stale.status, 409);
+  assert.equal(((await stale.json()) as { code: string }).code, 'PERSISTENCE_CONFLICT');
+  const source = await persistence.read(reader => reader.getKnowledgeNode(project.id, sourceId));
+  assert.equal(source?.status, 'confirmed');
 });

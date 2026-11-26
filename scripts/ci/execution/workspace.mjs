@@ -4,7 +4,7 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runDependencyBuilds } from './parallel.mjs';
-import { TEST_TYPECHECK_SCOPES, TYPECHECK_TARGETS, UNIT_TARGETS, WORKSPACES } from '../impact/contract.mjs';
+import { CONFORMANCE_TASKS, TEST_TYPECHECK_SCOPES, TYPECHECK_TARGETS, UNIT_TARGETS, WORKSPACES } from '../impact/contract.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const generatedDirectoryNames = new Set(['.git', '.next', '.turbo', 'build', 'coverage', 'dist', 'node_modules', 'out', 'target']);
@@ -228,7 +228,7 @@ function typecheckWorkspace() {
 
 function prerequisiteIds(task) {
   if (task === 'coverage') return [];
-  if (task === 'db-contract') return [...buildDependencies(['api']), 'api'];
+  if (task === 'db-contract' || Object.hasOwn(CONFORMANCE_TASKS, task)) return [...buildDependencies(['api']), 'api'];
   if (task.startsWith('unit-')) {
     const id = getUnitTarget(task.slice(5)).id;
     return id === 'root' ? [...buildDependencies(['api']), 'api'] : buildDependencies([id]);
