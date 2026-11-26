@@ -19,28 +19,28 @@
 画面IDは [情報設計](INFORMATION-ARCHITECTURE.md) の従来カタログと整合させる。特に **WRT-02＝Revision履歴、REV-01＝提案一覧、REV-02＝提案詳細**。CFG-01は表示設定（DISPLAY-01）と本人セキュリティ設定（PREF-01）を束ねる概念的なカテゴリであり、別のデータ正本やURLを作らない。KNO-03の局所グラフは情報設計で検討された**未採用提案**として明示し、実装済みの関係一覧/詳細に見せかけない。
 
 
-**画面IDは安定した論理識別子。** 【実装】は現行React Web実装の状態であり、iOS Nativeの実装・受入を意味しない。【目標】は採用済みで未受入。旧Mobile Web `/mobile/`/Ionic/Capacitorは**廃止対象**であり、下表の現行ルートを製品の新規受入条件として扱わない。iOS Nativeの表示は[SwiftUI正本](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)に従い論理IDのみ共通化する。
+**画面IDは安定した論理識別子。** 【実装】は現行Desktop React Web実装の状態であり、iOS Nativeの実装・受入を意味しない。【目標】は採用済みで未受入。iOSの開発と自動Xcode検証は一時停止中で、実機受入は延期（免除ではない）。旧Mobile Web `/mobile/`/Ionic authoring shellは製品導線から撤去済みで、対応・互換性の約束はない。iOS Nativeの表示は[SwiftUI正本](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)に従い論理IDのみ共通化する。
 
 | 画面ID | 入口・表示形態 | principal | 主タスクと通常の戻り先 | 種別 |
 | --- | --- | --- | --- | --- |
-| ENTRY-01 | `/`（現行legacy選択あり）→目標は`/desktop/` | ANON | Desktop React Webを起動。iOSはnative app entry | 実装 |
+| ENTRY-01 | `/` Desktop-only start → `/desktop/` | ANON | Desktop React Webを起動。iOSはnative app entryという採用目標 | 実装 |
 | AUTH-01 | `/oauth/login` | 正しいsigned request→OWNER-SESSION | Passkey/連携IdPログイン → AUTH-02／中止→ENTRY | 実装 |
 | AUTH-02 | `/oauth/consent` | OWNER-SESSION＋登録済みclient | scopeとclientを確認→許可/拒否→検証済みcallback | 実装 |
-| LIB-01 | Desktop Web `/desktop/`・iOS Native Library（旧`/mobile/`廃止） | OWNER-API | 作品を選択/作成/取込/書出→構成・本文 | 実装 |
-| OUT-01 | Desktop構成panel・iOS native Outline | OWNER-API | 巻/章/シーン選択・移動・検索 → 本文 | 実装 |
-| WRT-01 | `/<shell>/projects/:projectId/scenes/:documentId` | OWNER-API | 編集、保存、閲覧、根拠、Revision。元の本文へ | 実装 |
-| READ-01 | Desktop reader・iOS native Reader | OWNER-API | 文字組み/縦横/参照→同じRevisionの編集位置へ | 実装 |
+| LIB-01 | Desktop Web `/desktop/`・iOS Native Library（旧`/mobile/`廃止） | OWNER-API | 作品を選択/作成/取込/書出→構成・本文 | Desktop実装・iOS未受入 |
+| OUT-01 | Desktop構成panel・iOS native Outline | OWNER-API | 巻/章/シーン選択・移動・検索 → 本文 | Desktop実装・iOS未受入 |
+| WRT-01 | Desktop Web `/desktop/projects/:projectId/scenes/:documentId`・iOS native navigation target | OWNER-API | 編集、保存、閲覧、根拠、Revision。元の本文へ | Desktop実装・iOS未受入 |
+| READ-01 | Desktop reader・iOS native Reader | OWNER-API | 文字組み/縦横/参照→同じRevisionの編集位置へ | Desktop実装・iOS未受入 |
 | WRT-02 | WRT-01のRevision履歴・差分 | OWNER-API | 差分表示・履歴復元→元の本文 | 実装 |
 | REC-01 | WRT-01の保存状態・競合/回復/失効 | OWNER-API＋browser local journal | 確定状態を照合・復旧→同じ文書 | 実装 |
-| KNO-01 | Desktop Knowledge panel・iOS Native Knowledge | OWNER-API | 候補一覧、検索、確定→KNO-02／原稿へ | 実装 |
+| KNO-01 | Desktop Knowledge panel・iOS Native Knowledge | OWNER-API | 候補一覧、検索、確定→KNO-02／原稿へ | Desktop実装・iOS未受入 |
 | KNO-02 | Knowledge node詳細・Evidence inspector | OWNER-API | Relation/Assertion/Text Anchor/根拠への遷移→元の文書 | 実装 |
 | KNO-03 | 選択nodeを中心にした局所関係グラフ/一覧 | OWNER-API（当該projectのreadのみ） | KNO-02から開き、同じnode/元原稿へ戻す | **情報設計の未採用提案**。専用UI/URLは未実装 |
-| REV-01 | Desktop ChangeSet/Module proposal・iOS Native Review | OWNER-API | 内容・作者の判断対象を選択 → REV-02 | 実装 |
+| REV-01 | Desktop ChangeSet/Module proposal・iOS Native Review | OWNER-API | 内容・作者の判断対象を選択 → REV-02 | Desktop実装・iOS未受入 |
 | REV-02 | 提案の前後差分・承認/却下/適用 | OWNER-API | receiptを照合し反映された原稿/知識へ | 実装 |
 | TOOL-01 | Workspaceの`module:*`可変panel | OWNER-API、MCPは独立tool側 | Moduleのread/compute/proposeと非同期job→同じ作品 | 実装 |
 | JOB-01 | ヘッダーの受信箱/ジョブdialog | OWNER-API | 通知とjob確認/既読 → 元の作業 | 実装 |
 | DISPLAY-01 | Theme、組版、Workspace配置 | 本人のbrowser UI state | 見た目・レイアウト変更→元の作業。原稿は無変更 | 実装 |
-| PREF-01 | Desktop認証dialog→`/console/security`目標・iOS Native設定 | OWNER-SESSION（実APIはowner確認） | Passkey/セッション→元の作業 | 実装 |
+| PREF-01 | Desktop認証dialog→`/console/security`目標・iOS Native設定 | OWNER-SESSION（実APIはowner確認） | Passkey/セッション→元の作業 | Desktop実装・iOS未受入 |
 | PUB-01 | `/r/:module/:project/:slug` | SHARE-READER | 許された公開版の読書→公開画面内で終了 | 実装 |
 | CON-00 | `/console` | OWNER-SESSION | 認証状況・各管理項目へのハブ | 目標 |
 | CON-01 | `/console/setup`開始・登録キー入力 | SETUP | 状態確認、キー認可→CON-02 | 目標 |
@@ -57,7 +57,7 @@
 | CON-34 | `/console/backups/recovery` | OWNER-SESSIONのread-only | 隔離restore drillの証拠、OPERATOR復旧手順への説明。実本番復元はしない | 目標・未実装 |
 | OPS-01 | Webではなくprotected workflow/SSH | OPERATOR | VM構築・更新・**本番**復旧（設計はデプロイ文書に委任）。保管先設定はCON-30〜34のowner UI、実際のhost backup/restoreはprotected executor/operator | 実装/目標分離 |
 
-**iOS採用目標は独立したSwiftUI画面とUIKit/TextKit 2編集面。** Core/API、作品、Revision、receipt/回復契約を共有するがReact/Ionic部品を共有しない。OAuthはsystem authentication、refresh tokenはKeychainに置き、第二原稿DBは作らない。現在のCapacitorは未撤去の旧実装。
+**iOS採用目標は独立したSwiftUI画面とUIKit/TextKit 2編集面。** Core/API、作品、Revision、receipt/回復契約を共有するがReact/Ionic部品を共有しない。OAuthはsystem authentication、refresh tokenはKeychainに置き、第二原稿DBは作らない。SwiftUI sourceは存在するが、未完了の実装・受入は開発凍結中。Capacitor/Ionic Web authoringは旧実装であり、current iOS SwiftUI appの実装根拠ではない。
 
 ## グローバルな状態・離脱ガード
 

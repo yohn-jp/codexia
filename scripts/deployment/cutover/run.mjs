@@ -211,8 +211,11 @@ export async function executePairCutover(operation, input, scratch, {
       ['_headers', '_redirects'].every(name => rawHash.test(controls[name] ?? '')),
     'First Worker activation requires certified publication controls');
   }
-  requireCondition(reactivation === undefined || (reactivation && prior.image === null && operation !== 'recover'),
-    'A renewed window is available only for first activation advance or reconciliation');
+  const retainedBackendFirstFrontend = deployment.plan.candidateRoute === 'R7' &&
+    prior.image !== null && prior.image === candidate.image && prior.workerVersion === null;
+  requireCondition(reactivation === undefined || (reactivation &&
+    (prior.image === null || retainedBackendFirstFrontend) && operation !== 'recover'),
+    'A renewed window is available only for first activation or retained Backend Frontend retry');
   const verifyApproval = ({ opening } = {}) => {
     const recovering = operation !== 'advance' && opening !== 'candidate';
     assertDeploymentPlanBinding({ ...deployment, recover: Boolean(reactivation) || recovering });

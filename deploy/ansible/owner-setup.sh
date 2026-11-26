@@ -4,7 +4,7 @@ set -Eeuo pipefail
 umask 077
 
 die() { printf '%s\n' "$1" >&2; exit 1; }
-[[ $# -ge 2 && $# -le 4 ]] || die 'An explicit owner setup operation and reviewed Full image are required'
+[[ $# -ge 2 && $# -le 5 ]] || die 'An explicit owner setup operation and reviewed Full image are required'
 operation="$1"
 image="$2"
 [[ "$image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || die 'A reviewed immutable Full image is required'
@@ -21,7 +21,15 @@ promoted="$state_dir/owner-setup.promoted"
 runtime="$config_dir/runtime.env"
 setup_env="$config_dir/owner-setup.env"
 
-exec 9>"$state_dir/host.lock"
+if [[ -e "$state_dir/host.lock" || -L "$state_dir/host.lock" ]]; then
+  [[ -f "$state_dir/host.lock" && ! -L "$state_dir/host.lock" && -O "$state_dir/host.lock" ]] ||
+    die 'The canonical deployment host lock is unsafe'
+  exec 9<>"$state_dir/host.lock"
+elif [[ $# == 5 ]]; then
+  die 'The canonical deployment host lock is missing'
+else
+  exec 9>"$state_dir/host.lock"
+fi
 flock --exclusive --nonblock 9 || die 'Another Codexia operation holds the deployment host lock'
 present() { [[ -e "$1" || -L "$1" ]]; }
 private_file() { [[ -f "$1" && ! -L "$1" && -O "$1" && "$(stat -c %a -- "$1")" == 600 ]]; }
@@ -64,6 +72,13 @@ read_database() {
     export PGOPTIONS="-c default_transaction_read_only=on"
     exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "$1"
   ' sh "$1"
+}
+
+assert_empty_auth_resume() {
+  local expected_database="$1" fingerprint="$2"
+  "$HOME/.local/bin/codexia-auth-runtime-bootstrap" verify-empty-auth-resume-held \
+    "$state_dir/host.lock" "$image" "$expected_database" "$fingerprint" 9>&9 >/dev/null ||
+    die 'The locked empty-auth checkpoint changed before owner setup'
 }
 
 database="$(read_database 'SELECT system_identifier || chr(58) || (SELECT oid FROM pg_database WHERE datname=current_database()) FROM pg_control_system()')"
@@ -177,13 +192,21 @@ encrypt_grant() {
 
 case "$operation" in
   --initialize)
-    [[ $# == 2 ]] && ! present "$promoted" ||
+    [[ ( $# == 2 || ( $# == 5 && "$3" == --resume-bootstrap ) ) ]] && ! present "$promoted" ||
       die 'Owner setup initialization requires an unprepared installation'
+    if [[ $# == 5 ]] && present "$marker"; then
+      die 'An empty-auth resume cannot reuse a completed owner setup marker'
+    fi
     if present "$marker"; then
       assert_installation
     else
       assert_intent
-      "$HOME/.local/bin/codexia-require-clean-api-target"
+      # Both admitted R4 checkpoints must have reached the same empty schema.
+      if [[ $# == 5 ]]; then
+        assert_empty_auth_resume "$4" "$5"
+      else
+        assert_empty_auth_resume "$database" candidate
+      fi
       run_image /app/node_modules/@codexia/api/dist/migrate-auth.js --apply
       run_image "$operator_script" --describe >/dev/null
       write_marker "$marker" "${database%%:*}"

@@ -43,7 +43,7 @@ corepack pnpm ui:scan
 
 The scanner runs the pinned Impeccable engine against `app/` and the frozen Desktop snapshot at `1440x900`. Reports are written to `artifacts/ui-preview/detector/{source,desktop,summary}.json` (ignored by git). Exit code **2** from Impeccable is findings, **1** is a failed scan; only a successful scan is included in the summary. There is no inference that an empty JSON from a failed HTTP request means a clean UI. Runs do not alter source or a design-system file.
 
-The snapshots preserve the seeded, authenticated layout but **are not interactive**. They do not prove end-to-end behavior, permissions, animations or native iOS rendering. Those remain covered by existing E2E tests and manual UX review. A separate browser scan of the real interactive URLs would only examine the sign-in state in a new unauthenticated browser; do not count that as an editor audit.
+The snapshots preserve the seeded, authenticated layout but **are not interactive**. They do not prove end-to-end behavior, permissions, animations or native iOS rendering. Native iOS implementation and physical-device acceptance remain incomplete during the current development and automatic Xcode validation pause; this preview provides no native acceptance evidence. A separate browser scan of the real interactive URLs would only examine the sign-in state in a new unauthenticated browser; do not count that as an editor audit.
 
 On exit (`Ctrl+C`) the script stops its API, removes its PostgreSQL container and temporary server state, and deletes the active scan session file. Screenshots and reports stay under `artifacts/` until removed. On an abnormal hard shutdown, find orphaned local containers using `docker ps --filter label=dev.codexia.purpose=ui-preview` (or `podman ps ...`), and stop only the identified preview container.
 
@@ -54,7 +54,7 @@ Options include `--port 4173`, `--profile core|full`, `--engine auto|docker|podm
 - **`EUNSUPPORTEDPROTOCOL workspace:*`**: do not use npm install. Run `corepack pnpm install --frozen-lockfile` at the repository root.
 - **Vite's `browser-modules` import missing**: do not start Vite directly. The preview build calls the canonical profile generator before serving UI.
 - **`ERR_CONNECTION_REFUSED` or blank scan JSON**: confirm the preview command is still running and `ui:scan` sees its matching snapshot session. The scanner rejects a failed URL scan.
-- **`PostgreSQLへ接続できません (404)`**: the Vite-only port is not an API server. Use the preview port (`4173` by default), which serves the API and both built UIs from one origin.
+- **`PostgreSQLへ接続できません (404)`**: the Vite-only port is not an API server. Use the preview port (`4173` by default), which serves the API and Desktop UI from one origin.
 - **Browser capture failed**: install Chromium as above, then retry `ui:preview`, or use `ui:preview --no-capture` temporarily for API diagnosis.
 - **Port already in use**: `corepack pnpm ui:preview --port 4181`; the scanner discovers the snapshot port from the running session.
 

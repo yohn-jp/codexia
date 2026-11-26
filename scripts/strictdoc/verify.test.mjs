@@ -16,7 +16,61 @@ import {
   validateObligationDesignRefs,
   validateRequirementNodes,
   validateRelations,
+  projectTraceabilityGates,
 } from './verify.mjs';
+
+test('projects unauthenticated or incomplete gates as partial and preserves missing case evidence', () => {
+  const gates = projectTraceabilityGates({
+    requirementNodes: [{ UID: 'REQ-API-001', 'Test IDs': 'TEST-API-001 TEST-API-002' }],
+    obligationTrace: { violations: [], gaps: ['OBL-REQ-API-001-O01: no exact-source run evidence'] },
+    reverseTrace: { violations: [], gaps: ['surface link missing'] },
+    caseExecutions: [{ testId: 'TEST-API-001', result: 'SKIPPED' }],
+    run: { status: 'NOT_RUN' },
+  });
+  assert.equal(gates.G0.status, 'PARTIAL');
+  for (const id of ['G1', 'G2', 'G3', 'G4', 'G6']) assert.equal(gates[id].status, 'NOT_RUN');
+  assert.equal(gates.G7.status, 'PARTIAL');
+  assert.equal(gates.G7.runStatus, 'NOT_RUN');
+  assert.deepEqual(gates.G7.unresolvedCases, ['TEST-API-001', 'TEST-API-002']);
+  assert.equal(gates.G7.publisherStatus, 'NOT_PUBLISHED');
+  assert.equal(gates.G7.gapCount, 2);
+});
+
+test('blocks the trace gate when relation validation finds injected defects', () => {
+  const gates = projectTraceabilityGates({
+    requirementNodes: [],
+    obligationTrace: { violations: ['duplicate UID'], gaps: [] },
+    reverseTrace: { violations: [], gaps: [] },
+    caseExecutions: [], run: { status: 'NOT_RUN' },
+  });
+  assert.equal(gates.G7.status, 'BLOCKED');
+});
+
+test('fault injection rejects stale route, tool, and database classifications removed from source inventory', () => {
+  const violations = validateInventory({ routes: [], tools: [], databaseObjects: [] }, [
+    { kind: 'route', id: 'GET /api/removed', classification: 'REQ-API-001' },
+    { kind: 'tool', id: 'removed_tool', classification: 'REQ-MCP-001' },
+    { kind: 'databaseObject', id: 'public.removed_table', classification: 'REQ-DATA-001' },
+  ]);
+  assert.deepEqual(violations, [
+    'Stale inventory classification for route GET /api/removed',
+    'Stale inventory classification for tool removed_tool',
+    'Stale inventory classification for databaseObject public.removed_table',
+  ]);
+});
+
+test('missing S3 receipt remains a blocked trace limitation and G5 remains NOT_RUN', () => {
+  const gates = projectTraceabilityGates({
+    requirementNodes: [], obligationTrace: { violations: [], gaps: [] },
+    reverseTrace: { violations: [], gaps: [{ kind: 'BLOCKED', provenance: 'Discovery limitation', area: 'backup-receipt', reason: 'No run-bound S3 receipt or isolated restore result.' }] },
+    caseExecutions: [], run: { status: 'NOT_RUN' },
+  });
+  assert.equal(gates.G4.status, 'NOT_RUN');
+  assert.equal(gates.G5.status, 'NOT_RUN');
+  assert.equal(gates.G7.status, 'PARTIAL');
+  assert.match(JSON.stringify(gates.G7.blockers), /backup-receipt/u);
+  assert.match(JSON.stringify(gates.G7.blockers), /No run-bound S3 receipt/u);
+});
 
 const stableMid = (uid) => createHash('sha256').update(uid).digest('hex').slice(0, 32);
 
@@ -211,6 +265,10 @@ test('requires each TEST-ID to resolve to a declared requirement and a real test
   }];
 
   assert.deepEqual(await validateScenarioNodes(scenarios, [parent], root), []);
+  const authoredRun = await validateScenarioNodes([{
+    ...scenarios[0], 'Exact-run reference': 'https://github.com/yohn-jp/codexia/actions/runs/7',
+  }], [parent], root);
+  assert.match(authoredRun.join('\n'), /authored Exact-run reference must be NOT_RUN/u);
   const broken = [{
     ...scenarios[0],
     'Case name': 'does not exist in the source file',
@@ -219,6 +277,13 @@ test('requires each TEST-ID to resolve to a declared requirement and a real test
   const violations = await validateScenarioNodes(broken, [parent], root);
   assert.match(violations.join('\n'), /missing a parent requirement/i);
   assert.match(violations.join('\n'), /case name.*not found/i);
+  const staleRange = await validateScenarioNodes([{
+    ...scenarios[0], RELATIONS: [
+      { TYPE: 'Parent', VALUE: 'REQ-TRACE-001' },
+      { TYPE: 'File', VALUE: 'case.test.mjs', LINE_RANGE: '10, 10' },
+    ],
+  }], [parent], root);
+  assert.match(staleRange.join('\n'), /Case name was not found within its declared test source line range/u);
 });
 
 test('requires complete exact GitHub run identity when running in Actions', () => {

@@ -69,7 +69,7 @@ StrictDocが直接扱えるsource-file/range relationを優先し、正本内に
 | TRC-02 | Markdown parse→HTML/JSON→同一入力から再生成 | **LOCAL_PASS**: StrictDoc 0.32.1のHTML/JSONを2回生成し比較。HTML検索timestamp、確認済みMarkdown document MID、検索index key順とunordered membership順のみを正規化し、membership値と他の出力を保持 |
 | TRC-03 | REQ→設計→実装surface→obligation | **PARTIAL**: File relationのpath/rangeと明示したtyped surface identifierを検査する。生成Fastify routeのOperation ID、test caseの宣言名・source/rangeを保持する。意味的な実装適合、全obligationに対するsymbol AST coverageは未証明 |
 | TRC-04 | 実装側の逆引き | **PARTIAL**: bounded scanからHTTP method/path、MCP tool、DB object、Desktop UI control、Native iOS SwiftUI view、Terraform resource、Ansible source、GitHub Actions workflow定義を `reverseTrace` に記録する。workflow定義は実行済みjob/runを意味しない。surface inventoryの分類と候補REQはaccepted relationと分離し、未分類・対応未接続surfaceも表示する。動的登録、全migration/live DB、実画面・実機挙動、適用済みIaC、host実行、隔離復元は静的source scanでは証明しない。 |
-| TRC-05 | TEST→CI exact source evidence | Node fault-injectionとPlaywright static-page testはローカル実測済み。GitHub run/source SHA/task/artifact identityをreportに記録し、hosted resultは当該PRの実際のVerify runで判定 |
+| TRC-05 | TEST→CI exact source evidence | 登録ケースの宣言名・source path・行範囲を実行結果と照合する。Pages は同一 SHA の Verify 認定を確認できたケースに run・attempt・artifact ID・digest を表示する。証拠を取得できないケースは未検証として残す。 |
 | TRC-06 | 重複UID・切れた参照・inventory欠落・不正MIDへの故障注入 | **LOCAL_PASS**: `verify.test.mjs`の負例を実行。legacy product behaviorの適合試験とは区別 |
 | TRC-07 | Repository Audit Pagesに静的サイトを公開 | StrictDoc HTML/JSONと `/requirements/traceability/` のstatus HTML/JSONを既存の唯一のpublisherが生成する。PR artifactをChromiumで検査し、mainの同じpublisherが公開する。公開URLとsource SHAが一致するまで `PENDING_PAGES_PUBLISH` を維持する。 |
 
@@ -89,6 +89,6 @@ dashboardの検索とarea/status/surface type filterはURL queryへ反映する�
 
 個別義務nodeは`OBL-<REQ-ID>-O01` UID、`Parent` relationからREQ-ID、`Design reference`文字列から設計アンカー、`Test IDs`から明示TEST-IDを受け取る。source anchorは既存StrictDoc `File` relationの`VALUE`と任意の`LINE_RANGE`を使用する。既存TEST nodeは現在のREQ ParentとCase name/File relationを維持し、義務node側の`Test IDs`がその義務との対応を示す。Junit、AST symbol coverage、試験名の類似度から対応づけを作らない。
 
-APIの`runEvidence`は観測済みcase execution候補であり、各値は`testId`, canonical `url`, `repository`, `sourceSha`, `runId`, `attempt`, `job`, `task`, `result`を含む。呼出側は`expectedRepository`と`expectedSourceSha`を指定する。run URL、repository、source SHAの不一致や識別情報不足は違反となる。まだartifact upload前のrunも記録できるためartifact ID/digestはこの候補データに含めない。artifact certificationと最終認定は別の既存jobの責務であり、この投影だけでは行わない。
+APIの`runEvidence`は観測済みcase execution候補であり、各値は`testId`, canonical `url`, `repository`, `sourceSha`, `runId`, `attempt`, `job`, `task`, `result`を含む。呼出側は`expectedRepository`と`expectedSourceSha`を指定する。run URL、repository、source SHAの不一致や識別情報不足は違反となる。まだartifact upload前のrunも記録できるためartifact ID/digestはこの候補データに含めない。既存 Verify の certification job が実行と成果物を認定する。Pages は認定済み run と ZIP の identity を照合して、公開用の要約を生成する。台帳の `Exact-run reference` は `NOT_RUN` を保持し、実行結果は生成レポートから参照する。
 
 故障注入テストは重複義務UID、切れたTEST-ID、repository外source path、不一致repository、exact-source実行の欠落を検査する。testの存在だけ、または成功結果だけでは要求の適合を証明しない。

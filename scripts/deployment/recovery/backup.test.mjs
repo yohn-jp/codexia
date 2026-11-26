@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -55,6 +55,67 @@ function invokeBackup(fixture, { activeUnits = '', approved = true, lockFile = f
       CODEXIA_TEST_ACTIVE_UNITS: activeUnits,
     },
   });
+}
+
+async function installFingerprintBackupCommands(fixture, { database, history }) {
+  const dbCalls = path.join(fixture.directory, 'database-fingerprint-calls');
+  const historyCalls = path.join(fixture.directory, 'history-fingerprint-calls');
+  await writeFile(path.join(fixture.bin, 'podman'), String.raw`#!/usr/bin/env bash
+set -u
+next_count() {
+  local file="$1" count=0
+  if [[ -f "$file" ]]; then read -r count < "$file"; fi
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$file"
+  printf '%s' "$count"
+}
+case "$1" in
+  volume)
+    case "$2" in
+      exists) exit 0;;
+      export) printf 'history archive';;
+      *) exit 1;;
+    esac
+    ;;
+  container) exit 1;;
+  exec)
+    if [[ "$*" == *"exec psql"* ]]; then
+      count="$(next_count ${shellQuote(dbCalls)})"
+      case ${shellQuote(database)} in
+        empty) :;;
+        nonempty) printf 'database';;
+        mismatch) if (( count == 1 )); then printf 'database'; else printf 'changed database'; fi;;
+        fail-second) if (( count == 2 )); then exit 125; fi;;
+        *) exit 2;;
+      esac
+    else
+      printf 'database dump'
+    fi
+    ;;
+  run)
+    count="$(next_count ${shellQuote(historyCalls)})"
+    case ${shellQuote(history)} in
+      empty) :;;
+      nonempty) printf 'file\n';;
+      mismatch) if (( count == 1 )); then printf 'file\n'; else printf 'changed-file\n'; fi;;
+      fail-second) if (( count == 2 )); then exit 125; fi;;
+      *) exit 2;;
+    esac
+    ;;
+  *) exit 1;;
+esac
+`);
+  await writeFile(path.join(fixture.bin, 'age'), String.raw`#!/usr/bin/env bash
+set -euo pipefail
+output=
+while (($#)); do
+  if [[ "$1" == -o ]]; then output="$2"; shift 2; else shift; fi
+done
+[[ -n "$output" ]]
+cat > "$output"
+`);
+  await chmod(path.join(fixture.bin, 'podman'), 0o700);
+  await chmod(path.join(fixture.bin, 'age'), 0o700);
 }
 
 function invokeValidation(fixture, operation, artifactPath) {
@@ -130,6 +191,70 @@ test('push backup requires a quiesced API and Tunnel', async () => {
   }
 });
 
+test('backup publication accepts successful empty and non-empty history fingerprints', async () => {
+  for (const historyMode of ['empty', 'nonempty']) {
+    const fixture = await createFixture();
+    try {
+      await installFingerprintBackupCommands(fixture, { database: 'nonempty', history: historyMode });
+      const result = invokeBackup(fixture);
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /Encrypted backup committed:/u);
+      const artifacts = await readdir(fixture.backupDestination);
+      assert.equal(artifacts.length, 1);
+      assert.match(artifacts[0], /^codexia-/u);
+      assert.deepEqual((await readdir(path.join(fixture.backupDestination, artifacts[0]))).sort(), [
+        'SHA256SUMS', 'database.dump.age', 'history.tar.age', 'manifest.age',
+      ]);
+    } finally {
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test('backup publication rejects database and history fingerprint mismatches', async () => {
+  for (const scenario of [
+    { database: 'mismatch', history: 'empty', error: /Database changed during backup/u },
+    { database: 'empty', history: 'mismatch', error: /History changed during backup/u },
+  ]) {
+    const fixture = await createFixture();
+    try {
+      await installFingerprintBackupCommands(fixture, { database: scenario.database, history: scenario.history });
+      const result = invokeBackup(fixture);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, scenario.error);
+      assert.doesNotMatch(result.stdout, /Encrypted backup committed:/u);
+      assert.deepEqual(await readdir(fixture.backupDestination), []);
+    } finally {
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test('backup publication rejects exit-125 fingerprint rereads with no output', async () => {
+  const results = [];
+  const fixtures = [];
+  try {
+    for (const scenario of [
+      { database: 'fail-second', history: 'empty', error: /database fingerprint/u },
+      { database: 'empty', history: 'fail-second', error: /history fingerprint/u },
+    ]) {
+      const fixture = await createFixture();
+      fixtures.push(fixture);
+      await installFingerprintBackupCommands(fixture, { database: scenario.database, history: scenario.history });
+      const result = invokeBackup(fixture);
+      results.push({ result, fixture, expectedError: scenario.error });
+    }
+    assert.deepEqual(results.map(({ result }) => result.status), [1, 1]);
+    for (const { result, fixture, expectedError } of results) {
+      assert.match(result.stderr, expectedError);
+      assert.doesNotMatch(result.stdout, /Encrypted backup committed:|Published checksum manifest sha256:/u);
+      assert.deepEqual(await readdir(fixture.backupDestination), []);
+    }
+  } finally {
+    await Promise.all(fixtures.map(fixture => rm(fixture.directory, { recursive: true, force: true })));
+  }
+});
+
 test('backup rejects calls without explicit host-lock approval', async () => {
   const fixture = await createFixture();
   try {
@@ -176,7 +301,7 @@ test('fingerprint-locked returns canonical hashes only with the quiesced host lo
   }
 });
 
-test('restore drill checks the candidate ledger only against verified scratch storage', async () => {
+test('restore drill verifies fingerprints before success evidence or candidate-ledger proof', async () => {
   const fixture = await createFixture();
   try {
     const archive = fixture.backupDestination;
@@ -184,10 +309,10 @@ test('restore drill checks the candidate ledger only against verified scratch st
     const commands = path.join(fixture.directory, 'commands.jsonl');
     const scratch = path.join(fixture.directory, 'resources.json');
     const digest = contents => createHash('sha256').update(contents).digest('hex');
-    const manifest = ['codexia-backup/v2', digest('restored database'), digest('restored history')].join('\n');
-    const contents = [['database.dump.age', 'database dump'], ['history.tar.age', 'history archive'], ['manifest.age', manifest]];
-    for (const [name, bytes] of contents) await writeFile(path.join(archive, name), bytes);
-    await writeFile(path.join(archive, 'SHA256SUMS'), contents.map(([name, bytes]) => `${digest(bytes)}  ${name}\n`).join(''));
+    const originalContents = [
+      ['database.dump.age', 'database dump'], ['history.tar.age', 'history archive'],
+      ['manifest.age', ['codexia-backup/v2', digest('restored database'), digest('restored history')].join('\n')],
+    ];
     await writeFile(identity, 'fixture recovery identity', { mode: 0o600 });
     await writeFile(path.join(fixture.bin, 'age'), '#!/bin/sh\nexec cat -- "$4"\n');
     await writeFile(path.join(fixture.bin, 'podman'), `#!/usr/bin/env node
@@ -205,17 +330,37 @@ if (verb === 'volume' && action === 'create') state.resources[args.at(-1)] = id(
 else if (verb === 'volume' && action === 'inspect' || verb === 'inspect') {
   process.stdout.write(args.includes('{{.HostConfig.NetworkMode}}') ? 'none' : state.resources[args.at(-1)]);
 } else if (verb === 'run' && action === '-d') state.resources[args[args.indexOf('--name') + 1]] = id(args[args.indexOf('--label') + 1]);
-else if (verb === 'run' && args.includes('/bin/bash')) process.stdout.write('restored history');
+else if (verb === 'run' && args.includes('/bin/bash')) {
+  if (process.env.DRILL_FIXTURE_FAIL_HISTORY_FINGERPRINT) process.exit(125);
+  if (!process.env.DRILL_FIXTURE_EMPTY_HISTORY) {
+    process.stdout.write(process.env.DRILL_FIXTURE_WRONG_HISTORY ? 'wrong history' : 'restored history');
+  }
+}
 else if (verb === 'run' && args.at(-1).includes('verifyPostgresSchema')) process.stdout.write(process.env.DRILL_FIXTURE_LEDGER + '\\n');
-else if (verb === 'exec' && args.includes('sh')) process.stdout.write(process.env.DRILL_FIXTURE_BAD_RESTORE ? 'wrong database' : 'restored database');
+else if (verb === 'exec' && args.includes('sh')) {
+  if (process.env.DRILL_FIXTURE_FAIL_DATABASE_FINGERPRINT) process.exit(125);
+  if (!process.env.DRILL_FIXTURE_EMPTY_DATABASE) {
+    process.stdout.write(process.env.DRILL_FIXTURE_BAD_RESTORE ? 'wrong database' : 'restored database');
+  }
+}
 else if (verb === 'rm' || verb === 'volume' && action === 'rm') delete state.resources[args.at(-1)];
 save();
 `);
     const candidate = `ghcr.io/yohn-jp/codexia-backend@sha256:${'a'.repeat(64)}`;
     const ledger = 'sha256:' + 'b'.repeat(64);
-    const run = async (options, { wrongDatabase = false, ledgerResult = ledger } = {}) => {
+    const run = async (options, {
+      wrongDatabase = false, wrongHistory = false, emptyDatabase = false, emptyHistory = false,
+      failDatabaseFingerprint = false, failHistoryFingerprint = false, ledgerResult = ledger,
+    } = {}) => {
       await writeFile(scratch, JSON.stringify({ resources: {} }));
       await writeFile(commands, '');
+      const manifest = ['codexia-backup/v2', digest(emptyDatabase ? '' : 'restored database'),
+        digest(emptyHistory ? '' : 'restored history')].join('\n');
+      const contents = [
+        ['database.dump.age', 'database dump'], ['history.tar.age', 'history archive'], ['manifest.age', manifest],
+      ];
+      for (const [name, bytes] of contents) await writeFile(path.join(archive, name), bytes);
+      await writeFile(path.join(archive, 'SHA256SUMS'), contents.map(([name, bytes]) => `${digest(bytes)}  ${name}\n`).join(''));
       const result = spawnSync('bash', [backupProgram, 'drill', archive, identity, '--approved', ...options], {
         encoding: 'utf8',
         env: {
@@ -223,6 +368,11 @@ save();
           PATH: `${fixture.bin}:${process.env.PATH}`,
           DRILL_FIXTURE_RESOURCES: scratch, DRILL_FIXTURE_COMMANDS: commands,
           DRILL_FIXTURE_LEDGER: ledgerResult, DRILL_FIXTURE_BAD_RESTORE: wrongDatabase ? '1' : '',
+          DRILL_FIXTURE_WRONG_HISTORY: wrongHistory ? '1' : '',
+          DRILL_FIXTURE_EMPTY_DATABASE: emptyDatabase ? '1' : '',
+          DRILL_FIXTURE_EMPTY_HISTORY: emptyHistory ? '1' : '',
+          DRILL_FIXTURE_FAIL_DATABASE_FINGERPRINT: failDatabaseFingerprint ? '1' : '',
+          DRILL_FIXTURE_FAIL_HISTORY_FINGERPRINT: failHistoryFingerprint ? '1' : '',
         },
       });
       assert.deepEqual(JSON.parse(await readFile(scratch, 'utf8')).resources, {});
@@ -263,6 +413,30 @@ save();
     assert.match(wrongDatabase.stderr, /Restored database logical fingerprint mismatch/u);
     assert.equal(wrongDatabase.calls.filter(call => call.includes(candidate)).length, 0);
 
+    const wrongHistory = await run([], { wrongHistory: true });
+    assert.equal(wrongHistory.status, 1);
+    assert.match(wrongHistory.stderr, /Restored history fingerprint mismatch/u);
+    assert.doesNotMatch(wrongHistory.stdout,
+      /Isolated restore verified:|Verified checksum manifest sha256:|Verified database logical sha256:|Verified history logical sha256:|Isolated candidate ledger verified:/u);
+
+    const emptyRestore = await run([], { emptyDatabase: true, emptyHistory: true });
+    assert.equal(emptyRestore.status, 0, emptyRestore.stderr);
+    assert.match(emptyRestore.stdout, /Isolated restore verified: database and history fingerprints match/u);
+
+    const failedDatabaseRead = await run([], {
+      emptyDatabase: true, emptyHistory: true, failDatabaseFingerprint: true,
+    });
+    const failedHistoryRead = await run([], {
+      emptyDatabase: true, emptyHistory: true, failHistoryFingerprint: true,
+    });
+    assert.deepEqual([failedDatabaseRead.status, failedHistoryRead.status], [1, 1]);
+    assert.match(failedDatabaseRead.stderr, /database fingerprint/u);
+    assert.doesNotMatch(failedDatabaseRead.stdout,
+      /Isolated restore verified:|Verified checksum manifest sha256:|Verified database logical sha256:|Verified history logical sha256:|Isolated candidate ledger verified:/u);
+    assert.match(failedHistoryRead.stderr, /history fingerprint/u);
+    assert.doesNotMatch(failedHistoryRead.stdout,
+      /Isolated restore verified:|Verified checksum manifest sha256:|Verified database logical sha256:|Verified history logical sha256:|Isolated candidate ledger verified:/u);
+
     assert.ok(readOnly.stdout.includes(`Verified database logical sha256: ${digest('restored database')}`));
     assert.ok(readOnly.stdout.includes(`Verified history logical sha256: ${digest('restored history')}`));
     const restoredDb = readOnly.calls.find(call => call[0] === 'run' && call[1] === '-d');
@@ -278,7 +452,12 @@ save();
     assert.equal(mountSetup[mountSetup.indexOf('--volume') + 1], `${scratchHistory}:/history:rw,nocopy`);
     assert.equal(mountSetup[mountSetup.indexOf('--network') + 1], 'none');
 
-    for (const [name, bytes] of contents) assert.equal(await readFile(path.join(archive, name), 'utf8'), bytes);
+    for (const [name, bytes] of originalContents) {
+      await writeFile(path.join(archive, name), bytes);
+      assert.equal(await readFile(path.join(archive, name), 'utf8'), bytes);
+    }
+    await writeFile(path.join(archive, 'SHA256SUMS'),
+      originalContents.map(([name, bytes]) => `${digest(bytes)}  ${name}\n`).join(''));
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }

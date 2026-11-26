@@ -281,6 +281,11 @@ export async function extractJsonEntry(bytes, filename) {
   return json;
 }
 
+export async function readTraceArtifact(bytes) {
+  const [report, traceReport] = await extractJsonEntries(bytes, ['report.json', TRACE_REPORT_ENTRY]);
+  return { group: JSON.parse(report), trace: JSON.parse(traceReport) };
+}
+
 export function assertTraceArtifact(trace, group, identity, repository) {
   const task = 'requirements-trace';
   const url = `https://github.com/${repository}/actions/runs/${identity.runId}`;
