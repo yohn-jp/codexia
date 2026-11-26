@@ -49,6 +49,9 @@ function fixture({ first = false, changeWorker = true, retainedBackendFirstFront
         reactivationStartedAt = timestamp;
         retainedCandidateWorker = request.retainedCandidateWorker;
         reactivationWindow = request.reactivationWindow;
+      } else if (action === 'checkpoint' && phase === 'checkpointed' && retainedBackendFirstFrontend) {
+        reactivationStartedAt = timestamp;
+        reactivationWindow = request.reactivationWindow;
       }
       outcome = request.outcome ?? outcome;
       phase = { admit: 'intent', checkpoint: 'checkpointed', apply: 'candidate-ready',
@@ -245,14 +248,18 @@ test('R7 recovery pins the retained Backend and records the existing checkpoint 
   cut.independent = true;
   cut.expired = true;
   await assert.rejects(advancePair(cut), /expired/u);
-  cut.expired = false;
   assert.deepEqual(calls, ['recover']);
 
-  assert.equal((await advancePair(cut)).status, 'awaiting-functional-acceptance');
-  assert.deepEqual(calls.slice(-3), ['apply', 'open-tunnel', 'deploy']);
+  const window = { id: 'r7-renewal', notBefore: timestamp, notAfter: '2026-11-23T12:10:00.000Z' };
+  const renewal = { window, approval: digestEvidence({ planSha256: approved, window }) };
+  const verifyApproval = () => verifyReactivationWindow(renewal, approved, { now: new Date(timestamp) });
+  const retry = { ...cut, request: { reactivationWindow: verifyApproval() }, verifyApproval };
+  assert.equal((await advancePair(retry)).status, 'awaiting-functional-acceptance');
+  assert.deepEqual(calls.slice(-4), ['checkpoint', 'apply', 'open-tunnel', 'deploy']);
+  assert.deepEqual((await cut.host('observe', {})).reactivationWindow, retry.request.reactivationWindow);
   assert.ok((await cut.verifyIngress()).fence.enabled);
-  accept(cut);
-  assert.equal((await advancePair(cut)).status, 'finished');
+  accept(retry);
+  assert.equal((await advancePair(retry)).status, 'finished');
   assert.ok(!(await cut.verifyIngress()).fence.enabled);
 });
 
