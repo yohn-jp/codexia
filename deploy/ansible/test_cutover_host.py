@@ -448,6 +448,16 @@ class CutoverHostTest(unittest.TestCase):
                       self.invoke("apply", success=False))
         repeated = self.invoke("recover", frontendRetry=True, retainedCandidateWorker=False)
         self.assertEqual(repeated, result)
+        renewal = {"notAfter": "2099-01-01T00:00:00.000Z", "approval": "c" * 64}
+        self.invoke("apply", success=False, reactivationWindow=renewal)
+        self.assertEqual(self.invoke("checkpoint", reactivationWindow=renewal)["status"], "checkpointed")
+        self.assertEqual(self.invoke("observe")["reactivationWindow"], renewal)
+        self.assertIn("durable activation window", self.invoke("apply", success=False))
+        self.input["reactivationWindow"] = renewal
+        self.assertEqual(self.invoke("apply")["status"], "candidate-ready")
+        self.invoke("open-tunnel", outcome="candidate")
+        self.invoke("publishing", outcome="candidate")
+        self.invoke("finish", outcome="candidate")
 
     def test_r7_retained_candidate_worker_marker_can_only_advance_to_true(self):
         self.input.update(candidateIdentity=self.input["priorIdentity"], candidateImage=PRIOR, migration=None,
