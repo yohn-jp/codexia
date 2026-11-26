@@ -2,7 +2,7 @@
 
 手元で校正したい場合はPublishingの書き出しを開き、形式と範囲を選ぶ。
 期限付きで読んでもらいたい場合は、読み取り専用の読者リンクを選ぶ。
-DesktopとMobileでPublishingが使えるときは、同じ作者向けのパネルと状態の語彙を使う。
+Desktop Webでは、作者向けのPublishingパネルから書き出しと読者リンクを操作する。iOSの画面は[SwiftUI設計](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)に従う。
 
 ## 渡す前に確かめる内容
 

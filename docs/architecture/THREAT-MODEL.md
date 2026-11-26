@@ -22,7 +22,7 @@ The `risk_tracking` entries use wildcard patterns to bind each category to its g
 
 ## Ownership and trust boundaries
 
-- **Clients:** Desktop Web is the current supported authoring product; native iOS is the accepted target with development and automatic Xcode validation paused and device acceptance incomplete. Their local draft journals are separate recoverable stores, not manuscript authorities. Retained Mobile React/Capacitor source and dependency remnants are not current product clients.
+- **Clients:** Desktop Web is the current supported authoring product; native iOS is the accepted target with development and automatic Xcode validation paused and device acceptance incomplete. Their local draft journals are separate recoverable stores, not manuscript authorities. Mobile Web and the Capacitor authentication bridge are retired. The [OAuth retirement procedure](IOS-SWIFTUI-ARCHITECTURE.md#7-implementation-slices-and-acceptance-gates) covers historical registrations.
 - **Cloudflare edge:** Workers Static Assets and Tunnel/API ingress route traffic. Access protects the UI entry and never substitutes for Fastify's principal, project, object and effect authorization.
 - **Application and data:** Fastify admission, Better Auth, MCP, shared domain actions, the trusted optional module runtime and the PostgreSQL persistence adapter lead to PostgreSQL as the sole canonical data authority.
 - **Host operations:** Protected GitHub Actions uses Tailscale OIDC, pinned SSH and Ansible to reach the approved host operations path. The web UI, API and MCP adapter do not reach SSH or Ansible.

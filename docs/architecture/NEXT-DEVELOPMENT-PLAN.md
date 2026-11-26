@@ -29,7 +29,7 @@ Codexiaを、原稿の執筆・作品世界の知識管理・物語の整合性�
 | Story UI/API | `story.timeline.query`、`story.world-state.at-scene`、`story.threads.lifecycle`、`story.reader-model.build`、既存Workbench | 新規の並行Storyシステムを作らない |
 | Search | `modules/search` の辞書・索引・自動リンク | Knowledgeと用語辞書の責務整理。重複索引を作らない |
 | Assistant | `assistant.qa`、`continuation`、`reader.reaction`、`stateEvents.draft` 等と文脈・出典・プレビューの実装 | 既存Provider実行を凍結。文脈取得と提案の共通部分のみ再利用し、外部AI/MCPを主経路にする |
-| UI | Desktop/Mobile、共有保存・復旧、可変パネル、Reading | 既存シェルを維持して創作ワークフローを完成させる |
+| UI | Desktop Web、保存・復旧、可変パネル、Reading | Desktop Webで創作ワークフローを完成させる。iOSは[独立したSwiftUI設計](IOS-SWIFTUI-ARCHITECTURE.md)に従う |
 | 交換・復旧 | `codexia-work/v1`、PostgreSQLバックアップ | 作品交換と運用バックアップを区別し、未解決Evidenceを保持 |
 | 配備 | Workers静的UI、Tunnel、Rootless Podman、Quadlet、SHA固定GHCR発行 | Tailscale/SSH/AnsibleのPush型に統一。Kubernetes等への移行は不要 |
 
@@ -78,7 +78,7 @@ Knowledge/Evidenceの統合契約を基礎として、Temporal Story、Narrative
 - ノード・関係・命題を作成し、複数文書の根拠を追加して再起動後に取得できる。本文にない作者設定も登録できる。
 - 別名が同一文字列の複数ノードを指す場合、自動確定せず選択を求める。ノード統合は関係・根拠・履歴を失わない。
 - Anchor前方の編集は位置追従、内部変更は要確認、削除は孤立として表示する。古いRevisionを現在の根拠と偽らない。
-- 日本語IME・ルビ・絵文字を含む実原稿で入力と選択が失われず、Desktop/Mobileで原稿↔Knowledgeの往復ができる。
+- 日本語IME・ルビ・絵文字を含む実原稿で入力と選択が失われず、Desktop Webで原稿とKnowledgeを往復できる。iOS SwiftUIでも実機で同じ作業を確認する。
 - Core-onlyでも手動Knowledge/Evidenceが利用でき、Optionalモジュールの停止によって確定データが失われない。
 
 ### Temporal Story / 世界状態
@@ -132,7 +132,7 @@ Knowledge/Evidenceの統合契約を基礎として、Temporal Story、Narrative
 ## 7. 共通検証・リリースガバナンス
 
 - 検証義務の配置は [Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md)、実行・認証は [CI/CD architecture](../verification/CI-CD.md) に従う。
-- 各機能の必須証拠は、純粋計算のunit、実PostgreSQLでのトランザクション・scope・Revision・障害検証、Desktop/Mobileの実操作、外部AIを使用しないfixture、必要な場合の実サービス検証で構成する。
+- 各機能の必須証拠は、純粋計算のunit、実PostgreSQLでのトランザクション・scope・Revision・障害検証、Desktop Webの実操作、iOS SwiftUIの独立した実機検証、外部AIを使用しないfixture、必要な場合の実サービス検証で構成する。
 - パフォーマンスは統合契約の基準値と同じfixture・profile・環境で比較する。入力、場面切替、保存、参照、解析を分離し、解析をForegroundへ直列化しない。目標数値は基準計測後に設定する。
 - スキーマ変更を発見した場合は変更の理由と互換性を記録する。通常更新へ紛れ込ませず、計画されたメジャーアップデートの運用手順・バックアップ・復旧試験を別途定める。
 - スコープ外: Git永続化/同期、WASMによる再設計、外部Plugin Marketplace、全作品横断の知識統合、汎用イベントバス、Kubernetes、完全オフライン同期、共同編集CRDT、無条件の自動原稿修正。外部Plugin設計は既存別計画に留める。

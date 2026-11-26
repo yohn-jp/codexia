@@ -102,7 +102,7 @@ API/Tunnel quiesce        allowlisted HTTPS egress
 | BKC-T06 | 手動/定期ジョブとdeployが同じhost lockを競合して安全停止。writer quiesce、API/Tunnel復帰、中断回復を実ホストfixtureで検証 |
 | BKC-T07 | 必須S3障害時のdeployment停止、secondary障害時の別保管証明、不明/未設定時のDR未認定を確認 |
 | BKC-T08 | 使い捨てDB/S3互換fixtureで異常系を検証。独立restore hostで暗号文取得→復号→DB/history/認証整合とAPI readinessを証明 |
-| BKC-T09 | Desktop/Mobileの深いURL・戻り・キーボード/320px/WCAG 2.2 AA・IME/原稿下書き保持・owner session失効/通信中断をPlaywrightで確認 |
+| BKC-T09 | Desktopとコンソールの直接URL・戻る操作、キーボード操作・320 CSS pxでの表示・WCAG 2.2 AA、IME・原稿下書き保持、owner session失効・通信中断をPlaywrightで確認 |
 | BKC-T10 | 本番復元/SSH/Ansible/Podman/IAM/Object Lock変更をpublic API経由で要求できず、Web入力から任意副作用を起こせない |
 
 本書を完成させてもコード・本番UI・S3 bucket・role・worker・backup timer・drillが存在する証拠とはならない。導入PRごとにAPI/DB/権限/CIの実測結果を添える。
