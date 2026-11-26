@@ -127,7 +127,7 @@ Source Audit はブランチごとに詳細を展開し、SHA による直リン
 - 上: 固定された`sourceSha`と`tracked`/`eligible`/`extracted`/`excluded`（集計不能なら未取得）、relation種別と抽出条件。Graphifyが認識しなかったものを`0 references`とは呼ばない。
 - 未使用ファイルの推測は禁じる。無参照候補から「実行時/ルート/CI/テスト/動的登録を別証拠で確認する」へ進む**検証チェックポイント**とし、削除判断は設計正本とコードの実到達調査へ委ねる。
 
-**データ契約:** 現在の`graph.json`/`git ls-files`の一致した索引を基礎とし、集約したfile-level graphだけで失われるsymbol-level edgeは**source graphから追加の索引を導出する**。座標・実行時参照・テストとの対応が実際に得られない場合、推測したURL/行番号や「依存なし」表示を作らない。2版比較は両ソースの許可・抽出recipe・欠落を検証した場合に限り有効化する。`/graph/communities.html`の上流HTMLは独立した集約概観として残し、標準hubラベル、同じgraph.jsonの構成要素・関係に基づくクリック可能な詳細パネルを追加する。詳細の索引は既存File Explorerの公開範囲に限定し、描画上限・索引対象外の件数を明記する。
+**データ契約:** 現在の`graph.json`/`git ls-files`の一致した索引を基礎とし、集約したfile-level graphだけで失われるsymbol-level edgeは**source graphから追加の索引を導出する**。座標・実行時参照・テストとの対応が実際に得られない場合、推測したURL/行番号や「依存なし」表示を作らない。2版比較は両ソースの許可・抽出recipe・欠落を検証した場合に限り有効化する。`/graph/communities.html`の上流HTMLは独立した集約概観として残し、標準hubラベルに観測されたファイル/範囲と、同名hubの一意な包含関係による修飾を加え、残る衝突にはsnapshot内IDを付ける。概観・検索・凡例で同じ名称を使用し、同じgraph.jsonの構成要素・関係・confidenceに基づくクリック可能な詳細パネルを追加する。詳細の索引は既存File Explorerの公開範囲に限定し、描画上限・索引対象外の件数を明記する。
 
 ### 図3: ファイル・シンボルを根拠まで追う
 

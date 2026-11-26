@@ -424,8 +424,17 @@ try {
       await page.goto(new URL('graph/communities.html', base).href);
       const communityData = await page.locator('#cx-community-data').textContent().then(JSON.parse);
       assert.equal(communityData.sourceSha, source.sourceSha);
+      assert.equal(new Set(communityData.groups.map(group => group.displayName)).size, communityData.groups.length, 'Overview names must distinguish communities');
+      assert.ok(communityData.groups.some(group => group.context && group.displayName !== group.name), 'Hub labels must include source context');
       const named = communityData.groups.find(group => group.members.length && group.name !== 'Community ' + group.id);
       assert.ok(named, 'At least one indexed community must have a Graphify hub label');
+      const overview = await page.evaluate(id => {
+        const node = RAW_NODES.find(n => n.community === id);
+        const legendIndex = LEGEND.findIndex(entry => entry.cid === id);
+        return { aggregated: node?.member_count != null, label: node && nodesDS.get(node.id).label, legend: document.querySelectorAll('#legend .legend-label')[legendIndex]?.textContent };
+      }, named.id);
+      if (overview.aggregated) assert.equal(overview.label, named.displayName);
+      assert.equal(overview.legend, named.displayName);
       const target = await page.evaluate(id => {
         network.stopSimulation();
         const node = RAW_NODES.find(n => n.community === id);
@@ -439,12 +448,15 @@ try {
       await page.mouse.click(canvas.x + target.x, canvas.y + target.y);
       const inspector = page.locator('#cx-community-dialog');
       await inspector.waitFor({ state: 'visible' });
+      assert.ok(await page.locator('#cx-community-graph canvas').isVisible(), 'Selected members must render as an internal graph');
       assert.equal(new URL(page.url()).searchParams.get('community'), String(named.id));
       assert.match(await page.locator('#cx-community-title').textContent(), /#\d+/);
       await page.reload();
       await inspector.waitFor({ state: 'visible' });
       await page.locator('#cx-edge-direction').selectOption('outgoing');
-      assert.ok(await page.locator('#cx-community-edges').isVisible());
+      const outgoing = communityData.edges.filter(([from, to]) => communityData.nodes[from].community === named.id && communityData.nodes[to].community !== named.id);
+      assert.equal(await page.locator('#cx-community-edges a').count(), 2 * Math.min(60, outgoing.length));
+      if (outgoing.length) assert.ok((await page.locator('#cx-community-edges li').first().textContent()).includes('[' + outgoing[0][3] + ']'));
       const memberLink = page.locator('#cx-community-members a').first();
       const memberURL = new URL(await memberLink.getAttribute('href'), page.url());
       assert.ok(source.files.some(file => file.path === memberURL.searchParams.get('file')));

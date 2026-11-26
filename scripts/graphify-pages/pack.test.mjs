@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { packGraph, summarizeGraph } from './pack.mjs';
 import { EXCLUSION_PATTERNS } from './analysis.mjs';
+import { projectCommunities } from './community-data.mjs';
 
 const sha = 'a'.repeat(40);
 const trackedFiles = new Set(['packages/api/server.ts', 'packages/core/db.ts', 'modules/story/scene.ts']);
@@ -21,7 +22,7 @@ const graph = {
   ],
   links: [
     { source: 'a', target: 'b', relation: 'imports', source_file: 'packages/api/server.ts', source_location: 'L3' },
-    { source: 'a2', target: 'b', relation: 'calls' },
+    { source: 'a2', target: 'b', relation: 'calls', confidence: 'INFERRED' },
     { source: 'c', target: 'a', relation: 'imports' },
     { source: 'a', target: 'a2', relation: 'calls' },
     { source: 'external', target: 'a', relation: 'imports' },
@@ -69,7 +70,8 @@ test('publishes a searchable file explorer and augments the native community gra
   assert.ok(!communityData.nodes.some(node => node.path.includes('private')));
   assert.equal(communityData.nodes.find(node => node.label === 'startServer').symbol, 'packages/api/server.ts::a2');
   assert.equal(communityData.nodes.find(node => node.label === 'server.ts').symbol, null);
-  assert.ok(communityData.edges.some(([from, to, relation]) => communityData.nodes[from].community !== communityData.nodes[to].community && relation === 'calls'));
+  assert.ok(communityData.edges.some(([from, to, relation, confidence]) => communityData.nodes[from].community !== communityData.nodes[to].community && relation === 'calls' && confidence === 'INFERRED'));
+  assert.ok(communityData.edges.some(edge => edge[3] === 'not reported'));
   assert.ok(communityData.edges.some(([from, to, relation]) => communityData.nodes[from].community === communityData.nodes[to].community && relation === 'calls'));
   assert.deepEqual(await readFile(join(published, 'analysis.mjs')), await readFile(new URL('./analysis.mjs', import.meta.url)));
   const explorer = await readFile(join(published, 'index.html'), 'utf8');
@@ -131,4 +133,37 @@ test('validates a same-SHA Graphify candidate inventory and publishes measured c
   await assert.rejects(packGraph(source, join(root, 'invalid-site'), sha, trackedFiles, { ...candidates, sourceSha: 'c'.repeat(40) }), /source SHA/);
   await assert.rejects(packGraph(source, join(root, 'invalid-site'), sha, trackedFiles, { ...candidates, excludes: [] }), /exclusions/);
   await assert.rejects(packGraph(source, join(root, 'invalid-site'), sha, trackedFiles, { ...candidates, files: [...trackedFiles, '../private'] }), /invalid or excluded/);
+});
+
+test('qualifies repeated hubs using observed same-file containment and distinguishes remaining collisions', () => {
+  const path = 'ios/CodexiaTransport/Types.swift';
+  const tracked = new Set([path, 'scripts/verify.yml']);
+  const entries = [
+    ['owner-a', 'Alpha', 0, 'Alpha'], ['owner-b', 'Beta', 0, 'Alpha'],
+    ['key-a', 'CodingKeys', 1, 'CodingKeys'], ['key-b', 'CodingKeys', 2, 'CodingKeys'],
+    ['key-c', 'CodingKeys', 3, 'CodingKeys'], ['key-d', 'CodingKeys', 4, 'CodingKeys'],
+    ['key-e', 'CodingKeys', 5, 'CodingKeys'],
+  ];
+  const source = {
+    nodes: entries.map(([id, label, community, community_name]) => ({ id, label, community, community_name, source_file: path })).concat(
+      [{ id: 'steps', label: 'steps', community: 6, community_name: 'steps', source_file: 'scripts/verify.yml' }],
+    ),
+    links: [
+      { source: 'owner-a', target: 'key-a', relation: 'contains', confidence: 'EXTRACTED' },
+      { source: 'owner-b', target: 'key-b', relation: 'contains', confidence: 'INFERRED' },
+      { source: 'owner-b', target: 'key-e', relation: 'references', confidence: 'AMBIGUOUS' },
+    ],
+  };
+  const result = projectCommunities(source, summarizeGraph(source, sha, tracked));
+  const byId = new Map(result.groups.map(group => [group.id, group]));
+  assert.equal(byId.get(1).displayName, 'Types.swift · Alpha › CodingKeys');
+  assert.equal(byId.get(2).displayName, 'Types.swift · Beta › CodingKeys');
+  assert.equal(byId.get(3).displayName, 'Types.swift · CodingKeys (#3)');
+  assert.equal(byId.get(4).displayName, 'Types.swift · CodingKeys (#4)');
+  assert.equal(byId.get(5).displayName, 'Types.swift · CodingKeys (#5)');
+  assert.equal(byId.get(6).displayName, 'verify.yml · steps');
+  assert.equal(byId.get(1).context, path);
+  assert.equal(byId.get(1).name, 'CodingKeys');
+  assert.equal(new Set(result.groups.map(group => group.displayName)).size, result.groups.length);
+  assert.deepEqual(result.edges.map(edge => edge[3]), ['EXTRACTED', 'INFERRED', 'AMBIGUOUS']);
 });

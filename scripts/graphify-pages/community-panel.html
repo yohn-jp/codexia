@@ -33,7 +33,7 @@
   <header><h1 id="cx-community-title">Community detail</h1><button id="cx-community-close" type="button">Back to overview</button></header>
   <div class="cx-controls"><label for="cx-community-select">Community</label><select id="cx-community-select"></select></div>
   <p id="cx-community-summary" role="status"></p>
-  <p class="cx-note">Hub-derived names and static relationships from Graphify, not confirmed runtime dependencies. Only indexed repository files and their observed edges are shown.</p>
+  <p class="cx-note">Graphify hub names qualified by observed file/scope and containment. Static relationships are not confirmed runtime dependencies. Only indexed repository files and their edges are shown. Solid lines: EXTRACTED; dashed lines: other or unreported confidence.</p>
   <p class="cx-note">Source <code id="cx-community-sha"></code></p>
   <div class="cx-controls"><label for="cx-community-search">Find members</label><input id="cx-community-search" type="search" placeholder="Symbol or file path"><button id="cx-members-prev" type="button">Previous</button><button id="cx-members-next" type="button">Next</button><span id="cx-members-count" role="status"></span></div>
   <div class="cx-detail-grid">
@@ -63,7 +63,7 @@
   const PAGE = 60;
   const EDGE_LIMIT = 250;
   let group, memberPage = 0, edgePage = 0, detailNetwork;
-  const name = item => item.name + ' (#' + item.id + ')' + (item.scope ? ' · ' + item.scope : '');
+  const name = item => item.displayName;
   for (const item of data.groups) {
     const option = document.createElement('option');
     option.value = String(item.id); option.textContent = name(item) + ' · ' + item.members.length + ' indexed';
@@ -116,7 +116,7 @@
     const dark = document.documentElement.getAttribute('data-theme') !== 'light';
     detailNetwork = new vis.Network(host, {
       nodes: visible.map(id => ({ id, label: nodes[id].label, title: nodes[id].path, color: dark ? '#5c8fc1' : '#315d8c', font: { color: dark ? '#f0f0f0' : '#222222' } })),
-      edges: local.slice(0, EDGE_LIMIT).map(([from, to, relation]) => ({ from, to, title: relation, arrows: 'to' })),
+      edges: local.slice(0, EDGE_LIMIT).map(([from, to, relation, confidence]) => ({ from, to, title: relation + ' [' + confidence + ']', arrows: 'to', dashes: confidence !== 'EXTRACTED' })),
     }, { nodes: { shape: 'dot', size: 11 }, edges: { smooth: false }, physics: { stabilization: { iterations: 150 } }, interaction: { hover: true } });
     detailNetwork.on('click', event => { if (event.nodes.length) $('cx-member-' + event.nodes[0])?.focus(); });
   }
@@ -124,9 +124,9 @@
     const edges = edgesByGroup.get(group.id)[$('cx-edge-direction').value];
     edgePage = Math.min(edgePage, Math.max(0, Math.ceil(edges.length / PAGE) - 1));
     const list = $('cx-community-edges'); list.replaceChildren();
-    for (const [from, to, relation] of edges.slice(edgePage * PAGE, (edgePage + 1) * PAGE)) {
+    for (const [from, to, relation, confidence] of edges.slice(edgePage * PAGE, (edgePage + 1) * PAGE)) {
       const item = document.createElement('li'), a = nodes[from], b = nodes[to];
-      item.append(anchor(a), document.createTextNode(' → ' + relation + ' → '), anchor(b));
+      item.append(anchor(a), document.createTextNode(' → ' + relation + ' [' + confidence + '] → '), anchor(b));
       const paths = document.createElement('small'); paths.textContent = a.path + ' → ' + b.path; item.append(paths);
       if (a.community !== b.community) {
         const other = groups.get(String(a.community === group.id ? b.community : a.community));
@@ -148,8 +148,8 @@
     }
     $('cx-community-status').textContent = '';
     select.value = id;
-    $('cx-community-title').textContent = name(group);
-    $('cx-community-summary').textContent = group.members.length + ' indexed / ' + group.total + ' Graphify members · ' + (group.total - group.members.length) + ' outside the published file index';
+    $('cx-community-title').textContent = name(group) + ' · Community #' + group.id;
+    $('cx-community-summary').textContent = 'Graphify hub: ' + group.name + (group.context ? ' · Source context: ' + group.context : '') + ' · ' + group.members.length + ' indexed / ' + group.total + ' Graphify members · ' + (group.total - group.members.length) + ' outside the published file index';
     memberPage = edgePage = 0; $('cx-community-search').value = ''; $('cx-edge-direction').value = 'internal';
     if (!dialog.open) dialog.showModal();
     renderMembers(); renderEdges();
@@ -174,6 +174,25 @@
   // Graphify 0.9.120 exposes these bindings in its native HTML.
   // Register after the upstream selection handler; the standalone inspector still works without it.
   if (typeof vis !== 'undefined' && typeof network !== 'undefined' && typeof nodesDS !== 'undefined') {
+    // The upstream native search reads RAW_NODES and the native legend is
+    // created in LEGEND order. Use textContent for untrusted source labels.
+    const updates = [];
+    for (const node of RAW_NODES) {
+      const item = groups.get(String(node.community));
+      if (!item) continue;
+      node.community_name = name(item);
+      if (node.member_count != null) {
+        node.label = name(item);
+        node.title = name(item) + (item.context ? '\\n' + item.context : '');
+      }
+      updates.push({ id: node.id, label: node.label, title: node.title, community_name: node.community_name });
+    }
+    nodesDS.update(updates);
+    const legendRows = $('legend')?.querySelectorAll('.legend-label') || [];
+    LEGEND.forEach((entry, i) => {
+      const item = groups.get(String(entry.cid));
+      if (item && legendRows[i]) legendRows[i].textContent = name(item);
+    });
     network.on('click', event => {
       if (!event.nodes.length) return;
       const node = nodesDS.get(event.nodes[0]);
