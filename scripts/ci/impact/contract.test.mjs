@@ -14,7 +14,7 @@ const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../../../.github/workflows/verify.yml', import.meta.url), 'utf8'));
 const fullModelWorkflow = parse(readFileSync(new URL('../../../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
 
-test('artifact ZIP consumers install only the frozen CI dependency before loading evidence', () => {
+test('CI evidence consumers install the frozen dependency before loading evidence', () => {
   const installCommand = 'corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts';
   const jobs = {
     'verify.yml': {
@@ -38,6 +38,11 @@ test('artifact ZIP consumers install only the frozen CI dependency before loadin
         'node scripts/deployment/bootstrap/activate-backend.mjs certify'],
       'deploy-production': ['node scripts/release/components/source-gate.mjs backend-deployment',
         'PATH="$RUNNER_TEMP/codexia-ansible/bin:$PATH" node scripts/deployment/bootstrap/activate-backend.mjs admit'],
+    },
+    'publish-oci.yml': {
+      'verify-source': 'node scripts/release/components/verify-source.mjs',
+      publish: ['node scripts/release/components/verify-source.mjs', 'node scripts/verification/artifacts/unpublished-image.mjs'],
+      release: 'node scripts/release/components/verify-source.mjs',
     },
     'push-app-lifecycle.yml': { lifecycle: 'bash deploy/ansible/test-push-app-lifecycle.sh' },
   };
