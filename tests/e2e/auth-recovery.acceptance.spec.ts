@@ -184,7 +184,8 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
   expect(bearerSessions.status()).toBe(403);
   expect(await bearerSessions.json()).toMatchObject({ code: "OWNER_SECURITY_COOKIE_REQUIRED" });
   const unadmittedIdentity = await page.request.get(`${origin}/api/auth/codexia/owner-security/identity`);
-  expect(unadmittedIdentity.status()).toBe(404);
+  expect(unadmittedIdentity.status()).toBe(401);
+  expect(await unadmittedIdentity.json()).toMatchObject({ code: "OWNER_SECURITY_SESSION_REQUIRED" });
 
   await page.getByRole("button", { name: "執筆画面へ戻る", exact: true }).first().click();
   await expect.poll(() => page.url()).toBe(authoringUrl);
