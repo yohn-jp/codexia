@@ -1143,7 +1143,7 @@ export function PersistenceWorkspace({
   );
 
   const openDocument = useCallback(
-    async (nextDocumentId: string, selection?: { intent: number; protect: () => Promise<boolean> }): Promise<boolean> => {
+    async (nextDocumentId: string, selection?: { intent: number; protect: () => Promise<boolean>; replaceRoute?: boolean }): Promise<boolean> => {
       const currentProject = projects.find(item => item.id === projectId);
       const currentJournal = journalRef.current;
       if (sessionBlockedRef.current || !currentProject || !currentJournal || !nextDocumentId) return false;
@@ -1199,7 +1199,7 @@ export function PersistenceWorkspace({
         setEvidenceLoadPending(null);
         selectionRef.current = { projectId: currentProject.id, documentId: nextDocumentId };
         persistSelectionSafely(authorScope, selectionRef.current);
-        updateRouteSelection(selectionRef.current, !selection);
+        updateRouteSelection(selectionRef.current, !selection || selection.replaceRoute === true);
         setDocumentId(nextDocumentId);
         const requested = continueRequestRef.current;
         const position =
@@ -2239,7 +2239,7 @@ export function PersistenceWorkspace({
   }, []);
 
   const selectDocument = useCallback(
-    async (nextId: string, position?: ContinuePosition): Promise<boolean> => {
+    async (nextId: string, position?: ContinuePosition, replaceRoute = false): Promise<boolean> => {
       // The latest explicit selection owns the guard and the target read.
       const intent = beginSelection();
       const isCurrent = () => intent === selectionIntentRef.current && projectId === projectIdRef.current && !sessionBlockedRef.current;
@@ -2253,7 +2253,7 @@ export function PersistenceWorkspace({
           continueRequestRef.current = { projectId, documentId: nextId, intent, position };
           if (!alreadyOpen) setPendingContinue(intent);
         }
-        const opened = alreadyOpen || (await openDocument(nextId, { intent, protect }));
+        const opened = alreadyOpen || (await openDocument(nextId, { intent, protect, replaceRoute }));
         if (!opened && continueRequestRef.current?.intent === intent) continueRequestRef.current = undefined;
         if (opened && position && isCurrent()) setRequestedPanel({ id: 'editor', sequence: ++panelRequestSequenceRef.current });
         return opened && isCurrent();
@@ -2424,6 +2424,18 @@ export function PersistenceWorkspace({
           : null;
       const nextProjectId = target?.projectId ?? '';
       const nextDocumentId = target?.documentId ?? '';
+      if (nextProjectId === projectId && nextDocumentId && nextDocumentId !== documentId) {
+        // History navigation must retain the active editor until the target read
+        // succeeds, just like an outline selection. Do not push a history entry.
+        const pending = selectDocument(nextDocumentId, undefined, true);
+        const intent = selectionIntentRef.current;
+        void pending.then(opened => {
+          if (intent !== selectionIntentRef.current) return;
+          if (opened) setExplicitRouteDocumentId(nextDocumentId);
+          else updateRouteSelection(selectionRef.current, true);
+        });
+        return;
+      }
       const intent = beginSelection();
       if (nextProjectId === projectId && nextDocumentId === documentId) return;
       void (async () => {
@@ -2445,7 +2457,7 @@ export function PersistenceWorkspace({
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [authorScope, beginSelection, documentId, mode, projectId, protectTransition, publishEditor, updateRouteSelection]);
+  }, [authorScope, beginSelection, documentId, mode, projectId, protectTransition, publishEditor, selectDocument, updateRouteSelection]);
 
   async function editStructure(
     update: { title?: string; parentId?: string | null; orderKey?: string },
