@@ -62,6 +62,7 @@ HTTP契約の検証は既存Verifyの `unit-http-contract` と `typecheck-http-c
   エラー級の非互換差分、イベントSHAの欠落、生成物とデプロイ互換設定のepoch不一致で失敗する。初回本番導入に限る epoch 3 → 4 の限定是正は [API contract](../architecture/API-CONTRACT.md) に従い、基準 SHA と変更範囲を照合する。oasdiff 自体は省略しない。
 - Schemathesisは**隔離API**で実行する。書込み可能であるため本番や作者データに接続してはならない。Zod/TypeSpecの正常ケース、status/error/body、security testing、boundary/rate/invalid payload等を補強する。
 - Schemathesisによる拒否確認と、Codexiaのowner-only / MCP-proposal / project-BOLA / write preconditionを別々の独立したテストとして保持する。
+- 静的なOpenAPI形状を満たしても、opaque cursor、条件付きclient identity、アーカイブ参照整合性、ChangeSetの対象・重複・サイズ、自己mergeは業務上不正になり得る。positive-data検査はその場合に限りcanonical validationの予測と実応答のstatus/code/detailを照合する。それ以外は公式positive-data検査を実行する。適用結果を証拠に保持し、実DBの正常系・拒否系の対照試験も必須とする。単なる400の許容、検査対象除外、結果改変は禁止する。
 - HTTP error/codeやoptional responseがTypeSpec上で定義されていない場合、ツールがスキーマを自動修正するのではなくAPI-CONTRACTへ設計決定を戻す。
 
 ## LikeC4・Architecture Atlasのownership

@@ -12,7 +12,7 @@ Codexiaが所有するHTTPのmethodとpath、DTO、header、ステータス、�
 MCP の HTTP 入口は TypeSpec で定義し、JSON-RPC のペイロードは [MCP プロトコル契約](MCP-V2-MIGRATION.md) に従う。
 `POST /mcp` と作品別の POST 入口を公式 SDK に委譲する。
 同じ二つの URL に対する GET と DELETE は、認可されたリクエストにも 405 を返す。
-初回本番導入前の API epoch 4 では persistence の UUID、版番号、必須項目、長さ・範囲制約およびポータブルアーカイブの形状を TypeSpec 正本に記述する。MCP POST の 400 応答は、認可等の ApiError と JSON-RPC parse error の両方を明示する。
+初回本番導入前の API epoch 4 では persistence の UUID、版番号、必須項目、長さ・範囲制約およびポータブルアーカイブの形状を TypeSpec 正本に記述する。MCP POST の 400 応答は、認可等の ApiError と JSON-RPC parse error の両方を明示する。Persistence の JSON body を要求する操作は未対応メディア型に415を返す。opaque cursorはAPIから返された値を使用する。保存はX-Client-Idまたは本文clientIdを必須とし、ChangeSetは7種のnative operationの形状、pathとcommandのproject一致およびwrite identity一意性を要求する。アーカイブの参照整合性、自己merge禁止等の業務制約は静的スキーマとは別に実行時に検証する。
 
 ## 契約境界
 

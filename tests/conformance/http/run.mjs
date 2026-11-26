@@ -5,6 +5,7 @@ import { createServer as createHttpServer, request as httpRequest } from 'node:h
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
+import { verifySemanticControls } from './semantic-controls.mjs';
 import { tmpdir } from 'node:os';
 import { format } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -84,6 +85,8 @@ try {
   report.target.operations.push(`all ${report.openapi.persistenceOperationCount} generated persistence operations`);
   report.target.excludedOperationCount = report.openapi.totalOperationCount - report.openapi.persistenceOperationCount;
 
+  const helperTest = await runProcess(process.execPath, ['--import', 'tsx', '--test', resolve(dirname(fileURLToPath(import.meta.url)), 'semantic-preconditions.test.mjs')]);
+  assert.equal(helperTest.exitCode, 0, helperTest.stdout + helperTest.stderr);
   const base = await executeSchemathesis({
     name: 'baseline',
     schema,
@@ -91,13 +94,14 @@ try {
     token,
     reportDir,
     includePathRegex: '^/api/v1/persistence(?:/|$)',
-    checks: 'not_a_server_error,status_code_conformance,content_type_conformance,response_headers_conformance,response_schema_conformance,positive_data_acceptance,negative_data_rejection',
+    checks: 'not_a_server_error,status_code_conformance,content_type_conformance,response_headers_conformance,response_schema_conformance,codexia_positive_data_acceptance,negative_data_rejection',
     maxExamples: 3,
     expectedFailure: false,
   });
   report.phases.push(base.phase);
   base.phase.gate = validatePhase(base.phase, { expectedExitCode: 0, selected: report.openapi.persistenceOperationCount });
   if (!base.phase.gate.passed) failed = true;
+  report.semanticControls = await verifySemanticControls(fixture.apiOrigin, token);
 
   controlProxy = await startResponseProxy(fixture.apiOrigin, false);
   const control = await executeSchemathesis({
@@ -173,6 +177,13 @@ async function executeSchemathesis({ name, schema, url, token, reportDir, includ
   const cliOutputDir = await mkdtemp(resolve(tmpdir(), 'codexia-http-schemathesis-'));
   const jsonPath = resolve(cliOutputDir, 'report.json');
   const harPath = resolve(cliOutputDir, 'report.har.json');
+  const semanticEvidence = resolve(cliOutputDir, 'semantic-rejections.jsonl');
+  const customPositive = name === 'baseline';
+  const hookEnv = customPositive ? {
+    SCHEMATHESIS_HOOKS: resolve(dirname(fileURLToPath(import.meta.url)), 'codexia_checks.py'),
+    CODEXIA_HTTP_SEMANTIC_EVIDENCE: semanticEvidence,
+  } : {};
+  if (customPositive) await writeFile(semanticEvidence, '');
   const args = [
     ...schemathesisPrefix, 'run', schema,
     '--url', url,
@@ -195,11 +206,12 @@ async function executeSchemathesis({ name, schema, url, token, reportDir, includ
     '-H', `Authorization: Bearer ${token}`,
   ];
   try {
-    const result = await runProcess(schemathesisCommand, args, cliOutputDir);
+    const result = await runProcess(schemathesisCommand, args, cliOutputDir, hookEnv);
     const safeLog = redactSensitive(`${result.stdout}\n${result.stderr}`, [token, databaseUrl]);
     await writeFile(logPath, safeLog);
     await copyRedactedFile(jsonPath, outputJsonPath, [token, databaseUrl]);
     if (recordHar) await copyRedactedFile(harPath, outputHarPath, [token, databaseUrl]);
+    if (customPositive) await copyRedactedFile(semanticEvidence, resolve(reportDir, 'semantic-rejections.jsonl'), [token, databaseUrl]);
     const phase = {
       name,
       target: new URL(url).origin,
@@ -208,6 +220,7 @@ async function executeSchemathesis({ name, schema, url, token, reportDir, includ
       passedExpectation: expectedFailure ? result.exitCode !== 0 : result.exitCode === 0,
       report: `${name}.schemathesis.json`,
       ...(recordHar ? { har: `${name}.har.json` } : {}),
+      ...(customPositive ? { semanticRejections: 'semantic-rejections.jsonl' } : {}),
       log: `${name}.log`,
       totals: await extractTotals(outputJsonPath),
     };
@@ -366,9 +379,9 @@ function redactSensitive(value, values) {
   return result;
 }
 
-async function runProcess(command, args, cwd = root) {
+async function runProcess(command, args, cwd = root, extraEnv = {}) {
   const childEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) => name !== 'GH_TOKEN' && name !== 'GITHUB_TOKEN'));
-  const child = spawn(command, args, { cwd, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(command, args, { cwd, env: { ...childEnv, ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'] });
   const stdout = [];
   const stderr = [];
   child.stdout.on('data', chunk => stdout.push(chunk));

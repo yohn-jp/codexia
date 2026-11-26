@@ -1362,12 +1362,100 @@ model ProjectResponse {
   ...Record<never>;
 }
 
+@minLength(1) @maxLength(512) @pattern(".*\\S.*")
+scalar NativeOperationText extends string;
+
+model NativeKnowledgeNodeSaveRequest {
+  type: "knowledge.node.save";
+  command: {
+    projectId: PersistenceId; id: PersistenceId; type: NativeOperationText; name: NativeOperationText;
+    attributes: JsonObject; status: "proposed" | "confirmed" | "retired"; expectedVersion: PositiveVersion | null;
+    ...Record<never>;
+  };
+  ...Record<never>;
+}
+
+model NativeKnowledgeAliasSaveRequest {
+  type: "knowledge.alias.save";
+  command: {
+    projectId: PersistenceId; id: PersistenceId; nodeId: PersistenceId; surface: NativeOperationText;
+    normalized: NativeOperationText; scope: NativeOperationText | null; status: "proposed" | "confirmed" | "ambiguous" | "retired";
+    ...Record<never>;
+  };
+  ...Record<never>;
+}
+
+model NativeKnowledgeRelationSaveRequest {
+  type: "knowledge.relation.save";
+  command: {
+    projectId: PersistenceId; id: PersistenceId; sourceId: PersistenceId; targetId: PersistenceId;
+    type: NativeOperationText; attributes: JsonObject; validity: JsonObject;
+    status: "proposed" | "confirmed" | "rejected" | "retired"; expectedVersion: PositiveVersion | null;
+    ...Record<never>;
+  };
+  ...Record<never>;
+}
+
+model NativeEvidenceAnchorSaveRequest {
+  type: "evidence.anchor.save";
+  command: {
+    projectId: PersistenceId; id: PersistenceId; documentId: PersistenceId; revisionId: PersistenceId;
+    @minValue(0) fromUtf16: int32; @minValue(1) toUtf16: int32; @pattern("^[0-9a-f]{64}$") quoteSha256: string;
+    status: "proposed" | "confirmed" | "needs_review" | "orphaned"; expectedVersion: PositiveVersion | null;
+    ...Record<never>;
+  };
+  ...Record<never>;
+}
+
+model NativeEvidenceMentionSaveRequest {
+  type: "evidence.mention.save";
+  command: {
+    projectId: PersistenceId; evidenceId: PersistenceId; nodeId: PersistenceId;
+    source: NativeOperationText; confidence: UnitConfidence | null; extractorVersion: NativeOperationText | null;
+    status: "proposed" | "confirmed" | "ambiguous" | "rejected";
+    ...Record<never>;
+  };
+  ...Record<never>;
+}
+
+model NativeEvidenceAssertionSaveRequest {
+  type: "evidence.assertion.save";
+  command: {
+    projectId: PersistenceId; id: PersistenceId; proposition: JsonObject; modality: NativeOperationText;
+    perspective: NativeOperationText; narrativeTime: JsonObject; confidence: UnitConfidence | null;
+    status: "proposed" | "confirmed" | "rejected" | "retired"; expectedVersion: PositiveVersion | null;
+    ...Record<never>;
+  };
+  ...Record<never>;
+}
+
+model NativeEvidenceAssertionLinkRequest {
+  type: "evidence.assertion.link";
+  command: {
+    projectId: PersistenceId; assertionId: PersistenceId; evidenceId: PersistenceId;
+    role: "supports" | "contradicts" | "quotes" | "context";
+    ...Record<never>;
+  };
+  ...Record<never>;
+}
+
+union NativeChangeSetOperationRequest {
+  nativeKnowledgeNodeSave: NativeKnowledgeNodeSaveRequest,
+  nativeKnowledgeAliasSave: NativeKnowledgeAliasSaveRequest,
+  nativeKnowledgeRelationSave: NativeKnowledgeRelationSaveRequest,
+  nativeEvidenceAnchorSave: NativeEvidenceAnchorSaveRequest,
+  nativeEvidenceMentionSave: NativeEvidenceMentionSaveRequest,
+  nativeEvidenceAssertionSave: NativeEvidenceAssertionSaveRequest,
+  nativeEvidenceAssertionLink: NativeEvidenceAssertionLinkRequest,
+}
+
 model ProposeChangeSetRequest {
   @minValue(1)
   projectVersion: int32;
   @minItems(1)
   @maxItems(50)
-  operations: JsonObject[];
+  @doc("Every command targets the path project; native write identities are unique, and operations are limited to 256,000 UTF-8 JSON bytes.")
+  operations: NativeChangeSetOperationRequest[];
   ...Record<never>;
 }
 
