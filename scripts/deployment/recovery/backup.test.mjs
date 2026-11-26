@@ -135,30 +135,40 @@ test('the protected run shares the deploy lock and recovers both services after 
     FIXTURE: fixture.directory,
     PATH: fixture.bin + ':' + process.env.PATH,
   };
-  const invoke = (setup, args) => spawnSync('bash', [
-    '-c', setup + '\nexport RUNNER_PID=$$\nexec bash "$@"', 'fixture', backupRunner, ...args,
-  ], { encoding: 'utf8', env, timeout: 10_000 });
-  const contention = invoke('exec 8>>"$CODEXIA_PUSH_STATE_DIR/host.lock"; flock -n 8', [run]);
+  const invoke = (mode, ...args) => spawnSync('/bin/bash', [
+    '-c', 'if [[ "$1" == lock ]]; then exec 8>>"$CODEXIA_PUSH_STATE_DIR/host.lock"; flock -n 8 || exit; fi\n' +
+      'shift\nexport RUNNER_PID=$$\nexec /bin/bash "$@"', 'fixture', mode, backupRunner, ...args,
+  ], {
+    encoding: 'utf8',
+    env: {
+      ...env,
+      KILL_RUNNER: mode === 'before-publication' ? '1' : '0',
+      KILL_PUBLISHED: mode === 'after-publication' ? '1' : '0',
+      KILL_UPLOAD: mode === 'during-upload' ? '1' : '0',
+    },
+    timeout: 10_000,
+  });
+  const contention = invoke('lock', run);
   assert.equal(contention.status, 75, contention.stderr);
   assert.equal(await readFile(trace, 'utf8'), '');
 
-  const killed = invoke('export KILL_RUNNER=1', [run]);
+  const killed = invoke('before-publication', run);
   assert.equal(killed.signal, 'SIGKILL', killed.stderr);
   assert.deepEqual((await readFile(trace, 'utf8')).trim().split('\n'), ['manual-start ' + run + ' ' + source + ' ' + digest, 'backup']);
-  const recovered = invoke('', ['recover']);
+  const recovered = invoke('recover', 'recover');
   assert.equal(recovered.status, 0, recovered.stderr);
   assert.match(await readFile(trace, 'utf8'), new RegExp('manual-interrupted ' + run));
   await Promise.all(['api', 'tunnel'].map(name => readFile(path.join(fixture.directory, name))));
 
-  const publicationKilled = invoke('export KILL_PUBLISHED=1', [publishedRun]);
+  const publicationKilled = invoke('after-publication', publishedRun);
   assert.equal(publicationKilled.signal, 'SIGKILL', publicationKilled.stderr);
-  const publicationRecovered = invoke('', ['recover']);
+  const publicationRecovered = invoke('recover', 'recover');
   assert.equal(publicationRecovered.status, 0, publicationRecovered.stderr);
   assert.match(await readFile(trace, 'utf8'), new RegExp('manual-finish ' + publishedRun + ' .+ ' + manifest));
 
-  const transferKilled = invoke('export KILL_UPLOAD=1', [transferRun]);
+  const transferKilled = invoke('during-upload', transferRun);
   assert.equal(transferKilled.signal, 'SIGKILL', transferKilled.stderr);
-  const completed = invoke('', ['recover']);
+  const completed = invoke('recover', 'recover');
   assert.equal(completed.status, 0, completed.stderr);
   const transfers = (await readFile(trace, 'utf8')).split('\n').filter(line => line.startsWith('manual-finish ' + transferRun));
   assert.equal(transfers.length, 2, 'recovery must retry the same run after local publication');
