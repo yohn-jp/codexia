@@ -1354,7 +1354,7 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 **UID**: OBL-REQ-OPS-002-O01
 **Design reference**: [Update flow](../deployment/UPDATE-FLOW.md)、[CI/CD](../verification/CI-CD.md)
 **Implementation identifiers**: deploy/update-compatibility.json; .github/workflows/backend-release.yml; deploy/ansible/test-push-app-lifecycle.sh
-**Surface identifiers**: iacResource=cloudflare_worker_version.candidate; iacResource=cloudflare_worker.frontend; iacResource=terraform_data.public_oauth_edge_readiness; iacResource=cloudflare_workers_route.frontend; ansibleSource=deploy/ansible/cutover-host.yml; ansibleSource=deploy/ansible/cutover-observe.yml; ansibleSource=deploy/ansible/deploy-lifecycle-fixture.yml; ansibleSource=deploy/ansible/deploy-prepare.yml; ansibleSource=deploy/ansible/deploy-transaction.yml; ansibleSource=deploy/ansible/deploy.yml; ansibleSource=deploy/ansible/verify-deploy-base-runtime.yml
+**Surface identifiers**: iacResource=cloudflare_worker_version.candidate; iacResource=cloudflare_worker.frontend; iacResource=terraform_data.public_oauth_edge_readiness; iacResource=cloudflare_workers_route.frontend; ansibleSource=deploy/ansible/deploy-lifecycle-fixture.yml; ansibleSource=deploy/ansible/deploy-prepare.yml; ansibleSource=deploy/ansible/deploy-transaction.yml; ansibleSource=deploy/ansible/deploy.yml; ansibleSource=deploy/ansible/verify-deploy-base-runtime.yml
 **Test IDs**: TEST-OPS-002-001
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1380,12 +1380,6 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 
 - **Type**: File
   **Path**: deploy/cloudflare/terraform/main.tf
-
-- **Type**: File
-  **Path**: deploy/ansible/cutover-host.yml
-
-- **Type**: File
-  **Path**: deploy/ansible/cutover-observe.yml
 
 - **Type**: File
   **Path**: deploy/ansible/deploy-lifecycle-fixture.yml
@@ -2918,18 +2912,18 @@ Checks source certification rejection in the update handoff with fixtures.
 **Type**: TEST
 **MID**: 39af32e2e1ba0c9596ca11da0ccb83a7
 **UID**: TEST-OPS-003-001
-**Case name**: admits only an independent and timely recovery receipt bound to the stopped source
+**Case name**: restore drill verifies fingerprints before success evidence or candidate-ledger proof
 **Exact-run reference**: NOT_RUN
 
-Checks receipt validation with fixtures. S3 transfer and isolated restore execution still require evidence.
+Checks restore proof and candidate-ledger verification with fixtures. Live S3 transfer and independent restore execution still require evidence.
 
 **Relations**:
 
 - **Type**: Parent
   **ID**: REQ-OPS-003
 - **Type**: File
-  **Path**: scripts/deployment/recovery/epoch-cutover.test.mjs
-  **Lines**: 56, 56
+  **Path**: scripts/deployment/recovery/backup.test.mjs
+  **Lines**: 434, 434
 
 ## TEST-QUAL-001-001
 

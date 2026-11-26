@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 // Read-only certification of a merged PR's source tree; never promote PR bytes here.
 import assert from 'node:assert/strict';
-import { CERTIFICATION_DEPENDENCIES, DEPLOYMENT_FIXTURE_CALLER } from '../impact/contract.mjs';
+import { CERTIFICATION_DEPENDENCIES } from '../impact/contract.mjs';
 import { execFileSync } from 'node:child_process';
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateVerificationPlan, planDigest } from '../impact/plan.mjs';
-import { assertDeploymentFixtureJobs, assertPlanEvidence } from '../evidence/validation.mjs';
-import { deploymentImpactForSource } from '../impact/migration-contracts.mjs';
+import { assertPlanEvidence } from '../evidence/validation.mjs';
 import { assertProfileArtifactEvidence } from '../evidence/profile-artifact.mjs';
 import { selectLatestPlanArtifact, selectLatestEvidenceArtifacts, resolveProducerJobAttempts } from '../evidence/artifact-selection.mjs';
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from '../evidence/download-artifacts.mjs';
@@ -201,10 +200,6 @@ export async function readReusableMainEvidence({ sourceSha, before, repository, 
   const plan = await readArtifact(selectedPlan, 'ci-plan.json');
   assertCandidatePlan(plan, candidate);
   assertFullModelJob(plan, jobs);
-  const deploymentFixtures = await deploymentImpactForSource({
-    event: 'push', sha: candidate.sourceSha, base: candidate.base, git,
-  });
-  assertDeploymentFixtureJobs(jobs, deploymentFixtures);
   const evidence = selectLatestEvidenceArtifacts(plan, artifacts, jobs, identity);
   const selected = selectedArtifacts(inventory, evidence.map(item => item.id), identity, 'evidence');
   // Only digest-verified JSON is read. Never restore or execute code from a PR artifact.
@@ -215,7 +210,7 @@ export async function readReusableMainEvidence({ sourceSha, before, repository, 
     ['build-core', 'build-full']);
   assertProfileArtifactEvidence(plan, producerJobs, reports, artifacts, run.id);
   for (const job of jobs.filter(job => job.conclusion === 'skipped')) {
-    assert.ok(job.name === DEPLOYMENT_FIXTURE_CALLER || REUSED_MAIN_SKIPPED_JOBS.includes(job.name), 'Unexpected skipped PR job');
+    assert.ok(REUSED_MAIN_SKIPPED_JOBS.includes(job.name), 'Unexpected skipped PR job');
   }
   const receipt = {
     version: 1, sourceSha, tree: candidate.tree, baseSha: candidate.base, headSha: candidate.head,

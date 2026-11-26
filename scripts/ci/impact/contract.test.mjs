@@ -86,8 +86,8 @@ test('Biome selects shipped JS/TS changes and config, but not unrelated CI or na
 });
 
 test('the certified graph covers every declared obligation within the twenty-two-job cap', () => {
-  assert.ok(REQUIRED_VERIFICATION_JOBS.length + 1 <= 22, 'CI-CD.md caps certification and selected deployment fixtures at twenty-two jobs');
-  assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'deployment_cutover', 'biome', 'unit', 'types', 'build', 'oci', 'browser', 'certification']);
+  assert.ok(REQUIRED_VERIFICATION_JOBS.length + 1 <= 22, 'CI-CD.md caps certification at twenty-two jobs');
+  assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'biome', 'unit', 'types', 'build', 'oci', 'browser', 'certification']);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
@@ -219,7 +219,7 @@ test('browser jobs start from plan while exact producer restore gates execution;
   });
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.jobs.plan.name, 'plan');
-  for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification', 'full_model_oci', 'deployment_cutover', 'biome'].includes(id))) {
+  for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification', 'full_model_oci', 'biome'].includes(id))) {
     assert.deepEqual(job.needs, ['plan'], id);
     assert.match(job.if, /needs\.plan\.result == 'success'/);
     assert.equal(job['continue-on-error'], undefined, id);
@@ -487,7 +487,7 @@ test('active Python installers share the pinned environment recipe and retain th
   const helper = 'scripts/shared/python-env.sh';
   const readWorkflow = name => parse(readFileSync(new URL('../../../.github/workflows/' + name, import.meta.url), 'utf8'));
   const active = ['verify.yml', 'repository-audit.yml', 'ansible-base-secrets.yml', 'ansible-host.yml',
-    'push-host.yml', 'push-app-lifecycle.yml', 'production-bootstrap.yml', 'production-epoch-cutover.yml',
+    'push-host.yml', 'push-app-lifecycle.yml', 'production-bootstrap.yml',
     'production-preflight.yml', 'backend-deployment-handoff.yml', 'deployment-config.yml',
     'full-model-oci-acceptance.yml', 'ios-api.yml'];
   for (const name of active) {

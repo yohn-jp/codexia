@@ -246,7 +246,7 @@ test('selected producer and Full-model evidence must still be valid for full pro
 });
 
 test('compact certification cannot proceed on a failed plan or executed heavy family', () => {
-  const needs = Object.fromEntries(['plan', 'deployment_cutover', 'biome', 'unit', 'types', 'build', 'oci', 'browser'].map(name =>
+  const needs = Object.fromEntries(['plan', 'biome', 'unit', 'types', 'build', 'oci', 'browser'].map(name =>
     [name, { result: name === 'plan' ? 'success' : 'skipped' }]));
   assert.doesNotThrow(() => assertCompactNeeds(needs));
   assert.throws(() => assertCompactNeeds({ ...needs, plan: { result: 'failure' } }));

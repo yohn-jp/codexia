@@ -50,7 +50,6 @@ for mode in full blobless sparse; do
     export CODEXIA_EXPECTED_SHA="$BENCH_HEAD" GITHUB_EVENT_NAME=pull_request GITHUB_EVENT_PATH="$event"
     export CODEXIA_CI_PLAN_PATH="$out/$mode-plan.json"
     node scripts/ci/impact/plan.mjs > "$out/$mode-plan.log"
-    node scripts/ci/impact/migration-contracts.mjs > "$out/$mode-migration.json"
     node --input-type=module -e '
       import {writeFileSync} from "node:fs";
       import {coverageRuntime,coverageInvocation,captureCoverageInputClosure} from "./scripts/ci/evidence/coverage-inputs.mjs";
@@ -67,9 +66,9 @@ for mode in full blobless sparse; do
   after=$(du -sb "$repo/.git/objects" | cut -f1)
   printf '| %s | %s | %s | %s | %s | %s | %s | %s |\n' "$mode" "$(( (fetched-start)/1000000 ))" "$(( (checked-fetched)/1000000 ))" "$(( (finished-checked)/1000000 ))" "$before" "$after" "$count" "$bytes" | tee -a "$GITHUB_STEP_SUMMARY"
   if [[ "$mode" != full ]]; then
-    for kind in plan migration inputs; do
+    for kind in plan inputs; do
       diff -u "$out/full-$kind.json" "$out/$mode-$kind.json"
     done
   fi
 done
-echo 'All three variants: plan, deployment fixture selection, coverage and every task closure identical. Pack bytes are local object storage, not measured network traffic.' | tee -a "$GITHUB_STEP_SUMMARY"
+echo 'All three variants: plan, coverage and every task closure identical. Pack bytes are local object storage, not measured network traffic.' | tee -a "$GITHUB_STEP_SUMMARY"
