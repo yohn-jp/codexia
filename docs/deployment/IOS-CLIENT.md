@@ -8,11 +8,11 @@ Ship an installable **native SwiftUI** iOS application for a personally owned iP
 
 Web static assets remain under Cloudflare Access; the app uses an independently registered **public OAuth/PKCE iOS client** to reach the HTTPS API, subject to the same owner/project/effect authorization. The existing Web same-hostname deployment does **not** yet prove Access-independent API reachability; the required ingress and authorization cutover is governed by [deployment](README.md) and [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.md).
 
-The Mobile Web production route, launcher choice and authoring shell have been removed, and the legacy Capacitor IPA workflow is retired. Remaining old package/test material does not restore Mobile Web support or satisfy native acceptance. The acceptance gates below remain unchanged.
+The Mobile Web production route, launcher choice and authoring shell have been removed. The legacy Capacitor bridge, Ionic dependencies, Mobile Web package scripts and Capacitor IPA workflow have also been removed. The acceptance gates below remain unchanged.
 
 ## Target native packaging
 
-- iOS minimum deployment target: **27.0**. Xcode 27, iOS 27 SDK and ARM64 macOS CI are the accepted target. Explicitly check minimum OS in the app/IPA. SwiftUI screen implementation is separate from the retained legacy `app/native` Capacitor project.
+- iOS minimum deployment target: **27.0**. Xcode 27, iOS 27 SDK and ARM64 macOS CI are the accepted target. Explicitly check minimum OS in the app/IPA. SwiftUI is the only iOS application implementation.
 - Build a SwiftUI executable/IPA from the **exact commit under test**. Record the Xcode/Swift toolchain, dependency lock/resolution, source revision, architectures, bundle ID, entitlements, build status, archive structure, artifact digest and retention policy.
 - Use generated Swift OpenAPI client DTOs from the same TypeSpec-derived OpenAPI 3.1 as Web; dependencies and compiler/toolchain compatibility must be pinned and validated. No iOS API schema fork or embedded credential.
 - Do not put Apple Account credentials, signing certificates, provisioning profiles, OAuth refresh tokens, bearer JWTs or user manuscripts in repository, GitHub Actions artifacts or distributed unsigned binaries.
@@ -20,11 +20,11 @@ The Mobile Web production route, launcher choice and authoring shell have been r
 
 ## Authentication and network
 
-- Prefer a native system authentication flow with exact callback, discovery, PKCE S256, CSRF state, OAuth resource/scope checks and secure Keychain refresh-token rotation. The SwiftUI source uses `ASWebAuthenticationSession`; AppAuth-iOS remains in the legacy Capacitor bridge and may be evaluated for native-only reuse. The Capacitor bridge is not retained solely to preserve it.
+- Prefer a native system authentication flow with exact callback, discovery, PKCE S256, CSRF state, OAuth resource/scope checks and secure Keychain refresh-token rotation. The SwiftUI source uses `ASWebAuthenticationSession`; the retired AppAuth-iOS Capacitor bridge has been removed.
 - Native HTTPS URLSession networking accepts only the configured API origin and approved API paths, rejects cross-origin redirects/ambient cookies, never uses the upstream IdP ID token as an API bearer, and separates the public reader URL origin.
 - Token expiry, cancellation, revoked credentials, API outage, lost response, conflict and logout must preserve recoverable pending drafts. Do not grant the app different API permissions from Desktop.
 - **Sign-out does not revoke already-issued API access tokens.** It clears client-side tokens and attempts the provider's refresh-token/session termination; an individual still-valid access token can be explicitly revoked through the authenticated RFC 7009 endpoint `/api/auth/oauth2/revoke`. Verify revocation separately from UI logout, and preserve unresolved drafts during either operation.
-- The native client must verify job/events streaming rather than inherit the buffering limitation of the legacy Capacitor bridge. The actual capabilities are a native-client acceptance item.
+- The native client must verify job/events streaming; the actual capabilities are a native-client acceptance item.
 
 ## Personal-device signing boundary
 

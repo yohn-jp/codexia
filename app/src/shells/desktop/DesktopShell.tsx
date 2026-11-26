@@ -59,7 +59,7 @@ export function DesktopShell({
             <button
               type="button"
               data-ux-control="PREF-01.A"
-              className="st-studio-mobile-link st-studio-console-link"
+              className="st-studio-console-link"
               onClick={requestConsoleNavigation}
             >
               管理コンソール

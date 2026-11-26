@@ -1,4 +1,4 @@
-/** Source manuscriptPageMetrics behavior retained for the mobile reader. */
+/** Source manuscriptPageMetrics behavior used by responsive paged reading. */
 export const READING_TAP_ZONE_PX = 44;
 
 export function measureColumnPageCount(scrollWidth: number, pageWidth: number): number {

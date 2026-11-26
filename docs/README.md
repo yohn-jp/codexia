@@ -86,7 +86,6 @@ These maintained documents supplement the topic owners above. The classification
 | Governance | [Agent governance](../AGENTS.md) · [Security reporting](../SECURITY.md) | Contributing and disclosure policy; not a second architecture |
 | Product brief | [Product purpose](../app/PRODUCT.md) | Product intent and accepted UX context |
 | Native SwiftUI implementation | [iOS SwiftUI architecture](architecture/IOS-SWIFTUI-ARCHITECTURE.md) | Normative target, currently unimplemented |
-| Legacy packaging | [Capacitor client notes](../app/native/README.md) | Existing code, not normative native target |
 | Authentication provisioning | [Better Auth runbook](../deploy/ansible/AUTH-RUNTIME.md) | Operational procedure |
 | Base deployment | [Ansible deployment](../deploy/ansible/README.md) · [Base runtime](../deploy/ansible/BASE-RUNTIME.md) · [Base secrets](../deploy/ansible/BASE-SECRETS.md) | Operational procedures, subordinate to deployment design |
 | Edge configuration | [Cloudflare Access policy migration](../deploy/cloudflare/terraform/ACCESS-POLICY-MIGRATION.md) | Operational procedure |

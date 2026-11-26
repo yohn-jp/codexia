@@ -28,14 +28,14 @@ function writingTokens(mode: keyof typeof themeTokens) {
   };
 }
 
-createGlobalTheme('.st-desktop-shell, .mobile-shell', shellVars, editorialShellTokens.light);
+createGlobalTheme('.st-desktop-shell', shellVars, editorialShellTokens.light);
 createGlobalTheme(
-  ':root[data-zp-theme="dark"] .st-desktop-shell, :root[data-zp-theme="dark"] .mobile-shell',
+  ':root[data-zp-theme="dark"] .st-desktop-shell',
   shellVars,
   editorialShellTokens.dark,
 );
 createGlobalTheme(
-  ':root[data-zp-theme="paper"] .st-desktop-shell, :root[data-zp-theme="paper"] .mobile-shell',
+  ':root[data-zp-theme="paper"] .st-desktop-shell',
   shellVars,
   editorialShellTokens.paper,
 );

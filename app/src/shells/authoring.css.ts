@@ -1,30 +1,30 @@
 import type { CSSProperties } from '@vanilla-extract/css';
 import { scopedGlobalStyle as globalStyle } from '../styles/scoped-global-style.css';
 
-globalStyle(':is(.st-studio-shell, .mobile-shell)', {
+globalStyle('.st-studio-shell', {
   vars: { '--authoring-control-height': '2.75rem', '--authoring-status-height': '2.25rem' },
 });
-globalStyle(':is(.st-studio-shell, .mobile-shell) .scene-heading', { minWidth: '0' });
-globalStyle(':is(.st-studio-shell, .mobile-shell) .scene-heading :is(h1, .eyebrow)', { overflowWrap: 'anywhere' });
-globalStyle(':is(.st-studio-shell, .mobile-shell) .editor-header', { gap: '0.75rem', flexWrap: 'wrap' });
-globalStyle(':is(.st-studio-shell, .mobile-shell) .writing-toolbar', {
+globalStyle('.st-studio-shell .scene-heading', { minWidth: '0' });
+globalStyle('.st-studio-shell .scene-heading :is(h1, .eyebrow)', { overflowWrap: 'anywhere' });
+globalStyle('.st-studio-shell .editor-header', { gap: '0.75rem', flexWrap: 'wrap' });
+globalStyle('.st-studio-shell .writing-toolbar', {
   display: 'flex',
   flexWrap: 'wrap',
   gap: '0.35rem',
   marginBlock: '0.35rem',
 });
-globalStyle(':is(.st-studio-shell, .mobile-shell) .writing-toolbar button', {
+globalStyle('.st-studio-shell .writing-toolbar button', {
   minHeight: 'var(--authoring-control-height)',
   padding: '0.35rem 0.65rem',
   borderColor: 'transparent',
   color: 'var(--ink)',
   background: 'transparent',
 });
-globalStyle(':is(.st-studio-shell, .mobile-shell) .writing-toolbar button[aria-pressed="true"]', {
+globalStyle('.st-studio-shell .writing-toolbar button[aria-pressed="true"]', {
   borderColor: 'var(--surface-selected-border)',
   background: 'var(--surface-selected)',
 });
-globalStyle(':is(.st-studio-shell, .mobile-shell) :is(.typography-settings, .editor-protection) > summary', {
+globalStyle('.st-studio-shell :is(.typography-settings, .editor-protection) > summary', {
   display: 'flex',
   alignItems: 'center',
   minHeight: 'var(--authoring-control-height)',
@@ -33,15 +33,15 @@ globalStyle(':is(.st-studio-shell, .mobile-shell) :is(.typography-settings, .edi
   cursor: 'pointer',
   fontSize: '0.8rem',
 });
-globalStyle(':is(.st-studio-shell, .mobile-shell) :is(.typography-settings, .editor-protection) > summary::before', {
+globalStyle('.st-studio-shell :is(.typography-settings, .editor-protection) > summary::before', {
   content: '"+"',
   marginRight: '0.5rem',
 });
-globalStyle(':is(.st-studio-shell, .mobile-shell) :is(.typography-settings, .editor-protection)[open] > summary::before', {
+globalStyle('.st-studio-shell :is(.typography-settings, .editor-protection)[open] > summary::before', {
   content: '"−"',
 });
-globalStyle(':is(.st-studio-shell, .mobile-shell) .editor-protection', { position: 'relative', zIndex: '3' });
-globalStyle(':is(.st-studio-shell, .mobile-shell) .editor-protection-detail', {
+globalStyle('.st-studio-shell .editor-protection', { position: 'relative', zIndex: '3' });
+globalStyle('.st-studio-shell .editor-protection-detail', {
   position: 'absolute',
   insetInline: '0',
   top: '100%',
@@ -56,8 +56,8 @@ globalStyle(':is(.st-studio-shell, .mobile-shell) .editor-protection-detail', {
   fontSize: '0.85rem',
   overflowWrap: 'anywhere',
 });
-globalStyle(':is(.st-studio-shell, .mobile-shell) .durability-row', { margin: '0', minHeight: '1.5rem' });
-globalStyle(':is(.st-studio-shell, .mobile-shell) .durability-badge.is-current', {
+globalStyle('.st-studio-shell .durability-row', { margin: '0', minHeight: '1.5rem' });
+globalStyle('.st-studio-shell .durability-badge.is-current', {
   margin: '0',
   padding: '0',
   border: '0',
@@ -67,7 +67,7 @@ globalStyle(':is(.st-studio-shell, .mobile-shell) .durability-badge.is-current',
   fontSize: '0.8rem',
 });
 globalStyle('.st-studio-shell .st-workspace .editor-columns:not(.has-preview)', { gridTemplateColumns: 'minmax(0, 1fr)' });
-globalStyle(':is(.st-studio-shell, .mobile-shell) .preview-column[hidden]', { display: 'none' });
+globalStyle('.st-studio-shell .preview-column[hidden]', { display: 'none' });
 globalStyle('.st-studio-shell .st-workspace .manuscript-column', {
   border: '0',
   boxShadow: 'none',
@@ -90,7 +90,7 @@ globalStyle('.st-workspace-configuration > summary', {
   color: 'var(--muted)',
   fontSize: '0.8rem',
 });
-globalStyle('.st-studio-shell .st-desktop-status,\n.mobile-shell .mobile-shell-status', {
+globalStyle('.st-studio-shell .st-desktop-status', {
   position: 'relative',
   inset: 'auto',
   zIndex: '30',
@@ -119,7 +119,7 @@ globalStyle('.application-status > summary', {
   fontSize: '0.78rem',
 });
 globalStyle('.application-status[data-attention] > summary', { color: 'var(--error-text)', background: 'var(--error-bg)' });
-globalStyle('.st-desktop-status .application-status-content,\n.mobile-shell-status .application-status-content', {
+globalStyle('.st-desktop-status .application-status-content', {
   position: 'absolute',
   bottom: '100%',
   insetInline: '0.5rem',
@@ -136,42 +136,7 @@ globalStyle('.st-desktop-status .application-status-content,\n.mobile-shell-stat
 globalStyle('.application-status-content .topbar-status', { whiteSpace: 'normal', margin: '0', maxWidth: 'none' });
 globalStyle('.application-status-content p', { margin: '0.35rem 0' });
 globalStyle('.st-studio-shell .st-desktop-switch-error', { position: 'absolute', bottom: '100%', insetInline: '0' });
-globalStyle('.mobile-shell .mobile-shell-interaction-error', {
-  position: 'absolute',
-  zIndex: '31',
-  bottom: '8rem',
-  insetInline: '0.5rem',
-  maxHeight: '30dvh',
-  overflow: 'auto',
-});
-globalStyle('.mobile-shell .st-workspace-configuration .st-workspace-toolbar', { flexWrap: 'wrap' });
-globalStyle('.mobile-shell :is(.st-workspace-message, .st-workspace-storage-state)', {
-  display: 'block',
-  flex: '0 0 1.6rem',
-  height: '1.6rem',
-  overflow: 'auto',
-  margin: '0',
-  padding: '0.2rem 0.7rem',
-  lineHeight: '1.2',
-});
-globalStyle('.mobile-shell .st-workspace-configuration > summary', { minHeight: '2.75rem', display: 'flex', alignItems: 'center' });
-globalStyle('.mobile-shell .st-workspace-mobile-tabs', { margin: '0', padding: '0.25rem 0.5rem' });
-globalStyle('.mobile-shell .st-workspace-mobile-tabs button', { minHeight: '2.75rem' });
-globalStyle('.mobile-shell .editor', { padding: '0.5rem 0.75rem' });
-globalStyle('.mobile-shell .editor-header', { padding: '0', margin: '0', gap: '0.25rem' });
-globalStyle('.mobile-shell .editor-header h1', { fontSize: '1.25rem', margin: '0' });
-globalStyle('.mobile-shell .editor-header .eyebrow', { margin: '0', fontSize: '0.72rem', color: 'var(--muted)' });
-globalStyle('.mobile-shell .editor-actions', { gap: '0.25rem' });
-globalStyle('.mobile-shell .editor-actions button', { minHeight: '2.75rem', fontSize: '0.78rem', padding: '0.4rem 0.65rem' });
-globalStyle('.mobile-shell .writing-toolbar', { gap: '0.1rem', flexWrap: 'nowrap', overflowX: 'auto' });
-globalStyle('.mobile-shell .writing-toolbar button', { flex: '0 0 auto', fontSize: '0.78rem' });
-globalStyle('.mobile-shell .editor-columns', { margin: '0' });
-globalStyle('.mobile-shell .manuscript-column', { padding: '0.5rem 0', border: '0', boxShadow: 'none' });
-globalStyle('.mobile-shell .cm-content', { padding: '0.75rem 0.25rem' });
-globalStyle('.mobile-shell .mobile-shell-accessories-label', { display: 'none' });
-globalStyle('.mobile-shell .mobile-shell-writing-accessories', { gap: '0.35rem', padding: '0.25rem 0.5rem' });
-globalStyle('.mobile-shell .mobile-shell-accessory-button', { minHeight: '2.75rem' });
-globalStyle(':is(.st-studio-shell, .mobile-shell) :is(button, summary, select, a):focus-visible', {
+globalStyle('.st-studio-shell :is(button, summary, select, a):focus-visible', {
   outline: '3px solid var(--focus-ring)',
   outlineOffset: '2px',
 });
@@ -183,13 +148,9 @@ globalStyle('.st-studio-masthead-actions', { '@media': { '(max-width: 850px)': {
 globalStyle('.st-studio-shell .st-workspace-toolbar', { '@media': { '(max-width: 850px)': { flexWrap: 'wrap' } } });
 globalStyle('.st-studio-shell .st-workspace .editor-header', { '@media': { '(max-width: 850px)': { alignItems: 'flex-start' } } });
 globalStyle('.st-studio-shell .st-workspace .editor-actions', { '@media': { '(max-width: 850px)': { flexWrap: 'wrap' } } });
-globalStyle(':is(.st-studio-shell, .mobile-shell) *', {
+globalStyle('.st-studio-shell *', {
   '@media': { '(prefers-reduced-motion: reduce)': { scrollBehavior: 'auto !important' as unknown as CSSProperties['scrollBehavior'] } },
 });
-globalStyle(
-  '.mobile-shell:has(.mobile-shell-writing-accessories) .mobile-shell-status,\n.mobile-shell.mobile-shell-keyboard-open .mobile-shell-status',
-  { bottom: 'auto', maxHeight: 'none' },
-);
 globalStyle(
   '.st-studio-shell .st-workspace :is(.project-button, .scene-button),\n.st-studio-shell .st-workspace :is(.project-button, .scene-button)[aria-current="true"]',
   { color: 'var(--ink)' },
@@ -198,7 +159,7 @@ globalStyle('.st-studio-shell .st-workspace :is(.project-button, .scene-button)[
   background: 'var(--surface-selected)',
 });
 globalStyle('.st-studio-shell .st-workspace .tree details > summary', { color: 'var(--ink)' });
-globalStyle(':is(.st-studio-shell, .mobile-shell) .scene-button', { whiteSpace: 'normal', overflowWrap: 'anywhere' });
+globalStyle('.st-studio-shell .scene-button', { whiteSpace: 'normal', overflowWrap: 'anywhere' });
 globalStyle(
   '.writing-toolbar, .typography-settings, .editor-protection,\n  .st-studio-rail, .st-studio-topbar, .st-workspace-configuration',
   { '@media': { print: { display: 'none !important' } } },
@@ -207,16 +168,6 @@ globalStyle('.st-studio-shell .st-workspace .manuscript-input', {
   width: '100%',
   maxWidth: 'min(100%, var(--reader-max-width, 960px))',
   alignSelf: 'center',
-});
-globalStyle('.mobile-shell .mobile-shell-workspace-view,\n.mobile-shell .st-workspace', {
-  height: 'auto',
-  minHeight: '100%',
-  overflow: 'visible',
-});
-globalStyle('.mobile-shell .st-workspace-mobile-layout,\n.mobile-shell .st-workspace-mobile-pane', {
-  height: 'auto',
-  flex: '1 0 auto',
-  overflow: 'visible',
 });
 globalStyle('.st-studio-shell', {
   gridTemplateColumns: 'minmax(0, 1fr)',
@@ -265,7 +216,7 @@ globalStyle('.st-studio-header-slot .theme-control select', {
   paddingInline: '8px',
   fontSize: '12px',
 });
-globalStyle('.st-studio-mobile-link', {
+globalStyle('.st-studio-console-link', {
   minBlockSize: '34px',
   paddingInline: '8px',
   border: '0',
@@ -275,7 +226,7 @@ globalStyle('.st-studio-mobile-link', {
   fontSize: '11px',
   cursor: 'pointer',
 });
-globalStyle('.st-studio-mobile-link:hover', { color: 'var(--ink)' });
+globalStyle('.st-studio-console-link:hover', { color: 'var(--ink)' });
 globalStyle('.st-studio-shell .st-workspace', {
   minBlockSize: '0',
   border: '0',
@@ -777,7 +728,7 @@ globalStyle('.st-studio-topbar', { '@media': { '(max-width: 900px)': { flexWrap:
 globalStyle('.st-studio-identity', { '@media': { '(max-width: 900px)': { flex: '1 1 100%' } } });
 globalStyle('.st-studio-breadcrumb', { '@media': { '(max-width: 900px)': { maxInlineSize: 'calc(100vw - 160px)' } } });
 globalStyle('.st-studio-masthead-actions', { '@media': { '(max-width: 900px)': { flex: '1 1 100%', flexWrap: 'wrap' } } });
-globalStyle('.st-studio-mobile-link', { '@media': { '(max-width: 900px)': { flex: '0 0 auto', marginInlineStart: 'auto' } } });
+globalStyle('.st-studio-console-link', { '@media': { '(max-width: 900px)': { flex: '0 0 auto', marginInlineStart: 'auto' } } });
 globalStyle('.st-studio-shell .st-workspace-desktop-controls', { '@media': { '(max-width: 760px)': { alignItems: 'flex-start' } } });
 globalStyle('.st-studio-shell .st-workspace-toolbar', { '@media': { '(max-width: 760px)': { flexWrap: 'wrap' } } });
 globalStyle('.st-studio-shell .st-workspace-layout', { '@media': { '(max-width: 760px)': { overflow: 'auto' } } });

@@ -63,7 +63,7 @@ SQL
     --env-file "$secret_directory/auth.env" --env NODE_EXTRA_CA_CERTS=/run/codexia-bootstrap/tls.crt \
     --env "CODEXIA_AUTH_BOOTSTRAP_ORIGIN=$bootstrap_origin" \
     --env CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT=codexia-fixture-owner \
-    --env "CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS=$api_origin/desktop,$api_origin/mobile" \
+    --env "CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS=$api_origin/desktop" \
     --entrypoint node "$image" /app/node_modules/@codexia/api/dist/bootstrap-auth.js --apply >/dev/null
 
   for attempt in $(seq 1 40); do

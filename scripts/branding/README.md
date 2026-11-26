@@ -23,4 +23,4 @@ Open `preview.html` to inspect actual CSS pixel sizes and the nearest-neighbor e
 
 The icon is decorative in browser chrome; do not replace accessible page titles or text labels with it. The meaningful standalone SVG includes a description; decorative inline SVG may use `accessible:false`.
 
-**Current scope:** SVG branding source and website favicon. Native iOS PNG, PWA manifest adoption, multi-resolution ICO and Apple Icon Composer builds remain separate release integration tasks; do not claim those formats have been produced by this branch. Recognition and WCAG 2.2 AA conformance still require manual/assistive-technology acceptance.
+**Current scope:** SVG branding source and website favicon. Native iOS PNG, multi-resolution ICO and Apple Icon Composer builds remain separate release integration tasks; do not claim those formats have been produced by this branch. Mobile Web/PWA is retired and has no manifest adoption task. Recognition and WCAG 2.2 AA conformance still require manual/assistive-technology acceptance.
