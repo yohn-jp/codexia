@@ -65,13 +65,13 @@ interface NormalizedText { value: string; starts: number[]; ends: number[] }
 /** Keeps offsets in the original UTF-16 string while matching normalized graphemes. */
 function normalizeWithOffsets(text: string): NormalizedText {
   const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-  let value = "";
+  // Normalize whole text so contextual casing matches the whole-string alias normalization.
+  const value = normalizeTerm(text);
   const starts: number[] = [];
   const ends: number[] = [];
   for (const segment of segmenter.segment(text)) {
-    const normalized = normalizeTerm(segment.segment);
-    value += normalized;
-    for (let index = 0; index < normalized.length; index += 1) {
+    const normalizedLength = normalizeTerm(segment.segment).length;
+    for (let index = 0; index < normalizedLength; index += 1) {
       starts.push(segment.index);
       ends.push(segment.index + segment.segment.length);
     }

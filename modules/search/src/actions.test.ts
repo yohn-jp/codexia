@@ -123,6 +123,37 @@ test("terminology changes are emitted only as revision-guarded dictionary propos
   assert.equal(evidence?.[0]?.paths.some(({ path }) => path === "manuscript/vol-main/ch-main-1/sc-1.md"), true);
 });
 
+test("search.terms.resolve applies whole-string Unicode normalization and preserves original UTF-16 spans", async () => {
+  const targetPath = "manuscript/vol-main/ch-main-1/sc-1.md";
+  const text = "ΟΣ / ος / 😀ΟΣ";
+  const original = text;
+  const reader = makeReader({
+    [targetPath]: text,
+    [TERM_REGISTRY_PATH]: JSON.stringify({
+      schemaVersion: 1,
+      terms: [{ id: "greek-term", canonical: "ΟΣ", aliases: [], targetPath }],
+    }),
+  });
+  const actions = createSearchActions(moduleContext(async () => { throw new Error("unused"); }), new SnapshotIndexCache());
+  const resolve = findAction(actions, "search.terms.resolve");
+
+  const out = await resolve.invoke(resolve.inputSchema.parse({ text }), actionContext(reader));
+
+  assert.equal(out.ok, true);
+  if (out.ok) {
+    const data = out.data as { spans: Array<{ start: number; end: number; termId: string }>; ambiguities: unknown[] };
+    assert.deepEqual(data.spans.map(({ start, end }) => ({ start, end })), [
+      { start: 0, end: 2 },
+      { start: 5, end: 7 },
+      { start: 12, end: 14 },
+    ]);
+    assert.deepEqual(data.spans.map(({ start, end }) => text.slice(start, end)), ["ΟΣ", "ος", "ΟΣ"]);
+    assert.deepEqual(data.spans.map(({ termId }) => termId), ["greek-term", "greek-term", "greek-term"]);
+    assert.deepEqual(data.ambiguities, []);
+  }
+  assert.equal(text, original);
+});
+
 test("module disposal aborts and invalidates active index work", async () => {
   let release!: () => void;
   let started!: () => void;
