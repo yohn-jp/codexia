@@ -105,6 +105,9 @@ async function main() {
     return { status: 'NOT_AVAILABLE', sourceSha };
   });
   await writeFile(output, JSON.stringify(receipt) + '\n', { flag: 'wx' });
+  console.log(receipt.status === 'CERTIFIED'
+    ? `Verify trace receipt certified: run ${receipt.runId}, producer attempt ${receipt.attempt}, artifact ${receipt.artifactId}, ${receipt.passedCaseIds.length} passing cases.`
+    : 'No certified Verify trace receipt is available for this source.');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

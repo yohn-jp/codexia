@@ -64,10 +64,11 @@ export function projectTraceabilityGates({ requirementNodes, obligationTrace, re
     .filter(id => /^TEST-(?:[A-Z0-9]+-)+\d{3}$/u.test(id)));
   const unresolvedCases = required.filter(id => byId.get(id)?.result !== 'PASSED');
   const hasTraceFailures = obligationTrace.violations.length > 0 || reverseTrace.violations.length > 0;
-  const gaps = [...obligationTrace.gaps, ...reverseTrace.gaps];
+  const gapCount = obligationTrace.gaps.length + reverseTrace.gaps.length;
+  const blockers = reverseTrace.gaps.filter(gap => gap.kind === 'BLOCKED');
   const runStatus = run.status === 'IN_PROGRESS' ? 'OBSERVED_PENDING_ARTIFACT_CERTIFICATION' : 'NOT_RUN';
   return {
-    G0: { status: 'LOCAL_PASS', evidence: 'StrictDoc parse, UID/relation validation, and deterministic HTML/JSON export completed by this producer.' },
+    G0: { status: 'PARTIAL', evidence: 'StrictDoc parse, UID/relation validation, and deterministic HTML/JSON export passed. This task does not authenticate the remaining G0 checks.' },
     G1: { status: 'NOT_RUN', evidence: 'No TypeSpec/OpenAPI runtime contract gate is authenticated by this trace task.' },
     G2: { status: 'NOT_RUN', evidence: 'No isolated HTTP/MCP runtime contract execution is authenticated by this trace task.' },
     G3: { status: 'NOT_RUN', evidence: 'No live database catalog or migration execution is authenticated by this trace task.' },
@@ -75,8 +76,8 @@ export function projectTraceabilityGates({ requirementNodes, obligationTrace, re
     G5: { status: 'NOT_RUN', evidence: 'No authenticated LikeC4 validation or Threagile risk analysis is included in this trace producer run.' },
     G6: { status: 'NOT_RUN', evidence: 'No performance execution is authenticated by this trace task.' },
     G7: { status: hasTraceFailures ? 'BLOCKED' : 'PARTIAL',
-      runStatus, publisherStatus, unresolvedCases, gaps,
-      evidence: 'Requirement/source/test relations are projections. Exact-source run candidates remain pending existing Verify artifact certification; absent product case executions remain NOT_RUN.' },
+      runStatus, publisherStatus, unresolvedCases, gapCount, blockers,
+      evidence: 'Requirement/source/test relations are projections. Verify certification authenticates the trace artifact. Product cases without matching execution evidence remain NOT_RUN.' },
   };
 }
 
@@ -887,6 +888,7 @@ async function runVerifier(args) {
       'scripts/strictdoc/verify.test.mjs', 'scripts/strictdoc/case-results.test.mjs',
       'scripts/strictdoc/obligation-trace.test.mjs', 'scripts/strictdoc/reverse-trace.test.mjs',
       'scripts/audit/specifications.test.mjs', 'scripts/ci/evidence/trace-receipt.test.mjs',
+      'scripts/verification/artifacts/pages-live-ux.test.mjs',
     ];
     const browserTraceTests = ['scripts/strictdoc/verify.browser.mjs'];
     const nodeTest = await executeTraceTests(root, tempRoot, 'node', nodeTraceTests);

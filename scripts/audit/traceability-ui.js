@@ -58,4 +58,72 @@
     if (target?.closest('[data-trace-row]')?.hidden) clearFilters();
   });
   apply(false);
+
+  const live = document.querySelector('#pages-live-confirmation');
+  const liveStatus = live?.querySelector('[data-live-status]');
+  const expectedSha = live?.dataset.sourceSha;
+  const digest = async value => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  const readJson = async path => {
+    const url = new URL(path, location.href);
+    url.searchParams.set('live-check', expectedSha);
+    const response = await fetch(url, { cache: 'no-store', credentials: 'omit' });
+    if (!response.ok) throw new Error('public Pages metadata is unavailable');
+    return response.json();
+  };
+  const verifyLivePublication = async () => {
+    if (!live || !liveStatus || !/^[a-f0-9]{40}$/u.test(expectedSha ?? '')) return;
+    if (location.origin !== 'https://yohn-jp.github.io' || location.pathname !== '/codexia/requirements/traceability/') {
+      liveStatus.textContent = 'Not confirmed for the canonical public URL. This Pages observation is separate from Verify certification and remains pending until the exact-source post-deployment check succeeds.';
+      live.dataset.status = 'pending';
+      return;
+    }
+    try {
+      const [site, trace, requirements, htmlResponse, jsonResponse] = await Promise.all([
+        readJson('../../site-manifest.json'), readJson('./traceability.json'), readJson('../manifest.json'),
+        fetch(new URL('./index.html?live-check=' + expectedSha, location.href), { cache: 'no-store', credentials: 'omit' }),
+        fetch(new URL('./traceability.json?live-check=' + expectedSha, location.href), { cache: 'no-store', credentials: 'omit' }),
+      ]);
+      if (!htmlResponse.ok || !jsonResponse.ok) throw new Error('public traceability outputs are unavailable');
+      const html = await htmlResponse.text();
+      const jsonText = await jsonResponse.text();
+      if (site.sourceSha !== expectedSha || trace.sourceSha !== expectedSha || requirements.sourceSha !== expectedSha) throw new Error('served source SHA does not match this page');
+      const route = site.routes?.find(item => item.route === '/requirements/traceability/');
+      if (route?.generationStatus !== 'ready' || route.sourceSha !== expectedSha) throw new Error('published route identity does not match this page');
+      if (trace.pagesQualification?.status !== 'PENDING_PAGES_PUBLISH' || trace.pagesQualification.publicUrlConfirmation !== 'PENDING') throw new Error('build qualification is invalid');
+      const outputByName = new Map(requirements.outputs?.map(item => [item.name, item]) ?? []);
+      for (const [name, value] of [['traceability/index.html', html], ['traceability/traceability.json', jsonText]]) {
+        const output = outputByName.get(name);
+        if (!output || output.bytes !== new TextEncoder().encode(value).length || output.sha256 !== await digest(value)) throw new Error('published traceability digest mismatch');
+      }
+      const publisher = trace.pagesQualification?.publisherExecution;
+      if (!publisher || publisher.status !== 'IN_PROGRESS' || publisher.repository !== 'yohn-jp/codexia' || publisher.sourceSha !== expectedSha || publisher.job !== 'specification' || publisher.task !== 'pages-requirements-trace' || !/^\d+$/u.test(String(publisher.runId)) || !Number.isInteger(publisher.attempt) || publisher.attempt < 1 || publisher.runUrl !== `https://github.com/yohn-jp/codexia/actions/runs/${publisher.runId}`) throw new Error('exact Pages producer run identity is unavailable');
+      const runResponse = await fetch(`https://api.github.com/repos/yohn-jp/codexia/actions/runs/${publisher.runId}`, { cache: 'no-store', credentials: 'omit', headers: { Accept: 'application/vnd.github+json' } });
+      if (!runResponse.ok) throw new Error('exact publisher run evidence is unavailable');
+      const run = await runResponse.json();
+      if (run.id !== Number(publisher.runId) || run.path !== '.github/workflows/repository-audit.yml' || run.head_sha !== expectedSha || run.head_branch !== 'main' || !['push', 'workflow_dispatch'].includes(run.event) || run.status !== 'completed' || run.conclusion !== 'success' || run.run_attempt !== publisher.attempt || run.html_url !== publisher.runUrl || run.repository?.full_name !== publisher.repository || run.head_repository?.full_name !== publisher.repository) throw new Error('exact publisher run is stale, foreign, or incomplete');
+      const jobsUrl = new URL(`https://api.github.com/repos/yohn-jp/codexia/actions/runs/${publisher.runId}/jobs`);
+      jobsUrl.searchParams.set('filter', 'latest');
+      jobsUrl.searchParams.set('per_page', '100');
+      const jobsResponse = await fetch(jobsUrl, { cache: 'no-store', credentials: 'omit', headers: { Accept: 'application/vnd.github+json' } });
+      if (!jobsResponse.ok) throw new Error('exact publisher job evidence is unavailable');
+      const jobs = await jobsResponse.json();
+      const deploy = (jobs.jobs ?? []).find(job => job.name === 'deploy' && job.run_id === run.id && job.run_attempt === publisher.attempt && job.head_sha === expectedSha && job.status === 'completed' && job.conclusion === 'success');
+      const step = deploy?.steps?.find(item => item.name === 'Verify the published Pages projection' && item.status === 'completed' && item.conclusion === 'success');
+      if (!step) throw new Error('exact publisher run has no successful public URL and SHA confirmation');
+      liveStatus.textContent = '';
+      const label = document.createElement('strong');
+      label.textContent = 'Confirmed';
+      const text = document.createTextNode(' · public Pages traceability outputs, manifest digests, source SHA, and post-deployment verifier all match ' + expectedSha + ' · ');
+      const link = document.createElement('a');
+      link.href = publisher.runUrl;
+      link.textContent = 'Open publisher and live verification run';
+      link.rel = 'noopener noreferrer';
+      liveStatus.append(label, text, link);
+      live.dataset.status = 'confirmed';
+    } catch {
+      liveStatus.textContent = 'Not confirmed for the canonical public URL. This Pages observation is separate from Verify certification and remains pending until the exact-source post-deployment check succeeds.';
+      live.dataset.status = 'pending';
+    }
+  };
+  void verifyLivePublication();
 })();

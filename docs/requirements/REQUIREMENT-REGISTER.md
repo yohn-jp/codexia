@@ -1676,7 +1676,7 @@ INP p75、CLS p75の品質目安に加え、原稿入力・保存・復旧の別
 **Design owner**: [Requirements governance](README.md)、[Traceability register](../verification/TRACEABILITY-REGISTER.md)
 **Implementation identifiers**: この台帳とAPI・DB・外部IFの初期契約
 **Verification identifiers**: scripts/strictdoc/verify.test.mjs; scripts/audit/specifications.test.mjs; scripts/ci/evidence/trace-receipt.test.mjs
-**Test IDs**: TEST-TRC-01-001, TEST-TRC-02-001, TEST-TRC-02-002, TEST-TRC-03-001, TEST-TRC-04-001, TEST-TRC-04-002, TEST-TRC-05-001, TEST-TRC-05-002, TEST-TRC-05-003, TEST-TRC-07-001, TEST-TRC-08-001, TEST-TRC-04-003, TEST-TRC-05-004, TEST-TRC-06-001, TEST-TRC-06-002
+**Test IDs**: TEST-TRC-01-001, TEST-TRC-02-001, TEST-TRC-02-002, TEST-TRC-03-001, TEST-TRC-04-001, TEST-TRC-04-002, TEST-TRC-05-001, TEST-TRC-05-002, TEST-TRC-05-003, TEST-TRC-07-001, TEST-TRC-07-002, TEST-TRC-08-001, TEST-TRC-04-003, TEST-TRC-05-004, TEST-TRC-06-001, TEST-TRC-06-002
 **Exact-run reference**: NOT_RUN
 **Comment**: ACCEPTED／**構築中**; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
@@ -1874,6 +1874,31 @@ Requirementsから実装・テストへ、実装面から義務へ移動でき�
   **Path**: scripts/audit/specifications.browser.mjs
 - **Type**: File
   **Path**: .github/workflows/repository-audit.yml
+
+## OBL-REQ-TRACE-001-O09
+
+**Type**: OBLIGATION
+**MID**: cfcbe4617d5a8e5ba96f52635d2e21d6
+**UID**: OBL-REQ-TRACE-001-O09
+**Design reference**: [StrictDoc traceability](STRICTDOC-TRACEABILITY.md)、[Tooling acceptance](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md)
+**Implementation identifiers**: .github/workflows/repository-audit.yml; scripts/verification/artifacts/pages-live-ux.mjs; scripts/audit/traceability-ui.js
+**Surface identifiers**: ciWorkflow=.github/workflows/repository-audit.yml
+**Test IDs**: TEST-TRC-07-002
+**Exact-run reference**: NOT_RUN
+**Comment**: The registered fixture checks the publication verifier. Public acceptance relies on the producer's own post-deployment check.
+
+Repository Audit Pagesの公開確認は正規URLで配信中のHTML・JSON・manifestと対象SHAを照合する。PR previewおよび公開後の照合が未完了のsiteはTRC-07の公開確認を保留する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-TRACE-001
+- **Type**: File
+  **Path**: .github/workflows/repository-audit.yml
+- **Type**: File
+  **Path**: scripts/verification/artifacts/pages-live-ux.mjs
+- **Type**: File
+  **Path**: scripts/audit/traceability-ui.js
 
 ## OBL-REQ-API-002-O02
 
@@ -2985,3 +3010,20 @@ Checks that the trace retains a missing S3 receipt as a limitation.
   **ID**: REQ-TRACE-001
 - **Type**: File
   **Path**: scripts/strictdoc/verify.test.mjs
+
+## TEST-TRC-07-002
+
+**Type**: TEST
+**MID**: 3694489c139146c11b7ff49148e69fc9
+**UID**: TEST-TRC-07-002
+**Case name**: live Pages proof checks public response revision, route and snapshot bytes
+**Exact-run reference**: NOT_RUN
+
+Checks public route identity and exact-source output bytes with controlled responses.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-TRACE-001
+- **Type**: File
+  **Path**: scripts/verification/artifacts/pages-live-ux.test.mjs

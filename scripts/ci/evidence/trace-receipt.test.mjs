@@ -49,6 +49,10 @@ test('exports the certified trace artifact identity and the cases observed in it
 test('rejects foreign artifacts, stale source, skipped certification, mismatched attempts and skipped required cases', () => {
   const foreign = { ...selected, workflow_run: { ...selected.workflow_run, repository_id: 99 } };
   assert.throws(() => summarizeCertifiedTrace({ ...inputs, selected: foreign }), /artifact repository/iu);
+  const wrongRun = { ...selected, workflow_run: { ...selected.workflow_run, id: run.id + 1 } };
+  assert.throws(() => summarizeCertifiedTrace({ ...inputs, selected: wrongRun }), /another run/iu);
+  const skippedTask = { ...inputs.group, results: [{ task: 'requirements-trace', status: 'skipped' }] };
+  assert.throws(() => summarizeCertifiedTrace({ ...inputs, group: skippedTask }), /did not execute/iu);
   assert.throws(() => summarizeCertifiedTrace({ ...inputs, trace: { ...inputs.trace, source: { sourceSha: 'b'.repeat(40) } } }), /trace report source/iu);
   const skipped = { ...job, steps: [{ ...job.steps[0], conclusion: 'skipped' }] };
   assert.throws(() => summarizeCertifiedTrace({ ...inputs, certification: skipped }), /did not certify/iu);

@@ -27,13 +27,13 @@ test('projects unauthenticated or incomplete gates as partial and preserves miss
     caseExecutions: [{ testId: 'TEST-API-001', result: 'SKIPPED' }],
     run: { status: 'NOT_RUN' },
   });
-  assert.equal(gates.G0.status, 'LOCAL_PASS');
+  assert.equal(gates.G0.status, 'PARTIAL');
   for (const id of ['G1', 'G2', 'G3', 'G4', 'G6']) assert.equal(gates[id].status, 'NOT_RUN');
   assert.equal(gates.G7.status, 'PARTIAL');
   assert.equal(gates.G7.runStatus, 'NOT_RUN');
   assert.deepEqual(gates.G7.unresolvedCases, ['TEST-API-001', 'TEST-API-002']);
   assert.equal(gates.G7.publisherStatus, 'NOT_PUBLISHED');
-  assert.equal(gates.G7.gaps.length, 2);
+  assert.equal(gates.G7.gapCount, 2);
 });
 
 test('blocks the trace gate when relation validation finds injected defects', () => {
@@ -68,8 +68,8 @@ test('missing S3 receipt remains a blocked trace limitation and G5 remains NOT_R
   assert.equal(gates.G4.status, 'NOT_RUN');
   assert.equal(gates.G5.status, 'NOT_RUN');
   assert.equal(gates.G7.status, 'PARTIAL');
-  assert.match(JSON.stringify(gates.G7.gaps), /backup-receipt/u);
-  assert.match(JSON.stringify(gates.G7.gaps), /No run-bound S3 receipt/u);
+  assert.match(JSON.stringify(gates.G7.blockers), /backup-receipt/u);
+  assert.match(JSON.stringify(gates.G7.blockers), /No run-bound S3 receipt/u);
 });
 
 const stableMid = (uid) => createHash('sha256').update(uid).digest('hex').slice(0, 32);

@@ -28,6 +28,7 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
   try {
     browser = await chromium.launch({headless:true, executablePath:process.env.CODEXIA_E2E_CHROMIUM});
     const page = await browser.newPage();
+    await page.route('https://api.github.com/**', route => route.abort());
     const base = `http://127.0.0.1:${server.address().port}`;
     assert.equal((await page.goto(`${base}/`)).status(), 200);
     const link = page.locator('a[href="requirements/html/"]').first();
@@ -43,6 +44,9 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     assert.match(page.url(), /\/requirements\/traceability\/$/u);
     assert.equal((await page.goto(`${base}/requirements/traceability/`)).status(), 200);
     assert.match(await page.getByRole('heading', { name: '実装トレーサビリティ' }).innerText(), /実装トレーサビリティ/u);
+    await page.locator('#pages-live-confirmation[data-status="pending"]').waitFor();
+    assert.match(await page.locator('#pages-live-confirmation').innerText(), /Not confirmed for the canonical public URL/u);
+    assert.match(await page.locator('section:has(#qualification-gates) table').innerText(), /G7/u);
     assert.match(await page.locator('body').innerText(), /実装面の逆引き/u);
     assert.match(await page.locator('body').innerText(), /UNMAPPED|No exact-source run/u);
     const traceResponse = await page.request.get(`${base}/requirements/traceability/traceability.json`);
