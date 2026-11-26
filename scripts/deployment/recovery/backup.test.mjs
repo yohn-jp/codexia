@@ -405,6 +405,8 @@ test('restore drill verifies fingerprints before success evidence or candidate-l
     const identity = path.join(fixture.directory, 'identity');
     const commands = path.join(fixture.directory, 'commands.jsonl');
     const scratch = path.join(fixture.directory, 'resources.json');
+    const runtimeSettings = path.join(fixture.directory, 'runtime.env');
+    const introspectionSecret = path.join(fixture.directory, 'introspection-secret');
     const digest = contents => createHash('sha256').update(contents).digest('hex');
     const originalContents = [
       ['database.dump.age', 'database dump'], ['history.tar.age', 'history archive'],
@@ -418,6 +420,7 @@ const args = process.argv.slice(2);
 const [verb, action, subject] = args;
 const statePath = process.env.DRILL_FIXTURE_RESOURCES;
 const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+state.images ||= {};
 fs.appendFileSync(process.env.DRILL_FIXTURE_COMMANDS, JSON.stringify(args) + '\\n');
 if (args.includes('-i') || verb === 'volume' && action === 'import') fs.readFileSync(0);
 const save = () => fs.writeFileSync(statePath, JSON.stringify(state));
@@ -425,8 +428,13 @@ const id = value => value.split('=')[1];
 if (['container', 'volume'].includes(verb) && action === 'exists') process.exit(subject in state.resources ? 0 : 1);
 if (verb === 'volume' && action === 'create') state.resources[args.at(-1)] = id(args[3]);
 else if (verb === 'volume' && action === 'inspect' || verb === 'inspect') {
-  process.stdout.write(args.includes('{{.HostConfig.NetworkMode}}') ? 'none' : state.resources[args.at(-1)]);
-} else if (verb === 'run' && action === '-d') state.resources[args[args.indexOf('--name') + 1]] = id(args[args.indexOf('--label') + 1]);
+  process.stdout.write(args.includes('{{.HostConfig.NetworkMode}}') ? (state.images[args.at(-1)] ? 'container:' + args.at(-1).replace(/-api$/u, '') : 'none') : args.includes('{{.State.Running}}') ? (process.env.DRILL_FIXTURE_API_EXITED ? 'false' : 'true') : args.includes('{{.Config.Image}}') ? state.images[args.at(-1)] : state.resources[args.at(-1)]);
+} else if (verb === 'run' && action === '-d') {
+  const name = args[args.indexOf('--name') + 1];
+  state.resources[name] = id(args[args.indexOf('--label') + 1]);
+  if (args.at(-1).startsWith('ghcr.io/')) state.images[name] = args.at(-1);
+}
+else if (verb === 'run' && args.includes('--name')) state.resources[args[args.indexOf('--name') + 1]] = id(args[args.indexOf('--label') + 1]);
 else if (verb === 'run' && args.includes('/bin/bash')) {
   if (process.env.DRILL_FIXTURE_FAIL_HISTORY_FINGERPRINT) process.exit(125);
   if (!process.env.DRILL_FIXTURE_EMPTY_HISTORY) {
@@ -434,6 +442,9 @@ else if (verb === 'run' && args.includes('/bin/bash')) {
   }
 }
 else if (verb === 'run' && args.at(-1).includes('verifyPostgresSchema')) process.stdout.write(process.env.DRILL_FIXTURE_LEDGER + '\\n');
+else if (verb === 'exec' && args.some(value => value.includes('/health/ready'))) {
+  if (process.env.DRILL_FIXTURE_FAIL_API_READINESS) process.exit(125);
+}
 else if (verb === 'exec' && args.includes('sh')) {
   if (process.env.DRILL_FIXTURE_FAIL_DATABASE_FINGERPRINT) process.exit(125);
   if (!process.env.DRILL_FIXTURE_EMPTY_DATABASE) {
@@ -447,7 +458,7 @@ save();
     const ledger = 'sha256:' + 'b'.repeat(64);
     const run = async (options, {
       wrongDatabase = false, wrongHistory = false, emptyDatabase = false, emptyHistory = false,
-      failDatabaseFingerprint = false, failHistoryFingerprint = false, ledgerResult = ledger,
+      failDatabaseFingerprint = false, failHistoryFingerprint = false, failApiReadiness = false, ledgerResult = ledger,
     } = {}) => {
       await writeFile(scratch, JSON.stringify({ resources: {} }));
       await writeFile(commands, '');
@@ -470,6 +481,8 @@ save();
           DRILL_FIXTURE_EMPTY_HISTORY: emptyHistory ? '1' : '',
           DRILL_FIXTURE_FAIL_DATABASE_FINGERPRINT: failDatabaseFingerprint ? '1' : '',
           DRILL_FIXTURE_FAIL_HISTORY_FINGERPRINT: failHistoryFingerprint ? '1' : '',
+          DRILL_FIXTURE_FAIL_API_READINESS: failApiReadiness ? '1' : '',
+          DRILL_FIXTURE_API_EXITED: failApiReadiness ? '1' : '',
         },
       });
       assert.deepEqual(JSON.parse(await readFile(scratch, 'utf8')).resources, {});
@@ -494,6 +507,54 @@ save();
     assert.ok(candidateChecks[1].some(argument => argument.includes('default_transaction_read_only')));
     assert.ok(candidateChecks.every(call => call.includes('--read-only') && call.includes('--pull=never')));
     assert.ok(candidateChecks.every(call => !call.includes('--apply') && !call.includes('--volume')));
+    await writeFile(runtimeSettings, [
+      'CODEXIA_PUBLIC_ORIGIN=https://fixture.example.test',
+      'CODEXIA_OIDC_ISSUER=https://identity.example.test',
+      'CODEXIA_OIDC_CLIENT_ID=fixture-web',
+      'CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID=fixture-introspection',
+      'CODEXIA_OAUTH_OWNER_SUBJECT=fixture-owner',
+      'CODEXIA_OAUTH_OWNER_CLIENT_IDS=fixture-web,fixture-ios',
+      '',
+    ].join('\n'), { mode: 0o600 });
+    await writeFile(introspectionSecret, 'fixture-introspection-secret-with-enough-length', { mode: 0o600 });
+    const apiReadyArgs = [
+      ...readOnlyArgs, '--candidate-api-ready', '--candidate-runtime-settings', runtimeSettings,
+      '--candidate-introspection-secret-file', introspectionSecret,
+    ];
+    const apiReady = await run(apiReadyArgs);
+    assert.equal(apiReady.status, 0, apiReady.stderr);
+    assert.ok(apiReady.stdout.includes('Isolated candidate API readiness verified'));
+    const apiStart = apiReady.calls.find(call => call[0] === 'run' && call.includes('--name') && call.includes(candidate));
+    assert.ok(apiStart);
+    const restoredDatabase = apiReady.calls.find(call => call[0] === 'run' && call[1] === '-d');
+    const apiDatabaseName = restoredDatabase[restoredDatabase.indexOf('--name') + 1];
+    assert.equal(apiStart[apiStart.indexOf('--network') + 1], `container:${apiDatabaseName}`);
+    assert.ok(apiStart.includes('--read-only') && apiStart.includes('--pull=never'));
+    assert.ok(apiStart.some(argument => argument.startsWith('--env-file')));
+    assert.ok(apiReady.calls.filter(call => call[0] === 'exec').length >= 2);
+    await writeFile(runtimeSettings, [
+      'CODEXIA_PUBLIC_ORIGIN=https://fixture.example.test',
+      'CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID=fixture-introspection',
+      'CODEXIA_OAUTH_OWNER_SUBJECT=fixture-owner',
+      'CODEXIA_OAUTH_OWNER_CLIENT_IDS=fixture-web,fixture-ios',
+      '',
+    ].join('\n'), { mode: 0o600 });
+    const passkeyOnly = await run(apiReadyArgs);
+    assert.equal(passkeyOnly.status, 0, passkeyOnly.stderr);
+    assert.ok(passkeyOnly.stdout.includes('Isolated candidate API readiness verified'));
+    await writeFile(runtimeSettings, [
+      'CODEXIA_PUBLIC_ORIGIN=https://fixture.example.test',
+      'CODEXIA_OIDC_ISSUER=https://identity.example.test',
+      'CODEXIA_OIDC_CLIENT_ID=fixture-web',
+      'CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID=fixture-introspection',
+      'CODEXIA_OAUTH_OWNER_SUBJECT=fixture-owner',
+      'CODEXIA_OAUTH_OWNER_CLIENT_IDS=fixture-web,fixture-ios',
+      '',
+    ].join('\n'), { mode: 0o600 });
+    const unhealthyApi = await run(apiReadyArgs, { failApiReadiness: true });
+    assert.equal(unhealthyApi.status, 1);
+    assert.match(unhealthyApi.stderr, /candidate API readiness/u);
+    assert.doesNotMatch(unhealthyApi.stdout, /Isolated candidate API readiness verified/u);
     const wrongLedger = await run(readOnlyArgs, { ledgerResult: 'sha256:' + 'c'.repeat(64) });
     assert.equal(wrongLedger.status, 1);
     assert.doesNotMatch(wrongLedger.stdout, /verified/u);
