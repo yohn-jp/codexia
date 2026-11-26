@@ -88,6 +88,36 @@ final class JournalSaveCoordinatorTests: XCTestCase {
         XCTAssertEqual(confirmed.text, protected.text)
     }
 
+    func testCanceledCompositionClearsTheLocalDraftWithoutSendingARevision() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let origin = URL(string: "https://api.example.test")!
+        let coordinator = try JournalSaveCoordinator(authorID: "author", apiOrigin: origin,
+            projectID: "project", clientID: "ios-test", journal: ProtectedDraftJournal(directory: root),
+            api: APITransport(origin: origin).client)
+        var editor = EditorState(documentID: "document", text: "基準稿")
+        editor.updateComposition("基準稿かな")
+        let markedText = editor.snapshot
+        try await coordinator.protect(snapshot: markedText, baseRevisionID: "revision-1", baseText: "基準稿")
+        editor.setComposing(false)
+        try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: "revision-1", baseText: "基準稿")
+
+        do {
+            try await coordinator.protect(snapshot: markedText, baseRevisionID: "revision-1", baseText: "基準稿")
+            XCTFail("A delayed write must not restore canceled marked text")
+        } catch DraftJournalError.staleSnapshot {
+            // The base-matching record still guards the journal version.
+        }
+        let recovered = try await coordinator.recover(documentID: "document")
+        XCTAssertNil(recovered)
+        let baseline = try await coordinator.records(documentID: "document", includeLocalBaseline: true)
+        XCTAssertEqual(baseline.last?.version, editor.snapshot.version)
+        XCTAssertEqual(baseline.last?.sessionID, editor.snapshot.sessionID)
+        guard case .nothingToSave = await coordinator.save(documentID: "document") else {
+            return XCTFail("Canceling marked text must not produce an identical server revision")
+        }
+    }
+
     func testUnsubmittedSnapshotsCoalesceToLatestAndRecoveryUsesAppendOrder() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }

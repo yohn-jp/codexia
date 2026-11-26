@@ -579,11 +579,11 @@ test('overlapping identical portable import requests replay the committed projec
   const archive = await exportWorkArchive(persistence, sourceId);
   let arrivals = 0;
   let release!: () => void;
-  const bothRead = new Promise<void>(resolve => {
+  const bothReadyToInsert = new Promise<void>(resolve => {
     release = resolve;
   });
-  // Each request obtains an independent real PostgreSQL transaction. Force both
-  // initial reads to observe absence before either can attempt the INSERT.
+  // Both independent PostgreSQL transactions complete their identity lookups
+  // before either can attempt the INSERT.
   const overlapping: Persistence = {
     read: work => persistence.read(work),
     transaction: <T>(work: (tx: PersistenceTransaction) => Promise<T>) =>
@@ -591,14 +591,15 @@ test('overlapping identical portable import requests replay the committed projec
         work(
           new Proxy(tx, {
             get(target, key, receiver) {
-              if (key === 'getProject')
-                return async (id: ProjectId) => {
-                  const project = await target.getProject(id);
+              if (key === 'createProject')
+                return async (command: Parameters<PersistenceTransaction['createProject']>[0]) => {
+                  assert.ok(command.id);
+                  assert.equal(await target.getProject(command.id), undefined);
                   arrivals++;
                   if (arrivals === 2) release();
-                  await bothRead;
-                  assert.equal(project, undefined);
-                  return project;
+                  await bothReadyToInsert;
+                  assert.equal(arrivals, 2);
+                  return target.createProject(command);
                 };
               const value = Reflect.get(target, key, receiver);
               return typeof value === 'function' ? value.bind(target) : value;

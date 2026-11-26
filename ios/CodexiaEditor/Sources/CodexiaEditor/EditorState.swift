@@ -35,14 +35,15 @@ public struct EditorState {
         self.session = UUID()
     }
 
-    /// Restore a durable pending draft without treating it as server committed.
-    public init(recoveringDocumentID documentID: String, text: String, version: UInt64, sessionID: UUID) {
+    /// Restore the durable version, optionally using the freshly read confirmed manuscript.
+    public init(recoveringDocumentID documentID: String, text: String, version: UInt64, sessionID: UUID,
+                alreadyCommitted: Bool = false) {
         self.documentID = documentID
         self.text = text
         self.session = sessionID
         self.version = version
         self.protectedVersion = version
-        self.committedVersion = nil
+        self.committedVersion = alreadyCommitted ? version : nil
     }
 
     /// Stable identity for this in-memory editing session; a reopened document gets a new value.
@@ -128,7 +129,7 @@ public struct EditorState {
         protectedVersion = max(protectedVersion, snapshot.version)
     }
 
-    /// Call only after a validated server receipt confirms this snapshot was committed.
+    /// Acknowledge bytes already confirmed at the base or by a validated save receipt.
     public mutating func markCommitted(_ snapshot: Snapshot) {
         guard snapshot.sessionID == session, snapshot.documentID == documentID,
               snapshot.version <= version, !snapshot.isComposing else { return }

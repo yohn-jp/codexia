@@ -27,6 +27,10 @@ public struct DraftRecord: Codable, Sendable, Equatable {
     public var receipt: Components.Schemas.SaveDocumentResponse?
     public var conflict: Components.Schemas.SaveConflictResponse?
 
+    // Keep the cancellation version on disk so a delayed marked-text write cannot restore it.
+    public var isLocalBaseline: Bool {
+        state == .protected && isComposing != true && text.utf8.elementsEqual(baseText.utf8)
+    }
 }
 
 public enum SaveDisposition: Sendable {
@@ -216,6 +220,7 @@ public actor ProtectedDraftJournal {
             throw DraftJournalError.staleSnapshot
         }
         if let latest = current.last, latest.sessionID == record.sessionID
+            && (latest.version == record.version || latest.state != .protected)
             && (latest.isComposing == true) == (record.isComposing == true)
             && latest.contentSHA256 == record.contentSHA256
             && Data(latest.text.utf8).elementsEqual(Data(record.text.utf8))
@@ -235,7 +240,7 @@ public actor ProtectedDraftJournal {
         var current = try records(scope: scope)
         guard let index = current.firstIndex(where: { $0.state != .committed }) else { return .nothing }
         var record = current[index]
-        guard record.isComposing != true else { return .nothing }
+        guard record.isComposing != true, !record.isLocalBaseline else { return .nothing }
         if record.state == .protected && reconcile { return .nothing }
         if record.state == .conflict { return .conflict }
         if (record.state == .unknown || record.state == .inFlight) && !reconcile { return .pending }
@@ -383,12 +388,13 @@ public actor JournalSaveCoordinator {
     }
 
     public func recover(documentID: String) async throws -> DraftRecord? {
-        try await journal.records(scope: scope(documentID: documentID))
-            .last(where: { $0.state != .committed })
+        try await records(documentID: documentID).last
     }
 
-    public func records(documentID: String) async throws -> [DraftRecord] {
-        try await journal.records(scope: scope(documentID: documentID)).filter { $0.state != .committed }
+    public func records(documentID: String, includeLocalBaseline: Bool = false) async throws -> [DraftRecord] {
+        let pending = try await journal.records(scope: scope(documentID: documentID)).filter { $0.state != .committed }
+        if !includeLocalBaseline, pending.count == 1, pending.first?.isLocalBaseline == true { return [] }
+        return pending
     }
 
     /// Replaces a conflicted operation only after the caller explicitly supplies
