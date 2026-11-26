@@ -143,6 +143,22 @@ const plan = async (files, event = 'pull_request') => {
   return createVerificationPlan({ files, event, sha: 'a'.repeat(40), base: 'b'.repeat(40) });
 };
 
+test('official conformance fixtures select their own task and share the API lane', async () => {
+  for (const kind of ['http', 'mcp']) {
+    const task = `${kind}-conformance`;
+    const result = await plan([`tests/conformance/${kind}/run.mjs`]);
+    assert.deepEqual(result.tasks, [task, 'coverage']);
+    assert.deepEqual(result.groups, ['unit-api', 'types-tests']);
+    assert.equal(result.full_model_oci, false);
+  }
+  for (const file of ['packages/api/src/server.ts', 'packages/persistence-postgres/src/migrate.ts']) {
+    const { tasks } = await plan([file]);
+    assert.ok(tasks.includes('http-conformance') && tasks.includes('mcp-conformance'), file);
+  }
+  assert.ok((await plan(['packages/http-contract/openapi/codexia.openapi.yaml'])).tasks.includes('http-conformance'));
+  assert.ok((await plan(['modules/mcp/src/stdio.ts'])).tasks.includes('mcp-conformance'));
+});
+
 test('UX projection source and Pages inputs select scoped canonical proofs', async () => {
   const { UX_PROJECTION_DOCUMENTS } = await import('../evidence/task-inputs.mjs');
   const { OPERATIONAL_ROOT_PATHS, OPERATIONAL_ROOT_PREFIXES } = await import('./plan.mjs');
@@ -236,12 +252,12 @@ test('StrictDoc authority selects trace proof and the requirement register also 
       ? ['unit-root', 'db-contract', 'coverage', 'requirements-trace']
       : uxAuthority ? ['unit-root', 'coverage', 'requirements-trace']
         : architectureAuthority ? ['coverage', 'architecture-g5', 'requirements-trace']
-          : toolingAcceptance ? ['db-contract', 'coverage', 'requirements-trace'] : ['coverage', 'requirements-trace'], file);
+          : toolingAcceptance ? ['db-contract', 'http-conformance', 'mcp-conformance', 'coverage', 'requirements-trace'] : ['coverage', 'requirements-trace'], file);
     assert.deepEqual(selected.groups, requirementRegister
       ? ['unit-core', 'unit-db', 'types-tests', 'types-trace']
       : uxAuthority ? ['unit-core', 'types-tests', 'types-trace']
         : architectureAuthority ? ['unit-architecture', 'types-tests', 'types-trace']
-          : toolingAcceptance ? ['unit-db', 'types-tests', 'types-trace'] : ['types-tests', 'types-trace'], file);
+          : toolingAcceptance ? ['unit-api', 'unit-db', 'types-tests', 'types-trace'] : ['types-tests', 'types-trace'], file);
   }
 });
 

@@ -38,6 +38,8 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@typespec/http` | `1.18.0` | `packages/http-contract`・HTTP method/path/parameter binding | **連動**: compilerとOpenAPI3 emitterに同期 |
 | `@typespec/openapi` | `1.18.0` | `packages/http-contract`・OpenAPI metadata decorators | **連動**: compiler/http/emitterと同期 |
 | `@typespec/openapi3` | `1.18.0` | `packages/http-contract`・OpenAPI 3.1.0 emitter | **連動**: compiler/http/openapi librariesと同一releaseで更新 |
+| `@modelcontextprotocol/conformance` | `0.2.0-alpha.12` | `tests/conformance/mcp`・公式MCP適合性CLI | **契約検証用**: `--requirements 2026-07-28` を提供する公式版をnpm lockfileで固定し、更新時に必須シナリオの選択と失敗判定を検証する |
+| `@modelcontextprotocol/inspector` | `2.16.0` | `tests/conformance/mcp`・公式MCP Inspector CLI | **契約検証用**: npm lockfileで固定し、更新時にHTTPとstdioのツール一覧、呼び出し、エラー応答を検証する |
 
 ### 認証・API・永続化
 
@@ -149,6 +151,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v7.1.0` | **連動**: 対象workflowの実行環境とアクションの固定版を同時検証する。GitHub Actions全体を一律更新せず、依存・ランナー互換性と実ジョブで確認 |
 | Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql,terraform]==0.9.115` | **要検証**: 独立ツールの指定。最新版と解析出力・CI再現性の差を確認 |
 | oasdiff | `v1.39.0`; official release assets pinned by SHA-256 | `packages/http-contract/scripts`・OpenAPI breaking-change check | **既存採用**: install script accepts only the pinned version/platform digest; compatibility policy uses the existing API epoch |
+| Schemathesis | `tests/conformance/http/requirements.in`で`4.34.2`、`requirements.lock.txt`で推移依存までハッシュ固定 | **契約検証用**: 生成OpenAPIと使い捨てPostgreSQLで動くFastifyを照合する。更新時は契約違反の検出を再確認する |
 | AWS SDK for Python | `deploy/backup/requirements.in`で`boto3==1.44.9`、`requirements.lock`でBoto3/Botocoreと推移依存をhash固定 | **既存採用**: Apache-2.0の公式AWS SDK。S3署名、HTTPS接続、retryをSDKに委譲し、自前署名を実装しない。最新版確認後、AWS受入と互換fixtureの両方を更新時に検証 |
 | S3互換fixture | `deploy/backup/s3-fixture.sh`でSilo `RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329`（AGPL-3.0-or-later）とMinIO Client `RELEASE.2025-08-13T08-35-41Z`（SHA-256 `01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891`）を使用 | **Test-only**: 合成データ・一時credentialでS3 API互換性を検証。production runtimeへ含めない。fixture更新時はdigest、license、conditional write・multipart・TLSの実挙動を再検証 |
 | PostgreSQL contract verification | `packages/persistence-postgres/tests/db-contract/toolchain.json`: PostgreSQL 17-bookworm OCI digest, pgTAP 1.3.4 source SHA-256, tbls 1.97.0 archive SHA-256 | **契約検証用**: disposable DB専用。migration sourceではなく`pg_catalog`とpgTAPでDDLを照合し、tblsはread-only artifactを生成 |

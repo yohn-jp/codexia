@@ -3,13 +3,14 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { VERIFICATION_GROUPS, requiredBuildProfile } from '../impact/contract.mjs';
+import { CONFORMANCE_TASKS, VERIFICATION_GROUPS, requiredBuildProfile } from '../impact/contract.mjs';
 import { browserRuntimeRequirements } from '../browser/image-digests.mjs';
 import { THREAGILE_IMAGE } from '../../architecture/constants.mjs';
 
 const sha256 = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const testFilePattern = /\.(?:test|spec)\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx)$/u;
-const dependencyPath = file => /(?:^|\/)(?:package\.json|package-lock\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.node-version|\.nvmrc)$/u.test(file);
+const dependencyPath = file => /(?:^|\/)(?:package\.json|package-lock\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.node-version|\.nvmrc)$/u.test(file) ||
+  file === 'tests/conformance/http/requirements.lock.txt';
 export const ROOT_VERIFICATION_DOCUMENTS = Object.freeze([
   'docs/deployment/BACKUP.md',
   'docs/deployment/IAC.md',
@@ -111,6 +112,9 @@ export function isNonExecutableDocumentation(file) {
 }
 export function isTaskInputDocument(file, task) {
   if (!isNonExecutableDocumentation(file)) return true;
+  if (Object.hasOwn(CONFORMANCE_TASKS, task) && (file === 'AGENTS.md' ||
+      file === 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md' ||
+      file === (task === 'http-conformance' ? 'docs/architecture/HTTP-PLATFORM-MIGRATION.md' : 'docs/architecture/MCP-V2-MIGRATION.md'))) return true;
   if (task === 'requirements-trace' && requirementsTraceDocuments.has(file)) return true;
   return task === 'unit-root' && uxProjectionDocuments.has(file);
 }
@@ -156,6 +160,9 @@ export function taskInvocation(task, executable = process.execPath) {
   const environmentKeys = Object.keys(overrides).sort();
   if (task === 'biome-ci') return { executable, arguments: ['scripts/ci/biome/check.mjs'], environmentKeys: ['CODEXIA_CI_REPORT_DIR'] };
   if (task === 'db-contract') return { executable: 'pnpm', arguments: ['--filter', '@codexia/persistence-postgres', 'run', 'test:db-contract'], environmentKeys: ['CODEXIA_CI_REPORT_DIR'] };
+  if (Object.hasOwn(CONFORMANCE_TASKS, task)) return {
+    executable, arguments: ['--import', 'tsx', CONFORMANCE_TASKS[task]], environmentKeys: ['CODEXIA_CI_REPORT_DIR'],
+  };
   if (task === 'requirements-trace') return {
     executable,
     arguments: ['scripts/strictdoc/verify.mjs'],
@@ -197,6 +204,18 @@ function taskEnvironment(task, group, runtime) {
   });
   if (task === 'biome-ci') env.CODEXIA_CI_REPORT_DIR = '<task-report-dir>';
   if (task === 'db-contract') env.CODEXIA_CI_REPORT_DIR = '<task-report-dir>';
+  if (Object.hasOwn(CONFORMANCE_TASKS, task)) {
+    env.CODEXIA_CI_REPORT_DIR = '<task-report-dir>';
+    if (task === 'http-conformance') {
+      env.CODEXIA_CI_HTTP_CONFORMANCE_SETUP = 'success';
+      env.CODEXIA_HTTP_CONFORMANCE_DATABASE_URL = '<disposable-loopback-postgres-database-url>';
+      env.PYTHON_VERSION = '3.12';
+      env.SCHEMATHESIS_BIN = '<locked-python-environment>/bin/schemathesis';
+    } else {
+      env.CODEXIA_CI_MCP_CONFORMANCE_SETUP = 'success';
+      env.CODEXIA_MCP_CONFORMANCE_DATABASE_URL = '<disposable-loopback-postgres-database-url>';
+    }
+  }
   if (task.startsWith('browser-')) {
     Object.assign(env, { CODEXIA_E2E_DATABASE_URL: 'postgres://codexia:codexia@postgres:5432/codexia_test',
       CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: browserRuntimeRequirements(group).imageDigest });
@@ -215,12 +234,14 @@ function taskProducerRecipe(task) {
   const profile = requiredBuildProfile(group);
   if (profile) prerequisites.push(`build-${profile}`);
   if (task === 'audit-core') prerequisites.push('build-core');
-  if (task === 'db-contract') prerequisites.push('workspace-build-prerequisites');
-  if (task.startsWith('unit-') || task.startsWith('typecheck-') || task.startsWith('test-types-') || task === 'safety') {
+  if (task.startsWith('unit-') || task.startsWith('typecheck-') || task.startsWith('test-types-') || task === 'safety' ||
+      task === 'db-contract' || Object.hasOwn(CONFORMANCE_TASKS, task)) {
     prerequisites.push('workspace-build-prerequisites');
   }
   const external = [];
-  if (task.startsWith('unit-') || task.startsWith('browser-')) external.push(POSTGRES_CI_IMAGE);
+  if (task.startsWith('unit-') || task.startsWith('browser-') || Object.hasOwn(CONFORMANCE_TASKS, task)) external.push(POSTGRES_CI_IMAGE);
+  if (task === 'http-conformance') external.push('python:3.12', 'tests/conformance/http/requirements.lock.txt');
+  if (task === 'mcp-conformance') external.push('tests/conformance/mcp/package-lock.json');
   if (task === 'biome-ci') external.push('@biomejs/biome@2.6.8');
   if (task === 'db-contract') {
     const toolchain = DB_CONTRACT_TOOLCHAIN;

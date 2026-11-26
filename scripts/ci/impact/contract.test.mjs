@@ -92,7 +92,9 @@ test('the certified graph covers every declared obligation within the twenty-two
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
   assert.deepEqual(VERIFICATION_GROUPS['unit-db'], ['db-contract']);
-  assert.deepEqual(VERIFICATION_GROUPS['unit-api'], ['unit-api']);
+  assert.deepEqual(VERIFICATION_GROUPS['unit-api'], ['unit-api', 'http-conformance', 'mcp-conformance']);
+  assert.equal(requiresWorkspacePreparation(['http-conformance']), true);
+  assert.equal(requiresWorkspacePreparation(['mcp-conformance']), true);
   assert.equal(requiresWorkspacePreparation(['db-contract']), true);
   assert.ok(VERIFICATION_TASKS.includes('db-contract'));
   assert.match(readFileSync(new URL('../execution/group.mjs', import.meta.url), 'utf8'), /CODEXIA_CI_REPORT_DIR: path\.join\(reportDirectory, task\)/u);

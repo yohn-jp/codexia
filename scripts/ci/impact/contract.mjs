@@ -15,6 +15,10 @@ export const TYPECHECK_TARGETS = [
 ];
 export const TEST_TYPECHECK_SCOPES = ['app-e2e', 'packages', 'modules'];
 export const PROFILES = ['core', 'full'];
+export const CONFORMANCE_TASKS = Object.freeze({
+  'http-conformance': 'tests/conformance/http/run.mjs',
+  'mcp-conformance': 'tests/conformance/mcp/run.mjs',
+});
 export const BROWSER_SHARDS = [
   { id: 'auth-recovery', project: 'chromium', file: 'auth-recovery.acceptance.spec.ts' },
   { id: 'oauth-web', project: 'chromium', file: 'oauth-web.acceptance.spec.ts' },
@@ -24,6 +28,7 @@ export const BROWSER_SHARDS = [
 export const VERIFICATION_TASKS = [
   ...UNIT_TARGETS.map(({ id }) => `unit-${id}`),
   'db-contract',
+  ...Object.keys(CONFORMANCE_TASKS),
   ...TYPECHECK_TARGETS.map(({ id }) => `typecheck-${id}`),
   ...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`),
   'safety', 'build-core', 'build-full', 'audit-core', 'oci-core', 'oci-full',
@@ -39,7 +44,7 @@ export const VERIFICATION_GROUPS = {
   'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'http-contract', 'root'].map(id => `unit-${id}`),
   // API integration and the rootless DB contract each own mutable fixtures.
   // They execute on distinct runners instead of serial exclusive barriers.
-  'unit-api': ['unit-api'],
+  'unit-api': ['unit-api', ...Object.keys(CONFORMANCE_TASKS)],
   'unit-db': ['db-contract'],
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
   'unit-architecture': ['architecture-g5'],
@@ -73,5 +78,5 @@ export const CERTIFICATION_DEPENDENCIES = Object.freeze(['plan', 'deployment_cut
 /** @param {string[]} tasks */
 export function requiresWorkspacePreparation(tasks) {
   return tasks.some(task => task.startsWith('unit-') || task.startsWith('typecheck-') ||
-    task.startsWith('test-types-') || task === 'safety' || task === 'db-contract');
+    task.startsWith('test-types-') || task === 'safety' || task === 'db-contract' || Object.hasOwn(CONFORMANCE_TASKS, task));
 }
