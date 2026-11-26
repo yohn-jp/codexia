@@ -7,6 +7,7 @@ import { createServer as createHttpServer, type Server as HttpServer } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { initializeFreshPostgresSchema, inspectFreshPostgresSchema } from '@codexia/persistence-postgres';
 import { type Browser, type BrowserContext, type CDPSession, chromium, expect, type Page } from '@playwright/test';
 import type { LightMyRequestResponse } from 'fastify';
 import { Pool } from 'pg';
@@ -923,34 +924,67 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === '1')
   test('same-origin setup-only Fastify commits one verified owner and closes setup before OAuth activation', {
     timeout: 120_000,
   }, async t => {
-    const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL!;
-    assertDisposableAuthFixtureDatabaseUrl(databaseUrl);
+    const sourceDatabaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL!;
+    assertDisposableAuthFixtureDatabaseUrl(sourceDatabaseUrl);
     const previousEnvironment = process.env.NODE_ENV;
     process.env.NODE_ENV = 'test';
-    const database = new Pool({ connectionString: databaseUrl });
+    const fixtureAdmin = new Pool({ connectionString: sourceDatabaseUrl });
+    const databaseName = `codexia_r4_${randomUUID().replaceAll('-', '')}`;
+    let createdDatabase = false;
     let createdRole = false;
+    const isolatedDatabaseUrl = new URL(sourceDatabaseUrl);
+    isolatedDatabaseUrl.pathname = `/${databaseName}`;
+    const databaseUrl = isolatedDatabaseUrl.href;
+    const database = new Pool({ connectionString: databaseUrl });
     let app: ReturnType<typeof createOwnerSetupApp> | undefined;
     let authPool: Pool | undefined;
     let browser: Browser | undefined;
     let active: Awaited<ReturnType<typeof startRuntimeHttpFixture>> | undefined;
     t.after(async () => {
-      await browser?.close();
-      await app?.close();
-      await authPool?.end();
-      await active?.fixture.close();
-      await active?.runtime.pool.end();
-      if (createdRole) {
-        await database.query('DROP SCHEMA codexia_auth CASCADE');
-        await database.query('DROP ROLE codexia_auth_runtime');
-      }
+      await browser?.close().catch(() => undefined);
+      await app?.close().catch(() => undefined);
+      await authPool?.end().catch(() => undefined);
+      await active?.fixture.close().catch(() => undefined);
+      await active?.runtime.pool.end().catch(() => undefined);
       await database.end();
-      if (previousEnvironment === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = previousEnvironment;
+      try {
+        if (createdDatabase) await fixtureAdmin.query(`DROP DATABASE ${databaseName}`);
+        if (createdRole) await fixtureAdmin.query('DROP ROLE codexia_auth_runtime');
+      } finally {
+        await fixtureAdmin.end();
+        if (previousEnvironment === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousEnvironment;
+      }
     });
+    await fixtureAdmin.query(`CREATE DATABASE ${databaseName}`);
+    createdDatabase = true;
+    // Simulate the interrupted R4 checkpoint: application migrations and the
+    // least-privilege auth namespace exist, while Better Auth has not yet run.
+    await initializeFreshPostgresSchema(databaseUrl);
+    const applicationCheckpoint = await inspectFreshPostgresSchema(databaseUrl);
+    assert.equal(applicationCheckpoint.pristine, false);
+    assert.match(applicationCheckpoint.fingerprint, /^sha256:[a-f0-9]{64}$/u);
+    const databaseIdentitySql = 'SELECT system_identifier::text || chr(58) || ' +
+      '(SELECT oid::text FROM pg_database WHERE datname=current_database()) AS identity FROM pg_control_system()';
+    const databaseIdentity = (await database.query<{ identity: string }>(databaseIdentitySql)).rows[0]?.identity;
+    assert.match(databaseIdentity ?? '', /^[1-9][0-9]{0,19}:[1-9][0-9]{0,9}$/u);
+
     const password = randomBytes(32).toString('base64url');
-    await database.query(`CREATE ROLE codexia_auth_runtime LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE`);
+    await database.query(`CREATE ROLE codexia_auth_runtime LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);
     createdRole = true;
     await database.query('CREATE SCHEMA codexia_auth AUTHORIZATION codexia_auth_runtime');
+    const authNamespaceCheckpoint = await database.query<{ pristine: boolean }>(`
+      SELECT n.nspowner = (SELECT oid FROM pg_roles WHERE rolname='codexia_auth_runtime')
+        AND NOT EXISTS (SELECT FROM aclexplode(COALESCE(n.nspacl, acldefault('n',n.nspowner))) a WHERE a.grantee<>n.nspowner)
+        AND NOT EXISTS (SELECT FROM pg_auth_members WHERE member=n.nspowner OR roleid=n.nspowner)
+        AND NOT EXISTS (SELECT FROM pg_depend d WHERE d.refclassid='pg_namespace'::regclass AND d.refobjid=n.oid)
+        AND NOT EXISTS (SELECT FROM pg_class c WHERE c.relnamespace=n.oid)
+        AND NOT EXISTS (SELECT FROM pg_proc p WHERE p.pronamespace=n.oid)
+        AND NOT EXISTS (SELECT FROM pg_type t WHERE t.typnamespace=n.oid) AS pristine
+      FROM pg_namespace n WHERE n.nspname='codexia_auth'
+    `);
+    assert.equal(authNamespaceCheckpoint.rows[0]?.pristine, true,
+      'interrupted R4 checkpoint must be an empty auth namespace');
     const runtimeDatabase = new URL(databaseUrl);
     runtimeDatabase.username = 'codexia_auth_runtime';
     runtimeDatabase.password = password;
@@ -1320,4 +1354,6 @@ if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === '1')
     assert.equal(signedIn.verifyStatus, 200, signedIn.verifyCode);
     assert.equal(signedIn.credentialId, credential.rows[0]?.credentialID);
     assert.deepEqual(await active.runtime.checkOwnerSession(await sessionHeaders()), { status: 200 });
+    assert.equal((await database.query<{ identity: string }>(databaseIdentitySql)).rows[0]?.identity, databaseIdentity);
+    assert.deepEqual(await inspectFreshPostgresSchema(databaseUrl), applicationCheckpoint);
   });
