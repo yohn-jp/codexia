@@ -14,7 +14,7 @@ using TypeSpec.OpenAPI;
 @info(#{ version: "2.0.0" })
 @server("https://api.codexia.example", "Codexia API")
 @extension("x-codexia-contract-status", "incomplete")
-@extension("x-codexia-api-epoch", 3)
+@extension("x-codexia-api-epoch", 4)
 @extension("x-codexia-cors", #{
   originPolicy: "same-origin or exact configured HTTPS origin; wildcard origins are forbidden",
   credentials: false,

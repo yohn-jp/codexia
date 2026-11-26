@@ -638,8 +638,9 @@ test('Better Auth activation uses protected staged settings on a fresh or existi
   assert.match(authRuntime, /Configured Better Auth owner subject is not registered/u);
   assert.match(authRuntime, /has an unsupported scope/u, 'client registration checks must reject authority beyond the configured scope class');
   assert.match(runbook, /\[browser enrollment\]\(\.\.\/\.\.\/deploy\/ansible\/AUTH-RUNTIME\.md#first-owner-through-the-browser\)/u);
-  assert.match(runbook, /\[legacy SSH-forward enrollment\]\(\.\.\/\.\.\/deploy\/ansible\/AUTH-RUNTIME\.md#legacy-initial-owner-and-oauth-client-registration\)/u);
-  assert.match(runbook, /both first-activation approvals/u);
+  assert.match(runbook, /`preflight_run_id`/u);
+  assert.match(runbook, /`ACTIVATE_CODEXIA_BACKEND`/u);
+  assert.match(runbook, /`CODEXIA_INITIAL_INSTALL_APPROVED=true` and `CODEXIA_DATABASE_INITIALIZATION_APPROVED=true`/u);
 });
 
 test('stale admission stops before touching activation links, transaction intent or services', () => {

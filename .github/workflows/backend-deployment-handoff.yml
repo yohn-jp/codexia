@@ -2,8 +2,8 @@ name: Codexia Backend Deployment
 on:
   workflow_dispatch:
     inputs:
-      request:
-        description: Reviewed R6 deployment plan, approval binding and certified artifact references (JSON)
+      preflight_run_id:
+        description: Reviewed runtime lifecycle Preflight run ID for R6
         type: string
         required: true
       approval_phrase:
@@ -67,12 +67,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_PUBLISHER_RUN_ID: ${{ github.event.workflow_run.id }}
         run: node scripts/deployment/handoff/verify-push.mjs
+      - name: Read the immutable runtime Preflight receipt
+        if: github.event_name == 'workflow_dispatch'
+        uses: ./.github/actions/reviewed-preflight
+        with:
+          run-id: ${{ inputs.preflight_run_id }}
+          management: runtime
       - name: Certify the selected published Backend for manual first activation
         if: github.event_name == 'workflow_dispatch'
         id: manual
         env:
           GH_TOKEN: ${{ github.token }}
-          CODEXIA_FIRST_ACTIVATION_REQUEST: ${{ inputs.request }}
         run: node scripts/deployment/bootstrap/activate-backend.mjs certify
 
   deploy-production:
@@ -163,6 +168,9 @@ jobs:
           else
             node scripts/release/components/source-gate.mjs backend-deployment
           fi
+      - name: Load the public production origin and OAuth configuration
+        if: steps.freshness.outputs.current == 'true'
+        run: node scripts/deployment/bootstrap/public-env.mjs
       - name: Prepare pinned SSH identity
         id: target
         if: steps.freshness.outputs.current == 'true'
@@ -187,7 +195,6 @@ jobs:
         id: live-ui
         shell: bash
         env:
-          CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
           CODEXIA_EXPECTED_BACKEND_API_EPOCH: ${{ needs.verify-handoff.outputs.certified-full-api-epoch }}
@@ -204,28 +211,26 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
+      - name: Read the immutable runtime Preflight receipt
+        if: github.event_name == 'workflow_dispatch' && steps.freshness.outputs.current == 'true'
+        uses: ./.github/actions/reviewed-preflight
+        with:
+          run-id: ${{ inputs.preflight_run_id }}
+          management: runtime
       - name: Reverify the R6 plan after entering the production queue
         if: github.event_name == 'workflow_dispatch' && steps.freshness.outputs.current == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
-          CODEXIA_FIRST_ACTIVATION_REQUEST: ${{ inputs.request }}
           CODEXIA_FIRST_ACTIVATION_APPROVAL: ${{ inputs.approval_phrase }}
           CODEXIA_DEPLOYMENT_CERTIFICATE_B64: ${{ needs.verify-handoff.outputs.deployment-certificate }}
           CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.target.outputs.host }}
-          CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
           CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
           CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN }}
-          CODEXIA_DEPLOYMENT_PRESERVATION: ${{ secrets.CODEXIA_DEPLOYMENT_PRESERVATION }}
           CODEXIA_INITIAL_INSTALL_APPROVED: ${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED }}
           CODEXIA_DATABASE_INITIALIZATION_APPROVED: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED }}
-          VITE_CODEXIA_OAUTH_ISSUER: ${{ vars.VITE_CODEXIA_OAUTH_ISSUER }}
-          VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
-          VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
-          VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
-          VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
         run: |
           set -euo pipefail
           umask 077

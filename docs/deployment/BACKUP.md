@@ -122,3 +122,46 @@ It starts the pinned Silo S3-compatible service on loopback with a temporary CA,
 | BACKUP-S3-007 | bucket credential、age秘密鍵、原稿平文がログ・CI artifact・公開Pagesへ出ない |
 
 本番のDR受入には、実際の保管先での転送・読み戻しと、独立したホストでの復元ドリルの証拠が必要になる。S3互換fixtureで確認できる範囲は、使用した互換実装とその隔離復元環境に限られる。[External interfaces](../architecture/EXTERNAL-INTERFACES.md)（`EXT-OPS-003`）と [Requirements](../requirements/REQUIREMENT-REGISTER.md)（`REQ-OPS-003`）を参照。
+
+## Initial recovery before activation
+
+Provision both recovery paths before starting a fresh install. The owner first reaches the normal backup console after activation. The operator controls the initial destinations and identities through protected Environments.
+
+| Material | Writer and recovery reader | Admission proof |
+| --- | --- | --- |
+| Rootless Podman secrets including the PostgreSQL role credentials | On R4 the VM encrypts the exact installed values to the public age recipient. Bootstrap puts the envelope in S3 and reads it back. A fresh runner in `codexia-bootstrap-recovery` reads and decrypts the envelope and validates its actual contents. | The recovery principal records proof for the host, recipient and credential generation. R5 and the initial data capture verify the current generation and corresponding S3 ciphertext. |
+| Enrolled DB and history | After R5 preparation, the runtime operator captures the stopped source with the existing `backup.sh backup-locked` producer. The pinned S3 adapter uploads and reads back its v2 artifact. A fresh recovery runner downloads the artifact and runs `backup.sh drill` against isolated PostgreSQL and history volumes. | Only the successful drill publishes the redacted source-bound receipt. R6 authenticates the producing workflow, run and successful attempt on the reviewed main and verifies the host, DB, secret identities and both restored content fingerprints before publication. |
+
+Use a dedicated escrow prefix and the standard S3 transfer profile JSON for `CODEXIA_BOOTSTRAP_ESCROW_PROFILE` (Variable). Set `CODEXIA_BOOTSTRAP_ESCROW_RECIPIENT` to the verified recovery public key. Supply `CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL` as a Secret containing `accessKeyId`, `secretAccessKey` and optional `sessionToken`. Grant the bootstrap principal conditional upload and read access to `envelopes/` and only read access to `verified/`. The runtime observer reads both prefixes. Grant the independent recovery principal read access to envelopes and conditional write/read access to the proof prefix. Include versioned reads for a versioned bucket. When the profile requests Object Lock, scope the required retention permissions to each principal’s authorized keys. The recovery Environment alone receives the Secret `CODEXIA_BOOTSTRAP_ESCROW_AGE_IDENTITY`. Keep an independent offline recovery copy.
+
+To rehydrate credentials on an approved isolated host, retrieve the original redacted R4 receipt, use the configured recovery profile and recovery credential, and invoke the [escrow helper](../../deploy/backup/bootstrap_escrow.py) in the pinned S3 Python environment. Set `CODEXIA_BOOTSTRAP_ESCROW_PROFILE` and `CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL` for the recovery destination. The helper derives the recipient from the private identity.
+
+```sh
+python deploy/backup/bootstrap_escrow.py recover \
+  --receipt /private/escrow-receipt.json --identity /private/recovery.agekey \
+  --output-dir /private/restored-secrets
+```
+
+When the Actions receipt has expired, use `restore --host-id HOST_ID --generation GENERATION --identity /private/recovery.agekey --output-dir /private/restored-secrets`. The host ID and generation identify the independently verified receipt in the protected S3 prefix. This path needs read access only.
+
+The output directory must be new. Apply the recovered values under the canonical Podman secret names and provision the original PostgreSQL roles using the recovered passwords through the approved recovery operation. Restore the v2 DB and history, then verify the original owner, Passkey and client bindings before allowing runtime use.
+
+For initial **data** preservation, configure `CODEXIA_INITIAL_BACKUP_PROFILE` (Variable) in both `codexia-production` and `codexia-bootstrap-recovery` with the same v2 destination. In each Environment supply its own `CODEXIA_INITIAL_BACKUP_CREDENTIAL` Secret. The production principal needs the [v2 upload permissions](#採用済み目標-s3互換オブジェクトストレージへの暗号化バックアップ) and the recovery principal needs read access. Production supplies the public `CODEXIA_BACKUP_AGE_RECIPIENT`; the recovery Environment supplies the matching `CODEXIA_INITIAL_BACKUP_IDENTITY` Secret. The initial workflow passes the private transfer receipt between jobs encrypted to that recipient. After the isolated drill succeeds, the recovery runner conditionally writes the exact age-encrypted transfer receipt to `<escrow-prefix>/verified/v2-backups/<source-host-id>/<backup-id>.age` and reads it back byte for byte. A different existing object, failed write or failed readback stops publication of the activation receipt. The recovery Environment uses its existing write/read access to `verified/`. Set object retention to cover the v2 backup's recovery lifetime.
+
+To retrieve an initial backup after the Actions artifacts expire, fetch that object from the escrow destination using the protected recovery reader. On the isolated recovery host, decrypt it with the initial **data** backup identity. Verify `sourceHostId` and `backupId` against the selected backup before exporting its `transfer` record. The pinned S3 transfer helper consumes this private record with the initial data profile and its read credential. Given a private directory, the encrypted receipt, and the selected identifiers:
+
+```sh
+umask 077
+set -euo pipefail
+age -d -i "$DATA_AGE_IDENTITY" "$PRIVATE_DIR/transfer.age" |
+  jq -e --arg host "$SOURCE_HOST_ID" --arg id "$BACKUP_ID" \
+    'select(.sourceHostId == $host and .backupId == $id and .transfer.backupId == $id) | .transfer' \
+    > "$PRIVATE_DIR/transfer.json"
+mkdir -m 0700 "$PRIVATE_DIR/download"
+python deploy/backup/s3_transfer.py download --profile "$INITIAL_DATA_PROFILE" \
+  --backup-id "$BACKUP_ID" --receipt "$PRIVATE_DIR/transfer.json" --output-dir "$PRIVATE_DIR/download" \
+  --credential-stdin < "$INITIAL_DATA_READ_CREDENTIAL"
+bash deploy/backup/backup.sh drill "$PRIVATE_DIR/download/codexia-$BACKUP_ID" "$DATA_AGE_IDENTITY" --approved
+```
+
+A new verification dispatch on current main can refresh an expired activation receipt while the Backend remains stopped.

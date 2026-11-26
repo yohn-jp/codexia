@@ -39,6 +39,8 @@
     "packages/persistence-contracts/src/**",
     "deploy/cloudflare/**",
     "deploy/frontend-compatibility.json",
+    "deploy/production.json",
+    "scripts/deployment/bootstrap/public-env.mjs",
     "scripts/ci/impact/contract.mjs",
     "scripts/ci/evidence/artifact-selection.mjs",
     "scripts/ci/evidence/download-artifacts*.mjs",

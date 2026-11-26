@@ -1,0 +1,165 @@
+name: Independently recover bootstrap credentials
+on:
+  workflow_call:
+    inputs:
+      producer-attempt:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Verify a protected receipt or escrow an existing R5/R6 installation
+        type: choice
+        options: [recover, adopt]
+        required: true
+      preflight-run:
+        description: Reviewed bootstrap-management Preflight for existing-set adoption
+        type: string
+        required: false
+      producer-run:
+        description: Original protected run that uploaded the receipt (recover only)
+        type: string
+        required: false
+      producer-attempt:
+        description: Attempt that emitted the receipt (recover only)
+        type: string
+        default: '1'
+        required: false
+permissions:
+  contents: read
+  actions: read
+jobs:
+  adopt:
+    if: github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'adopt'
+    environment: codexia-bootstrap
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: codexia-production
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    outputs:
+      receipt-attempt: ${{ steps.receipt.outputs.attempt }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/reviewed-preflight
+        with:
+          run-id: ${{ inputs.preflight-run }}
+          management: bootstrap
+          escrow-adoption: 'true'
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install protected controller dependencies
+        run: |
+          set -euo pipefail
+          corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
+          bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt
+          echo "$RUNNER_TEMP/codexia-ansible/bin" >> "$GITHUB_PATH"
+          bash deploy/backup/install-s3-runtime.sh "$RUNNER_TEMP/bootstrap-s3"
+      - name: Prepare the existing pinned administrator identity for observation
+        id: target
+        env:
+          CODEXIA_BOOTSTRAP_MODE: preflight
+          CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED: 'false'
+          CODEXIA_BOOTSTRAP_HOST: ${{ vars.CODEXIA_BOOTSTRAP_HOST }}
+          CODEXIA_BOOTSTRAP_SSH_USER: ${{ vars.CODEXIA_BOOTSTRAP_SSH_USER }}
+          CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS }}
+          CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY }}
+        run: "$RUNNER_TEMP/codexia-ansible/bin/python deploy/ansible/prepare-production-bootstrap.py"
+      - uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: api.tailscale.com/Ts4P9VFjmJ11CNTRL-khX5P9DgL421CNTRL
+          tags: tag:ci
+          ping: ${{ steps.target.outputs.host }}
+      - name: Verify the reviewed staging state before sealing existing credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.target.outputs.host }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = "$GITHUB_SHA"
+          node scripts/deployment/preflight/run.mjs bootstrap-host
+          node scripts/deployment/bootstrap/escrow-admission.mjs
+      - name: Seal the intact set on the VM and verify off-VM readback
+        env:
+          CONTROL: ${{ steps.target.outputs.control }}
+          CODEXIA_BOOTSTRAP_ESCROW_PROFILE: ${{ vars.CODEXIA_BOOTSTRAP_ESCROW_PROFILE }}
+          CODEXIA_BOOTSTRAP_ESCROW_RECIPIENT: ${{ vars.CODEXIA_BOOTSTRAP_ESCROW_RECIPIENT }}
+          CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL: ${{ secrets.CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL }}
+        run: |
+          set -euo pipefail
+          CODEXIA_BOOTSTRAP_ESCROW_HOST_ID=$(jq -er '.host.hostId' "$RUNNER_TEMP/codexia-lifecycle-host.json")
+          export CODEXIA_BOOTSTRAP_ESCROW_HOST_ID
+          ansible-playbook -i "$CONTROL/inventory.yml" deploy/ansible/verify-bootstrap-escrow.yml \
+            --extra-vars "@$RUNNER_TEMP/escrow-admission.json"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: bootstrap-escrow-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codexia-bootstrap/control/escrow-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+      - id: receipt
+        run: echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - if: always()
+        run: rm -rf -- "$RUNNER_TEMP/codexia-bootstrap"
+
+  recover:
+    needs: adopt
+    if: always() && !cancelled() && (needs.adopt.result == 'success' || (inputs.mode != 'adopt' && needs.adopt.result == 'skipped')) && github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    environment: codexia-bootstrap-recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify the receipt producer before accepting its artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCER: ${{ needs.adopt.outputs.receipt-attempt && github.run_id || inputs.producer-run || github.run_id }}
+          ATTEMPT: ${{ needs.adopt.outputs.receipt-attempt || inputs.producer-attempt }}
+        run: |
+          set -euo pipefail
+          [[ "$PRODUCER" =~ ^[1-9][0-9]*$ && "$ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PRODUCER/attempts/$ATTEMPT" |
+            jq -e --arg repo "$GITHUB_REPOSITORY" --arg id "$PRODUCER" --arg attempt "$ATTEMPT" '
+              .repository.full_name == $repo and .head_repository.full_name == $repo and
+              .event == "workflow_dispatch" and .head_branch == "main" and
+              (.path == ".github/workflows/production-bootstrap.yml" or .path == ".github/workflows/bootstrap-recovery.yml") and
+              (.id | tostring) == $id and (.run_attempt | tostring) == $attempt' >/dev/null
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: bootstrap-escrow-receipt-${{ needs.adopt.outputs.receipt-attempt && github.run_id || inputs.producer-run || github.run_id }}-${{ needs.adopt.outputs.receipt-attempt || inputs.producer-attempt }}
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.adopt.outputs.receipt-attempt && github.run_id || inputs.producer-run || github.run_id }}
+          path: ${{ runner.temp }}/bootstrap-escrow-receipt
+      - name: Install age and the pinned S3 transport
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y age
+          bash deploy/backup/install-s3-runtime.sh "$RUNNER_TEMP/bootstrap-s3"
+      - name: Recover the host-bound credentials in independent temporary storage
+        env:
+          CODEXIA_BOOTSTRAP_ESCROW_PROFILE: ${{ vars.CODEXIA_BOOTSTRAP_ESCROW_PROFILE }}
+          CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL: ${{ secrets.CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL }}
+          RECOVERY_IDENTITY: ${{ secrets.CODEXIA_BOOTSTRAP_ESCROW_AGE_IDENTITY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          identity=$(mktemp "$RUNNER_TEMP/escrow-identity.XXXXXXXX")
+          trap 'rm -f -- "$identity"' EXIT
+          printf '%s\n' "$RECOVERY_IDENTITY" > "$identity"
+          unset RECOVERY_IDENTITY
+          "$RUNNER_TEMP/bootstrap-s3/bin/python" deploy/backup/bootstrap_escrow.py recover \
+            --receipt "$RUNNER_TEMP/bootstrap-escrow-receipt/escrow-receipt.json" --identity "$identity"

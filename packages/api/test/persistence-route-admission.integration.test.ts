@@ -188,8 +188,8 @@ test('Knowledge merge reports missing entities and stale previews as declared cl
     [project.id, sourceId, missingId, 404, 'PERSISTENCE_NOT_FOUND'],
     [project.id, sourceId, sourceId, 400, 'PERSISTENCE_VALIDATION'],
     [project.id, sourceId.toUpperCase(), sourceId, 400, 'PERSISTENCE_VALIDATION'],
-    [project.id, '0', '0', 400, 'PERSISTENCE_VALIDATION'],
-    [project.id, '0', targetId, 400, 'PERSISTENCE_VALIDATION'],
+    [project.id, '0', '0', 400, 'INVALID_ID'],
+    [project.id, '0', targetId, 400, 'INVALID_ID'],
   ] as const) {
     const response = await preview(projectId, source, target);
     assert.equal(response.status, status);

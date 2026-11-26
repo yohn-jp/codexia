@@ -43,6 +43,27 @@ for name in codexia-postgres codexia-data codexia-history; do
   rc=0; podman volume exists "$name" || rc=$?
   test "$rc" = 1
 done
+# Exercise the production VM helper against real Podman before the standalone
+# file-adoption fixture creates its synthetic baseline.
+managed_names=(codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password
+               codexia-auth-database-url codexia-auth-secret codexia-oauth-introspection-client-secret)
+for name in "${managed_names[@]}"; do
+  rc=0; podman secret exists "$name" || rc=$?
+  test "$rc" = 1
+done
+state_dir="$service_home/.local/state/codexia-deploy"
+helper="$service_home/.local/bin/codexia-bootstrap-secrets"
+as_service mkdir -p -m 0700 "$state_dir" "$service_home/.local/bin"
+sudo install -o "$service_user" -g "$(id -gn "$service_user")" -m 0700 deploy/ansible/managed-bootstrap-secrets.py "$helper"
+host_id=$(tr -d '\n' </etc/machine-id | sha256sum | cut -d' ' -f1)
+admission=$(jq -cn --arg host "$host_id" '{host:$host, hashes:{}}')
+receipt="$state_dir/bootstrap-secret-ids.json"
+test "$(printf '%s' fixture-managed-tunnel | as_service "$helper" "$admission" install)" = INITIALIZED
+admission=$(as_service cat "$receipt" | jq -c --arg host "$host_id" '{host:$host, hashes:.}')
+test "$(printf '%s' fixture-managed-tunnel | as_service "$helper" "$admission" adopt)" = VERIFIED
+as_service "$helper" auth-password | base64 -d | grep -qxE '[a-f0-9]{64}'
+for name in "${managed_names[@]}"; do podman secret rm "$name" >/dev/null; done
+as_service rm "$receipt"
 printf 'fixture-tunnel-token\n' > "$tmp/tunnel"
 printf '%064d' 1 > "$tmp/admin"
 printf '%064d\n' 2 > "$tmp/app"

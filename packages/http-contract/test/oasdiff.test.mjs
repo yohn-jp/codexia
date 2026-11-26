@@ -153,7 +153,7 @@ test('pinned oasdiff flags a deliberately breaking response schema', async () =>
   assert.match(`${result.stdout}\n${result.stderr}`, /breaking/u);
 });
 
-test('oasdiff rejects publishing expectedVersion as required although runtime already enforces it', async t => {
+test('oasdiff rejects a newly required property within the same API epoch', async t => {
   const binary = await resolveOasdiffBinary();
   const basePath = path.join(packageRoot, 'openapi', 'codexia.openapi.yaml');
   const candidateDirectory = mkdtempSync(path.join(os.tmpdir(), 'codexia-oasdiff-required-version-'));
@@ -165,14 +165,14 @@ test('oasdiff rejects publishing expectedVersion as required although runtime al
   assert.equal(requestSchema.$ref, '#/components/schemas/PersistenceDocumentDeleteRequest');
   const deleteRequestSchema = candidate.components.schemas.PersistenceDocumentDeleteRequest;
   const existingRequired = deleteRequestSchema.required ?? [];
-  assert.ok(!existingRequired.includes('expectedVersion'), 'the approved OpenAPI currently leaves expectedVersion optional');
-  deleteRequestSchema.required = [...new Set([...existingRequired, 'expectedVersion'])];
-  assert.deepEqual(deleteRequestSchema.required, [...existingRequired, 'expectedVersion']);
+  assert.ok(existingRequired.includes('expectedVersion'), 'the repaired OpenAPI requires the runtime version');
+  deleteRequestSchema.properties.additionalVersion = { type: 'integer' };
+  deleteRequestSchema.required = [...existingRequired, 'additionalVersion'];
   writeFileSync(candidatePath, stringify(candidate));
 
   const result = spawnSync(binary, ['breaking', basePath, candidatePath, '--allow-external-refs=false', '--fail-on', 'ERR'], {
     encoding: 'utf8',
   });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  assert.match(`${result.stdout}\n${result.stderr}`, /request-property-became-required/u);
+  assert.match(`${result.stdout}\n${result.stderr}`, /new-required-request-property|request-property-became-required/u);
 });

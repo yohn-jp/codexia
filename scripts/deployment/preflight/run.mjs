@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { access, readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
-import { readPreservationEvidence } from './preservation.mjs';
+import { readPreservationEvidence, findPreservationEvidence } from './preservation.mjs';
 import { digestEvidence } from './evidence-digest.mjs';
 import { authSchemaFingerprint, CODEXIA_AUTH_SCHEMA } from '../../../packages/api/src/auth-schema.ts';
 
@@ -146,21 +146,23 @@ export async function readLifecycleCandidate(request) {
 
 async function candidateObservation() {
   const binding = runBinding();
-  const request = parsePreflightRequest(env.CODEXIA_PREFLIGHT_REQUEST ?? '');
+  const raw = env.CODEXIA_PREFLIGHT_REQUEST ||
+    JSON.stringify(await (await import('./discover.mjs')).discoverRequest(env));
+  const request = parsePreflightRequest(raw);
   const candidate = await readLifecycleCandidate(request);
   await writeFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-candidate.json'),
-    JSON.stringify({ ...binding, requestSha256: digestEvidence(request), ...candidate }) + '\n', { mode: 0o600, flag: 'wx' });
+    JSON.stringify({ ...binding, request, requestSha256: digestEvidence(request), ...candidate }) + '\n', { mode: 0o600, flag: 'wx' });
 }
 
 async function planObservation({ bootstrapMode } = {}) {
   const binding = runBinding();
   let stage = 'request';
   try {
-    const request = parsePreflightRequest(env.CODEXIA_PREFLIGHT_REQUEST ?? '');
     await mainSource();
     stage = 'candidate-evidence';
     const candidate = JSON.parse(await readFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-candidate.json'), 'utf8'));
     for (const [key, value] of Object.entries(binding)) assert.equal(candidate[key], value);
+    const request = parsePreflightRequest(env.CODEXIA_PREFLIGHT_REQUEST || JSON.stringify(candidate.request));
     assert.equal(candidate.requestSha256, digestEvidence(request));
     const { candidateBackend, candidateFrontend, authSchemas } = candidate;
     stage = 'host-evidence';
@@ -194,7 +196,8 @@ async function planObservation({ bootstrapMode } = {}) {
     const result = planFromObservations({ host, edge, hostPinSha256: receipt.hostPinSha256,
       candidateBackend, candidateFrontend, authSchemas, priorBackend: candidate.priorBackend,
       intent: request.intent, window: request.window ?? null,
-      preservationReceipt: readPreservationEvidence(env.CODEXIA_DEPLOYMENT_PRESERVATION, host) });
+      preservationReceipt: request.intent === 'install' ? await findPreservationEvidence(host) :
+        readPreservationEvidence(env.CODEXIA_DEPLOYMENT_PRESERVATION, host) });
     await mainSource();
     if (bootstrapMode) {
       stage = 'bootstrap-admission';
@@ -216,6 +219,9 @@ async function planObservation({ bootstrapMode } = {}) {
         topology: host.topology,
         initializeDatabase: env.CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED === 'true',
       });
+      if (bootstrapMode === 'bootstrap' && !host.topology?.secrets?.['codexia-tunnel-token']) {
+        await access(join(env.RUNNER_TEMP, 'codexia-bootstrap/control/tunnel-token'));
+      }
       if (bootstrapMode === 'publish-frontend') {
         assert.equal(env.CODEXIA_INITIAL_FRONTEND_APPROVAL, 'PUBLISH_INITIAL_FRONTEND');
         assert.equal(request.intent, 'install');
@@ -241,6 +247,8 @@ async function planObservation({ bootstrapMode } = {}) {
       }
       const overrides = bootstrapMode === 'bootstrap' ? {
         codexia_bootstrap_stages: admission.stages,
+        codexia_bootstrap_host_id: host.hostId,
+        codexia_bootstrap_secret_hashes: host.topology?.secretHashes ?? {},
         codexia_owner_setup_install_intent: admission.installIntent,
         codexia_owner_setup_approved: false,
         ...(admission.installIntent && plan.observation.state.D === 'absent' &&
@@ -265,11 +273,12 @@ async function planObservation({ bootstrapMode } = {}) {
       console.log('Protected operation admitted for ' + admission.route);
       return;
     }
-    await writeFile(output(), JSON.stringify({ ...binding, ...result }, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+    await writeFile(output(), JSON.stringify({ ...binding, management: env.CODEXIA_PREFLIGHT_MANAGEMENT, request, ...result }, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
     console.log('Read-only lifecycle candidate route: ' + result.plan.candidateRoute +
       '; evidence blockers: ' + (result.plan.blockers.join(', ') || 'none') +
       '; no mutation authority granted');
-    if (result.plan.route === 'R0') process.exitCode = 1;
+    if (result.plan.route === 'R0' &&
+      (result.plan.candidateRoute === 'R0' || result.plan.blockers.some(reason => reason !== 'approval-required'))) process.exitCode = 1;
   } catch {
     await writeFile(output(), JSON.stringify({ ...binding, format: 'codexia-lifecycle-preflight-failure/v1',
       route: 'R0', reason: stage, observedAt: new Date().toISOString() }) + '\n', { mode: 0o600, flag: 'wx' });

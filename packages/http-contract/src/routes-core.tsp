@@ -239,7 +239,7 @@ op getStandaloneMcp(@query projectId?: string, @header("MCP-Protocol-Version") p
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/mcp") @post @operationId("mcp_root_post")
-op postStandaloneMcp(@query projectId?: string, @body body: JsonObject | JsonObject[], @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string, @header("Accept") accept?: string): McpEventStream | McpJsonResponse | McpAcceptedResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 413; @body body: ApiError; } | { @statusCode _: 415; @body body: ApiError; };
+op postStandaloneMcp(@query projectId?: string, @body body: JsonObject | JsonObject[], @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string, @header("Accept") accept?: string): McpEventStream | McpJsonResponse | McpAcceptedResponse | { @statusCode _: 400; @body body: ApiError | McpParseError; } | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 413; @body body: ApiError; } | { @statusCode _: 415; @body body: ApiError; };
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/mcp") @delete @operationId("mcp_root_delete")
@@ -251,7 +251,7 @@ op getProjectMcpStream(@path projectId: string, @header("MCP-Protocol-Version") 
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/api/projects/{projectId}/modules/mcp/streamable") @post @operationId("project_mcp_stream_post")
-op postProjectMcpStream(@path projectId: string, @body body: JsonObject | JsonObject[], @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string, @header("Accept") accept?: string): McpEventStream | McpJsonResponse | McpAcceptedResponse | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 413; @body body: ApiError; } | { @statusCode _: 415; @body body: ApiError; };
+op postProjectMcpStream(@path projectId: string, @body body: JsonObject | JsonObject[], @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string, @header("Accept") accept?: string): McpEventStream | McpJsonResponse | McpAcceptedResponse | { @statusCode _: 400; @body body: ApiError | McpParseError; } | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 413; @body body: ApiError; } | { @statusCode _: 415; @body body: ApiError; };
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/api/projects/{projectId}/modules/mcp/streamable") @delete @operationId("project_mcp_stream_delete")

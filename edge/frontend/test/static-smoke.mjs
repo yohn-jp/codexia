@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from '@playwright/test';
-import { assertFrontendOAuthConfigIdentity } from '../../../scripts/build/frontend/oauth-config.mjs';
+import { assertFrontendOAuthConfigIdentity, readFrontendOAuthConfig } from '../../../scripts/build/frontend/oauth-config.mjs';
 import { inspectHtml } from '../../../scripts/shared/html-document.mjs';
 
 const identity = JSON.parse(await readFile('app/dist/desktop/update-identity.json', 'utf8'));
@@ -73,6 +73,22 @@ try {
     headless: true,
     ...(systemChromium ? { executablePath: systemChromium, args: ['--no-sandbox'] } : {}),
   });
+  // A production-configured bundle validates the browser's origin before
+  // probing the API. Serve this origin entirely from the local Wrangler
+  // process so the real signed-out/offline path runs without production I/O.
+  const oauth = readFrontendOAuthConfig();
+  const origin = oauth ? new URL(oauth.desktopRedirectUri).origin : base;
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  if (origin !== base) {
+    await context.route(origin + '/**', async route => {
+      const request = new URL(route.request().url());
+      const local = new URL(base);
+      local.pathname = request.pathname;
+      local.search = request.search;
+      const response = await route.fetch({ url: local.href, maxRedirects: 0 });
+      await route.fulfill({ response });
+    });
+  }
   try {
     for (const [path, heading] of [
       ['/?utm_source=smoke', '執筆画面を選ぶ'],
@@ -81,13 +97,13 @@ try {
       ['/console/backups/history', '管理コンソールを利用できません'],
       ['/console/setup', '初回所有者登録'],
     ]) {
-      const page = await browser.newPage();
+      const page = await context.newPage();
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       try {
         if (path === '/console/setup')
-          await page.route(`${base}/api/auth/codexia/setup/status`, route => route.fulfill({ json: { state: 'setup-pending' } }));
-        await page.goto(base + path, { waitUntil: 'domcontentloaded' });
+          await page.route(`${origin}/api/auth/codexia/setup/status`, route => route.fulfill({ json: { state: 'setup-pending' } }));
+        await page.goto(origin + path, { waitUntil: 'domcontentloaded' });
         await page.getByRole('heading', { name: heading, exact: true }).waitFor({ timeout: 20000 });
         if (path === '/console/setup') await page.getByLabel('初期登録キー').waitFor({ timeout: 20000 });
         assert.deepEqual(errors, [], `${path} browser exceptions`);
@@ -95,12 +111,13 @@ try {
         await page.close();
       }
     }
-    const ownerPage = await browser.newPage({ viewport: { width: 320, height: 720 } });
+    const ownerPage = await context.newPage();
+    await ownerPage.setViewportSize({ width: 320, height: 720 });
     try {
-      await ownerPage.route(`${base}/api/auth/codexia/owner-session`, route =>
+      await ownerPage.route(`${origin}/api/auth/codexia/owner-session`, route =>
         route.fulfill({ status: 200, contentType: 'application/json', body: '{"authenticated":true}' }),
       );
-      await ownerPage.goto(`${base}/console/`, { waitUntil: 'domcontentloaded' });
+      await ownerPage.goto(`${origin}/console/`, { waitUntil: 'domcontentloaded' });
       await ownerPage.getByRole('heading', { name: '管理コンソール', exact: true }).waitFor({ timeout: 20000 });
       const navigation = ownerPage.getByRole('navigation', { name: '管理コンソール' });
       assert.equal(await navigation.getByRole('link', { name: 'セキュリティ' }).getAttribute('href'), '/console/security');

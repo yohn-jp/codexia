@@ -725,7 +725,24 @@ export function createServer(options: ApiServerOptions): Server {
     });
     done();
   });
-  app.setErrorHandler((error: Error & { statusCode?: number; validationContext?: string }, _request, reply) => {
+  app.setErrorHandler((error: Error & { statusCode?: number; validationContext?: string; code?: string }, _request, reply) => {
+    // Admission and non-MCP errors keep ApiError. Only authenticated MCP
+    // POSTs that reached the JSON parser get the JSON-RPC parse error.
+    const route = _request.routeOptions.url;
+    const mcpPost = _request.method === 'POST' && (route === '/mcp' || route === '/api/projects/:projectId/modules/mcp/streamable');
+    if (
+      mcpPost &&
+      routeContexts.has(_request) &&
+      error.statusCode === 400 &&
+      !error.validationContext &&
+      (error instanceof SyntaxError || error.code === 'FST_ERR_CTP_INVALID_JSON_BODY' || error.code === 'FST_ERR_CTP_EMPTY_JSON_BODY')
+    ) {
+      void reply
+        .code(400)
+        .type('application/json; charset=utf-8')
+        .send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
+      return;
+    }
     let failure: HttpFailure;
     if (isHttpFailure(error)) failure = error;
     else if (error instanceof PersistenceError && error.code === 'unavailable')

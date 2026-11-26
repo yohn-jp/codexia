@@ -1486,7 +1486,10 @@ preparedAuthorTest("replays ambiguous project and document creates with retained
   await page.route("**/api/v1/persistence/projects/*/documents", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     const body = route.request().postDataJSON() as { documentId?: string; idempotencyKey?: string; title: string };
-    documentBodies.push(body);
+    expect(body).not.toHaveProperty("idempotencyKey");
+    const idempotencyKey = await route.request().headerValue("idempotency-key");
+    expect(idempotencyKey).toBeTruthy();
+    documentBodies.push({ ...body, idempotencyKey: idempotencyKey! });
     if (!documentTimeoutInjected) {
       documentTimeoutInjected = true;
       const response = await route.fetch();
@@ -1601,7 +1604,11 @@ preparedAuthorTest("replays ambiguous project and document creates with retained
   let collisionReadCount = 0;
   await page.route("**/api/v1/persistence/projects/*/documents", async (route) => {
     if (route.request().method() === "POST" && !collidingAttempt) {
-      collidingAttempt = route.request().postDataJSON() as typeof collidingAttempt;
+      const body = route.request().postDataJSON() as { documentId: string; title: string };
+      expect(body).not.toHaveProperty("idempotencyKey");
+      const idempotencyKey = await route.request().headerValue("idempotency-key");
+      expect(idempotencyKey).toBeTruthy();
+      collidingAttempt = { ...body, idempotencyKey: idempotencyKey! };
       await route.fulfill({ status: 409, json: { error: "synthetic document ID collision" } });
       return;
     }

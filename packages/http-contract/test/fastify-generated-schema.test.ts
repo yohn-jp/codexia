@@ -19,7 +19,7 @@ test('generated Fastify schemas validate project creation and preserve actual pe
   let createHandlerCalls = 0;
   let importHandlerCalls = 0;
   const project = {
-    id: 'project-1',
+    id: '00000000-0000-4000-8000-000000000001',
     title: 'A title',
     settings: {},
     version: 1,
@@ -92,7 +92,21 @@ test('generated Fastify schemas validate project creation and preserve actual pe
     code: 'PERSISTENCE_UNAVAILABLE',
   });
 
-  const importPayload = { format: 'codexia-work/v1', project: { title: project.title } };
+  const importPayload = {
+    format: 'codexia-work/v1',
+    project: { title: project.title, settings: {} },
+    documents: [],
+    knowledge: { nodes: [], aliases: [], relations: [] },
+    evidence: {
+      anchors: [],
+      mentions: [],
+      assertions: [],
+      assertionEvidence: [],
+      unresolved: { anchors: [], mentions: [], assertionEvidence: [] },
+    },
+    moduleRecords: [],
+    omittedRecords: [],
+  };
   const missingImportKey = await app.inject({
     method: 'POST',
     url: '/api/v1/persistence/import',
@@ -131,22 +145,22 @@ test('generated Fastify document response schema preserves PostgreSQL DTOs and a
     schema: documentRoute.schema as FastifySchema,
     handler: async () => ({
       document: {
-        id: 'document-1',
-        projectId: 'project-1',
+        id: '00000000-0000-4000-8000-000000000002',
+        projectId: '00000000-0000-4000-8000-000000000001',
         parentId: null,
         kind: 'chapter',
         title: 'Opening',
         orderKey: '0001',
-        headRevisionId: 'revision-1',
+        headRevisionId: '00000000-0000-4000-8000-000000000003',
         version: 1,
         createdAt: '2026-11-23T00:00:00Z',
         updatedAt: '2026-11-23T00:00:00Z',
         projectionMetadata: { generation: 1 },
       },
       revision: {
-        id: 'revision-1',
-        projectId: 'project-1',
-        documentId: 'document-1',
+        id: '00000000-0000-4000-8000-000000000003',
+        projectId: '00000000-0000-4000-8000-000000000001',
+        documentId: '00000000-0000-4000-8000-000000000002',
         parentRevisionId: null,
         markdown: 'First page',
         sha256: 'a'.repeat(64),
@@ -157,7 +171,10 @@ test('generated Fastify document response schema preserves PostgreSQL DTOs and a
     }),
   });
 
-  const response = await app.inject({ method: 'GET', url: '/api/v1/persistence/projects/project-1/documents/document-1' });
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/v1/persistence/projects/00000000-0000-4000-8000-000000000001/documents/00000000-0000-4000-8000-000000000002',
+  });
   assert.equal(response.statusCode, 200, response.payload);
   assert.equal(response.json().document.title, 'Opening');
   assert.deepEqual(response.json().document.projectionMetadata, { generation: 1 });
@@ -184,7 +201,7 @@ test('generated document listing validates limit and passes the persistence defa
     },
   });
 
-  const url = '/api/v1/persistence/projects/project-1/documents';
+  const url = '/api/v1/persistence/projects/00000000-0000-4000-8000-000000000001/documents';
   for (const query of ['', '?limit=1', '?limit=1000']) {
     const response = await app.inject({ method: 'GET', url: url + query });
     assert.equal(response.statusCode, 200, response.payload);
@@ -210,10 +227,10 @@ test('generated anchor write responses preserve persisted evidence and reject in
   assert.ok(updateAnchor);
 
   const anchor = {
-    id: 'anchor-1',
-    projectId: 'project-1',
-    documentId: 'document-1',
-    revisionId: 'revision-1',
+    id: '00000000-0000-4000-8000-000000000005',
+    projectId: '00000000-0000-4000-8000-000000000001',
+    documentId: '00000000-0000-4000-8000-000000000002',
+    revisionId: '00000000-0000-4000-8000-000000000003',
     fromUtf16: 0,
     toUtf16: 2,
     quoteSha256: 'a'.repeat(64),
@@ -231,7 +248,11 @@ test('generated anchor write responses preserve persisted evidence and reject in
     handler: async (request, reply) =>
       reply
         .code(201)
-        .send(request.params.documentId === 'incomplete' ? { ...created, anchor: { ...anchor, quoteSha256: undefined } } : created),
+        .send(
+          request.params.documentId === '00000000-0000-4000-8000-000000000009'
+            ? { ...created, anchor: { ...anchor, quoteSha256: undefined } }
+            : created,
+        ),
   });
   app.route({
     method: updateAnchor.method,
@@ -240,16 +261,25 @@ test('generated anchor write responses preserve persisted evidence and reject in
     handler: async () => ({ ...anchor, version: 2 }),
   });
 
-  const url = '/api/v1/persistence/projects/project-1/documents/document-1/anchors';
-  const creation = await app.inject({ method: 'POST', url, payload: {} });
+  const url = '/api/v1/persistence/projects/00000000-0000-4000-8000-000000000001/documents/00000000-0000-4000-8000-000000000002/anchors';
+  const input = { revisionId: anchor.revisionId, fromUtf16: 0, toUtf16: 2, status: 'confirmed' };
+  const creation = await app.inject({ method: 'POST', url, payload: input });
   assert.equal(creation.statusCode, 201, creation.payload);
   assert.deepEqual(creation.json(), created);
 
-  const update = await app.inject({ method: 'PATCH', url: `${url}/anchor-1`, payload: {} });
+  const update = await app.inject({
+    method: 'PATCH',
+    url: `${url}/00000000-0000-4000-8000-000000000005`,
+    payload: { ...input, expectedVersion: 1 },
+  });
   assert.equal(update.statusCode, 200, update.payload);
   assert.deepEqual(update.json(), { ...anchor, version: 2 });
 
-  const incomplete = await app.inject({ method: 'POST', url: url.replace('document-1', 'incomplete'), payload: {} });
+  const incomplete = await app.inject({
+    method: 'POST',
+    url: url.replace('00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000009'),
+    payload: input,
+  });
   assert.equal(incomplete.statusCode, 500, incomplete.payload);
   assert.match(incomplete.json().message, /quoteSha256.*required/u);
 });
