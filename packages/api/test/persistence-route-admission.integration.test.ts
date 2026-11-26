@@ -107,7 +107,10 @@ test('PostgreSQL project pagination accepts documented bounds and returned curso
   assert.equal(defaultResponse.status, 200);
   const defaultPage = (await defaultResponse.json()) as { projects: { id: string }[]; nextCursor: string | null };
   assert.equal(defaultPage.projects.length, 200, 'omitted limit uses the documented default of 200');
-  assert.deepEqual(defaultPage.projects.map(project => project.id), twoHundredPage.projects.map(project => project.id));
+  assert.deepEqual(
+    defaultPage.projects.map(project => project.id),
+    twoHundredPage.projects.map(project => project.id),
+  );
 
   assert.ok(onePage.nextCursor, 'two or more projects produce a continuation cursor');
   const nextPageResponse = await fetch(`${projectsUrl}?limit=1&cursor=${encodeURIComponent(onePage.nextCursor)}`, {
@@ -125,7 +128,10 @@ test('PostgreSQL project pagination accepts documented bounds and returned curso
   const remainder = (await remainderResponse.json()) as { projects: { id: string }[]; nextCursor: string | null };
   assert.ok(remainder.projects.length > 0, 'the next page contains rows beyond the 200-row boundary');
   const firstPageIds = new Set(twoHundredPage.projects.map(project => project.id));
-  assert.ok(remainder.projects.every(project => !firstPageIds.has(project.id)), 'continuation page does not repeat prior rows');
+  assert.ok(
+    remainder.projects.every(project => !firstPageIds.has(project.id)),
+    'continuation page does not repeat prior rows',
+  );
 
   for (const query of ['limit=0', 'limit=201', 'cursor=']) {
     const response = await fetch(`${projectsUrl}?${query}`, { headers: ownerHeaders });
