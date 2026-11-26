@@ -67,7 +67,7 @@ import type { JournalProposal } from '../storage/journal';
 import { BrowserJournal, type PersistenceDraftTextChanges } from '../storage/journal';
 import { applyThemeMode, loadThemeMode, persistThemeMode } from '../theme';
 import { DocumentOutlineTree, type OutlineTreeDocument } from './DocumentOutlineTree';
-import { KnowledgeContextInspector } from './KnowledgeContextInspector';
+import { emptyKnowledgeDraft, KnowledgeContextInspector, type KnowledgeDraft } from './KnowledgeContextInspector';
 import { extractMarkdownHeadings } from './markdownOutline';
 import { NativeChangeSetReview } from './NativeChangeSetReview';
 import { PersistenceLegacyDraftImport } from './PersistenceLegacyDraftImport';
@@ -419,6 +419,7 @@ export function PersistenceWorkspace({
   const refreshKnowledgeBrowse = useCallback(() => setKnowledgeListRetryEpoch(current => current + 1), []);
   const [nodeId, setNodeId] = useState('');
   const [selectedKnowledgeNode, setSelectedKnowledgeNode] = useState<KnowledgeNode | null>(null);
+  const [knowledgeDrafts, setKnowledgeDrafts] = useState<Record<string, KnowledgeDraft>>({});
   const [knowledgeSelectionError, setKnowledgeSelectionError] = useState<{ projectId: string; nodeId: string; message: string } | null>(
     null,
   );
@@ -631,6 +632,7 @@ export function PersistenceWorkspace({
   const selectedNode =
     nodes.find(candidate => candidate.id === nodeId && candidate.projectId === projectId) ??
     (selectedKnowledgeNode?.id === nodeId && selectedKnowledgeNode.projectId === projectId ? selectedKnowledgeNode : null);
+  const knowledgeDraftKey = selectedNode ? JSON.stringify([authorScope, selectedNode.projectId, selectedNode.id]) : null;
   const selectedNodeError =
     knowledgeSelectionError?.projectId === projectId && knowledgeSelectionError.nodeId === nodeId ? knowledgeSelectionError.message : '';
   const selectedNodeEvidence =
@@ -1199,7 +1201,12 @@ export function PersistenceWorkspace({
         evidenceReadControllerRef.current?.abort();
         evidenceReadControllerRef.current = null;
         setEvidenceLoadIssue(null);
-        setEvidenceLoadPending(null);
+        const evidenceIdentity = {
+          projectId: currentProject.id,
+          documentId: nextDocumentId,
+          revisionId: revision.id,
+        };
+        setEvidenceLoadPending(evidenceIdentity);
         selectionRef.current = { projectId: currentProject.id, documentId: nextDocumentId };
         persistSelectionSafely(authorScope, selectionRef.current);
         updateRouteSelection(selectionRef.current, !selection || selection.replaceRoute === true);
@@ -1278,6 +1285,10 @@ export function PersistenceWorkspace({
           evidence: { ...emptyDocumentEvidence(revision.markdown, revision.id), positionsTrusted: false },
           evidenceLoadKey: 1,
         });
+        if (source?.document.projectId === currentProject.id && source.document.id === nextDocumentId) {
+          // A same-document refresh does not rerun the document selection effect.
+          void loadOpenEvidence({ ...evidenceIdentity, markdown: revision.markdown }, evidenceReadSequenceRef.current);
+        }
         if (draft && staleDraft && !recoverablePending)
           setNotice('ブラウザーに保存された下書きのbase Revisionが変わっています。比較してから、どちらを使うか選んでください。');
         if (recoverablePending) setNotice('応答が失われた可能性のある保存操作を照合しています。');
@@ -1309,7 +1320,7 @@ export function PersistenceWorkspace({
         if (readSequence === documentReadRef.current) setLoadingDocument(false);
       }
     },
-    [authorScope, projectId, projects, publishEditor, saveMachineActor, updateRouteSelection],
+    [authorScope, loadOpenEvidence, projectId, projects, publishEditor, saveMachineActor, updateRouteSelection],
   );
 
   const persistDraft = useCallback(
@@ -3562,12 +3573,17 @@ export function PersistenceWorkspace({
   const pendingSaveForDisplay = active
     ? pendingSaveRef.current.get(JSON.stringify([active.document.projectId, active.document.id]))
     : undefined;
+  const editorReadOnly = Boolean(journalError) || legacyImportBusy || restoring || sessionBlocked || active?.recovery === 'other-tab';
   const evidencePendingForActive = Boolean(
     active &&
       evidenceLoadPending &&
       evidenceLoadPending.projectId === active.document.projectId &&
       evidenceLoadPending.documentId === active.document.id,
   );
+  const evidenceIssueForActive =
+    active && evidenceLoadIssue?.projectId === active.document.projectId && evidenceLoadIssue.documentId === active.document.id
+      ? evidenceLoadIssue
+      : null;
   const editor = (
     <main className="pg-editor-column" aria-label="PostgreSQL原稿編集">
       {pageError && (
@@ -3701,16 +3717,14 @@ export function PersistenceWorkspace({
               )}
             </div>
           )}
-          {evidenceLoadIssue &&
-            evidenceLoadIssue.projectId === active.document.projectId &&
-            evidenceLoadIssue.documentId === active.document.id && (
-              <div className="pg-alert" role="alert">
-                <p>このRevisionの根拠を取得できませんでした。登録状況は未確認です。{evidenceLoadIssue.message}</p>
-                <button type="button" disabled={evidenceLoadIssue.retrying || sessionBlocked} onClick={() => void retryEvidence()}>
-                  {evidenceLoadIssue.retrying ? '根拠を再読み込みしています…' : '根拠を再試行'}
-                </button>
-              </div>
-            )}
+          {evidenceIssueForActive && (
+            <div className="pg-alert" role="alert">
+              <p>このRevisionの根拠を取得できませんでした。登録状況は未確認です。{evidenceIssueForActive.message}</p>
+              <button type="button" disabled={evidenceIssueForActive.retrying || sessionBlocked} onClick={() => void retryEvidence()}>
+                {evidenceIssueForActive.retrying ? '根拠を再読み込みしています…' : '根拠を再試行'}
+              </button>
+            </div>
+          )}
           <fieldset className="pg-editor-actions" aria-label="原稿の操作" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
             <legend className="st-desktop-visually-hidden">原稿の操作</legend>
             <button
@@ -3781,11 +3795,7 @@ export function PersistenceWorkspace({
                     Boolean(active.remoteConflict) ||
                     active.save !== 'saved' ||
                     evidencePendingForActive ||
-                    Boolean(
-                      evidenceLoadIssue &&
-                        evidenceLoadIssue.projectId === active.document.projectId &&
-                        evidenceLoadIssue.documentId === active.document.id,
-                    )
+                    Boolean(evidenceIssueForActive)
                   }
                 >
                   選択範囲をText Anchorにする
@@ -3852,6 +3862,7 @@ export function PersistenceWorkspace({
                         key={symbol.id}
                         type="button"
                         aria-label={symbol.ariaLabel}
+                        disabled={editorReadOnly}
                         onClick={() => editorRef.current?.insert(symbol.id)}
                       >
                         {symbol.label}
@@ -3884,7 +3895,7 @@ export function PersistenceWorkspace({
               }}
               value={active.markdown}
               externalTextRevision={active.generation}
-              readOnly={Boolean(journalError) || legacyImportBusy || restoring || sessionBlocked || active.recovery === 'other-tab'}
+              readOnly={editorReadOnly}
               onChange={onEditorChange}
               documentRevision={active.revision.id}
               evidenceState={active.evidence}
@@ -4191,11 +4202,19 @@ export function PersistenceWorkspace({
           ) : (
             <p role="status">Knowledge詳細を読み込んでいます。</p>
           ))}
-        {selectedNode && (
+        {selectedNode && knowledgeDraftKey && (
           <KnowledgeContextInspector
-            key={selectedNode.id}
+            key={knowledgeDraftKey}
             node={selectedNode}
             nodes={nodes}
+            draft={knowledgeDrafts[knowledgeDraftKey]}
+            onDraftChange={update => {
+              setKnowledgeDrafts(current => {
+                const previous = current[knowledgeDraftKey] ?? emptyKnowledgeDraft;
+                const next = update(previous);
+                return next === previous ? current : { ...current, [knowledgeDraftKey]: next };
+              });
+            }}
             documentId={active?.document.id}
             revisionId={active?.revision.id}
             clean={Boolean(active && !active.dirty && !active.remoteConflict && active.save === 'saved')}
@@ -4250,13 +4269,22 @@ export function PersistenceWorkspace({
           </section>
         )}
       </section>
-      <section>
+      <section aria-busy={evidencePendingForActive}>
         <h2>本文の根拠</h2>
         {!active && <p>文書を開くと、この作品の知識と根拠を利用できます。</p>}
-        {active && active.evidence.anchors.length === 0 && (
+        {evidencePendingForActive && <p>Text Anchorを読み込んでいます。</p>}
+        {!evidencePendingForActive && evidenceIssueForActive && (
+          <div className="pg-alert">
+            <p>Text Anchorを取得できませんでした。{evidenceIssueForActive.message}</p>
+            <button type="button" disabled={sessionBlocked} onClick={() => void retryEvidence()}>
+              Text Anchorを再試行
+            </button>
+          </div>
+        )}
+        {active && !evidencePendingForActive && !evidenceIssueForActive && active.evidence.anchors.length === 0 && (
           <p>このRevisionにText Anchorはありません。本文で範囲を選び、作成してください。</p>
         )}
-        {active && (
+        {active && active.evidence.anchors.length > 0 && (
           <ul className="pg-evidence-list">
             {active.evidence.anchors.map(anchor => (
               <li key={anchor.id}>

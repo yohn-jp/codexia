@@ -274,7 +274,8 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
       await page.route(`**${consentPath}`, temporaryOutage, { times: 1 });
       await page.getByRole("button", { name: "認証・セキュリティ", exact: true }).click();
       const settings = page.getByRole("dialog", { name: "認証とセキュリティ" });
-      await expect(settings.getByRole("alert")).toHaveText("同意を読み込めませんでした。");
+      const consentError = settings.getByRole("alert").filter({ hasText: /^同意を読み込めませんでした。$/u });
+      await expect(consentError).toBeVisible();
       const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === consentPath && response.ok());
       await settings.getByRole("button", { name: "同意を再読み込み" }).click();
       const response = await loaded;
