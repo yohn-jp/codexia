@@ -81,6 +81,7 @@ export {
 import {
   type ActionHostContext,
   type DomainJobActionExecutor,
+  type ModuleLoader,
   ModuleRuntime,
   type ModuleRuntimeOptions,
   type WorkerJobLifecycleSnapshot,
@@ -253,7 +254,7 @@ function sameOrigin(request: IncomingMessage, trustProxy: boolean): boolean {
   }
 }
 
-const _CORS_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
+const CORS_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const VERSION_PATHS = ['/api/version', '/api/browser/version'];
 const CORS_HEADERS = new Map([
   ['authorization', 'Authorization'],
@@ -324,7 +325,7 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
   response.end(JSON.stringify(value));
 }
 
-function _serializeParsedJson(value: unknown): string {
+function serializeParsedJson(value: unknown): string {
   const serialized = JSON.stringify(value);
   if (typeof serialized !== 'string') throw httpFailure(400, 'INVALID_JSON', 'Request body must be a JSON value');
   return serialized;
@@ -1452,7 +1453,7 @@ export function createServer(options: ApiServerOptions): Server {
         // Reserve synchronously, before the durable registration awaits, so
         // concurrent invokes cannot all observe the same free capacity.
         activeDomainJobIds.add(id);
-        const _historyId = `domain:${id}`;
+        const historyId = `domain:${id}`;
         let registered = false;
         try {
           const event = await jobHistory.beginDomainJob({ id, type, projectId: snapshot.projectId });
@@ -1856,7 +1857,7 @@ export function createServer(options: ApiServerOptions): Server {
     const canReviewPrivateChangeSets = isAuthor;
     const hasAuth = isAuthor || isBearer;
     const mcpAllowedEffects: readonly ActionDescriptor['effect'][] | undefined = admittedMcpClient
-      ? (['read', 'compute', 'propose'] as const).filter(effect => admittedMcpClient?.scopes.includes(OAUTH_MCP_SCOPE_BY_EFFECT[effect]))
+      ? (['read', 'compute', 'propose'] as const).filter(effect => admittedMcpClient!.scopes.includes(OAUTH_MCP_SCOPE_BY_EFFECT[effect]))
       : undefined;
     const requireMcpEffect = (effect: ActionDescriptor['effect']): void => {
       if (!admittedMcpClient) return;
@@ -2317,7 +2318,7 @@ export function createServer(options: ApiServerOptions): Server {
       const descriptors = await listActionDescriptors(
         projectId,
         signal,
-        isBearer || params.actionId?.startsWith('mcp.') ? 'mcp' : 'author',
+        isBearer || params.actionId!.startsWith('mcp.') ? 'mcp' : 'author',
         mcpAllowedEffects,
         admittedMcpClient?.projectIds,
         resolveNativeProposalActor,
@@ -2408,7 +2409,7 @@ export function createServer(options: ApiServerOptions): Server {
             error: { code: 'ACTION_UNAVAILABLE', message: 'Core host actions cannot dispatch module actions', retryable: false },
           }),
           listActions: async () => descriptors,
-          linkedReader: async (repositoryId: string) => host.linkedReader?.(repositoryId),
+          linkedReader: async (repositoryId: string) => host.linkedReader!(repositoryId),
           propose: async (operations, evidence, proposalId) => {
             if (coreAction.effect !== 'propose')
               throw httpFailure(403, 'ACTION_EFFECT_DENIED', 'Read-only Core actions cannot propose changes');
@@ -2586,7 +2587,7 @@ export function createServer(options: ApiServerOptions): Server {
         return;
       }
       try {
-        const context = await options.betterAuth?.getConsentContext(options.betterAuth?.toHeaders(request.headers), body.oauth_query);
+        const context = await options.betterAuth!.getConsentContext(options.betterAuth!.toHeaders(request.headers), body.oauth_query);
         json(200, context);
       } catch {
         reject(request.headers.cookie ? 403 : 401, 'OAUTH_CONSENT_CONTEXT_DENIED', 'OAuth consent context could not be verified');
@@ -2611,7 +2612,7 @@ export function createServer(options: ApiServerOptions): Server {
         reject(403, 'OWNER_SESSION_COOKIE_REQUIRED', 'Owner session confirmation does not accept bearer credentials');
         return;
       }
-      const result = await options.betterAuth?.checkOwnerSession(options.betterAuth?.toHeaders(request.headers));
+      const result = await options.betterAuth!.checkOwnerSession(options.betterAuth!.toHeaders(request.headers));
       if (result.status === 200) json(200, { authenticated: true });
       else if (result.status === 403) reject(403, 'OWNER_SESSION_REQUIRED', 'Owner session confirmation was denied');
       else reject(401, 'AUTHENTICATION_REQUIRED', 'A valid owner session is required');
@@ -2622,7 +2623,7 @@ export function createServer(options: ApiServerOptions): Server {
         reject(403, 'CROSS_ORIGIN_REQUEST', 'OAuth consent listing requires a same-origin request');
         return;
       }
-      const result = await options.betterAuth?.listOwnerOAuthConsents(options.betterAuth?.toHeaders(request.headers));
+      const result = await options.betterAuth!.listOwnerOAuthConsents(options.betterAuth!.toHeaders(request.headers));
       if (result.status === 200) json(200, result.consents);
       else reject(result.status, 'OAUTH_CONSENT_LIST_DENIED', 'OAuth consent listing requires the owner session');
       return;
@@ -2630,10 +2631,10 @@ export function createServer(options: ApiServerOptions): Server {
     authorizationServerMetadata: async ({ request, reply }) => {
       const metadataRequest = new Request(
         `${requestProtocol(request, trustProxy)}//${request.headers.host ?? 'localhost'}${request.url ?? '/'}`,
-        { headers: options.betterAuth?.toHeaders(request.headers) },
+        { headers: options.betterAuth!.toHeaders(request.headers) },
       );
-      const metadata = await options.betterAuth?.advertisePublicClientTokenAuth(
-        await options.betterAuth?.authorizationServerMetadata(metadataRequest),
+      const metadata = await options.betterAuth!.advertisePublicClientTokenAuth(
+        await options.betterAuth!.authorizationServerMetadata(metadataRequest),
       );
       await sendWebResponse(reply, metadata);
       return;
@@ -2641,10 +2642,10 @@ export function createServer(options: ApiServerOptions): Server {
     openIdConfigMetadata: async ({ request, reply }) => {
       const metadataRequest = new Request(
         `${requestProtocol(request, trustProxy)}//${request.headers.host ?? 'localhost'}${request.url ?? '/'}`,
-        { headers: options.betterAuth?.toHeaders(request.headers) },
+        { headers: options.betterAuth!.toHeaders(request.headers) },
       );
-      const metadata = await options.betterAuth?.advertisePublicClientTokenAuth(
-        await options.betterAuth?.openIdConfigMetadata(metadataRequest),
+      const metadata = await options.betterAuth!.advertisePublicClientTokenAuth(
+        await options.betterAuth!.openIdConfigMetadata(metadataRequest),
       );
       await sendWebResponse(reply, metadata);
       return;
@@ -2656,7 +2657,7 @@ export function createServer(options: ApiServerOptions): Server {
     betterAuthWeb: async ({ request, reply, parsedBody, signal }) => {
       const host = request.headers.host ?? 'localhost';
       const authUrl = `${requestProtocol(request, trustProxy)}//${host}${request.url ?? '/'}`;
-      const headers = options.betterAuth?.toHeaders(request.headers);
+      const headers = options.betterAuth!.toHeaders(request.headers);
       headers.delete('connection');
       headers.delete('content-length');
       headers.delete('host');
@@ -2667,7 +2668,7 @@ export function createServer(options: ApiServerOptions): Server {
         body = typeof parsedBody === 'string' ? parsedBody : JSON.stringify(parsedBody);
       }
       const authRequest = new Request(authUrl, { method: authMethod, headers, signal, ...(body !== undefined ? { body } : {}) });
-      const authResponse = await options.betterAuth?.handler(authRequest);
+      const authResponse = await options.betterAuth!.handler(authRequest);
       const responseHeaders: Record<string, string | string[]> = Object.fromEntries(authResponse.headers.entries());
       const cookies = authResponse.headers.getSetCookie();
       if (cookies.length) responseHeaders['set-cookie'] = cookies;
@@ -2730,7 +2731,7 @@ export function createServer(options: ApiServerOptions): Server {
         const admission = await admit(input, response, params, query, policy);
         if ((contract?.requestContentTypes.length ?? 0) > 0) {
           const contentType = input.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-          if (!contract?.requestContentTypes.includes(contentType)) {
+          if (!contract!.requestContentTypes.includes(contentType)) {
             throw httpFailure(415, 'JSON_REQUIRED', 'Send a supported request body');
           }
         }
@@ -2985,7 +2986,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (!closePromise) {
       closed = true;
       shuttingDown = true;
-      const _beganAt = Date.now();
+      const beganAt = Date.now();
       let deadlineExpired = false;
       let drainTimer: NodeJS.Timeout | undefined;
       let resolveDeadline!: () => void;
@@ -3136,8 +3137,8 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     .map(value => value.trim())
     .filter(Boolean);
   const mcpProjectAssignments = parseOAuthMcpProjectAssignments(betterAuthValues.mcpProjectAssignments, mcpClientIds);
-  const ownerClientIds = betterAuthValues.ownerClientIds
-    ?.split(',')
+  const ownerClientIds = betterAuthValues
+    .ownerClientIds!.split(',')
     .map(value => value.trim())
     .filter(Boolean);
   const { createBetterAuthRuntime } = await import('./better-auth.js');
@@ -3196,7 +3197,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     const runtimeOptions = await loadProfileRuntimeOptions(profile);
     persistenceOptions = await postgresPersistenceOptions();
     if (Object.keys(mcpProjectAssignments).length > 0) {
-      const missingMcpProjects = await persistenceOptions.persistence?.read(async reader => {
+      const missingMcpProjects = await persistenceOptions.persistence!.read(async reader => {
         const missing: string[] = [];
         for (const projectIds of Object.values(mcpProjectAssignments)) {
           for (const projectId of projectIds) {
@@ -3315,7 +3316,7 @@ async function loadProfileRuntimeOptions(profile: string): Promise<Omit<ModuleRu
           .split(',')
           .map(id => id.trim())
           .filter(Boolean);
-  if (new Set(enabled).size !== enabled.length || enabled.some(id => !composition?.moduleManifests?.some(manifest => manifest.id === id))) {
+  if (new Set(enabled).size !== enabled.length || enabled.some(id => !composition!.moduleManifests!.some(manifest => manifest.id === id))) {
     throw new Error('Requested enabled module set does not match the immutable composition');
   }
   return {

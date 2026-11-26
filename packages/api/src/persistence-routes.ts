@@ -812,7 +812,7 @@ const handlers: Record<string, PersistenceHandler> = {
         const node =
           typeof existing.proposition.nodeId === 'string' &&
           (await transaction.getKnowledgeNode(projectId, existing.proposition.nodeId as KnowledgeNodeId));
-        if (node?.status !== 'confirmed' || node.deletedAt)
+        if (!node || node.status !== 'confirmed' || node.deletedAt)
           failure(409, 'KNOWLEDGE_REQUIRES_AUTHOR_CONFIRMATION', 'Confirm the Knowledge node before confirming this assertion');
       }
       return transaction.saveAssertion({
@@ -874,7 +874,7 @@ const handlers: Record<string, PersistenceHandler> = {
   persistence_changeset_apply_post: async (input, persistence) => {
     const projectId = input.params.projectId as ProjectId;
     const changeSetId = input.params.changeSetId as import('@codexia/persistence-contracts').ChangeSetId;
-    const _actorId = await input.requireAuthor();
+    const actorId = await input.requireAuthor();
     const body = input.body as Record<string, unknown>;
     const expectedVersion = integer(body.expectedVersion, 'expectedVersion', 1);
     return { status: 200, body: await applyNativeChangeSet(persistence, projectId, changeSetId, expectedVersion) };

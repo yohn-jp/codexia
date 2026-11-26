@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, randomUUID, sign as signJwt } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { get as httpGet, request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -19,7 +19,7 @@ import type {
   ValueSchema,
 } from '@codexia/contracts';
 import { CoreStore, type CoreStore as CoreStoreShape } from '@codexia/core';
-import { ModuleRuntime } from '@codexia/module-runtime';
+import { ModuleRuntime, type ModuleRuntimeOptions } from '@codexia/module-runtime';
 import type {
   ChangeSetApplicationResult,
   ChangeSetId,
@@ -94,7 +94,7 @@ async function nativeProject(t: { after(callback: () => Promise<void>): void }, 
   return { persistence, store, project };
 }
 
-function _instrumentPersistence(
+function instrumentPersistence(
   persistence: Persistence,
   hooks: { beforeProjectRead?: () => Promise<void>; onProjectRead?: () => void } = {},
 ): Persistence {
@@ -755,7 +755,7 @@ function createSignedRequestFixture() {
         scope,
       });
     const signature = signJwt('sha256', Buffer.from(unsigned), { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url');
-    const token = `${unsigned}.${signature}`;
+    const token = unsigned + '.' + signature;
     active.add(token);
     return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   }
@@ -772,7 +772,7 @@ function testClientSettings(projectId: string, publicJwks: object, isActive: (to
     issuer: TEST_ISSUER,
     audience: TEST_AUDIENCE,
     ownerSubject: TEST_OWNER_SUBJECT,
-    jwksUrl: `${TEST_ISSUER}/jwks`,
+    jwksUrl: TEST_ISSUER + '/jwks',
     fetch: async () => Response.json(publicJwks),
     verifyActiveToken: isActive,
   };
@@ -800,18 +800,18 @@ it('starts standalone API only with Better Auth and exposes no static session mu
   const instance = await startCustomApi(store, staticDir);
   const owner = signedRequests.ownerHeaders();
   t.after(instance.close);
-  const version = await fetch(`${instance.base}/api/browser/version`);
+  const version = await fetch(instance.base + '/api/browser/version');
   assert.equal(version.status, 200);
   const identity = await version.json();
   assert.deepEqual(identity.auth, ['oauth-owner', 'oauth-mcp']);
   assert.equal('hosted' in identity, false);
-  assert.equal((await fetch(`${instance.base}/api/platform/v1/metadata`, { headers: owner })).status, 404);
-  const oldLogin = await fetch(`${instance.base}/api/login`, { method: 'POST', headers: owner, body: '{}' });
+  assert.equal((await fetch(instance.base + '/api/platform/v1/metadata', { headers: owner })).status, 404);
+  const oldLogin = await fetch(instance.base + '/api/login', { method: 'POST', headers: owner, body: '{}' });
   assert.equal(oldLogin.status, 404);
   assert.equal(oldLogin.headers.get('set-cookie'), null);
-  const session = await fetch(`${instance.base}/api/session`, { headers: owner });
+  const session = await fetch(instance.base + '/api/session', { headers: owner });
   assert.deepEqual(await session.json(), { authenticated: true, authorScope: 'owner' });
-  const retiredLogout = await fetch(`${instance.base}/api/logout`, { method: 'POST', headers: owner, body: '{}' });
+  const retiredLogout = await fetch(instance.base + '/api/logout', { method: 'POST', headers: owner, body: '{}' });
   assert.equal(retiredLogout.status, 404);
   assert.equal(retiredLogout.headers.get('set-cookie'), null);
 });
@@ -832,7 +832,7 @@ it('confirms only a cookie-backed owner session on the exact same origin', async
   } as unknown as NonNullable<ApiServerOptions['betterAuth']>;
   const api = await startCustomApi(makeStore(), staticDir, { betterAuth });
   t.after(api.close);
-  const endpoint = `${api.base}/api/auth/codexia/owner-session`;
+  const endpoint = api.base + '/api/auth/codexia/owner-session';
   const post = (headers: Record<string, string> = {}, body = '{}') =>
     fetch(endpoint, {
       method: 'POST',
@@ -902,7 +902,7 @@ describe('Codexia HTTP boundary', () => {
     const api = await startCustomApi(store, staticDir, { corsAllowedOrigins: ['https://web.codexia.test'] });
     t.after(api.close);
 
-    const projects = `${api.base}/api/projects`;
+    const projects = api.base + '/api/projects';
     const malformed = await fetch(projects, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -921,11 +921,11 @@ describe('Codexia HTTP boundary', () => {
     assert.equal(creates, 0);
     const preflight = { Origin: 'https://web.codexia.test', 'Access-Control-Request-Method': 'DELETE' };
     assert.equal((await fetch(projects, { method: 'OPTIONS', headers: preflight })).status, 403);
-    assert.equal((await fetch(`${projects}/missing/operation`, { method: 'OPTIONS', headers: preflight })).status, 404);
-    const encodedSeparator = await fetch(`${projects}/project%2Felsewhere`, { headers });
+    assert.equal((await fetch(projects + '/missing/operation', { method: 'OPTIONS', headers: preflight })).status, 404);
+    const encodedSeparator = await fetch(projects + '/project%2Felsewhere', { headers });
     assert.equal(encodedSeparator.status, 400);
     const hostStatus = await new Promise<number | undefined>((resolveStatus, rejectRequest) => {
-      const probe = httpGet(`${api.base}/mcp`, { headers: { Host: 'unexpected.example' } }, response => {
+      const probe = httpGet(api.base + '/mcp', { headers: { Host: 'unexpected.example' } }, response => {
         response.resume();
         resolveStatus(response.statusCode);
       });
@@ -1436,7 +1436,7 @@ describe('Codexia HTTP boundary', () => {
       jobType: 'speaker-eval',
       status: 'running',
       progress: 0.4,
-      at: (await store.getJob('domain-job-success'))?.updatedAt,
+      at: (await store.getJob('domain-job-success'))!.updatedAt,
     });
     const regressed = await store.reportDomainJobProgress('domain-job-success', 0.1);
     assert.equal(regressed?.type, 'job-progress', 'source progress may report a lower value in a later phase');
@@ -1470,9 +1470,9 @@ describe('Codexia HTTP boundary', () => {
       progress: 1,
       result: success.data,
       error: null,
-      createdAt: (await store.getJob('domain-job-success'))?.createdAt,
-      updatedAt: (await store.getJob('domain-job-success'))?.updatedAt,
-      finishedAt: (await store.getJob('domain-job-success'))?.finishedAt,
+      createdAt: (await store.getJob('domain-job-success'))!.createdAt,
+      updatedAt: (await store.getJob('domain-job-success'))!.updatedAt,
+      finishedAt: (await store.getJob('domain-job-success'))!.finishedAt,
     });
     assert.deepEqual(await reopened.getJob('domain-job-error'), await store.getJob('domain-job-error'));
     const failedJob = await reopened.getJob('domain-job-error');
@@ -1523,14 +1523,13 @@ describe('Codexia HTTP boundary', () => {
     });
     assert.equal(progressResponse.status, 200);
     assert.ok(progressResponse.body);
-    const progressResponseReader = progressResponse.body.getReader();
-    progressReader = progressResponseReader;
+    progressReader = progressResponse.body.getReader();
     progressEventsTask = (async () => {
       const decoder = new TextDecoder();
       const events: Array<{ type: string; jobId: string; jobType: string; status: string; progress: number; at: string }> = [];
       let buffer = '';
       while (events.length < 5) {
-        const { value, done } = await progressResponseReader.read();
+        const { value, done } = await progressReader!.read();
         if (done) throw new Error('The owner job event stream closed before all progress events arrived');
         buffer += decoder.decode(value, { stream: true });
         const frames = buffer.split('\n\n');
@@ -1909,13 +1908,13 @@ describe('Codexia HTTP boundary', () => {
     );
     t.after(apiServer.close);
     const author = signedRequests.ownerHeaders();
-    const projectCollection = await fetch(`${apiServer.base}/api/projects`, { headers: author });
+    const projectCollection = await fetch(apiServer.base + '/api/projects', { headers: author });
     assert.equal(projectCollection.status, 200);
     assert.deepEqual(await projectCollection.json(), {
       projects: [TEST_PROJECT],
       nextCursor: null,
     });
-    const scene = `${apiServer.base}/api/projects/project-1/scenes/scene-1`;
+    const scene = apiServer.base + '/api/projects/project-1/scenes/scene-1';
     const save = (revision: string, origin: string) =>
       fetch(scene, {
         method: 'PUT',
@@ -1942,11 +1941,11 @@ describe('Codexia HTTP boundary', () => {
       { Authorization: `Bearer ${ACCESS_TOKEN}` },
     ];
     for (const headers of retired) {
-      const response = await fetch(`${api.base}/api/session`, { headers });
+      const response = await fetch(api.base + '/api/session', { headers });
       assert.equal(response.status, 401);
       assert.equal(response.headers.get('set-cookie'), null);
     }
-    assert.equal((await fetch(`${api.base}/api/session`, { headers: signedRequests.ownerHeaders() })).status, 200);
+    assert.equal((await fetch(api.base + '/api/session', { headers: signedRequests.ownerHeaders() })).status, 200);
   });
 
   it('authorizes standalone owner writes only with a verified API-audience OAuth access token', async t => {
@@ -1975,7 +1974,7 @@ describe('Codexia HTTP boundary', () => {
           jti: randomUUID(),
           ...overrides,
         });
-      return `${unsigned}.${signJwt('RSA-SHA256', Buffer.from(unsigned), key.privateKey).toString('base64url')}`;
+      return unsigned + '.' + signJwt('RSA-SHA256', Buffer.from(unsigned), key.privateKey).toString('base64url');
     };
     const persistence = await nativePersistence(t);
     const store = new CoreStore({ persistence });
@@ -1999,7 +1998,7 @@ describe('Codexia HTTP boundary', () => {
     const headers = (credential: string) => ({ Authorization: `Bearer ${credential}` });
     const browserHeaders = (credential: string) => ({ ...headers(credential), Origin: webOrigin });
     const valid = token();
-    const preflight = await fetch(`${api.base}/api/projects`, {
+    const preflight = await fetch(api.base + '/api/projects', {
       method: 'OPTIONS',
       headers: {
         Origin: webOrigin,
@@ -2012,7 +2011,7 @@ describe('Codexia HTTP boundary', () => {
     assert.equal(preflight.headers.get('access-control-allow-methods'), 'POST');
     assert.deepEqual(preflight.headers.get('access-control-allow-headers'), 'Authorization, Content-Type');
     assert.equal(preflight.headers.has('access-control-allow-credentials'), false);
-    const blockedOriginPreflight = await fetch(`${api.base}/api/projects`, {
+    const blockedOriginPreflight = await fetch(api.base + '/api/projects', {
       method: 'OPTIONS',
       headers: {
         Origin: 'https://unlisted.example.test',
@@ -2021,7 +2020,7 @@ describe('Codexia HTTP boundary', () => {
       },
     });
     assert.equal(blockedOriginPreflight.status, 403);
-    const blockedCookiePreflight = await fetch(`${api.base}/api/projects`, {
+    const blockedCookiePreflight = await fetch(api.base + '/api/projects', {
       method: 'OPTIONS',
       headers: {
         Origin: webOrigin,
@@ -2030,19 +2029,19 @@ describe('Codexia HTTP boundary', () => {
       },
     });
     assert.equal(blockedCookiePreflight.status, 403);
-    const session = await fetch(`${api.base}/api/session`, { headers: browserHeaders(valid) });
+    const session = await fetch(api.base + '/api/session', { headers: browserHeaders(valid) });
     assert.equal(session.status, 200);
     assert.deepEqual(await session.json(), { authenticated: true, authorScope: 'owner' });
     assert.equal(session.headers.get('access-control-allow-origin'), webOrigin);
 
-    const write = await fetch(`${api.base}/api/projects`, {
+    const write = await fetch(api.base + '/api/projects', {
       method: 'POST',
       headers: { ...browserHeaders(valid), 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'OAuth owner project' }),
     });
     assert.equal(write.status, 201, await write.text());
     assert.equal(write.headers.get('access-control-allow-origin'), webOrigin);
-    const list = await fetch(`${api.base}/api/projects`, { headers: browserHeaders(valid) });
+    const list = await fetch(api.base + '/api/projects', { headers: browserHeaders(valid) });
     assert.equal(list.status, 200);
     const { projects } = (await list.json()) as { projects: Array<{ id: string; title: string; version: number }> };
     const project = projects.find(item => item.title === 'OAuth owner project');
@@ -2107,20 +2106,20 @@ describe('Codexia HTTP boundary', () => {
     assert.equal(apply.status, 200, await apply.text());
     assert.ok(await persistence.read(reader => reader.getKnowledgeNode(projectId, nodeId)));
 
-    const unknownRoute = await fetch(`${api.base}/api/non-allowlisted`, { headers: browserHeaders(valid) });
+    const unknownRoute = await fetch(api.base + '/api/non-allowlisted', { headers: browserHeaders(valid) });
     assert.equal(unknownRoute.status, 404);
-    const unlistedOrigin = await fetch(`${api.base}/api/session`, {
+    const unlistedOrigin = await fetch(api.base + '/api/session', {
       headers: { ...headers(valid), Origin: 'https://unlisted.example.test' },
     });
     assert.equal(unlistedOrigin.status, 403);
 
-    const wrongOwner = await fetch(`${api.base}/api/projects`, {
+    const wrongOwner = await fetch(api.base + '/api/projects', {
       method: 'POST',
       headers: { ...browserHeaders(token({ sub: 'other-subject' })), 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'Denied project' }),
     });
     assert.equal(wrongOwner.status, 403);
-    const noScope = await fetch(`${api.base}/api/projects`, {
+    const noScope = await fetch(api.base + '/api/projects', {
       method: 'POST',
       headers: { ...browserHeaders(token({ scope: 'profile' })), 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'Denied project' }),
@@ -2137,23 +2136,23 @@ describe('Codexia HTTP boundary', () => {
     ];
     for (const [index, invalid] of invalidTokens.entries()) {
       assert.equal(
-        (await fetch(`${api.base}/api/session`, { headers: browserHeaders(invalid) })).status,
+        (await fetch(api.base + '/api/session', { headers: browserHeaders(invalid) })).status,
         401,
         `invalid OAuth token case ${index}`,
       );
     }
     assert.equal(
-      (await fetch(`${api.base}/api/session`, { headers: browserHeaders(token({}, 'at+jwt', 'unpublished-key')) })).status,
+      (await fetch(api.base + '/api/session', { headers: browserHeaders(token({}, 'at+jwt', 'unpublished-key')) })).status,
       401,
       'unknown signing keys fail closed',
     );
-    const legacyBearerWrite = await fetch(`${api.base}/api/projects`, {
+    const legacyBearerWrite = await fetch(api.base + '/api/projects', {
       method: 'POST',
       headers: { ...headers(ACCESS_TOKEN), 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'Legacy bearer cannot author' }),
     });
     assert.equal(legacyBearerWrite.status, 401);
-    const bothCredentials = await fetch(`${api.base}/api/projects`, {
+    const bothCredentials = await fetch(api.base + '/api/projects', {
       headers: { ...browserHeaders(valid), Cookie: 'scriptorium_session=present' },
     });
     assert.equal(bothCredentials.status, 403, 'cross-origin cookies are denied by bearer-only CORS');
@@ -2170,7 +2169,7 @@ describe('Codexia HTTP boundary', () => {
     });
     t.after(unavailableApi.close);
     assert.equal(
-      (await fetch(`${unavailableApi.base}/api/session`, { headers: headers(valid) })).status,
+      (await fetch(unavailableApi.base + '/api/session', { headers: headers(valid) })).status,
       503,
       'unavailable JWKS fails closed without treating it as bad credentials',
     );
@@ -2283,14 +2282,14 @@ describe('Codexia HTTP boundary', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }),
     };
-    const standaloneChallenge = await fetchWithHost(`${api.base}/mcp`, initialize, new URL(audience).host);
+    const standaloneChallenge = await fetchWithHost(api.base + '/mcp', initialize, new URL(audience).host);
     assert.equal(standaloneChallenge.status, 401);
     assert.equal(
       standaloneChallenge.headers.get('www-authenticate'),
       'Bearer resource_metadata="https://api.codexia.example/.well-known/oauth-protected-resource/api", scope="mcp:read mcp:compute mcp:propose"',
     );
     const preflight = await fetchWithHost(
-      `${api.base}/mcp`,
+      api.base + '/mcp',
       {
         method: 'OPTIONS',
         headers: {
@@ -2304,7 +2303,7 @@ describe('Codexia HTTP boundary', () => {
     assert.equal(preflight.status, 204);
     assert.equal(preflight.headers.get('access-control-allow-headers'), 'Authorization, MCP-Protocol-Version, Mcp-Method, Mcp-Name');
     const corsChallenge = await fetchWithHost(
-      `${api.base}/mcp`,
+      api.base + '/mcp',
       {
         ...initialize,
         headers: { ...initialize.headers, Origin: 'https://mcp-client.example.test' },
@@ -2313,11 +2312,11 @@ describe('Codexia HTTP boundary', () => {
     );
     assert.equal(corsChallenge.status, 401);
     assert.equal(corsChallenge.headers.get('access-control-expose-headers'), 'MCP-Protocol-Version, WWW-Authenticate');
-    const spoofedHost = await fetchWithHost(`${api.base}/mcp`, initialize, 'attacker.example');
+    const spoofedHost = await fetchWithHost(api.base + '/mcp', initialize, 'attacker.example');
     assert.equal(spoofedHost.status, 403, 'DNS-rebinding requests with an unconfigured Host are denied');
     assert.equal(((await spoofedHost.json()) as { code: string }).code, 'MCP_HOST_DENIED');
     const mismatchedOrigin = await fetchWithHost(
-      `${api.base}/mcp`,
+      api.base + '/mcp',
       { ...initialize, headers: { ...initialize.headers, Origin: 'https://attacker.example' } },
       new URL(audience).host,
     );
@@ -2325,7 +2324,7 @@ describe('Codexia HTTP boundary', () => {
     assert.equal((await send('/mcp', ACCESS_TOKEN, initialize)).status, 401);
     const cookie = 'scriptorium_session=retired-fixture-value';
     assert.equal(
-      (await fetch(`${api.base}/mcp`, { ...initialize, headers: { ...initialize.headers, Cookie: cookie, Origin: api.base } })).status,
+      (await fetch(api.base + '/mcp', { ...initialize, headers: { ...initialize.headers, Cookie: cookie, Origin: api.base } })).status,
       401,
     );
     assert.equal((await send('/api/session', ownerToken)).status, 200);
@@ -2921,7 +2920,7 @@ describe('Codexia HTTP boundary', () => {
     const settings = testClientSettings(project.id, signedRequests.publicJwks, signedRequests.isActive);
     apiServer = await startCustomApi(store, staticDir, { persistence, ...settings });
     let owner = signedRequests.ownerHeaders();
-    const ownerHeaders = () => ({ ...owner, Origin: apiServer?.base });
+    const ownerHeaders = () => ({ ...owner, Origin: apiServer!.base });
     const snapshot = (await store.observe(project.id)).snapshot;
     const operation = (id: string, path: string, content: string): ChangeOperation => ({
       id,
@@ -3112,7 +3111,7 @@ describe('Codexia HTTP boundary', () => {
     );
     const missingDocumentId = randomUUID();
     const missingPath = `documents/${missingDocumentId}.md`;
-    const nestedAssetPath = `${missingPath}/preview.txt`;
+    const nestedAssetPath = missingPath + '/preview.txt';
     await persistence.transaction(tx =>
       tx.saveModuleRecord({
         projectId: project.id,
@@ -3318,7 +3317,7 @@ describe('Codexia HTTP boundary', () => {
       assert.equal(response.status, 404, `${suffix} must not retain a Git fallback`);
     }
     assert.equal(forbiddenCalls, 0);
-    const reader = stream.body?.getReader();
+    const reader = stream.body!.getReader();
     const shutdownAt = Date.now();
     await apiServer.close();
     closed = true;
@@ -3873,7 +3872,7 @@ it('portable work API enforces authentication, author writes, origin, and replay
   t.after(() => rm(staticDir, { recursive: true, force: true }));
   const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
   t.after(apiServer.close);
-  const url = `${apiServer.base}/api/v1/persistence/projects/${native.project.id}/archive`;
+  const url = apiServer.base + '/api/v1/persistence/projects/' + native.project.id + '/archive';
   assert.equal((await fetch(url)).status, 401);
   const owner = signedRequests.ownerHeaders();
   const exported = await fetch(url, { headers: { Authorization: owner.Authorization } });
@@ -3881,7 +3880,7 @@ it('portable work API enforces authentication, author writes, origin, and replay
   const archive = (await exported.json()) as { format: string; documents: unknown[] };
   assert.equal(archive.format, 'codexia-work/v1');
   assert.deepEqual(archive.documents, []);
-  const endpoint = `${apiServer.base}/api/v1/persistence/import`;
+  const endpoint = apiServer.base + '/api/v1/persistence/import';
   const requestBody = JSON.stringify(archive);
   const bearer = await fetch(endpoint, {
     method: 'POST',
@@ -3913,7 +3912,7 @@ it('portable work API enforces authentication, author writes, origin, and replay
   const replay = (await repeated.json()) as { project: { id: string }; replayed: boolean };
   assert.equal(replay.replayed, true);
   assert.equal(replay.project.id, imported.project.id);
-  const importedExport = await fetch(`${apiServer.base}/api/v1/persistence/projects/${imported.project.id}/archive`, {
+  const importedExport = await fetch(apiServer.base + '/api/v1/persistence/projects/' + imported.project.id + '/archive', {
     headers: { Authorization: owner.Authorization },
   });
   assert.equal(importedExport.status, 200);
@@ -3936,7 +3935,7 @@ it('native actions use real PostgreSQL through direct and composed OAuth admissi
   t.after(standalone.close);
   const projectId = native.project.id as import('@codexia/persistence-contracts').ProjectId;
   const nodeId = randomUUID() as import('@codexia/persistence-contracts').KnowledgeNodeId;
-  const projectVersion = (await native.persistence.read(reader => reader.getProject(projectId)))?.version;
+  const projectVersion = (await native.persistence.read(reader => reader.getProject(projectId)))!.version;
   const payload = {
     projectVersion,
     idempotencyKey: 'action-real',
@@ -3956,8 +3955,8 @@ it('native actions use real PostgreSQL through direct and composed OAuth admissi
     ],
   };
   const headers = client.mcpHeaders();
-  const actionPath = `/api/projects/${projectId}/actions/`;
-  const response = await fetch(`${standalone.base + actionPath}core.knowledge.propose`, {
+  const actionPath = '/api/projects/' + projectId + '/actions/';
+  const response = await fetch(standalone.base + actionPath + 'core.knowledge.propose', {
     method: 'POST',
     headers,
     body: JSON.stringify({ input: payload }),
@@ -3969,8 +3968,8 @@ it('native actions use real PostgreSQL through direct and composed OAuth admissi
   assert.equal(proposed.authorId, 'owner');
   assert.equal(proposed.provenance.details.origin, 'external-agent');
   assert.equal(await native.persistence.read(reader => reader.getKnowledgeNode(projectId, nodeId)), undefined);
-  const approvalPath = `/api/v1/persistence/projects/${projectId}/changesets/${proposed.id}`;
-  const deniedApproval = await fetch(`${standalone.base + approvalPath}/approve`, {
+  const approvalPath = '/api/v1/persistence/projects/' + projectId + '/changesets/' + proposed.id;
+  const deniedApproval = await fetch(standalone.base + approvalPath + '/approve', {
     method: 'POST',
     headers,
     body: JSON.stringify({ expectedVersion: proposed.version }),
@@ -3978,42 +3977,42 @@ it('native actions use real PostgreSQL through direct and composed OAuth admissi
   assert.equal(deniedApproval.status, 403);
   assert.equal(((await deniedApproval.json()) as { code: string }).code, 'OAUTH_MCP_PERSISTENCE_DENIED');
   const ownerHeaders = client.ownerHeaders();
-  const approval = await fetch(`${standalone.base + approvalPath}/approve`, {
+  const approval = await fetch(standalone.base + approvalPath + '/approve', {
     method: 'POST',
     headers: ownerHeaders,
     body: JSON.stringify({ expectedVersion: proposed.version }),
   });
   assert.equal(approval.status, 200, await approval.text());
-  const applied = await fetch(`${standalone.base + approvalPath}/apply`, {
+  const applied = await fetch(standalone.base + approvalPath + '/apply', {
     method: 'POST',
     headers: ownerHeaders,
     body: JSON.stringify({ expectedVersion: proposed.version + 1 }),
   });
   assert.equal(applied.status, 200, await applied.text());
-  const retry = await fetch(`${standalone.base + actionPath}core.knowledge.propose`, {
+  const retry = await fetch(standalone.base + actionPath + 'core.knowledge.propose', {
     method: 'POST',
     headers,
     body: JSON.stringify({ input: payload }),
   });
   const replay = (await retry.json()) as ActionResult;
   assert.ok(replay.ok && (replay.data as { replayed: boolean }).replayed);
-  const listed = await fetch(`${standalone.base + actionPath}core.knowledge.nodes.list`, {
+  const listed = await fetch(standalone.base + actionPath + 'core.knowledge.nodes.list', {
     method: 'POST',
     headers,
     body: JSON.stringify({ input: {} }),
   });
   const list = (await listed.json()) as ActionResult;
   assert.ok(list.ok && (list.data as Array<{ id: string }>).some(node => node.id === nodeId));
-  const current = (await native.persistence.read(reader => reader.getProject(projectId)))?.version;
+  const current = (await native.persistence.read(reader => reader.getProject(projectId)))!.version;
   const nestedId = randomUUID();
-  const nested = await fetch(`${standalone.base}/api/projects/${projectId}/modules/mcp/native-propose`, {
+  const nested = await fetch(standalone.base + '/api/projects/' + projectId + '/modules/mcp/native-propose', {
     method: 'POST',
     headers,
     body: JSON.stringify({
       ...payload,
       projectVersion: current,
       idempotencyKey: 'nested-real',
-      operations: [{ ...payload.operations[0], command: { ...payload.operations[0]?.command, id: nestedId } }],
+      operations: [{ ...payload.operations[0], command: { ...payload.operations[0]!.command, id: nestedId } }],
     }),
   });
   const nestedResult = (await nested.json()) as ActionResult;
@@ -4095,7 +4094,7 @@ it('restricts Publishing review payloads and legacy files to authenticated autho
     await tx.saveModuleRecord({
       projectId,
       moduleId: 'core.authority.snapshots',
-      key: `snapshot:${legacyProject.version}`,
+      key: 'snapshot:' + legacyProject.version,
       expectedVersion: null,
       value: {
         snapshot: legacySnapshot,
@@ -4139,7 +4138,7 @@ it('restricts Publishing review payloads and legacy files to authenticated autho
         tx.saveModuleRecord({
           projectId,
           moduleId: 'core.authority.proposals',
-          key: `proposal:${id}`,
+          key: 'proposal:' + id,
           expectedVersion: null,
           value: status as unknown as JsonObject,
         }),
@@ -4170,8 +4169,8 @@ it('restricts Publishing review payloads and legacy files to authenticated autho
     ...testClientSettings(projectId, client.publicJwks, client.isActive),
   });
   t.after(standalone.close);
-  const projectPath = `/api/projects/${projectId}`;
-  const nativePath = `/api/v1/persistence/projects/${projectId}/changesets`;
+  const projectPath = '/api/projects/' + projectId;
+  const nativePath = '/api/v1/persistence/projects/' + projectId + '/changesets';
   const readers: Array<{ name: string; base: string; headers: Record<string, string>; author: boolean; directPersistence: boolean }> = [
     { name: 'OAuth author', base: standalone.base, headers: client.ownerHeaders(), author: true, directPersistence: true },
     { name: 'OAuth MCP reader', base: standalone.base, headers: client.mcpHeaders(), author: false, directPersistence: false },
@@ -4179,7 +4178,7 @@ it('restricts Publishing review payloads and legacy files to authenticated autho
   for (const { name, base, headers, author, directPersistence } of readers) {
     await t.test(name, async () => {
       const invoke = async <Data>(action: string, input: unknown, selected?: SnapshotId): Promise<ActionResult<Data>> => {
-        const url = `${base + projectPath}/actions/${action}`;
+        const url = base + projectPath + '/actions/' + action;
         const body = JSON.stringify({ input, snapshot: selected });
         const response = await fetch(url, { method: 'POST', headers, body });
         assert.equal(response.status, 200);
@@ -4196,7 +4195,7 @@ it('restricts Publishing review payloads and legacy files to authenticated autho
         assert.deepEqual(proposals.map(status => status.proposal.id).sort(), expectedIds);
       }
       if (!author) {
-        const globalQueue = await fetch(`${base}/api/review-queue`, { headers: getHeaders });
+        const globalQueue = await fetch(base + '/api/review-queue', { headers: getHeaders });
         assert.equal(globalQueue.status, 200);
         const queue = (await globalQueue.json()) as {
           unresolvedCount: number;
@@ -4207,7 +4206,7 @@ it('restricts Publishing review payloads and legacy files to authenticated autho
         assert.equal(queue.unresolvedCount, expectedIds.length);
       }
       for (const id of [ordinaryId, ...privateIds]) {
-        const response = await fetch(`${base + projectPath}/proposals/${id}`, { headers: getHeaders });
+        const response = await fetch(base + projectPath + '/proposals/' + id, { headers: getHeaders });
         assert.equal(response.status, author || id === ordinaryId ? 200 : 404);
         if (!author && id !== ordinaryId) assert.equal((await response.json()).code, 'PROPOSAL_NOT_FOUND');
       }
@@ -4232,7 +4231,7 @@ it('restricts Publishing review payloads and legacy files to authenticated autho
       assert.ok(nativeDetail.ok, JSON.stringify(nativeDetail));
       assert.equal(nativeDetail.data?.changeSet.id, author ? native.changeSet.id : undefined);
       if (directPersistence) {
-        const response = await fetch(`${base + nativePath}/${native.changeSet.id}`, { headers: getHeaders });
+        const response = await fetch(base + nativePath + '/' + native.changeSet.id, { headers: getHeaders });
         assert.equal(response.status, author ? 200 : 404);
       }
     });
@@ -4335,8 +4334,8 @@ it('binds Publishing record ports to the requested snapshot and authenticated au
     ...testClientSettings(project.id, client.publicJwks, client.isActive),
   });
   t.after(standalone.close);
-  const base = `/api/projects/${project.id}`;
-  const actionUrl = (origin: string, action: string) => `${origin + base}/actions/publishing.fixture-${action}`;
+  const base = '/api/projects/' + project.id;
+  const actionUrl = (origin: string, action: string) => origin + base + '/actions/publishing.fixture-' + action;
   const body = (input: unknown = {}, snapshot?: SnapshotId) => JSON.stringify({ input, snapshot });
   const invoke = async (origin: string, action: string, headers: Record<string, string>, input?: unknown, snapshot?: SnapshotId) => {
     const response = await fetch(actionUrl(origin, action), { method: 'POST', headers, body: body(input, snapshot) });
@@ -4355,7 +4354,7 @@ it('binds Publishing record ports to the requested snapshot and authenticated au
   const external = await invoke(standalone.base, 'read', client.mcpHeaders(), { key });
   assert.equal(external.ok, false);
 
-  const anon = await fetch(`${standalone.base}/api/public/projects/${project.id}/modules/publishing/fixture-public`);
+  const anon = await fetch(standalone.base + '/api/public/projects/' + project.id + '/modules/publishing/fixture-public');
   assert.equal(anon.status, 200);
   assert.deepEqual(await anon.json(), { version: 2, write: false });
   const proposed = (await invoke(standalone.base, 'propose', owner)) as ActionResult<{ changeSet: { id: string; projectId: string } }>;
@@ -4434,7 +4433,7 @@ it('allows scoped NLP settings proposals while reserving application for the aut
   });
   t.after(api.close);
   const snapshot = (await store.reader(project.id)).snapshot;
-  const actionBase = `${api.base}/api/projects/${project.id}/actions/nlp.fixture-`;
+  const actionBase = api.base + '/api/projects/' + project.id + '/actions/nlp.fixture-';
   const owner = client.ownerHeaders();
   const mcp = client.mcpHeaders('mcp:propose');
   const invoke = (action: string, headers: Record<string, string>, input: unknown = {}, selected?: SnapshotId) =>
@@ -4464,9 +4463,9 @@ it('allows scoped NLP settings proposals while reserving application for the aut
     [result.data.changeSet.id],
   );
 
-  const review = `${api.base}/api/v1/persistence/projects/${project.id}/changesets/${result.data.changeSet.id}`;
+  const review = api.base + '/api/v1/persistence/projects/' + project.id + '/changesets/' + result.data.changeSet.id;
   const transition = (action: string, headers: Record<string, string>, expectedVersion: number) =>
-    fetch(`${review}/${action}`, { method: 'POST', headers, body: JSON.stringify({ expectedVersion }) });
+    fetch(review + '/' + action, { method: 'POST', headers, body: JSON.stringify({ expectedVersion }) });
   for (const action of ['approve', 'apply']) {
     assert.equal((await transition(action, mcp, 1)).status, 403);
   }
@@ -4537,7 +4536,7 @@ it('reorders hierarchy only by approving a version-bound native ChangeSet', asyn
   assert.ok(replay.ok && replay.data.replayed);
   assert.equal(replay.data.changeSet.id, changeSet.id);
 
-  const review = await fetch(`${instance.base + nativePath}/review-feed`, { headers: authorHeaders });
+  const review = await fetch(instance.base + nativePath + '/review-feed', { headers: authorHeaders });
   assert.equal(review.status, 200);
   const { items } = (await review.json()) as { items: Awaited<ReturnType<CoreStore['listAuthorReviews']>> };
   assert.ok(items.some(item => item.kind === 'native-change-set' && item.changeSet.id === changeSet.id));
@@ -4545,12 +4544,12 @@ it('reorders hierarchy only by approving a version-bound native ChangeSet', asyn
   const changeSetPath = `${nativePath}/changesets/${changeSet.id}`;
   const unauthorized = await post(actionPath, { input: { ...input, idempotencyKey: randomUUID() }, snapshot }, bearerHeaders);
   assert.equal(unauthorized.status, 401);
-  const unapproved = await post(`${changeSetPath}/apply`, { expectedVersion: changeSet.version });
+  const unapproved = await post(changeSetPath + '/apply', { expectedVersion: changeSet.version });
   assert.equal(unapproved.status, 409);
   assert.deepEqual(await readOrder(), [first.document.id, second.document.id]);
-  const approval = await post(`${changeSetPath}/approve`, { expectedVersion: changeSet.version });
+  const approval = await post(changeSetPath + '/approve', { expectedVersion: changeSet.version });
   assert.equal(approval.status, 200, await approval.text());
-  const applied = await post(`${changeSetPath}/apply`, { expectedVersion: changeSet.version + 1 });
+  const applied = await post(changeSetPath + '/apply', { expectedVersion: changeSet.version + 1 });
   assert.equal(applied.status, 200, await applied.text());
   assert.deepEqual(await readOrder(), [second.document.id, first.document.id]);
   const appliedReplay = await post(actionPath, { input, snapshot });
@@ -4743,7 +4742,7 @@ it('replays native hierarchy creation and deletion through authenticated Postgre
   assert.ok(retry.ok && retry.data.replayed);
   assert.deepEqual(retry.data.changeSet, changeSet);
 
-  const review = await fetch(`${apiServer.base + nativePath}/review-feed`, { headers });
+  const review = await fetch(apiServer.base + nativePath + '/review-feed', { headers });
   assert.equal(review.status, 200);
   const { items } = (await review.json()) as { items: Awaited<ReturnType<CoreStore['listAuthorReviews']>> };
   assert.ok(items.some(item => item.kind === 'native-change-set' && item.changeSet.id === changeSet.id));
@@ -4854,20 +4853,20 @@ it('restores a manuscript revision only through an approved native ChangeSet and
   assert.ok(!invalid.ok && invalid.error.code === 'invalid_action_input', JSON.stringify(invalid));
 
   const changeSetPath = `${nativePath}/changesets/${changeSet.id}`;
-  const review = await fetch(`${instance.base + nativePath}/review-feed`, { headers: author });
+  const review = await fetch(instance.base + nativePath + '/review-feed', { headers: author });
   assert.equal(review.status, 200);
   const { items } = (await review.json()) as { items: Awaited<ReturnType<CoreStore['listAuthorReviews']>> };
   assert.ok(items.some(item => item.kind === 'native-change-set' && item.changeSet.id === changeSet.id));
   const approvalBody = { expectedVersion: changeSet.version };
-  assert.equal((await post(`${changeSetPath}/approve`, approvalBody, external)).status, 403);
-  assert.equal((await post(`${changeSetPath}/apply`, approvalBody)).status, 409);
+  assert.equal((await post(changeSetPath + '/approve', approvalBody, external)).status, 403);
+  assert.equal((await post(changeSetPath + '/apply', approvalBody)).status, 409);
   assert.equal((await readHead())?.id, current.id);
 
-  const approval = await post(`${changeSetPath}/approve`, approvalBody);
+  const approval = await post(changeSetPath + '/approve', approvalBody);
   assert.equal(approval.status, 200, await approval.text());
   assert.equal((await readHead())?.id, current.id);
   const apply = async () => {
-    const response = await post(`${changeSetPath}/apply`, { expectedVersion: changeSet.version + 1 });
+    const response = await post(changeSetPath + '/apply', { expectedVersion: changeSet.version + 1 });
     assert.equal(response.status, 200);
     return (await response.json()) as ChangeSetApplicationResult;
   };
