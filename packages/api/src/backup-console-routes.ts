@@ -335,7 +335,7 @@ export function registerBackupConsole(
     });
     app.get(path + '/runs', wire('runs_get'), async request => {
       const query = z
-        .strictObject({ cursor: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(100).default(50) })
+        .strictObject({ cursor: uuid.optional(), limit: z.coerce.number().int().min(1).max(100).default(50) })
         .safeParse(request.query);
       if (!query.success) return invalid();
       return store().listRuns(query.data.cursor, query.data.limit);

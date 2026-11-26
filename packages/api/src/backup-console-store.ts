@@ -320,11 +320,15 @@ export class BackupConsoleStore {
 
   async listRuns(cursor?: string, limit = 50) {
     const { rows } = await this.pool.query<BackupRun>(
-      `SELECT * FROM codexia_backup.runs WHERE ($1::timestamptz IS NULL OR created_at < $1)
-       ORDER BY created_at DESC, id DESC LIMIT $2`,
-      [cursor ?? null, limit],
+      `SELECT run.* FROM codexia_backup.runs run
+       WHERE $1::uuid IS NULL OR (run.created_at, run.id) < (
+         SELECT anchor.created_at, anchor.id FROM codexia_backup.runs anchor WHERE anchor.id = $1
+       )
+       ORDER BY run.created_at DESC, run.id DESC LIMIT $2`,
+      [cursor ?? null, limit + 1],
     );
-    return { runs: rows.map(viewRun), nextCursor: rows.length === limit ? (rows.at(-1)?.created_at.toISOString() ?? null) : null };
+    const page = rows.slice(0, limit);
+    return { runs: page.map(viewRun), nextCursor: rows.length > limit ? (page.at(-1)?.id ?? null) : null };
   }
 
   async run(id: string) {

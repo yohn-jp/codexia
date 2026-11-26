@@ -278,6 +278,34 @@ test('backup console requires owner proof, isolates credentials, and applies onl
   assert.ok(runHistory.runs.some(run => run.runId === runReceipt.runId && run.status === 'QUEUED'));
   assert.equal(await worker.processNext(), true);
   assert.equal((await (await get('/runs/' + runReceipt.runId)).json()).status, 'REMOTE_VERIFIED');
+  const historyIds = [
+    '00000000-0000-4000-8000-000000000003',
+    '00000000-0000-4000-8000-000000000002',
+    '00000000-0000-4000-8000-000000000001',
+  ];
+  await admin.query(
+    `INSERT INTO codexia_backup.runs (id, request_id, kind, maintenance_window_id, state, created_at)
+     SELECT id, id::text, 'manual', 'fixture-window', 'FAILED',
+       '2024-01-01T00:00:00.000001Z'::timestamptz + ((ordinality = 1)::integer * interval '1 microsecond')
+     FROM unnest($1::uuid[]) WITH ORDINALITY AS fixture(id, ordinality)`,
+    [historyIds],
+  );
+  let historyPagePath = '/runs?limit=1';
+  for (const runId of [runReceipt.runId, ...historyIds]) {
+    const response = await get(historyPagePath);
+    assert.equal(response.status, 200);
+    const page = (await response.json()) as { runs: Array<{ runId: string }>; nextCursor: string | null };
+    assert.deepEqual(
+      page.runs.map(run => run.runId),
+      [runId],
+    );
+    if (runId === historyIds.at(-1)) {
+      assert.equal(page.nextCursor, null);
+    } else {
+      assert.ok(page.nextCursor);
+      historyPagePath = `/runs?limit=1&cursor=${encodeURIComponent(page.nextCursor)}`;
+    }
+  }
   assert.equal(typeof (await (await get('/status')).json()).lastVerifiedOffVmBackup.manifestSha256, 'string');
   assert.deepEqual((await get('/recovery').then(response => response.json())).missingConditions, [
     'independent_restore_drill_for_latest_backup',
