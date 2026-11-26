@@ -147,6 +147,15 @@ test('portable import replays a pre-canonical receipt only for the original pars
   assert.equal(canonicalReplay.project.id, canonical.project.id);
   assert.equal(canonicalReplay.replayed, true);
   assert.equal(store.projects.size, 2);
+
+  // An exact legacy replay now proves both identities exist. Do not silently
+  // switch the author to the canonical duplicate or modify either project.
+  await assert.rejects(
+    importWorkArchive(store.persistence, archive, 'owner'),
+    (error: unknown) => error instanceof WorkArchiveError && error.status === 409 && error.code === 'WORK_IMPORT_CONFLICT',
+  );
+  assert.equal(store.projects.size, 2);
+  assert.deepEqual(store.projects.get(legacyId), legacyProject);
 });
 
 test('portable import rejects sensitive project settings before opening a write transaction', async () => {
