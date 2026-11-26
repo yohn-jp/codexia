@@ -44,7 +44,7 @@ interface NativeReviewContext {
   coreReviews: Array<Extract<AuthorReviewFeedItem, { kind: 'core-proposal' }>>;
   action: NativeReviewAction | null;
   message: string;
-  applyVersion: number | null;
+  applyVersions: ReadonlyMap<string, number>;
   outcome: NativeReviewOutcome | null;
   outcomeSequence: number;
 }
@@ -253,24 +253,13 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
         canWrite: event.type === 'LOAD.REQUESTED' ? (event.canWrite ?? context.canWrite) : context.canWrite,
         showCoreReviews: event.type === 'LOAD.REQUESTED' ? (event.showCoreReviews ?? context.showCoreReviews) : context.showCoreReviews,
       })),
-      beginInspect: assign(({ context, event }) =>
-        event.type === 'SELECT.REQUESTED'
-          ? {
-              selectedId: event.id,
-              detail: null,
-              message: '',
-              applyVersion: event.id === context.selectedId ? context.applyVersion : null,
-            }
-          : {},
-      ),
+      beginInspect: assign(({ event }) => (event.type === 'SELECT.REQUESTED' ? { selectedId: event.id, detail: null, message: '' } : {})),
       beginAction: assign(({ context, event }) => {
         if (event.type !== 'ACTION' || !context.detail) return {};
-        return {
-          action: event.action,
-          message: '',
-          outcome: null,
-          applyVersion: event.action === 'apply' ? (context.applyVersion ?? context.detail.changeSet.version) : context.applyVersion,
-        };
+        const { id, version } = context.detail.changeSet;
+        const applyVersions = new Map(context.applyVersions);
+        if (event.action === 'apply' && !applyVersions.has(id)) applyVersions.set(id, version);
+        return { action: event.action, message: '', outcome: null, applyVersions };
       }),
     },
   }).createMachine({
@@ -287,7 +276,7 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
       coreReviews: [],
       action: null,
       message: '',
-      applyVersion: null,
+      applyVersions: new Map(),
       outcome: null,
       outcomeSequence: 0,
     }),
@@ -334,25 +323,25 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
       working: {
         invoke: {
           src: 'performAndReconcile',
-          input: ({ context }) => ({
-            projectId: context.projectId,
-            detail: context.detail!,
-            action: context.action!,
-            version: context.action === 'apply' ? context.applyVersion! : context.detail!.changeSet.version,
-          }),
+          input: ({ context }) => {
+            const { action, applyVersions, detail, projectId } = context;
+            if (!action || !detail) throw new Error('ChangeSet操作の対象がありません。');
+            const { id, version } = detail.changeSet;
+            return { projectId, detail, action, version: action === 'apply' ? (applyVersions.get(id) ?? version) : version };
+          },
           onDone: {
             target: 'settling',
             actions: assign(({ context, event }) => {
               const outcome = event.output as NativeReviewOutcome;
-              const confirmedApplied =
-                outcome.kind === 'confirmed' && outcome.detail?.changeSet.status === 'applied' && Boolean(outcome.detail.receipt);
+              const applyVersions = new Map(context.applyVersions);
+              if (context.action === 'apply' && outcome.kind !== 'unknown') applyVersions.delete(context.selectedId);
               return {
                 outcome,
                 outcomeSequence: context.outcomeSequence + 1,
                 detail: outcome.detail ?? context.detail,
                 changeSets: outcome.changeSets ?? context.changeSets,
                 message: outcome.message,
-                applyVersion: confirmedApplied || outcome.kind !== 'unknown' ? null : context.applyVersion,
+                applyVersions,
               };
             }),
           },
@@ -390,7 +379,6 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
                 coreReviews: result.coreReviews,
                 selectedId: result.selectedId,
                 detail: null,
-                applyVersion: result.selectedId === context.selectedId ? context.applyVersion : null,
                 outcome: null,
                 message: '',
               };
@@ -410,18 +398,32 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
         invoke: {
           src: 'inspect',
           input: ({ context }) => ({ projectId: context.projectId, id: context.selectedId }),
-          onDone: {
-            target: 'idle',
-            actions: assign(({ context, event }) => {
-              const detail = event.output as NativeReviewDetail;
-              return {
-                detail,
-                applyVersion: detail.changeSet.status === 'approved' ? context.applyVersion : null,
-                outcome: null,
-                message: '',
-              };
-            }),
-          },
+          onDone: [
+            {
+              guard: ({ context, event }) =>
+                context.applyVersions.has(event.output.changeSet.id) &&
+                event.output.changeSet.status === 'applied' &&
+                Boolean(event.output.receipt),
+              target: 'confirmed',
+              actions: assign(({ context, event }) => {
+                const detail = event.output;
+                const applyVersions = new Map(context.applyVersions);
+                applyVersions.delete(detail.changeSet.id);
+                const message = '適用receiptを再確認しました。';
+                return {
+                  detail,
+                  applyVersions,
+                  outcome: { kind: 'confirmed', detail, message } satisfies NativeReviewOutcome,
+                  outcomeSequence: context.outcomeSequence + 1,
+                  message,
+                };
+              }),
+            },
+            {
+              target: 'idle',
+              actions: assign(({ event }) => ({ detail: event.output, outcome: null, message: '' })),
+            },
+          ],
           onError: { target: 'readFailed', actions: assign(({ event }) => ({ message: errorTextForRead(event.error) })) },
         },
       },

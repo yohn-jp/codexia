@@ -153,7 +153,7 @@ test('a version conflict blocks another mutation until a fresh detail is loaded'
   await load();
   actor.send({ type: 'ACTION', action: 'apply' });
   await waitFor(actor, snapshot => snapshot.matches('conflict'), { timeout: 1_000 });
-  assert.equal(actor.getSnapshot().context.applyVersion, null);
+  assert.equal(actor.getSnapshot().context.applyVersions.has(changeSet.id), false);
   actor.send({ type: 'ACTION', action: 'apply' });
   assert.deepEqual(calls, [{ action: 'apply', version: 7 }]);
   actor.send({ type: 'LOAD.REQUESTED', canWrite: true, showCoreReviews: false });
@@ -253,5 +253,63 @@ test('a reconciled apply receipt survives a failed list refresh', async () => {
   await waitFor(actor, snapshot => snapshot.context.outcome !== null, { timeout: 1_000 });
   assert.equal(actor.getSnapshot().matches('confirmed'), true);
   assert.equal(actor.getSnapshot().context.detail?.receipt, receipt);
+  actor.stop();
+});
+
+test('an uncertain apply preserves the original version after reviewing another ChangeSet', async () => {
+  const other = { ...changeSet, id: 'changeset-2' as ChangeSet['id'] };
+  let version = 7;
+  const { actor, calls, load } = harness({
+    async load() {
+      return { changeSets: [{ ...changeSet, version }, other], coreReviews: [] };
+    },
+    async get(_projectId, id) {
+      return { changeSet: id === other.id ? other : { ...changeSet, version } };
+    },
+    async apply(_projectId, _id, version) {
+      calls.push({ action: 'apply', version });
+      throw new Error('response lost');
+    },
+  });
+  await load();
+  actor.send({ type: 'ACTION', action: 'apply' });
+  await waitFor(actor, snapshot => snapshot.matches('unknown'), { timeout: 1_000 });
+  actor.send({ type: 'SELECT.REQUESTED', id: other.id });
+  await waitFor(actor, snapshot => snapshot.context.detail?.changeSet.id === other.id, { timeout: 1_000 });
+  version = 8;
+  actor.send({ type: 'SELECT.REQUESTED', id: changeSet.id });
+  await waitFor(actor, snapshot => snapshot.context.detail?.changeSet.id === changeSet.id, { timeout: 1_000 });
+  actor.send({ type: 'ACTION', action: 'apply' });
+  await waitFor(actor, snapshot => snapshot.matches('unknown'), { timeout: 1_000 });
+  assert.deepEqual(calls, [
+    { action: 'apply', version: 7 },
+    { action: 'apply', version: 7 },
+  ]);
+  actor.stop();
+});
+
+test('a later detail refresh emits the recovered apply outcome once', async () => {
+  const appliedChangeSet = { ...changeSet, status: 'applied' } as ChangeSet;
+  const receipt = { changeSet: appliedChangeSet, results: [], replayed: false };
+  let receiptAvailable = false;
+  const { actor, load } = harness({
+    async apply() {
+      throw new Error('response lost');
+    },
+    async get() {
+      return receiptAvailable ? { changeSet: appliedChangeSet, receipt } : { changeSet };
+    },
+  });
+  await load();
+  actor.send({ type: 'ACTION', action: 'apply' });
+  const unknown = await waitFor(actor, snapshot => snapshot.matches('unknown'), { timeout: 1_000 });
+  receiptAvailable = true;
+  actor.send({ type: 'LOAD.REQUESTED' });
+  const refreshed = await waitFor(actor, snapshot => snapshot.context.detail?.receipt === receipt, { timeout: 1_000 });
+  assert.equal(refreshed.context.outcome?.kind, 'confirmed');
+  assert.equal(refreshed.context.outcomeSequence, unknown.context.outcomeSequence + 1);
+  actor.send({ type: 'SELECT.REQUESTED', id: changeSet.id });
+  const reselected = await waitFor(actor, snapshot => snapshot.context.detail?.receipt === receipt, { timeout: 1_000 });
+  assert.equal(reselected.context.outcomeSequence, refreshed.context.outcomeSequence);
   actor.stop();
 });
