@@ -427,7 +427,10 @@ function databaseError(error: unknown): unknown {
   if (error instanceof PersistenceError) return error;
   if (!error || typeof error !== 'object' || !('code' in error)) return error;
   const code = (error as { code?: unknown }).code;
-  if (typeof code === 'string' && (/^08\d{3}$/u.test(code) || ['57P01', '57P02', '57P03', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT'].includes(code))) {
+  if (
+    typeof code === 'string' &&
+    (/^08\d{3}$/u.test(code) || ['57P01', '57P02', '57P03', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT'].includes(code))
+  ) {
     return databaseUnavailable();
   }
   if (code === '23505') return new PersistenceError('conflict', 'A persistence constraint rejected the write');
