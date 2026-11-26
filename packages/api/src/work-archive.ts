@@ -576,6 +576,7 @@ export async function importWorkArchive(persistence: Persistence, payload: unkno
   const legacyTarget = portableProjectId(archive, false);
   const replayTargets = target.id === legacyTarget.id ? [target] : [target, legacyTarget];
   const readReplay = async (reader: PersistenceReader): Promise<WorkImportResult | undefined> => {
+    let matched: WorkImportResult | undefined;
     for (const replayTarget of replayTargets) {
       const existing = await reader.getProject(replayTarget.id);
       if (!existing) continue;
@@ -583,14 +584,15 @@ export async function importWorkArchive(persistence: Persistence, payload: unkno
       if (receipt?.value.payloadSha256 !== replayTarget.hash || receipt.value.archiveFormat !== WORK_ARCHIVE_FORMAT) {
         fail(409, 'WORK_IMPORT_CONFLICT', 'An existing project conflicts with this import identity');
       }
-      return {
+      if (matched) fail(409, 'WORK_IMPORT_CONFLICT', 'Both canonical and legacy import identities exist; resolve the duplicate explicitly');
+      matched = {
         project: existing,
         replayed: true,
         unresolvedAnchors: archive.evidence.unresolved.anchors.length,
         omittedRecords: archive.omittedRecords.length,
       };
     }
-    return undefined;
+    return matched;
   };
   let creatingProject = false;
   const result = await persistence
