@@ -1,8 +1,10 @@
 # MCP conformance
 
-The locked official conformance CLI runs the 2026-07-28 requirements suite against a loopback fixture using the current SDK, HTTP contribution, and tool registration. The native reports include the required and non-scored scenarios. A separate run removes the JSON-RPC `id` from a successful `tools/list` response and requires the official wire-schema check to report the missing field.
+The locked official conformance CLI runs the 2026-07-28 server requirements derived from the official frozen manifest against both a loopback fixture using the current SDK/registrars and the live Fastify/Core/PostgreSQL product. It invokes scenarios individually so each native report retains its required or non-scored classification. `dns-rebinding-protection` is explicitly excluded from execution by task safety scope; it is recorded as excluded. Pending and extension scenarios remain unscored and are run with the official CLI's `--force` flag so native pass/failure/skipped outcomes are visible. A separate run removes the JSON-RPC `id` from a successful synthetic `tools/list` response and requires the official wire-schema check to report the missing field.
 
-The runner also starts the current Fastify API and Core with a fresh PostgreSQL database and locally signed fixture tokens. The official conformance `tools-list` scenario targets this API through a loopback proxy that supplies one fixture token. Inspector connects directly over HTTP and through the shipped stdio entry point. It exercises the catalog, a Core action, and admission or schema errors. SDK probes verify wire errors and record the negotiated stdio versions. The synthetic loopback fixture rejects foreign Host and Origin headers; a separate direct live-product HTTP probe checks a valid loopback request and independently rejects a forged Host and a foreign Origin. These probes do not substitute for the full required conformance suite. The report marks the full requirements suite against the live product as untested.
+The product suite runs through a loopback proxy that supplies one fixture token to the actual Fastify/Core/PostgreSQL endpoint. It does not add conformance-only tools or alter the production tool catalog. Inspector connects directly over HTTP and through the shipped stdio entry point. It exercises the catalog, a Core action, and admission or schema errors. SDK probes verify wire errors and record the negotiated stdio versions. The protocol and admission checks here do not claim DNS-rebinding acceptance; the corresponding official scenario is excluded as noted above.
+
+The live product report also records malformed JSON behavior. The official SDK returns JSON-RPC parse error `-32700`, while the current Fastify parser returns `INVALID_JSON`. Changing the published MCP 400 response schema was rejected by the pinned oasdiff compatibility guard, so the report records this product deviation and blocker without bypassing the API contract check or changing the API epoch.
 
 ## Local run
 
@@ -15,8 +17,8 @@ Create a dedicated disposable database named `codexia_perf_mcp_conformance` on a
 
 ```sh
 CODEXIA_AUTH_TEST_DISPOSABLE=1 \
-  CODEXIA_MCP_CONFORMANCE_DATABASE_URL='postgres://test-user:test-password@127.0.0.1:5432/codexia_perf_mcp_conformance' \
+CODEXIA_MCP_CONFORMANCE_DATABASE_URL='postgres://test-user:test-password@127.0.0.1:5432/codexia_perf_mcp_conformance' \
   node --import tsx tests/conformance/mcp/run.mjs
 ```
 
-The runner creates a fresh subdirectory under `CODEXIA_CI_REPORT_DIR`, which defaults to the ignored `test-results/conformance/mcp`. Open `report.json` for the outcome and use the remainder of that subdirectory for official CLI logs and checks. Unsuccessful required checks cause a nonzero exit.
+The runner creates a fresh subdirectory under `CODEXIA_CI_REPORT_DIR`, which defaults to the ignored `test-results/conformance/mcp`. Open `report.json` for the outcome and use the remainder of that subdirectory for official CLI logs and checks. The scenario summary records successful scenarios with official warnings as `SUCCESS_WITH_WARNINGS`. The authorization summary is partial when the executed checks pass and the DNS-rebinding check is excluded. Required failures and exclusions cause a nonzero exit.

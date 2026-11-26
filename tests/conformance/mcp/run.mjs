@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +17,13 @@ const databaseUrl = process.env.CODEXIA_MCP_CONFORMANCE_DATABASE_URL;
 const disposableOptIn = process.env.CODEXIA_AUTH_TEST_DISPOSABLE === '1';
 const conformanceBin = resolve(toolRoot, 'node_modules/.bin/conformance');
 const inspectorBin = resolve(toolRoot, 'node_modules/.bin/mcp-inspector');
+const conformanceRequire = createRequire(resolve(toolRoot, 'node_modules/@modelcontextprotocol/conformance/package.json'));
+const { parse: parseYaml } = conformanceRequire('yaml');
+const requirements = parseYaml(await readFile(resolve(toolRoot, 'node_modules/@modelcontextprotocol/conformance/requirements/2026-07-28.yaml'), 'utf8'));
+const excludedScenarios = [{ scenario: 'dns-rebinding-protection', reason: 'excluded by task safety scope; no DNS-rebinding or forged-Host scenario is executed' }];
+const excludedScenarioNames = new Set(excludedScenarios.map(({ scenario }) => scenario));
+const requiredServerScenarios = requirements.server.filter(scenario => !excludedScenarioNames.has(scenario));
+const unscoredServerScenarios = requirements.not_scored.filter(item => item.leg === 'server' && !excludedScenarioNames.has(item.scenario));
 const secretValues = databaseUrl ? [databaseUrl] : [];
 const failures = [];
 const evidence = {
@@ -23,10 +31,11 @@ const evidence = {
   conformanceTool: '@modelcontextprotocol/conformance@0.2.0-alpha.12',
   inspectorTool: '@modelcontextprotocol/inspector@2.16.0',
   officialConformance: { status: 'NOT_RUN' },
-  fullRequiredSuiteAgainstProduct: { status: 'NOT_RUN_BY_SCOPE', note: 'Stock 2026 suite runs only against the loopback SDK-backed fixture; it includes hostile protocol scenarios.' },
+  fullRequiredSuiteAgainstProduct: { status: 'NOT_RUN' },
   stdioProtocolProbe: { status: 'NOT_RUN' },
   inspector: { status: 'NOT_RUN' },
   authorization: { status: 'NOT_RUN' },
+  transportErrors: { malformedJson: 'NOT_RUN' },
   contract: { status: 'NOT_RUN' },
   mutation: { status: 'NOT_RUN' },
 };
@@ -97,6 +106,60 @@ async function scenarioResults(path, scenario) {
   return reports.length ? all : null;
 }
 
+async function runOfficialScenario({ target, url, scenario, classification, reason, rawRoot, force = false }) {
+  const label = scenario.replaceAll('/', '__');
+  const directory = resolve(rawRoot, `${target}-${classification}-${label}`);
+  const args = ['server', '--url', url, '--scenario', scenario, '--spec-version', '2026-07-28', '--output-dir', directory, '--verbose'];
+  if (force) args.push('--force');
+  const result = await execute(conformanceBin, args, { timeout: 120_000 });
+  await writeFile(resolve(output, `${target}-${classification}-${label}.stdout.txt`), result.stdout);
+  await writeFile(resolve(output, `${target}-${classification}-${label}.stderr.txt`), result.stderr);
+  const checks = await scenarioResults(directory, scenario);
+  const allChecksSkipped = Boolean(checks?.length) && checks.every(check => check.status === 'SKIPPED');
+  const skipped = allChecksSkipped || (!checks?.length && /\bSKIPPED\b/u.test(`${result.stdout}\n${result.stderr}`));
+  const hasFailingCheck = Boolean(checks?.some(check => check.status === 'FAILURE'));
+  const hasPassingBehaviorCheck = Boolean(checks?.some(check =>
+    !['wire-schema-valid', 'wire-schema-harness-error'].includes(check.id) && check.status === 'SUCCESS'));
+  let status = 'NO_REPORT';
+  if (result.code !== 0 || hasFailingCheck) status = 'FAILURE';
+  else if (skipped) status = 'SKIPPED';
+  else if (hasPassingBehaviorCheck) status = checks.some(check => check.status === 'WARNING') ? 'SUCCESS_WITH_WARNINGS' : 'SUCCESS';
+  else if (checks?.length) status = 'NO_PASSING_CHECK';
+  const toolCount = scenario === 'tools-list' ? checks?.find(check => check.id === 'tools-list')?.details?.toolCount : undefined;
+  return {
+    target, classification, scenario, ...(reason ? { reason } : {}), force,
+    exitCode: result.code, status,
+    ...(typeof toolCount === 'number' ? { toolCount } : {}),
+    checkCounts: (checks ?? []).reduce((counts, check) => ({ ...counts, [check.status]: (counts[check.status] ?? 0) + 1 }), {}),
+    checks: checks?.map(({ id, status: checkStatus, errorMessage }) => ({ id, status: checkStatus, ...(errorMessage ? { error: errorMessage.slice(0, 600) } : {}) })) ?? null,
+    ...(skipped ? { skipReason: result.stdout.slice(0, 400) } : {}),
+  };
+}
+
+async function runOfficialMatrix(target, url, rawRoot) {
+  const required = [];
+  for (const scenario of requiredServerScenarios) {
+    required.push(await runOfficialScenario({ target, url, scenario, classification: 'required', rawRoot, force: true }));
+  }
+  const unscored = [];
+  for (const item of unscoredServerScenarios) {
+    unscored.push(await runOfficialScenario({
+      target, url, scenario: item.scenario, classification: 'unscored', reason: item.reason,
+      rawRoot, force: true,
+    }));
+  }
+  const eligibleRequiredPassed = required.every(item => item.status === 'SUCCESS' || item.status === 'SUCCESS_WITH_WARNINGS');
+  const counts = items => items.reduce((summary, item) => ({ ...summary, [item.status]: (summary[item.status] ?? 0) + 1 }), {});
+  return {
+    requirements: '2026-07-28',
+    required: { attempted: required.length, counts: counts(required), results: required },
+    unscored: { attempted: unscored.length, counts: counts(unscored), results: unscored },
+    excluded: excludedScenarios,
+    eligibleRequiredPassed,
+    fullRequirementSetPassed: eligibleRequiredPassed && excludedScenarios.length === 0,
+  };
+}
+
 async function stopChild(child) {
   if (child.exitCode !== null || child.signalCode !== null) return;
   await new Promise(resolveExit => {
@@ -138,7 +201,14 @@ async function verifyAdmissionError(result, endpoint, token, expectedStatus, exp
   return { inspectorCode: error.code, httpStatus: response.status, httpCode: body.code };
 }
 
-// Connect to the actual loopback socket even when the test deliberately forges Host.
+function assertLiveProjectStatus(result, projectId) {
+  const { structuredContent } = JSON.parse(result.stdout).result;
+  assert.equal(structuredContent.snapshot.projectId, projectId);
+  assert.equal(structuredContent.data.state, 'durable');
+}
+
+// This is a normal loopback/CORS policy check. The official DNS-rebinding scenario
+// separately exercises forged Host handling and is excluded by task safety scope.
 async function discoverWithHeaders(endpoint, token, headers) {
   const body = JSON.stringify({
     jsonrpc: '2.0', id: 1, method: 'server/discover',
@@ -176,12 +246,6 @@ async function discoverWithHeaders(endpoint, token, headers) {
     request.once('error', rejectRequest);
     request.end(body);
   });
-}
-
-function assertLiveProjectStatus(result, projectId) {
-  const { structuredContent } = JSON.parse(result.stdout).result;
-  assert.equal(structuredContent.snapshot.projectId, projectId);
-  assert.equal(structuredContent.data.state, 'durable');
 }
 
 async function startProtocolFixture(mutated = false) {
@@ -232,20 +296,14 @@ try {
   tempRoot = await mkdtemp(resolve(tmpdir(), 'codexia-mcp-conformance-'));
   rawReports = resolve(tempRoot, 'official-reports');
   protocolFixture = await startProtocolFixture();
-  const conformanceDir = resolve(rawReports, 'official-2026-07-28');
-  const conformanceArgs = ['server', '--url', protocolFixture.url, '--requirements', '2026-07-28', '--output-dir', conformanceDir, '--verbose'];
-  const conformance = await execute(conformanceBin, conformanceArgs, { timeout: 300_000 });
-  await writeFile(resolve(output, 'conformance.stdout.txt'), conformance.stdout);
-  await writeFile(resolve(output, 'conformance.stderr.txt'), conformance.stderr);
-  const conformanceChecks = await scenarioResults(conformanceDir);
-  const conformanceCounts = (conformanceChecks ?? []).reduce((counts, item) => ({ ...counts, [item.status]: (counts[item.status] ?? 0) + 1 }), {});
+  const syntheticConformance = await runOfficialMatrix('synthetic', protocolFixture.url, rawReports);
   evidence.officialConformance = {
     target: 'current @modelcontextprotocol/server SDK plus Codexia createMcpHttpContribution and tool registrars with synthetic action context',
-    fullRequirementsAgainstProduct: 'NOT_RUN_BY_SCOPE', exitCode: conformance.code,
-    scenarioCounts: conformanceCounts,
-    results: conformanceChecks?.map(({ id, status, errorMessage }) => ({ id, status, ...(errorMessage ? { error: errorMessage.slice(0, 600) } : {}) })) ?? null,
+    manifest: '@modelcontextprotocol/conformance requirements/2026-07-28.yaml',
+    ...syntheticConformance,
   };
-  if (conformance.code !== 0 || !conformanceChecks?.length) failures.push(`official required 2026-07-28 SDK fixture scenarios failed or emitted no report (exit ${conformance.code}, checks ${conformanceChecks?.length ?? 0})`);
+  if (!syntheticConformance.eligibleRequiredPassed) failures.push('official eligible required 2026-07-28 synthetic SDK fixture scenarios failed; see the per-scenario native reports');
+  if (syntheticConformance.excluded.length) failures.push('full 2026-07-28 requirement set is not certified because the required dns-rebinding-protection scenario is excluded by task safety scope');
 
   mutationFixture = await startProtocolFixture(true);
   const mutationDir = resolve(rawReports, 'official-tools-list-deliberate-mutation');
@@ -255,7 +313,7 @@ try {
   const mutationChecks = await scenarioResults(mutationDir);
   const toolsListCheck = mutationChecks?.find(item => item.id === 'tools-list');
   const mutationSchemaCheck = mutationChecks?.find(item => item.id === 'wire-schema-valid');
-  const baselineToolsListChecks = await scenarioResults(conformanceDir, 'tools-list');
+  const baselineToolsListChecks = syntheticConformance.required.results.find(item => item.scenario === 'tools-list')?.checks ?? null;
   const baselineToolsList = baselineToolsListChecks?.find(item => item.id === 'tools-list');
   const baselineSchemaCheck = baselineToolsListChecks?.find(item => item.id === 'wire-schema-valid');
   const detected = mutated.code === 1 && baselineToolsList?.status === 'SUCCESS' && baselineSchemaCheck?.status === 'SUCCESS' && mutationSchemaCheck?.status === 'FAILURE' &&
@@ -278,35 +336,68 @@ try {
   for (const token of Object.values(liveHost.tokens)) secretValues.push(token);
   const endpoint = `${liveHost.baseUrl}/mcp?projectId=${encodeURIComponent(liveHost.projectId)}`;
 
-  await guarded('live product DNS rebinding admission', async () => {
+  await guarded('live MCP malformed JSON behavior', async () => {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      signal: AbortSignal.timeout(5_000),
+      headers: {
+        Authorization: `Bearer ${liveHost.tokens.full}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+        'MCP-Protocol-Version': '2026-07-28',
+      },
+      body: '{',
+    });
+    const body = await response.json();
+    const conforms = response.status === 400 && body.jsonrpc === '2.0' && body.id === null && body.error?.code === -32700;
+    const observedFastifyParserError = response.status === 400 && body.code === 'INVALID_JSON';
+    evidence.transportErrors.malformedJson = {
+      status: conforms ? 'PASS' : observedFastifyParserError ? 'PRODUCT_DEVIATION' : 'UNEXPECTED_RESPONSE',
+      httpStatus: response.status,
+      body,
+      expected: { status: 400, jsonrpc: '2.0', id: null, errorCode: -32700 },
+      blocker: observedFastifyParserError ? 'Fastify returns generic INVALID_JSON; changing the published MCP 400 schema is breaking against the approved OpenAPI baseline and cannot be bundled without the owning compatibility decision/API epoch change.' : null,
+    };
+    if (!conforms) failures.push(observedFastifyParserError
+      ? 'live MCP malformed JSON response differs from the official SDK JSON-RPC parse error; published response-shape correction is blocked by the compatibility guard'
+      : `live MCP malformed JSON returned unexpected status/body (${response.status}, ${JSON.stringify(body).slice(0, 250)})`);
+  });
+
+  await guarded('live product loopback and configured origin policy', async () => {
     const origin = new URL(endpoint).origin;
     const host = new URL(endpoint).host;
     const control = await discoverWithHeaders(endpoint, liveHost.tokens.full, { Host: host, Origin: origin });
     assert.equal(control.status, 200);
     assert.equal(control.body.jsonrpc, '2.0');
-    const deniedHost = await discoverWithHeaders(endpoint, liveHost.tokens.full, { Host: 'evil.example.com' });
-    assert.equal(deniedHost.status, 403);
-    assert.equal(deniedHost.body.code, 'MCP_HOST_DENIED');
-    const deniedOrigin = await discoverWithHeaders(endpoint, liveHost.tokens.full, { Host: host, Origin: 'http://evil.example.com' });
+    const deniedOrigin = await discoverWithHeaders(endpoint, liveHost.tokens.full, { Host: host, Origin: 'https://foreign.example.test' });
     assert.equal(deniedOrigin.status, 403);
     assert.equal(deniedOrigin.body.code, 'CORS_ORIGIN_DENIED');
-    evidence.authorization.dnsRebinding = {
-      validLoopback: control.status,
-      invalidHost: { status: deniedHost.status, code: deniedHost.body.code },
-      invalidOrigin: { status: deniedOrigin.status, code: deniedOrigin.body.code },
+    evidence.authorization.originPolicy = {
+      sameOrigin: { status: control.status, jsonrpc: control.body.jsonrpc },
+      unconfiguredOrigin: { status: deniedOrigin.status, code: deniedOrigin.body.code },
+      forgedHost: 'NOT_RUN under task safety scope',
     };
   });
 
   productConformanceProxy = await startAuthProxy(endpoint, liveHost.tokens.full);
-  const productScenarioDir = resolve(rawReports, 'product-tools-list-2026-07-28');
-  const productResult = await execute(conformanceBin, ['server', '--url', productConformanceProxy.url,
-    '--scenario', 'tools-list', '--spec-version', '2026-07-28', '--output-dir', productScenarioDir, '--verbose']);
-  await writeFile(resolve(output, 'product-tools-list.stdout.txt'), productResult.stdout);
-  await writeFile(resolve(output, 'product-tools-list.stderr.txt'), productResult.stderr);
-  const productChecks = await scenarioResults(productScenarioDir);
-  const productToolListCheck = productChecks?.find(item => item.id === 'tools-list');
-  evidence.productToolsListScenario = { exitCode: productResult.code, status: productToolListCheck?.status ?? 'NO_REPORT', target: 'loopback auth proxy to isolated live Fastify/Core/PostgreSQL MCP endpoint', toolCount: productToolListCheck?.details?.toolCount ?? null };
-  if (productResult.code !== 0 || productToolListCheck?.status !== 'SUCCESS') failures.push(`official product tools-list scenario failed (exit ${productResult.code}, status ${productToolListCheck?.status ?? 'NO_REPORT'}); see product-tools-list evidence`);
+  const productConformance = await runOfficialMatrix('product', productConformanceProxy.url, rawReports);
+  evidence.fullRequiredSuiteAgainstProduct = {
+    target: 'loopback auth proxy to isolated live Fastify/Core/PostgreSQL MCP endpoint',
+    manifest: '@modelcontextprotocol/conformance requirements/2026-07-28.yaml',
+    ...productConformance,
+  };
+  if (!productConformance.eligibleRequiredPassed) failures.push('official eligible required 2026-07-28 live product scenarios failed; see the per-scenario native reports');
+  if (productConformance.excluded.length) failures.push('full 2026-07-28 product requirement set is not certified because the required dns-rebinding-protection scenario is excluded by task safety scope');
+  const productToolListCheck = productConformance.required.results.find(item => item.scenario === 'tools-list');
+  evidence.productToolsListScenario = {
+    exitCode: productToolListCheck?.exitCode ?? null,
+    status: productToolListCheck?.status ?? 'NO_REPORT',
+    toolCount: productToolListCheck?.toolCount ?? null,
+    target: 'loopback auth proxy to isolated live Fastify/Core/PostgreSQL MCP endpoint',
+  };
+  if (!['SUCCESS', 'SUCCESS_WITH_WARNINGS'].includes(productToolListCheck?.status)) {
+    failures.push(`official product tools-list scenario failed (${productToolListCheck?.status ?? 'NO_REPORT'}); see product tools-list report`);
+  }
 
   const path = `/mcp?projectId=${encodeURIComponent(liveHost.projectId)}`;
   const httpTarget = ['--transport', 'http', '--server-url', `${liveHost.baseUrl}${path}`];
@@ -430,7 +521,8 @@ try {
   if (rawReports) await guarded('publish native reports', () => publishOfficialEvidence(rawReports));
   if (tempRoot) await guarded('remove fixture directory', () => rm(tempRoot, { recursive: true, force: true }));
   evidence.inspector.status = evidence.inspector.http && evidence.inspector.stdio ? 'PASSED' : 'INCOMPLETE';
-  evidence.authorization.status = ['owner', 'wrongScope', 'expired', 'unassignedProject', 'readScope', 'dnsRebinding'].every(key => evidence.authorization[key]) ? 'PASSED' : 'INCOMPLETE';
+  evidence.authorization.status = ['owner', 'wrongScope', 'expired', 'unassignedProject', 'readScope', 'originPolicy'].every(key => evidence.authorization[key]) ? 'PARTIAL' : 'INCOMPLETE';
+  evidence.authorization.excluded = excludedScenarios;
   evidence.contract.status = evidence.contract.wire ? 'PASSED' : 'INCOMPLETE';
   evidence.stdioProtocolProbe.status = evidence.stdioProtocolProbe.legacy && evidence.stdioProtocolProbe.modern ? 'PASSED' : 'INCOMPLETE';
   evidence.mutation.status = evidence.mutation.detectedByOfficialTool ? 'DETECTED' : 'NOT_DETECTED';

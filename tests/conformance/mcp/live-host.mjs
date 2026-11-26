@@ -72,6 +72,13 @@ export async function startLiveHost(databaseUrl, tempRoot) {
       server.listen(0, '127.0.0.1', () => { server.removeListener('error', reject); resolveListen(); });
     });
     const address = server.address();
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    // Listening opens the socket; the first request waits for Fastify readiness.
+    const readiness = await fetch(`${baseUrl}/health/ready`, { signal: AbortSignal.timeout(60_000) }).catch(cause => {
+      throw new Error('Live MCP fixture did not become ready', { cause });
+    });
+    await readiness.body?.cancel();
+    if (!readiness.ok) throw new Error(`Live MCP fixture readiness returned HTTP ${readiness.status}`);
     const tokens = {
     full: await issue(mcpClientId, 'mcp:read mcp:compute mcp:propose'),
     read: await issue(mcpClientId, 'mcp:read'),
@@ -80,7 +87,7 @@ export async function startLiveHost(databaseUrl, tempRoot) {
     wrongScope: await issue(mcpClientId, 'codexia:api'),
   };
     return {
-    baseUrl: `http://127.0.0.1:${address.port}`,
+    baseUrl,
     projectId: project.id,
     unassignedProjectId: unassignedProject.id,
     tokens,
