@@ -545,7 +545,9 @@ export function PersistenceWorkspace({
   const [requestedPanel, setRequestedPanel] = useState<WorkspacePanelRequest>();
 
   const resume = useRecentActivityResume({
-    binding: projectId ? { projectId, authorScope, projectScopeKey: projectId } : null,
+    binding: projectId
+      ? { projectId, authorScope, projectScopeKey: projectId, documentId, viewTarget: reading ? 'reading' : 'writing' }
+      : null,
     enabled: Boolean(projectId),
   });
   const project = projects.find(candidate => candidate.id === projectId) ?? null;
@@ -3333,7 +3335,21 @@ export function PersistenceWorkspace({
             <summary>続きを開く</summary>
             <section className="continue-panel" aria-label="続きから">
               {resume.error && <p role="status">再開位置を同期できません: {resume.error}</p>}
-              {mergeContinueCandidates(resume.localWriting, resume.items, { documents }).map(candidate => {
+              {mergeContinueCandidates(
+                resume.localWriting,
+                resume.items,
+                { documents },
+                {
+                  identity: {
+                    authorScope,
+                    projectScopeKey: projectId,
+                    projectId,
+                    documentId,
+                    viewTarget: reading ? 'reading' : 'writing',
+                  },
+                  snapshotIdentityKey: resume.snapshotIdentityKey,
+                },
+              ).map(candidate => {
                 const title = documents.find(item => item.id === candidate.sceneId)?.title ?? candidate.sceneId;
                 const handoff = formatHandoffHint(candidate.deviceType, candidate.updatedAt, Date.now(), resume.deviceType);
                 return (

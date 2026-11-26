@@ -3699,7 +3699,7 @@ describe('Codexia HTTP boundary', () => {
       attachmentBytes,
     );
     const scratch = (await reader.read(result.path))?.content ?? '';
-    const frontMatterPaths = [...scratch.matchAll(/^    path: "([^"]+)"$/gmu)].map(([, path]) => path);
+    const frontMatterPaths = [...scratch.matchAll(/^ {4}path: "([^"]+)"$/gmu)].map(([, path]) => path);
     assert.deepEqual(
       frontMatterPaths,
       result.attachments.map(({ path }) => path),
@@ -3906,7 +3906,11 @@ describe('Codexia HTTP boundary', () => {
       body: JSON.stringify({ sceneId: 'scene-two', sentenceOffset: null, deviceType: 'desktop' }),
     });
     const desktopUpdateBody = (await desktopUpdate.json()) as { items: Array<{ pageIndex: number | null; deviceType: string }> };
-    assert.equal(desktopUpdateBody.items.find(item => item.deviceType === 'desktop')?.pageIndex, 7);
+    assert.equal(
+      desktopUpdateBody.items.find(item => item.deviceType === 'desktop')?.pageIndex,
+      null,
+      'an omitted page is retained only for the same document',
+    );
     const writer = randomUUID();
     const ordered = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: 'PUT',
@@ -3961,7 +3965,7 @@ describe('Codexia HTTP boundary', () => {
     const restored = (await afterRestart.json()) as { items: Array<{ sceneId: string; pageIndex: number | null; deviceType: string }> };
     assert.equal(restored.items.length, 2);
     assert.equal(restored.items.find(item => item.deviceType === 'desktop')?.sceneId, 'scene-two');
-    assert.equal(restored.items.find(item => item.deviceType === 'desktop')?.pageIndex, 7);
+    assert.equal(restored.items.find(item => item.deviceType === 'desktop')?.pageIndex, null);
     assert.equal(restored.items.find(item => item.deviceType === 'mobile')?.sceneId, 'scene-mobile');
     const stale = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: 'PUT',

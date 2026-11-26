@@ -1,82 +1,145 @@
-import assert from "node:assert/strict";
-import test from "node:test";
-import { EditorState } from "@codemirror/state";
-import type { RecentActivityItem } from "@codexia/contracts";
-import type { Tree } from "./api";
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { EditorState } from '@codemirror/state';
+import type { RecentActivityItem } from '@codexia/contracts';
+import type { Tree } from './api';
 import {
-  createUiSentencePositionIndexCache,
   createUiSentencePositionIndex,
+  createUiSentencePositionIndexCache,
   formatHandoffHint,
   loadReadingPage,
   loadWritingResume,
   mergeContinueCandidates,
   offsetAtUiSentenceIndex,
+  recentActivityIdentityKey,
   saveReadingPage,
   saveWritingResume,
   uiSentenceIndexAtOffset,
-} from "./resume/continueCandidates";
+} from './resume/continueCandidates';
 
 const tree: Tree = {
-  title: "Novel",
-  volumes: [{
-    id: "v1",
-    title: "Volume One",
-    chapters: [{
-      id: "c1",
-      title: "Chapter One",
-      scenes: [{ id: "scene-1", title: "First" }, { id: "scene-2", title: "Second" }],
-    }],
-  }],
+  title: 'Novel',
+  volumes: [
+    {
+      id: 'v1',
+      title: 'Volume One',
+      chapters: [
+        {
+          id: 'c1',
+          title: 'Chapter One',
+          scenes: [
+            { id: 'scene-1', title: 'First' },
+            { id: 'scene-2', title: 'Second' },
+          ],
+        },
+      ],
+    },
+  ],
 };
 
-test("continue candidates keep distinct device scenes and prefer the local cursor for the same scene", () => {
+test('continue candidates keep distinct device scenes and prefer the local cursor for the same scene', () => {
   const remote: RecentActivityItem[] = [
-    { sceneId: "scene-1", sentenceOffset: 4, pageIndex: 3, deviceType: "mobile", updatedAt: "2026-10-17T01:00:00Z" },
-    { sceneId: "scene-1", sentenceOffset: 5, pageIndex: 4, deviceType: "mobile", updatedAt: "2026-10-17T01:01:00Z" },
-    { sceneId: "scene-2", sentenceOffset: 2, pageIndex: null, deviceType: "desktop", updatedAt: "2026-10-17T01:02:00Z" },
-    { sceneId: "deleted-scene", sentenceOffset: 1, deviceType: "desktop", updatedAt: "2026-10-17T01:03:00Z" },
+    { sceneId: 'scene-1', sentenceOffset: 4, pageIndex: 3, deviceType: 'mobile', updatedAt: '2026-10-17T01:00:00Z' },
+    { sceneId: 'scene-1', sentenceOffset: 5, pageIndex: 4, deviceType: 'mobile', updatedAt: '2026-10-17T01:01:00Z' },
+    { sceneId: 'scene-2', sentenceOffset: 2, pageIndex: null, deviceType: 'desktop', updatedAt: '2026-10-17T01:02:00Z' },
+    { sceneId: 'deleted-scene', sentenceOffset: 1, deviceType: 'desktop', updatedAt: '2026-10-17T01:03:00Z' },
   ];
-  const candidates = mergeContinueCandidates({ sceneId: "scene-1", cursorSentenceIndex: 7, scrollTop: 120 }, remote, tree);
+  const identity = {
+    authorScope: 'owner-a',
+    projectScopeKey: 'work-a',
+    projectId: 'project-a',
+    documentId: 'scene-1',
+    viewTarget: 'writing' as const,
+  };
+  const candidates = mergeContinueCandidates({ sceneId: 'scene-1', cursorSentenceIndex: 7, scrollTop: 120 }, remote, tree, {
+    identity,
+    snapshotIdentityKey: recentActivityIdentityKey(identity),
+  });
   assert.deepEqual(candidates, [
-    { sceneId: "scene-1", sentenceOffset: 7, pageIndex: 4, source: "local", deviceType: "mobile", updatedAt: "2026-10-17T01:01:00Z", scrollTop: 120 },
-    { sceneId: "scene-2", sentenceOffset: 2, pageIndex: null, source: "server", deviceType: "desktop", updatedAt: "2026-10-17T01:02:00Z" },
+    {
+      sceneId: 'scene-1',
+      sentenceOffset: 7,
+      pageIndex: 4,
+      source: 'local',
+      deviceType: 'mobile',
+      updatedAt: '2026-10-17T01:01:00Z',
+      scrollTop: 120,
+    },
+    { sceneId: 'scene-2', sentenceOffset: 2, pageIndex: null, source: 'server', deviceType: 'desktop', updatedAt: '2026-10-17T01:02:00Z' },
   ]);
 });
 
-test("handoff hints identify the other device without displaying prose", () => {
-  assert.equal(formatHandoffHint("mobile", "2026-10-17T11:59:00.000Z", Date.parse("2026-10-17T12:00:00.000Z"), "desktop"), "スマホで1分前まで編集していました");
-  assert.equal(formatHandoffHint("desktop", "2026-10-17T11:59:00.000Z", Date.parse("2026-10-17T12:00:00.000Z"), "desktop"), null);
-  assert.equal(formatHandoffHint("mobile", "invalid", 0, "desktop"), null);
+test('continue candidates reject a snapshot from a different work identity', () => {
+  const serverItems: RecentActivityItem[] = [
+    { sceneId: 'scene-1', sentenceOffset: 4, pageIndex: 8, deviceType: 'desktop', updatedAt: '2026-10-17T01:00:00Z' },
+  ];
+  const snapshotIdentityKey = '["owner-a","work-a","project-a","scene-1","reading"]';
+  const identities = [
+    { authorScope: 'owner-b', projectScopeKey: 'work-a', projectId: 'project-a', documentId: 'scene-1', viewTarget: 'reading' as const },
+    { authorScope: 'owner-a', projectScopeKey: 'work-b', projectId: 'project-a', documentId: 'scene-1', viewTarget: 'reading' as const },
+    { authorScope: 'owner-a', projectScopeKey: 'work-a', projectId: 'project-b', documentId: 'scene-1', viewTarget: 'reading' as const },
+    { authorScope: 'owner-a', projectScopeKey: 'work-a', projectId: 'project-a', documentId: 'scene-2', viewTarget: 'reading' as const },
+    { authorScope: 'owner-a', projectScopeKey: 'work-a', projectId: 'project-a', documentId: 'scene-1', viewTarget: 'writing' as const },
+  ];
+
+  for (const identity of identities) {
+    assert.deepEqual(
+      mergeContinueCandidates({ sceneId: 'scene-1', cursorSentenceIndex: 9, scrollTop: 40 }, serverItems, tree, {
+        identity,
+        snapshotIdentityKey,
+      }),
+      [],
+    );
+  }
 });
 
-test("local reading and writing positions are isolated by author, work, and scene", t => {
+test('recent activity request identity includes the document and view target', () => {
+  const work = { authorScope: 'owner-a', projectScopeKey: 'work-a', projectId: 'project-a' };
+  const referenceA = { ...work, documentId: 'scene-a', viewTarget: 'reading' as const };
+  const writingB = { ...work, documentId: 'scene-b', viewTarget: 'writing' as const };
+
+  assert.notEqual(recentActivityIdentityKey(referenceA), recentActivityIdentityKey(writingB));
+});
+
+test('handoff hints identify the other device without displaying prose', () => {
+  assert.equal(
+    formatHandoffHint('mobile', '2026-10-17T11:59:00.000Z', Date.parse('2026-10-17T12:00:00.000Z'), 'desktop'),
+    'スマホで1分前まで編集していました',
+  );
+  assert.equal(formatHandoffHint('desktop', '2026-10-17T11:59:00.000Z', Date.parse('2026-10-17T12:00:00.000Z'), 'desktop'), null);
+  assert.equal(formatHandoffHint('mobile', 'invalid', 0, 'desktop'), null);
+});
+
+test('local reading and writing positions are isolated by author, work, and scene', t => {
   const values = new Map<string, string>();
-  const previous = Object.getOwnPropertyDescriptor(globalThis, "window");
-  Object.defineProperty(globalThis, "window", {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', {
     configurable: true,
-    value: { localStorage: { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) } },
+    value: {
+      localStorage: { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) },
+    },
   });
   t.after(() => {
-    if (previous) Object.defineProperty(globalThis, "window", previous);
-    else Reflect.deleteProperty(globalThis, "window");
+    if (previous) Object.defineProperty(globalThis, 'window', previous);
+    else Reflect.deleteProperty(globalThis, 'window');
   });
 
-  saveReadingPage("owner-a", "work-a", "scene-1", 4);
-  saveReadingPage("owner-a", "work-a", "scene-2", 7);
-  assert.equal(loadReadingPage("owner-a", "work-a", "scene-1"), 4);
-  assert.equal(loadReadingPage("owner-a", "work-a", "scene-2"), 7);
-  assert.equal(loadReadingPage("owner-b", "work-a", "scene-1"), 0);
-  assert.equal(loadReadingPage("owner-a", "work-b", "scene-1"), 0);
+  saveReadingPage('owner-a', 'work-a', 'scene-1', 4);
+  saveReadingPage('owner-a', 'work-a', 'scene-2', 7);
+  assert.equal(loadReadingPage('owner-a', 'work-a', 'scene-1'), 4);
+  assert.equal(loadReadingPage('owner-a', 'work-a', 'scene-2'), 7);
+  assert.equal(loadReadingPage('owner-b', 'work-a', 'scene-1'), 0);
+  assert.equal(loadReadingPage('owner-a', 'work-b', 'scene-1'), 0);
 
-  const resume = { sceneId: "scene-1", cursorSentenceIndex: 2, scrollTop: 80 };
-  saveWritingResume("owner-a", "work-a", resume);
-  assert.deepEqual(loadWritingResume("owner-a", "work-a"), resume);
-  assert.equal(loadWritingResume("owner-b", "work-a"), null);
-  assert.equal(loadWritingResume("owner-a", "work-b"), null);
+  const resume = { sceneId: 'scene-1', cursorSentenceIndex: 2, scrollTop: 80 };
+  saveWritingResume('owner-a', 'work-a', resume);
+  assert.deepEqual(loadWritingResume('owner-a', 'work-a'), resume);
+  assert.equal(loadWritingResume('owner-b', 'work-a'), null);
+  assert.equal(loadWritingResume('owner-a', 'work-b'), null);
 });
 
-test("cursor mapping uses source sentence numbering around Japanese punctuation and dialogue", () => {
-  const text = "地の文。「台詞です。」続き。";
+test('cursor mapping uses source sentence numbering around Japanese punctuation and dialogue', () => {
+  const text = '地の文。「台詞です。」続き。';
   assert.equal(uiSentenceIndexAtOffset(text, 0), 1);
   assert.equal(uiSentenceIndexAtOffset(text, 4), 2);
   assert.equal(uiSentenceIndexAtOffset(text, 11), 3);
@@ -85,36 +148,36 @@ test("cursor mapping uses source sentence numbering around Japanese punctuation 
   assert.equal(offsetAtUiSentenceIndex(text, null), null);
 });
 
-test("reusable cursor positions preserve dialogue, UTF-16, and newline offsets", () => {
-  const dialogue = createUiSentencePositionIndex("地の文。「台詞です。」続き。");
+test('reusable cursor positions preserve dialogue, UTF-16, and newline offsets', () => {
+  const dialogue = createUiSentencePositionIndex('地の文。「台詞です。」続き。');
   assert.equal(dialogue.indexAtOffset(4), 2);
   assert.equal(dialogue.indexAtOffset(11), 3);
   assert.equal(dialogue.offsetAtIndex(2), 4);
   assert.equal(dialogue.offsetAtIndex(3), 11);
 
-  const surrogatePair = createUiSentencePositionIndex("A😀。B。");
+  const surrogatePair = createUiSentencePositionIndex('A😀。B。');
   assert.equal(surrogatePair.indexAtOffset(2), 1);
   assert.equal(surrogatePair.indexAtOffset(4), 2);
   assert.equal(surrogatePair.offsetAtIndex(2), 4);
 
-  const multipleLines = createUiSentencePositionIndex("一文目。\n二文目。\n三文目。");
+  const multipleLines = createUiSentencePositionIndex('一文目。\n二文目。\n三文目。');
   assert.equal(multipleLines.indexAtOffset(4), null);
   assert.equal(multipleLines.indexAtOffset(5), 2);
   assert.equal(multipleLines.indexAtOffset(10), 3);
   assert.equal(multipleLines.offsetAtIndex(2), 5);
   assert.equal(multipleLines.offsetAtIndex(3), 10);
 
-  const blankLine = createUiSentencePositionIndex("一文目。\n\n四文目。");
+  const blankLine = createUiSentencePositionIndex('一文目。\n\n四文目。');
   assert.equal(blankLine.offsetAtIndex(3), 6);
   assert.equal(blankLine.indexAtOffset(6), 3);
   assert.equal(blankLine.indexAtOffset(10), 4);
 });
 
-test("sentence position indexing does not construct a Segmenter per line", () => {
-  const descriptor = Object.getOwnPropertyDescriptor(Intl, "Segmenter");
+test('sentence position indexing does not construct a Segmenter per line', () => {
+  const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
   const originalSegmenter = Intl.Segmenter;
   let constructions = 0;
-  Object.defineProperty(Intl, "Segmenter", {
+  Object.defineProperty(Intl, 'Segmenter', {
     configurable: true,
     value: new Proxy(originalSegmenter, {
       construct(target, argumentsList, newTarget) {
@@ -125,7 +188,7 @@ test("sentence position indexing does not construct a Segmenter per line", () =>
   });
 
   try {
-    const text = Array.from({ length: 256 }, () => "一文目。").join("\n");
+    const text = Array.from({ length: 256 }, () => '一文目。').join('\n');
     const index = createUiSentencePositionIndex(text);
     assert.ok(constructions <= 1);
     for (let sentence = 1; sentence <= 256; sentence++) {
@@ -135,20 +198,20 @@ test("sentence position indexing does not construct a Segmenter per line", () =>
     }
 
     constructions = 0;
-    assert.equal(createUiSentencePositionIndex("").indexAtOffset(0), 1);
+    assert.equal(createUiSentencePositionIndex('').indexAtOffset(0), 1);
     assert.equal(constructions, 0);
   } finally {
-    if (descriptor) Object.defineProperty(Intl, "Segmenter", descriptor);
+    if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
   }
 });
 
-test("selection-only cursor updates reuse the primed CodeMirror document and document index", () => {
-  const initialText = "地の文。「台詞です。」続き。\r\n次の行。";
+test('selection-only cursor updates reuse the primed CodeMirror document and document index', () => {
+  const initialText = '地の文。「台詞です。」続き。\r\n次の行。';
   const state = EditorState.create({ doc: initialText });
   const doc = state.doc;
   const originalToString = doc.toString;
   let materializations = 0;
-  Object.defineProperty(doc, "toString", {
+  Object.defineProperty(doc, 'toString', {
     configurable: true,
     value() {
       materializations++;
@@ -157,7 +220,7 @@ test("selection-only cursor updates reuse the primed CodeMirror document and doc
   });
 
   let indexBuilds = 0;
-  const cache = createUiSentencePositionIndexCache<typeof doc>((text) => {
+  const cache = createUiSentencePositionIndexCache<typeof doc>(text => {
     indexBuilds++;
     return createUiSentencePositionIndex(text);
   });
@@ -165,7 +228,7 @@ test("selection-only cursor updates reuse the primed CodeMirror document and doc
   try {
     const normalizedInitialText = doc.toString();
     const index = cache.get(doc, normalizedInitialText);
-    assert.equal(normalizedInitialText, "地の文。「台詞です。」続き。\n次の行。");
+    assert.equal(normalizedInitialText, '地の文。「台詞です。」続き。\n次の行。');
     assert.equal(materializations, 1);
     let selectionState = state;
     for (const anchor of [4, 11, 2, 14]) {
@@ -180,12 +243,12 @@ test("selection-only cursor updates reuse the primed CodeMirror document and doc
     assert.equal(index.indexAtOffset(11), 3);
 
     const revisedState = selectionState.update({
-      changes: { from: 0, to: selectionState.doc.length, insert: "一文目。\n\n四文目。" },
+      changes: { from: 0, to: selectionState.doc.length, insert: '一文目。\n\n四文目。' },
     }).state;
     assert.notStrictEqual(revisedState.doc, doc);
     const revisedDocToString = revisedState.doc.toString;
     let revisedMaterializations = 0;
-    Object.defineProperty(revisedState.doc, "toString", {
+    Object.defineProperty(revisedState.doc, 'toString', {
       configurable: true,
       value() {
         revisedMaterializations++;
@@ -204,6 +267,6 @@ test("selection-only cursor updates reuse the primed CodeMirror document and doc
     assert.equal(revisedIndex.indexAtOffset(6), 3);
     assert.equal(indexBuilds, 2);
   } finally {
-    Reflect.deleteProperty(doc, "toString");
+    Reflect.deleteProperty(doc, 'toString');
   }
 });

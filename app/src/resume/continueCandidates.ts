@@ -1,5 +1,5 @@
-import type { RecentActivityDeviceType, RecentActivityItem } from "@codexia/contracts";
-import type { Tree } from "../api";
+import type { RecentActivityDeviceType, RecentActivityItem } from '@codexia/contracts';
+import type { Tree } from '../api';
 
 export interface WritingResumePosition {
   sceneId: string;
@@ -11,7 +11,7 @@ export interface ContinueCandidate {
   sceneId: string;
   sentenceOffset: number | null;
   pageIndex: number | null;
-  source: "local" | "server";
+  source: 'local' | 'server';
   deviceType?: RecentActivityDeviceType;
   updatedAt?: string;
   scrollTop?: number;
@@ -19,14 +19,37 @@ export interface ContinueCandidate {
 
 export type ContinueSceneSource = Tree | { documents: ReadonlyArray<{ id: string }> };
 
+export interface RecentActivityProjectIdentity {
+  authorScope: string;
+  projectScopeKey: string;
+  projectId: string;
+}
+
+export interface RecentActivityIdentity extends RecentActivityProjectIdentity {
+  documentId: string;
+  viewTarget: 'writing' | 'reading';
+}
+
+export interface ContinueCandidateScope {
+  identity: RecentActivityIdentity;
+  snapshotIdentityKey: string;
+}
+
+export function recentActivityIdentityKey(identity: RecentActivityProjectIdentity | RecentActivityIdentity): string {
+  const workIdentity = [identity.authorScope, identity.projectScopeKey, identity.projectId];
+  return 'documentId' in identity && 'viewTarget' in identity
+    ? JSON.stringify([...workIdentity, identity.documentId, identity.viewTarget])
+    : JSON.stringify(workIdentity);
+}
+
 export function sceneExistsInTree(tree: Tree, sceneId: string): boolean {
-  return tree.volumes.some((volume) => volume.chapters.some((chapter) => chapter.scenes.some((scene) => scene.id === sceneId)));
+  return tree.volumes.some(volume => volume.chapters.some(chapter => chapter.scenes.some(scene => scene.id === sceneId)));
 }
 
 export function sceneTitleInTree(tree: Tree, sceneId: string): string {
   for (const volume of tree.volumes) {
     for (const chapter of volume.chapters) {
-      const scene = chapter.scenes.find((item) => item.id === sceneId);
+      const scene = chapter.scenes.find(item => item.id === sceneId);
       if (scene) return scene.title || sceneId;
     }
   }
@@ -38,20 +61,21 @@ export function mergeContinueCandidates(
   local: WritingResumePosition | null,
   serverItems: RecentActivityItem[],
   source: ContinueSceneSource,
+  scope: ContinueCandidateScope,
 ): ContinueCandidate[] {
-  const exists = (sceneId: string) => "volumes" in source
-    ? sceneExistsInTree(source, sceneId)
-    : source.documents.some((document) => document.id === sceneId);
+  if (scope.snapshotIdentityKey !== recentActivityIdentityKey(scope.identity)) return [];
+  const exists = (sceneId: string) =>
+    'volumes' in source ? sceneExistsInTree(source, sceneId) : source.documents.some(document => document.id === sceneId);
   const byScene = new Map<string, ContinueCandidate>();
   for (const item of serverItems) {
     if (!exists(item.sceneId)) continue;
     const previous = byScene.get(item.sceneId);
-    if (previous && (previous.updatedAt ?? "") >= item.updatedAt) continue;
+    if (previous && (previous.updatedAt ?? '') >= item.updatedAt) continue;
     byScene.set(item.sceneId, {
       sceneId: item.sceneId,
       sentenceOffset: item.sentenceOffset,
       pageIndex: item.pageIndex ?? null,
-      source: "server",
+      source: 'server',
       deviceType: item.deviceType,
       updatedAt: item.updatedAt,
     });
@@ -62,15 +86,15 @@ export function mergeContinueCandidates(
       sceneId: local.sceneId,
       sentenceOffset: local.cursorSentenceIndex,
       pageIndex: previous?.pageIndex ?? null,
-      source: "local",
+      source: 'local',
       deviceType: previous?.deviceType,
       updatedAt: previous?.updatedAt,
       scrollTop: local.scrollTop,
     });
   }
   return [...byScene.values()].sort((left, right) => {
-    if (left.source !== right.source) return left.source === "local" ? -1 : 1;
-    return (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
+    if (left.source !== right.source) return left.source === 'local' ? -1 : 1;
+    return (right.updatedAt ?? '').localeCompare(left.updatedAt ?? '');
   });
 }
 
@@ -84,9 +108,15 @@ export function formatHandoffHint(
   const then = Date.parse(updatedAt);
   if (!Number.isFinite(then)) return null;
   const minutes = Math.max(0, Math.round((nowMs - then) / 60_000));
-  const label = deviceType === "desktop" ? "PC" : "スマホ";
-  const when = minutes < 1 ? "たった今" : minutes < 60 ? `${minutes}分前` :
-    minutes < 60 * 48 ? `${Math.round(minutes / 60)}時間前` : `${Math.round(minutes / 1_440)}日前`;
+  const label = deviceType === 'desktop' ? 'PC' : 'スマホ';
+  const when =
+    minutes < 1
+      ? 'たった今'
+      : minutes < 60
+        ? `${minutes}分前`
+        : minutes < 60 * 48
+          ? `${Math.round(minutes / 60)}時間前`
+          : `${Math.round(minutes / 1_440)}日前`;
   return `${label}で${when}まで編集していました`;
 }
 
@@ -99,11 +129,18 @@ export function loadWritingResume(authorScope: string, repositoryKey: string): W
     const raw = window.localStorage.getItem(writingResumeStorageKey(authorScope, repositoryKey));
     if (!raw) return null;
     const value: unknown = JSON.parse(raw);
-    if (!value || typeof value !== "object") return null;
+    if (!value || typeof value !== 'object') return null;
     const record = value as Record<string, unknown>;
-    if (typeof record.sceneId !== "string" || !record.sceneId ||
-        (record.cursorSentenceIndex !== null && (!Number.isSafeInteger(record.cursorSentenceIndex) || (record.cursorSentenceIndex as number) < 1)) ||
-        typeof record.scrollTop !== "number" || !Number.isFinite(record.scrollTop) || record.scrollTop < 0) return null;
+    if (
+      typeof record.sceneId !== 'string' ||
+      !record.sceneId ||
+      (record.cursorSentenceIndex !== null &&
+        (!Number.isSafeInteger(record.cursorSentenceIndex) || (record.cursorSentenceIndex as number) < 1)) ||
+      typeof record.scrollTop !== 'number' ||
+      !Number.isFinite(record.scrollTop) ||
+      record.scrollTop < 0
+    )
+      return null;
     return {
       sceneId: record.sceneId,
       cursorSentenceIndex: record.cursorSentenceIndex as number | null,
@@ -143,7 +180,10 @@ export function saveReadingPage(authorScope: string, repositoryKey: string, scen
   }
 }
 
-interface SentenceOffset { start: number; end: number; }
+interface SentenceOffset {
+  start: number;
+  end: number;
+}
 
 // Port of core-shared's browser-safe splitter, kept in the shell so core UI
 // stays independent from whichever optional module profile is selected.
@@ -153,13 +193,13 @@ function sentenceOffsets(text: string): SentenceOffset[] {
   let justSplit = false;
   let segmenter: Intl.Segmenter | null = null;
   for (let index = 0; index <= text.length; index++) {
-    const atNewline = index < text.length && text[index] === "\n";
+    const atNewline = index < text.length && text[index] === '\n';
     const atEnd = index === text.length;
     if (!atNewline && !atEnd) continue;
     const lineEnd = index;
     if (lineEnd > lineStart) {
       const line = text.slice(lineStart, lineEnd);
-      segmenter ??= new Intl.Segmenter("ja", { granularity: "sentence" });
+      segmenter ??= new Intl.Segmenter('ja', { granularity: 'sentence' });
       const raw = [...segmenter.segment(line)].map(({ segment, index: start }) => ({ start, end: start + segment.length }));
       const merged: SentenceOffset[] = [];
       // Build the bracket-depth prefix once. The old depthAt implementation
@@ -169,9 +209,8 @@ function sentenceOffsets(text: string): SentenceOffset[] {
       for (let cursor = 0; cursor < line.length; cursor++) {
         const char = line[cursor];
         const depth = depthBefore[cursor] ?? 0;
-        depthBefore[cursor + 1] = char === "「" || char === "『"
-          ? depth + 1
-          : char === "」" || char === "』" ? Math.max(0, depth - 1) : depth;
+        depthBefore[cursor + 1] =
+          char === '「' || char === '『' ? depth + 1 : char === '」' || char === '』' ? Math.max(0, depth - 1) : depth;
       }
       const depthAt = (end: number) => depthBefore[Math.max(0, Math.min(end, line.length))] ?? 0;
       if (raw.length === 0) raw.push({ start: 0, end: line.length });
@@ -179,7 +218,11 @@ function sentenceOffsets(text: string): SentenceOffset[] {
       let end = raw[0]?.end ?? line.length;
       for (const segment of raw.slice(1)) {
         if (depthAt(end) > 0) end = segment.end;
-        else { merged.push({ start, end }); start = segment.start; end = segment.end; }
+        else {
+          merged.push({ start, end });
+          start = segment.start;
+          end = segment.end;
+        }
       }
       merged.push({ start, end });
       for (const segment of merged) {
@@ -187,13 +230,13 @@ function sentenceOffsets(text: string): SentenceOffset[] {
         let chunkStart = segment.start;
         for (let cursor = segment.start; cursor < segment.end; cursor++) {
           const char = line[cursor];
-          if (char === "「" || char === "『") {
+          if (char === '「' || char === '『') {
             if (depth === 0 && cursor > chunkStart) {
               result.push({ start: lineStart + chunkStart, end: lineStart + cursor });
               chunkStart = cursor;
             }
             depth++;
-          } else if (char === "」" || char === "』") {
+          } else if (char === '」' || char === '』') {
             depth = Math.max(0, depth - 1);
             if (depth === 0) {
               result.push({ start: lineStart + chunkStart, end: lineStart + cursor + 1 });
@@ -206,7 +249,10 @@ function sentenceOffsets(text: string): SentenceOffset[] {
       justSplit = true;
     } else if (atNewline && !justSplit) result.push({ start: lineEnd, end: lineEnd });
     if (atEnd) lineStart = text.length;
-    else { lineStart = index + 1; justSplit = false; }
+    else {
+      lineStart = index + 1;
+      justSplit = false;
+    }
   }
   result.push({ start: lineStart, end: text.length });
   return result;
@@ -241,7 +287,8 @@ export function createUiSentencePositionIndex(text: string): UiSentencePositionI
       }
       const index = low - 1;
       const range = offsets[index];
-      if (range && cursor >= range.start && (cursor < range.end || (index === offsets.length - 1 && cursor === range.end))) return index + 1;
+      if (range && cursor >= range.start && (cursor < range.end || (index === offsets.length - 1 && cursor === range.end)))
+        return index + 1;
       return null;
     },
     offsetAtIndex(sentenceIndex) {

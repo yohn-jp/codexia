@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { RecentActivityDeviceType, RecentActivityInput, RecentActivityItem } from "@codexia/contracts";
-import { api } from "../api";
+import type { RecentActivityDeviceType, RecentActivityInput, RecentActivityItem } from '@codexia/contracts';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api } from '../api';
 import {
   loadWritingResume,
+  type RecentActivityIdentity,
+  type RecentActivityProjectIdentity,
+  recentActivityIdentityKey,
   saveReadingPage,
   saveWritingResume,
   type WritingResumePosition,
-} from "./continueCandidates";
+} from './continueCandidates';
 
 const LOCAL_DEBOUNCE_MS = 400;
 const SERVER_DEBOUNCE_MS = 2_000;
@@ -16,11 +19,9 @@ const REFRESH_INTERVAL_MS = 15_000;
 let activityWriter: string | undefined;
 let activitySequence = 0;
 
-interface Binding {
-  projectId: string;
-  authorScope: string;
-  projectScopeKey: string;
+interface Binding extends RecentActivityIdentity {
   identityKey: string;
+  projectIdentityKey: string;
 }
 
 interface PendingLocal {
@@ -36,7 +37,8 @@ interface PendingServer {
 
 export interface RecentActivityResumeState {
   items: RecentActivityItem[];
-  projectKey: string;
+  snapshotIdentityKey: string;
+  itemsProjectIdentityKey: string;
   localWriting: WritingResumePosition | null;
   error: string;
   deviceType: RecentActivityDeviceType;
@@ -46,7 +48,7 @@ export interface RecentActivityResumeState {
 }
 
 function deviceTypeForViewport(): RecentActivityDeviceType {
-  return window.matchMedia("(max-width: 760px)").matches ? "mobile" : "desktop";
+  return window.matchMedia('(max-width: 760px)').matches ? 'mobile' : 'desktop';
 }
 
 /**
@@ -57,18 +59,32 @@ export function useRecentActivityResume({
   binding,
   enabled,
 }: {
-  binding: Omit<Binding, "identityKey"> | null;
+  binding: Omit<Binding, 'identityKey' | 'projectIdentityKey'> | null;
   enabled: boolean;
 }): RecentActivityResumeState {
-  const identityKey = binding ? JSON.stringify([binding.authorScope, binding.projectScopeKey, binding.projectId]) : "";
-  const currentBinding: Binding | null = binding ? { ...binding, identityKey } : null;
-  const bindingRef = useRef<Binding | null>(currentBinding);
-  bindingRef.current = currentBinding;
+  const projectIdentity: RecentActivityProjectIdentity | null = binding
+    ? {
+        authorScope: binding.authorScope,
+        projectScopeKey: binding.projectScopeKey,
+        projectId: binding.projectId,
+      }
+    : null;
+  const projectIdentityKey = projectIdentity ? recentActivityIdentityKey(projectIdentity) : '';
+  const identityKey = binding ? recentActivityIdentityKey(binding) : '';
+  const bindingRef = useRef<Binding | null>(null);
+  // Keep one binding per visit. Returning to the same identity after a
+  // switch must not revive responses from the earlier visit.
+  if (!binding || !enabled) bindingRef.current = null;
+  else if (bindingRef.current?.identityKey !== identityKey) {
+    bindingRef.current = { ...binding, identityKey, projectIdentityKey };
+  }
+  const currentBinding = bindingRef.current;
   const [deviceType, setDeviceType] = useState<RecentActivityDeviceType>(deviceTypeForViewport);
   const [items, setItems] = useState<RecentActivityItem[]>([]);
-  const [projectKey, setProjectKey] = useState("");
+  const [snapshotIdentityKey, setSnapshotIdentityKey] = useState('');
+  const [itemsProjectIdentityKey, setItemsProjectIdentityKey] = useState('');
   const [localWriting, setLocalWriting] = useState<WritingResumePosition | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState('');
   const pendingLocalRef = useRef<PendingLocal>({});
   const pendingServerRef = useRef<PendingServer | null>(null);
   const localTimerRef = useRef<number | null>(null);
@@ -88,10 +104,11 @@ export function useRecentActivityResume({
     if (!captured) return;
     if (pending.writing) {
       saveWritingResume(captured.authorScope, captured.projectScopeKey, pending.writing);
-      lastWritingRef.current = { bindingKey: captured.identityKey, position: pending.writing };
-      if (bindingRef.current?.identityKey === captured.identityKey) setLocalWriting(pending.writing);
+      lastWritingRef.current = { bindingKey: captured.projectIdentityKey, position: pending.writing };
+      if (bindingRef.current?.projectIdentityKey === captured.projectIdentityKey) setLocalWriting(pending.writing);
     }
-    if (pending.reading) saveReadingPage(captured.authorScope, captured.projectScopeKey, pending.reading.sceneId, pending.reading.pageIndex);
+    if (pending.reading)
+      saveReadingPage(captured.authorScope, captured.projectScopeKey, pending.reading.sceneId, pending.reading.pageIndex);
   };
 
   serverFlushRef.current = (keepalive = false) => {
@@ -106,20 +123,22 @@ export function useRecentActivityResume({
     // reports from this writer, so a delayed PUT cannot rewind the cursor.
     activityWriter ??= crypto.randomUUID();
     const order = `${activityWriter}:${++activitySequence}`;
-    void api.putRecentActivity(pending.binding.projectId, pending.input, { keepalive, order }).then((response) => {
-      const active = bindingRef.current;
-      if (version === latestWriteVersionRef.current && active?.identityKey === pending.binding.identityKey &&
-          active.authorScope === pending.binding.authorScope) {
-        setItems(response.items);
-        setProjectKey(active.identityKey);
-        setError("");
-      }
-    }).catch((caught: unknown) => {
-      const active = bindingRef.current;
-      if (version === latestWriteVersionRef.current && active?.identityKey === pending.binding.identityKey) {
-        setError(caught instanceof Error ? caught.message : "再開位置を同期できませんでした。");
-      }
-    });
+    void api
+      .putRecentActivity(pending.binding.projectId, pending.input, { keepalive, order })
+      .then(response => {
+        const active = bindingRef.current;
+        if (version === latestWriteVersionRef.current && active === pending.binding) {
+          setItems(response.items);
+          setSnapshotIdentityKey(active.identityKey);
+          setItemsProjectIdentityKey(active.projectIdentityKey);
+          setError('');
+        }
+      })
+      .catch((caught: unknown) => {
+        if (version === latestWriteVersionRef.current && bindingRef.current === pending.binding) {
+          setError(caught instanceof Error ? caught.message : '再開位置を同期できませんでした。');
+        }
+      });
   };
 
   const flush = useCallback((keepalive = false) => {
@@ -128,21 +147,22 @@ export function useRecentActivityResume({
   }, []);
 
   useEffect(() => {
-    if (!binding || !enabled) {
+    if (!currentBinding) {
       setItems([]);
-      setProjectKey("");
+      setSnapshotIdentityKey('');
+      setItemsProjectIdentityKey('');
       setLocalWriting(null);
-      setError("");
+      setError('');
       return;
     }
     const captured = currentBinding;
-    if (!captured) return;
     const controller = new AbortController();
     let alive = true;
     setItems([]);
-    setProjectKey(captured.identityKey);
+    setSnapshotIdentityKey(captured.identityKey);
+    setItemsProjectIdentityKey(captured.projectIdentityKey);
     const local = loadWritingResume(captured.authorScope, captured.projectScopeKey);
-    lastWritingRef.current = local ? { bindingKey: captured.identityKey, position: local } : null;
+    lastWritingRef.current = local ? { bindingKey: captured.projectIdentityKey, position: local } : null;
     setLocalWriting(local);
 
     let refreshTimer: number | null = null;
@@ -152,35 +172,39 @@ export function useRecentActivityResume({
       refreshTimer = null;
     };
     const startRefreshTimer = () => {
-      if (refreshTimer === null && document.visibilityState === "visible") {
+      if (refreshTimer === null && document.visibilityState === 'visible') {
         refreshTimer = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
       }
     };
 
     const refresh = async () => {
-      if (document.visibilityState !== "visible") return;
+      if (document.visibilityState !== 'visible') return;
       const sequence = ++refreshSequenceRef.current;
       const startedAt = latestWriteVersionRef.current;
+      const isCurrentRefresh = () =>
+        alive &&
+        !controller.signal.aborted &&
+        sequence === refreshSequenceRef.current &&
+        startedAt === latestWriteVersionRef.current &&
+        bindingRef.current === captured;
       try {
         const response = await api.recentActivity(captured.projectId, controller.signal);
-        const active = bindingRef.current;
-        if (alive && !controller.signal.aborted && sequence === refreshSequenceRef.current &&
-            startedAt === latestWriteVersionRef.current && active?.identityKey === captured.identityKey) {
+        if (isCurrentRefresh()) {
           setItems(response.items);
-          setProjectKey(captured.identityKey);
-          setError("");
+          setSnapshotIdentityKey(captured.identityKey);
+          setItemsProjectIdentityKey(captured.projectIdentityKey);
+          setError('');
         }
       } catch (caught) {
-        if (!alive || controller.signal.aborted) return;
-        if (bindingRef.current?.identityKey === captured.identityKey) {
-          setError(caught instanceof Error ? caught.message : "再開位置を読み込めませんでした。");
+        if (isCurrentRefresh()) {
+          setError(caught instanceof Error ? caught.message : '再開位置を読み込めませんでした。');
         }
       }
     };
-    if (document.visibilityState === "visible") void refresh();
+    if (document.visibilityState === 'visible') void refresh();
     startRefreshTimer();
     const onVisibility = () => {
-      if (document.visibilityState === "visible") {
+      if (document.visibilityState === 'visible') {
         void refresh();
         startRefreshTimer();
       } else {
@@ -196,75 +220,86 @@ export function useRecentActivityResume({
     const onPageShow = () => {
       if (!pageHidden) return;
       pageHidden = false;
-      if (document.visibilityState === "visible") {
+      if (document.visibilityState === 'visible') {
         void refresh();
         startRefreshTimer();
       }
     };
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("beforeunload", onPageHide);
-    window.addEventListener("pagehide", onPageHide);
-    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('beforeunload', onPageHide);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
     return () => {
       alive = false;
       controller.abort();
       stopRefreshTimer();
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("beforeunload", onPageHide);
-      window.removeEventListener("pagehide", onPageHide);
-      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('beforeunload', onPageHide);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
       flush(true);
     };
-  // identityKey captures author/project/repository; enabled controls authenticated lifecycle.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identityKey, enabled, flush]);
+  }, [currentBinding, flush]);
 
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 760px)");
-    const update = () => setDeviceType(media.matches ? "mobile" : "desktop");
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
+    const media = window.matchMedia('(max-width: 760px)');
+    const update = () => setDeviceType(media.matches ? 'mobile' : 'desktop');
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
   }, []);
 
-  const onWritingPosition = useCallback((sceneId: string, cursorSentenceIndex: number | null, scrollTop: number) => {
-    const active = bindingRef.current;
-    if (!active || !enabled || !sceneId) return;
-    const position: WritingResumePosition = { sceneId, cursorSentenceIndex, scrollTop: Math.max(0, scrollTop) };
-    lastWritingRef.current = { bindingKey: active.identityKey, position };
-    if (pendingLocalRef.current.binding && pendingLocalRef.current.binding.identityKey !== active.identityKey) localFlushRef.current();
-    pendingLocalRef.current = { ...pendingLocalRef.current, binding: active, writing: position };
-    if (localTimerRef.current !== null) window.clearTimeout(localTimerRef.current);
-    localTimerRef.current = window.setTimeout(() => localFlushRef.current(), LOCAL_DEBOUNCE_MS);
-    const input: RecentActivityInput = { sceneId, sentenceOffset: cursorSentenceIndex, deviceType };
-    pendingServerRef.current = { binding: active, input };
-    if (serverTimerRef.current !== null) window.clearTimeout(serverTimerRef.current);
-    serverTimerRef.current = window.setTimeout(() => serverFlushRef.current(), SERVER_DEBOUNCE_MS);
-  }, [enabled, deviceType]);
+  const onWritingPosition = useCallback(
+    (sceneId: string, cursorSentenceIndex: number | null, scrollTop: number) => {
+      const active = bindingRef.current;
+      if (!active || !enabled || active.viewTarget !== 'writing' || sceneId !== active.documentId) return;
+      const position: WritingResumePosition = { sceneId, cursorSentenceIndex, scrollTop: Math.max(0, scrollTop) };
+      lastWritingRef.current = { bindingKey: active.projectIdentityKey, position };
+      if (pendingLocalRef.current.binding && pendingLocalRef.current.binding.identityKey !== active.identityKey) localFlushRef.current();
+      pendingLocalRef.current = { ...pendingLocalRef.current, binding: active, writing: position };
+      if (localTimerRef.current !== null) window.clearTimeout(localTimerRef.current);
+      localTimerRef.current = window.setTimeout(() => localFlushRef.current(), LOCAL_DEBOUNCE_MS);
+      const input: RecentActivityInput = { sceneId, sentenceOffset: cursorSentenceIndex, deviceType };
+      pendingServerRef.current = { binding: active, input };
+      if (serverTimerRef.current !== null) window.clearTimeout(serverTimerRef.current);
+      serverTimerRef.current = window.setTimeout(() => serverFlushRef.current(), SERVER_DEBOUNCE_MS);
+    },
+    [enabled, deviceType],
+  );
 
-  const onReadingPage = useCallback((sceneId: string, pageIndex: number) => {
-    const active = bindingRef.current;
-    if (!active || !enabled || !sceneId || !Number.isSafeInteger(pageIndex) || pageIndex < 0) return;
-    if (pendingLocalRef.current.binding && pendingLocalRef.current.binding.identityKey !== active.identityKey) localFlushRef.current();
-    pendingLocalRef.current = { ...pendingLocalRef.current, binding: active, reading: { sceneId, pageIndex } };
-    if (localTimerRef.current !== null) window.clearTimeout(localTimerRef.current);
-    localTimerRef.current = window.setTimeout(() => localFlushRef.current(), LOCAL_DEBOUNCE_MS);
-    const localWriting = lastWritingRef.current?.bindingKey === active.identityKey
-      ? lastWritingRef.current.position
-      : null;
-    const serverWriting = projectKey === active.identityKey
-      ? items.find((item) => item.deviceType === deviceType && item.sceneId === sceneId)?.sentenceOffset
-      : null;
-    const writing = localWriting?.sceneId === sceneId ? localWriting.cursorSentenceIndex : serverWriting ?? null;
-    const input: RecentActivityInput = {
-      sceneId,
-      sentenceOffset: writing,
-      pageIndex,
-      deviceType,
-    };
-    pendingServerRef.current = { binding: active, input };
-    if (serverTimerRef.current !== null) window.clearTimeout(serverTimerRef.current);
-    serverTimerRef.current = window.setTimeout(() => serverFlushRef.current(), SERVER_DEBOUNCE_MS);
-  }, [enabled, items, projectKey, deviceType]);
+  const onReadingPage = useCallback(
+    (sceneId: string, pageIndex: number) => {
+      const active = bindingRef.current;
+      if (
+        !active ||
+        !enabled ||
+        active.viewTarget !== 'reading' ||
+        sceneId !== active.documentId ||
+        !Number.isSafeInteger(pageIndex) ||
+        pageIndex < 0
+      )
+        return;
+      if (pendingLocalRef.current.binding && pendingLocalRef.current.binding.identityKey !== active.identityKey) localFlushRef.current();
+      pendingLocalRef.current = { ...pendingLocalRef.current, binding: active, reading: { sceneId, pageIndex } };
+      if (localTimerRef.current !== null) window.clearTimeout(localTimerRef.current);
+      localTimerRef.current = window.setTimeout(() => localFlushRef.current(), LOCAL_DEBOUNCE_MS);
+      const localWriting = lastWritingRef.current?.bindingKey === active.projectIdentityKey ? lastWritingRef.current.position : null;
+      const serverWriting =
+        itemsProjectIdentityKey === active.projectIdentityKey
+          ? items.find(item => item.deviceType === deviceType && item.sceneId === sceneId)?.sentenceOffset
+          : null;
+      const writing = localWriting?.sceneId === sceneId ? localWriting.cursorSentenceIndex : (serverWriting ?? null);
+      const input: RecentActivityInput = {
+        sceneId,
+        sentenceOffset: writing,
+        pageIndex,
+        deviceType,
+      };
+      pendingServerRef.current = { binding: active, input };
+      if (serverTimerRef.current !== null) window.clearTimeout(serverTimerRef.current);
+      serverTimerRef.current = window.setTimeout(() => serverFlushRef.current(), SERVER_DEBOUNCE_MS);
+    },
+    [enabled, items, itemsProjectIdentityKey, deviceType],
+  );
 
-  return { items, projectKey, localWriting, error, onWritingPosition, onReadingPage, flush, deviceType };
+  return { items, snapshotIdentityKey, itemsProjectIdentityKey, localWriting, error, onWritingPosition, onReadingPage, flush, deviceType };
 }
