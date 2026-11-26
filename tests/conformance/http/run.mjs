@@ -18,8 +18,9 @@ assert.match(URL.parse(databaseUrl)?.pathname ?? '', /^\/codexia_perf_http_confo
   'The database must be dedicated to HTTP conformance');
 
 // Reuse the existing test fixture's explicit disposable database guard.
+assert.equal(process.env.CODEXIA_AUTH_TEST_DISPOSABLE, '1',
+  'CODEXIA_AUTH_TEST_DISPOSABLE=1 is required before the runner may migrate or write its database');
 process.env.CODEXIA_AUTH_TEST_DATABASE_URL = databaseUrl;
-process.env.CODEXIA_AUTH_TEST_DISPOSABLE = '1';
 
 const reportDir = resolve(process.env.CODEXIA_CI_REPORT_DIR ?? 'test-results/conformance/http');
 await mkdir(reportDir, { recursive: true });
