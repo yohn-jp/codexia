@@ -122,7 +122,11 @@ public struct AuthoringView: View {
 
     private var protectionStatus: String {
         if isProtecting { return "端末に保護中…" }
-        if state.isComposing { return "日本語入力中 — この端末には未保護です" }
+        if state.isComposing {
+            return state.isCurrentVersionProtected
+                ? "変換中の原稿を端末に保護済み — サーバー保存は入力確定後に行います"
+                : "日本語入力中 — この端末には未保護です"
+        }
         if state.hasLocalEdits {
             return state.canLeave
                 ? "端末に保護済み — サーバー未確定"

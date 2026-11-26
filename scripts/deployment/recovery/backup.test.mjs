@@ -36,15 +36,15 @@ async function createFixture() {
   return { directory, home, stateDir, backupDestination, bin, lockFile };
 }
 
-function invokeBackup(fixture, { activeUnits = '', approved = true } = {}) {
+function invokeBackup(fixture, { activeUnits = '', approved = true, lockFile = fixture.lockFile } = {}) {
   const args = [
     backupProgram,
     'backup-locked',
     fixture.backupDestination,
     'age1pushfixture',
-    ...(approved ? ['--approved', '--lock-file', fixture.lockFile, '--lock-fd', '9'] : []),
+    ...(approved ? ['--approved', '--lock-file', lockFile, '--lock-fd', '9'] : []),
   ].map(shellQuote).join(' ');
-  const command = `exec 9>${shellQuote(fixture.lockFile)}; flock --exclusive --nonblock 9; exec ${args} 9>&9`;
+  const command = `exec 9>${shellQuote(lockFile)}; flock --exclusive --nonblock 9; exec ${args} 9>&9`;
   return spawnSync('bash', ['-c', command], {
     encoding: 'utf8',
     env: {
@@ -136,6 +136,19 @@ test('backup rejects calls without explicit host-lock approval', async () => {
     const rejected = invokeBackup(fixture, { approved: false });
     assert.notEqual(rejected.status, 0);
     assert.match(rejected.stderr, /explicit approval/u);
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('push backup rejects a locked file other than the canonical host lock', async () => {
+  const fixture = await createFixture();
+  const alternateLock = path.join(fixture.directory, 'alternate.lock');
+  try {
+    await writeFile(alternateLock, '');
+    const rejected = invokeBackup(fixture, { lockFile: alternateLock });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /canonical host lock/u);
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }

@@ -53,6 +53,30 @@ final class JournalSaveCoordinatorTests: XCTestCase {
         XCTAssertNil(otherAuthorDraft)
     }
 
+    func testComposingSnapshotIsRecoveredAsPendingLocalDraft() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let origin = URL(string: "https://api.example.test")!
+        let journal = try ProtectedDraftJournal(directory: root)
+        let coordinator = try JournalSaveCoordinator(authorID: "author", apiOrigin: origin,
+            projectID: "project", clientID: "ios-test", journal: journal,
+            api: APITransport(origin: origin).client)
+        var editor = EditorState(documentID: "document", text: "基準稿")
+        editor.updateComposition("基準稿かな")
+
+        let protected = try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: "revision-1", baseText: "基準稿")
+        let reopened = try JournalSaveCoordinator(authorID: "author", apiOrigin: origin,
+            projectID: "project", clientID: "ios-test", journal: ProtectedDraftJournal(directory: root),
+            api: APITransport(origin: origin).client)
+        let recovered = try await reopened.recover(documentID: "document")
+
+        XCTAssertEqual(protected.text, "基準稿かな")
+        XCTAssertEqual(protected.state, .protected)
+        XCTAssertEqual(recovered?.text, "基準稿かな")
+        XCTAssertEqual(recovered?.state, .protected)
+        XCTAssertFalse(editor.canLeave)
+    }
+
     func testUnsubmittedSnapshotsCoalesceToLatestAndRecoveryUsesAppendOrder() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }

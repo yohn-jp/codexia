@@ -840,7 +840,7 @@ private final class ProductEditorModel: ObservableObject {
 
     func protectBeforeBackground() async {
         protectionTask?.cancel()
-        guard !state.isComposing, !state.canLeave else { return }
+        guard !state.canLeave else { return }
         do { try await protect(state.snapshot) }
         catch { saveMessage = "バックグラウンド移行前に端末へ保護できませんでした。入力リスクがあります。" }
     }

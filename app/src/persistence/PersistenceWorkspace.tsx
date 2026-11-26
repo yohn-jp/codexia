@@ -1138,14 +1138,11 @@ export function PersistenceWorkspace({
   );
 
   const openDocument = useCallback(
-    async (nextDocumentId: string): Promise<void> => {
+    async (nextDocumentId: string, replaceRoute = true, selectionIntent?: number): Promise<boolean> => {
       const currentProject = projects.find(item => item.id === projectId);
       const currentJournal = journalRef.current;
-      if (sessionBlockedRef.current || !currentProject || !currentJournal || !nextDocumentId) return;
+      if (sessionBlockedRef.current || !currentProject || !currentJournal || !nextDocumentId) return false;
       const openSequence = ++openSequenceRef.current;
-      evidenceReadSequenceRef.current++;
-      evidenceReadControllerRef.current?.abort();
-      evidenceReadControllerRef.current = null;
       revisionPageSequenceRef.current += 1;
       setShowRevisions(false);
       setRevisions([]);
@@ -1155,9 +1152,6 @@ export function PersistenceWorkspace({
       setLoading(true);
       setPageError('');
       setNotice('');
-      setEvidenceLoadIssue(null);
-      setEvidenceLoadPending(null);
-      publishEditor(null);
       try {
         const [read, draft] = await Promise.all([
           api.persistenceDocument(currentProject.id, nextDocumentId),
@@ -1165,10 +1159,22 @@ export function PersistenceWorkspace({
         ]);
         if (!read.revision) throw new Error('この文書にRevisionがありません。');
         const revision = read.revision;
-        if (sessionBlockedRef.current || openSequence !== openSequenceRef.current) return;
+        if (
+          sessionBlockedRef.current ||
+          openSequence !== openSequenceRef.current ||
+          (selectionIntent !== undefined && selectionIntent !== selectionIntentRef.current)
+        ) return false;
+        evidenceReadSequenceRef.current++;
+        evidenceReadControllerRef.current?.abort();
+        evidenceReadControllerRef.current = null;
+        setEvidenceLoadIssue(null);
+        setEvidenceLoadPending(null);
         selectionRef.current = { projectId: currentProject.id, documentId: nextDocumentId };
         persistSelectionSafely(authorScope, selectionRef.current);
-        updateRouteSelection(selectionRef.current, true);
+        updateRouteSelection(selectionRef.current, replaceRoute);
+        setDocumentId(nextDocumentId);
+        setReading(false);
+        setEvidenceJump(undefined);
         const staleDraft = Boolean(draft && (draft.baseRevisionId !== revision.id || draft.baseMarkdown !== revision.markdown));
         const recoveredSave = draft?.pendingSave;
         const recoverablePending =
@@ -1264,8 +1270,13 @@ export function PersistenceWorkspace({
         setRevisionCursor(null);
         setRevisionPageLoading(false);
         setRevisionPageError('');
+        return true;
       } catch (error) {
-        if (openSequence === openSequenceRef.current) setPageError(error instanceof Error ? error.message : '文書を開けませんでした。');
+        if (
+          openSequence === openSequenceRef.current &&
+          (selectionIntent === undefined || selectionIntent === selectionIntentRef.current)
+        ) setPageError(error instanceof Error ? error.message : '文書を開けませんでした。');
+        return false;
       } finally {
         if (openSequence === openSequenceRef.current) setLoading(false);
       }
@@ -2190,26 +2201,23 @@ export function PersistenceWorkspace({
       // may publish a document, even when an earlier request finishes later.
       const intent = ++selectionIntentRef.current;
       continueRequestRef.current = undefined;
-      setEvidenceJump(undefined);
       const alreadyOpen = nextId === documentId && selectionRef.current?.documentId === nextId && activeRef.current?.document.id === nextId;
       if (alreadyOpen && !position) return true;
       if (!(await protectTransition())) return false;
       if (intent !== selectionIntentRef.current) return false;
       if (position) {
         continueRequestRef.current = { projectId, documentId: nextId, intent, position };
-        setRequestedPanel({ id: 'editor', sequence: ++panelRequestSequenceRef.current });
       }
-      if (alreadyOpen) return true;
-      openSequenceRef.current += 1;
-      publishEditor(null);
-      selectionRef.current = { projectId, documentId: nextId };
-      persistSelectionSafely(authorScope, selectionRef.current);
-      updateRouteSelection(selectionRef.current, false);
-      setReading(false);
-      setDocumentId(nextId);
-      return true;
+      if (alreadyOpen) {
+        if (position) setRequestedPanel({ id: 'editor', sequence: ++panelRequestSequenceRef.current });
+        return true;
+      }
+      const opened = await openDocument(nextId, false, intent);
+      if (!opened && continueRequestRef.current?.intent === intent) continueRequestRef.current = undefined;
+      if (opened && position) setRequestedPanel({ id: 'editor', sequence: ++panelRequestSequenceRef.current });
+      return opened;
     },
-    [authorScope, documentId, projectId, protectTransition, publishEditor, updateRouteSelection],
+    [documentId, openDocument, projectId, protectTransition],
   );
 
   const requestedContinue = continueRequestRef.current;

@@ -326,6 +326,9 @@ test("revision history responses and errors stay bound to the scene that request
   const editorAlert = page.locator(".pg-editor-column").getByRole("alert");
   await expect(editorAlert).toHaveText("対象の文書を開けませんでした。");
   await expect(editorAlert).toHaveCount(1);
+  await expectMarkdown(page, aCurrent);
+  await expect(page).toHaveURL(url => url.pathname === writingFixturePath("desktop", project, scene));
+  await expect(page.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`)).toHaveAttribute("aria-current", "page");
   const initialResponse = page.waitForResponse((response) => historyUrl(new URL(response.url())));
   releaseInitial();
   await initialResponse;

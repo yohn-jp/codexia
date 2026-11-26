@@ -73,8 +73,8 @@ validate_artifact(){
 }
 case "$operation" in
   backup-locked)
-    [[ $# == 8 && "${4:-}" == --approved && "${5:-}" == --lock-file && "${7:-}" == --lock-fd ]] ||
-      die 'Push backup requires explicit approval and an inherited host lock'
+    [[ $# == 8 && "${4:-}" == --approved && "${5:-}" == --lock-file && "${6:-}" == "$lock_file" && "${7:-}" == --lock-fd ]] ||
+      die 'Push backup requires explicit approval and the canonical host lock'
     verify_lock_descriptor "$6" "$8"
     ;;
   fingerprint-locked)

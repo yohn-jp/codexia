@@ -120,6 +120,17 @@ function containsSensitiveObjectKeys(value: unknown, depth = 0): boolean {
   }
   return false;
 }
+function canonicalJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue);
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([key, item]) => [key, canonicalJsonValue(item)] as const);
+    return Object.fromEntries(entries);
+  }
+  return value;
+}
 function excludedRecord(moduleId: string, key: string, value: unknown): boolean {
   return moduleId.startsWith("core.authority.") ||
     moduleId === "core.portable.archive" ||
@@ -146,6 +157,9 @@ function safeSettings(value: Record<string, unknown>, omitted: string[]): JsonOb
   return safeSettingsValue(value, omitted, "project.settings") as JsonObject;
 }
 function validateGraph(archive: WorkArchive): void {
+  if (containsSensitiveObjectKeys(archive.project.settings)) {
+    fail(400, "INVALID_WORK_ARCHIVE", "Archive contains sensitive project settings");
+  }
   unique(archive.documents.map((item) => item.id), "document");
   unique(archive.documents.map((item) => item.revisionId), "document revision");
   unique(archive.knowledge.nodes.map((item) => item.id), "knowledge node");
@@ -372,7 +386,7 @@ export async function exportWorkArchive(persistence: Persistence, projectId: Pro
 }
 
 function portableProjectId(archive: WorkArchive): { id: ProjectId; hash: string } {
-  const hash = digest("codexia-work/v1-import" + "\0" + JSON.stringify(archive));
+  const hash = digest("codexia-work/v1-import" + "\0" + JSON.stringify(canonicalJsonValue(archive)));
   const id = (hash.slice(0, 8) + "-" + hash.slice(8, 12) + "-5" + hash.slice(13, 16) +
     "-a" + hash.slice(17, 20) + "-" + hash.slice(20, 32)) as ProjectId;
   return { id, hash };

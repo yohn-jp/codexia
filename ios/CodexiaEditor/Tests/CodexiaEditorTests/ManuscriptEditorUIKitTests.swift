@@ -28,6 +28,7 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
         coordinator.textViewDidChange(view)
         XCTAssertNotNil(view.markedTextRange)
         XCTAssertEqual(box.state.text, "原稿")
+        XCTAssertEqual(box.state.snapshot.text, "原稿かな")
         XCTAssertFalse(box.state.canLeave)
         view.unmarkText()
         coordinator.textViewDidChange(view)
@@ -86,6 +87,7 @@ final class ManuscriptEditorUIKitTests: XCTestCase {
 
         XCTAssertNotNil(view.markedTextRange)
         XCTAssertEqual(box.state.text, "原稿")
+        XCTAssertEqual(box.state.snapshot.text, "原稿仮名")
         XCTAssertFalse(box.state.canLeave)
 
         view.unmarkText()

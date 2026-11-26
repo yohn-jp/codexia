@@ -93,7 +93,7 @@ public struct ManuscriptEditor: UIViewRepresentable {
             // value is replaced. Never write the old TextView into that new session.
             guard current.documentID == documentID, current.sessionID == sessionID else { return false }
             if textView.markedTextRange != nil {
-                current.setComposing(true)
+                current.updateComposition(textView.text)
             } else {
                 current.edit(textView.text)
                 current.setComposing(false)
