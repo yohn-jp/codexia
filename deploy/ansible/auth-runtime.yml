@@ -15,6 +15,7 @@
       - codexia_expected_bootstrap_resume.clusterId is match('^[1-9][0-9]{0,19}$')
       - codexia_expected_bootstrap_resume.databaseOid is match('^[1-9][0-9]{0,9}$')
       - codexia_expected_bootstrap_resume.migrationFingerprint is match('^sha256:[a-f0-9]{64}$')
+      - codexia_expected_bootstrap_resume.checkpoint is not defined or codexia_expected_bootstrap_resume.checkpoint == 'empty-auth-schema'
     fail_msg: Resuming an approved installation requires its exact database, image and application ledger.
 
 - name: Require explicit Better Auth runtime provisioning on the codexia service identity
@@ -287,6 +288,13 @@
   loop: [owner-setup.intent, owner-setup.installation]
   register: owner_setup_existing_installation
 
+- name: Observe the completed setup installation marker
+  when: owner_setup_requested and codexia_auth_database_state_value.applicationLedgerExists
+  ansible.builtin.stat:
+    path: "{{ home }}/.local/state/codexia-deploy/owner-setup.installation"
+    follow: false
+  register: owner_setup_installation_marker
+
 - name: Reject owner setup on an initialized database without installation evidence
   when: owner_setup_requested and codexia_auth_database_state_value.applicationLedgerExists
   ansible.builtin.assert:
@@ -304,13 +312,11 @@
   vars:
     resume: "{{ codexia_expected_bootstrap_resume }}"
   ansible.builtin.command:
-    argv:
-      - "{{ home }}/.local/bin/codexia-auth-runtime-bootstrap"
-      - verify-bootstrap-resume
-      - "{{ home }}/.local/state/codexia-deploy/host.lock"
-      - "{{ resume.image }}"
-      - "{{ resume.clusterId }}:{{ resume.databaseOid }}"
-      - "{{ resume.migrationFingerprint }}"
+    argv: >-
+      {{ [home + '/.local/bin/codexia-auth-runtime-bootstrap', 'verify-bootstrap-resume',
+          home + '/.local/state/codexia-deploy/host.lock', resume.image,
+          resume.clusterId + ':' + resume.databaseOid, resume.migrationFingerprint]
+         + ([resume.checkpoint] if (resume.checkpoint | default('')) == 'empty-auth-schema' else []) }}
     expand_argument_vars: false
   changed_when: false
   no_log: true
@@ -321,6 +327,19 @@
       - not codexia_auth_database_state_value.schemaExists or codexia_auth_database_state_value.schemaOwner == 'codexia_auth_runtime'
       - not codexia_auth_database_state_value.schemaExists or codexia_auth_database_state_value.roleExists
     fail_msg: Existing codexia_auth schema ownership is not the declared runtime role; stop for explicit recovery.
+
+- name: Require explicit empty-auth checkpoint evidence when resuming owner setup on an existing schema
+  when: owner_setup_requested and codexia_auth_database_state_value.applicationLedgerExists and
+        codexia_auth_database_state_value.schemaExists and
+        not (owner_setup_installation_marker.stat.isreg | default(false))
+  ansible.builtin.assert:
+    that:
+      - codexia_owner_setup_install_intent | default(false) | bool
+      - codexia_expected_bootstrap_resume is mapping
+      - codexia_expected_bootstrap_resume.checkpoint | default('') == 'empty-auth-schema'
+      - codexia_expected_bootstrap_resume.image == codexia_auth_bootstrap_image
+      - codexia_expected_bootstrap_resume.migrationFingerprint is match('^sha256:[a-f0-9]{64}$')
+    fail_msg: An existing auth namespace can resume new owner setup only with the reviewed empty-auth R4 checkpoint.
 
 - name: Observe existing auth secret identities
   ansible.builtin.command:
@@ -411,7 +430,9 @@
     argv: >-
       {{ [home + '/.local/bin/codexia-auth-runtime-bootstrap', 'converge',
           home + '/.local/state/codexia-deploy/host.lock']
-          + ([resume.image, resume.clusterId + ':' + resume.databaseOid, resume.migrationFingerprint] if resume else []) }}
+          + ([resume.image, resume.clusterId + ':' + resume.databaseOid, resume.migrationFingerprint]
+             + (['empty-auth-schema'] if (resume.checkpoint | default('')) == 'empty-auth-schema' else [])
+             if resume else []) }}
     stdin: "{{ codexia_auth_database_password_b64 }}"
     stdin_add_newline: true
     expand_argument_vars: false

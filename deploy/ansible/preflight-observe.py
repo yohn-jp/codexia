@@ -114,7 +114,8 @@ def observe_transaction(state_dir):
     return journals[0] if journals else None
 
 
-def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_query, volume_layout):
+def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_query, volume_layout,
+                     resume_clean=False):
     if not volumes["codexia-postgres"]:
         require(not containers["codexia-db"])
         return {"state": "absent", "authState": "absent"}
@@ -153,18 +154,44 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
               "authState": "unknown", "authSchemaSha256": None, "ownerBindingSha256": None}
     if not db["authExists"]:
         result["authState"] = "legacy" if writer and writer.get("authMode") == "legacy" else "absent"
-        if (writer is None and not containers.get("codexia-api")
+        if (resume_clean and writer is None and not containers.get("codexia-api")
                 and all(metadata(state_dir / name) is None for name in (
                     "owner-setup.installation", "owner-setup.promoted", "owner-setup.age", "owner-setup.age.pending"))):
             intent = read_owner_installation_intent(state_dir / "owner-setup.intent", cluster)
             if intent is not None:
                 result["bootstrapIntent"] = intent
         return result
+    namespace = json_sql("codexia", """SELECT json_build_object(
+        'empty', n.nspowner = (SELECT oid FROM pg_roles WHERE rolname='codexia_auth_runtime')
+          AND EXISTS (SELECT FROM pg_roles r WHERE r.oid=n.nspowner AND r.rolcanlogin AND NOT r.rolsuper
+            AND NOT r.rolcreatedb AND NOT r.rolcreaterole AND NOT r.rolinherit AND NOT r.rolreplication
+            AND NOT r.rolbypassrls)
+          AND NOT EXISTS (SELECT FROM pg_auth_members WHERE member=n.nspowner OR roleid=n.nspowner)
+          AND NOT EXISTS (SELECT FROM pg_default_acl WHERE defaclrole=n.nspowner)
+          AND NOT EXISTS (SELECT FROM aclexplode(COALESCE(n.nspacl, acldefault('n',n.nspowner))) acl
+            WHERE acl.grantee<>n.nspowner)
+          AND NOT EXISTS (SELECT FROM pg_depend d WHERE d.refclassid='pg_namespace'::regclass AND d.refobjid=n.oid)
+          AND NOT EXISTS (SELECT FROM pg_class c WHERE c.relnamespace=n.oid)
+          AND NOT EXISTS (SELECT FROM pg_proc p WHERE p.pronamespace=n.oid)
+          AND NOT EXISTS (SELECT FROM pg_type t WHERE t.typnamespace=n.oid)
+        ) FROM pg_namespace n WHERE n.nspname='codexia_auth';""")
+    # A schema-only catalog checkpoint is valid only while the original install
+    # intent and the clean setup slot are both positively observed under lock.
+    if (namespace.get("empty") is True and resume_clean and writer is None and
+            all(metadata(state_dir / name) is None for name in (
+                "owner-setup.installation", "owner-setup.promoted", "owner-setup.age",
+                "owner-setup.age.pending"))):
+        intent = read_owner_installation_intent(state_dir / "owner-setup.intent", cluster)
+        if intent is not None:
+            result.update({"authState": "absent", "emptyAuthSchema": True,
+                           "bootstrapIntent": intent})
     # Use the owning auth-schema catalog query supplied by the checked-out source.
     # Hash its ordered text definitions locally; never emit them.
     definitions = sql("codexia", "BEGIN READ ONLY; SET LOCAL search_path TO codexia_auth; " + auth_query + "; COMMIT;").splitlines()
     result["authSchemaSha256"] = "sha256:" + hashlib.sha256(
         json.dumps(definitions, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    if result.get("emptyAuthSchema") is True:
+        return result
     if writer and writer.get("authMode") == "better-auth":
         result["ownerBindingSha256"] = writer["ownerBindingSha256"]
         # Reuse the existing read-only Better Auth schema/client verifier in the
@@ -379,7 +406,10 @@ def observe():
             if set(unit_state.splitlines()) == {"LoadState=not-found", "ActiveState=inactive"}:
                 backend = {"state": "absent"}
         database = observe_database(volumes, containers, state_dir, auth_dir, full,
-                                    os.environ["CODEXIA_AUTH_SCHEMA_QUERY"], facts["volumeLayout"])
+                                    os.environ["CODEXIA_AUTH_SCHEMA_QUERY"], facts["volumeLayout"],
+                                    resume_clean=lock_handle is not None and transaction is None and
+                                    backend.get("state") == "absent" and not residue and
+                                    not containers["codexia-api"])
         if database["state"] in ("missing", "absent"):
             # Verify the canonical residual slot independently of old DB health.
             if containers["codexia-api"]:

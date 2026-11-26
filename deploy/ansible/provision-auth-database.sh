@@ -3,11 +3,18 @@ set -Eeuo pipefail
 umask 077
 
 die(){ printf '%s\n' "$1" >&2; exit 1; }
-[[ $# -ge 2 && $# -le 5 ]] || die 'An auth bootstrap operation and its protected inputs are required'
+[[ $# -ge 2 && $# -le 6 ]] || die 'An auth bootstrap operation and its protected inputs are required'
 operation="$1"
 lock_file="$2"
 image="${3:-}"
 [[ "$lock_file" == /* && ! "$lock_file" =~ [[:cntrl:]] ]] || die 'Invalid auth bootstrap lock path'
+[[ "$lock_file" == "$HOME/.local/state/codexia-deploy/host.lock" ]] || die 'Auth bootstrap requires the canonical host lock'
+if [[ -e "$lock_file" || -L "$lock_file" ]]; then
+  [[ -f "$lock_file" && ! -L "$lock_file" && -O "$lock_file" ]] ||
+    die 'The canonical deployment host lock is unsafe'
+elif [[ "$operation" != inspect ]]; then
+  die 'The canonical deployment host lock is missing'
+fi
 case "$operation" in
   inspect|verify|verify-permissions) [[ $# == 2 ]] || die 'Unexpected auth bootstrap argument' ;;
   initialize-application)
@@ -16,14 +23,30 @@ case "$operation" in
       die 'Application initialization requires a reviewed immutable Full image' ;;
   verify-bootstrap-resume|converge)
     [[ ( "$operation" == converge && $# == 2 ) ||
-       ( $# == 5 && "$image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ &&
+       ( ( $# == 5 || ( $# == 6 && "$6" == empty-auth-schema ) ) &&
+         "$image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ &&
          "$4" =~ ^[1-9][0-9]{0,19}:[1-9][0-9]{0,9}$ && "$5" =~ ^sha256:[a-f0-9]{64}$ ) ]] ||
       die 'Bootstrap resumption requires the approved database, Full image and migration fingerprint' ;;
+  verify-empty-auth-resume-held)
+    [[ $# == 5 && "$image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ &&
+       "$4" =~ ^[1-9][0-9]{0,19}:[1-9][0-9]{0,9}$ &&
+       ( "$5" == candidate || "$5" =~ ^sha256:[a-f0-9]{64}$ ) ]] ||
+      die 'Empty-auth resumption requires the approved database, Full image and migration fingerprint' ;;
   *) die 'Invalid auth bootstrap operation' ;;
 esac
 
-exec 9>"$lock_file"
-flock --exclusive --nonblock 9 || die 'Another Codexia deployment or backup holds the host lock'
+if [[ "$operation" == verify-empty-auth-resume-held ]]; then
+  [[ -e /proc/self/fd/9 && "$(readlink -- /proc/self/fd/9)" == "$lock_file" ]] ||
+    die 'Empty-auth validation requires the caller-held deployment host lock'
+  flock --exclusive --nonblock 9 || die 'The caller no longer holds the deployment host lock'
+else
+  if [[ "$operation" == inspect && ! -e "$lock_file" && ! -L "$lock_file" ]]; then
+    exec 9>"$lock_file"
+  else
+    exec 9<>"$lock_file"
+  fi
+  flock --exclusive --nonblock 9 || die 'Another Codexia deployment or backup holds the host lock'
+fi
 
 admin_psql(){
   podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia'
@@ -48,11 +71,12 @@ application_schema(){
         console.log(applied.length ? "INITIALIZED_FRESH_SCHEMA" : "VERIFIED_EXACT_SCHEMA");
       } else {
         const observed = await inspectFreshPostgresSchema(connection);
+        const expected = fingerprint === "candidate" ? identity.migrationFingerprint : fingerprint;
         if (operation === "require-pristine" && !observed.pristine) {
           throw new Error("Fresh owner setup refuses an existing application ledger");
         }
-        if (operation === "require-ledger" && (observed.pristine || observed.fingerprint !== fingerprint ||
-            identity.migrationFingerprint !== fingerprint)) {
+        if (operation === "require-ledger" && (observed.pristine || observed.fingerprint !== expected ||
+            identity.migrationFingerprint !== expected)) {
           throw new Error("Bootstrap resumption requires the exact approved application ledger");
         }
       }
@@ -81,6 +105,38 @@ SQL
   [[ "$database" == "$expected_database" ]] ||
     die 'Bootstrap resumption no longer matches the current database or Auth schema state'
   application_schema require-ledger "$fingerprint"
+}
+
+verify_empty_auth_resume(){
+  local expected_database="$1" fingerprint="$2"
+  local state_dir="$HOME/.local/state/codexia-deploy" intent database
+  "$HOME/.local/bin/codexia-require-clean-api-target"
+  intent="$state_dir/owner-setup.intent"
+  [[ -f "$intent" && ! -L "$intent" && -O "$intent" && "$(stat -c %a -- "$intent")" == 600 &&
+     "$(cat -- "$intent")" == "$expected_database:$image" ]] ||
+    die 'Empty-auth resumption requires the exact recorded initial installation'
+  for evidence in owner-setup.installation owner-setup.promoted owner-setup.age owner-setup.age.pending cutover-transaction.json; do
+    [[ ! -e "$state_dir/$evidence" && ! -L "$state_dir/$evidence" ]] ||
+      die 'Empty-auth resumption found owner or API deployment residue'
+  done
+  database="$(admin_psql <<'SQL'
+SELECT system_identifier || chr(58) || d.oid::text
+FROM pg_control_system(), pg_database d JOIN pg_namespace n ON n.nspname='codexia_auth'
+JOIN pg_roles r ON r.rolname='codexia_auth_runtime' AND n.nspowner=r.oid
+WHERE d.datname=current_database() AND r.rolcanlogin AND NOT r.rolsuper AND NOT r.rolcreatedb
+  AND NOT r.rolcreaterole AND NOT r.rolinherit AND NOT r.rolreplication AND NOT r.rolbypassrls
+  AND NOT EXISTS (SELECT FROM pg_auth_members WHERE member=r.oid OR roleid=r.oid)
+  AND NOT EXISTS (SELECT FROM pg_default_acl WHERE defaclrole=r.oid)
+  AND NOT EXISTS (SELECT FROM aclexplode(COALESCE(n.nspacl, acldefault('n',n.nspowner))) a WHERE a.grantee<>n.nspowner)
+  AND NOT EXISTS (SELECT FROM pg_depend dep WHERE dep.refclassid='pg_namespace'::regclass AND dep.refobjid=n.oid)
+  AND NOT EXISTS (SELECT FROM pg_class c WHERE c.relnamespace=n.oid)
+  AND NOT EXISTS (SELECT FROM pg_proc p WHERE p.pronamespace=n.oid)
+  AND NOT EXISTS (SELECT FROM pg_type t WHERE t.typnamespace=n.oid)
+SQL
+)"
+  [[ "$database" == "$expected_database" ]] || die 'Empty-auth resumption no longer matches the approved database or namespace'
+  application_schema require-ledger "$fingerprint"
+  assert_role_state
 }
 
 assert_role_security(){
@@ -259,7 +315,14 @@ SQL
     application_schema apply
     ;;
   verify-bootstrap-resume)
-    verify_bootstrap_resume "$4" "$5"
+    if [[ $# == 6 ]]; then
+      verify_empty_auth_resume "$4" "$5"
+    else
+      verify_bootstrap_resume "$4" "$5"
+    fi
+    ;;
+  verify-empty-auth-resume-held)
+    verify_empty_auth_resume "$4" "$5"
     ;;
   verify)
     IFS= read -r auth_password_b64 || die 'Auth password input is missing'
@@ -286,6 +349,7 @@ SQL
     ;;
   converge)
     if [[ $# == 5 ]]; then verify_bootstrap_resume "$4" "$5"; fi
+    if [[ $# == 6 ]]; then verify_empty_auth_resume "$4" "$5"; fi
     IFS= read -r auth_password_b64 || die 'Auth password input is missing'
     [[ "$auth_password_b64" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || die 'Auth password input is invalid'
     auth_password="$(printf '%s' "$auth_password_b64" | base64 --decode)" || die 'Auth password input is invalid'

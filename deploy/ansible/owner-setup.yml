@@ -20,15 +20,17 @@
     mode: '0700'
 
 - name: Initialize a verified new setup installation without issuing the grant
+  vars:
+    resume: "{{ codexia_expected_bootstrap_resume | default({}) }}"
   environment:
     CODEXIA_OWNER_SETUP_EXPECTED_ORIGIN: "{{ codexia_owner_setup_expected_origin | default('') }}"
     CODEXIA_OWNER_SETUP_EXPECTED_WEB_CLIENT_ID: "{{ codexia_owner_setup_expected_web_client_id | default('') }}"
     CODEXIA_OWNER_SETUP_EXPECTED_WEB_REDIRECT_URIS: "{{ codexia_owner_setup_expected_web_redirect_uris | default([]) | join(',') }}"
   ansible.builtin.command:
-    argv:
-      - "{{ home }}/.local/bin/codexia-owner-setup"
-      - --initialize
-      - "{{ codexia_auth_bootstrap_image }}"
+    argv: >-
+      {{ [home + '/.local/bin/codexia-owner-setup', '--initialize', codexia_auth_bootstrap_image]
+         + (['--resume-bootstrap', resume.clusterId + ':' + resume.databaseOid,
+             resume.migrationFingerprint] if resume else []) }}
     expand_argument_vars: false
   register: owner_setup_initialization
   changed_when: owner_setup_initialization.stdout != ''
