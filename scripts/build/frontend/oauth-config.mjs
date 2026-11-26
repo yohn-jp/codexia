@@ -4,10 +4,10 @@ const requiredSettings = Object.freeze([
   ['VITE_CODEXIA_OAUTH_CLIENT_ID', 'OAuth client ID'],
   ['VITE_CODEXIA_API_AUDIENCE', 'OAuth API audience'],
   ['VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI', 'Desktop redirect URI'],
-  ['VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI', 'Mobile redirect URI'],
 ]);
 const scopesSetting = 'VITE_CODEXIA_OAUTH_SCOPES';
-const configFormat = 'codexia-web-oauth-config/v1';
+const configFormat = 'codexia-web-oauth-config/v2';
+const legacyConfigFormat = 'codexia-web-oauth-config/v1';
 
 function configured(value) {
   return value !== undefined && value !== null && value !== '';
@@ -24,7 +24,7 @@ function trustedWebUrl(value, label) {
   return parsed;
 }
 
-/** Read and validate the public OAuth settings shared by both browser shells. */
+/** Read and validate the public OAuth settings for the Desktop browser shell. */
 export function readFrontendOAuthConfig(env = process.env) {
   const active = requiredSettings.some(([key]) => configured(env[key])) || configured(env[scopesSetting]);
   if (!active) return null;
@@ -44,8 +44,7 @@ export function readFrontendOAuthConfig(env = process.env) {
   }
   const audience = trustedWebUrl(env.VITE_CODEXIA_API_AUDIENCE, 'OAuth API audience');
   const desktopRedirect = trustedWebUrl(env.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI, 'Desktop redirect URI');
-  const mobileRedirect = trustedWebUrl(env.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI, 'Mobile redirect URI');
-  if (desktopRedirect.origin !== issuer.origin || mobileRedirect.origin !== issuer.origin) {
+  if (desktopRedirect.origin !== issuer.origin) {
     throw new Error('OAuth redirect URI must use the OAuth issuer origin.');
   }
 
@@ -59,7 +58,6 @@ export function readFrontendOAuthConfig(env = process.env) {
     clientId: env.VITE_CODEXIA_OAUTH_CLIENT_ID,
     apiAudience: env.VITE_CODEXIA_API_AUDIENCE,
     desktopRedirectUri: env.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI,
-    mobileRedirectUri: env.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI,
     scopes,
   });
 }
@@ -82,9 +80,10 @@ export function parsePublicFrontendConfigIdentity(serialized) {
   let value;
   try { value = JSON.parse(serialized); }
   catch { throw invalid(); }
-  if (!value || value.format !== configFormat) throw invalid();
+  if (!value || ![configFormat, legacyConfigFormat].includes(value.format)) throw invalid();
+  const { format } = value;
   if (value.settings === null) {
-    if (serialized !== frontendOAuthConfigIdentity({})) throw invalid();
+    if (serialized !== JSON.stringify({ format, settings: null })) throw invalid();
     return null;
   }
   const settings = value.settings;
@@ -99,11 +98,17 @@ export function parsePublicFrontendConfigIdentity(serialized) {
       VITE_CODEXIA_OAUTH_CLIENT_ID: settings.clientId,
       VITE_CODEXIA_API_AUDIENCE: settings.apiAudience,
       VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: settings.desktopRedirectUri,
-      VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: settings.mobileRedirectUri,
       VITE_CODEXIA_OAUTH_SCOPES: settings.scopes.join(' '),
     });
+    if (publicConfig && format === legacyConfigFormat) {
+      const { mobileRedirectUri } = settings;
+      if (typeof mobileRedirectUri !== 'string' || mobileRedirectUri !== mobileRedirectUri.trim() ||
+          trustedWebUrl(mobileRedirectUri, 'Mobile redirect URI').origin !== new URL(publicConfig.issuer).origin) throw invalid();
+      const { scopes, ...desktopConfig } = publicConfig;
+      publicConfig = { ...desktopConfig, mobileRedirectUri, scopes };
+    }
   } catch { throw invalid(); }
-  if (!publicConfig || JSON.stringify({ format: configFormat, settings: publicConfig }) !== serialized) throw invalid();
+  if (!publicConfig || JSON.stringify({ format, settings: publicConfig }) !== serialized) throw invalid();
   return publicConfig;
 }
 
