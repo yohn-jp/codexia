@@ -29,16 +29,8 @@ function writingTokens(mode: keyof typeof themeTokens) {
 }
 
 createGlobalTheme('.st-desktop-shell', shellVars, editorialShellTokens.light);
-createGlobalTheme(
-  ':root[data-zp-theme="dark"] .st-desktop-shell',
-  shellVars,
-  editorialShellTokens.dark,
-);
-createGlobalTheme(
-  ':root[data-zp-theme="paper"] .st-desktop-shell',
-  shellVars,
-  editorialShellTokens.paper,
-);
+createGlobalTheme(':root[data-zp-theme="dark"] .st-desktop-shell', shellVars, editorialShellTokens.dark);
+createGlobalTheme(':root[data-zp-theme="paper"] .st-desktop-shell', shellVars, editorialShellTokens.paper);
 createGlobalTheme('.st-studio-shell', shellVars, writingTokens('light'));
 createGlobalTheme(':root[data-zp-theme="dark"] .st-studio-shell', shellVars, writingTokens('dark'));
 createGlobalTheme(':root[data-zp-theme="paper"] .st-studio-shell', shellVars, writingTokens('paper'));

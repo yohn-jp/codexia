@@ -107,10 +107,12 @@ globalStyle('.st-workspace-storage-state,\n.st-workspace-message,\n.st-workspace
 });
 globalStyle('.st-workspace-warning', { color: 'var(--error-text)', background: 'var(--error-bg)' });
 globalStyle('.st-workspace-message', { color: 'var(--accent-strong)' });
-globalStyle(
-  '.st-workspace-layout,\n.st-workspace-split,\n.st-workspace-resizable-panel,\n.st-workspace-stack,\n.st-workspace-tab-panel',
-  { width: '100%', height: '100%', minWidth: '0', minHeight: '0' },
-);
+globalStyle('.st-workspace-layout,\n.st-workspace-split,\n.st-workspace-resizable-panel,\n.st-workspace-stack,\n.st-workspace-tab-panel', {
+  width: '100%',
+  height: '100%',
+  minWidth: '0',
+  minHeight: '0',
+});
 globalStyle('.st-workspace-layout', { flex: '1 1 auto', overflow: 'hidden' });
 globalStyle('.st-workspace-split', { display: 'flex', overflow: 'hidden', background: 'var(--paper)' });
 globalStyle('.st-workspace-split-child', { display: 'contents' });
