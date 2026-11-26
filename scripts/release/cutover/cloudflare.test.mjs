@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { buildFenceExpression, createCloudflareCutover, FENCE_RESPONSE } from './cloudflare.mjs';
+import { publishInitialFrontend } from '../../deployment/bootstrap/publish-frontend.mjs';
 
 const origin = 'https://cutover.example.com';
 const accountId = 'a'.repeat(32);
@@ -13,12 +14,10 @@ const oldVersion = '10000000-0000-4000-8000-000000000001';
 const newVersion = '10000000-0000-4000-8000-000000000002';
 const deploymentId = '10000000-0000-4000-8000-000000000003';
 const workerId = 'e'.repeat(32);
-const ownerSetupWorkerId = 'f'.repeat(32);
 const artifactDigest = 'sha256:' + 'e'.repeat(64);
 const workerPath = `/client/v4/accounts/${accountId}/workers/scripts/codexia-frontend`;
 const workerResource = `/client/v4/accounts/${accountId}/workers/workers/codexia-frontend`;
 const workerResourceById = `/client/v4/accounts/${accountId}/workers/workers/${workerId}`;
-const setupWorkerPath = `/client/v4/accounts/${accountId}/workers/scripts/codexia-owner-setup`;
 const accountPath = `/client/v4/accounts/${accountId}`;
 const zonePath = `/client/v4/zones/${zoneId}`;
 const rulesPath = `/client/v4/zones/${zoneId}/rulesets`;
@@ -42,7 +41,8 @@ function fixture() {
   const state = { enabled: false, preview: false, activeVersion: oldVersion, uploadTag: null, replyLost: false, alias: false, ipAllow: false,
     scriptAbsent: false, inventoryDenied: false, backendAbsent: false, frontendDenied: false,
     workerId, initialUpload: null, previousDeploymentEvidence: false, controlsChanged: false,
-    setupRoutes: false, setupPreview: false, setupAlias: false, setupTag: null, setupExposed: false,
+    setupRoutes: false, setupExposed: false,
+    candidateIdentity: null, rejectPromotion: false, uploadCount: 0,
     publicEpoch: 1, publicAuth: ['cookie-owner', 'bearer-read-compute-propose'] };
   const rule = () => ({
     id: fenceRuleId,
@@ -60,11 +60,13 @@ function fixture() {
     readToken: 'read-secret', workerToken: 'worker-secret', fenceToken: 'waf-secret',
     accessEnv: { CODEXIA_PUBLIC_ORIGIN: origin, CODEXIA_ACCESS_CLIENT_ID: 'identity-id', CODEXIA_ACCESS_CLIENT_SECRET: 'identity-secret' },
     uploadVersion: async ({ tag }) => {
+      state.uploadCount++;
       state.uploadTag = tag;
       return newVersion;
     },
     readInitialWorkerControls: async () => controlsSha256,
     uploadInitialVersion: async ({ workerId: targetWorker, tag, initialControls }) => {
+      state.uploadCount++;
       state.initialUpload = { targetWorker, tag, initialControls };
       state.uploadTag = tag;
       return newVersion;
@@ -80,6 +82,7 @@ function fixture() {
         }
         if (init.headers['CF-Access-Client-Id'] && target.pathname === '/desktop/update-identity.json') {
           if (state.frontendDenied) return new Response('Denied', { status: 403 });
+          if (state.candidateIdentity && state.activeVersion === newVersion) return Response.json(state.candidateIdentity);
           return Response.json({ format: 'codexia-frontend-identity/v1', version: '1.0.0', profile: 'full', sourceSha: 'f'.repeat(40), apiEpoch: 1 });
         }
         return new Response(state.enabled ? FENCE_RESPONSE.content : 'Cloudflare Access denied', { status: 403 });
@@ -97,11 +100,11 @@ function fixture() {
           ...(!state.scriptAbsent ? [{ id: state.workerId, name: 'codexia-frontend',
             deployed_on: state.activeVersion || state.previousDeploymentEvidence ? '2026-11-23T12:00:00Z' : null,
             subdomain: { enabled: false, previews_enabled: state.preview } }] : []),
-          ...(state.setupTag ? [{ id: ownerSetupWorkerId, name: 'codexia-owner-setup' }] : []),
         ]);
       }
       if (path === workerPath + '/deployments') {
         if (method === 'POST') {
+          if (state.rejectPromotion) return new Response('Unavailable', { status: 503 });
           state.activeVersion = writes.at(-1).body.versions[0].version_id;
           if (state.replyLost) throw new Error('connection reset');
         }
@@ -121,24 +124,13 @@ function fixture() {
         });
       }
       if (path === workerResourceById + '/versions/' + oldVersion) return apiResponse({ id: oldVersion, urls: [] });
-      if (path === setupWorkerPath + '/deployments') return apiResponse({ deployments: [{
-        id: deploymentId, created_on: '2026-11-23T12:00:00Z', strategy: 'percentage',
-        versions: [{ version_id: newVersion, percentage: 100 }],
-      }] });
-      if (path === setupWorkerPath + '/versions/' + newVersion) return apiResponse({ id: newVersion,
-        metadata: { hasPreview: false }, annotations: { 'workers/tag': state.setupTag } });
-      if (path === setupWorkerPath + '/subdomain') return apiResponse({ enabled: false, previews_enabled: state.setupPreview });
       if (path.endsWith('/firewall/access_rules/rules')) {
         return apiResponse(path.startsWith(zonePath) && state.ipAllow ? [{ mode: 'whitelist' }] : []);
       }
       if (path === zonePath + '/dns_records') return apiResponse([{ id: 'f'.repeat(32), name: hostname, proxied: true, type: 'CNAME', content: tunnelId + '.cfargotunnel.com' }]);
       if (path === zonePath + '/workers/routes') {
         if (state.setupRoutes) return apiResponse([
-          ...['/console/setup', '/console/setup/', '/console/setup/assets/*'].map(route => ({
-            pattern: hostname + route, script: 'codexia-owner-setup',
-          })),
-          ...(!state.scriptAbsent ? [{ pattern: hostname + '/desktop/update-identity.json', script: 'codexia-frontend' }] : []),
-          ...(state.setupAlias ? [{ pattern: 'alias.example.com/*', script: 'codexia-owner-setup' }] : []),
+          { pattern: hostname + '/console/setup', script: 'unexpected-setup-worker' },
         ]);
         if (state.scriptAbsent) return apiResponse([]);
         const routes = [{ pattern: hostname + '/*', script: 'codexia-frontend' },
@@ -175,33 +167,20 @@ function fixture() {
   return { client, state, writes };
 }
 
-test('lifecycle observes only the exact certified limited owner setup without a normal frontend', async () => {
+test('owner enrollment uses the normal Worker routes and rejects a distinct setup route', async () => {
   const { client, state, writes } = fixture();
-  state.scriptAbsent = true;
   state.backendAbsent = true;
-  state.setupRoutes = true;
-  state.setupTag = 'owner-setup-' + artifactDigest.slice(7);
-  const request = { backendExpected: false, ownerSetupArtifactDigest: artifactDigest.slice(7) };
+  const request = { backendExpected: false, ownerSetup: true };
   const result = await client.observeLifecycle(request);
-  assert.equal(result.frontendState, 'absent');
-  assert.equal(result.routesReady, false);
+  assert.equal(result.frontendState, 'running');
+  assert.equal(result.routesReady, true);
   assert.equal(result.publicProtocolEnabled, false);
-  assert.deepEqual(result.ownerSetup, { deploymentId, versionId: newVersion, artifactDigest: request.ownerSetupArtifactDigest });
-  await assert.rejects(client.observeLifecycle({ ...request, ownerSetupArtifactDigest: 'a'.repeat(64) }), /setup.*artifact/iu);
-  await assert.rejects(client.assertOwnerSetupDetached(), /setup/iu);
+  assert.equal(result.deployment.versionId, oldVersion);
+  state.setupRoutes = true;
+  await assert.rejects(client.observeLifecycle(request), /alternate ingress/u);
+  state.setupRoutes = false;
   state.setupExposed = true;
   await assert.rejects(client.observeLifecycle(request), /ACCESS_BOUNDARY/u);
-  state.setupExposed = false;
-  state.scriptAbsent = false;
-  const previous = await client.observeLifecycle(request);
-  assert.equal(previous.frontendState, 'running');
-  assert.equal(previous.deployment.versionId, oldVersion);
-  assert.deepEqual(previous.ownerSetup, result.ownerSetup);
-  state.setupAlias = true;
-  await assert.rejects(client.observeLifecycle(request), /alternate ingress/u);
-  state.setupAlias = false;
-  state.setupPreview = true;
-  await assert.rejects(client.observeLifecycle(request), /preview URLs/u);
   assert.deepEqual(writes, []);
 });
 
@@ -354,4 +333,86 @@ test('lifecycle observation preserves legacy backend identity and does not infer
   assert.equal(observed.backend.apiEpoch, 1);
   assert.equal(observed.backend.standaloneOAuth, false);
   assert.deepEqual(writes, []);
+});
+
+// Execute the same R5 publication controller and Cloudflare adapter used by the
+// protected dispatch, with only the external HTTP/upload/record boundaries replaced.
+const enrollmentCandidate = {
+  identity: { format: 'codexia-frontend-identity/v1', sourceSha: 'a'.repeat(40),
+    version: '1.2.3', profile: 'full', apiEpoch: 3 },
+  artifactDigest: artifactDigest.slice(7), artifactId: 70, runId: 80, producerAttempt: 2,
+};
+
+async function enrollmentFixture({ empty = false } = {}) {
+  const f = fixture();
+  f.state.backendAbsent = true;
+  f.state.candidateIdentity = enrollmentCandidate.identity;
+  if (empty) f.state.activeVersion = null;
+  const records = [];
+  const observe = () => f.client.observeLifecycle({ backendExpected: false, ownerSetup: true });
+  const publish = async (overrides = {}) => publishInitialFrontend({
+    edge: f.client, observed: await observe(), candidate: enrollmentCandidate,
+    assertCurrentSource: async () => {}, recordRelease: async record => records.push(record),
+    ...overrides,
+  });
+  return { ...f, records, observe, publish };
+}
+
+test('R5 publishes the first version of the canonical private Worker and records its certified source', async () => {
+  const f = await enrollmentFixture({ empty: true });
+  assert.deepEqual(await f.publish(), { deployed: true, releaseTag: 'frontend-v1.2.3' });
+  assert.equal(f.state.initialUpload.targetWorker, workerId);
+  assert.equal(f.state.activeVersion, newVersion);
+  assert.equal(f.state.uploadCount, 1);
+  assert.deepEqual(f.writes.map(({ method, auth }) => [method, auth]), [['POST', 'Bearer worker-secret']]);
+  assert.equal(f.records[0].targetSha, enrollmentCandidate.identity.sourceSha);
+  assert.equal(f.records[0].metadata.worker, 'codexia-frontend');
+  assert.equal(f.records[0].metadata.requiredApiEpoch, 3);
+  assert.equal(f.state.enabled, false);
+});
+
+test('R5 replaces only the observed older Worker version and reconciles a lost promotion response', async () => {
+  const f = await enrollmentFixture();
+  f.state.replyLost = true;
+  assert.equal((await f.publish()).deployed, true);
+  assert.equal(f.state.initialUpload, null);
+  assert.equal(f.state.uploadCount, 1);
+  assert.equal(f.state.activeVersion, newVersion);
+  assert.equal(f.records.length, 1);
+  assert.equal(f.writes.length, 1);
+  assert.equal((await f.publish()).deployed, false);
+  assert.equal(f.state.uploadCount, 1);
+  assert.equal(f.writes.length, 1);
+  assert.deepEqual(f.records[1], f.records[0]);
+});
+
+test('R5 never records failed publication; retries an already active version when recording failed', async () => {
+  const f = await enrollmentFixture({ empty: true });
+  f.state.rejectPromotion = true;
+  await assert.rejects(f.publish());
+  assert.equal(f.state.activeVersion, null);
+  assert.equal(f.records.length, 0);
+  f.state.rejectPromotion = false;
+  await assert.rejects(f.publish({ recordRelease: async () => { throw new Error('record unavailable'); } }), /record unavailable/u);
+  assert.equal(f.state.activeVersion, newVersion);
+  const uploads = f.state.uploadCount;
+  const writes = f.writes.length;
+  assert.equal((await f.publish()).deployed, false);
+  assert.equal(f.state.uploadCount, uploads);
+  assert.equal(f.writes.length, writes);
+  assert.equal(f.records.length, 1);
+});
+
+test('R5 refuses changed ingress before promotion and never records an unverified candidate', async () => {
+  const f = await enrollmentFixture();
+  let sourceChecks = 0;
+  await assert.rejects(f.publish({ assertCurrentSource: async () => {
+    if (++sourceChecks === 2) f.state.alias = true;
+  } }), /alternate ingress/u);
+  assert.equal(f.writes.length, 0);
+  assert.equal(f.records.length, 0);
+  f.state.alias = false;
+  f.state.candidateIdentity = { ...enrollmentCandidate.identity, apiEpoch: 2 };
+  await assert.rejects(f.publish(), /API epoch|identity|immutable/u);
+  assert.equal(f.records.length, 0);
 });

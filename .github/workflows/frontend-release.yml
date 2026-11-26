@@ -1,5 +1,23 @@
 name: Codexia UI Static Assets
 on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: Certified install candidate pair JSON from lifecycle Preflight
+        required: true
+        type: string
+      preflight_run_id:
+        description: Reviewed runtime lifecycle Preflight run ID
+        required: true
+        type: string
+      plan_sha256:
+        description: Reviewed lifecycle plan SHA-256
+        required: true
+        type: string
+      approval_phrase:
+        description: PUBLISH_INITIAL_FRONTEND
+        required: true
+        type: string
   pull_request:
     branches: [main]
     paths:
@@ -54,7 +72,6 @@ on:
       - scripts/release/frontend/promotion-handoff.test.mjs
       - scripts/build/frontend/oauth-config.mjs
       - scripts/build/frontend/oauth-config.test.mjs
-      - scripts/build/frontend/owner-setup-assets.mjs
       - scripts/release/components/record-model*.mjs
       - scripts/ci/certification/reuse-merged-pr*.mjs
       - scripts/release/frontend/verify-compatibility*.mjs
@@ -258,8 +275,6 @@ jobs:
         run: node edge/frontend/test/static-smoke.mjs
       - name: Exercise OAuth authorization from static browser shells
         run: node edge/frontend/test/oauth-static-smoke.mjs
-      - name: Exercise the isolated owner setup assets in the browser
-        run: node edge/frontend/test/owner-setup-static-smoke.mjs
       - name: Identify immutable frontend artifact for this producer attempt
         id: producer
         env:
@@ -385,3 +400,138 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_FRONTEND_VERIFY_RUN_ID: ${{ needs.preflight.outputs.producer-verify-run-id || needs.source.outputs.verify-run-id }}
         run: node scripts/release/components/record.mjs frontend
+
+  initial-frontend:
+    name: Publish canonical frontend for initial owner enrollment
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: codexia-production
+    concurrency:
+      group: codexia-production
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: write
+      actions: read
+      packages: read
+      id-token: write
+    steps:
+      - name: Require current main and reviewed publication approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPROVAL: ${{ inputs.approval_phrase }}
+          PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
+          PREFLIGHT_RUN: ${{ inputs.preflight_run_id }}
+          PLAN_SHA: ${{ inputs.plan_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$APPROVAL" == PUBLISH_INITIAL_FRONTEND && "$PAUSED" != true ]]
+          [[ "$PREFLIGHT_RUN" =~ ^[1-9][0-9]{0,15}$ && "$PLAN_SHA" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" == "$GITHUB_SHA" ]]
+      - name: Resolve the exact protected Preflight producer and attempt
+        id: preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREFLIGHT_RUN: ${{ inputs.preflight_run_id }}
+        run: |
+          set -euo pipefail
+          attempt=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREFLIGHT_RUN" |
+            jq -er --arg repo "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" '
+              select(.repository.full_name == $repo and .head_repository.full_name == $repo and
+                .event == "workflow_dispatch" and .head_branch == "main" and .head_sha == $sha and
+                .path == ".github/workflows/production-preflight.yml" and .status == "completed") |
+              .run_attempt | select(type == "number" and . > 0)')
+          echo "attempt=$attempt" >> "$GITHUB_OUTPUT"
+      - name: Download the reviewed redacted lifecycle plan
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: lifecycle-preflight-${{ inputs.preflight_run_id }}-${{ steps.preflight.outputs.attempt }}
+          path: ${{ runner.temp }}/reviewed-preflight
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.preflight_run_id }}
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install frozen evidence-reader dependencies
+        run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
+      - name: Install pinned Wrangler
+        run: npm ci --prefix edge/frontend
+      - name: Install pinned Terraform for the first version of the normal Worker
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: 1.17.2
+          terraform_wrapper: false
+      - uses: docker/login-action@v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Read certified source and candidate artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
+          CODEXIA_PREFLIGHT_REQUEST: ${{ inputs.request }}
+          VITE_CODEXIA_OAUTH_ISSUER: ${{ vars.VITE_CODEXIA_OAUTH_ISSUER }}
+          VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
+          VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
+          VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
+        run: node scripts/deployment/preflight/run.mjs candidate
+      - name: Prepare runtime pinned SSH
+        id: runtime
+        env:
+          CODEXIA_DEPLOY_HOST: ${{ vars.CODEXIA_DEPLOY_HOST }}
+          CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
+          CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}
+        run: bash deploy/ansible/prepare-deploy-ssh.sh
+      - name: Connect the existing protected management plane
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: api.tailscale.com/Ts4P9VFjmJ11CNTRL-khX5P9DgL421CNTRL
+          tags: tag:ci
+          ping: ${{ steps.runtime.outputs.host }}
+      - name: Prepare the pinned read-only Ansible inventory
+        env:
+          SSH_USER: codexia
+        run: |
+          set -euo pipefail
+          bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt
+          echo "$RUNNER_TEMP/codexia-ansible/bin" >> "$GITHUB_PATH"
+          cat > "$RUNNER_TEMP/codexia-preflight-inventory.yml" <<EOF_INVENTORY
+          all:
+            hosts:
+              codexia:
+                ansible_host: codexia-target
+                ansible_user: $SSH_USER
+                ansible_ssh_use_tty: false
+                ansible_ssh_common_args: '-F "$RUNNER_TEMP/codexia-ssh/config"'
+          EOF_INVENTORY
+      - name: Observe existing host evidence
+        env:
+          CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.runtime.outputs.host }}
+        run: node scripts/deployment/preflight/run.mjs host
+      - name: Admit reviewed R5 and publish the canonical frontend
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_PREFLIGHT_REQUEST: ${{ inputs.request }}
+          CODEXIA_CUTOVER_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_CUTOVER_CLOUDFLARE_TARGET }}
+          CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN }}
+          CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
+          CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
+          CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
+          CODEXIA_CUTOVER_PRESERVATION: ${{ secrets.CODEXIA_CUTOVER_PRESERVATION }}
+          CODEXIA_INITIAL_FRONTEND_APPROVAL: ${{ inputs.approval_phrase }}
+          CODEXIA_BOOTSTRAP_PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+          CODEXIA_BOOTSTRAP_PREFLIGHT_ATTEMPT: ${{ steps.preflight.outputs.attempt }}
+          CODEXIA_BOOTSTRAP_PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          CODEXIA_EPOCH_CUTOVER_PAUSED: ${{ vars.CODEXIA_EPOCH_CUTOVER_PAUSED }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/deployment/preflight/run.mjs initial-frontend

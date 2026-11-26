@@ -179,13 +179,14 @@ async function planObservation({ bootstrapMode } = {}) {
       ...config,
       origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
       readToken: env.CODEXIA_CUTOVER_CLOUDFLARE_READ_TOKEN,
+      ...(bootstrapMode === 'publish-frontend' ? { workerToken: env.CLOUDFLARE_API_TOKEN } : {}),
     });
     let edge = null;
     try {
       edge = await edgeReader.observeLifecycle({
         backendExpected: host.backend?.state === 'running' ||
           (host.backend?.databaseAbsent === true && host.topology?.containers?.['codexia-api'] === true),
-        ownerSetupArtifactDigest: candidateFrontend.artifactDigest,
+        ownerSetup: ['pending', 'unprepared'].includes(host.database?.authState),
       });
     } catch { /* failed or unauthorized observation is never absence */ }
     stage = 'plan';
@@ -197,7 +198,7 @@ async function planObservation({ bootstrapMode } = {}) {
     await mainSource();
     if (bootstrapMode) {
       stage = 'bootstrap-admission';
-      const { admitBootstrap, ownerSetupFrontendBindings } = await import('../bootstrap/admission.mjs');
+      const { admitBootstrap, ownerSetupFrontendBindings, assertInitialFrontendReady } = await import('../bootstrap/admission.mjs');
       const { plan } = result;
       if (bootstrapMode !== 'bootstrap') {
         assert.equal(host.database.setupImage, candidateBackend.image, 'Owner setup must use the certified installation image');
@@ -215,10 +216,29 @@ async function planObservation({ bootstrapMode } = {}) {
         topology: host.topology,
         initializeDatabase: env.CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED === 'true',
       });
+      if (bootstrapMode === 'publish-frontend') {
+        assert.equal(env.CODEXIA_INITIAL_FRONTEND_APPROVAL, 'PUBLISH_INITIAL_FRONTEND');
+        assert.notEqual(env.CODEXIA_EPOCH_CUTOVER_PAUSED, 'true', 'Production deployment is paused');
+        assert.equal(request.intent, 'install');
+        assert.ok(env.CLOUDFLARE_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID === config.accountId,
+          'Canonical Worker publication credential and account must match the protected target');
+        ownerSetupFrontendBindings(candidateFrontend.identity.oauthConfigIdentity, edge.origin);
+        stage = 'canonical-frontend-publication';
+        const { publishInitialFrontend } = await import('../bootstrap/publish-frontend.mjs');
+        const { recordComponentRelease } = await import('../../release/components/record.mjs');
+        await publishInitialFrontend({ edge: edgeReader, observed: edge, candidate: candidateFrontend,
+          assertCurrentSource: mainSource,
+          recordRelease: release => recordComponentRelease(release, { github: createGitHubOctokit({ token: env.GH_TOKEN }) }),
+        });
+        console.log('Certified canonical frontend and immutable release record verified for initial owner enrollment');
+        return;
+      }
       if (bootstrapMode === 'owner-setup') {
-        assert.equal(edge?.publicProtocolEnabled, false, 'Public OAuth/MCP must be disabled for limited setup');
-        assert.equal(edge.ownerSetup?.artifactDigest, candidateFrontend.artifactDigest,
-          'The limited setup route must serve the certified frontend assets');
+        assertInitialFrontendReady(edge, candidateFrontend.identity);
+        const { initialFrontendRelease } = await import('../bootstrap/publish-frontend.mjs');
+        const { assertComponentReleaseRecorded } = await import('../../release/components/record.mjs');
+        await assertComponentReleaseRecorded(initialFrontendRelease(candidateFrontend),
+          { github: createGitHubOctokit({ token: env.GH_TOKEN }) });
       }
       const overrides = bootstrapMode === 'bootstrap' ? {
         codexia_bootstrap_stages: admission.stages,
@@ -254,7 +274,7 @@ async function planObservation({ bootstrapMode } = {}) {
   } catch {
     await writeFile(output(), JSON.stringify({ ...binding, format: 'codexia-lifecycle-preflight-failure/v1',
       route: 'R0', reason: stage, observedAt: new Date().toISOString() }) + '\n', { mode: 0o600, flag: 'wx' });
-    console.error('Read-only lifecycle preflight stopped at ' + stage);
+    console.error('Lifecycle operation stopped at ' + stage);
     process.exitCode = 1;
   }
 }
@@ -265,12 +285,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     else if (process.argv[2] === 'host') await hostObservation();
     else if (process.argv[2] === 'plan') await planObservation();
     else if (process.argv[2] === 'bootstrap-host') await hostObservation({ bootstrap: true });
+    else if (process.argv[2] === 'initial-frontend') await planObservation({ bootstrapMode: 'publish-frontend' });
     else if (process.argv[2] === 'bootstrap-admission') await planObservation({
       bootstrapMode: env.CODEXIA_BOOTSTRAP_MODE,
     });
     else throw new Error('Unknown lifecycle preflight operation');
   } catch {
-    console.error('Protected lifecycle observation unavailable; no mutation performed');
+    console.error('Protected lifecycle operation failed');
     process.exitCode = 1;
   }
 }

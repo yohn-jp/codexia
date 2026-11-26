@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { isDeepStrictEqual } from 'node:util';
+import { assertFrontendReleaseAdmission } from '../../release/frontend/verify-compatibility.mjs';
 import { parsePublicFrontendConfigIdentity } from '../../build/frontend/oauth-config.mjs';
 import { assertDeploymentPlanApproval, assertFreshObservationTime } from '../preflight/plan.mjs';
 
@@ -6,7 +8,7 @@ const stages = ['host', 'secrets', 'base', 'auth-runtime'];
 
 export function admitBootstrap({ mode, plan, planSha256, current, topology,
   initializeDatabase = false, now = new Date() }) {
-  const route = { bootstrap: 'R4', 'owner-setup': 'R5', 'prepare-activation': 'R5' }[mode];
+  const route = { bootstrap: 'R4', 'publish-frontend': 'R5', 'owner-setup': 'R5', 'prepare-activation': 'R5' }[mode];
   assert.ok(route, 'Unsupported bootstrap admission mode');
   assertFreshObservationTime(current.observation.observedAt, { now });
   assert.ok(Date.parse(plan?.observation?.observedAt) <= Date.parse(current.observation.observedAt),
@@ -21,8 +23,10 @@ export function admitBootstrap({ mode, plan, planSha256, current, topology,
 
   const state = plan.observation.state;
   if (route === 'R5') {
-    const expected = mode === 'owner-setup' ? 'pending' : 'unprepared';
+    const expected = mode === 'prepare-activation' ? 'unprepared' : 'pending';
     assert.equal(state.A, expected, 'Observed owner state does not admit this operation');
+    assert.ok(state.H === 'ready' && state.D === 'compatible' && ['absent', 'setup'].includes(state.B),
+      'Owner operation requires a ready host, compatible database and no ordinary API writer');
     return { route, stages: [], installIntent: false };
   }
   if (plan.observation.bootstrapResume) return { route, stages: ['auth-runtime'], installIntent: true };
@@ -51,4 +55,24 @@ export function ownerSetupFrontendBindings(identity, origin) {
     codexia_owner_setup_expected_web_client_id: settings.clientId,
     codexia_owner_setup_expected_web_redirect_uris: redirects,
   };
+}
+
+/** R5 has its own exact-plan admission; the ordinary release gate is unchanged. */
+export function initialFrontendNeedsPublication(edge, candidate) {
+  assert.ok(edge?.routesReady && edge.publicProtocolEnabled === false &&
+    edge.fence?.enabled === false && edge.backend === null,
+  'Initial frontend requires protected canonical ingress and no ordinary API writer');
+  if (edge.frontendState === 'absent') {
+    assert.equal(edge.deployment, null, 'Frontend absence must be positively observed');
+    return true;
+  }
+  assert.ok(edge.frontendState === 'running' && edge.deployment && edge.frontend,
+    'Existing frontend identity must be observed');
+  return assertFrontendReleaseAdmission(edge.frontend, candidate);
+}
+
+export function assertInitialFrontendReady(edge, candidate) {
+  assert.equal(initialFrontendNeedsPublication(edge, candidate), false,
+    'The canonical frontend must serve the certified candidate');
+  assert.ok(isDeepStrictEqual(edge.frontend, candidate), 'Live frontend differs from the certified identity');
 }

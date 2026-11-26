@@ -89,6 +89,15 @@
         codexia_stage == 'host' or
         (codexia_stage == 'bootstrap' and 'host' in (codexia_bootstrap_stages | default(['host', 'secrets', 'base', 'auth-runtime'])))
 
+    - name: Converge the protected runtime SSH key when the existing host stage is not required
+      ansible.builtin.include_tasks: deploy-ssh-key.yml
+      when:
+        - codexia_stage == 'bootstrap'
+        - codexia_bootstrap_stages is defined
+        - "'host' not in codexia_bootstrap_stages"
+        - codexia_deploy_ssh_public_key is defined
+        - codexia_host_approved | default(false) | bool
+
     - name: Install only explicitly authorized base credentials
       ansible.builtin.include_tasks:
         file: base-secrets.yml

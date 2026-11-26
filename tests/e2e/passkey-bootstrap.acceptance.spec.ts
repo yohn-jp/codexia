@@ -18,7 +18,7 @@ test("Passkey-first Better Auth acceptance uses real WebAuthn and PostgreSQL", a
       CODEXIA_AUTH_TEST_DATABASE_URL: databaseUrl,
       CODEXIA_AUTH_TEST_DISPOSABLE: "1",
       CODEXIA_PASSKEY_ACCEPTANCE: "1",
-      CODEXIA_PASSKEY_SETUP_UI_DIST: fileURLToPath(new URL("../../app/dist/console/setup/", import.meta.url)),
+      CODEXIA_PASSKEY_SETUP_UI_DIST: fileURLToPath(new URL("../../app/dist/desktop/", import.meta.url)),
     },
     encoding: "utf8",
     timeout: 210_000,

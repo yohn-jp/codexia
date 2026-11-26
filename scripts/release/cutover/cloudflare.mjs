@@ -12,11 +12,10 @@ import { readRegularFile } from '../../shared/read-regular-file.mjs';
 import { assertProbeDenied, IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, readLiveJson } from '../../verification/infrastructure/identity-probe-client.mjs';
 
 const readConfig = async name => JSON.parse(await readFile(new URL(`../../../deploy/cloudflare/${name}.json`, import.meta.url), 'utf8'));
-const [identities, routes, protocols, setup] = await Promise.all([
+const [identities, routes, protocols] = await Promise.all([
   readConfig('identity-probes'),
   readConfig('ui-routes'),
   readConfig('public-protocol-paths'),
-  readConfig('owner-setup'),
 ]);
 const worker = 'codexia-frontend';
 const publicationControls = ['_headers', '_redirects'];
@@ -32,11 +31,6 @@ const fenceDescription = 'Codexia maintenance fence';
 export const FENCE_RESPONSE = Object.freeze({ status_code: 403, content_type: 'text/plain', content: fenceDescription });
 const api = 'https://api.cloudflare.com/client/v4';
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
-
-export function ownerSetupArtifactTag(digest) {
-  assert.ok(typeof digest === 'string' && /^[a-f0-9]{64}$/u.test(digest), 'Owner setup artifact digest is invalid');
-  return `owner-setup-${digest}`;
-}
 
 function parseOrigin(origin) {
   let parsed;
@@ -195,7 +189,6 @@ export function createCloudflareCutover({
   const accountPath = `/accounts/${accountId}`;
   const zonePath = `/zones/${zoneId}`;
   const workerPath = `${accountPath}/workers/scripts/${worker}`;
-  const setupWorkerPath = `${accountPath}/workers/scripts/${setup.worker}`;
 
   async function request(label, path, { method = 'GET', token = readToken, body } = {}) {
     assert.ok(typeof token === 'string' && token.length > 0 && token.trim() === token, `Missing Cloudflare credential for ${label}`);
@@ -251,10 +244,6 @@ export function createCloudflareCutover({
 
   function assertPrivateWorker(settings) {
     assert.ok(settings?.enabled === false && settings?.previews_enabled === false, 'Worker subdomain and preview URLs must be disabled');
-  }
-
-  async function assertPrivateSetupWorker() {
-    assertPrivateWorker(await result('Owner setup Worker subdomain settings', `${setupWorkerPath}/subdomain`));
   }
 
   async function readVersion(versionId, path, { includeModules = false } = {}) {
@@ -366,8 +355,8 @@ export function createCloudflareCutover({
     return initial ? { ...staged, initialControls } : staged;
   }
 
-  async function deploy({ fromVersionId, toVersionId }) {
-    assert.ok((await observeFence()).enabled, 'Cloudflare maintenance fence must be active before switching the Worker');
+  async function promoteVersion({ fromVersionId, toVersionId }, assertBoundary) {
+    await assertBoundary(false);
     const [before] = await Promise.all([observeDeployment({ allowAbsent: true }), readNormalVersion(toVersionId)]);
     if (before?.versionId === toVersionId) return before;
     assert.ok((fromVersionId === null || uuid.test(fromVersionId)) && (before?.versionId ?? null) === fromVersionId, 'Cloudflare has an unexpected live Worker version');
@@ -381,8 +370,34 @@ export function createCloudflareCutover({
     }
     const after = await observeDeployment();
     assert.ok(after.versionId === toVersionId, 'Cloudflare did not confirm the requested Worker version at 100%');
-    assert.ok((await observeFence()).enabled, 'Cloudflare maintenance fence changed while switching the Worker');
+    await assertBoundary(true);
     return after;
+  }
+
+  async function deploy(input) {
+    return promoteVersion(input, async after => {
+      assert.ok((await observeFence()).enabled, after
+        ? 'Cloudflare maintenance fence changed while switching the Worker'
+        : 'Cloudflare maintenance fence must be active before switching the Worker');
+    });
+  }
+
+  // The R5 controller has already admitted a certified fresh installation.
+  // Reuse the immutable version uploader and promotion sink without toggling
+  // a maintenance fence; the normal Access topology is required throughout.
+  async function deployForOwnerEnrollment({ observed, staged, artifactDigest }) {
+    assert.ok(observed?.workerId && observed.routesReady && observed.publicProtocolEnabled === false &&
+      observed.fence?.enabled === false && observed.backend === null, 'Owner enrollment requires protected canonical ingress');
+    await assertWorkerArtifact({ ...staged, artifactDigest, initialWorkerId: observed.workerId });
+    const fromVersionId = observed.deployment?.versionId ?? null;
+    const toVersionId = staged.versionId;
+    return promoteVersion({ fromVersionId, toVersionId }, async after => {
+      const current = await observeLifecycle({ backendExpected: false, ownerSetup: true });
+      assert.ok(current.routesReady && current.ingressDigest === observed.ingressDigest &&
+        current.workerId === observed.workerId, 'Canonical ingress changed during owner enrollment publication');
+      if (!after) assert.deepEqual(current.deployment, observed.deployment, 'Approved Worker deployment changed before publication');
+      else assert.equal(current.deployment?.versionId, toVersionId, 'Owner enrollment Worker version changed after publication');
+    });
   }
 
   async function verifyFenced() {
@@ -433,18 +448,7 @@ export function createCloudflareCutover({
     assert.ok(allowLists.every(items => items.length === 0), 'Cloudflare IP Access Allow rules can skip the maintenance fence');
   }
 
-  async function observeOwnerSetup(artifactDigest) {
-    const tag = ownerSetupArtifactTag(artifactDigest);
-    const [deployment] = await Promise.all([
-      observeDeployment({ path: setupWorkerPath }), assertPrivateSetupWorker(),
-    ]);
-    const version = await readVersion(deployment.versionId, setupWorkerPath);
-    assert.ok(version.annotations?.['workers/tag'] === tag && version.metadata?.hasPreview !== true,
-      'Owner setup Worker version does not match the certified artifact');
-    return { deploymentId: deployment.id, versionId: version.id, artifactDigest };
-  }
-
-  async function observeIngress({ lifecycle = false, ownerSetupArtifactDigest } = {}) {
+  async function observeIngress({ lifecycle = false } = {}) {
     assert.ok(uuid.test(authorPolicyId) && uuid.test(ciPolicyId) && authorPolicyId !== ciPolicyId &&
       typeof publicProtocolEnabled === 'boolean' && /^[a-z0-9-]+$/u.test(tunnelTeamName ?? ''),
     'Access policy IDs, Tunnel team and protocol ingress setting must be pinned');
@@ -458,7 +462,6 @@ export function createCloudflareCutover({
     const workers = await readWorkerInventory();
     const normalWorker = workers.find(item => item.name === worker);
     const scriptPresent = normalWorker !== undefined;
-    const setupScriptPresent = workers.some(item => item.name === setup.worker);
     assert.ok(lifecycle || scriptPresent, 'Expected an existing normal Worker');
     if (normalWorker) {
       assertPrivateWorker(normalWorker.subdomain);
@@ -468,36 +471,27 @@ export function createCloudflareCutover({
       result('Worker routes', `${zonePath}/workers/routes`),
       Promise.all([
         list('Worker custom domains', `${accountPath}/workers/domains?service=${worker}`),
-        list('Owner setup Worker custom domains', `${accountPath}/workers/domains?service=${setup.worker}`),
         list('Worker custom domains for application', `${accountPath}/workers/domains?hostname=${host}`),
       ]),
       list('Access applications', `${accountPath}/access/apps`),
       result('Tunnel configuration', `${accountPath}/cfd_tunnel/${tunnelId}/configurations`),
       scriptPresent ? observeDeployment({ allowAbsent: lifecycle }) : null, observeFence(),
       assertNoFenceSkippingIpRules(),
-      setupScriptPresent ? assertPrivateSetupWorker() : null,
     ]);
     assert.ok(dns.length === 1 && dns[0].name === host && dns[0].proxied === true && dns[0].type === 'CNAME' &&
       dns[0].content === `${tunnelId}.cfargotunnel.com`, 'Application DNS must be the pinned proxied Tunnel CNAME');
     assert.ok(domains.every(items => items.length === 0), 'Worker custom domains permit alternate ingress');
     assert.ok(Array.isArray(workerRoutes), 'Cloudflare Worker route inventory is invalid');
-    const relevantRoutes = workerRoutes.filter(route => [worker, setup.worker].includes(route.script) || allowsHostname(route.pattern, host));
-    const setupAttached = relevantRoutes.some(route => route.script === setup.worker);
-    assert.ok(!setupAttached || (lifecycle && setupScriptPresent && !publicProtocolEnabled && !fence.enabled),
-      'Owner setup ingress requires the protected limited topology with public protocols disabled');
+    const relevantRoutes = workerRoutes.filter(route => route.script === worker || allowsHostname(route.pattern, host));
     const canonicalRoutes = [
       ...routes.routes.map(path => ({ pattern: host + path, script: worker })),
       ...routes.originRoutes.map(path => ({ pattern: host + path, script: null })),
     ];
-    const routePlan = setupAttached ? [
-      ...setup.routes.map(path => ({ pattern: host + path, script: setup.worker })),
-      ...(deployment ? [{ pattern: host + identities.frontend.path, script: worker }] : []),
-    ] : lifecycle && deployment === null && relevantRoutes.length === 0 ? [] : canonicalRoutes;
-    assert.ok(setupAttached || scriptPresent || routePlan.length === 0, 'Normal frontend routes require an existing Worker');
+    const routePlan = lifecycle && deployment === null && relevantRoutes.length === 0 ? [] : canonicalRoutes;
+    assert.ok(scriptPresent || routePlan.length === 0, 'Normal frontend routes require an existing Worker');
     assert.deepEqual(relevantRoutes.map(route => ({ pattern: route.pattern, script: route.script ?? null }))
       .sort((a, b) => a.pattern.localeCompare(b.pattern)), routePlan.sort((a, b) => a.pattern.localeCompare(b.pattern)),
     'Worker routes expose alternate ingress or differ from the canonical routing contract');
-    const ownerSetup = setupAttached ? await observeOwnerSetup(ownerSetupArtifactDigest) : null;
 
     const relevantApps = applications.filter(app => [app.domain, ...(app.self_hosted_domains ?? []),
       ...(app.destinations ?? []).filter(destination => destination.type === 'public').map(destination => destination.uri),
@@ -546,19 +540,12 @@ export function createCloudflareCutover({
     const topology = { dns: dns[0].id, workerId, workerRoutes: routePlan,
       access: relevantPolicies.sort((a, b) => a.path.localeCompare(b.path)), tunnel: tunnel.config,
       fence: { rulesetId: fence.rulesetId, ruleId: fence.ruleId, expression },
-      ...(ownerSetup ? { ownerSetup } : {}),
     };
     const ingressDigest = `sha256:${createHash('sha256').update(JSON.stringify(canonical(topology))).digest('hex')}`;
     return { observedAt: new Date().toISOString(), origin: target.origin, deployment, fence, ingressDigest,
       ...(lifecycle ? { scriptPresent, workerId, workerNeverDeployed: normalWorker?.deployed_on === null,
-        routesReady: !setupAttached && scriptPresent && routePlan.length > 0,
-        setupScriptPresent, ownerSetup, publicProtocolEnabled } : {}) };
-  }
-
-  async function assertOwnerSetupDetached() {
-    const ingress = await observeIngress({ lifecycle: true });
-    assert.ok(!ingress.ownerSetup && !ingress.fence.enabled, 'Owner setup Worker must be detached outside maintenance');
-    return ingress;
+        routesReady: scriptPresent && routePlan.length > 0,
+        publicProtocolEnabled } : {}) };
   }
 
   async function observe({ allowLegacyBackend = false } = {}) {
@@ -576,9 +563,9 @@ export function createCloudflareCutover({
     return { ...ingress, backend: live.backend, frontend: live.deployed };
   }
 
-  async function observeLifecycle({ backendExpected, ownerSetupArtifactDigest }) {
+  async function observeLifecycle({ backendExpected, ownerSetup = false }) {
     assert.ok(typeof backendExpected === 'boolean', 'Lifecycle backend observation mode is invalid');
-    const ingress = await observeIngress({ lifecycle: true, ownerSetupArtifactDigest });
+    const ingress = await observeIngress({ lifecycle: true });
     const { origin: liveOrigin, clientId, clientSecret } = readFrontendReleaseConfiguration(accessEnv);
     assert.ok(liveOrigin.origin === target.origin, 'Protected identity origin differs from the pinned hostname');
     const credentials = { clientId, clientSecret };
@@ -587,7 +574,8 @@ export function createCloudflareCutover({
     const boundary = await probeScopedIdentityAccess({ origin: liveOrigin, credentials, fetchImpl,
       checkBoundary: true, includeBackend: false, includeFrontend: false });
     assert.deepEqual(boundary, {});
-    if (ingress.ownerSetup) {
+    if (ownerSetup) {
+      assert.ok(!ingress.publicProtocolEnabled && !ingress.fence.enabled, 'Owner setup requires protected canonical ingress');
       await Promise.all(['/console/setup', '/api/auth/codexia/setup/status', '/api/projects',
         '/api/auth/oauth2/authorize', '/mcp'].flatMap(path => [
         assertProbeDenied(path, liveOrigin, null, fetchImpl),
@@ -621,7 +609,7 @@ export function createCloudflareCutover({
       } catch { /* no positive identity evidence */ }
     }
     if (!backendExpected && backend !== null) throw new Error('Public backend contradicts observed host absence');
-    const after = await observeIngress({ lifecycle: true, ownerSetupArtifactDigest });
+    const after = await observeIngress({ lifecycle: true });
     assert.deepEqual({ deployment: ingress.deployment, fence: ingress.fence, ingressDigest: ingress.ingressDigest,
       scriptPresent: ingress.scriptPresent }, { deployment: after.deployment, fence: after.fence,
       ingressDigest: after.ingressDigest, scriptPresent: after.scriptPresent }, 'Ingress changed during observation');
@@ -629,6 +617,6 @@ export function createCloudflareCutover({
   }
 
   return { observe, observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, assertWorkerArtifact, fence: () => setFence(true),
-    unfence: () => setFence(false), verifyFenced, verifyUnfenced, deploy, assertOwnerSetupDetached, observeOwnerSetup,
+    unfence: () => setFence(false), verifyFenced, verifyUnfenced, deploy, deployForOwnerEnrollment,
     readInitialWorkerControls };
 }

@@ -4,7 +4,7 @@ import { migrationSetFingerprint } from '../../../packages/persistence-postgres/
 import { createDeploymentPlan } from '../preflight/plan.mjs';
 import { planFromObservations } from '../preflight/observe.mjs';
 import { frontendOAuthConfigIdentity } from '../../build/frontend/oauth-config.mjs';
-import { admitBootstrap, ownerSetupFrontendBindings } from './admission.mjs';
+import { admitBootstrap, ownerSetupFrontendBindings, initialFrontendNeedsPublication, assertInitialFrontendReady } from './admission.mjs';
 
 const hash = 'a'.repeat(64);
 const now = new Date('2026-11-24T06:00:00.000Z');
@@ -73,6 +73,10 @@ test('R5 separates enrollment start from preparation, and rejects existing owner
   assert.deepEqual(admitBootstrap({ ...enrolled, mode: 'prepare-activation' }), {
     route: 'R5', stages: [], installIntent: false,
   });
+  assert.deepEqual(admitBootstrap({ ...pending, mode: 'publish-frontend' }), {
+    route: 'R5', stages: [], installIntent: false,
+  });
+  assert.throws(() => admitBootstrap({ ...enrolled, mode: 'publish-frontend' }), /owner state/);
   assert.throws(() => admitBootstrap({ ...enrolled, mode: 'owner-setup' }), /owner state/);
   assert.throws(() => admitBootstrap({ ...pending, mode: 'prepare-activation' }), /owner state/);
   assert.throws(() => admitBootstrap({
@@ -311,4 +315,22 @@ test('Preflight admits resuming activation preparation without owner reissuance 
   assert.equal(prepared.plan.route, 'R0');
   assert.ok(prepared.plan.blockers.includes('missing-preservation-evidence'));
   assert.throws(() => admitBootstrap({ ...prepared, mode: 'prepare-activation' }), /does not admit/u);
+});
+
+test('R5 normal frontend publication requires protected canonical ingress and an observed identity', () => {
+  const candidate = { format: 'codexia-frontend-identity/v1', sourceSha: 'a'.repeat(40),
+    version: '1.2.3', profile: 'full', apiEpoch: 3 };
+  const empty = { routesReady: true, publicProtocolEnabled: false, fence: { enabled: false },
+    backend: null, frontendState: 'absent', deployment: null, frontend: null };
+  assert.equal(initialFrontendNeedsPublication(empty, candidate), true);
+  assert.throws(() => assertInitialFrontendReady(empty, candidate), /certified candidate/u);
+  const deployed = { ...empty, frontendState: 'running', deployment: { versionId: 'version' }, frontend: candidate };
+  assert.equal(initialFrontendNeedsPublication(deployed, candidate), false);
+  assertInitialFrontendReady(deployed, candidate);
+  assert.equal(initialFrontendNeedsPublication({ ...deployed, frontend: { ...candidate, version: '1.2.2' } }, candidate), true);
+  assert.throws(() => initialFrontendNeedsPublication({ ...deployed, frontend: { ...candidate, version: '1.2.4' } }, candidate), /older/u);
+  for (const changed of [
+    { routesReady: false }, { publicProtocolEnabled: true }, { fence: { enabled: true } },
+    { backend: {} }, { frontendState: 'unknown' },
+  ]) assert.throws(() => initialFrontendNeedsPublication({ ...empty, ...changed }, candidate));
 });

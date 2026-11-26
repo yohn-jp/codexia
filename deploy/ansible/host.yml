@@ -173,34 +173,8 @@
       register: host_linger_status
       changed_when: false
       failed_when: host_linger_status.rc != 0 or host_linger_status.stdout != 'yes'
-- name: Install the declared public key for protected backend updates
-  when: codexia_deploy_ssh_public_key is defined
-  become: true
-  become_user: "{{ codexia_service_user }}"
-  block:
-    - name: Validate a single Ed25519 public key
-      ansible.builtin.assert:
-        that:
-          - codexia_deploy_ssh_public_key is string
-          - codexia_deploy_ssh_public_key is match('^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [^\r\n]+)?\Z')
-        fail_msg: Supply one OpenSSH Ed25519 public key for the deployment account.
-    - name: Verify the public key encoding
-      ansible.builtin.command:
-        argv: [ssh-keygen, -l, -f, '-']
-        stdin: "{{ codexia_deploy_ssh_public_key }}"
-      changed_when: false
-    - name: Create the service user's private SSH directory
-      ansible.builtin.file:
-        path: "{{ codexia_service_home }}/.ssh"
-        state: directory
-        mode: '0700'
-    - name: Converge the dedicated noninteractive deployment key
-      ansible.builtin.blockinfile:
-        path: "{{ codexia_service_home }}/.ssh/authorized_keys"
-        marker: "# {mark} Codexia protected deployment key"
-        block: "restrict {{ codexia_deploy_ssh_public_key }}"
-        create: true
-        mode: '0600'
+- name: Converge the declared runtime SSH key
+  ansible.builtin.include_tasks: deploy-ssh-key.yml
 - name: Verify the rootless user manager without starting Podman or application units
   become: true
   become_user: "{{ codexia_service_user }}"
