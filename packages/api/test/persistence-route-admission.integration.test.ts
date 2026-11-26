@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { type TestContext, test } from 'node:test';
-import type { KnowledgeNodeId, ProjectId } from '@codexia/persistence-contracts';
+import type { KnowledgeNodeId, KnowledgeRelationId, ProjectId } from '@codexia/persistence-contracts';
 import { createPostgresPersistence } from '@codexia/persistence-postgres';
 import { startBetterAuthFixture } from './fixtures/better-auth-server.js';
 
@@ -85,16 +85,74 @@ test('PostgreSQL document list honors the requested project version', async t =>
   assert.equal(invalid.status, 400);
 });
 
+test('PostgreSQL project pagination accepts documented bounds and returned cursors', async t => {
+  const { base, ownerHeaders, persistence } = await startAuthorApi(t);
+  await persistence.transaction(async tx => {
+    for (let index = 0; index < 201; index += 1) {
+      await tx.createProject({ title: `Pagination ${index}` });
+    }
+  });
+  const projectsUrl = `${base}/api/v1/persistence/projects`;
+  const oneResponse = await fetch(`${projectsUrl}?limit=1`, { headers: ownerHeaders });
+  assert.equal(oneResponse.status, 200);
+  const onePage = (await oneResponse.json()) as { projects: { id: string }[]; nextCursor: string | null };
+  assert.equal(onePage.projects.length, 1);
+
+  const twoHundredResponse = await fetch(`${projectsUrl}?limit=200`, { headers: ownerHeaders });
+  assert.equal(twoHundredResponse.status, 200);
+  const twoHundredPage = (await twoHundredResponse.json()) as { projects: { id: string }[]; nextCursor: string | null };
+  assert.equal(twoHundredPage.projects.length, 200);
+
+  const defaultResponse = await fetch(projectsUrl, { headers: ownerHeaders });
+  assert.equal(defaultResponse.status, 200);
+  const defaultPage = (await defaultResponse.json()) as { projects: { id: string }[]; nextCursor: string | null };
+  assert.equal(defaultPage.projects.length, 200, 'omitted limit uses the documented default of 200');
+  assert.deepEqual(
+    defaultPage.projects.map(project => project.id),
+    twoHundredPage.projects.map(project => project.id),
+  );
+
+  assert.ok(onePage.nextCursor, 'two or more projects produce a continuation cursor');
+  const nextPageResponse = await fetch(`${projectsUrl}?limit=1&cursor=${encodeURIComponent(onePage.nextCursor)}`, {
+    headers: ownerHeaders,
+  });
+  assert.equal(nextPageResponse.status, 200);
+  const nextPage = (await nextPageResponse.json()) as { projects: { id: string }[]; nextCursor: string | null };
+  assert.equal(nextPage.projects.length, 1);
+  assert.notEqual(nextPage.projects[0]?.id, onePage.projects[0]?.id, 'cursor advances without repeating the prior row');
+  assert.ok(twoHundredPage.nextCursor);
+  const remainderResponse = await fetch(`${projectsUrl}?limit=200&cursor=${encodeURIComponent(twoHundredPage.nextCursor)}`, {
+    headers: ownerHeaders,
+  });
+  assert.equal(remainderResponse.status, 200);
+  const remainder = (await remainderResponse.json()) as { projects: { id: string }[]; nextCursor: string | null };
+  assert.ok(remainder.projects.length > 0, 'the next page contains rows beyond the 200-row boundary');
+  const firstPageIds = new Set(twoHundredPage.projects.map(project => project.id));
+  assert.ok(
+    remainder.projects.every(project => !firstPageIds.has(project.id)),
+    'continuation page does not repeat prior rows',
+  );
+
+  for (const query of ['limit=0', 'limit=201', 'cursor=']) {
+    const response = await fetch(`${projectsUrl}?${query}`, { headers: ownerHeaders });
+    assert.equal(response.status, 400, query);
+    assert.equal(((await response.json()) as { code: string }).code, query.startsWith('cursor=') ? 'INVALID_CURSOR' : 'INVALID_QUERY');
+  }
+});
+
 test('Knowledge merge reports missing entities and stale previews as declared client errors', async t => {
   const { base, ownerHeaders, persistence } = await startAuthorApi(t);
   const project = await persistence.transaction(tx => tx.createProject({ title: 'Merge rejection fixture' }));
-  const sourceId = randomUUID() as KnowledgeNodeId;
-  const targetId = randomUUID() as KnowledgeNodeId;
+  const sourceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' as KnowledgeNodeId;
+  const targetId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' as KnowledgeNodeId;
+  const relatedId = randomUUID() as KnowledgeNodeId;
+  const relationId = randomUUID() as KnowledgeRelationId;
   const missingId = randomUUID();
   await persistence.transaction(async tx => {
     for (const [id, name] of [
       [sourceId, 'Source'],
       [targetId, 'Target'],
+      [relatedId, 'Related'],
     ] as const) {
       await tx.saveKnowledgeNode({
         projectId: project.id,
@@ -106,6 +164,17 @@ test('Knowledge merge reports missing entities and stale previews as declared cl
         expectedVersion: null,
       });
     }
+    await tx.saveKnowledgeRelation({
+      projectId: project.id,
+      id: relationId,
+      sourceId,
+      targetId: relatedId,
+      type: 'related',
+      attributes: {},
+      validity: {},
+      status: 'confirmed',
+      expectedVersion: null,
+    });
   });
   const preview = (projectId: string, source: string, target: string) =>
     fetch(`${base}/api/v1/persistence/projects/${projectId}/nodes/${source}/merge-preview`, {
@@ -118,6 +187,8 @@ test('Knowledge merge reports missing entities and stale previews as declared cl
     [project.id, missingId, targetId, 404, 'PERSISTENCE_NOT_FOUND'],
     [project.id, sourceId, missingId, 404, 'PERSISTENCE_NOT_FOUND'],
     [project.id, sourceId, sourceId, 400, 'PERSISTENCE_VALIDATION'],
+    [project.id, sourceId.toUpperCase(), sourceId, 400, 'PERSISTENCE_VALIDATION'],
+    [project.id, '0', '0', 400, 'PERSISTENCE_VALIDATION'],
     [project.id, '0', targetId, 400, 'PERSISTENCE_VALIDATION'],
   ] as const) {
     const response = await preview(projectId, source, target);
@@ -141,4 +212,13 @@ test('Knowledge merge reports missing entities and stale previews as declared cl
   assert.equal(((await stale.json()) as { code: string }).code, 'PERSISTENCE_CONFLICT');
   const source = await persistence.read(reader => reader.getKnowledgeNode(project.id, sourceId));
   assert.equal(source?.status, 'confirmed');
+
+  const merged = await fetch(`${base}/api/v1/persistence/projects/${project.id}/nodes/${sourceId.toUpperCase()}/merge`, {
+    method: 'POST',
+    headers: ownerHeaders,
+    body: JSON.stringify({ targetId: targetId.toUpperCase(), confirm: true, projectVersion, previewDigest }),
+  });
+  assert.equal(merged.status, 200);
+  const targetRelations = await persistence.read(reader => reader.listKnowledgeRelations(project.id, targetId));
+  assert.equal(targetRelations.find(relation => relation.id === relationId)?.sourceId, targetId);
 });

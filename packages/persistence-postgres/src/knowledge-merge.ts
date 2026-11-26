@@ -30,13 +30,16 @@ function containsId(value: unknown, id: string): boolean {
 export async function planKnowledgeMerge(
   reader: PersistenceReader,
   projectId: ProjectId,
-  sourceId: KnowledgeNodeId,
-  targetId: KnowledgeNodeId,
+  requestedSourceId: KnowledgeNodeId,
+  requestedTargetId: KnowledgeNodeId,
 ) {
   const project = requireValue(await reader.getProject(projectId), 'Project not found');
+  if (requestedSourceId === requestedTargetId) throw new PersistenceError('validation', 'Select two different nodes');
+  const source = requireValue(await reader.getKnowledgeNode(projectId, requestedSourceId), 'Source Knowledge not found');
+  const target = requireValue(await reader.getKnowledgeNode(projectId, requestedTargetId), 'Target Knowledge not found');
+  const sourceId = source.id;
+  const targetId = target.id;
   if (sourceId === targetId) throw new PersistenceError('validation', 'Select two different nodes');
-  const source = requireValue(await reader.getKnowledgeNode(projectId, sourceId), 'Source Knowledge not found');
-  const target = requireValue(await reader.getKnowledgeNode(projectId, targetId), 'Target Knowledge not found');
   const sourceAliases = await reader.listKnowledgeAliases(projectId, sourceId, MAX_ALIAS_INVENTORY);
   const targetAliases = await reader.listKnowledgeAliases(projectId, targetId, MAX_ALIAS_INVENTORY);
   const sourceRelations = await reader.listKnowledgeRelations(projectId, sourceId, MAX_RELATION_INVENTORY);
@@ -133,8 +136,8 @@ export function shouldGenerateSourceNameAlias(
 export async function applyKnowledgeMerge(
   tx: PersistenceTransaction,
   projectId: ProjectId,
-  sourceId: KnowledgeNodeId,
-  targetId: KnowledgeNodeId,
+  requestedSourceId: KnowledgeNodeId,
+  requestedTargetId: KnowledgeNodeId,
   expectedProjectVersion: number,
   previewDigest: string,
   authorId: string,
@@ -147,7 +150,7 @@ export async function applyKnowledgeMerge(
   },
 ): Promise<KnowledgeMergeResult> {
   await tx.assertProjectVersion(projectId, expectedProjectVersion);
-  const plan = await planKnowledgeMerge(tx, projectId, sourceId, targetId);
+  const plan = await planKnowledgeMerge(tx, projectId, requestedSourceId, requestedTargetId);
   if (
     plan.previewDigest !== previewDigest ||
     plan.conflicts.length ||
@@ -157,6 +160,8 @@ export async function applyKnowledgeMerge(
   )
     throw new PersistenceError('conflict', 'Merge preview changed or has unresolved conflicts');
   const { source, target } = plan;
+  const sourceId = source.id;
+  const targetId = target.id;
   const auditId = stableIds?.auditId ?? randomUUID();
   await tx.saveModuleRecord({
     projectId,
