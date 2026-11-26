@@ -1537,25 +1537,64 @@ extension Components {
             public var state: Components.Schemas.BackupRunReceipt.statePayload
             /// - Remark: Generated from `#/components/schemas/BackupRunReceipt/createdAt`.
             public var createdAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/BackupRunReceipt/requestId`.
+            public var requestId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BackupRunReceipt/status`.
+            @frozen public enum statusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case QUEUED = "QUEUED"
+                case RUNNING = "RUNNING"
+                case UNKNOWN = "UNKNOWN"
+                case FAILED = "FAILED"
+                case BLOCKED = "BLOCKED"
+                case REMOTE_VERIFIED = "REMOTE_VERIFIED"
+            }
+            /// - Remark: Generated from `#/components/schemas/BackupRunReceipt/status`.
+            public var status: Components.Schemas.BackupRunReceipt.statusPayload?
+            /// - Remark: Generated from `#/components/schemas/BackupRunReceipt/phase`.
+            public var phase: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BackupRunReceipt/reasonCode`.
+            public var reasonCode: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BackupRunReceipt/observedAt`.
+            public var observedAt: Foundation.Date?
             /// Creates a new `BackupRunReceipt`.
             ///
             /// - Parameters:
             ///   - runId:
             ///   - state:
             ///   - createdAt:
+            ///   - requestId:
+            ///   - status:
+            ///   - phase:
+            ///   - reasonCode:
+            ///   - observedAt:
             public init(
                 runId: Swift.String,
                 state: Components.Schemas.BackupRunReceipt.statePayload,
-                createdAt: Foundation.Date
+                createdAt: Foundation.Date,
+                requestId: Swift.String? = nil,
+                status: Components.Schemas.BackupRunReceipt.statusPayload? = nil,
+                phase: Swift.String? = nil,
+                reasonCode: Swift.String? = nil,
+                observedAt: Foundation.Date? = nil
             ) {
                 self.runId = runId
                 self.state = state
                 self.createdAt = createdAt
+                self.requestId = requestId
+                self.status = status
+                self.phase = phase
+                self.reasonCode = reasonCode
+                self.observedAt = observedAt
             }
             public enum CodingKeys: String, CodingKey {
                 case runId
                 case state
                 case createdAt
+                case requestId
+                case status
+                case phase
+                case reasonCode
+                case observedAt
             }
         }
         /// - Remark: Generated from `#/components/schemas/ChangeSetActionRequest`.
