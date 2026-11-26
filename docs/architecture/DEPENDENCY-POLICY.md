@@ -107,7 +107,7 @@ GitHub APIのbearer tokenを署名付きArtifactのリダイレクト先へ転�
 
 ### 今回の確定済み追加採用ターゲット
 
-- **XState v5**：DesktopのWRT-01/REC-01保存・復旧machineに導入済み。React 19の単純なlocal UI stateを全置換しない。状態の意味と未導入領域は [XState状態機械設計](../design/XSTATE-STATE-MACHINE-CONTRACT.md) に従う。追加導入時はv5 stableとReact adapterの整合を検証し、宣言・lockfile・[依存台帳](DEPENDENCY-INVENTORY.md)を更新する。
+- **XState v5**：Desktopの保存・復旧、Native ChangeSet review、本人認証管理の一部で `xstate` 5.33.4 と公式React adapter 6.1.0を使用する。React 19の単純なlocal UI stateを全置換しない。状態の意味と適用範囲は [XState状態機械設計](../design/XSTATE-STATE-MACHINE-CONTRACT.md) に従う。追加導入時はv5 stableとReact adapterの整合を確認し、バージョンを変更する場合は宣言・lockfile・[依存台帳](DEPENDENCY-INVENTORY.md)を更新する。
 - **S3互換API client**：既存のage暗号化バックアップをoff-VMへ送る**バックアップ専用executor**で維持管理される公式SDK/成熟ライブラリを選ぶ。S3署名/リトライ/TLS/redirectを独自実装しない。AWS S3と互換providerの両方で検査し、具体的パッケージとバージョンを導入PRで確定。詳細は [バックアップ管理契約](BACKUP-CONSOLE-CONTRACT.md)。
 
 ## 4. 追加採用しないもの

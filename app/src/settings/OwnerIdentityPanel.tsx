@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from 'react';
+import { useActorRef, useSelector } from '@xstate/react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { authClient } from '../auth-client';
 import { checkOwnerSession } from '../console/console-session';
 import {
@@ -6,10 +7,10 @@ import {
   type OwnerConsent,
   type OwnerIdentity,
   OwnerSecurityRequestError,
-  outcomeWasUnconfirmed,
   revokeOwnerConsent,
 } from './owner-security-client';
 import './identity-management.css';
+import { createOwnerGrantRevocationMachine } from './owner-grant-revocation-machine';
 
 type IdentityState = { status: 'loading' | 'unavailable' } | { status: 'ready'; identity: OwnerIdentity };
 type AuthResult<T> = { data?: T | null; error?: unknown };
@@ -66,24 +67,15 @@ function errorMessage(error: unknown): string {
   return 'OAuth grantを取り消せませんでした。一覧を確認してから再試行してください。';
 }
 
-function mutationText(error: unknown, currentIdentity: OwnerIdentity | null, consent: OwnerConsent): string {
-  if (!currentIdentity) return '操作結果と最新の一覧を確認できませんでした。ページを再読み込みして状態を確認してください。';
-  if (!currentIdentity.consents.some(row => row.id === consent.id))
-    return '再取得した一覧ではこの同意は存在しません。撤回操作の結果は確認できていません。';
-  if (outcomeWasUnconfirmed(error)) return '操作結果を確認できませんでした。再取得した一覧を確認し、残っていれば再試行してください。';
-  return errorMessage(error);
-}
-
 export function OwnerIdentityPanel({ headingLevel = 3 }: { oidcConfigured?: boolean; headingLevel?: 2 | 3 }) {
   const id = useId();
   const [state, setState] = useState<IdentityState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const Heading = headingLevel === 2 ? 'h2' : 'h3';
 
-  async function loadIdentity(signal?: AbortSignal): Promise<OwnerIdentity | null> {
+  const loadIdentity = async (signal?: AbortSignal): Promise<OwnerIdentity | null> => {
     try {
       const deadline = AbortSignal.timeout(5_000);
       const identity = await fetchOwnerIdentity(fetch, signal ? AbortSignal.any([signal, deadline]) : deadline);
@@ -95,7 +87,47 @@ export function OwnerIdentityPanel({ headingLevel = 3 }: { oidcConfigured?: bool
       setState({ status: 'unavailable' });
       return null;
     }
-  }
+  };
+
+  const revocationMachine = useMemo(
+    () =>
+      createOwnerGrantRevocationMachine({
+        reauthenticate: () => requireFreshOwnerPasskey(),
+        revoke: consent => revokeOwnerConsent(consent),
+        reload: async consent => {
+          const identity = await loadIdentity();
+          if (!identity) return { status: 'unavailable' as const };
+          return { status: identity.consents.some(row => row.id === consent.id) ? ('present' as const) : ('absent' as const) };
+        },
+      }),
+    [],
+  );
+  const revocationActor = useActorRef(revocationMachine);
+  const revocation = useSelector(revocationActor, snapshot => snapshot);
+  const activeGrantId = revocation.context.grant?.id ?? null;
+  const revocationBusy = (['reauthenticating', 'revoking', 'reloading'] as const).some(stateName => revocation.matches(stateName));
+
+  useEffect(() => {
+    if (revocation.matches('confirmed')) {
+      setMessage('同意と発行済みOAuth grantを取り消しました。');
+      setConfirmingId(null);
+    } else if (revocation.matches('confirmedListUnavailable')) {
+      setMessage('撤回はサーバーで確認されましたが、最新一覧を取得できませんでした。ページを再読み込みしてください。');
+      setConfirmingId(null);
+    } else if (revocation.matches('unknown')) {
+      setMessage('操作結果を確認できませんでした。再取得した一覧を確認し、残っていれば再試行してください。');
+      setConfirmingId(null);
+    } else if (revocation.matches('cancelled')) {
+      setMessage('パスキー認証はキャンセルされました。同意は取り消していません。');
+      setConfirmingId(null);
+    } else if (revocation.matches('failed')) {
+      setMessage(errorMessage(revocation.context.error));
+      setConfirmingId(null);
+    } else if (revocation.matches('failedListUnavailable')) {
+      setMessage(`${errorMessage(revocation.context.error)} 最新一覧も取得できませんでした。ページを再読み込みしてください。`);
+      setConfirmingId(null);
+    }
+  }, [revocation]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -103,30 +135,10 @@ export function OwnerIdentityPanel({ headingLevel = 3 }: { oidcConfigured?: bool
     return () => controller.abort();
   }, [attempt]);
 
-  async function withdraw(consent: OwnerConsent) {
-    if (busyId) return;
-    setBusyId(consent.id);
+  function withdraw(consent: OwnerConsent) {
+    if (revocationBusy) return;
     setMessage('');
-    let failure: unknown;
-    let currentIdentity: OwnerIdentity | null = null;
-    try {
-      await requireFreshOwnerPasskey();
-      await revokeOwnerConsent(consent);
-    } catch (error) {
-      failure = error;
-    }
-    currentIdentity = await loadIdentity();
-    setMessage(
-      failure
-        ? mutationText(failure, currentIdentity, consent)
-        : !currentIdentity
-          ? '撤回はサーバーで確認されましたが、最新一覧を取得できませんでした。ページを再読み込みしてください。'
-          : currentIdentity.consents.some(row => row.id === consent.id)
-            ? '取り消し結果を確認できませんでした。一覧を再取得して再試行してください。'
-            : '同意と発行済みOAuth grantを取り消しました。',
-    );
-    setConfirmingId(null);
-    setBusyId(null);
+    revocationActor.send({ type: 'WITHDRAW', grant: consent });
   }
 
   const providerStatus = state.status === 'ready' ? state.identity.provider.status : null;
@@ -181,7 +193,7 @@ export function OwnerIdentityPanel({ headingLevel = 3 }: { oidcConfigured?: bool
               {state.identity.consents.map(consent => {
                 const client = clients.get(consent.clientId);
                 const confirming = confirmingId === consent.id;
-                const busy = busyId === consent.id;
+                const busy = revocationBusy && activeGrantId === consent.id;
                 return (
                   <li className="identity-management__list-item" key={consent.id}>
                     <div className="identity-management__item-main">
@@ -196,12 +208,7 @@ export function OwnerIdentityPanel({ headingLevel = 3 }: { oidcConfigured?: bool
                         <p className="identity-management__hint">
                           パスキーで再認証した後、このアプリの同意と既発行のアクセス・更新トークンを取り消します。
                         </p>
-                        <button
-                          className="identity-management__danger"
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void withdraw(consent)}
-                        >
+                        <button className="identity-management__danger" type="button" disabled={busy} onClick={() => withdraw(consent)}>
                           {busy ? '再認証・取り消し中…' : 'パスキーで認証して取り消す'}
                         </button>
                         <button
@@ -217,7 +224,7 @@ export function OwnerIdentityPanel({ headingLevel = 3 }: { oidcConfigured?: bool
                       <button
                         className="identity-management__secondary"
                         type="button"
-                        disabled={busyId !== null}
+                        disabled={revocationBusy}
                         onClick={() => {
                           setMessage('');
                           setConfirmingId(consent.id);

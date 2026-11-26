@@ -174,7 +174,41 @@ test("native rejection leaves canonical Knowledge unchanged and stale applicatio
   const latest = await authoritative.json() as { changeSet: { status: string }; receipt?: unknown };
   expect(latest.changeSet.status).toBe("approved");
   expect(latest.receipt).toBeUndefined();
+  await expect(page.getByRole("button", { name: "承認済み提案を適用" })).toBeDisabled();
+  await page.getByRole("button", { name: "最新状態を再確認" }).click();
   await expect(page.getByRole("button", { name: "承認済み提案を適用" })).toBeEnabled();
+});
+
+test("native apply reconciles a response lost after the database committed", async ({ page, authorizeAuthor }) => {
+  expect(databaseUrl).toBeTruthy();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Committed apply with lost response", originalMarkdown);
+  const proposal = await proposeNode(author, project.id, "応答断後に照合する候補");
+  await openReview(page);
+  await page.locator(".native-changeset-select").filter({ hasText: proposal.changeSetId }).click();
+  await page.getByRole("button", { name: "承認する" }).click();
+  await expect(page.locator(".native-changeset-card")).toContainText("承認済み・未適用");
+
+  let applyRequests = 0;
+  await page.route(`**/api/v1/persistence/projects/${project.id}/changesets/${proposal.changeSetId}/apply`, async (route) => {
+    applyRequests += 1;
+    const committedResponse = await route.fetch();
+    expect(committedResponse.ok()).toBe(true);
+    await committedResponse.body();
+    await route.abort("connectionreset");
+  });
+  await page.getByRole("button", { name: "承認済み提案を適用" }).click();
+  const receipt = page.getByRole("region", { name: "適用receipt" });
+  await expect(receipt).toBeVisible();
+  expect(applyRequests).toBe(1);
+  const [detail, nodes] = await Promise.all([
+    author.fetch(`/api/v1/persistence/projects/${project.id}/changesets/${proposal.changeSetId}`),
+    author.fetch(`/api/v1/persistence/projects/${project.id}/nodes?limit=500`),
+  ]);
+  const applied = await detail.json() as { changeSet: { status: string }; receipt?: { changeSet: { id: string } } };
+  expect(applied.changeSet.status).toBe("applied");
+  expect(applied.receipt?.changeSet.id).toBe(proposal.changeSetId);
+  expect((await nodes.json() as { nodes: Array<{ id: string }> }).nodes.some((node) => node.id === proposal.id)).toBe(true);
 });
 
 test("author review reads native ChangeSets from the unified feed and keeps one actionable Core card", async ({ page, authorizeAuthor }) => {

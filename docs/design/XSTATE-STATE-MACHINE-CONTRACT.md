@@ -1,6 +1,6 @@
 # XState v5 状態機械の採用・所有権・検証契約
 
-**種別: 採用済み技術・部分導入済み。** DesktopのWRT-01/REC-01原稿保存・復旧では、XState v5 machineを [`persistence-save-machine.ts`](../../app/src/application/persistence-save-machine.ts) と [`PersistenceWorkspace.tsx`](../../app/src/persistence/PersistenceWorkspace.tsx) で使用する。他の領域への導入は未完了の設計目標であり、本書の受入条件がすべて検証済みという意味ではない。状態の意味・許される操作とエラー時の復旧は [Interaction contract](INTERACTION-CONTRACT.md)、[Screen State Atlas](SCREEN-STATE-ATLAS.md)、[Core](../architecture/CORE.md)、[Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md)、[Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md) が先に決める。XStateは複雑な遷移だけを**実行可能な状態機械に写像する**ため採用する。既存React UIの単純なローカル状態を機械的に全面置換しない。
+**種別: 採用済み技術・部分導入済み。** Desktopの原稿保存・復旧、Native ChangeSet review、本人認証管理の一部でXState v5を使用する。状態の意味・許される操作とエラー時の復旧は [Interaction contract](INTERACTION-CONTRACT.md)、[Screen State Atlas](SCREEN-STATE-ATLAS.md)、[Core](../architecture/CORE.md)、[Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md)、[Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md) が先に決める。XStateは複雑な遷移だけを**実行可能な状態機械に写像する**ため採用する。既存React UIの単純なローカル状態を機械的に全面置換しない。
 
 ## 対象と不変条件
 
@@ -48,4 +48,14 @@
 | XST-005 | ChangeSet/auth/backupへの展開はそれぞれの状態正本と比較し、重複stateや不要なglobal actorを追加しない |
 | XST-006 | 決定したXState version、API、採用範囲、追加したCI source/test identityをexact-sourceで検証 |
 
-DesktopのWRT-01/REC-01保存・復旧machine、React adapter、関連するmachine testは実装済みである。これはXST-001〜006の全受入条件を満たしたという認定ではない。ChangeSet、認証、backup workflowへの適用は未実装である。ネイティブSwiftUIクライアントにはReact/XState runtimeを導入しない。
+DesktopのWRT-01/REC-01保存・復旧は [`persistence-save-machine.ts`](../../app/src/application/persistence-save-machine.ts) と [`PersistenceWorkspace.tsx`](../../app/src/persistence/PersistenceWorkspace.tsx) が担当する。次の機械は操作対象を画面単位で保持し、既存APIの結果を表示に写像する。
+
+| 画面・操作 | Desktopでの適用範囲 | 判定と再照合の正本 |
+| --- | --- | --- |
+| REV-01.A、REV-02.A | [Native ChangeSet review](../../app/src/persistence/native-review-machine.ts) の取得・選択、承認・却下と別操作での適用、競合・応答不明 | review feed、ChangeSet APIのversion・statusと適用receipt |
+| CON-10.A | [Passkey再認証](../../app/src/settings/owner-passkey-reauth-machine.ts) とWebAuthnの中断、結果の再取得 | Better Authのセッション・Passkey API |
+| CON-20・CON-21.A | Desktop連携先画面の [OAuth同意撤回](../../app/src/settings/owner-grant-revocation-machine.ts)、本人確認、撤回結果の再照合 | owner-security identity・revoke-consent APIの対象grant・revision・receipt |
+
+機械の単体テストと、既存の `native-review`・`oauth-web` Chromiumタスクで状態と副作用を検証する。画面を経由しないChangeSetの認可拒否は、Better AuthのAPI統合テストで確認する。
+
+Module proposalの承認・適用とローカルの非表示、OIDCプロバイダーの設定・リンク管理、バックアップ操作はこの適用範囲の外にある。ネイティブSwiftUIクライアントにはReact/XState runtimeを導入しない。

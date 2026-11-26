@@ -1,9 +1,11 @@
-import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useActorRef, useSelector } from '@xstate/react';
+import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { authClient } from '../auth-client';
 import { checkOwnerSession } from '../console/console-session';
 import { fetchAuthMethodAvailability } from '../oauth-login';
 import { OwnerIdentityPanel } from './OwnerIdentityPanel';
+import { createOwnerPasskeyReauthMachine } from './owner-passkey-reauth-machine';
 import { confirmAuthMutation, outcomeWasUnconfirmed } from './owner-security-client';
 import './identity-management.css';
 
@@ -156,7 +158,6 @@ export function IdentityManagementPanel({ placement }: { placement: 'desktop' | 
   const [capabilityLoading, setCapabilityLoading] = useState(true);
   const [newPasskeyName, setNewPasskeyName] = useState('');
   const [addingPasskey, setAddingPasskey] = useState(false);
-  const [reauthenticating, setReauthenticating] = useState(false);
   const [busyPasskeyId, setBusyPasskeyId] = useState<string | null>(null);
   const [busySessionId, setBusySessionId] = useState<string | null>(null);
   const [revokingOtherSessions, setRevokingOtherSessions] = useState(false);
@@ -166,6 +167,38 @@ export function IdentityManagementPanel({ placement }: { placement: 'desktop' | 
   const [sessionError, setSessionError] = useState('');
   const [sessionMessage, setSessionMessage] = useState('');
   const panelId = useId();
+  const accessRef = useRef(access);
+  useEffect(() => {
+    accessRef.current = access;
+  }, [access]);
+  const reauthMachine = useMemo(
+    () =>
+      createOwnerPasskeyReauthMachine(async () => {
+        const previousToken = accessRef.current.status === 'ready' ? accessRef.current.currentSessionToken : null;
+        if (!previousToken) throw new Error('OWNER_SESSION_REQUIRED');
+        try {
+          const result = authData<BetterAuthSessionPayload>(await authClient.signIn.passkey(), 'Better Auth response is unavailable');
+          const token = await confirmOwnerSessionToken();
+          if (!token || token === previousToken || token !== result?.session?.token) {
+            throw new TypeError('Better Auth did not confirm the new owner session');
+          }
+          setAccess(current => (current.status === 'ready' ? { ...current, currentSessionToken: token } : current));
+        } catch (error) {
+          const token = await confirmOwnerSessionToken().catch(() => null);
+          if (!token) {
+            setAccess({ status: 'unavailable', reason: 'session' });
+          } else if (token !== previousToken) {
+            setAccess(current => (current.status === 'ready' ? { ...current, currentSessionToken: token } : current));
+            await loadSessions();
+          }
+          throw error;
+        }
+      }),
+    [],
+  );
+  const reauthActor = useActorRef(reauthMachine);
+  const reauthSnapshot = useSelector(reauthActor, snapshot => snapshot);
+  const reauthenticating = reauthSnapshot.matches('authenticating');
 
   useEffect(() => {
     let active = true;
@@ -254,6 +287,21 @@ export function IdentityManagementPanel({ placement }: { placement: 'desktop' | 
       setSessionLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (reauthSnapshot.matches('success')) {
+      void loadSessions();
+      setPasskeyError('');
+      setPasskeyMessage('パスキーで再認証しました。');
+    } else if (reauthSnapshot.matches('cancelled') || reauthSnapshot.matches('failed')) {
+      const cancelled = reauthSnapshot.matches('cancelled');
+      setPasskeyError(
+        cancelled
+          ? 'パスキー認証の完了を確認できませんでした。認証状態を再確認してください。'
+          : securityErrorMessage(reauthSnapshot.context.error, 'パスキーでの再認証を確認できませんでした。'),
+      );
+    }
+  }, [loadSessions, reauthSnapshot]);
 
   const panelVisible = access.status === 'ready' && (placement !== 'desktop' || dialogOpen);
   useEffect(() => {
@@ -375,31 +423,9 @@ export function IdentityManagementPanel({ placement }: { placement: 'desktop' | 
 
   const reauthenticateWithPasskey = async () => {
     if (access.status !== 'ready' || reauthenticating) return;
-    setReauthenticating(true);
     setPasskeyError('');
     setPasskeyMessage('');
-    try {
-      const result = authData<BetterAuthSessionPayload>(await authClient.signIn.passkey(), 'Better Auth response is unavailable');
-      const token = await confirmOwnerSessionToken();
-      if (!token || token === access.currentSessionToken || token !== result?.session?.token) {
-        throw new TypeError('Better Auth did not confirm the new owner session');
-      }
-      setAccess({ ...access, currentSessionToken: token });
-      await loadSessions();
-      setPasskeyMessage('パスキーで再認証しました。');
-    } catch (error) {
-      // Better Auth can report a verification transport failure as cancellation.
-      const token = await confirmOwnerSessionToken().catch(() => null);
-      if (!token) {
-        setAccess({ status: 'unavailable', reason: 'session' });
-      } else if (token !== access.currentSessionToken) {
-        setAccess({ ...access, currentSessionToken: token });
-        await loadSessions();
-      }
-      setPasskeyError(securityErrorMessage(error, 'パスキーでの再認証を確認できませんでした。'));
-    } finally {
-      setReauthenticating(false);
-    }
+    reauthActor.send({ type: 'REAUTHENTICATE' });
   };
 
   const openDialog = () => {

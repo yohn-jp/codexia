@@ -243,6 +243,58 @@ test('Better Auth PKCE MCP client lists and invokes tools through central OAuth 
     'owner OAuth tokens do not gain MCP client admission',
   );
 
+  await t.test('ChangeSet decisions require an owner even on an MCP-assigned project', async () => {
+    const projectPath = `${origin}/api/v1/persistence/projects/${fixture.mcpProjectId}`;
+    const reviewHeaders = { authorization: `Bearer ${ownerBearer}`, origin, 'content-type': 'application/json' };
+    const projectResponse = await apiRequest(projectPath, { headers: reviewHeaders });
+    assert.equal(projectResponse.status, 200);
+    const { project } = (await projectResponse.json()) as { project: { version: number } };
+    const reviewNodeId = randomUUID();
+    const proposalResponse = await apiRequest(`${projectPath}/changesets`, {
+      method: 'POST',
+      headers: { ...reviewHeaders, 'idempotency-key': randomUUID() },
+      body: JSON.stringify({
+        projectVersion: project.version,
+        operations: [
+          {
+            type: 'knowledge.node.save',
+            command: {
+              projectId: fixture.mcpProjectId,
+              id: reviewNodeId,
+              type: 'person',
+              name: 'Review candidate',
+              attributes: {},
+              status: 'proposed',
+              expectedVersion: null,
+            },
+          },
+        ],
+      }),
+    });
+    assert.equal(proposalResponse.status, 201);
+    type ReviewResult = { changeSet: { id: string; version: number; status: string }; receipt?: unknown };
+    const { changeSet: proposed } = (await proposalResponse.json()) as ReviewResult;
+    const changeSetPath = `${projectPath}/changesets/${proposed.id}`;
+    const mcpReviewHeaders = { ...reviewHeaders, authorization: `Bearer ${refreshedMcpCredential.accessToken}` };
+    const decide = (action: 'approve' | 'apply', version: number, headers: HeadersInit) =>
+      apiRequest(`${changeSetPath}/${action}`, { method: 'POST', headers, body: JSON.stringify({ expectedVersion: version }) });
+
+    const anonymousHeaders = { origin, 'content-type': 'application/json' };
+    assert.equal((await decide('approve', proposed.version, anonymousHeaders)).status, 401);
+    assert.equal((await decide('approve', proposed.version, mcpReviewHeaders)).status, 403);
+    const approval = await decide('approve', proposed.version, reviewHeaders);
+    assert.equal(approval.status, 200, 'the same proposal remains available for the owner to approve');
+    const { changeSet: approved } = (await approval.json()) as ReviewResult;
+    assert.equal((await decide('apply', approved.version, anonymousHeaders)).status, 401);
+    assert.equal((await decide('apply', approved.version, mcpReviewHeaders)).status, 403);
+    const detail = await apiRequest(changeSetPath, { headers: reviewHeaders });
+    assert.equal(detail.status, 200);
+    assert.deepEqual((await detail.json()) as ReviewResult, { changeSet: approved });
+    const nodes = await apiRequest(`${projectPath}/nodes`, { headers: reviewHeaders });
+    assert.equal(nodes.status, 200);
+    assert.ok(!((await nodes.json()) as { nodes: { id: string }[] }).nodes.some(node => node.id === reviewNodeId));
+  });
+
   const verifier = `fixture-${randomUUID()}-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~`;
   const challenge = createHash('sha256').update(verifier).digest('base64url');
   const pendingResponse = await apiRequest(
