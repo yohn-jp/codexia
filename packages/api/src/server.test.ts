@@ -1978,6 +1978,7 @@ describe('Codexia HTTP boundary', () => {
     };
     const persistence = await nativePersistence(t);
     const store = new CoreStore({ persistence });
+    let introspectionUnavailable = false;
     const api = await startCustomApi(store, staticDir, {
       persistence,
       usageDirectory: staticDir,
@@ -1988,6 +1989,10 @@ describe('Codexia HTTP boundary', () => {
         jwksUrl: 'https://identity.example.test/.well-known/jwks.json',
         ownerSubject: 'owner-subject',
         requiredScopes: ['codexia:api'],
+        verifyActiveToken: async () => {
+          if (introspectionUnavailable) throw new Error('Fixture introspection unavailable');
+          return true;
+        },
         fetch: async input => {
           assert.equal(String(input), 'https://identity.example.test/.well-known/jwks.json');
           return Response.json({ keys: [jwk] });
@@ -2157,6 +2162,11 @@ describe('Codexia HTTP boundary', () => {
     });
     assert.equal(bothCredentials.status, 403, 'cross-origin cookies are denied by bearer-only CORS');
 
+    introspectionUnavailable = true;
+    const unavailableIntrospection = await fetch(api.base + '/api/session', { headers: headers(valid) });
+    assert.equal(unavailableIntrospection.status, 503);
+    assert.equal((await unavailableIntrospection.json()).code, 'OAUTH_TOKEN_STATUS_UNAVAILABLE');
+
     const unavailableApi = await startCustomApi(store, staticDir, {
       oauthOwner: {
         issuer,
@@ -2164,15 +2174,14 @@ describe('Codexia HTTP boundary', () => {
         jwksUrl: 'https://identity.example.test/.well-known/unavailable.json',
         ownerSubject: 'owner-subject',
         requiredScopes: ['codexia:api'],
+        verifyActiveToken: async () => true,
         fetch: async () => new Response(null, { status: 503 }),
       },
     });
     t.after(unavailableApi.close);
-    assert.equal(
-      (await fetch(unavailableApi.base + '/api/session', { headers: headers(valid) })).status,
-      503,
-      'unavailable JWKS fails closed without treating it as bad credentials',
-    );
+    const unavailableJwks = await fetch(unavailableApi.base + '/api/session', { headers: headers(valid) });
+    assert.equal(unavailableJwks.status, 503);
+    assert.equal((await unavailableJwks.json()).code, 'OAUTH_JWKS_UNAVAILABLE');
   });
 
   it('admits registered MCP OAuth clients by exact operation scope without owner rights', async t => {

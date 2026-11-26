@@ -69,7 +69,8 @@ import {
   type OAuthMcpPrincipal,
   parseOAuthMcpProjectAssignments,
 } from './oauth-mcp.js';
-import { CODEXIA_OWNER_SCOPE, createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from './oauth-owner.js';
+import { CODEXIA_OWNER_SCOPE, createOAuthOwnerAuthenticator, type OAuthOwnerOptions } from './oauth-owner.js';
+import { OAuthAuthenticationError } from './oauth-token.js';
 
 export {
   initializeFreshPostgresSchema,

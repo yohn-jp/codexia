@@ -19,18 +19,20 @@ export interface OAuthAccessTokenVerifierOptions {
   readonly fetch?: typeof fetch;
 }
 
-export class OAuthTokenVerifierError extends Error {
-  constructor(readonly status: 401 | 503, readonly code: string, message: string) {
+export class OAuthAuthenticationError extends Error {
+  constructor(readonly status: 401 | 403 | 503, readonly code: string, message: string) {
     super(message);
-    this.name = "OAuthTokenVerifierError";
+    this.name = "OAuthAuthenticationError";
   }
 }
 
-function assertHttpsEndpoint(value: string, label: string): URL {
+function assertHttpsEndpoint(value: string, label: string, allowInsecureLoopbackForTests: boolean): URL {
   let url: URL;
   try { url = new URL(value); }
   catch { throw new Error(`${label} must be an absolute HTTPS URL`); }
-  if (url.protocol !== "https:" || url.username || url.password || url.hash || url.search) {
+  const testLoopback = allowInsecureLoopbackForTests && process.env.NODE_ENV === "test" && url.protocol === "http:" &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if ((!testLoopback && url.protocol !== "https:") || url.username || url.password || url.hash || url.search) {
     throw new Error(`${label} must be an absolute HTTPS URL without credentials, query, or fragment`);
   }
   return url;
@@ -51,21 +53,23 @@ function isInvalidJwt(error: unknown): boolean {
 }
 
 /** Verify the strict local JWT profile before consulting the online active-token authority. */
-export function createOAuthAccessTokenVerifier(options: OAuthAccessTokenVerifierOptions) {
-  assertHttpsEndpoint(options.issuer, "OAuth issuer");
-  assertHttpsEndpoint(options.audience, "OAuth audience");
-  assertHttpsEndpoint(options.jwksUrl, "OAuth JWKS URL");
-  const resolveKey = createRemoteJWKSet(new URL(options.jwksUrl), {
+export function createOAuthAccessTokenVerifier(
+  options: OAuthAccessTokenVerifierOptions,
+  validateClaims: (claims: OAuthAccessTokenClaims) => void,
+  allowInsecureLoopbackForTests = false,
+) {
+  assertHttpsEndpoint(options.issuer, "OAuth issuer", allowInsecureLoopbackForTests);
+  assertHttpsEndpoint(options.audience, "OAuth audience", allowInsecureLoopbackForTests);
+  const jwksUrl = assertHttpsEndpoint(options.jwksUrl, "OAuth JWKS URL", allowInsecureLoopbackForTests);
+  if (typeof options.verifyActiveToken !== "function") throw new TypeError("OAuth access-token status verification is required");
+  const resolveKey = createRemoteJWKSet(jwksUrl, {
     timeoutDuration: JWKS_TIMEOUT_MS,
     cooldownDuration: 30_000,
     cacheMaxAge: 300_000,
     ...(options.fetch ? { [customFetch]: options.fetch } : {}),
   });
 
-  return async (
-    token: string,
-    validateClaims?: (claims: OAuthAccessTokenClaims) => void,
-  ): Promise<OAuthAccessTokenClaims> => {
+  return async (token: string): Promise<OAuthAccessTokenClaims> => {
     let claims: OAuthAccessTokenClaims;
     try {
       const { payload, protectedHeader } = await jwtVerify(token, resolveKey, {
@@ -80,25 +84,25 @@ export function createOAuthAccessTokenVerifier(options: OAuthAccessTokenVerifier
           typeof payload.iat !== "number" || payload.iat > Math.floor(Date.now() / 1000) + 5 ||
           typeof payload.client_id !== "string" || !payload.client_id || payload.azp !== payload.client_id ||
           typeof payload.jti !== "string" || !payload.jti) {
-        throw new OAuthTokenVerifierError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
+        throw new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
       }
       claims = { issuer: options.issuer, subject: payload.sub, clientId: payload.client_id, scopes: tokenScopes(payload) };
     } catch (error) {
-      if (error instanceof OAuthTokenVerifierError) throw error;
-      if (isInvalidJwt(error)) throw new OAuthTokenVerifierError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
-      throw new OAuthTokenVerifierError(503, "OAUTH_JWKS_UNAVAILABLE", "OAuth signing keys are unavailable");
+      if (error instanceof OAuthAuthenticationError) throw error;
+      if (isInvalidJwt(error)) throw new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
+      throw new OAuthAuthenticationError(503, "OAUTH_JWKS_UNAVAILABLE", "OAuth signing keys are unavailable");
     }
 
     // Client/scope admission must happen before the remote call. The remote
     // provider verifies token liveness and session revocation, while local
     // verification above preserves the strict typ/issuer/audience profile.
-    validateClaims?.(claims);
+    validateClaims(claims);
     let active: boolean;
     try { active = await options.verifyActiveToken(token); }
     catch {
-      throw new OAuthTokenVerifierError(503, "OAUTH_TOKEN_STATUS_UNAVAILABLE", "OAuth access-token status is unavailable");
+      throw new OAuthAuthenticationError(503, "OAUTH_TOKEN_STATUS_UNAVAILABLE", "OAuth access-token status is unavailable");
     }
-    if (!active) throw new OAuthTokenVerifierError(401, "OAUTH_TOKEN_INACTIVE", "OAuth access token is inactive or its login session was revoked");
+    if (!active) throw new OAuthAuthenticationError(401, "OAUTH_TOKEN_INACTIVE", "OAuth access token is inactive or its login session was revoked");
     return claims;
   };
 }
