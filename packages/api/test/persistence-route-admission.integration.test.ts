@@ -92,8 +92,19 @@ test('Knowledge merge reports missing entities and stale previews as declared cl
   const targetId = randomUUID() as KnowledgeNodeId;
   const missingId = randomUUID();
   await persistence.transaction(async tx => {
-    for (const [id, name] of [[sourceId, 'Source'], [targetId, 'Target']] as const) {
-      await tx.saveKnowledgeNode({ projectId: project.id, id, name, type: 'lore', attributes: {}, status: 'confirmed', expectedVersion: null });
+    for (const [id, name] of [
+      [sourceId, 'Source'],
+      [targetId, 'Target'],
+    ] as const) {
+      await tx.saveKnowledgeNode({
+        projectId: project.id,
+        id,
+        name,
+        type: 'lore',
+        attributes: {},
+        status: 'confirmed',
+        expectedVersion: null,
+      });
     }
   });
   const preview = (projectId: string, source: string, target: string) =>
