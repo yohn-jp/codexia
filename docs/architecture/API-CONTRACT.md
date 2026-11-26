@@ -120,7 +120,7 @@ IDは重複させず、表示名や説明を変えるときも維持する。
 ### API-PERSIST-007 — documentの保存と競合
 
 - PATCH /api/v1/persistence/projects/:p/documents/:d。bodyには baseRevisionId、changes配列、resultingSha256等の正規の差分が必要。clientIdは X-Client-Id またはbody、冪等性識別子は Idempotency-Key headerから取得する。
-- 成功時HTTP 200の更新結果。履歴と新revisionの保存をDB側で検査する。競合時にはHTTP 409、code PERSISTENCE_CONFLICT、detailsとcurrentを返す分岐がある。
+- 成功時は HTTP 200 と更新結果を返す。DB が履歴と新しい Revision を一緒に保存する。保存元の Revision が古い場合は HTTP 409 と `PERSISTENCE_CONFLICT`、`details`、`current` を返す。保存済みの冪等キーを異なる内容に再利用した場合は HTTP 409 と `IDEMPOTENCY_CONFLICT` を返し、保存済みの Revision を維持する。
 - アプリは再試行時に**同じoperation identity**を保持する。レスポンス不明時に新規操作として重複適用しない。
 - SOURCE: persistence-routes.ts の documents/:d PATCH、postgres-store.ts の保存トランザクション。
 - TypeSpecは変更のUTF-16オフセット、結果のSHA-256フィールド、保存結果と競合時の現行revisionを記述する。

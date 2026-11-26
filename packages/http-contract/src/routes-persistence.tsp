@@ -58,7 +58,7 @@ op savePersistenceDocument(
   @body body: SaveDocumentRequest,
   @header("Idempotency-Key") idempotencyKey: string,
   @header("X-Client-Id") clientId?: string,
-): { @statusCode _: 200; @body body: SaveDocumentResponse; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: SaveConflictResponse; };
+): { @statusCode _: 200; @body body: SaveDocumentResponse; } | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 409; @body body: SaveDocumentConflictResponse; };
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents/{documentId}") @delete @operationId("persistence_document_delete")
