@@ -52,7 +52,7 @@ For an OIDC-first installation, configure all three OIDC settings, omit the Pass
    ```dotenv
    CODEXIA_AUTH_BOOTSTRAP_ORIGIN=https://<bootstrap-host>:8443
    CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT=<immutable-IdP-subject>
-   CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS=https://<production-host>/desktop,https://<production-host>/mobile
+   CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS=https://<production-host>/desktop
    ```
 
    Obtain the exact IdP subject from the approved identity authority. The bootstrap uses the issuer configured by `auth-runtime` and compares the issuer and subject on the verified ID token. The native redirect is `jp.yohn.codexia:/oauth2redirect`.

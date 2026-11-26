@@ -16,7 +16,6 @@ const publicSettings = {
   VITE_CODEXIA_OAUTH_CLIENT_ID: 'fixture-public-config',
   VITE_CODEXIA_API_AUDIENCE: 'https://example.test/api',
   VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: 'https://example.test/desktop',
-  VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: 'https://example.test/mobile',
 };
 
 function fixture() {
@@ -235,4 +234,18 @@ test('frontend evidence binds immutable deployment and archive while validating 
   absent.candidateFrontend.identity = { ...absent.candidateFrontend.identity,
     oauthConfigIdentity: frontendOAuthConfigIdentity({}) };
   assert.throws(() => planFromObservations(absent), /no certified OAuth contract/u);
+});
+
+test('an installed legacy identity admits a newer frontend with the same Desktop OAuth contract', () => {
+  const f = fixture();
+  const { scopes, ...settings } = JSON.parse(f.edge.frontend.oauthConfigIdentity).settings;
+  f.edge.frontend = { ...f.edge.frontend, oauthConfigIdentity: JSON.stringify({
+    format: 'codexia-web-oauth-config/v1',
+    settings: { ...settings, mobileRedirectUri: 'https://example.test/mobile', scopes },
+  }) };
+  f.candidateFrontend.identity = { ...f.candidateFrontend.identity, version: '1.0.1' };
+  const { plan } = planFromObservations(f);
+  assert.equal(plan.route, 'R8');
+  assert.deepEqual(plan.observation.changeAxes, ['frontend']);
+  assert.equal(plan.observation.frontendAdmission, 'allowed');
 });

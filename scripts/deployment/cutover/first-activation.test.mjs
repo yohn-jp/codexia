@@ -19,7 +19,6 @@ const publicSettings = {
   VITE_CODEXIA_OAUTH_CLIENT_ID: 'codexia-web',
   VITE_CODEXIA_API_AUDIENCE: origin + '/api',
   VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: origin + '/desktop/',
-  VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: origin + '/mobile/',
   VITE_CODEXIA_OAUTH_SCOPES: 'openid codexia:api',
 };
 

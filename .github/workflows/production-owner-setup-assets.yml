@@ -50,7 +50,6 @@ jobs:
           VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
           VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
           VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
-          VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
           VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
         run: node scripts/deployment/preflight/run.mjs candidate
       - name: Stage only the verified owner setup files without any route or public preview
