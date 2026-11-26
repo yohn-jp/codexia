@@ -319,7 +319,7 @@ test('authenticated PostgreSQL API saves, replays, follows Evidence, conflicts a
   const shiftedAnchors = (
     (await shiftedEvidence.json()) as { anchors: Array<{ anchor: { id: string; fromUtf16: number; status: string } }> }
   ).anchors;
-  const shiftedAnchor = shiftedAnchors.find(item => item.anchor.id === anchorId)!.anchor;
+  const shiftedAnchor = shiftedAnchors.find(item => item.anchor.id === anchorId)?.anchor;
   assert.equal(shiftedAnchor.fromUtf16, quoteStart + '💠'.length);
   assert.equal(shiftedAnchor.status, 'confirmed');
 
@@ -516,8 +516,8 @@ test('concurrent document POSTs stay within 999 active documents and deletion fr
   assert.deepEqual(attempts.map(response => response.status).sort(), [201, 409]);
   const successfulIndex = attempts.findIndex(response => response.status === 201);
   const failedIndex = 1 - successfulIndex;
-  const created = (await attempts[successfulIndex]!.json()) as { document: { id: string }; replayed: boolean };
-  const rejected = (await attempts[failedIndex]!.json()) as { code: string; error: string };
+  const created = (await attempts[successfulIndex]?.json()) as { document: { id: string }; replayed: boolean };
+  const rejected = (await attempts[failedIndex]?.json()) as { code: string; error: string };
   assert.equal(created.replayed, false);
   assert.equal(rejected.code, 'PERSISTENCE_CONFLICT');
   assert.match(rejected.error, /at most 999 active documents/u);
