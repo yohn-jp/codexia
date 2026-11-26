@@ -30,6 +30,8 @@ The accepted Desktop Web toolchain is **TypeScript 7 (native compiler/type check
 ## 製品・システム境界
 
 - 製品は単一作者の小説執筆・知識管理・提案レビューを提供する。作品本文・構成・Revision・Knowledge・Evidence・ChangeSet・module record の永続正本は **PostgreSQL** のみ。
+- **サーバー側の復旧正本の集約（採用済み目標）:** 作品・認証・ユーザー状態・運用記録など、消失すると確定済みのアプリケーション状態を復元できないデータは単一PostgreSQLクラスタだけに永続化する。スキーマとロールで責務を分離し、DB外のアプリケーションファイルを再構築可能な派生物に限定する。詳細・移行条件は [Data model](DATA-MODEL.md)（REQ-DATA-005）。現行のhost historyとバックアップは移行受入まで保護し、DB専用バックアップへの切替は別途承認する。
+- **データポータビリティ（採用済み目標）:** 作者はCodexiaから離脱しても作品の本文・構成・知識・根拠・保持された履歴を利用できる。ZIPにUTF-8 Markdownと公開仕様のJSONを格納する離脱用エクスポートを [作品ポータビリティ契約](../authoring-portable.md)（REQ-DATA-006）が所有する。現行JSON交換と運用バックアップを区別する。
 - **採用目標は Desktop Web (React/CodeMirror) とインストール型 iOS (SwiftUI + 必要なUIKit/TextKit 2) の2クライアント。** Mobile Web/PWA、Ionic/Capacitorを用いるモバイル執筆は製品対象から撤去する。両者は画面、UIコンポーネント、ルーティング、クライアントの状態管理を共有しない。**Core/API契約・作者権限・保存とRevisionの意味論のみ共通**。DesktopのIndexedDBとiOSの保護されたローカルdraft journalは未確定の回復領域であり、PostgreSQLの第二正本ではない。ネイティブ詳細は [iOS SwiftUI](IOS-SWIFTUI-ARCHITECTURE.md)。iOS開発凍結中の提供対象はDesktop Webのみとし、旧Mobile Web/PWAの撤去はNative受入の完了を待たずに行う。Swift実装・手動検証は保持し、Native受入と配布の再開は別途判断する。
 - **作者用Desktop Webの正式対応はWindows上のChromium系ブラウザー（Chrome/Edge）に限定する。** macOS（Safari/Chromeを含む）、Firefox、Android、その他OS/ブラウザー固有の互換性・最適化・回帰保証は製品要件に含めない。対象外環境のアクセスをUA等で意図的に拒否する要件ではない。標準Web APIを優先し、不要な互換レイヤーを新設しない。将来macOS対応が必要な場合は独立したネイティブアプリを優先評価し、別途採用決定する。公開reader・外部認証/同意の互換性は作者用UIと独立した公開面の契約とし、今回の変更によって既存の公開・認証・アクセシビリティ義務を免除しない。Linux上のChromium CIはWindows実機のIME・フォント・OS統合を証明しない。検証範囲・移行ゲートは [Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md) と [E2E execution](../verification/E2E-EXECUTION.md) に従う。
 - オプション module は Core の読取・提案境界を利用する。module 側の解析キャッシュ・索引・モデルは再構築可能な派生物。Core だけで作品作成、執筆、保存、履歴、復元が成立する。

@@ -3051,3 +3051,243 @@ Checks public route identity and exact-source output bytes with controlled respo
   **ID**: REQ-TRACE-001
 - **Type**: File
   **Path**: scripts/verification/artifacts/pages-live-ux.test.mjs
+
+## REQ-DATA-005
+
+**MID**: ad3b54d5fb2fa830c9b9d69a177a3d92
+**UID**: REQ-DATA-005
+**Decision status**: ACCEPTED
+**Conformance status**: UNMAPPED
+**Applicability**: FUTURE_TARGET
+**Design owner**: [Data model](../architecture/DATA-MODEL.md)
+**Implementation identifiers**: JobHistoryStore; RecentActivityStore; PostgreSQL persistence and approved migrations; Quadlet volume lifecycle (target, 未実装)
+**Verification identifiers**: NOT_ASSIGNED (future acceptance scenarios in owning design)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: ACCEPTED／将来目標・未実装。既存sourceは移行候補であり適合証拠ではない。
+
+復旧に必要な確定済みサーバーアプリケーション状態を単一PostgreSQLクラスタに集約し、DB外のアプリケーション領域は再生成可能なデータまたは一時領域に限定する。
+
+**Relations**:
+
+- **Type**: File
+  **Path**: docs/architecture/DATA-MODEL.md
+
+## OBL-REQ-DATA-005-O01
+
+**Type**: OBLIGATION
+**MID**: c3c4e72ae44536489c0d5bdb6a09634f
+**UID**: OBL-REQ-DATA-005-O01
+**Design reference**: [Data model](../architecture/DATA-MODEL.md)
+**Implementation identifiers**: packages/persistence-postgres/; packages/api/src/backup-console-store.ts (target candidate)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: Future target; no implementation or exact-source evidence claimed.
+
+全runtime profileの永続状態を棚卸しし、作品、認証、ユーザー状態、運用記録を単一クラスタに保存する。スキーマ・role・owner/project境界を維持する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-005
+
+## OBL-REQ-DATA-005-O02
+
+**Type**: OBLIGATION
+**MID**: 510d6a0da145483ee20d5ba748b4072c
+**UID**: OBL-REQ-DATA-005-O02
+**Design reference**: [Data model](../architecture/DATA-MODEL.md)
+**Implementation identifiers**: packages/api/src/job-history-store.ts: JobHistoryStore (target candidate)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: Future target; no implementation or exact-source evidence claimed.
+
+ジョブ、結果、通知、既読と状態遷移を原子的に確定し、既存の状態・保持・中断契約を維持する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-005
+
+## OBL-REQ-DATA-005-O03
+
+**Type**: OBLIGATION
+**MID**: bd6d8ac8e1cf067b17dd1daeb2b3d29a
+**UID**: OBL-REQ-DATA-005-O03
+**Design reference**: [Data model](../architecture/DATA-MODEL.md)
+**Implementation identifiers**: packages/api/src/recent-activity-store.ts: RecentActivityStore (target candidate)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: Future target; no implementation or exact-source evidence claimed.
+
+Recent Activityのcursorとwriter/page順序を同一DBトランザクションで更新し、競合と遅延応答で新しい状態を失わない。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-005
+
+## OBL-REQ-DATA-005-O04
+
+**Type**: OBLIGATION
+**MID**: 3610bface7e2a1e65b22bdbe02506477
+**UID**: OBL-REQ-DATA-005-O04
+**Design reference**: [Data model](../architecture/DATA-MODEL.md)
+**Implementation identifiers**: packages/api/src/maintain-job-history.ts; deploy/quadlet/codexia-api.container (target candidate)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: Future target; no implementation or exact-source evidence claimed.
+
+旧historyの検証付き移行を冪等に行い、DB障害時の代替ファイル書込みを禁止する。受入後に旧ストア・volume・互換分岐を廃止する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-005
+
+## OBL-REQ-DATA-005-O05
+
+**Type**: OBLIGATION
+**MID**: 52bf39baaa7f67f9de79d9378e0d6565
+**UID**: OBL-REQ-DATA-005-O05
+**Design reference**: [Data model](../architecture/DATA-MODEL.md)
+**Implementation identifiers**: deploy/backup/backup.sh; deploy/ansible/restore-drill.yml (target candidate)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: Future target; no implementation or exact-source evidence claimed.
+
+独立保全されたDB、再配備した構成/秘密情報、空の派生cacheだけで新規VMの確定済み状態を復旧できることを実証する。現行バックアップの廃止には別途承認を要する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-005
+
+## REQ-DATA-006
+
+**MID**: d9983b4b35d1e4e841037b838c59c303
+**UID**: REQ-DATA-006
+**Decision status**: ACCEPTED
+**Conformance status**: UNMAPPED
+**Applicability**: FUTURE_TARGET
+**Design owner**: [Portable works](../authoring-portable.md)
+**Implementation identifiers**: packages/api/src/work-archive.ts: exportWorkArchive; PersistenceReader; existing project export entry (target, 未実装)
+**Verification identifiers**: NOT_ASSIGNED (future acceptance scenarios in owning design)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: ACCEPTED／将来目標・未実装。既存sourceは移行候補であり適合証拠ではない。
+
+作者がCodexiaなしで作品の確定済み本文・構成・知識・根拠・保持された過去Revisionを利用できる、公開仕様のZIP/UTF-8 Markdown/JSONによる離脱用エクスポートを提供する。
+
+**Relations**:
+
+- **Type**: File
+  **Path**: docs/authoring-portable.md
+
+## OBL-REQ-DATA-006-O01
+
+**Type**: OBLIGATION
+**MID**: f856ef5614d12e7c2de882e9e0667d07
+**UID**: OBL-REQ-DATA-006-O01
+**Design reference**: [Portable works](../authoring-portable.md)
+**Implementation identifiers**: packages/api/src/work-archive.ts (target candidate)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: Future target; no implementation or exact-source evidence claimed.
+
+作品をZIPで取得し、一般的な展開ツールとエディタでMarkdownを利用できる。公開version付きmanifest、JSON Schema、説明書、パス・順序・ID・hashを同梱する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-006
+
+## OBL-REQ-DATA-006-O02
+
+**Type**: OBLIGATION
+**MID**: 48001e1bbab80bd75f8bdc781b211fb2
+**UID**: OBL-REQ-DATA-006-O02
+**Design reference**: [Portable works](../authoring-portable.md)
+**Implementation identifiers**: packages/persistence-contracts/src/index.ts: PersistenceReader; packages/persistence-postgres/src/postgres-store.ts (target candidate)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: Future target; no implementation or exact-source evidence claimed.
+
+保持された過去Revisionと回復可能な論理削除文書を区別し、全本文の文字・改行・階層・順序と参照を保存する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-006
+
+## OBL-REQ-DATA-006-O03
+
+**Type**: OBLIGATION
+**MID**: cb217de1704bb6bfbc287a509ef2ee3c
+**UID**: OBL-REQ-DATA-006-O03
+**Design reference**: [Portable works](../authoring-portable.md)
+**Implementation identifiers**: packages/api/src/work-archive.ts: exportWorkArchive (target candidate)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: Future target; no implementation or exact-source evidence claimed.
+
+Knowledge、Evidence、Assertion、未解決参照、許可された作者所有module recordsを構造化出力し、参照の真正な対応を保持する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-006
+
+## OBL-REQ-DATA-006-O04
+
+**Type**: OBLIGATION
+**MID**: be77b9ff6017d4687d70ed902ce5ade2
+**UID**: OBL-REQ-DATA-006-O04
+**Design reference**: [Portable works](../authoring-portable.md)
+**Implementation identifiers**: packages/api/src/persistence-routes.ts; packages/api/src/work-archive.ts (target candidate)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: Future target; no implementation or exact-source evidence claimed.
+
+作者認可と作品境界を強制し、非認可principal、秘密情報、内部authority、運用状態、未確定draftを排除する。安全な除外記録を返す。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-006
+
+## OBL-REQ-DATA-006-O05
+
+**Type**: OBLIGATION
+**MID**: 24fc9e798a49c823411b221652b104af
+**UID**: OBL-REQ-DATA-006-O05
+**Design reference**: [Portable works](../authoring-portable.md)
+**Implementation identifiers**: packages/api/src/work-archive.ts; packages/persistence-postgres/src/postgres-store.ts (target candidate)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: Future target; no implementation or exact-source evidence claimed.
+
+単一snapshotから大容量作品と全ページを欠落なく生成し、リソース上限、異常、キャンセルを完了と誤表示しない。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-006
+
+## OBL-REQ-DATA-006-O06
+
+**Type**: OBLIGATION
+**MID**: db33b8c0c008bb5ea1092fcb44e9dd9b
+**UID**: OBL-REQ-DATA-006-O06
+**Design reference**: [Portable works](../authoring-portable.md)
+**Implementation identifiers**: packages/api/src/work-archive.ts; packages/http-contract/src/routes-persistence.tsp (target candidate)
+**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Exact-run reference**: NOT_RUN
+**Comment**: Future target; no implementation or exact-source evidence claimed.
+
+既存のJSON交換・import、認可と正本を維持し、保守されたZIPライブラリと既存永続化読み取り経路を利用する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-006

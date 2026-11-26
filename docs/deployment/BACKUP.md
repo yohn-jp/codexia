@@ -14,6 +14,12 @@ Use an approved protected Ansible inventory and independently supplied recipient
 
 The deployment backup is a pre-rollout recovery point for the database and history resources. PostgreSQL roles and Podman secrets require separate recovery. Current push deployment admission rejects migration-fingerprint, API-epoch, and persistence-format changes. These changes require a separately reviewed operation with its own approval, encrypted pre-change backup, migration verification, and tested restore procedure.
 
+## Accepted target: one PostgreSQL application-state recovery source
+
+[Data model — REQ-DATA-005](../architecture/DATA-MODEL.md) owns the approved target of consolidating all recovery-required server application state into one PostgreSQL cluster. Once migrated and independently verified, application-state disaster recovery must not depend on the former host-history volume or derived caches. Infrastructure configuration, recovery keys, credentials and independently protected evidence remain separately recoverable. Author-facing [open work export](../authoring-portable.md) is data portability, not operational recovery.
+
+The current logical DB + history + age backup and protected host lock remain the only admitted path until a separately approved replacement has passed isolated clean-VM restore, off-VM protection, key custody, integrity/authenticity, failure and deployment admission tests. Evaluate established PostgreSQL physical backup/WAL/PITR tools (e.g. pgBackRest or WAL-G) under that change; neither product nor a new encryption/retention policy is selected here. Do not retire the existing backup or its S3/restore obligations merely because a DB migration is complete.
+
 ## Verify a candidate ledger on a restored backup
 
 Load the reviewed, publication-certified Full backend image by its immutable digest on the isolated recovery host. Use the migration fingerprint from the same certified image.
