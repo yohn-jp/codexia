@@ -200,6 +200,9 @@ const probeReasons = z.enum([
   'invalid_operator_policy',
   'destination_policy_unavailable',
   'invalid_retention_request',
+  'redirect_rejected',
+  'dns_validation_failed',
+  'egress_policy_blocked',
 ]);
 const probeResponse = z.object({
   status: z.enum(['PASSED', 'FAILED', 'BLOCKED']),
@@ -210,11 +213,17 @@ const probeResponse = z.object({
   defaultRetentionDays: z.number().int().nonnegative().nullable().optional(),
 });
 
+const transportConfig = z.strictObject({
+  caBundle: z.string().optional(),
+  allowedPrivateAddresses: z.array(z.string()).optional(),
+  allowProbeCleanup: z.boolean().optional(),
+});
+
 export function pythonBackupProbe(
   python: string,
   script: string,
   policy: BackupPolicy,
-  transport: Record<string, unknown> = {},
+  transportByOrigin: Readonly<Record<string, z.infer<typeof transportConfig>>> = {},
 ): ExecutorOptions['probe'] {
   return (revision, credential) =>
     new Promise(resolveResult => {
@@ -241,7 +250,11 @@ export function pythonBackupProbe(
               });
               return;
             }
-            resolveResult({ state: result.status === 'BLOCKED' ? 'BLOCKED' : 'FAILED', reason: result.reasonCode ?? 'transport_failed' });
+            const reason = result.reasonCode ?? 'transport_failed';
+            const blocked = ['redirect_rejected', 'dns_validation_failed', 'egress_policy_blocked', 'destination_not_allowed'].includes(
+              reason,
+            );
+            resolveResult({ state: result.status === 'BLOCKED' || blocked ? 'BLOCKED' : 'FAILED', reason });
           } catch {
             resolveResult({ state: 'FAILED', reason: 'transport_failed' });
           }
@@ -252,13 +265,16 @@ export function pythonBackupProbe(
         JSON.stringify({
           draft: { ...destination, endpoint: aws ? null : destination.endpoint, addressingStyle: aws ? 'virtual' : 'path', credential },
           operatorPolicy: {
-            destinations: policy.destinations.map(rule => ({
-              ...transport,
-              provider: rule.provider,
-              bucket: rule.bucket,
-              prefix: rule.prefix,
-              origin: rule.provider === 'aws-s3' ? `https://s3.${rule.region}.amazonaws.com` : rule.endpoint,
-            })),
+            destinations: policy.destinations.map(rule => {
+              const origin = rule.provider === 'aws-s3' ? `https://s3.${rule.region}.amazonaws.com` : rule.endpoint;
+              return {
+                ...(origin ? transportByOrigin[origin] : undefined),
+                provider: rule.provider,
+                bucket: rule.bucket,
+                prefix: rule.prefix,
+                origin,
+              };
+            }),
           },
         }),
       );
@@ -283,9 +299,7 @@ const executorConfig = z.strictObject({
       sessionToken: z.string().min(1).max(4096).optional(),
     })
     .optional(),
-  caBundle: z.string().optional(),
-  allowedPrivateAddresses: z.array(z.string()).optional(),
-  allowProbeCleanup: z.boolean().optional(),
+  transportByOrigin: z.record(z.string().url(), transportConfig).default({}),
 });
 
 async function main() {
@@ -324,11 +338,7 @@ async function main() {
           },
         }
       : {}),
-    probe: pythonBackupProbe(python, script, policy, {
-      caBundle: config.caBundle,
-      allowedPrivateAddresses: config.allowedPrivateAddresses,
-      allowProbeCleanup: config.allowProbeCleanup,
-    }),
+    probe: pythonBackupProbe(python, script, policy, config.transportByOrigin),
   });
   const stop = new AbortController();
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => stop.abort());
