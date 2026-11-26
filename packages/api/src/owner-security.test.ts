@@ -8,32 +8,6 @@ import { jwt, testUtils } from 'better-auth/plugins';
 import { Pool } from 'pg';
 import { ownerSecurity } from './owner-security.js';
 
-const authTestDatabase = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
-
-async function createIsolatedAuthSchema(t: TestContext): Promise<Pool> {
-  assert.ok(authTestDatabase, 'Set CODEXIA_AUTH_TEST_DATABASE_URL to a disposable auth database');
-  const url = new URL(authTestDatabase);
-  assert.match(url.protocol, /^postgres(?:ql)?:$/u);
-  assert.equal(url.search + url.hash, '');
-  const localDisposable = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && url.pathname === '/codexia_auth_test';
-  const ciDisposable = process.env.CI === 'true' && url.hostname === 'postgres' && /^\/codexia_ci_[a-f0-9]{32}$/u.test(url.pathname);
-  assert.ok(localDisposable || ciDisposable, 'owner security test requires an isolated disposable auth database');
-
-  const schema = `owner_security_test_${randomUUID().replaceAll('-', '')}`;
-  const admin = new Pool({ connectionString: authTestDatabase });
-  const scoped = new Pool({ connectionString: authTestDatabase, options: `-c search_path=${schema}` });
-  t.after(async () => {
-    try {
-      await scoped.end();
-      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-    } finally {
-      await admin.end();
-    }
-  });
-  await admin.query(`CREATE SCHEMA ${schema}`);
-  return scoped;
-}
-
 const origin = 'https://codexia.example.test';
 const ownerId = 'established-owner';
 const webClientId = 'codexia-web';
@@ -211,6 +185,32 @@ test('identity reads only allowlisted clients and owner grants, with an unverifi
   );
   assert.doesNotMatch(JSON.stringify(result), /sensitive-fixture-client-secret|clientSecret|not-the-owner/u);
 });
+
+const authTestDatabase = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
+
+async function createIsolatedAuthSchema(t: TestContext): Promise<Pool> {
+  assert.ok(authTestDatabase, 'Set CODEXIA_AUTH_TEST_DATABASE_URL to a disposable auth database');
+  const url = new URL(authTestDatabase);
+  assert.match(url.protocol, /^postgres(?:ql)?:$/u);
+  assert.equal(url.search + url.hash, '');
+  const localDisposable = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && url.pathname === '/codexia_auth_test';
+  const ciDisposable = process.env.CI === 'true' && url.hostname === 'postgres' && /^\/codexia_ci_[a-f0-9]{32}$/u.test(url.pathname);
+  assert.ok(localDisposable || ciDisposable, 'owner security test requires an isolated disposable auth database');
+
+  const schema = `owner_security_test_${randomUUID().replaceAll('-', '')}`;
+  const admin = new Pool({ connectionString: authTestDatabase });
+  const scoped = new Pool({ connectionString: authTestDatabase, options: `-c search_path=${schema}` });
+  t.after(async () => {
+    try {
+      await scoped.end();
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    } finally {
+      await admin.end();
+    }
+  });
+  await admin.query(`CREATE SCHEMA ${schema}`);
+  return scoped;
+}
 
 test('withdrawing stored consent compares the owner, client, scopes and exact version before revoking the grant', {
   skip: authTestDatabase && process.env.CODEXIA_AUTH_TEST_DISPOSABLE === '1' ? false : 'requires a disposable auth database',
