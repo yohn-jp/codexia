@@ -2272,6 +2272,14 @@ class PostgresTransaction implements PersistenceTransaction {
       changeSet.provenance,
       changeSet.operations.some(operation => operation.type === 'knowledge.merge'),
     );
+    for (const operation of changeSet.operations) {
+      if (operation.type !== 'document.restore') continue;
+      const document = await this.getDocument(changeSet.projectId, operation.command.documentId);
+      const currentHeadRevisionId = document?.headRevisionId ?? null;
+      if (currentHeadRevisionId !== operation.command.baseRevisionId) {
+        throw conflict('document_revision', operation.command.documentId, operation.command.baseRevisionId, currentHeadRevisionId);
+      }
+    }
     if (changeSet.provenance.source === HIERARCHY_REORDER_SOURCE) await this.assertHierarchyReorderScope(changeSet);
     if (changeSet.provenance.source === HIERARCHY_DELETE_SOURCE) await this.assertHierarchyDeleteScope(changeSet);
     await this.assertChangeSetReadSet(changeSet.projectId, changeSet.readSet);
