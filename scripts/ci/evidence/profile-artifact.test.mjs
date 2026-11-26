@@ -17,6 +17,9 @@ async function fixture(t,profile='core'){
     'packages/persistence-postgres/dist/index.js', 'packages/module-runtime/dist/index.js',
     'packages/core/dist/index.js', 'packages/migration/dist/index.js',
     'app/dist/index.html','app/dist/desktop/index.html',
+    'packages/api/src/generated/http-contract.json',
+    ...['http', 'auth-methods'].flatMap(client => ['client.ts', 'client.operations.ts', 'schemas/index.ts']
+      .map(file => 'app/src/generated/' + client + '/' + file)),
     'packages/api/dist/server.js','profiles/'+profile+'/generated/server.mjs',
     'profiles/'+profile+'/generated/browser.mjs','profiles/'+profile+'/generated/module-manifests.json',
     ...optionalOutputs,
@@ -36,6 +39,9 @@ test('exact profile output round trips, with no optional modules in core',async 
       profile === 'core' ? [] : optionalOutputs.sort());
     await restoreProfile(consumer,bundle,identity);
     assert.equal(await readFile(path.join(consumer,'app/dist/desktop/index.html'),'utf8'),'fixture app/dist/desktop/index.html');
+    for (const input of ['packages/api/src/generated/http-contract.json', 'app/src/generated/http/client.ts', 'app/src/generated/auth-methods/schemas/index.ts']) {
+      assert.equal(await readFile(path.join(consumer,input),'utf8'), 'fixture ' + input);
+    }
     await assert.rejects(readFile(path.join(consumer,'app/dist/mobile/index.html')), {code:'ENOENT'});
     const migration=path.join(consumer,'packages/migration/dist/index.js');
     await assert.rejects(readFile(migration),{code:'ENOENT'});
@@ -53,6 +59,9 @@ test('rejects stale or wrong profile, corruption, paths, duplicates and missing 
     b=>{b.files[0].path='modules/story/dist/index.js';},
     b=>{b.files.push(b.files[0]);},
     b=>{b.files=b.files.filter(file=>file.path!=='app/dist/desktop/index.html');},
+    b=>{b.files=b.files.filter(file=>file.path!=='packages/api/src/generated/http-contract.json');},
+    b=>{b.files=b.files.filter(file=>file.path!=='app/src/generated/http/client.operations.ts');},
+    b=>{b.files.push({...b.files[0],path:'packages/api/src/generated/other.json'});},
     b=>{b.files.push({...b.files.find(file=>file.path==='app/dist/desktop/index.html'),path:'app/dist/mobile/index.html'});},
   ]){
     const invalid=structuredClone(bundle);mutate(invalid);

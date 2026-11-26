@@ -19,16 +19,21 @@ const safeRelative = value => typeof value === 'string' && value.length <= 1024 
   value.split('/').every(part => part !== '.' && part !== '..' && /^[A-Za-z0-9_.@+-]+$/u.test(part));
 const profileName = value => { assert.ok(PROFILES.includes(value), 'Unknown profile'); return value; };
 
+// Playwright fixtures import the source API and browser adapters as well as dist.
+const fastifySource = 'packages/api/src/generated/http-contract.json';
+const clientDirectories = ['app/src/generated/http', 'app/src/generated/auth-methods'];
+
 export function profileRoots(profile) {
   profileName(profile);
   const common = WORKSPACES.filter(({id}) => ['contracts','persistence-contracts','persistence-postgres','module-runtime','core','api','app'].includes(id));
   const extra = profile === 'full' ? WORKSPACES.filter(({path}) => path.startsWith('modules/')) : [];
-  return [...common,...extra].map(({path}) => path + '/dist').concat('profiles/' + profile + '/generated');
+  return [...common,...extra].map(({path}) => path + '/dist').concat('profiles/' + profile + '/generated', clientDirectories);
 }
 
 const requiredEntries = profile => [
   'app/dist/index.html','app/dist/desktop/index.html',
   'packages/api/dist/server.js','packages/core/dist/index.js','packages/persistence-postgres/dist/index.js',
+  fastifySource, ...clientDirectories.flatMap(dir => ['client.ts', 'client.operations.ts', 'schemas/index.ts'].map(entry => dir + '/' + entry)),
   ...['server.mjs','browser.mjs','module-manifests.json'].map(file => 'profiles/' + profile + '/generated/' + file),
 ];
 
@@ -45,21 +50,25 @@ async function assertPlainAncestors(root, relative, { missing = false } = {}) {
 export async function packProfile(root, identity) {
   const files = [];
   let total = 0;
+  async function addFile(file) {
+    assert.ok(!/\.(node|so|dll|dylib|exe)$/iu.test(file), 'Native binary cannot be shared: ' + file);
+    const info = await lstat(path.join(root,file));
+    assert.ok(info.isFile() && !info.isSymbolicLink(), 'Nonregular build output: ' + file);
+    assert.ok(info.size <= MAX_BYTES - total && files.length < MAX_FILES, 'Profile build exceeds bounds');
+    const bytes = await readFile(path.join(root,file));
+    total += bytes.length;
+    files.push({path:file,size:bytes.length,sha256:sha256(bytes),data:bytes.toString('base64')});
+  }
   async function visit(relative) {
     for (const item of (await readdir(path.join(root, relative), {withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {
       const file = relative + '/' + item.name;
       assert.ok(safeRelative(file), 'Unsafe artifact path: ' + file);
-      if (item.isDirectory()) { await visit(file); continue; }
-      assert.ok(item.isFile(), 'Nonregular build output: ' + file);
-      assert.ok(!/\.(node|so|dll|dylib|exe)$/iu.test(file), 'Native binary cannot be shared: ' + file);
-      const info = await lstat(path.join(root,file));
-      assert.ok(info.isFile() && !info.isSymbolicLink(), 'Nonregular build output: ' + file);
-      assert.ok(info.size <= MAX_BYTES - total && files.length < MAX_FILES, 'Profile build exceeds bounds');
-      const bytes = await readFile(path.join(root,file));
-      total += bytes.length;
-      files.push({path:file,size:bytes.length,sha256:sha256(bytes),data:bytes.toString('base64')});
+      if (item.isDirectory()) await visit(file);
+      else await addFile(file);
     }
   }
+  await assertPlainAncestors(root,path.posix.dirname(fastifySource));
+  await addFile(fastifySource);
   for (const dir of profileRoots(identity.profile)) {
     await assertPlainAncestors(root,dir);
     await visit(dir);
@@ -77,7 +86,7 @@ export function validateBundle(bundle, expected) {
   const seen = new Set();
   let total = 0;
   for (const file of bundle.files) {
-    assert.ok(safeRelative(file.path) && roots.some(dir=>file.path.startsWith(dir+'/')), 'Unsafe profile artifact path');
+    assert.ok(safeRelative(file.path) && (file.path === fastifySource || roots.some(dir=>file.path.startsWith(dir+'/'))), 'Unsafe profile artifact path');
     assert.ok(!/\.(node|so|dll|dylib|exe)$/iu.test(file.path), 'Native binary cannot be shared');
     assert.ok(!file.path.startsWith('app/dist/mobile/'), 'Retired Mobile Web build output');
     assert.ok(!seen.has(file.path),'Duplicate profile artifact path');
@@ -102,7 +111,7 @@ export function validateBundle(bundle, expected) {
 
 export async function restoreProfile(root,bundle,expected) {
   validateBundle(bundle,expected);
-  for (const dir of profileRoots(expected.profile)) {
+  for (const dir of [...profileRoots(expected.profile), fastifySource]) {
     await assertPlainAncestors(root,path.posix.dirname(dir),{missing:true});
     const existing=await lstat(path.join(root,dir)).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
     assert.equal(existing,null,'Profile output already exists: '+dir);
