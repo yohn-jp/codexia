@@ -246,11 +246,13 @@ export function ownerSecurity(options: OwnerSecurityOptions) {
                 limit: 100,
               });
               if (!rows.length) break;
-              const ids = rows.filter(row => {
-                const value: unknown = JSON.parse(row.value);
-                const record = value as { type?: unknown; userId?: unknown; query?: { client_id?: unknown } } | null;
-                return record?.type === 'authorization_code' && record.userId === user.id && record.query?.client_id === clientId;
-              }).map(row => row.id);
+              const ids = rows
+                .filter(row => {
+                  const value: unknown = JSON.parse(row.value);
+                  const record = value as { type?: unknown; userId?: unknown; query?: { client_id?: unknown } } | null;
+                  return record?.type === 'authorization_code' && record.userId === user.id && record.query?.client_id === clientId;
+                })
+                .map(row => row.id);
               if (ids.length) {
                 await transaction.deleteMany({ model: 'verification', where: [{ field: 'id', operator: 'in', value: ids }] });
               }
