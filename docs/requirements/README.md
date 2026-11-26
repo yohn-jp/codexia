@@ -25,7 +25,7 @@
 
 要求登録簿は既存正本の**索引と検証可能な受入条件の要約**である。具体的な振る舞いが矛盾した場合は所有する設計正本に戻して承認する。API・DB・外部IFの物理詳細を要求登録簿に複写しない。
 
-**要求の唯一の編集正本:** [StrictDoc requirement register](REQUIREMENT-REGISTER.md)。StrictDoc Markdownを正本として33件の採用済みREQ-IDを保持し、HTML/JSONは検証・レビュー用の派生物とする。実装候補・テスト候補のrelationだけで適合や完全coverageを認定しない。導入範囲と残件は[StrictDoc traceability](STRICTDOC-TRACEABILITY.md)に記録する。
+**要求の唯一の編集正本:** [StrictDoc requirement register](REQUIREMENT-REGISTER.md)。StrictDoc Markdownを正本として採用済みREQ-ID（既存33件の移行baselineと以降の採用要件）を保持し、HTML/JSONは検証・レビュー用の派生物とする。実装候補・テスト候補のrelationだけで適合や完全coverageを認定しない。導入範囲と残件は[StrictDoc traceability](STRICTDOC-TRACEABILITY.md)に記録する。
 
 ## ID、粒度、参照の規則
 

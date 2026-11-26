@@ -84,7 +84,7 @@ model {
       #data
       metadata { trustBoundary 'data' }
     }
-    history = database 'Job history volume (derived operations records)' {
+    history = database 'Legacy host history volume (until DB consolidation acceptance)' {
       #data
       metadata { trustBoundary 'data' }
     }
@@ -158,7 +158,7 @@ model {
   codexia.fastify.mcp -> codexia.fastify.core 'Uses shared authorized domain actions'
   codexia.fastify.core <-> codexia.fastify.modules 'Reads, computes and proposes through trusted capabilities'
   codexia.fastify.core -> codexia.fastify.persistence 'Uses the PostgreSQL persistence boundary'
-  codexia.fastify.persistence -> codexia.postgres 'Reads and commits canonical project data'
+  codexia.fastify.persistence -> codexia.postgres 'Reads and commits canonical project data; target includes durable user and operations state'
   codexia.fastify.betterAuth -> codexia.postgres 'Stores authentication state'
 
   github -> operations.workflow.verify 'Provides the main source for verification'
@@ -174,7 +174,7 @@ model {
   codexia.podman -> codexia.postgres 'Runs PostgreSQL with preserved volumes'
   codexia.ssh -> codexia.backupExecutor 'Invokes the protected host-locked backup path'
   codexia.backupExecutor -> codexia.postgres 'Reads a quiesced PostgreSQL backup source'
-  codexia.backupExecutor -> codexia.history 'Includes the host history volume in backup'
+  codexia.backupExecutor -> codexia.history 'Current backup includes host history until replacement acceptance'
   codexia.backupExecutor -> offsite.s3 'Uploads and re-reads age-encrypted ciphertext'
 }
 
