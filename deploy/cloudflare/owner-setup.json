@@ -1,4 +1,0 @@
-{
-  "worker": "codexia-owner-setup",
-  "routes": ["/console/setup", "/console/setup/", "/console/setup/assets/*"]
-}

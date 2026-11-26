@@ -221,7 +221,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
   return { ...result, evidence: {
     host, edge: edge ? { observedAt: edge.observedAt, origin: edge.origin, deployment: edge.deployment,
       fence: edge.fence, ingressDigest: edge.ingressDigest, frontendState: edge.frontendState,
-      ownerSetup: edge.ownerSetup ?? null, publicProtocolEnabled: edge.publicProtocolEnabled,
+      routesReady: edge.routesReady, publicProtocolEnabled: edge.publicProtocolEnabled,
       frontend: publicFrontendEvidence(edge.frontend), backend: edge.backend } : null,
     sourceBackendCertificateSha256: hash(installedCertificate),
     candidate: { backendImage: targetIdentity.image, backendIdentity: targetIdentity.backend,
