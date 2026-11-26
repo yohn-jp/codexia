@@ -94,7 +94,7 @@ test('portable import replays when only nested object key order changes', async 
   assert.equal(store.projects.size, 1);
 });
 
-test('portable import replays a project created with the pre-canonical identity', async () => {
+test('portable import replays a pre-canonical receipt only for the original parsed key order', async () => {
   const store = memoryPersistence();
   const archive = emptyArchive();
   archive.project.settings = { outer: { alpha: 1, beta: 2 }, list: [{ delta: true, gamma: false }] };
@@ -135,6 +135,18 @@ test('portable import replays a project created with the pre-canonical identity'
   assert.equal(replay.project.id, legacyId);
   assert.equal(replay.replayed, true);
   assert.equal(store.projects.size, 1);
+
+  // A historical receipt stores only the order-dependent hash, not the original
+  // payload. A different parsed key order cannot be proven to be that import.
+  const reordered = structuredClone(archive);
+  reordered.project.settings = { list: [{ gamma: false, delta: true }], outer: { beta: 2, alpha: 1 } };
+  const canonical = await importWorkArchive(store.persistence, reordered, 'owner');
+  assert.equal(canonical.replayed, false);
+  assert.notEqual(canonical.project.id, legacyId);
+  const canonicalReplay = await importWorkArchive(store.persistence, reordered, 'owner');
+  assert.equal(canonicalReplay.project.id, canonical.project.id);
+  assert.equal(canonicalReplay.replayed, true);
+  assert.equal(store.projects.size, 2);
 });
 
 test('portable import rejects sensitive project settings before opening a write transaction', async () => {
