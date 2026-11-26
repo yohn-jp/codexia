@@ -4839,11 +4839,24 @@ components:
           enum:
             - operator-role
             - sealed-access-key
+        addressing:
+          type: string
+          enum:
+            - path-style
+            - virtual-hosted-style
+        schedule:
+          type: string
+          enum:
+            - disabled
         accessKeyId:
           type: string
           x-codexia-sensitive: write-only; never return, persist in browser storage, or include in logs
           writeOnly: true
         secretAccessKey:
+          type: string
+          x-codexia-sensitive: write-only; never return, persist in browser storage, or include in logs
+          writeOnly: true
+        sessionToken:
           type: string
           x-codexia-sensitive: write-only; never return, persist in browser storage, or include in logs
           writeOnly: true
@@ -4900,6 +4913,71 @@ components:
         revision:
           type: integer
           format: int32
+        draft:
+          anyOf:
+            - $ref: '#/components/schemas/BackupDestinationView'
+            - type: 'null'
+        active:
+          anyOf:
+            - $ref: '#/components/schemas/BackupDestinationView'
+            - type: 'null'
+      unevaluatedProperties:
+        not: {}
+    BackupDestinationView:
+      type: object
+      required:
+        - provider
+        - endpoint
+        - region
+        - bucket
+        - prefix
+        - addressing
+        - credentialMode
+        - credentialConfigured
+        - offVmPolicy
+        - schedule
+        - revision
+      properties:
+        provider:
+          type: string
+          enum:
+            - aws-s3
+            - s3-compatible
+        endpoint:
+          type: string
+        region:
+          type: string
+        bucket:
+          type: string
+        prefix:
+          type: string
+        addressing:
+          type: string
+          enum:
+            - path-style
+            - virtual-hosted-style
+        credentialMode:
+          type: string
+          enum:
+            - operator-role
+            - sealed-access-key
+        credentialConfigured:
+          type: boolean
+        offVmPolicy:
+          type: string
+          enum:
+            - required
+            - secondary
+        retentionRequest:
+          type: object
+          additionalProperties: {}
+        schedule:
+          type: string
+          enum:
+            - disabled
+        revision:
+          type: integer
+          format: int32
       unevaluatedProperties:
         not: {}
     BackupOperationReceipt:
@@ -4918,6 +4996,30 @@ components:
         createdAt:
           type: string
           format: date-time
+        requestId:
+          type: string
+        status:
+          type: string
+          enum:
+            - QUEUED
+            - RUNNING
+            - PASSED
+            - FAILED
+            - BLOCKED
+            - APPLIED
+        phase:
+          type: string
+          enum:
+            - probe
+            - activate
+            - disable
+        observedAt:
+          type: string
+          format: date-time
+        reasonCode:
+          anyOf:
+            - type: string
+            - type: 'null'
       unevaluatedProperties:
         not: {}
     BackupProbeReceipt:
@@ -4936,6 +5038,30 @@ components:
         createdAt:
           type: string
           format: date-time
+        requestId:
+          type: string
+        status:
+          type: string
+          enum:
+            - QUEUED
+            - RUNNING
+            - PASSED
+            - FAILED
+            - BLOCKED
+            - APPLIED
+        phase:
+          type: string
+          enum:
+            - probe
+            - activate
+            - disable
+        observedAt:
+          type: string
+          format: date-time
+        reasonCode:
+          anyOf:
+            - type: string
+            - type: 'null'
       unevaluatedProperties:
         not: {}
     BackupRunReceipt:
@@ -5010,11 +5136,24 @@ components:
           enum:
             - operator-role
             - sealed-access-key
+        addressing:
+          type: string
+          enum:
+            - path-style
+            - virtual-hosted-style
+        schedule:
+          type: string
+          enum:
+            - disabled
         accessKeyId:
           type: string
           x-codexia-sensitive: write-only; never return, persist in browser storage, or include in logs
           writeOnly: true
         secretAccessKey:
+          type: string
+          x-codexia-sensitive: write-only; never return, persist in browser storage, or include in logs
+          writeOnly: true
+        sessionToken:
           type: string
           x-codexia-sensitive: write-only; never return, persist in browser storage, or include in logs
           writeOnly: true

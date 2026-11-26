@@ -68,6 +68,12 @@ jobs:
       - name: Verify S3 transfer unit contract
         if: steps.reuse.outputs.eligible != 'true'
         run: python3 -m unittest deploy/backup/test_s3_transfer.py -v
+      - name: Verify S3 destination probe over pinned TLS transport
+        if: steps.reuse.outputs.eligible != 'true'
+        run: |
+          runtime="$RUNNER_TEMP/codexia-s3-probe-runtime"
+          bash deploy/backup/install-s3-runtime.sh "$runtime"
+          (cd deploy/backup && "$runtime/bin/python" -m unittest test_s3_probe.py test_s3_probe_tls_fixture.py -v)
       - name: Verify pinned S3-compatible transfer and isolated restore fixture
         if: steps.reuse.outputs.eligible != 'true'
         run: bash deploy/backup/s3-fixture.sh

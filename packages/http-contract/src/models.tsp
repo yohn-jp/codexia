@@ -1740,6 +1740,22 @@ model DocumentRevisionPageResponse {
   ...Record<unknown>;
 }
 
+model BackupDestinationView {
+  provider: "aws-s3" | "s3-compatible";
+  endpoint: string;
+  region: string;
+  bucket: string;
+  prefix: string;
+  addressing: "path-style" | "virtual-hosted-style";
+  credentialMode: "operator-role" | "sealed-access-key";
+  credentialConfigured: boolean;
+  offVmPolicy: "required" | "secondary";
+  retentionRequest?: JsonObject;
+  schedule: "disabled";
+  revision: int32;
+  ...Record<never>;
+}
+
 model BackupConfigView {
   provider: "aws-s3" | "s3-compatible" | null;
   endpoint: string | null;
@@ -1748,6 +1764,8 @@ model BackupConfigView {
   prefix: string | null;
   credentialConfigured: boolean;
   revision: int32;
+  draft?: BackupDestinationView | null;
+  active?: BackupDestinationView | null;
   ...Record<never>;
 }
 
@@ -1757,12 +1775,17 @@ model AwsS3BackupConfigDraft {
   bucket: string;
   prefix: string;
   credentialMode: "operator-role" | "sealed-access-key";
+  addressing?: "path-style" | "virtual-hosted-style";
+  schedule?: "disabled";
   @extension("writeOnly", true)
   @extension("x-codexia-sensitive", "write-only; never return, persist in browser storage, or include in logs")
   accessKeyId?: string;
   @extension("writeOnly", true)
   @extension("x-codexia-sensitive", "write-only; never return, persist in browser storage, or include in logs")
   secretAccessKey?: string;
+  @extension("writeOnly", true)
+  @extension("x-codexia-sensitive", "write-only; never return, persist in browser storage, or include in logs")
+  sessionToken?: string;
   offVmPolicy: "required" | "secondary";
   retentionRequest?: JsonObject;
   ...Record<never>;
@@ -1775,12 +1798,17 @@ model CompatibleS3BackupConfigDraft {
   bucket: string;
   prefix: string;
   credentialMode: "operator-role" | "sealed-access-key";
+  addressing?: "path-style" | "virtual-hosted-style";
+  schedule?: "disabled";
   @extension("writeOnly", true)
   @extension("x-codexia-sensitive", "write-only; never return, persist in browser storage, or include in logs")
   accessKeyId?: string;
   @extension("writeOnly", true)
   @extension("x-codexia-sensitive", "write-only; never return, persist in browser storage, or include in logs")
   secretAccessKey?: string;
+  @extension("writeOnly", true)
+  @extension("x-codexia-sensitive", "write-only; never return, persist in browser storage, or include in logs")
+  sessionToken?: string;
   offVmPolicy: "required" | "secondary";
   retentionRequest?: JsonObject;
   ...Record<never>;
@@ -1796,6 +1824,11 @@ model BackupOperationReceipt {
   operationId: string;
   state: "queued";
   createdAt: utcDateTime;
+  requestId?: string;
+  status?: "QUEUED" | "RUNNING" | "PASSED" | "FAILED" | "BLOCKED" | "APPLIED";
+  phase?: "probe" | "activate" | "disable";
+  observedAt?: utcDateTime;
+  reasonCode?: string | null;
   ...Record<never>;
 }
 
@@ -1803,6 +1836,11 @@ model BackupProbeReceipt {
   probeId: string;
   state: "queued";
   createdAt: utcDateTime;
+  requestId?: string;
+  status?: "QUEUED" | "RUNNING" | "PASSED" | "FAILED" | "BLOCKED" | "APPLIED";
+  phase?: "probe" | "activate" | "disable";
+  observedAt?: utcDateTime;
+  reasonCode?: string | null;
   ...Record<never>;
 }
 

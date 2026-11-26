@@ -54,6 +54,7 @@ import {
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, type HTTPMethods } from 'fastify';
 import { resolveBetterAuthOidcSettings } from './auth-mode.js';
 import { verifyAuthSchema } from './auth-schema.js';
+import { type BackupConsoleOptions, loadBackupConsole, registerBackupConsole } from './backup-console-routes.js';
 import type { createBetterAuthRuntime } from './better-auth.js';
 import { readCodexiaEnvironment } from './environment.js';
 import { EventStreams } from './event-streams.js';
@@ -178,6 +179,7 @@ const PUBLIC_READER_MODULES = new Set(['story', 'diagnostics', 'nlp', 'semantic'
 const SOURCE_DOMAIN_JOB_TYPES = new Set(['speaker-eval', 'speaker-retrain', 'aspect-review', 'zukan-proposal', 'summary-refresh']);
 
 export interface ApiServerOptions {
+  backupConsole?: BackupConsoleOptions;
   store: CoreStore;
   /** Sole durable manuscript authority. */
   persistence: Persistence;
@@ -2898,6 +2900,11 @@ export function createServer(options: ApiServerOptions): Server {
     register(app, route.method, route.url, handler, route, policy);
   }
 
+  registerBackupConsole(app, options.betterAuth, options.backupConsole, () => shuttingDown);
+  if (options.backupConsole?.closeStoreOnShutdown) {
+    app.addHook('onClose', () => options.backupConsole!.store.close());
+  }
+
   app.register(async auth => {
     if (!options.betterAuth) return;
     auth.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_request, body, done) => done(null, body));
@@ -3155,6 +3162,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     mcpClientIds,
   });
   let persistenceOptions: Awaited<ReturnType<typeof postgresPersistenceOptions>> | undefined;
+  let backupConsole: BackupConsoleOptions | undefined;
   try {
     await verifyAuthSchema(betterAuth.pool);
     const { installedSetupOwner } = await import('./owner-setup-store.js');
@@ -3211,7 +3219,9 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     }
     await assertSnapshotProjectionReady(persistenceOptions.persistence, SNAPSHOT_PROJECTION_EPOCH);
     const store = new CoreStore({ persistence: persistenceOptions.persistence });
+    backupConsole = loadBackupConsole();
     return await startServer({
+      ...(backupConsole ? { backupConsole } : {}),
       store,
       ...persistenceOptions,
       oauthOwner,
@@ -3224,6 +3234,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       profile,
     });
   } catch (error) {
+    await backupConsole?.store.close().catch(() => undefined);
     await persistenceOptions?.persistence?.close().catch(() => undefined);
     await betterAuth.pool.end().catch(() => undefined);
     throw error;

@@ -62,6 +62,8 @@ export interface OAuthConsentContext {
   readonly redirectUri: string;
 }
 
+const BACKUP_OWNER_FRESH_AGE_MS = 5 * 60 * 1000;
+
 export type OwnerSessionCheck = { readonly status: 200 } | { readonly status: 401 | 403 };
 
 const SUPPORTED_OAUTH_SCOPES = ['openid', 'email', 'profile', 'offline_access', CODEXIA_OWNER_SCOPE, ...CODEXIA_MCP_SCOPES] as const;
@@ -890,14 +892,29 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
       } as const;
     },
     /** Confirms only the configured owner session; never returns account or credential data. */
-    async checkOwnerSession(headers: Headers): Promise<OwnerSessionCheck> {
-      if (headers.get('origin') !== publicOrigin.origin || headers.has('authorization')) {
+    async checkOwnerSession(headers: Headers, policy?: { write: boolean; fresh: boolean }): Promise<OwnerSessionCheck> {
+      const origin = headers.get('origin');
+      const fetchSite = headers.get('sec-fetch-site');
+      if (
+        headers.has('authorization') ||
+        ((!policy || policy.write || origin !== null) && origin !== publicOrigin.origin) ||
+        (policy && fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none')
+      ) {
         return { status: 403 };
       }
       if (!headers.has('cookie')) return { status: 401 };
-      const session = await auth.api.getSession({ headers });
+      const session = await auth.api.getSession({
+        headers,
+        ...(policy ? { query: { disableCookieCache: true } } : {}),
+      });
       if (!session) return { status: 401 };
-      if (!config.ownerSubject || session.user.id !== config.ownerSubject) return { status: 403 };
+      const age = Date.now() - new Date(session.session.createdAt).getTime();
+      if (
+        !config.ownerSubject ||
+        session.user.id !== config.ownerSubject ||
+        (policy?.fresh && !(age >= 0 && age < BACKUP_OWNER_FRESH_AGE_MS))
+      )
+        return { status: 403 };
       return { status: 200 };
     },
     async getConsentContext(headers: Headers, oauthQuery: string): Promise<OAuthConsentContext> {

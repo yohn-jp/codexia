@@ -65,6 +65,8 @@ export interface BetterAuthFixture {
   readonly ownerSubject: string;
   readonly introspectionClientId: string;
   readonly introspectionClientSecret: string;
+  ownerSessionCookie(): string;
+  expireOwnerFreshProof(): Promise<void>;
   issueOwnerAccessToken(): Promise<string>;
   issueForeignClientAccessToken(): Promise<string>;
   issueMcpAccessToken(): Promise<{ accessToken: string; refreshToken: string }>;
@@ -717,6 +719,16 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       ownerSubject,
       introspectionClientId: registered.introspectionClientId,
       introspectionClientSecret: runtimeConfig.oauthIntrospectionClientSecret,
+      ownerSessionCookie: () => productionCookie.header(),
+      async expireOwnerFreshProof() {
+        const active = await fixtureOwnerSession(productionCookie);
+        if (!active) throw new Error('Fixture owner session unavailable');
+        await (await runtime!.auth.$context).adapter.update({
+          model: 'session',
+          where: [{ field: 'id', value: active.session.id }],
+          update: { createdAt: new Date(Date.now() - 10 * 60 * 1000) },
+        });
+      },
       issueOwnerAccessToken: async () => (await issueAccessToken(registered.webClientId, '/desktop')).accessToken,
       issueForeignClientAccessToken: async () => (await issueAccessToken(foreignClient.client_id, '/foreign-client')).accessToken,
       async issueMcpAccessToken() {
