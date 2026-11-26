@@ -35,7 +35,7 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     assert.equal(await link.count(), 1);
     await link.click();
     assert.match(page.url(), /\/requirements\/html\/$/u);
-    assert.ok(await page.getByRole('link', {name:'Development Portal'}).isVisible());
+    await page.getByRole('link', { name: 'Development Portal', exact: true }).waitFor({ state: 'visible' });
     assert.equal((await page.goto(`${base}/requirements/html/requirements/REQUIREMENT-REGISTER.md-TRACE.html`)).status(), 200);
     assert.match(await page.locator('body').innerText(), /REQ-CORE-001/u);
     assert.equal((await page.goto(`${base}/`)).status(), 200);
@@ -88,11 +88,11 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     const visibleSurfaceKinds = await surfaceRows.filter({ visible: true }).evaluateAll(rows => rows.map(row => row.dataset.kind));
     assert.ok(visibleSurfaceKinds.length > 0 && visibleSurfaceKinds.every(kind => kind === 'mcpTool'));
     await page.getByRole('combobox', { name: 'surface種別', exact: true }).selectOption('');
-    await page.getByRole('combobox', { name: '状態', exact: true }).selectOption('UNVERIFIED');
+    await page.getByRole('combobox', { name: '状態', exact: true }).selectOption('MAPPED_UNVERIFIED');
     const visibleSurfaceStatuses = await surfaceRows.filter({ visible: true }).evaluateAll(rows => rows.map(row => row.dataset.status.split(/\s+/u)));
-    assert.ok(visibleSurfaceStatuses.length > 0 && visibleSurfaceStatuses.every(statuses => statuses.includes('UNVERIFIED')));
-    const unverifiedColor = await page.locator('#surface-table .state[data-state="UNVERIFIED"]').first().evaluate(element => getComputedStyle(element).color);
-    assert.notEqual(unverifiedColor, 'rgb(120, 223, 180)', 'UNVERIFIED must not use the VERIFIED success color');
+    assert.ok(visibleSurfaceStatuses.length > 0 && visibleSurfaceStatuses.every(statuses => statuses.includes('MAPPED_UNVERIFIED')));
+    const unverifiedColor = await page.locator('#surface-table .state[data-state="MAPPED_UNVERIFIED"]').first().evaluate(element => getComputedStyle(element).color);
+    assert.notEqual(unverifiedColor, 'rgb(120, 223, 180)', 'MAPPED_UNVERIFIED must not use the VERIFIED success color');
     await page.getByRole('button', { name: '条件を解除' }).click();
 
     await page.getByRole('combobox', { name: '状態', exact: true }).selectOption('CANDIDATE_ONLY');

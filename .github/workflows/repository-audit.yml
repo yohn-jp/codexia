@@ -278,7 +278,7 @@ jobs:
       - name: Read exact-source Verify artifact receipt and stage specifications
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CODEXIA_TRACE_VERIFY_WAIT_SECONDS: '300'
+          CODEXIA_TRACE_VERIFY_WAIT_SECONDS: '600'
         run: |
           VERIFY_EVENT="$GITHUB_EVENT_NAME"
           if [[ "$VERIFY_EVENT" == workflow_dispatch ]]; then VERIFY_EVENT=push; fi

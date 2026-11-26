@@ -31,7 +31,7 @@ export function selectTraceVerifyRun(runs, expected) {
 }
 
 export async function waitForTraceVerifyRun(readRuns, expected, { waitSeconds = 0, pause = delay } = {}) {
-  assert.ok(Number.isSafeInteger(waitSeconds) && waitSeconds >= 0 && waitSeconds <= 300, 'Invalid Verify observation timeout');
+  assert.ok(Number.isSafeInteger(waitSeconds) && waitSeconds >= 0 && waitSeconds <= 600, 'Invalid Verify observation timeout');
   const deadline = performance.now() + waitSeconds * 1000;
   do {
     const newest = latestTraceVerifyRun(await readRuns(), expected);
