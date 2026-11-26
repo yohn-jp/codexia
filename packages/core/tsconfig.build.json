@@ -4,6 +4,7 @@
     "src/index.ts",
     "src/snapshot-index.ts",
     "src/operation-records.ts",
+    "src/proposal-size.ts",
     "src/knowledge-context.ts",
     "src/knowledge/index.ts",
     "src/knowledge/**/*.ts",

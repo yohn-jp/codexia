@@ -63,6 +63,7 @@ IDは重複させず、表示名や説明を変えるときも維持する。
 | API-CORE-004 | POST /api/projects/:p/actions/:actionId | effect/actor別 | packages/api/src/server.ts | INCOMPLETE |
 | API-CORE-005 | POST /api/projects/:p/{proposals,approvals,apply} | 提案条件・owner承認別 | packages/api/src/server.ts | INCOMPLETE（操作別IDを展開） |
 | API-CORE-006 | GET/PUT /api/projects/:p/recent-activity、GET/POST /api/inbox*、GET /api/jobs* | OWNER-APIのみ | packages/api/src/server.ts | INCOMPLETE（path別IDを展開） |
+| project_scratch_post | POST /api/projects/:p/scratch | OWNER-API | packages/api/src/server.ts | 下記に添付の保存契約 |
 | API-PERSIST-001 | GET /api/v1/persistence/status | OWNER-API | packages/api/src/persistence-routes.ts | 部分定義 |
 | API-PERSIST-002 | GET /api/v1/persistence/projects | OWNER-API | packages/api/src/persistence-routes.ts | 部分定義 |
 | API-PERSIST-003 | POST /api/v1/persistence/projects | OWNER-API | packages/api/src/persistence-routes.ts | 部分定義 |
@@ -94,6 +95,26 @@ IDは重複させず、表示名や説明を変えるときも維持する。
 - `Cache-Control: no-store`はserver共通security headerで適用。cookieをOWNER-API bearerやAPI project/sessionに変換しない。実装は [route authorization](ROUTE-AUTHORIZATION-CONTRACT.md) のOWNER-SESSION境界とconsoleの入口で使う。
 - SOURCE: `packages/api/src/server.ts` のexplicit route admission、`packages/api/src/better-auth.ts` の`checkOwnerSession`。
 - TEST: `packages/api/src/server.test.ts` と `packages/api/src/better-auth.persistence.test.ts`。
+
+### 公開Scratch APIの添付保存
+
+`POST /api/projects/{projectId}/scratch` は、Scratchノートの本文と添付を一つのCore operationにまとめ、proposalの登録と所有者の承認を経て適用する。
+適用が完了するとHTTP 201でノートの情報、添付、proposal、receiptを返す。
+この操作はクライアント指定の冪等性キーを受け付けず、再送は新規作成として扱う。
+
+添付の表示名には入力ファイル名の最後のパス要素を使う。
+保存パスを組み立てる際は名前を正規化する。
+保存パスは同名または正規化後に同名となる添付にも個別に割り当てる。
+レスポンス、ノートのfront matter、本文内の添付参照はリクエストの添付順を保ち、本文の各リンクは対応する保存パスを参照する。
+
+Fastifyが受け付けるJSONは12 MiBまでで、標準のBase64から復号した添付は合計8 MiBまでとする。
+Coreのoperation上限は書き込み内容の合計8,388,608 UTF-16コード単位であり、添付のBase64と生成したMarkdownの両方を含む。
+復号後に `n` バイトの添付は、Base64にすると `4 × ceil(n / 3)` コード単位を使う。
+永続proposalの上限は正規化したproposal全体をJSONに直列化したUTF-8で8 MiBとする。
+エンベロープとメタデータも容量を使うため、保存可能な添付容量は本文やファイル名などによって変わる。
+サイズ超過はproposalの登録前にHTTP 413を返す。
+エラーコードはJSON上限の場合に `BODY_TOO_LARGE`、添付または保存上限の場合に `SCRATCH_ATTACHMENT_TOO_LARGE` とする。
+添付フィールドの不正や非正規のBase64はHTTP 400とする。
 
 ### API-PERSIST-001 — 永続化の状態
 
