@@ -571,7 +571,8 @@ export async function importWorkArchive(persistence: Persistence, payload: unkno
   const archive = parseWorkArchive(payload);
   const target = portableProjectId(archive);
   // Imports created before canonical JSON hashing used the original object key order.
-  // Preserve their deterministic IDs so a retry after upgrade finds the old project.
+  // Preserve their IDs for retries that reproduce the original parsed key order.
+  // Legacy receipts contain only that digest; reordered legacy input cannot be identified from it.
   const legacyTarget = portableProjectId(archive, false);
   const replayTargets = target.id === legacyTarget.id ? [target] : [target, legacyTarget];
   const readReplay = async (reader: PersistenceReader): Promise<WorkImportResult | undefined> => {
