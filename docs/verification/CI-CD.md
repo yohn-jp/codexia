@@ -44,7 +44,10 @@ client checks under their existing owners. The Repository Audit Pages workflow
 validates and publishes the static API reference for its own checked-out SHA.
 
 Compare the candidate OpenAPI with the event's immutable base commit. Pull
-requests use `pull_request.base.sha` and pushes use `before`. A generation
+requests use `pull_request.base.sha` and pushes use `before`. For historical
+bases read the approved OpenAPI blob. For source-only bases, build in a separate
+checkout of that SHA with its frozen toolchain. An unavailable base fails the
+comparison. A generation
 mismatch, invalid contract, rejected schema conversion or error-level breaking
 change fails the contract task. The Verify certifier still binds task execution
 to the selected source, plan, run attempt and immutable artifact.

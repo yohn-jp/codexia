@@ -14,7 +14,7 @@
     "build:workspace": "node scripts/ci/execution/workspace.mjs build-workspace && node scripts/build/packaging/profile-build.mjs --profile \"${CODEXIA_PROFILE:-core}\" && pnpm --filter @codexia/app build && pnpm --filter @codexia/api build",
     "typecheck": "node scripts/ci/execution/workspace.mjs typecheck",
     "typecheck:tests": "pnpm --filter @codexia/api... build && node scripts/ci/execution/typecheck-tests.mjs",
-    "typecheck:safety": "tsc -p tsconfig.safety.json",
+    "typecheck:safety": "pnpm --filter @codexia/app generate:http && tsc -p tsconfig.safety.json",
     "test:http-contract": "pnpm --filter @codexia/http-contract test",
     "test": "pnpm --filter @codexia/contracts build && pnpm --filter @codexia/persistence-contracts build && pnpm --filter @codexia/persistence-contracts test && pnpm --filter @codexia/persistence-postgres build && pnpm --filter @codexia/persistence-postgres test && pnpm --filter @codexia/contracts test && pnpm --filter @codexia/module-runtime build && pnpm --filter @codexia/core build && pnpm --filter @codexia/module-runtime test && pnpm run test:scripts && pnpm --filter @codexia/module-publishing test && pnpm --filter @codexia/module-mcp test && pnpm --filter @codexia/module-nlp build && pnpm --filter @codexia/module-nlp test && pnpm --filter @codexia/module-diagnostics test && pnpm --filter @codexia/module-story build && pnpm --filter @codexia/module-story test && pnpm --filter @codexia/module-semantic test && pnpm --filter @codexia/module-search build && pnpm --filter @codexia/module-search test && pnpm --filter @codexia/module-speaker test && pnpm --filter @codexia/module-assistant build && pnpm --filter @codexia/module-assistant test && pnpm --filter @codexia/core test && pnpm --filter @codexia/api test && pnpm --filter @codexia/app test",
     "start": "node packages/api/dist/server.js",
@@ -22,11 +22,11 @@
     "test:e2e": "pnpm build && playwright test --config tests/e2e/playwright.config.ts",
     "verify:public-oauth-edge": "node scripts/verification/infrastructure/public-oauth-edge.mjs",
     "verify": "node scripts/verification/run.mjs",
-    "test:scripts": "node --test 'scripts/**/*.test.mjs' && pnpm run verify:deployment && pnpm run typecheck:deployment && pnpm run test:deployment",
+    "test:scripts": "pnpm run verify:deployment && node --test 'scripts/**/*.test.mjs' && pnpm run typecheck:deployment && pnpm run test:deployment",
     "build:frontend": "node scripts/build/frontend/build.mjs",
     "typecheck:deployment": "tsc -p edge/frontend/tsconfig.json --noEmit",
     "test:deployment": "node --import tsx --test 'edge/frontend/test/*.test.ts'",
-    "verify:deployment": "node scripts/verification/infrastructure/deployment-config.mjs"
+    "verify:deployment": "pnpm --filter @codexia/app generate:http && node scripts/verification/infrastructure/deployment-config.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.65.1",

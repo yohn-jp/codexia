@@ -197,20 +197,21 @@ test('HTTP contract sources select the dedicated unit and typecheck tasks', () =
   assert.ok(plan.tasks.includes('test-types-packages'));
   assert.ok(plan.groups.includes('unit-core'));
   assert.ok(plan.groups.includes('types-sources'));
-  assert.ok(!plan.tasks.includes('oci-full'));
+  assert.ok(plan.tasks.includes('oci-core') && plan.tasks.includes('oci-full'));
   assert.ok(matchesFullModelOciPath('packages/api/src/server.ts'));
   assert.ok(matchesFullModelOciPath('packages/http-contract/openapi/codexia.openapi.yaml'));
 });
-test('OpenAPI changes also select the Desktop Web client regeneration check', () => {
-  const plan = createVerificationPlan({
-    files: ['packages/http-contract/openapi/codexia.openapi.yaml'],
-    event: 'pull_request',
-    sha: 'a'.repeat(40),
-    base: 'b'.repeat(40),
-  });
-  assert.equal(plan.mode, 'affected');
-  assert.ok(plan.tasks.includes('unit-http-contract'));
-  assert.ok(plan.tasks.includes('unit-app'));
+test('generator inputs select source-to-consumer validation even when generated outputs are absent from the diff', () => {
+  for (const file of ['packages/http-contract/src/routes-auth.tsp', 'packages/http-contract/tspconfig.yaml',
+    'packages/http-contract/scripts/generate-openapi.mjs', 'packages/http-contract/scripts/generated-file.mjs']) {
+    const plan = createVerificationPlan({ files: [file], event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) });
+    assert.equal(plan.mode, 'affected');
+    for (const task of ['unit-http-contract', 'unit-app', 'unit-api', 'unit-root', 'typecheck-app', 'typecheck-core-api',
+      'test-types-app-e2e', 'test-types-packages', 'http-conformance', 'requirements-trace', 'swift-linux',
+      'browser-core-core', 'browser-full-core', 'audit-core', 'oci-core', 'oci-full']) {
+      assert.ok(plan.tasks.includes(task), file + ' selects ' + task);
+    }
+  }
 });
 test('browser jobs start from plan while exact producer restore gates execution; independent groups cannot cancel other evidence', () => {
   assert.deepEqual(workflow.concurrency, {
@@ -489,10 +490,13 @@ test('active Python installers share the pinned environment recipe and retain th
   const active = ['verify.yml', 'repository-audit.yml', 'ansible-base-secrets.yml', 'ansible-host.yml',
     'push-host.yml', 'push-app-lifecycle.yml', 'production-bootstrap.yml',
     'production-preflight.yml', 'backend-deployment-handoff.yml', 'deployment-config.yml',
-    'full-model-oci-acceptance.yml', 'ios-api.yml'];
+    'full-model-oci-acceptance.yml', 'ios-api.yml', 'ios-editor.yml'];
   for (const name of active) {
     const definition = readWorkflow(name);
-    const runs = Object.values(definition.jobs).flatMap(job => (job.steps ?? []).map(step => step.run ?? ''));
+    const steps = Object.values(definition.jobs).flatMap(job => job.steps ?? []);
+    const runs = steps.flatMap(step => step.uses === './.github/actions/generate-swift-api'
+      ? parse(readFileSync(new URL('../../../.github/actions/generate-swift-api/action.yml', import.meta.url), 'utf8')).runs.steps.map(item => item.run ?? '')
+      : [step.run ?? '']);
     assert.ok(runs.some(run => run.includes(helper)), name);
     assert.ok(runs.every(run => !/(?:-m pip|\/bin\/pip) install/u.test(run)), name);
     for (const event of ['pull_request', 'push']) {

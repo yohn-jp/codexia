@@ -12,16 +12,13 @@ const nx = (...args) => execFileSync('pnpm', ['exec', 'nx', ...args], {
   env: { ...process.env, NX_DAEMON: 'false', NX_NO_CLOUD: 'true', NX_TASKS_RUNNER_DYNAMIC_OUTPUT: 'false' },
 });
 // The root is not inferred by Nx's package workspace discovery. Make the
-// candidate root and generated-input edges explicit for the next comparison.
+// candidate root edges explicit for the next comparison.
 const rootManifest = JSON.parse(readFileSync('package.json', 'utf8'));
 rootManifest.nx = { ...rootManifest.nx, implicitDependencies: [
   ...WORKSPACES.map(w => JSON.parse(readFileSync(path.join(w.path, 'package.json'), 'utf8')).name),
   '@codexia/profile-core', '@codexia/profile-full', '@codexia/ci-evidence',
 ] };
 writeFileSync('package.json', JSON.stringify(rootManifest, null, 2) + '\n');
-const appManifest = JSON.parse(readFileSync('app/package.json', 'utf8'));
-appManifest.nx = { ...appManifest.nx, implicitDependencies: ['@codexia/http-contract'] };
-writeFileSync('app/package.json', JSON.stringify(appManifest, null, 2) + '\n');
 const start = performance.now();
 nx('graph', '--file=' + path.join(out, 'project-graph.json'));
 const graphMs = Math.round(performance.now() - start);
@@ -78,7 +75,7 @@ for (const [id, file] of sample) {
 const report = {sha, graphMs, manifestProjects:manifests.size, nxProjects:Object.keys(graph.nodes).length,missingProjects,missingEdges,extraEdges,profiles,cases};
 writeFileSync(path.join(out,'graph-comparison.json'), JSON.stringify(report,null,2)+'\n');
 writeFileSync(path.join(out,'root-project-candidate.json'), JSON.stringify(rootManifest.nx,null,2)+'\n');
-writeFileSync(path.join(out,'app-project-candidate.json'), JSON.stringify(appManifest.nx,null,2)+'\n');
+writeFileSync(path.join(out,'app-project-candidate.json'), JSON.stringify(graph.dependencies['@codexia/app'],null,2)+'\n');
 console.log(JSON.stringify(report));
 appendFileSync(process.env.GITHUB_STEP_SUMMARY, '\n### Nx graph and affected (observation only)\n' +
   '| Scenario | Nx projects | Canonical tasks | Canonical workspace units outside Nx |\n|---|---:|---:|---:|\n' +

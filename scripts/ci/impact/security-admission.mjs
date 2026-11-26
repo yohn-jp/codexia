@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { isOpenApiGenerationInput } from './contract.mjs';
 
 const sha = /^[0-9a-f]{40}$/u;
 const compiledCode = /\.(?:mjs|cjs|js|jsx|mts|cts|ts|tsx|vue|svelte|html)$/iu;
@@ -17,7 +18,7 @@ const trivySourceRoots = /^(?:app\/src\/|modules\/[^/]+\/src\/|packages\/[^/]+\/
 const codeSource = /\.(?:mjs|cjs|js|jsx|mts|cts|ts|tsx|swift|css|scss|html|svg)$/iu;
 
 export function codeqlInput(file) {
-  if (compiledCode.test(file) || dependency.test(file) || codeqlConfiguration.test(file)) return true;
+  if (compiledCode.test(file) || dependency.test(file) || codeqlConfiguration.test(file) || isOpenApiGenerationInput(file)) return true;
   if (/^(?:Dockerfile|Containerfile)[^/]*$/iu.test(file) || /(?:^|\/)(?:Dockerfile|Containerfile)[^/]*$/iu.test(file)) return false;
   if (ignoredText.test(file) || knownNotCodeql.test(file) || file === '.gitignore') return false;
   // Unknown file kinds may be analyzer inputs or change the extraction policy.

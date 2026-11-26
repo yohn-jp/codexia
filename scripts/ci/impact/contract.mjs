@@ -1,4 +1,18 @@
 // Canonical verification inventory: workflow matrices, coverage and release eligibility share these names.
+// These tracked inputs replace the generated YAML, Fastify map and client sources in impact decisions.
+const httpToolchainInputs = new Set(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'packages/http-contract/package.json']);
+/** @param {string} file */
+export function isOpenApiGenerationInput(file) {
+  return httpToolchainInputs.has(file) || file === 'packages/http-contract/tspconfig.yaml' ||
+    (file.startsWith('packages/http-contract/src/') && file.endsWith('.tsp')) ||
+    /^packages\/http-contract\/scripts\/(?:generate-openapi|generated-file)\.mjs$/u.test(file);
+}
+/** @param {string} file */
+export function isFastifyGenerationInput(file) {
+  return isOpenApiGenerationInput(file) || file === 'packages/http-contract/src/fastify-schema.mjs' ||
+    file === 'packages/http-contract/scripts/generate-fastify.mjs';
+}
+
 export const WORKSPACES = [
   ...['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'api', 'http-contract'].map(id => ({ id, path: `packages/${id}` })),
   { id: 'app', path: 'app' },

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
+import { readApprovedOpenapi } from './approved-openapi.mjs';
 import { resolveBaseCommit, selectBaseReference } from './base-reference.mjs';
 import { assertBreakingComparison, assertCandidateManifestEpoch, assertComparisonManifestEpoch } from './breaking-policy.mjs';
 import { resolveOasdiffBinary } from './oasdiff.mjs';
@@ -39,40 +40,35 @@ try {
   const reference = selectBaseReference();
   const baseSha = resolveBaseCommit(reference, git);
   const baseFile = path.join(tempRoot, 'base.openapi.yaml');
-  const baseExists = git(['cat-file', '-e', `${baseSha}:${packageContractPath}`]).status === 0;
-  if (!baseExists) {
-    console.log(`No approved OpenAPI artifact exists at ${baseSha}; this first contract establishes the generated baseline.`);
-  } else {
-    const baseText = readBaseFile(baseSha, packageContractPath);
-    writeFileSync(baseFile, baseText);
-    const base = parse(baseText);
-    const baseUpdate = JSON.parse(readBaseFile(baseSha, 'deploy/update-compatibility.json'));
-    const baseFrontend = JSON.parse(readBaseFile(baseSha, 'deploy/frontend-compatibility.json'));
-    const epoch = assertComparisonManifestEpoch({
-      baseSpec: base,
-      candidateSpec: candidate,
-      baseUpdate,
-      baseFrontend,
-      candidateUpdate,
-      candidateFrontend,
-    });
+  const baseText = readApprovedOpenapi(repositoryRoot, baseSha).toString('utf8');
+  writeFileSync(baseFile, baseText);
+  const base = parse(baseText);
+  const baseUpdate = JSON.parse(readBaseFile(baseSha, 'deploy/update-compatibility.json'));
+  const baseFrontend = JSON.parse(readBaseFile(baseSha, 'deploy/frontend-compatibility.json'));
+  const epoch = assertComparisonManifestEpoch({
+    baseSpec: base,
+    candidateSpec: candidate,
+    baseUpdate,
+    baseFrontend,
+    candidateUpdate,
+    candidateFrontend,
+  });
 
-    const binary = await resolveOasdiffBinary();
-    const comparison = run(binary, [
-      'breaking',
-      baseFile,
-      candidatePath,
-      '--format',
-      'json',
-      '--allow-external-refs=false',
-      '--fail-on',
-      'ERR',
-    ]);
-    process.stdout.write(comparison.stdout ?? '');
-    process.stderr.write(comparison.stderr ?? '');
-    assertBreakingComparison({ stdout: comparison.stdout ?? '', status: comparison.status });
-    console.log(`oasdiff found no breaking changes at API epoch ${epoch}, comparing approved ${packageContractPath} from ${baseSha}.`);
-  }
+  const binary = await resolveOasdiffBinary();
+  const comparison = run(binary, [
+    'breaking',
+    baseFile,
+    candidatePath,
+    '--format',
+    'json',
+    '--allow-external-refs=false',
+    '--fail-on',
+    'ERR',
+  ]);
+  process.stdout.write(comparison.stdout ?? '');
+  process.stderr.write(comparison.stderr ?? '');
+  assertBreakingComparison({ stdout: comparison.stdout ?? '', status: comparison.status });
+  console.log(`oasdiff found no breaking changes at API epoch ${epoch}, comparing approved ${packageContractPath} from ${baseSha}.`);
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });
 }

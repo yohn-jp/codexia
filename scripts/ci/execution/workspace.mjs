@@ -3,6 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { trackedHttpOutputs } from '../evidence/coverage-inputs.mjs';
 import { runDependencyBuilds } from './parallel.mjs';
 import { CONFORMANCE_TASKS, TEST_TYPECHECK_SCOPES, TYPECHECK_TARGETS, UNIT_TARGETS, WORKSPACES } from '../impact/contract.mjs';
 
@@ -259,9 +260,12 @@ async function prepareSelectedGroup(filename) {
   };
   const limit = Number(process.env.CODEXIA_CI_CONCURRENCY ?? '2');
   const builds = await runDependencyBuilds(targets, dependenciesOf, build, limit);
+  // These checks now materialize HTTP sources in the shared checkout before tsc.
+  const httpWriters = new Set(['typecheck-app', 'typecheck-core-api', 'safety', 'test-types-app-e2e', 'test-types-packages']);
   const report = tasks.map(task => {
     const missing = requirements.get(task).filter(id => builds.get(id)?.status !== 'passed');
-    const exclusive = task.startsWith('typecheck-') && typecheckWorkspaceIds(task.slice(10)).some(id => !packageManifests.get(id).scripts?.typecheck);
+    const exclusive = httpWriters.has(task) ||
+      (task.startsWith('typecheck-') && typecheckWorkspaceIds(task.slice(10)).some(id => !packageManifests.get(id).scripts?.typecheck));
     return { task, exclusive, ...(missing.length ? { error: 'Failed workspace prerequisites: ' + missing.join(', ') } : {}) };
   });
   await writeFile(filename, JSON.stringify(report));
@@ -331,6 +335,8 @@ function assertUnique(values, label) {
 }
 
 async function checkCoverage() {
+  const committed = trackedHttpOutputs(root);
+  if (committed.length) fail('HTTP contract build outputs must be untracked: ' + committed.join(', '));
   const actualWorkspacePaths = ['app'];
   for (const area of ['packages', 'modules']) {
     const entries = await readdir(path.join(root, area), { withFileTypes: true });

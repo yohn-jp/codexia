@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { generate } from 'orval';
 import { parse } from 'yaml';
+import { generateFastify } from '../../packages/http-contract/scripts/generate-fastify.mjs';
 import {
   authMethodsClientConfig,
   authMethodsOperationIds,
@@ -20,6 +21,8 @@ const target = path.join(generatedRoot, 'http');
 const authTarget = path.join(generatedRoot, 'auth-methods');
 const methods = new Set(['get', 'head', 'post', 'put', 'patch', 'delete', 'options', 'trace']);
 const operations = new Map();
+
+generateFastify({ check: process.argv.includes('--check') });
 
 for (const [route, pathItem] of Object.entries(parse(readFileSync(input, 'utf8')).paths)) {
   for (const [method, operation] of Object.entries(pathItem)) {
@@ -51,12 +54,34 @@ for (const id of provisionalOperationIds) {
 }
 
 function generatedFiles(directory) {
-  return readdirSync(directory, { recursive: true, withFileTypes: true })
+  assert.ok(lstatSync(directory).isDirectory(), `Expected a real Orval output directory at ${directory}`);
+  const entries = readdirSync(directory, { recursive: true, withFileTypes: true });
+  assert.ok(!entries.some(entry => entry.isSymbolicLink()), `Unexpected symlink in Orval output ${directory}`);
+  return entries
     .filter(entry => entry.isFile())
     .map(entry => path.relative(directory, path.join(entry.parentPath, entry.name)))
     .sort();
 }
 
+function publishClient(stagingDirectory, directory, files) {
+  // Publish complete files before removing obsolete schemas. Parallel build and
+  // test consumers must never see their existing client disappear mid-import.
+  mkdirSync(directory, { recursive: true });
+  const previous = generatedFiles(directory);
+  for (const file of files) {
+    const source = path.join(stagingDirectory, file);
+    const destination = path.join(directory, file);
+    if (existsSync(destination) && readFileSync(destination).equals(readFileSync(source))) continue;
+    mkdirSync(path.dirname(destination), { recursive: true });
+    renameSync(source, destination);
+  }
+  for (const file of previous) {
+    if (!files.includes(file)) rmSync(path.join(directory, file), { force: true });
+  }
+}
+
+mkdirSync(generatedRoot, { recursive: true });
+assert.ok(lstatSync(generatedRoot).isDirectory(), `Expected a real generated source directory at ${generatedRoot}`);
 const staging = mkdtempSync(path.join(generatedRoot, '.http-'));
 const authStaging = mkdtempSync(path.join(generatedRoot, '.auth-'));
 
@@ -98,7 +123,7 @@ try {
   const authFiles = generatedFiles(authStaging);
   assert.ok(files.length > 0 && authFiles.length > 0, 'Orval produced no files');
   if (process.argv.includes('--check')) {
-    const instruction = 'Run pnpm --filter @codexia/app generate:http and review the generated diff';
+    const instruction = 'Fresh Orval generation differs from the materialized clients';
     assert.deepEqual(generatedFiles(target), files, instruction);
     assert.deepEqual(generatedFiles(authTarget), authFiles, instruction);
     for (const file of files) {
@@ -111,13 +136,10 @@ try {
         `auth-methods/${file} differs. ${instruction}`,
       );
     }
-    console.log(`Orval clients match the checked-in generated artifacts (${generatedRoutes.length} operations across both clients).`);
+    console.log(`Orval generation is reproducible (${generatedRoutes.length} operations across both clients).`);
   } else {
-    // Replace only the two dedicated Orval output directories.
-    rmSync(target, { recursive: true, force: true });
-    cpSync(staging, target, { recursive: true });
-    rmSync(authTarget, { recursive: true, force: true });
-    cpSync(authStaging, authTarget, { recursive: true });
+    publishClient(staging, target, files);
+    publishClient(authStaging, authTarget, authFiles);
   }
 } finally {
   rmSync(staging, { recursive: true, force: true });

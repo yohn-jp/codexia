@@ -25,4 +25,4 @@ PATH="$work/yaml/bin:$PATH" ios/CodexiaTransport/generate.sh --check
 swift test --package-path ios/CodexiaTransport --force-resolved-versions --jobs 4
 swift build --package-path ios/CodexiaEditor --force-resolved-versions --jobs 4
 swift test --package-path ios/CodexiaEditor --force-resolved-versions --jobs 4
-git diff --exit-code HEAD -- ios/CodexiaTransport/Package.resolved ios/CodexiaEditor/Package.resolved ios/CodexiaTransport/Sources/CodexiaAPI
+git diff --exit-code HEAD -- ios/CodexiaTransport/Package.resolved ios/CodexiaEditor/Package.resolved

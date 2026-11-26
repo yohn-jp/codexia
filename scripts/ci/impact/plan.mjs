@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BROWSER_SHARDS, CONFORMANCE_TASKS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES } from './contract.mjs';
+import { BROWSER_SHARDS, CONFORMANCE_TASKS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES, isOpenApiGenerationInput, isFastifyGenerationInput } from './contract.mjs';
 import { ROOT_VERIFICATION_DOCUMENTS, UX_PROJECTION_DOCUMENTS, isNonExecutableDocumentation, isRequirementsTraceInput, taskGroup, taskWorkflowJob } from '../evidence/task-inputs.mjs';
 
 export const FULL_MODEL_OCI_PATHS = Object.freeze([
@@ -247,7 +247,7 @@ const NATIVE_IOS_GENERATOR_INPUTS = new Set([
   'ios/CodexiaTransport/openapi-generator-config.yaml',
 ]);
 export function isNativeIosOwnedInput(file) {
-  if (NATIVE_IOS_WORKFLOW_INPUTS.includes(file)) return true;
+  if (NATIVE_IOS_WORKFLOW_INPUTS.includes(file) || file === '.github/actions/generate-swift-api/action.yml') return true;
   if (!NATIVE_IOS_ROOTS.some(root => file.startsWith(root))) return false;
   return /\.(?:swift|entitlements|pbxproj|xcscheme|plist|xcconfig)$/u.test(file) ||
     /\/(?:Package\.swift|Package\.resolved|\.gitignore)$/u.test(file) ||
@@ -269,7 +269,7 @@ const SWIFT_LINUX_INPUTS = new Set([
 ]);
 
 function isSwiftLinuxInput(file) {
-  return SWIFT_LINUX_INPUTS.has(file) ||
+  return SWIFT_LINUX_INPUTS.has(file) || isOpenApiGenerationInput(file) ||
     /^ios\/(?:CodexiaEditor|CodexiaTransport)\/(?:Sources\/|Tests\/|Package\.(?:swift|resolved)$)/u.test(file) ||
     /^packages\/http-contract\/(?:src|scripts|openapi)\//u.test(file);
 }
@@ -355,7 +355,15 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       file === 'packages/http-contract/redocly.yaml'
     ) {
       add('unit-http-contract', 'typecheck-http-contract', 'test-types-packages');
-      if (file.startsWith('packages/http-contract/openapi/')) add('unit-app');
+      // The emitted Fastify routes are packaged in both images. Web builds consume
+      // Orval's operations through the app and root deployment route assertions.
+      if (isFastifyGenerationInput(file)) {
+        add('unit-api', 'typecheck-core-api', 'http-conformance', 'build-core', 'build-full', 'audit-core', 'oci-core', 'oci-full');
+      }
+      if (isOpenApiGenerationInput(file) || file.startsWith('packages/http-contract/openapi/')) {
+        add('unit-app', 'unit-root', 'typecheck-app', 'test-types-app-e2e', 'safety');
+        browser(PROFILES);
+      }
       continue;
     }
     if (HTTP_CONTRACT_ROUTE_SOURCE_PATHS.has(file)) add('unit-http-contract');

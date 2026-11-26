@@ -149,6 +149,12 @@ async function checkScope(scopeId) {
 
 const [scopeId, ...extra] = process.argv.slice(2);
 if (extra.length) throw new Error('Usage: node scripts/ci/execution/typecheck-tests.mjs [app-e2e|packages|modules]');
+// API integration test sources import the app's public HTTP adapter.
+if (!scopeId || scopeId === 'app-e2e' || scopeId === 'packages') {
+  const generated = spawnSync('pnpm', ['--filter', '@codexia/app', 'run', 'generate:http'], { cwd: root, stdio: 'inherit' });
+  if (generated.error) throw generated.error;
+  if (generated.status !== 0) throw new Error('HTTP client generation failed before test typecheck');
+}
 if (scopeId) await checkScope(scopeId);
 else {
   for (const scope of TEST_TYPECHECK_SCOPES) await checkScope(scope);

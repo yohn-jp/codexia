@@ -92,6 +92,8 @@ test('PR paths and completed-Verify release impact retain component build inputs
   }
   const changes = [
     ['Desktop authoring', ['app/src/main.tsx'], [true, false]],
+    ['TypeSpec contract', ['packages/http-contract/src/routes-persistence.tsp'], [true, true]],
+    ['TypeSpec compiler config', ['packages/http-contract/tspconfig.yaml'], [true, true]],
     ['Story browser entry', ['modules/story/src/browser.tsx'], [true, false]],
     ['Backend API', ['packages/api/src/server.ts'], [false, true]],
     ['Backend API source helper', ['packages/api/src/auth/tests/helper.ts'], [false, true]],
@@ -425,7 +427,7 @@ test('main, manual, shared contracts, lockfiles, manifests and unknown files fai
     [['modules/search/package.json'], 'pull_request'], [['new-root-file'], 'pull_request'],
     [null, 'pull_request'],
   ]) {
-    assert.deepEqual((await plan(files, event)).tasks, files === null ? VERIFICATION_TASKS : NON_SWIFT_TASKS);
+    assert.deepEqual((await plan(files, event)).tasks, files === null || files.includes('pnpm-lock.yaml') ? VERIFICATION_TASKS : NON_SWIFT_TASKS);
   }
 });
 
@@ -609,7 +611,7 @@ test('known operational inputs retain root proof without unrelated browser or OC
   }
   const mixed = await plan(['deploy/ansible/host.yml','app/src/api.ts']);
   assert.ok(mixed.tasks.includes('unit-root') && mixed.tasks.includes('unit-app') && mixed.tasks.includes('browser-core-core'));
-  assert.deepEqual((await plan(['deploy/ansible/host.yml','pnpm-lock.yaml'])).tasks, NON_SWIFT_TASKS);
+  assert.deepEqual((await plan(['deploy/ansible/host.yml','pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
   assert.deepEqual((await plan(['deploy/ansible/host.yml'], 'push')).tasks, NON_SWIFT_TASKS);
   assert.deepEqual((await plan(null)).tasks, VERIFICATION_TASKS);
 });
@@ -661,7 +663,7 @@ test('Mitogen launcher changes select the rootless contract on PR and main', asy
 });
 
 test('Orval manifest and transport changes verify the deployment API route assertion', async () => {
-  for (const file of ['app/src/api-transport.ts', 'app/src/generated/http/client.operations.ts']) {
+  for (const file of ['app/src/api-transport.ts', 'app/orval.config.mjs', 'app/scripts/generate-http.mjs', 'app/scripts/orval-desktop-transformer.mjs']) {
     const selected = await plan([file]);
     assert.ok(selected.tasks.includes('unit-root'), file);
     assert.ok(selected.tasks.includes('unit-app'), file);
@@ -734,7 +736,7 @@ test('push backup changes retain root and independent exact-head verification', 
   assert.equal(steps.find(s => s.uses?.startsWith('actions/checkout')).with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
   assert.ok(steps.some(s => s.run?.includes('bash -n deploy/backup/backup.sh')));
   assert.ok(steps.some(s => s.run?.includes('scripts/deployment/recovery/backup.test.mjs')));
-  assert.deepEqual((await plan([...source, 'pnpm-lock.yaml'])).tasks, NON_SWIFT_TASKS);
+  assert.deepEqual((await plan([...source, 'pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
   assert.deepEqual((await plan(source, 'push')).tasks, NON_SWIFT_TASKS);
 });
 
@@ -820,6 +822,9 @@ test('Linux Swift verification follows SwiftPM and generation inputs even in ful
       'ios/CodexiaTransport/normalize-openapi.py',
       'packages/http-contract/openapi/codexia.openapi.yaml',
       'packages/http-contract/src/main.tsp',
+      'packages/http-contract/package.json',
+      'pnpm-lock.yaml',
+      'pnpm-workspace.yaml',
       ...SWIFT_LINUX_RECIPES,
       '.github/workflows/verify.yml',
       'scripts/ci/execution/group.mjs',
@@ -832,7 +837,6 @@ test('Linux Swift verification follows SwiftPM and generation inputs even in ful
       '.github/workflows/ios-api.yml',
       'packages/api/src/server.ts',
       'scripts/ci/dashboard/timing.mjs',
-      'pnpm-lock.yaml',
       'docs/README.md',
     ]) {
       assert.ok(!(await plan([file], event)).tasks.includes('swift-linux'), event + ': ' + file);

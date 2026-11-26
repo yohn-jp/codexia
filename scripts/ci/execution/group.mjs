@@ -198,7 +198,7 @@ async function executeTaskInContext(task, index, scope) {
   return result;
 }
 // Only proven read-only unit suites can overlap; writers, model tests and root scripts are barriers.
-const independentUnits = new Set(['unit-contracts', 'unit-persistence-contracts', 'unit-app', 'unit-story', 'unit-publishing', 'unit-mcp', 'unit-search']);
+const independentUnits = new Set(['unit-contracts', 'unit-persistence-contracts', 'unit-story', 'unit-publishing', 'unit-mcp', 'unit-search']);
 const exclusive = task => {
   if (group.startsWith('browser-')) return task.endsWith('-redesign-visual'); // performance measurements must not contend with siblings
   if (group.startsWith('types-')) return groupPreparation.get(task)?.exclusive ?? false;

@@ -10,8 +10,8 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 
 test('reverse discovery records authority and provenance for HTTP, MCP, DB, UI and operational surfaces', async () => {
   const { surfaces, limitations } = await discoverReverseSurfaces({ repositoryRoot });
-  assert.ok(surfaces.some((item) => item.kind === 'httpOperation' && item.id === 'GET /api/projects'));
-  assert.ok(surfaces.some((item) => item.kind === 'httpRuntimeRoute' && item.id === 'GET /api/projects' && item.operationId === 'projects_list_get' && item.source.path === 'packages/api/src/generated/http-contract.json'));
+  assert.ok(surfaces.some((item) => item.kind === 'httpOperation' && item.id === 'GET /api/projects' && item.source.path === 'packages/http-contract/test/fixtures/admitted-routes.json'));
+  assert.ok(surfaces.some((item) => item.kind === 'httpRuntimeRoute' && item.id === 'GET /api/projects' && item.operationId === 'projects_list_get' && item.source.path === 'packages/api/src/http-contract.ts'));
   assert.ok(surfaces.some((item) => item.kind === 'mcpTool' && item.id === 'list_projects'));
   const publicMcpTools = surfaces.filter((item) => item.kind === 'mcpTool');
   assert.equal(publicMcpTools.length, 53, 'all public MCP tools remain discoverable across SDK v1/v2 registration shapes');
@@ -49,10 +49,19 @@ test('reverse discovery inventories native iOS views and declared IaC resources'
   await mkdir(path.join(root, 'deploy/ansible'), { recursive: true });
   await writeFile(path.join(root, 'ios/CodexiaApp/Sources/EditorScreen.swift'), `import SwiftUI\nstruct EditorScreen: View { var body: some View { Text("Editor") } }\n`);
   await writeFile(path.join(root, 'ios/CodexiaEditor/Sources/AuthoringView.swift'), `import SwiftUI\npublic struct AuthoringView: View { public var body: some View { Text("Authoring") } }\n`);
+  for (const directory of ['ios/CodexiaTransport/.build/checkouts/vendor/Sources', 'ios/CodexiaTransport/Sources/CodexiaAPI/Generated']) {
+    await mkdir(path.join(root, directory), { recursive: true });
+    await writeFile(path.join(root, directory, 'BuildProduct.swift'), 'struct BuildProduct: View {}');
+  }
+  await mkdir(path.join(root, 'app/src/generated/http'), { recursive: true });
+  await writeFile(path.join(root, 'app/src/generated/http/client.ts'), '// CTRL-PRJ-GENERATED');
+  await writeFile(path.join(root, 'app/src/generated/browser-modules.ts'), '// CTRL-PRJ-SOURCE');
   await writeFile(path.join(root, 'deploy/cloudflare/terraform/main.tf'), `resource "cloudflare_workers_route" "frontend" {\n  pattern = "example.com/*"\n}\n`);
   await writeFile(path.join(root, 'deploy/ansible/site.yml'), `- name: Configure Codexia\n  hosts: codexia\n  tasks: []\n`);
 
   const result = await discoverReverseSurfaces({ repositoryRoot: root });
+  assert.ok(!result.surfaces.some(item => item.id === 'BuildProduct' || item.id === 'CTRL-PRJ-GENERATED'));
+  assert.ok(result.surfaces.some(item => item.kind === 'uiControlBindingReference' && item.id === 'CTRL-PRJ-SOURCE'));
   assert.ok(result.surfaces.some(item => item.kind === 'nativeIosView' && item.id === 'EditorScreen' && item.source.path.endsWith('EditorScreen.swift')));
   assert.ok(result.surfaces.some(item => item.kind === 'nativeIosView' && item.id === 'AuthoringView' && item.source.path.endsWith('AuthoringView.swift')));
   assert.ok(result.surfaces.some(item => item.kind === 'iacResource' && item.id === 'cloudflare_workers_route.frontend' && item.source.path.endsWith('main.tf')));

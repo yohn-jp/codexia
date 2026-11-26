@@ -56,7 +56,8 @@ HTTP契約の検証は既存Verifyの `unit-http-contract` と `typecheck-http-c
 ## OpenAPI lint・diff・runtime検証の分界
 
 - RedoclyはOpenAPI構造、参照、operationId一意性、HTTP status/scheme/response Schema、必要なタグ/説明/trace metadataをチェックする。アプリの認可は保証しない。
-- oasdiffはコミット済みの生成OpenAPIを比較する。
+- oasdiffは候補のTypeSpecから生成したOpenAPIを基準コミットのOpenAPIと比較する。
+  移行前の基準にはGitに保存済みのOpenAPIを使い、移行後の基準はそのSHAの依存ロックと生成スクリプトで再生成する。
   pull requestはイベントの `pull_request.base.sha`、mainへのpushはイベントの `before` SHAを基準にする。
   エラー級の非互換差分、イベントSHAの欠落、生成物とデプロイ互換設定のepoch不一致で失敗する。
 - Schemathesisは**隔離API**で実行する。書込み可能であるため本番や作者データに接続してはならない。Zod/TypeSpecの正常ケース、status/error/body、security testing、boundary/rate/invalid payload等を補強する。

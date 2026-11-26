@@ -37,19 +37,10 @@ jobs:
           {
             git rev-parse HEAD
             git rev-parse HEAD:ios/CodexiaTransport
-            git rev-parse HEAD:packages/http-contract/openapi/codexia.openapi.yaml
+            git rev-parse HEAD:packages/http-contract
             xcodebuild -version
             swift --version
           } > "$RUNNER_TEMP/ios-api-evidence/identity.txt"
-      - uses: actions/setup-python@v7.1.0
-        if: matrix.lane == 'macos-contract'
-        with:
-          python-version: '3.13'
-      - name: Prepare pinned generator dependencies
-        if: matrix.lane == 'macos-contract'
-        run: |
-          bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ios-yaml" PyYAML==6.0.3
-          echo "$RUNNER_TEMP/codexia-ios-yaml/bin" >> "$GITHUB_PATH"
       - name: Resolve locked Swift dependencies
         if: matrix.lane == 'macos-contract'
         env:
@@ -78,9 +69,11 @@ jobs:
             GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0='' \
             GIT_CONFIG_KEY_1=credential.https://github.com.helper GIT_CONFIG_VALUE_1="!\"$helper\"" \
             swift package --package-path ios/CodexiaTransport --force-resolved-versions resolve
-      - name: Compare regenerated client and operation IDs
-        if: matrix.lane == 'macos-contract'
-        run: ios/CodexiaTransport/generate.sh --check
+      - uses: ./.github/actions/generate-swift-api
+        with:
+          check: ${{ matrix.lane == 'macos-contract' }}
+      - name: Record generated OpenAPI digest
+        run: shasum -a 256 packages/http-contract/openapi/codexia.openapi.yaml >> "$RUNNER_TEMP/ios-api-evidence/identity.txt"
       - name: Run Swift contract tests
         if: matrix.lane == 'macos-contract'
         run: |
