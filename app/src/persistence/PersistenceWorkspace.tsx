@@ -487,8 +487,11 @@ export function PersistenceWorkspace({
   const transitionErrorRef = useRef('');
   const clientIdRef = useRef('');
   const openSequenceRef = useRef(0);
+  const documentReadRef = useRef(0);
   const selectionIntentRef = useRef(0);
+  const pendingSelectionRef = useRef<number | undefined>(undefined);
   const continueRequestRef = useRef<ContinueRequest | undefined>(undefined);
+  const [pendingContinue, setPendingContinue] = useState<number>();
   const panelRequestSequenceRef = useRef(0);
   const creationInFlightRef = useRef(false);
   const projectCreationIntentRef = useRef<{ id: ProjectId; title: string } | null>(null);
@@ -505,7 +508,9 @@ export function PersistenceWorkspace({
   } | null>(null);
   const [resumeEpoch, setResumeEpoch] = useState(0);
   const [legacyImportBusy, setLegacyImportBusy] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loadingWorkspace, setLoading] = useState(false);
+  const [loadingDocument, setLoadingDocument] = useState(false);
+  const loading = loadingWorkspace || loadingDocument;
   const [workTransferBusy, setWorkTransferBusy] = useState(false);
   const [workTransferStatus, setWorkTransferStatus] = useState('');
   const [pageError, setPageError] = useState('');
@@ -1138,37 +1143,74 @@ export function PersistenceWorkspace({
   );
 
   const openDocument = useCallback(
-    async (nextDocumentId: string): Promise<void> => {
+    async (
+      nextDocumentId: string,
+      selection?: { intent: number; protect: () => Promise<boolean>; replaceRoute?: boolean },
+    ): Promise<boolean> => {
       const currentProject = projects.find(item => item.id === projectId);
       const currentJournal = journalRef.current;
-      if (sessionBlockedRef.current || !currentProject || !currentJournal || !nextDocumentId) return;
-      const openSequence = ++openSequenceRef.current;
-      evidenceReadSequenceRef.current++;
-      evidenceReadControllerRef.current?.abort();
-      evidenceReadControllerRef.current = null;
+      if (sessionBlockedRef.current || !currentProject || !currentJournal || !nextDocumentId) return false;
+      if (!selection && pendingSelectionRef.current !== undefined) return false;
+      const intent = selection?.intent ?? selectionIntentRef.current;
+      const readSequence = ++documentReadRef.current;
+      const navigation = openSequenceRef.current;
+      const source = activeRef.current;
+      const isCurrent = () =>
+        !sessionBlockedRef.current &&
+        projectIdRef.current === currentProject.id &&
+        navigation === openSequenceRef.current &&
+        intent === selectionIntentRef.current &&
+        readSequence === documentReadRef.current;
       revisionPageSequenceRef.current += 1;
       setShowRevisions(false);
       setRevisions([]);
       setRevisionCursor(null);
       setRevisionPageLoading(false);
       setRevisionPageError('');
-      setLoading(true);
+      setLoadingDocument(true);
       setPageError('');
-      setNotice('');
-      setEvidenceLoadIssue(null);
-      setEvidenceLoadPending(null);
-      publishEditor(null);
       try {
         const [read, draft] = await Promise.all([
           api.persistenceDocument(currentProject.id, nextDocumentId),
           currentJournal.getPersistenceDraft(currentProject.id, nextDocumentId, authorScope),
         ]);
+        if (!isCurrent()) return false;
         if (!read.revision) throw new Error('この文書にRevisionがありません。');
         const revision = read.revision;
-        if (sessionBlockedRef.current || openSequence !== openSequenceRef.current) return;
+        if (
+          read.document.id !== nextDocumentId ||
+          read.document.projectId !== currentProject.id ||
+          revision.documentId !== nextDocumentId ||
+          revision.projectId !== currentProject.id ||
+          revision.id !== read.document.headRevisionId
+        )
+          throw new Error('読み込んだ文書の識別子が一致しません。');
+        // The source editor stays available while the target is loading. Protect
+        // any input added in that interval before committing the new selection.
+        if (selection && (!(await selection.protect()) || !isCurrent())) return false;
+        if (!selection && source?.document.id === nextDocumentId) {
+          const current = activeRef.current;
+          if (!current || current.dirty || current.generation !== source.generation || current.revision.id !== source.revision.id)
+            return false;
+        }
+        openSequenceRef.current += 1;
+        setNotice('');
+        evidenceReadSequenceRef.current++;
+        evidenceReadControllerRef.current?.abort();
+        evidenceReadControllerRef.current = null;
+        setEvidenceLoadIssue(null);
+        setEvidenceLoadPending(null);
         selectionRef.current = { projectId: currentProject.id, documentId: nextDocumentId };
         persistSelectionSafely(authorScope, selectionRef.current);
-        updateRouteSelection(selectionRef.current, true);
+        updateRouteSelection(selectionRef.current, !selection || selection.replaceRoute === true);
+        setDocumentId(nextDocumentId);
+        const requested = continueRequestRef.current;
+        const position =
+          requested?.projectId === currentProject.id && requested.documentId === nextDocumentId && requested.intent === intent
+            ? requested.position
+            : undefined;
+        if (selection) setReading(position?.kind === 'reading');
+        setEvidenceJump(undefined);
         const staleDraft = Boolean(draft && (draft.baseRevisionId !== revision.id || draft.baseMarkdown !== revision.markdown));
         const recoveredSave = draft?.pendingSave;
         const recoverablePending =
@@ -1239,12 +1281,7 @@ export function PersistenceWorkspace({
         if (draft && staleDraft && !recoverablePending)
           setNotice('ブラウザーに保存された下書きのbase Revisionが変わっています。比較してから、どちらを使うか選んでください。');
         if (recoverablePending) setNotice('応答が失われた可能性のある保存操作を照合しています。');
-        const requested = continueRequestRef.current;
-        const explicitPosition =
-          requested?.projectId === currentProject.id &&
-          requested.documentId === nextDocumentId &&
-          requested.intent === selectionIntentRef.current;
-        if (!explicitPosition) {
+        if (!position) {
           const position = loadWritingResume(authorScope, currentProject.id);
           const intent = selectionIntentRef.current;
           if (position?.sceneId === nextDocumentId)
@@ -1257,17 +1294,19 @@ export function PersistenceWorkspace({
                 editorRef.current?.restorePosition(position);
             });
         }
-        setReadingPage(loadReadingPage(authorScope, currentProject.id, nextDocumentId));
+        setReadingPage(position?.kind === 'reading' ? position.pageIndex : loadReadingPage(authorScope, currentProject.id, nextDocumentId));
         revisionPageSequenceRef.current += 1;
         setRevisions([]);
         setShowRevisions(false);
         setRevisionCursor(null);
         setRevisionPageLoading(false);
         setRevisionPageError('');
+        return true;
       } catch (error) {
-        if (openSequence === openSequenceRef.current) setPageError(error instanceof Error ? error.message : '文書を開けませんでした。');
+        if (isCurrent()) setPageError(error instanceof Error ? error.message : '文書を開けませんでした。');
+        return false;
       } finally {
-        if (openSequence === openSequenceRef.current) setLoading(false);
+        if (readSequence === documentReadRef.current) setLoadingDocument(false);
       }
     },
     [authorScope, projectId, projects, publishEditor, saveMachineActor, updateRouteSelection],
@@ -1441,21 +1480,23 @@ export function PersistenceWorkspace({
         sessionBlockedRef.current ||
         saveMachineActor.getSnapshot().matches({ active: { server: 'saving' } }) ||
         restoreInFlightRef.current ||
+        pendingSelectionRef.current !== undefined ||
         !captured ||
         !currentProject ||
         captured.document.id !== documentId ||
         captured.document.projectId !== projectId
       )
         return;
-      const sequence = ++openSequenceRef.current;
+      const sequence = openSequenceRef.current;
+      const intent = selectionIntentRef.current;
+      const isCurrent = () => !signal.aborted && sequence === openSequenceRef.current && intent === selectionIntentRef.current;
       try {
         const read = await api.persistenceDocument(projectId, captured.document.id, signal);
         if (
           sessionBlockedRef.current ||
           saveMachineActor.getSnapshot().matches({ active: { server: 'saving' } }) ||
           restoreInFlightRef.current ||
-          signal.aborted ||
-          sequence !== openSequenceRef.current ||
+          !isCurrent() ||
           !read.revision
         )
           return;
@@ -1471,7 +1512,7 @@ export function PersistenceWorkspace({
         }
         if (latest.recovery !== 'stored') {
           const stored = await persistDraft(latest);
-          if (signal.aborted || sequence !== openSequenceRef.current) return;
+          if (!isCurrent()) return;
           const afterWrite = activeRef.current;
           if (!stored && afterWrite?.document.id === latest.document.id) {
             publishEditor({
@@ -1497,8 +1538,7 @@ export function PersistenceWorkspace({
           error: 'PostgreSQL上で別の端末が新しいRevisionを保存しました。現在のブラウザーDraftを保持しています。',
         });
       } catch (error) {
-        if (!signal.aborted && sequence === openSequenceRef.current)
-          setPageError(error instanceof Error ? error.message : '開いている文書を再確認できませんでした。');
+        if (isCurrent()) setPageError(error instanceof Error ? error.message : '開いている文書を再確認できませんでした。');
       }
     },
     [documentId, openDocument, persistDraft, projectId, projects, publishEditor, saveMachineActor],
@@ -1625,7 +1665,8 @@ export function PersistenceWorkspace({
             navigation === openSequenceRef.current &&
             !controller.signal.aborted,
         );
-      if (inScope(activeRef.current)) publishEditor({ ...activeRef.current!, save: 'saving', error: '' });
+      const captured = activeRef.current;
+      if (captured && inScope(captured)) publishEditor({ ...captured, save: 'saving', error: '' });
       try {
         const protocol = await runPersistenceSaveProtocol({
           authorScope,
@@ -2086,130 +2127,145 @@ export function PersistenceWorkspace({
     }
   }
 
-  const protectTransition = useCallback(async (): Promise<boolean> => {
-    const requestId = crypto.randomUUID();
-    saveMachineActor.send({ type: 'NAVIGATION.REQUESTED', requestId });
-    let protectedIdentity: { projectId: string; documentId: string } | null = null;
-    let protectedGeneration: number | null = null;
-    try {
-      transitionErrorRef.current = '';
-      // Capture the IME guard synchronously, before scratch/journal promises can
-      // settle after compositionend. A transition requested during composition
-      // must remain denied even if the browser finishes composing meanwhile.
-      editorRef.current?.readForNavigation();
-      resume.flush();
-      await scratchGuardRef.current?.protect();
-      await protectEditorTransition(
-        () => activeRef.current,
-        () => {
-          const markdown = editorRef.current?.readForNavigation();
-          const current = activeRef.current;
-          if (current) {
-            protectedIdentity = { projectId: current.document.projectId, documentId: current.document.id };
-            protectedGeneration = current.generation;
-          }
-          if (current && markdown !== undefined && markdown !== current.markdown) {
-            const pending = pendingSaveRef.current.get(JSON.stringify([current.document.projectId, current.document.id]));
-            const next = {
-              ...current,
-              markdown,
-              textChanges: composeDraftChanges(current, pending, markdown, minimalTextChanges(current.markdown, markdown)),
-              generation: current.generation + 1,
-              dirty: markdown !== current.baseMarkdown || Boolean(pending && markdown !== pending.markdown),
-              recovery: current.recovery === 'other-tab' ? ('other-tab' as const) : ('pending' as const),
-              save:
-                current.recovery === 'other-tab'
-                  ? ('failed' as const)
-                  : current.save === 'saving'
-                    ? ('saving' as const)
-                    : ('idle' as const),
-            };
-            protectedGeneration = next.generation;
-            publishEditor({
-              ...next,
-            });
-          }
-        },
-        persistDraft,
-      );
-      const protectedEditor = activeRef.current;
-      const capturedIdentity = protectedIdentity as { projectId: string; documentId: string } | null;
-      const capturedGeneration = protectedGeneration as number | null;
-      if (
-        capturedIdentity &&
-        capturedGeneration !== null &&
-        protectedEditor &&
-        protectedEditor.document.projectId === capturedIdentity.projectId &&
-        protectedEditor.document.id === capturedIdentity.documentId &&
-        protectedEditor.generation === capturedGeneration
-      ) {
-        saveMachineActor.send({
-          type: 'DRAFT.PROTECTED',
-          identity: capturedIdentity,
-          generation: capturedGeneration,
-          dirty: protectedEditor.dirty,
-        });
+  const protectTransition = useCallback(
+    async (isCurrent?: () => boolean): Promise<boolean> => {
+      const requestId = crypto.randomUUID();
+      saveMachineActor.send({ type: 'NAVIGATION.REQUESTED', requestId });
+      let protectedIdentity: { projectId: string; documentId: string } | null = null;
+      let protectedGeneration: number | null = null;
+      try {
+        transitionErrorRef.current = '';
+        // Capture the IME guard synchronously, before scratch/journal promises can
+        // settle after compositionend. A transition requested during composition
+        // must remain denied even if the browser finishes composing meanwhile.
+        editorRef.current?.readForNavigation();
+        resume.flush();
+        await scratchGuardRef.current?.protect();
+        await protectEditorTransition(
+          () => activeRef.current,
+          () => {
+            const markdown = editorRef.current?.readForNavigation();
+            const current = activeRef.current;
+            if (current) {
+              protectedIdentity = { projectId: current.document.projectId, documentId: current.document.id };
+              protectedGeneration = current.generation;
+            }
+            if (current && markdown !== undefined && markdown !== current.markdown) {
+              const pending = pendingSaveRef.current.get(JSON.stringify([current.document.projectId, current.document.id]));
+              const next = {
+                ...current,
+                markdown,
+                textChanges: composeDraftChanges(current, pending, markdown, minimalTextChanges(current.markdown, markdown)),
+                generation: current.generation + 1,
+                dirty: markdown !== current.baseMarkdown || Boolean(pending && markdown !== pending.markdown),
+                recovery: current.recovery === 'other-tab' ? ('other-tab' as const) : ('pending' as const),
+                save:
+                  current.recovery === 'other-tab'
+                    ? ('failed' as const)
+                    : current.save === 'saving'
+                      ? ('saving' as const)
+                      : ('idle' as const),
+              };
+              protectedGeneration = next.generation;
+              publishEditor({
+                ...next,
+              });
+            }
+          },
+          persistDraft,
+        );
+        const protectedEditor = activeRef.current;
+        const capturedIdentity = protectedIdentity as { projectId: string; documentId: string } | null;
+        const capturedGeneration = protectedGeneration as number | null;
+        if (
+          capturedIdentity &&
+          capturedGeneration !== null &&
+          protectedEditor &&
+          protectedEditor.document.projectId === capturedIdentity.projectId &&
+          protectedEditor.document.id === capturedIdentity.documentId &&
+          protectedEditor.generation === capturedGeneration
+        ) {
+          saveMachineActor.send({
+            type: 'DRAFT.PROTECTED',
+            identity: capturedIdentity,
+            generation: capturedGeneration,
+            dirty: protectedEditor.dirty,
+          });
+        }
+        saveMachineActor.send({ type: 'NAVIGATION.ALLOWED', requestId });
+        return true;
+      } catch (error) {
+        const current = activeRef.current;
+        const capturedIdentity = protectedIdentity as { projectId: string; documentId: string } | null;
+        const capturedGeneration = protectedGeneration as number | null;
+        if (
+          capturedIdentity &&
+          capturedGeneration !== null &&
+          current &&
+          current.recovery !== 'other-tab' &&
+          current.document.projectId === capturedIdentity.projectId &&
+          current.document.id === capturedIdentity.documentId &&
+          current.generation === capturedGeneration
+        ) {
+          saveMachineActor.send({
+            type: 'DRAFT.FAILED',
+            identity: capturedIdentity,
+            generation: capturedGeneration,
+            message: error instanceof Error ? error.message : '回復Journalを保存できませんでした。',
+          });
+        }
+        saveMachineActor.send({ type: 'NAVIGATION.BLOCKED', requestId });
+        if (!isCurrent || isCurrent()) {
+          transitionErrorRef.current = error instanceof Error ? error.message : '回復Journalを保存できませんでした。';
+          setPageError(transitionErrorRef.current);
+        }
+        return false;
       }
-      saveMachineActor.send({ type: 'NAVIGATION.ALLOWED', requestId });
-      return true;
-    } catch (error) {
-      const current = activeRef.current;
-      const capturedIdentity = protectedIdentity as { projectId: string; documentId: string } | null;
-      const capturedGeneration = protectedGeneration as number | null;
-      if (
-        capturedIdentity &&
-        capturedGeneration !== null &&
-        current &&
-        current.recovery !== 'other-tab' &&
-        current.document.projectId === capturedIdentity.projectId &&
-        current.document.id === capturedIdentity.documentId &&
-        current.generation === capturedGeneration
-      ) {
-        saveMachineActor.send({
-          type: 'DRAFT.FAILED',
-          identity: capturedIdentity,
-          generation: capturedGeneration,
-          message: error instanceof Error ? error.message : '回復Journalを保存できませんでした。',
-        });
-      }
-      saveMachineActor.send({ type: 'NAVIGATION.BLOCKED', requestId });
-      transitionErrorRef.current = error instanceof Error ? error.message : '回復Journalを保存できませんでした。';
-      setPageError(transitionErrorRef.current);
-      return false;
-    }
-  }, [persistDraft, publishEditor, resume.flush, saveMachineActor]);
+    },
+    [persistDraft, publishEditor, resume.flush, saveMachineActor],
+  );
 
   useEffect(() => {
     registerProtection?.(protectTransition);
     return () => registerProtection?.(null);
   }, [registerProtection, protectTransition]);
 
+  const beginSelection = useCallback(() => {
+    const intent = ++selectionIntentRef.current;
+    if (pendingSelectionRef.current !== undefined) {
+      pendingSelectionRef.current = undefined;
+      setLoadingDocument(false);
+    }
+    continueRequestRef.current = undefined;
+    setPendingContinue(undefined);
+    return intent;
+  }, []);
+
   const selectDocument = useCallback(
-    async (nextId: string, position?: ContinuePosition): Promise<boolean> => {
-      // Navigation preflight is asynchronous. Only the latest requested selection
-      // may publish a document, even when an earlier request finishes later.
-      const intent = ++selectionIntentRef.current;
-      continueRequestRef.current = undefined;
-      setEvidenceJump(undefined);
+    async (nextId: string, position?: ContinuePosition, replaceRoute = false): Promise<boolean> => {
+      // The latest explicit selection owns the guard and the target read.
+      const intent = beginSelection();
+      const isCurrent = () => intent === selectionIntentRef.current && projectId === projectIdRef.current && !sessionBlockedRef.current;
+      const protect = () => protectTransition(isCurrent);
       const alreadyOpen = nextId === documentId && selectionRef.current?.documentId === nextId && activeRef.current?.document.id === nextId;
       if (alreadyOpen && !position) return true;
-      if (!(await protectTransition())) return false;
-      if (intent !== selectionIntentRef.current) return false;
-      if (position) {
-        continueRequestRef.current = { projectId, documentId: nextId, intent, position };
-        setRequestedPanel({ id: 'editor', sequence: ++panelRequestSequenceRef.current });
+      pendingSelectionRef.current = intent;
+      try {
+        if (!(await protect()) || !isCurrent()) return false;
+        if (position) {
+          continueRequestRef.current = { projectId, documentId: nextId, intent, position };
+          if (!alreadyOpen) setPendingContinue(intent);
+        }
+        const opened = alreadyOpen || (await openDocument(nextId, { intent, protect, replaceRoute }));
+        if (!opened && continueRequestRef.current?.intent === intent) continueRequestRef.current = undefined;
+        if (opened && position && isCurrent()) setRequestedPanel({ id: 'editor', sequence: ++panelRequestSequenceRef.current });
+        return opened && isCurrent();
+      } finally {
+        if (pendingSelectionRef.current === intent) pendingSelectionRef.current = undefined;
+        setPendingContinue(current => (current === intent ? undefined : current));
       }
-      if (alreadyOpen) return true;
-      openSequenceRef.current += 1;
-      publishEditor(null);
-      selectionRef.current = { projectId, documentId: nextId };
-      persistSelectionSafely(authorScope, selectionRef.current);
-      updateRouteSelection(selectionRef.current, false);
-      setReading(false);
-      setDocumentId(nextId);
-      return true;
     },
-    [authorScope, documentId, projectId, protectTransition, publishEditor, updateRouteSelection],
+    [beginSelection, documentId, openDocument, projectId, protectTransition],
   );
 
   const requestedContinue = continueRequestRef.current;
@@ -2371,10 +2427,22 @@ export function PersistenceWorkspace({
           : null;
       const nextProjectId = target?.projectId ?? '';
       const nextDocumentId = target?.documentId ?? '';
-      const intent = ++selectionIntentRef.current;
+      if (nextProjectId === projectId && nextDocumentId && nextDocumentId !== documentId) {
+        // History navigation must retain the active editor until the target read
+        // succeeds, just like an outline selection. Do not push a history entry.
+        const pending = selectDocument(nextDocumentId, undefined, true);
+        const intent = selectionIntentRef.current;
+        void pending.then(opened => {
+          if (intent !== selectionIntentRef.current) return;
+          if (opened) setExplicitRouteDocumentId(nextDocumentId);
+          else updateRouteSelection(selectionRef.current, true);
+        });
+        return;
+      }
+      const intent = beginSelection();
       if (nextProjectId === projectId && nextDocumentId === documentId) return;
       void (async () => {
-        const allowed = await protectTransition();
+        const allowed = await protectTransition(() => intent === selectionIntentRef.current);
         if (intent !== selectionIntentRef.current) return;
         if (!allowed) {
           updateRouteSelection(projectId ? { projectId, documentId } : null, true);
@@ -2392,7 +2460,7 @@ export function PersistenceWorkspace({
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [authorScope, documentId, mode, projectId, protectTransition, publishEditor, updateRouteSelection]);
+  }, [authorScope, beginSelection, documentId, mode, projectId, protectTransition, publishEditor, selectDocument, updateRouteSelection]);
 
   async function editStructure(
     update: { title?: string; parentId?: string | null; orderKey?: string },
@@ -2884,7 +2952,8 @@ export function PersistenceWorkspace({
         else setResumeEpoch(value => value + 1);
         return;
       }
-      const latest = activeRef.current!;
+      const latest = activeRef.current;
+      if (!latest) return;
       publishEditor({
         ...latest,
         document: restored.document,
@@ -2919,7 +2988,8 @@ export function PersistenceWorkspace({
           const latest = await api.persistenceDocument(projectId, documentId);
           if (!stillSelected()) return;
           if (!latest.revision) throw new Error('競合した最新Revisionを確認できませんでした。');
-          const current = activeRef.current!;
+          const current = activeRef.current;
+          if (!current) return;
           saveMachineActor.send({ type: 'SAVE.CONFLICT.OBSERVED', identity: { projectId, documentId } });
           publishEditor({
             ...current,
@@ -3044,9 +3114,9 @@ export function PersistenceWorkspace({
 
   const selectProject = async (nextProjectId: string): Promise<void> => {
     if (nextProjectId === projectId) return;
-    const intent = ++selectionIntentRef.current;
-    if (!(await protectTransition()) || intent !== selectionIntentRef.current) return;
-    continueRequestRef.current = undefined;
+    const intent = beginSelection();
+    const isCurrent = () => intent === selectionIntentRef.current;
+    if (!(await protectTransition(isCurrent)) || !isCurrent()) return;
     openSequenceRef.current += 1;
     publishEditor(null);
     selectionRef.current = { projectId: nextProjectId, documentId: '' };
@@ -3792,7 +3862,7 @@ export function PersistenceWorkspace({
               </div>
             </details>
           </fieldset>
-          <div hidden={reading}>
+          <div hidden={reading || (pendingContinue !== undefined && pendingContinue === selectionIntentRef.current)}>
             <label id="pg-manuscript-label" htmlFor="manuscript">
               本文
             </label>

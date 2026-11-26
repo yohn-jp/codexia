@@ -326,11 +326,22 @@ test("revision history responses and errors stay bound to the scene that request
   const editorAlert = page.locator(".pg-editor-column").getByRole("alert");
   await expect(editorAlert).toHaveText("対象の文書を開けませんでした。");
   await expect(editorAlert).toHaveCount(1);
+  await expectMarkdown(page, aCurrent);
+  await expect(page).toHaveURL(url => url.pathname === writingFixturePath("desktop", project, scene));
+  await expect(page.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`)).toHaveAttribute("aria-current", "page");
   const initialResponse = page.waitForResponse((response) => historyUrl(new URL(response.url())));
   releaseInitial();
   await initialResponse;
   await expect(page.getByRole("region", { name: "Revision履歴", exact: true })).toHaveCount(0);
   await page.unroute(historyUrl);
+  // The previous history entry is B; a failed history read must preserve A.
+  const failedHistoryRead = page.waitForResponse(response => failedDocumentRoute(new URL(response.url())) && response.status() === 503);
+  await page.goBack();
+  await failedHistoryRead;
+  await expect(page).toHaveURL(url => url.pathname === writingFixturePath("desktop", project, scene));
+  await expect(editorAlert).toHaveText("対象の文書を開けませんでした。");
+  await expectMarkdown(page, aCurrent);
+  await expect(page.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`)).toHaveAttribute("aria-current", "page");
   await page.unroute(failedDocumentRoute);
   await openManuscriptScene(page, scene);
   await openRevisionHistory(page);

@@ -49,6 +49,45 @@ preparedAuthorTest("browser quota failure blocks remote writes until explicit dr
   expect(await readManuscriptMarkdown(page)).toBe(draft);
 });
 
+preparedAuthorTest("scene activation protects input added while the next manuscript loads", async ({ page, authorizeAuthor }) => {
+  const { project, scene, second } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", undefined, "Before.");
+  const originalUrl = page.url();
+  const nextPath = `/api/v1/persistence/projects/${project.id}/documents/${second.id}`;
+  let release!: () => void;
+  let started!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const seen = new Promise<void>((resolve) => { started = resolve; });
+  await page.route((url) => url.pathname === nextPath, async (route) => {
+    started();
+    await gate;
+    await route.continue();
+  });
+  const destination = page.locator(`.pg-outline-item[data-document-id="${second.id}"] .pg-outline-document`);
+  const draft = "Before. Input during the pending scene read.";
+  try {
+    await destination.click();
+    await seen;
+    await setPersistenceDraftWritesFailing(page, true);
+    await manuscriptEditor(page).press("Control+End");
+    await page.keyboard.insertText(" Input during the pending scene read.");
+    await expect(manuscriptEditor(page)).toHaveText(draft);
+    const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === nextPath);
+    release();
+    expect((await loaded).ok()).toBe(true);
+    await expect(page.locator('.pg-editor-column > p[role="alert"]')).toContainText("復旧用の記録を作れていません");
+    await expect(page).toHaveURL(originalUrl);
+    await expect(manuscriptEditor(page)).toHaveText(draft);
+    await expect(page.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`)).toHaveAttribute("aria-current", "page");
+    expect((await readPersistenceDrafts(page)).some((item) => item.documentId === scene.id)).toBe(false);
+  } finally {
+    release();
+    await setPersistenceDraftWritesFailing(page, false);
+  }
+  await destination.click();
+  await expect(page.getByRole("heading", { name: second.title, exact: true })).toBeVisible();
+  expect((await readPersistenceDrafts(page)).find((item) => item.documentId === scene.id)?.markdown).toBe(draft);
+});
+
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
 
 preparedAuthorTest("mixed line endings preserve source offsets for edits and selected evidence", async ({ page, authorizeAuthor }) => {

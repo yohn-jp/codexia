@@ -47,10 +47,21 @@ final class EditorStateTests: XCTestCase {
 
     func testCompositionBlocksLeavingWithoutChangingCommittedText() {
         var state = EditorState(documentID: "a", text: "original")
-        state.setComposing(true)
+        state.updateComposition("originalかな")
         XCTAssertFalse(state.canLeave)
         XCTAssertEqual(state.text, "original")
+        XCTAssertEqual(state.snapshot.text, "originalかな")
+        let protectedComposition = state.snapshot
+        state.markProtected(protectedComposition)
+        XCTAssertTrue(state.isCurrentVersionProtected)
+        state.updateComposition("originalかも")
+        XCTAssertFalse(state.isCurrentVersionProtected)
+        XCTAssertGreaterThan(state.snapshot.version, protectedComposition.version)
         state.setComposing(false)
+        XCTAssertEqual(state.snapshot.text, "original")
+        state.markProtected(protectedComposition)
+        XCTAssertFalse(state.canLeave)
+        state.markProtected(state.snapshot)
         XCTAssertTrue(state.canLeave)
     }
 

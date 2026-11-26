@@ -9,6 +9,7 @@ public struct EditorState {
         /// Immutable manuscript contents captured at `version` for durable protection.
         /// Later edits to `EditorState` never change this payload.
         public let text: String
+        let isComposing: Bool
     }
 
     public struct RemoteRequest {
@@ -26,6 +27,7 @@ public struct EditorState {
     public private(set) var isComposing = false
     private var pendingRemote: (String, RemoteRequest)?
     private var requestGeneration: UInt64 = 0
+    private var compositionText: String?
 
     public init(documentID: String, text: String) {
         self.documentID = documentID
@@ -33,23 +35,28 @@ public struct EditorState {
         self.session = UUID()
     }
 
-    /// Restore a durable pending draft without treating it as server committed.
-    public init(recoveringDocumentID documentID: String, text: String, version: UInt64, sessionID: UUID) {
+    /// Restore the durable version, optionally using the freshly read confirmed manuscript.
+    public init(recoveringDocumentID documentID: String, text: String, version: UInt64, sessionID: UUID,
+                alreadyCommitted: Bool = false) {
         self.documentID = documentID
         self.text = text
         self.session = sessionID
         self.version = version
         self.protectedVersion = version
-        self.committedVersion = nil
+        self.committedVersion = alreadyCommitted ? version : nil
     }
 
     /// Stable identity for this in-memory editing session; a reopened document gets a new value.
     var sessionID: UUID { session }
 
     public var snapshot: Snapshot {
-        Snapshot(sessionID: session, documentID: documentID, version: version, text: text)
+        Snapshot(sessionID: session, documentID: documentID, version: version, text: compositionText ?? text,
+                 isComposing: isComposing)
     }
     public var canLeave: Bool { version == protectedVersion && !isComposing }
+    public var isCurrentVersionProtected: Bool {
+        version == protectedVersion && (!isComposing || compositionText != nil)
+    }
     public var hasLocalEdits: Bool { version != committedVersion }
 
     public func isCurrent(_ snapshot: Snapshot) -> Bool {
@@ -58,13 +65,28 @@ public struct EditorState {
 
     public mutating func edit(_ text: String) {
         guard !self.text.utf8.elementsEqual(text.utf8) else { return }
+        compositionText = nil
         self.text = text
+        version += 1
+        pendingRemote = nil
+    }
+
+    /// Capture UIKit's marked-text buffer for local protection without committing it as manuscript state.
+    public mutating func updateComposition(_ text: String) {
+        isComposing = true
+        if let current = compositionText, current.utf8.elementsEqual(text.utf8) { return }
+        compositionText = text
         version += 1
         pendingRemote = nil
     }
 
     public mutating func setComposing(_ active: Bool) {
         isComposing = active
+        if !active, compositionText != nil {
+            // Cancellation must replace any previously protected marked text.
+            compositionText = nil
+            version += 1
+        }
         applyPendingIfPossible()
     }
 
@@ -107,10 +129,10 @@ public struct EditorState {
         protectedVersion = max(protectedVersion, snapshot.version)
     }
 
-    /// Call only after a validated server receipt confirms this snapshot was committed.
+    /// Acknowledge bytes already confirmed at the base or by a validated save receipt.
     public mutating func markCommitted(_ snapshot: Snapshot) {
         guard snapshot.sessionID == session, snapshot.documentID == documentID,
-              snapshot.version <= version else { return }
+              snapshot.version <= version, !snapshot.isComposing else { return }
         if let committedVersion {
             self.committedVersion = max(committedVersion, snapshot.version)
         } else {

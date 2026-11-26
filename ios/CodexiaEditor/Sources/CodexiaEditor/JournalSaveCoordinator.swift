@@ -21,11 +21,16 @@ public struct DraftRecord: Codable, Sendable, Equatable {
     public let clientID: String
     public let expectedReceiptAuthorID: String
     public let contentSHA256: String
+    let isComposing: Bool?
     public var state: State
     public var saveRequest: Components.Schemas.SaveDocumentRequest
     public var receipt: Components.Schemas.SaveDocumentResponse?
     public var conflict: Components.Schemas.SaveConflictResponse?
 
+    // Keep the cancellation version on disk so a delayed marked-text write cannot restore it.
+    public var isLocalBaseline: Bool {
+        state == .protected && isComposing != true && text.utf8.elementsEqual(baseText.utf8)
+    }
 }
 
 public enum SaveDisposition: Sendable {
@@ -211,13 +216,15 @@ public actor ProtectedDraftJournal {
 
     fileprivate func insert(_ record: DraftRecord, scope: JournalScope) throws -> DraftRecord {
         var current = try records(scope: scope)
-        if let latest = current.last, latest.sessionID == record.sessionID
-            && latest.contentSHA256 == record.contentSHA256
-            && Data(latest.text.utf8).elementsEqual(Data(record.text.utf8))
-            && latest.baseRevisionID == record.baseRevisionID { return latest }
         if let latest = current.last, latest.sessionID == record.sessionID, record.version < latest.version {
             throw DraftJournalError.staleSnapshot
         }
+        if let latest = current.last, latest.sessionID == record.sessionID
+            && (latest.version == record.version || latest.state != .protected)
+            && (latest.isComposing == true) == (record.isComposing == true)
+            && latest.contentSHA256 == record.contentSHA256
+            && Data(latest.text.utf8).elementsEqual(Data(record.text.utf8))
+            && latest.baseRevisionID == record.baseRevisionID { return latest }
         if let unresolved = current.last, unresolved.sessionID != record.sessionID {
             throw DraftJournalError.sessionChanged
         }
@@ -233,6 +240,7 @@ public actor ProtectedDraftJournal {
         var current = try records(scope: scope)
         guard let index = current.firstIndex(where: { $0.state != .committed }) else { return .nothing }
         var record = current[index]
+        guard record.isComposing != true, !record.isLocalBaseline else { return .nothing }
         if record.state == .protected && reconcile { return .nothing }
         if record.state == .conflict { return .conflict }
         if (record.state == .unknown || record.state == .inFlight) && !reconcile { return .pending }
@@ -374,17 +382,19 @@ public actor JournalSaveCoordinator {
             baseRevisionID: baseRevisionID,
             baseText: baseText, text: snapshot.text, operationID: UUID().uuidString, clientID: clientID,
             expectedReceiptAuthorID: expectedReceiptAuthorID, contentSHA256: hash,
+            isComposing: snapshot.isComposing ? true : nil,
             state: .protected, saveRequest: request)
         return try await journal.insert(record, scope: scope)
     }
 
     public func recover(documentID: String) async throws -> DraftRecord? {
-        try await journal.records(scope: scope(documentID: documentID))
-            .last(where: { $0.state != .committed })
+        try await records(documentID: documentID).last
     }
 
-    public func records(documentID: String) async throws -> [DraftRecord] {
-        try await journal.records(scope: scope(documentID: documentID)).filter { $0.state != .committed }
+    public func records(documentID: String, includeLocalBaseline: Bool = false) async throws -> [DraftRecord] {
+        let pending = try await journal.records(scope: scope(documentID: documentID)).filter { $0.state != .committed }
+        if !includeLocalBaseline, pending.count == 1, pending.first?.isLocalBaseline == true { return [] }
+        return pending
     }
 
     /// Replaces a conflicted operation only after the caller explicitly supplies
@@ -392,7 +402,7 @@ public actor JournalSaveCoordinator {
     @discardableResult
     public func resolveConflict(documentID: String, expectedOperationID: String, snapshot: EditorState.Snapshot,
                                 currentRevisionID: String, currentText: String) async throws -> DraftRecord {
-        guard snapshot.documentID == documentID, !currentRevisionID.isEmpty,
+        guard snapshot.documentID == documentID, !snapshot.isComposing, !currentRevisionID.isEmpty,
               snapshot.text.utf16.count <= Int(Int32.max), currentText.utf16.count <= Int(Int32.max) else {
             throw DraftJournalError.invalidScope
         }
@@ -412,7 +422,7 @@ public actor JournalSaveCoordinator {
             baseRevisionID: currentRevisionID, baseText: currentText, text: snapshot.text,
             operationID: UUID().uuidString, clientID: clientID, expectedReceiptAuthorID: expectedReceiptAuthorID,
             contentSHA256: hash,
-            state: .protected, saveRequest: request)
+            isComposing: nil, state: .protected, saveRequest: request)
         return try await journal.resolveConflict(scope: key, operationID: expectedOperationID, replacement: replacement)
     }
 

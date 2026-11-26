@@ -252,9 +252,9 @@ private final class AccountSession: ObservableObject {
         }
     }
 
-    func records(_ prepared: PreparedProjectSession, documentID: String) async throws -> [DraftRecord] {
+    func records(_ prepared: PreparedProjectSession, documentID: String, includeLocalBaseline: Bool = false) async throws -> [DraftRecord] {
         try await withPreparedCoordinator(prepared) { coordinator in
-            try await coordinator.records(documentID: documentID)
+            try await coordinator.records(documentID: documentID, includeLocalBaseline: includeLocalBaseline)
         }
     }
 
@@ -783,14 +783,17 @@ private final class ProductEditorModel: ObservableObject {
     func restore() async {
         defer { isRestoring = false }
         do {
-            let records = try await account.records(prepared, documentID: documentID)
+            let records = try await account.records(prepared, documentID: documentID, includeLocalBaseline: true)
             guard let latest = records.last else { return }
+            let hasOnlyBaseline = records.count == 1 && latest.isLocalBaseline
             state = EditorState(
                 recoveringDocumentID: latest.documentID,
-                text: latest.text,
+                text: hasOnlyBaseline ? baseText : latest.text,
                 version: latest.version,
-                sessionID: latest.sessionID
+                sessionID: latest.sessionID,
+                alreadyCommitted: hasOnlyBaseline
             )
+            if hasOnlyBaseline { return }
             baseRevisionID = latest.baseRevisionID
             baseText = latest.baseText
             pendingState = records.first(where: { $0.state == .conflict })?.state ?? latest.state
@@ -840,7 +843,7 @@ private final class ProductEditorModel: ObservableObject {
 
     func protectBeforeBackground() async {
         protectionTask?.cancel()
-        guard !state.isComposing, !state.canLeave else { return }
+        guard !state.canLeave else { return }
         do { try await protect(state.snapshot) }
         catch { saveMessage = "バックグラウンド移行前に端末へ保護できませんでした。入力リスクがあります。" }
     }
@@ -896,7 +899,7 @@ private final class ProductEditorModel: ObservableObject {
             }
             baseRevisionID = receipt.revision.id
             baseText = receipt.revision.markdown
-            if state.text.utf8.elementsEqual(receipt.revision.markdown.utf8) {
+            if !state.isComposing, state.text.utf8.elementsEqual(receipt.revision.markdown.utf8) {
                 var current = state
                 current.markCommitted(state.snapshot)
                 state = current
@@ -931,6 +934,11 @@ private final class ProductEditorModel: ObservableObject {
         case .rejected(let status):
             saveMessage = "サーバーが保存を拒否しました（HTTP \(status)）。下書きは端末に保護されています。"
         case .nothingToSave:
+            if state.canLeave, state.text.utf8.elementsEqual(baseText.utf8) {
+                var current = state
+                current.markCommitted(state.snapshot)
+                state = current
+            }
             pendingState = nil
             canReconcile = false
             saveMessage = "未送信の下書きはありません。"
