@@ -68,7 +68,8 @@ function errorMessage(error: unknown): string {
 
 function mutationText(error: unknown, currentIdentity: OwnerIdentity | null, consent: OwnerConsent): string {
   if (!currentIdentity) return '操作結果と最新の一覧を確認できませんでした。ページを再読み込みして状態を確認してください。';
-  if (!currentIdentity.consents.some(row => row.id === consent.id)) return '再取得した一覧で、このgrantが取り消されたことを確認しました。';
+  if (!currentIdentity.consents.some(row => row.id === consent.id))
+    return '再取得した一覧ではこの同意は存在しません。撤回操作の結果は確認できていません。';
   if (outcomeWasUnconfirmed(error)) return '操作結果を確認できませんでした。再取得した一覧を確認し、残っていれば再試行してください。';
   return errorMessage(error);
 }
@@ -84,7 +85,8 @@ export function OwnerIdentityPanel({ headingLevel = 3 }: { oidcConfigured?: bool
 
   async function loadIdentity(signal?: AbortSignal): Promise<OwnerIdentity | null> {
     try {
-      const identity = await fetchOwnerIdentity(fetch, signal);
+      const deadline = AbortSignal.timeout(5_000);
+      const identity = await fetchOwnerIdentity(fetch, signal ? AbortSignal.any([signal, deadline]) : deadline);
       if (signal?.aborted) return null;
       setState({ status: 'ready', identity });
       return identity;
@@ -97,8 +99,7 @@ export function OwnerIdentityPanel({ headingLevel = 3 }: { oidcConfigured?: bool
 
   useEffect(() => {
     const controller = new AbortController();
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(5_000)]);
-    void loadIdentity(signal);
+    void loadIdentity(controller.signal);
     return () => controller.abort();
   }, [attempt]);
 

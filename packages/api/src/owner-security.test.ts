@@ -251,7 +251,7 @@ test('PostgreSQL preserves a concurrently updated consent with the same timestam
     }
   });
   await admin.query(`CREATE SCHEMA ${schema}`);
-  const { request, context, consentSelection } = await fixture(scoped);
+  const { request, context, consentSelection, grantRevocations } = await fixture(scoped);
   await context.adapter.create({ model: 'oauthClient', data: { clientId: webClientId, redirectUris: [`${origin}/callback`] } });
   const updatedAt = new Date(Math.floor(Date.now() / 1_000) * 1_000);
   const consent = await context.adapter.create({
@@ -266,18 +266,26 @@ test('PostgreSQL preserves a concurrently updated consent with the same timestam
     },
   });
   const where = [{ field: 'id', value: consent.id }];
-  const originalDelete = context.adapter.deleteMany;
+  const originalTransaction = context.adapter.transaction;
   const path = '/codexia/owner-security/revoke-consent';
   for (const update of [
     { scopes: ['openid', 'offline_access'] },
     { resources: [`${origin}/different-resource`] },
     { requestedUserInfoClaims: ['name'] },
   ]) {
-    context.adapter.deleteMany = async input => {
-      if (input.model === 'oauthConsent') await context.adapter.update({ model: 'oauthConsent', where, update: { ...update, updatedAt } });
-      return originalDelete(input);
-    };
+    context.adapter.transaction = cb =>
+      originalTransaction(async tx => {
+        const originalDelete = tx.deleteMany;
+        tx.deleteMany = async input => {
+          if (input.model === 'oauthConsent') {
+            await context.adapter.update({ model: 'oauthConsent', where, update: { ...update, updatedAt } });
+          }
+          return originalDelete(input);
+        };
+        return cb(tx);
+      });
     assert.equal((await request(path, { body: await consentSelection(consent.id) })).status, 409);
+    assert.equal(grantRevocations.length, 0, 'stale selection must not revoke JWTs');
     const persisted = await context.adapter.findOne<{ scopes: string[]; resources?: string[]; requestedUserInfoClaims?: string[] }>({
       model: 'oauthConsent',
       where,
@@ -287,7 +295,7 @@ test('PostgreSQL preserves a concurrently updated consent with the same timestam
       if (update[key]) assert.deepEqual(persisted[key], update[key]);
     }
   }
-  context.adapter.deleteMany = originalDelete;
+  context.adapter.transaction = originalTransaction;
   assert.equal((await request(path, { body: await consentSelection(consent.id) })).status, 200);
   assert.equal(await context.adapter.findOne({ model: 'oauthConsent', where }), null);
 });

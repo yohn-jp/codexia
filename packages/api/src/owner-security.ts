@@ -222,40 +222,54 @@ export function ownerSecurity(options: OwnerSecurityOptions) {
             { field: 'resources', value: storedArray(consent.resources) },
             { field: 'requestedUserInfoClaims', value: storedArray(consent.requestedUserInfoClaims) },
           ];
-          // Write the online JWT cutoff first. If any later write fails, access remains
-          // denied rather than leaving a withdrawn grant usable through an old token.
-          const revokedAt = new Date();
-          await options.revokeOAuthGrant({ clientId, subject: user.id, revokedAt });
-          await adapter.deleteMany({
-            model: 'oauthAccessToken',
-            where: [
-              { field: 'clientId', value: clientId },
-              { field: 'userId', value: user.id },
-            ],
-          });
-          const refreshWhere = [
-            { field: 'clientId', value: clientId },
-            { field: 'userId', value: user.id },
-            { field: 'revoked', operator: 'eq' as const, value: null },
-          ];
-          await adapter.updateMany({ model: 'oauthRefreshToken', where: refreshWhere, update: { revoked: revokedAt } });
-          // A concurrent refresh can finish between the initial access-token
-          // cleanup and refresh invalidation. Repeat both writes to catch rows it
-          // committed while the family was being withdrawn.
-          await adapter.deleteMany({
-            model: 'oauthAccessToken',
-            where: [
-              { field: 'clientId', value: clientId },
-              { field: 'userId', value: user.id },
-            ],
-          });
-          await adapter.updateMany({ model: 'oauthRefreshToken', where: refreshWhere, update: { revoked: revokedAt } });
+          await adapter.transaction(async transaction => {
+            // Claim the exact selected revision before touching any token family.
+            // PostgreSQL/Kysely rolls back the provider-owned writes if cleanup fails.
+            const deleted = await transaction.deleteMany({ model: 'oauthConsent', where: consentRevisionWhere });
+            if (deleted !== 1) reject('CONFLICT', 'OWNER_SECURITY_CONSENT_CHANGED');
 
-          const deleted = await adapter.deleteMany({
-            model: 'oauthConsent',
-            where: consentRevisionWhere,
+            const revokedAt = new Date();
+            // Better Auth 1.7.26 stores outstanding authorization codes in its
+            // verification model as typed JSON. A code already issued before
+            // withdrawal otherwise does not re-check consent at redemption.
+            // Walk the provider's active code records without the default 100-row cap.
+            let after: string | undefined;
+            while (true) {
+              const rows = await transaction.findMany<{ id: string; value: string }>({
+                model: 'verification',
+                where: [
+                  { field: 'expiresAt', operator: 'gt', value: revokedAt },
+                  { field: 'value', operator: 'starts_with', value: '{"type":"authorization_code",' },
+                  ...(after ? [{ field: 'id', operator: 'gt' as const, value: after }] : []),
+                ],
+                sortBy: { field: 'id', direction: 'asc' },
+                limit: 100,
+              });
+              if (!rows.length) break;
+              const ids = rows.filter(row => {
+                const value: unknown = JSON.parse(row.value);
+                const record = value as { type?: unknown; userId?: unknown; query?: { client_id?: unknown } } | null;
+                return record?.type === 'authorization_code' && record.userId === user.id && record.query?.client_id === clientId;
+              }).map(row => row.id);
+              if (ids.length) {
+                await transaction.deleteMany({ model: 'verification', where: [{ field: 'id', operator: 'in', value: ids }] });
+              }
+              after = rows.at(-1)?.id;
+              if (rows.length < 100) break;
+            }
+            const grantWhere = [
+              { field: 'clientId', value: clientId },
+              { field: 'userId', value: user.id },
+            ];
+            await transaction.deleteMany({ model: 'oauthAccessToken', where: grantWhere });
+            // Delete the full refresh family, including rotated rows with replay
+            // responses; a revoked timestamp alone can leave replay state usable.
+            await transaction.deleteMany({ model: 'oauthRefreshToken', where: grantWhere });
+            // The existing online JWT store has a separate connection. Record
+            // its cutoff before committing provider writes; an error rolls back
+            // consent deletion, while a lost commit response remains fail-closed.
+            await options.revokeOAuthGrant({ clientId, subject: user.id, revokedAt });
           });
-          if (deleted !== 1) reject('CONFLICT', 'OWNER_SECURITY_CONSENT_CHANGED');
           return ctx.json({ consentRemoved: true, grantRevoked: true });
         },
       ),

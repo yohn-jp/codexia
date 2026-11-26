@@ -118,6 +118,7 @@ export async function revokeOwnerConsent(consent: OwnerConsent, fetcher: typeof 
     mode: 'same-origin',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
     body: JSON.stringify({ id: consent.id, clientId: consent.clientId, scopes: consent.scopes, revision: consent.revision }),
+    signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw await readError(response);
   const receipt: unknown = await response.json();

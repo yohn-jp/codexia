@@ -648,6 +648,7 @@ test('Better Auth PKCE MCP client lists and invokes tools through central OAuth 
 
     const ownerGrant = await fixture.issueOwnerOAuthTokens();
     const iosGrant = await fixture.issueIosOAuthTokens();
+    const exchangePendingCode = await fixture.prepareOwnerAuthorizationCode();
     const ownerGrantHeaders = { authorization: `Bearer ${ownerGrant.accessToken}` };
     const iosGrantHeaders = { authorization: `Bearer ${iosGrant.accessToken}` };
     assert.equal((await apiRequest(`${origin}/api/session`, { headers: ownerGrantHeaders })).status, 200);
@@ -756,6 +757,9 @@ test('Better Auth PKCE MCP client lists and invokes tools through central OAuth 
       }),
     });
     assert.equal(withdrawnRefresh.status, 400, 'a refresh token from the withdrawn owner grant cannot mint another access token');
+    const withdrawnCode = await exchangePendingCode();
+    assert.equal(withdrawnCode.status, 400, 'a code issued before withdrawal cannot mint a new grant');
+    assert.equal((await withdrawnCode.json()).error, 'invalid_grant');
     assert.equal(
       (await apiRequest(`${origin}/api/session`, { headers: iosGrantHeaders })).status,
       200,

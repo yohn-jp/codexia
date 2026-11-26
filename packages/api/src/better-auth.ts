@@ -126,6 +126,24 @@ const PASSKEY_BOOTSTRAP_CONTEXT = 'codexia-first-owner-v1';
 const PASSKEY_OWNER_RECOVERY_CONTEXT = 'codexia-owner-recovery-v1';
 const PASSKEY_BOOTSTRAP_GRANT_TTL_MS = 10 * 60 * 1000;
 const passkeyDeletionQueues = new Map<string, Promise<void>>();
+const oauthGrantQueues = new Map<string, Promise<void>>();
+// The sole normal API writer serializes provider grant changes and withdrawal.
+// The login callbacks may resume authorization from the provider's after hook.
+const oauthGrantMutationPaths = new Set([
+  '/oauth2/authorize',
+  '/oauth2/consent',
+  '/oauth2/continue',
+  '/oauth2/token',
+  '/oauth2/revoke',
+  '/codexia/owner-security/revoke-consent',
+  '/callback/workspace-oidc',
+  '/sso/callback/codexia-owner-oidc',
+  '/passkey/verify-authentication',
+  '/passkey/verify-registration',
+  '/sign-in/social',
+  '/sign-in/sso',
+  '/sign-up/email',
+]);
 
 function constantTimeEqual(actual: string, expected: string): boolean {
   const actualBytes = Buffer.from(actual);
@@ -133,19 +151,19 @@ function constantTimeEqual(actual: string, expected: string): boolean {
   return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
 }
 
-async function withPasskeyDeletionLock<T>(ownerId: string, action: () => Promise<T>): Promise<T> {
-  const previous = passkeyDeletionQueues.get(ownerId) ?? Promise.resolve();
+async function withAuthMutationLock<T>(queues: Map<string, Promise<void>>, key: string, action: () => Promise<T>): Promise<T> {
+  const previous = queues.get(key) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>(resolve => {
     release = resolve;
   });
-  passkeyDeletionQueues.set(ownerId, current);
+  queues.set(key, current);
   await previous;
   try {
     return await action();
   } finally {
     release();
-    if (passkeyDeletionQueues.get(ownerId) === current) passkeyDeletionQueues.delete(ownerId);
+    if (queues.get(key) === current) queues.delete(key);
   }
 }
 
@@ -881,7 +899,11 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
       const pathname = new URL(request.url).pathname;
       if (pathname.endsWith('/passkey/delete-passkey')) {
         const session = await auth.api.getSession({ headers: request.headers });
-        if (session) return withPasskeyDeletionLock(session.user.id, () => accessTokenRevocation.handle(request, auth.handler));
+        if (session) return withAuthMutationLock(passkeyDeletionQueues, session.user.id, () => accessTokenRevocation.handle(request, auth.handler));
+      }
+      const relativePath = pathname.slice(new URL(issuer).pathname.length);
+      if (normalOwnerId && oauthGrantMutationPaths.has(relativePath)) {
+        return withAuthMutationLock(oauthGrantQueues, issuer, () => accessTokenRevocation.handle(request, auth.handler));
       }
       return accessTokenRevocation.handle(request, auth.handler);
     },
