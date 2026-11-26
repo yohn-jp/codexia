@@ -2515,7 +2515,7 @@ Checks that the retired Git selector cannot change the manuscript authority.
   **ID**: REQ-DATA-001
 - **Type**: File
   **Path**: tests/e2e/persistence-database.acceptance.spec.ts
-  **Lines**: 1537, 1537
+  **Lines**: 1576, 1576
 
 ## TEST-DATA-002-001
 
@@ -2677,7 +2677,7 @@ Checks verified owner enrollment and closure of the isolated setup endpoint.
   **ID**: REQ-AUTH-004
 - **Type**: File
   **Path**: packages/api/test/passkey-bootstrap.acceptance.test.ts
-  **Lines**: 923, 923
+  **Lines**: 924, 924
 
 ## TEST-AUTH-005-001
 
