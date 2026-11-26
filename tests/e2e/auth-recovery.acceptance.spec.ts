@@ -77,7 +77,7 @@ test("an unauthenticated standalone browser without Web OAuth configuration cann
   await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
 });
 
-test("Desktop console requires the Better Auth owner cookie and returns to a protected draft", async ({ page, authorizeAuthor, browserName }) => {
+test("Desktop console requires the Better Auth owner cookie and returns to a protected draft", async ({ page, authorizeAuthor, browserName, playwright }) => {
   const fixture = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Console return draft", "Original manuscript.");
   const draft = "コンソールへ移動しても保護される原稿。";
   await fillDraft(page, draft);
@@ -183,9 +183,16 @@ test("Desktop console requires the Better Auth owner cookie and returns to a pro
   });
   expect(bearerSessions.status()).toBe(403);
   expect(await bearerSessions.json()).toMatchObject({ code: "OWNER_SECURITY_COOKIE_REQUIRED" });
-  const unadmittedIdentity = await page.request.get(`${origin}/api/auth/codexia/owner-security/identity`);
-  expect(unadmittedIdentity.status()).toBe(401);
-  expect(await unadmittedIdentity.json()).toMatchObject({ code: "OWNER_SECURITY_SESSION_REQUIRED" });
+  const anonymousRequest = await playwright.request.newContext();
+  try {
+    const unadmittedIdentity = await anonymousRequest.get(`${origin}/api/auth/codexia/owner-security/identity`, {
+      headers: { Origin: origin },
+    });
+    expect(unadmittedIdentity.status()).toBe(401);
+    expect(await unadmittedIdentity.json()).toMatchObject({ code: "OWNER_SECURITY_SESSION_REQUIRED" });
+  } finally {
+    await anonymousRequest.dispose();
+  }
 
   await page.getByRole("button", { name: "執筆画面へ戻る", exact: true }).first().click();
   await expect.poll(() => page.url()).toBe(authoringUrl);

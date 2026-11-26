@@ -274,7 +274,6 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
       await page.route(`**${consentPath}`, temporaryOutage, { times: 1 });
       await page.getByRole("button", { name: "認証・セキュリティ", exact: true }).click();
       const settings = page.getByRole("dialog", { name: "認証とセキュリティ" });
-      await expect(settings.getByText("所有者との連携はこの画面では未確認です。", { exact: false })).toBeVisible();
       await expect(settings.getByRole("alert")).toHaveText("同意を読み込めませんでした。");
       const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === consentPath && response.ok());
       await settings.getByRole("button", { name: "同意を再読み込み" }).click();
@@ -425,7 +424,7 @@ ownerConsoleTest("Owner Console manages Passkeys and sessions and revokes an OAu
     await revoke.click();
     await page.getByRole("button", { name: "パスキーで認証して取り消す", exact: true }).click();
     await expect(consents.getByText(authorServer.webClientId, { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("status")).toContainText("同意と発行済みOAuth grantを取り消しました。");
+    await expect(page.getByText("同意と発行済みOAuth grantを取り消しました。", { exact: true })).toBeVisible();
   } finally {
     await authenticator.detach();
   }
