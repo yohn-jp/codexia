@@ -18,7 +18,7 @@ async function createFixture() {
   const stateDir = path.join(home, '.local/state/codexia-deploy');
   const backupDestination = path.join(directory, 'backup');
   const bin = path.join(directory, 'bin');
-  await Promise.all([mkdir(stateDir, { recursive: true }), mkdir(backupDestination), mkdir(bin)]);
+  await Promise.all([mkdir(stateDir, { recursive: true, mode: 0o700 }), mkdir(backupDestination), mkdir(bin)]);
   const lockFile = path.join(stateDir, 'host.lock');
   await writeFile(lockFile, '');
   const commands = {
@@ -62,6 +62,8 @@ test('the protected run shares the deploy lock and recovers both services after 
   const fixture = await createFixture();
   t.after(() => rm(fixture.directory, { recursive: true, force: true }));
   const run = '1485f702-eb68-4854-979d-fad9fd12d90d';
+  const publishedRun = '1485f702-eb68-4854-979d-fad9fd12d90e';
+  const transferRun = '1485f702-eb68-4854-979d-fad9fd12d90f';
   const source = 'a'.repeat(40);
   const digest = 'sha256:' + 'b'.repeat(64);
   const manifest = 'c'.repeat(64);
@@ -87,8 +89,10 @@ test('the protected run shares the deploy lock and recovers both services after 
       '[[ ! -e "$FIXTURE/api" && ! -e "$FIXTURE/tunnel" ]] || exit 2',
       'echo backup >> "$FIXTURE/trace"',
       'if [[ "$KILL_RUNNER" == 1 ]]; then kill -KILL "$RUNNER_PID"; exit 137; fi',
-      'archive="$2/codexia-20261126T000000Z-' + run + '"',
+      'for artifact_id; do :; done',
+      'archive="$2/$artifact_id"',
       'mkdir -p "$archive"',
+      'if [[ "$KILL_PUBLISHED" == 1 ]]; then kill -KILL "$RUNNER_PID"; exit 137; fi',
       'printf "Encrypted backup committed: %s\\nPublished checksum manifest sha256: %s\\n" "$archive" ' + manifest,
     ],
     [path.join(localBin, 'codexia-backup-control')]: [
@@ -127,11 +131,17 @@ test('the protected run shares the deploy lock and recovers both services after 
   assert.match(await readFile(trace, 'utf8'), new RegExp('manual-interrupted ' + run));
   await Promise.all(['api', 'tunnel'].map(name => readFile(path.join(fixture.directory, name))));
 
-  const transferKilled = invoke('export KILL_UPLOAD=1', [run]);
+  const publicationKilled = invoke('export KILL_PUBLISHED=1', [publishedRun]);
+  assert.equal(publicationKilled.signal, 'SIGKILL', publicationKilled.stderr);
+  const publicationRecovered = invoke('', ['recover']);
+  assert.equal(publicationRecovered.status, 0, publicationRecovered.stderr);
+  assert.match(await readFile(trace, 'utf8'), new RegExp('manual-finish ' + publishedRun + ' .+ ' + manifest));
+
+  const transferKilled = invoke('export KILL_UPLOAD=1', [transferRun]);
   assert.equal(transferKilled.signal, 'SIGKILL', transferKilled.stderr);
   const completed = invoke('', ['recover']);
   assert.equal(completed.status, 0, completed.stderr);
-  const transfers = (await readFile(trace, 'utf8')).split('\n').filter(line => line.startsWith('manual-finish '));
+  const transfers = (await readFile(trace, 'utf8')).split('\n').filter(line => line.startsWith('manual-finish ' + transferRun));
   assert.equal(transfers.length, 2, 'recovery must retry the same run after local publication');
   assert.equal(transfers[0], transfers[1], 'the run UUID, artifact path and manifest digest remain fixed');
 });

@@ -73,7 +73,9 @@ validate_artifact(){
 }
 case "$operation" in
   backup-locked)
-    [[ $# == 8 && "${4:-}" == --approved && "${5:-}" == --lock-file && "${6:-}" == "$lock_file" && "${7:-}" == --lock-fd ]] ||
+    [[ ( $# == 8 || ( $# == 10 && "${9}" == --artifact-id &&
+      "${10}" =~ ^codexia-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$ ) ) &&
+      "${4:-}" == --approved && "${5:-}" == --lock-file && "${6:-}" == "$lock_file" && "${7:-}" == --lock-fd ]] ||
       die 'Push backup requires explicit approval and the canonical host lock'
     verify_lock_descriptor "$6" "$8"
     ;;
@@ -163,12 +165,15 @@ require_quiesced(){
   esac
 }
 backup_artifact(){
-  local destination="$1" recipient="$2"
+  local destination="$1" recipient="$2" artifact_id="$3"
   require_quiesced
   podman volume exists codexia-history || die 'History volume absent'
-  local stamp staging final db_hash history_hash verified_db_hash verified_history_hash artifact_hash
-  stamp="$(date -u +%Y%m%dT%H%M%SZ)-$(cat /proc/sys/kernel/random/uuid)"
-  staging="$destination/.codexia-$stamp.partial"; final="$destination/codexia-$stamp"
+  local staging final db_hash history_hash verified_db_hash verified_history_hash artifact_hash
+  if [[ -z "$artifact_id" ]]; then
+    artifact_id="codexia-$(date -u +%Y%m%dT%H%M%SZ)-$(cat /proc/sys/kernel/random/uuid)"
+  fi
+  staging="$destination/.$artifact_id.partial"; final="$destination/$artifact_id"
+  [[ ! -e "$final" && ! -L "$final" ]] || die 'Backup already exists'
   mkdir "$staging"
   trap 'rm -rf -- "$staging"' EXIT
   db_hash="$(db_fingerprint codexia-db codexia_admin)" || die 'Could not retrieve database fingerprint'
@@ -228,10 +233,9 @@ SQL
 
 case "${1:-}" in
   backup-locked)
-    [[ $# == 8 ]] || die 'Usage: backup-locked /absolute/backup/directory age1-recipient --approved --lock-file /absolute/lock --lock-fd fd'
     backup_directory "$2"
     [[ "$3" =~ ^age1[0-9a-z]+$ ]] || die 'Provide an age public recipient, not a private key'
-    backup_artifact "$2" "$3"
+    backup_artifact "$2" "$3" "${10:-}"
     ;;
   fingerprint-locked)
     require_quiesced

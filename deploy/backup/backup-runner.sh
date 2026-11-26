@@ -59,8 +59,8 @@ clear_intent(){
   rm -- "$intent" && sync -f "$state_dir"
 }
 
-write_intent(){
-  local temporary
+write_intent() (
+  temporary=
   temporary="$(mktemp "$state_dir/.backup-transaction.XXXXXXXX")"
   trap 'rm -f -- "$temporary"' EXIT
   printf '%s\n' "$@" > "$temporary"
@@ -68,13 +68,17 @@ write_intent(){
   mv -T -- "$temporary" "$intent"
   sync -f "$state_dir"
   trap - EXIT
-}
+)
 
 finish_transfer(){
+  local status=0
   if "$control" manual-finish "$@"; then
     clear_intent || die 'Could not remove the completed backup intent'
     return 0
+  else
+    status=$?
   fi
+  [[ "$status" == 1 ]] || die 'Backup transfer reconciliation is pending'
   "$control" manual-interrupted "$1" || die 'Backup run reconciliation is pending'
   clear_intent || die 'Could not remove the reconciled backup intent'
   return 1
@@ -83,14 +87,18 @@ finish_transfer(){
 if exists "$intent"; then
   private_file "$intent" || die 'Unsafe pending backup intent'
   mapfile -t pending < "$intent"
-  [[ ( "${#pending[@]}" == 3 || "${#pending[@]}" == 5 ) && "${pending[0]}" =~ $uuid && "${pending[1]}" =~ $image_pattern &&
+  [[ "${#pending[@]}" -ge 4 && "${#pending[@]}" -le 5 && "${pending[0]}" =~ $uuid && "${pending[1]}" =~ $image_pattern &&
      ( "${pending[2]}" == true || "${pending[2]}" == false ) ]] || die 'Invalid pending backup intent'
+  [[ "${pending[3]}" == /* && "${pending[3]##*/}" =~ ^codexia-[0-9]{8}T[0-9]{6}Z-${pending[0]}$ ]] ||
+    die 'Invalid pending backup artifact path'
   resume_services "${pending[1]}" "${pending[2]}" || die 'Backup service recovery is pending'
-  if [[ "${#pending[@]}" == 5 ]]; then
-    [[ "${pending[3]}" == /* && "${pending[4]}" =~ ^[a-f0-9]{64}$ ]] || die 'Invalid pending backup artifact'
-    # The canonical artifact was committed before the executor disappeared.
-    # Retry its verification under the same run ID, or settle it as interrupted.
-    finish_transfer "${pending[0]}" "${pending[3]}" "${pending[4]}" || :
+  digest=
+  if exists "${pending[3]}"; then
+    digest="$("$backup_program" validate-artifact "${pending[3]}")" || digest=
+  fi
+  if [[ "$digest" =~ ^[a-f0-9]{64}$ && "$digest" == "${pending[4]:-$digest}" ]]; then
+    # Publication is atomic at the path recorded before writer quiesce.
+    finish_transfer "${pending[0]}" "${pending[3]}" "$digest" || :
   else
     "$control" manual-interrupted "${pending[0]}" || die 'Backup run reconciliation is pending'
     clear_intent
@@ -127,7 +135,9 @@ esac
 
 # Persist the service state before changing either unit. Keep it through remote
 # verification so a process death cannot leave a running receipt unaccounted for.
-write_intent "$run_id" "$image" "$tunnel_active"
+artifact_id="codexia-$(date -u +%Y%m%dT%H%M%SZ)-$run_id"
+artifact_path="$destination/$artifact_id"
+write_intent "$run_id" "$image" "$tunnel_active" "$artifact_path"
 
 if { [[ "$tunnel_active" == true ]] && ! systemctl --user stop codexia-tunnel.service; } ||
    ! systemctl --user stop codexia-api.service; then
@@ -137,11 +147,12 @@ if { [[ "$tunnel_active" == true ]] && ! systemctl --user stop codexia-tunnel.se
   die 'Could not quiesce services for backup'
 fi
 result=
-if output="$("$backup_program" backup-locked "$destination" "$recipient" --approved --lock-file "$lock_file" --lock-fd 9)"; then
+if output="$("$backup_program" backup-locked "$destination" "$recipient" --approved --lock-file "$lock_file" --lock-fd 9 --artifact-id "$artifact_id")"; then
   result="$(read_artifact "$destination" <<< "$output")" || result=
 fi
 if [[ -n "$result" ]]; then
   mapfile -t artifact <<< "$result"
+  [[ "${artifact[0]}" == "$artifact_path" ]] || die 'The backup produced an unexpected artifact path'
   write_intent "$run_id" "$image" "$tunnel_active" "${artifact[@]}"
 fi
 resume_services "$image" "$tunnel_active" || die 'Backup service recovery is pending'
