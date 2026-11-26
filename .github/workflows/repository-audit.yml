@@ -265,9 +265,8 @@ jobs:
           GRAPHIFY_BACKEND: none
         run: |
           bash scripts/shared/python-env.sh create python "$RUNNER_TEMP/graphify" 'graphifyy[sql,terraform]==0.9.120'
-          excludes=('tests/**' 'evidence/**' '.agents/**' 'docs/**' '**/*.test.*' '**/*.spec.*'
-                    'packages/http-contract/openapi/codexia.openapi.yaml' 'packages/api/src/generated/http-contract.json'
-                    'app/src/generated/http/**' 'app/src/generated/auth-methods/**' 'ios/CodexiaTransport/Sources/CodexiaAPI/Generated/**')
+          # Graphify honors .gitignore for generated contract outputs.
+          excludes=('tests/**' 'evidence/**' '.agents/**' 'docs/**' '**/*.test.*' '**/*.spec.*')
           exclude_args=()
           for pattern in "${excludes[@]}"; do
             exclude_args+=(--exclude "$pattern")
