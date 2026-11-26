@@ -73,6 +73,17 @@ test('coverage admits the current workspace and rejects a new unmapped package',
   assert.match(unregistered.stderr, /unregistered=\[packages\/unmapped-fixture\]/u);
 });
 
+test('coverage ignores package directories without a workspace manifest', async t => {
+  const generated = await mkdtemp(path.join(root, 'packages/ci-coverage-no-manifest-'));
+  try {
+    const result = run(['coverage']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Coverage PASS/u);
+  } finally {
+    await rm(generated, { recursive: true, force: true });
+  }
+});
+
 test('root unit preparation builds the API dependency closure before invoking root script tests', async () => {
   const temporary = await mkdtemp(path.join(tmpdir(), 'codexia-ci-workspace-'));
   const bin = path.join(temporary, 'bin');
