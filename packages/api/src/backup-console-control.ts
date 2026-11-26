@@ -528,7 +528,7 @@ export class BackupConsoleControl {
                   receipt.sha256sumsSha256 !== expectedManifestSha ||
                   receipt.markerSha256 !== output.markerSha256
                 )
-                  throw new Error('S3 verification receipt identity differs');
+                  throw new S3TransferFailure('artifact_invalid', false);
                 resolveResult({
                   markerSha256: receipt.markerSha256,
                   receiptSha256: createHash('sha256').update(bytes).digest('hex'),
