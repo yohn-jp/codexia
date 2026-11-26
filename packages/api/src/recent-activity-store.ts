@@ -129,7 +129,9 @@ export class RecentActivityStore {
       const item: RecentActivityItem = {
         sceneId: normalizedInput.sceneId,
         sentenceOffset: normalizedInput.sentenceOffset,
-        pageIndex: normalizedInput.pageIndex !== undefined ? normalizedInput.pageIndex : existing?.pageIndex ?? null,
+        pageIndex: normalizedInput.pageIndex !== undefined
+          ? normalizedInput.pageIndex
+          : existing?.sceneId === normalizedInput.sceneId ? existing.pageIndex : null,
         deviceType: normalizedInput.deviceType,
         updatedAt: new Date().toISOString(),
       };

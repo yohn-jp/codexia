@@ -19,8 +19,13 @@ describe("RecentActivityStore", () => {
     await assert.rejects(lstat(usageDirectory), (error: NodeJS.ErrnoException) => error.code === "ENOENT", "empty reads must not create storage");
 
     await first.upsert("owner", repository, { sceneId: "scene-one", sentenceOffset: 2, pageIndex: 8, deviceType: "desktop" });
-    const desktop = await first.upsert("owner", repository, { sceneId: "scene-two", sentenceOffset: null, deviceType: "desktop" });
-    assert.equal(desktop.find((item) => item.deviceType === "desktop")?.pageIndex, 8, "omitted pageIndex keeps the existing device value");
+    const sameDocument = await first.upsert("owner", repository, { sceneId: "scene-one", sentenceOffset: null, deviceType: "desktop" });
+    assert.equal(sameDocument.find((item) => item.deviceType === "desktop")?.pageIndex, 8, "omitted pageIndex keeps the existing document value");
+    const nextDocument = await first.upsert("owner", repository, { sceneId: "scene-two", sentenceOffset: null, deviceType: "desktop" });
+    assert.equal(nextDocument.find((item) => item.deviceType === "desktop")?.pageIndex, null, "a different document does not inherit the page");
+    await first.upsert("owner", repository, { sceneId: "scene-two", sentenceOffset: null, pageIndex: 4, deviceType: "desktop" });
+    const clearedPage = await first.upsert("owner", repository, { sceneId: "scene-two", sentenceOffset: null, pageIndex: null, deviceType: "desktop" });
+    assert.equal(clearedPage.find((item) => item.deviceType === "desktop")?.pageIndex, null, "explicit null clears the page");
     await first.upsert("owner", repository, { sceneId: "scene-mobile", sentenceOffset: 0, pageIndex: 1, deviceType: "mobile" });
 
     const statePath = resolve(usageDirectory, "recent-activity", "recent-activity-state.json");
