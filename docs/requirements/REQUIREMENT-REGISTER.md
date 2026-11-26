@@ -1073,14 +1073,14 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 **MID**: 75284b8b389d3d311edce1c19e4029c6
 **UID**: REQ-UI-006
 **Decision status**: ACCEPTED
-**Conformance status**: UNMAPPED
-**Applicability**: FUTURE_TARGET
+**Conformance status**: PARTIAL
+**Applicability**: CURRENT
 **Design owner**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: machine未導入。原稿保存/復旧は既存app controllerが観測開始点
+**Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx; WRT-01/REC-01 部分導入済み; ChangeSet・認証・バックアップは未実装
 **Verification identifiers**: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
-**Comment**: ACCEPTED／XState v5導入は**目標・未実装**; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+**Comment**: ACCEPTED／XState v5 はWRT-01/REC-01で部分導入済み。ChangeSet・認証・バックアップへの展開は未実装; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
 原稿保存・復旧、ChangeSet、認証、バックアップの複雑な状態と失敗・競合・接続断を決定的な遷移と独立テストで検証し、未確認の副作用を成功表示にしない
 
@@ -1097,7 +1097,7 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 **MID**: 0c54e429ce48db0abde06145b4640017
 **UID**: OBL-REQ-UI-006-O01
 **Design reference**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: UNMAPPED (candidate source file not identified)
+**Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx
 **Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1108,6 +1108,12 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 
 - **Type**: Parent
   **ID**: REQ-UI-006
+- **Type**: File
+  **Path**: app/src/application/persistence-save-machine.ts
+  **Lines**: 88, 89
+- **Type**: File
+  **Path**: app/src/persistence/PersistenceWorkspace.tsx
+  **Lines**: 439, 445
 
 ## REQ-EXT-001
 
