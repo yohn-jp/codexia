@@ -16,6 +16,9 @@ const { SignJWT } = await import(apiRequire.resolve('jose'));
 export async function startLiveHost(databaseUrl, tempRoot) {
   if (!databaseUrl) throw new Error('CODEXIA_MCP_CONFORMANCE_DATABASE_URL must name a dedicated disposable PostgreSQL database');
   if (process.env.CODEXIA_AUTH_TEST_DISPOSABLE !== '1') throw new Error('CODEXIA_AUTH_TEST_DISPOSABLE=1 is required before database writes');
+  if (!/^\/codexia_perf_mcp_conformance(?:_[a-z0-9_]+)?$/u.test(URL.parse(databaseUrl)?.pathname ?? '')) {
+    throw new Error('The database must be dedicated to MCP conformance');
+  }
   assertDisposableAuthFixtureDatabaseUrl(databaseUrl);
   await migratePostgresDatabase(databaseUrl);
   const persistence = createPostgresPersistence(databaseUrl);

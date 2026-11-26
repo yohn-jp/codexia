@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { startLiveHost } from './live-host.mjs';
@@ -42,7 +42,9 @@ function safeEnv(extra = {}) {
 
 function redact(value) {
   let result = String(value);
-  for (const secret of secretValues) if (secret) result = result.split(secret).join('[REDACTED]');
+  for (const secret of secretValues) {
+    for (const variant of new Set([secret, encodeURIComponent(secret)])) result = result.replaceAll(variant, '[REDACTED]');
+  }
   return result;
 }
 
@@ -71,18 +73,23 @@ async function guarded(label, action) {
 }
 
 async function listFiles(path) {
+  const entries = await readdir(path, { withFileTypes: true }).catch(error => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
   const found = [];
-  for (const entry of await readdir(path, { withFileTypes: true }).catch(() => [])) {
+  for (const entry of entries) {
     const child = resolve(path, entry.name);
     if (entry.isDirectory()) found.push(...await listFiles(child));
-    else found.push(child);
+    else if (entry.isFile()) found.push(child);
   }
   return found;
 }
 
-async function scenarioResults(path) {
+async function scenarioResults(path, scenario) {
   const files = await listFiles(path);
-  const reports = files.filter(file => file.endsWith('/checks.json'));
+  const reports = files.filter(file => basename(file) === 'checks.json' &&
+    (!scenario || basename(dirname(file)).startsWith(`server-${scenario}-`)));
   const all = [];
   for (const report of reports) all.push(...JSON.parse(await readFile(report, 'utf8')));
   return reports.length ? all : null;
@@ -96,12 +103,11 @@ async function stopChild(child) {
   });
 }
 
-async function sanitizeEvidenceFiles() {
-  for (const file of await listFiles(output)) {
-    const content = await readFile(file);
-    if (content.includes(0)) continue;
-    const safe = redact(content.toString('utf8'));
-    await writeFile(file, safe);
+async function publishOfficialEvidence(source) {
+  for (const file of await listFiles(source)) {
+    const target = resolve(output, relative(source, file));
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, redact(await readFile(file, 'utf8')));
   }
 }
 
@@ -157,9 +163,12 @@ let protocolFixture;
 let mutationFixture;
 let productConformanceProxy;
 let tempRoot;
+let rawReports;
 try {
+  tempRoot = await mkdtemp(resolve(tmpdir(), 'codexia-mcp-conformance-'));
+  rawReports = resolve(tempRoot, 'official-reports');
   protocolFixture = await startProtocolFixture();
-  const conformanceDir = resolve(output, 'official-2026-07-28');
+  const conformanceDir = resolve(rawReports, 'official-2026-07-28');
   const conformanceArgs = ['server', '--url', protocolFixture.url, '--requirements', '2026-07-28', '--output-dir', conformanceDir, '--verbose'];
   const conformance = await execute(conformanceBin, conformanceArgs, { timeout: 300_000 });
   await writeFile(resolve(output, 'conformance.stdout.txt'), conformance.stdout);
@@ -175,19 +184,21 @@ try {
   if (conformance.code !== 0 || !conformanceChecks?.length) failures.push(`official required 2026-07-28 SDK fixture scenarios failed or emitted no report (exit ${conformance.code}, checks ${conformanceChecks?.length ?? 0})`);
 
   mutationFixture = await startProtocolFixture(true);
-  const mutationDir = resolve(output, 'official-tools-list-deliberate-mutation');
+  const mutationDir = resolve(rawReports, 'official-tools-list-deliberate-mutation');
   const mutated = await execute(conformanceBin, ['server', '--url', mutationFixture.url, '--scenario', 'tools-list', '--spec-version', '2026-07-28', '--output-dir', mutationDir, '--verbose'], { timeout: 120_000 });
   await writeFile(resolve(output, 'conformance-mutation.stdout.txt'), mutated.stdout);
   await writeFile(resolve(output, 'conformance-mutation.stderr.txt'), mutated.stderr);
   const mutationChecks = await scenarioResults(mutationDir);
   const toolsListCheck = mutationChecks?.find(item => item.id === 'tools-list');
   const mutationSchemaCheck = mutationChecks?.find(item => item.id === 'wire-schema-valid');
-  const baselineToolsList = conformanceChecks?.find(item => item.id === 'tools-list');
-  const baselineSchemaCheck = conformanceChecks?.find(item => item.id === 'wire-schema-valid');
+  const baselineToolsListChecks = await scenarioResults(conformanceDir, 'tools-list');
+  const baselineToolsList = baselineToolsListChecks?.find(item => item.id === 'tools-list');
+  const baselineSchemaCheck = baselineToolsListChecks?.find(item => item.id === 'wire-schema-valid');
   const detected = baselineToolsList?.status === 'SUCCESS' && baselineSchemaCheck?.status === 'SUCCESS' && mutationSchemaCheck?.status === 'FAILURE' &&
     /JSONRPCResultResponse: must have required property 'id'/u.test(mutationSchemaCheck.errorMessage ?? '');
   evidence.mutation = {
     defect: 'delete only the request id from a successful tools/list JSON-RPC response',
+    exitCode: mutated.code,
     baselineToolsListStatus: baselineToolsList?.status ?? 'NO_REPORT',
     baselineWireSchemaStatus: baselineSchemaCheck?.status ?? 'NO_REPORT',
     mutatedToolsListStatus: toolsListCheck?.status ?? 'NO_REPORT',
@@ -199,13 +210,12 @@ try {
 
   if (!databaseUrl) throw new Error('BLOCKED: CODEXIA_MCP_CONFORMANCE_DATABASE_URL is required; official protocol, authorization and stdio gates need isolated PostgreSQL');
   if (!disposableOptIn) throw new Error('BLOCKED: CODEXIA_AUTH_TEST_DISPOSABLE=1 is required before the runner may migrate or write its database');
-  tempRoot = await mkdtemp(resolve(tmpdir(), 'codexia-mcp-conformance-'));
   liveHost = await startLiveHost(databaseUrl, tempRoot);
   for (const token of Object.values(liveHost.tokens)) secretValues.push(token);
   const endpoint = `${liveHost.baseUrl}/mcp?projectId=${encodeURIComponent(liveHost.projectId)}`;
 
   productConformanceProxy = await startAuthProxy(endpoint, liveHost.tokens.full);
-  const productScenarioDir = resolve(output, 'product-tools-list-2026-07-28');
+  const productScenarioDir = resolve(rawReports, 'product-tools-list-2026-07-28');
   const productResult = await execute(conformanceBin, ['server', '--url', productConformanceProxy.url,
     '--scenario', 'tools-list', '--spec-version', '2026-07-28', '--output-dir', productScenarioDir, '--verbose']);
   await writeFile(resolve(output, 'product-tools-list.stdout.txt'), productResult.stdout);
@@ -306,15 +316,15 @@ try {
   await protocolFixture?.close();
   await productConformanceProxy?.close();
   await liveHost?.close().catch(error => failures.push(`host cleanup: ${String(error)}`));
-  if (tempRoot) await rm(tempRoot, { recursive: true, force: true });
+  if (rawReports) await guarded('publish native reports', () => publishOfficialEvidence(rawReports));
+  if (tempRoot) await guarded('remove fixture directory', () => rm(tempRoot, { recursive: true, force: true }));
   evidence.inspector.status = evidence.inspector.http && evidence.inspector.stdio ? 'PASSED' : 'INCOMPLETE';
   evidence.authorization.status = ['owner', 'wrongScope', 'expired', 'unassignedProject', 'readScope'].every(key => evidence.authorization[key]) ? 'PASSED' : 'INCOMPLETE';
   evidence.contract.status = evidence.contract.wire ? 'PASSED' : 'INCOMPLETE';
   evidence.mutation.status = evidence.mutation.detectedByOfficialTool ? 'DETECTED' : 'NOT_DETECTED';
   evidence.status = failures.length ? 'FAILED_OR_BLOCKED' : 'PASSED';
   evidence.failures = failures;
-  await sanitizeEvidenceFiles();
-  await writeFile(resolve(output, 'report.json'), `${JSON.stringify(evidence, null, 2)}\n`);
+  await writeFile(resolve(output, 'report.json'), `${redact(JSON.stringify(evidence, null, 2))}\n`);
 }
 
 assert.equal(failures.length, 0, `MCP official verification did not pass; see ${output}/report.json`);
