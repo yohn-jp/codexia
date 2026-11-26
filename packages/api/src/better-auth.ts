@@ -899,7 +899,8 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
       const pathname = new URL(request.url).pathname;
       if (pathname.endsWith('/passkey/delete-passkey')) {
         const session = await auth.api.getSession({ headers: request.headers });
-        if (session) return withAuthMutationLock(passkeyDeletionQueues, session.user.id, () => accessTokenRevocation.handle(request, auth.handler));
+        if (session)
+          return withAuthMutationLock(passkeyDeletionQueues, session.user.id, () => accessTokenRevocation.handle(request, auth.handler));
       }
       const relativePath = pathname.slice(new URL(issuer).pathname.length);
       if (normalOwnerId && oauthGrantMutationPaths.has(relativePath)) {
