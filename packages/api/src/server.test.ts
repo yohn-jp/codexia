@@ -3699,7 +3699,7 @@ describe('Codexia HTTP boundary', () => {
       attachmentBytes,
     );
     const scratch = (await reader.read(result.path))?.content ?? '';
-    const frontMatterPaths = [...scratch.matchAll(/^    path: "([^"]+)"$/gmu)].map(([, path]) => path);
+    const frontMatterPaths = [...scratch.matchAll(/^ {4}path: "([^"]+)"$/gmu)].map(([, path]) => path);
     assert.deepEqual(
       frontMatterPaths,
       result.attachments.map(({ path }) => path),
@@ -3906,8 +3906,11 @@ describe('Codexia HTTP boundary', () => {
       body: JSON.stringify({ sceneId: 'scene-two', sentenceOffset: null, deviceType: 'desktop' }),
     });
     const desktopUpdateBody = (await desktopUpdate.json()) as { items: Array<{ pageIndex: number | null; deviceType: string }> };
-    assert.equal(desktopUpdateBody.items.find(item => item.deviceType === 'desktop')?.pageIndex, null,
-      'an omitted page is retained only for the same document');
+    assert.equal(
+      desktopUpdateBody.items.find(item => item.deviceType === 'desktop')?.pageIndex,
+      null,
+      'an omitted page is retained only for the same document',
+    );
     const writer = randomUUID();
     const ordered = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: 'PUT',
