@@ -225,7 +225,6 @@ test('Web append requests leave sibling order selection to the canonical persist
       markdown: '',
       orderKey: '0000000005',
       appendToEnd: true,
-      idempotencyKey: 'append-idempotency-key',
     });
     assert.equal(new Headers(init?.headers).get('Idempotency-Key'), 'append-idempotency-key');
     return Response.json({ document, revision, replayed: false });
