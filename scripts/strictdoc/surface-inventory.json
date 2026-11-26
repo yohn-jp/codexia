@@ -290,16 +290,6 @@
     },
     {
       "kind": "iacResource",
-      "id": "cloudflare_workers_route.owner_setup",
-      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
-    },
-    {
-      "kind": "iacResource",
-      "id": "cloudflare_workers_route.owner_setup_frontend_identity",
-      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
-    },
-    {
-      "kind": "iacResource",
       "id": "cloudflare_zero_trust_access_application.codexia",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
