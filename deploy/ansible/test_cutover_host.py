@@ -420,6 +420,81 @@ class CutoverHostTest(unittest.TestCase):
         self.invoke("finish", outcome="candidate")
         self.assertEqual(self.release.read_bytes(), original_release)
 
+    def test_r7_recover_retries_frontend_with_retained_backend_and_no_prior_worker(self):
+        self.input.update(candidateIdentity=self.input["priorIdentity"], candidateImage=PRIOR, migration=None,
+                          candidateUnit=str(self.root / "quadlet/codexia-api.container"),
+                          candidateUnitSha256=self.input["priorUnitSha256"])
+        self.invoke("checkpoint")
+        self.invoke("apply")
+        self.invoke("open-tunnel", outcome="candidate")
+        # Model the original approved window expiring after the candidate pair
+        # reached the Tunnel checkpoint while preserving journal/request binding.
+        expired = "2000-01-01T00:00:00.000Z"
+        journal = json.loads(self.journal.read_text())
+        journal["plan"]["notAfter"] = expired
+        self.journal.write_text(json.dumps(journal))
+        self.input["notAfter"] = expired
+
+        result = self.invoke("recover", frontendRetry=True, retainedCandidateWorker=False)
+
+        self.assertEqual(result["status"], "checkpointed")
+        self.assertEqual(result["nextOperation"], "advance")
+        observed = self.invoke("observe")
+        self.assertEqual(observed["phase"], "checkpointed")
+        self.assertFalse(observed["retainedCandidateWorker"])
+        self.assertTrue(self.live()["codexia-api"])
+        self.assertTrue(self.live()["codexia-tunnel"])
+        self.assertIn("Approved maintenance window has ended",
+                      self.invoke("apply", success=False))
+        repeated = self.invoke("recover", frontendRetry=True, retainedCandidateWorker=False)
+        self.assertEqual(repeated, result)
+        renewal = {"notAfter": "2099-01-01T00:00:00.000Z", "approval": "c" * 64}
+        self.invoke("apply", success=False, reactivationWindow=renewal)
+        self.assertEqual(self.invoke("checkpoint", reactivationWindow=renewal)["status"], "checkpointed")
+        self.assertEqual(self.invoke("observe")["reactivationWindow"], renewal)
+        self.assertIn("durable activation window", self.invoke("apply", success=False))
+        self.input["reactivationWindow"] = renewal
+        self.assertEqual(self.invoke("apply")["status"], "candidate-ready")
+        self.invoke("open-tunnel", outcome="candidate")
+        self.invoke("publishing", outcome="candidate")
+        self.invoke("finish", outcome="candidate")
+
+    def test_r7_retained_candidate_worker_marker_can_only_advance_to_true(self):
+        self.input.update(candidateIdentity=self.input["priorIdentity"], candidateImage=PRIOR, migration=None,
+                          candidateUnit=str(self.root / "quadlet/codexia-api.container"),
+                          candidateUnitSha256=self.input["priorUnitSha256"])
+        self.invoke("checkpoint")
+        self.invoke("apply")
+        self.invoke("open-tunnel", outcome="candidate")
+        self.invoke("recover", frontendRetry=True, retainedCandidateWorker=False)
+        self.invoke("apply")
+        self.invoke("open-tunnel", outcome="candidate")
+        promoted = self.invoke("recover", frontendRetry=True, retainedCandidateWorker=True)
+        self.assertEqual(promoted["status"], "checkpointed")
+        self.assertTrue(self.invoke("observe")["retainedCandidateWorker"])
+        self.invoke("recover", success=False, frontendRetry=True, retainedCandidateWorker=False)
+
+    def test_r7_frontend_retry_normalizes_legacy_prior_ready(self):
+        self.input.update(candidateIdentity=self.input["priorIdentity"], candidateImage=PRIOR, migration=None,
+                          candidateUnit=str(self.root / "quadlet/codexia-api.container"),
+                          candidateUnitSha256=self.input["priorUnitSha256"])
+        self.invoke("checkpoint")
+        self.invoke("apply")
+        self.invoke("recover-quiesce")
+        self.assertEqual(self.invoke("recover")["status"], "prior-ready")
+
+        normalized = self.invoke("recover", frontendRetry=True, retainedCandidateWorker=False)
+        self.assertEqual(normalized["status"], "checkpointed")
+        self.assertEqual(self.invoke("observe")["phase"], "checkpointed")
+
+    def test_frontend_retry_is_rejected_when_backend_changes(self):
+        self.checkpoint()
+        self.invoke("apply")
+        self.assertIn("Frontend retry recovery requires a retained Backend",
+                      self.invoke("recover", success=False, frontendRetry=True, retainedCandidateWorker=False))
+        self.assertTrue(self.live()["codexia-api"])
+        self.assertFalse(self.live()["codexia-tunnel"])
+
     def prepare_first_activation(self):
         self.runtime.write_text(json.dumps(self.live() | {"codexia-tunnel": False}))
         live = self.live()

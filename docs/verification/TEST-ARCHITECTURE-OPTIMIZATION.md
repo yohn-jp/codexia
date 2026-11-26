@@ -46,7 +46,7 @@ Normative test design contract. [CI/CD architecture](CI-CD.md) owns execution, s
 例ベースE2Eは、少なくとも次の契約を代表する既存シナリオを維持する。ケース数の目標を先に設定して削減しない。
 
 - 作者のログイン、原稿編集、保存、Revision再読込、Draft復旧。複数文書・別タブ・競合・応答順序逆転を含む。
-- Desktop Webの場面切替・参照・編集・原稿復帰を実ブラウザで確認する。iOS SwiftUIの同等操作、IME、選択、保護draft、ナビゲーションを物理iPhoneと実APIで独立確認する。現行Mobile React E2Eはネイティブの代替証拠にならず、移行時に廃止する。
+- Desktop Webの場面切替・参照・編集・原稿復帰を実ブラウザで確認する。iOS SwiftUIの同等操作、IME、選択、保護draft、ナビゲーションを物理iPhoneと実APIで独立確認する。Mobile React E2Eはネイティブの代替証拠ではなく、Mobile Web route/shell撤去後の残存テストも現行製品の受入証拠にはならない。
 - 外部MCPによる作品参照・提案、作者UIによるレビュー・承認、PostgreSQL適用とreceipt、拒否された操作が正本を変更しないこと。
 - Knowledgeの根拠、Story Contextの視点、Scenarioの仮説と承認後の確定状態。実装の横断的な結合を証明する。
 - Core/Fullとブラウザ固有の差、実OCIライフサイクルの証明。

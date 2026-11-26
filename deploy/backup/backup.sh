@@ -150,20 +150,22 @@ backup_artifact(){
   local destination="$1" recipient="$2"
   require_quiesced
   podman volume exists codexia-history || die 'History volume absent'
-  local stamp staging final db_hash history_hash artifact_hash
+  local stamp staging final db_hash history_hash verified_db_hash verified_history_hash artifact_hash
   stamp="$(date -u +%Y%m%dT%H%M%SZ)-$(cat /proc/sys/kernel/random/uuid)"
   staging="$destination/.codexia-$stamp.partial"; final="$destination/codexia-$stamp"
   mkdir "$staging"
   trap 'rm -rf -- "$staging"' EXIT
-  db_hash="$(db_fingerprint codexia-db codexia_admin)"
-  history_hash="$(history_fingerprint codexia-history)"
+  db_hash="$(db_fingerprint codexia-db codexia_admin)" || die 'Could not retrieve database fingerprint'
+  history_hash="$(history_fingerprint codexia-history)" || die 'Could not retrieve history fingerprint'
   podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec pg_dump -U codexia_admin -d codexia -Fc' |
     age -r "$recipient" -o "$staging/database.dump.age"
   podman volume export codexia-history | age -r "$recipient" -o "$staging/history.tar.age"
   # Recheck the stopped state and both logical fingerprints before publication.
   require_quiesced
-  [[ "$(db_fingerprint codexia-db codexia_admin)" == "$db_hash" ]] || die 'Database changed during backup'
-  [[ "$(history_fingerprint codexia-history)" == "$history_hash" ]] || die 'History changed during backup'
+  verified_db_hash="$(db_fingerprint codexia-db codexia_admin)" || die 'Could not retrieve database fingerprint during backup verification'
+  verified_history_hash="$(history_fingerprint codexia-history)" || die 'Could not retrieve history fingerprint during backup verification'
+  [[ "$verified_db_hash" == "$db_hash" ]] || die 'Database changed during backup'
+  [[ "$verified_history_hash" == "$history_hash" ]] || die 'History changed during backup'
   printf 'codexia-backup/v2\n%s\n%s\n' "$db_hash" "$history_hash" | age -r "$recipient" -o "$staging/manifest.age"
   (cd "$staging"; sha256sum database.dump.age history.tar.age manifest.age > SHA256SUMS)
   artifact_hash="$(sha256sum "$staging/SHA256SUMS" | cut -d' ' -f1)"
@@ -218,8 +220,8 @@ case "${1:-}" in
   fingerprint-locked)
     require_quiesced
     podman volume exists codexia-history || die 'History volume absent'
-    database_hash="$(db_fingerprint codexia-db codexia_admin)"
-    history_hash="$(history_fingerprint codexia-history)"
+    database_hash="$(db_fingerprint codexia-db codexia_admin)" || die 'Could not retrieve database fingerprint'
+    history_hash="$(history_fingerprint codexia-history)" || die 'Could not retrieve history fingerprint'
     require_quiesced
     printf '{"databaseFingerprint":"%s","historyFingerprint":"%s"}\n' "$database_hash" "$history_hash"
     ;;
@@ -334,8 +336,10 @@ case "${1:-}" in
       --cap-drop all --cap-add CHOWN --cap-add FOWNER --security-opt no-new-privileges \
       --entrypoint /bin/sh --volume "$history:/history:rw,nocopy" "$PG_IMAGE" \
       -ec 'chmod 0700 /history; chown 1000:1000 /history'
-    [[ "$(db_fingerprint "$db" postgres)" == "${fields[1]}" ]] || die 'Restored database logical fingerprint mismatch'
-    [[ "$(history_fingerprint "$history")" == "${fields[2]}" ]] || die 'Restored history fingerprint mismatch'
+    restored_database_hash="$(db_fingerprint "$db" postgres)" || die 'Could not retrieve restored database fingerprint'
+    restored_history_hash="$(history_fingerprint "$history")" || die 'Could not retrieve restored history fingerprint'
+    [[ "$restored_database_hash" == "${fields[1]}" ]] || die 'Restored database logical fingerprint mismatch'
+    [[ "$restored_history_hash" == "${fields[2]}" ]] || die 'Restored history fingerprint mismatch'
     if [[ -n "$candidate" ]]; then verify_drill_candidate "$candidate" "$db" "$ledger"; fi
     cleanup_restore_resources
     trap - EXIT

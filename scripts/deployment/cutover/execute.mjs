@@ -35,13 +35,17 @@ export async function advancePair({
     ...(candidate.initialControls ? { initialControls: candidate.initialControls } : {}),
   };
   const matchesJournal = () => journal.planSha256 === planSha256;
-  if (operation !== 'recover' && !(matchesJournal() && journal.phase === 'safe-stopped')) {
-    const recordedWindow = matchesJournal() ? journal.reactivationWindow ?? null : null;
+  const firstActivationWithoutWorker = prior.image === null && prior.workerVersion === null;
+  const retainedBackendFirstFrontend = prior.image !== null && prior.image === candidate.image && prior.workerVersion === null;
+  const recordedWindow = matchesJournal() ? journal.reactivationWindow ?? null : null;
+  const renewRetainedWindow = operation === 'advance' && retainedBackendFirstFrontend && matchesJournal() &&
+    journal.phase === 'checkpointed' && typeof journal.retainedCandidateWorker === 'boolean' &&
+    request.reactivationWindow != null && !isDeepStrictEqual(request.reactivationWindow, recordedWindow);
+  if (operation !== 'recover' && !(matchesJournal() && journal.phase === 'safe-stopped') && !renewRetainedWindow) {
     requireCondition(isDeepStrictEqual(request.reactivationWindow ?? null, recordedWindow),
       'Reactivation approval does not match the durable checkpoint');
   }
-  const firstActivationWithoutWorker = prior.image === null && prior.workerVersion === null;
-  const firstActivationWorkerRetained = () => firstActivationWithoutWorker &&
+  const candidateWorkerRetained = () => (firstActivationWithoutWorker || retainedBackendFirstFrontend) &&
     journal.retainedCandidateWorker === true && id(ingress) === candidate.workerVersion;
   const observeCheckpoint = async () => {
     journal = await host('observe', request);
@@ -55,6 +59,9 @@ export async function advancePair({
     ingress = await verifyIngress();
     requireCondition(ingress.fence.enabled, 'Maintenance fence is not active');
     await edge.verifyFenced();
+    if (retainedBackendFirstFrontend && journal.retainedCandidateWorker === true) {
+      requireCondition(candidateWorkerRetained(), 'Retained candidate Worker drifted');
+    }
   };
   const ensureFence = async () => {
     ingress = await verifyIngress();
@@ -67,7 +74,19 @@ export async function advancePair({
   const proveStagedWorker = async () => {
     if (prior.workerVersion === candidate.workerVersion) return;
     if (id(ingress) !== candidate.workerVersion) await edge.assertStaged(candidateWorkerProof);
-    else if (firstActivationWorkerRetained()) await edge.assertWorkerArtifact(candidateWorkerProof);
+    else if (candidateWorkerRetained()) await edge.assertWorkerArtifact(candidateWorkerProof);
+  };
+  const verifyRetainedBackend = () => {
+    requireCondition(journal.apiRunning === true && journal.apiVerified !== false && journal.tunnelRunning === true &&
+      journal.priorImage === prior.image && journal.priorUnitSha256 === prior.unitSha256 &&
+      journal.priorContainerId === prior.containerId && isDeepStrictEqual(journal.priorIdentity, prior.identity),
+    'Retained Backend drifted from the approved cutover plan');
+  };
+  const verifyRetryWorker = async workerVersion => {
+    if (workerVersion === null) await edge.assertStaged(candidateWorkerProof);
+    else await edge.assertWorkerArtifact(candidateWorkerProof);
+    await verifyFence();
+    requireCondition(id(ingress) === workerVersion, 'Worker drifted while checking the Frontend retry');
   };
   const promote = async outcome => {
     await verifyFence();
@@ -75,7 +94,7 @@ export async function advancePair({
     const previous = plan[outcome === 'prior' ? 'candidate' : 'prior'].workerVersion;
     requireCondition(wanted !== null, 'A verified Worker is required to reopen the paired Tunnel');
     if (outcome === 'candidate') {
-      requireCondition(journal.phase === 'candidate-tunnel' || id(ingress) === previous || firstActivationWorkerRetained(),
+      requireCondition(journal.phase === 'candidate-tunnel' || id(ingress) === previous || candidateWorkerRetained(),
         'Worker drifted before the Tunnel checkpoint');
       await proveStagedWorker();
     }
@@ -90,10 +109,15 @@ export async function advancePair({
   const publish = async outcome => {
     const pinned = plan[outcome];
     const observation = await verifyPair(outcome);
-    const staleRetryAcceptance = journal.reactivationStartedAt && acceptance &&
+    const retried = journal.reactivationStartedAt ||
+      (retainedBackendFirstFrontend && typeof journal.retainedCandidateWorker === 'boolean');
+    const staleRetryAcceptance = retried && acceptance &&
       Date.parse(acceptance.verifiedAt) < Date.parse(journal.tunnelOpenedAt ?? journal.phaseChangedAt);
     if (!acceptance || staleRetryAcceptance) {
       ingress = await verifyIngress();
+      if (retainedBackendFirstFrontend && journal.phase === 'candidate-tunnel') {
+        requireCondition(ingress.fence.enabled, 'Maintenance fence is not active during functional acceptance');
+      }
       if (journal.phase === 'finished' && !ingress.fence.enabled) {
         await edge.verifyUnfenced();
         return { status: 'finished', outcome, planSha256, observation };
@@ -144,6 +168,30 @@ export async function advancePair({
     return publish(outcome);
   }
   requireCondition(operation !== 'reconcile', 'No recorded publication is available for reconciliation');
+
+  if (operation === 'recover' && retainedBackendFirstFrontend) {
+    requireCondition(['intent', 'checkpointed', 'candidate-ready', 'candidate-tunnel', 'recovering', 'prior-ready'].includes(journal.phase),
+      'No retained Backend checkpoint is available for Frontend recovery');
+    verifyRetainedBackend();
+    if (journal.phase === 'intent') await ensureFence();
+    else await verifyFence();
+    const workerVersion = id(ingress);
+    // A Tunnel checkpoint may precede a completed Worker deployment. Older
+    // recovery journals no longer carry that forward checkpoint.
+    const mayHaveDeployed = ['candidate-tunnel', 'recovering', 'prior-ready'].includes(journal.phase);
+    requireCondition(workerVersion === null || (workerVersion === candidate.workerVersion &&
+      (mayHaveDeployed || candidateWorkerRetained())), 'Worker drifted before Frontend recovery');
+    await verifyRetryWorker(workerVersion);
+    const retainedCandidateWorker = workerVersion !== null;
+    await mutateHost('recover', { frontendRetry: true, retainedCandidateWorker });
+    await observeCheckpoint();
+    requireCondition(journal.phase === 'checkpointed' && journal.retainedCandidateWorker === retainedCandidateWorker,
+      'Host did not persist the Frontend retry checkpoint');
+    verifyRetainedBackend();
+    await verifyFence();
+    requireCondition(id(ingress) === workerVersion, 'Worker drifted after the Frontend retry checkpoint');
+    return { status: journal.phase, nextOperation: 'advance', planSha256 };
+  }
 
   if (operation === 'recover') {
     await ensureFence();
@@ -216,9 +264,23 @@ export async function advancePair({
   }
   if (journal.phase === 'checkpointed') {
     await verifyFence();
-    requireCondition(id(ingress) === prior.workerVersion || firstActivationWorkerRetained(),
-      'Worker drifted at the stopped host checkpoint');
-    await proveStagedWorker();
+    requireCondition(id(ingress) === prior.workerVersion || candidateWorkerRetained(),
+      'Worker drifted at the host checkpoint');
+    if (retainedBackendFirstFrontend && typeof journal.retainedCandidateWorker === 'boolean') {
+      verifyRetainedBackend();
+      await verifyRetryWorker(id(ingress));
+      if (renewRetainedWindow) {
+        await mutateHost('checkpoint');
+        await observeCheckpoint();
+        requireCondition(journal.phase === 'checkpointed' &&
+          isDeepStrictEqual(journal.reactivationWindow, request.reactivationWindow),
+        'Host did not persist the renewed Frontend retry window');
+        verifyRetainedBackend();
+        await verifyFence();
+      }
+    } else {
+      await proveStagedWorker();
+    }
     const proof = await checkpointProof(journal);
     if (proof.request === null) return { status: 'awaiting-independent-recovery-proof', binding: proof.binding, checkpoint: journal };
     await mutateHost('apply', proof.request);

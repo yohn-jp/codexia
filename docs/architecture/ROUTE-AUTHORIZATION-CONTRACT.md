@@ -21,9 +21,9 @@
 
 | URL | 利用主体と入口契約 | APIで必須の認可 | 目標／現状 |
 | --- | --- | --- | --- |
-| `/` | ANONのWeb入口。現行Desktop/Mobile選択は**旧実装**。目標はDesktop React起動 | 画面入口は認証不要。APIの作者権限は別に検証 | 現行選択は廃止対象 |
+| `/` | ANONのWeb入口。現行のstart画面はDesktopのみを選択し、`/desktop/`を開く。旧保存値のMobile選択はDesktopへ移行 | 画面入口は認証不要。APIの作者権限は別に検証 | Desktop起動を実装済み |
 | `/desktop/*` | Ownerの作品・原稿・Knowledge/レビューを表示。Access保護 | OWNER-API / project-object authorization | 実装済み |
-| `/mobile/*` | **廃止対象:** 旧Ionic React Mobile authoring（新規サポート/互換維持なし） | 実装残存中はOWNER-APIを迂回不可。Native iOSは別アプリ入口・同じAPI認可 | 現行旧実装・Native受入後に撤去 |
+| `/mobile/*` | 旧Ionic React Mobile authoringの撤去済みroute。現行製品の入口ではなく、互換維持なし | 有効な作者APIは引き続きOWNER-APIで認可。Native iOSは別アプリ入口・同じAPI認可 | 現行routeなし |
 | `/oauth/login` | 有効なsigned OAuth requestを持つ利用者の認証入口 | OWNER-SESSION、Passkeyかリンク済みOIDC | 実装済み |
 | `/oauth/consent` | 登録済みclient/scopeの許可または拒否 | OWNER-SESSION、same-origin、認可要求の検証 | 実装済み |
 | `/r/:module/:project/:slug` | 公開linkを受け取ったSHARE-READER。公開する場合のみAccess例外を明示 | share capabilityをAPIが確認し公開版のGETに限定 | 公開reader実装あり／実Edge受入は別 |

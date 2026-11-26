@@ -62,7 +62,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 
 ### Web UI・ルーター・エディター
 
-**Platform decision / inventory status:** 以下のIonic/Capacitor依存は**現行legacy実装の観測値**であり、採用目標ではない。DesktopはReact、iOSはSwiftUI Nativeであり、Mobile Web/PWA authoringは廃止対象。旧依存の更新・CI維持を新規製品要件として扱わず、ネイティブ実機受入後に旧ビルドとともに撤去する。Native Swiftの依存選定は [iOS SwiftUI設計](IOS-SWIFTUI-ARCHITECTURE.md) を参照する。
+**Platform decision / inventory status:** DesktopはReactで現在提供される作者用製品、SwiftUI Native iOSは開発・自動Xcode検証を一時停止した未受入の採用目標である。Mobile Web/PWA shellと`/mobile/` routeは撤去済み。一方、app package manifestsには未使用のIonic直接依存が残り、`app/native`にはretired Capacitor/AppAuth bridgeのsourceとmanifestが残る。これらは現行のDesktop UIやSwiftUI appのruntime依存ではなく、更新・CI維持を新規製品要件として扱わない。残存物の整理は別のコード変更で行う。Native Swiftの依存選定は [iOS SwiftUI設計](IOS-SWIFTUI-ARCHITECTURE.md) を参照する。
 
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
@@ -76,8 +76,8 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@codemirror/view` | `^6.43.15` | app・編集画面 | **要検証** |
 | `@headless-tree/core` | `1.8.0` | app・アウトライン | **連動**: Reactアダプターと一緒に更新 |
 | `@headless-tree/react` | `1.8.0` | app・アウトライン | **連動**: coreと一緒に更新 |
-| `@ionic/core` | `9.0.12` | app・モバイルUI | **連動**: Ionic Reactと一緒に検証 |
-| `@ionic/react` | `9.0.12` | app・モバイルUI | **連動**: Ionic Coreと一緒に検証 |
+| `@ionic/core` | `9.0.12` | app/package.jsonに残るMobile UI用の直接依存 | **Retired residue**: 現行app sourceからのimportはなく、Mobile authoring shellも撤去済み |
+| `@ionic/react` | `9.0.12` | app/package.jsonに残るMobile UI用の直接依存 | **Retired residue**: 現行app sourceからのimportはなく、Mobile authoring shellも撤去済み |
 | `@radix-ui/react-separator` | `1.2.0` | app・UI | **要検証** |
 | `@radix-ui/react-tabs` | `1.2.1` | app・UI | **要検証** |
 | `@xstate/react` | `6.1.0` | app・WRT-01/REC-01 machineとReact 19のactor接続 | **連動**: React peerは19を含み、XState `^5.28.0`と互換。machine統合と保存／復旧受入で併せて検証 |
@@ -129,10 +129,10 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `@capacitor/core` | `8.6.2`（auth plugin peer `^8.0.0`） | app/native・Capacitor runtime | **連動**: CLI・iOS・SwiftPMのCapacitorと同時に更新 |
-| `@capacitor/cli` | `8.6.2` | app/native・生成 | **連動**: runtimeと一致 |
-| `@capacitor/ios` | `8.6.2` | app/native・iOS shell | **連動**: runtime・SwiftPMと一致 |
-| `plist` | `^3.1.1` | app/native・Info.plist | **要検証** |
+| `@capacitor/core` | `8.6.2`（auth plugin peer `^8.0.0`） | app/native・旧Capacitor auth bridge | **Retired residue**: 現行SwiftUI appのruntimeではない |
+| `@capacitor/cli` | `8.6.2` | app/native・旧Capacitor project tooling | **Retired residue**: Mobile authoring IPA workflowは撤去済み |
+| `@capacitor/ios` | `8.6.2` | app/native・旧Capacitor shell | **Retired residue**: 現行iOS clientは`ios/CodexiaApp`のSwiftUI app |
+| `plist` | `^3.1.1` | app/native・旧Capacitor project plist | **Retired residue**: Mobile authoring projectの残存依存 |
 | `wrangler` | `4.162.0` | edge/frontend・Workers | **要検証**: Edge配信・デプロイ設定の契約を確認 |
 
 ## JavaScript以外／ツールチェーン
@@ -144,8 +144,8 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | Ajv | Fastify 5.12.8の推移依存 `8.20.0`、`ajv-formats` `3.0.1` | **連動**: `pnpm-lock.yaml` に従い、FastifyのDraft-07検証とserializerを隔離routeで確認 |
 | pnpm | root `pnpm@12.21.0`、CIとBackend Dockerfileで一致 | **連動**: 同期更新、lockfileの互換性・Corepack・キャッシュキーを検証 |
 | uv | `scripts/shared/python-env.sh`で公式Linux/macOSのx86-64/ARM64 release `0.13.10` と各配布SHA-256を固定 | **採用**: 全有効Python導入経路の共通標準。StrictDoc、Graphify、Ansible/Mitogen、S3 SDK、Hugging Face CLI、iOS PyYAMLの既存依存を維持し、実行環境別の受入と導入時間を確認する。旧StrictDoc OCI実験は凍結・廃止予定 |
-| AppAuth-iOS | `Package.swift`で`3.0.0` exact | **既存採用**: OSのOAuth・Keychain境界。新しい安定版・SwiftPM・iOS実機受入を確認、更新可否を随時評価 |
-| Capacitor SwiftPM | `Package.swift`で`8.6.2` exact | **連動**: NativeのCapacitor 8.6.2と一括更新 |
+| AppAuth-iOS | `app/native/plugins/codexia-auth/Package.swift`で`3.0.0` exact | **Retired residue**: 旧Capacitor auth plugin用。現在のSwiftUI appは`ASWebAuthenticationSession`を使用し、このbridgeをimportしない |
+| Capacitor SwiftPM | `app/native/plugins/codexia-auth/Package.swift`で`8.6.2` exact | **Retired residue**: 旧JS auth bridge用。現在のSwiftUI appのruntimeではない |
 | Ansible Core | `deploy/ansible/requirements.txt`で`2.21.6` | **要検証**: Python・Mitogen・実ホスト・IaC検証環境の整合を確認 |
 | StrictDoc | `scripts/strictdoc/requirements.in`で`0.32.1`、推移依存は`requirements.lock.txt`でexact pin | 要求MarkdownからHTML/JSONを生成し、双方向trace verifierを実行 | **連動**: parser、JSON構造、HTML再現性を再検証してからツールとlockを一括更新 |
 | GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v7.1.0` | **連動**: 対象workflowの実行環境とアクションの固定版を同時検証する。GitHub Actions全体を一律更新せず、依存・ランナー互換性と実ジョブで確認 |
@@ -162,6 +162,6 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 1. **候補の事実**: package名、マニフェスト宣言、lockfile解決版、registryの`latest`、利用ランタイム、変更する依存範囲（peer／transitive含む）を特定する。`^`、`~`は既に最新版という証拠ではない。
 2. **判定**: 更新対象／連動／制約／整理対象／要検証を振り分ける。「今のビルドは通る」「過去から固定されている」だけで意図的なピンとしない。廃止予定の機能・不要な直接依存なら先に削除を評価する。
 3. **制約の証拠**: 固定する場合、対象パッケージ・許可範囲、最新候補、具体的な再現条件・失敗ログ・依存境界、解除条件をPRに記録する。期限なしの例外は設けない。代替案や上流の修正を評価する。
-4. **更新の単位**: 同期必須の依存（Better Auth群、**既存Capacitor群はNative SwiftUI cutoverまでの旧実装としてのみ検証**、React／型、Playwright／イメージ、Node／型）を揃える。異なる原因を混在させたDependabotグループのレッドは個別に切り分ける。
+4. **更新の単位**: 同期必須の現行依存（Better Auth群、React／型、Playwright／イメージ、Node／型）を揃える。Retired Mobile Web / Capacitor残存物は通常の製品runtime依存として更新しない。異なる原因を混在させたDependabotグループのレッドは個別に切り分ける。
 5. **受入**: main HEADに更新して差分・実行時依存・型／unit／E2E／OCI・CodeQL・GitHub Actionsを検証する。古いbranchのチェックを現在のmainの合格とみなさない。CodeQLの抑制、依存除外、セキュリティ規約の緩和で通さない。
 6. **台帳の同期**: マニフェスト変更に合わせ、該当行の宣言と判定・制約根拠を改訂する。異なるバージョンが正当に共存する場合は用途と移行基準を記録する。過去の失敗ログ、SHA、日付、個別PR番号等の経時証拠は**当該PR**に保存し、製品の規範文書へ混入させない。

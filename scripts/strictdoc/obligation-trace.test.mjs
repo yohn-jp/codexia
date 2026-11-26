@@ -94,6 +94,46 @@ test('fault injection rejects malformed exact-source evidence and unsafe source 
   assert.match(result.violations.join('\n'), /authored Exact-run reference/);
 });
 
+test('fault injection rejects stale, foreign, duplicated, and unrelated run evidence', () => {
+  const result = buildObligationTrace({
+    requirements: [requirement], obligations: [obligation], scenarios: [scenario],
+    runEvidence: [candidate, candidate, { ...candidate, testId: 'TEST-API-404' }, { ...candidate, sourceSha: 'b'.repeat(40) }],
+    expectedRepository: 'yohn-jp/codexia', expectedSourceSha: 'a'.repeat(40),
+  });
+  const violations = result.violations.join('\n');
+  assert.match(violations, /Duplicate exact-source run evidence/);
+  assert.match(violations, /unknown TEST-ID TEST-API-404/);
+  assert.match(violations, /incomplete or invalid exact-source run evidence/);
+});
+
+test('passing observed UI case cannot promote an explicitly unimplemented requirement', () => {
+  const unimplemented = {
+    ...requirement, UID: 'REQ-UI-006', 'Test IDs': 'TEST-UI-006-001',
+    'Conformance status': 'UNMAPPED', Applicability: 'FUTURE_TARGET',
+    'Implementation identifiers': 'state machine未導入',
+  };
+  const uiScenario = {
+    ...scenario, UID: 'TEST-UI-006-001',
+    RELATIONS: [{ TYPE: 'Parent', VALUE: 'REQ-UI-006' }],
+  };
+  const uiObligation = {
+    ...obligation, UID: 'OBL-REQ-UI-006-O01',
+    MID: createHash('sha256').update('OBL-REQ-UI-006-O01', 'utf8').digest('hex').slice(0, 32),
+    'Test IDs': 'TEST-UI-006-001',
+    RELATIONS: [{ TYPE: 'Parent', VALUE: 'REQ-UI-006' }, { TYPE: 'File', VALUE: 'app/src/state.test.ts' }],
+  };
+  const result = buildObligationTrace({
+    requirements: [unimplemented], obligations: [uiObligation], scenarios: [uiScenario],
+    runEvidence: [{ ...candidate, testId: 'TEST-UI-006-001' }],
+    expectedRepository: 'yohn-jp/codexia', expectedSourceSha: 'a'.repeat(40),
+  });
+  assert.deepEqual(result.violations, []);
+  assert.equal(result.rows[0].exactRuns.length, 1);
+  assert.equal(result.rows[0].status, 'MAPPED_UNVERIFIED');
+  assert.equal(result.rows[0].conformanceStatus, 'UNMAPPED');
+  assert.deepEqual(result.rows[0].requirementImplementationIdentifiers, ['state machine未導入']);
+});
+
 test('reports missing exact-source evidence for each TEST-ID even when another case passed', () => {
   const missing = { ...scenario, UID: 'TEST-API-002' };
   const result = buildObligationTrace({

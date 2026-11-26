@@ -206,6 +206,9 @@ jobs:
           if-no-files-found: error
           retention-days: 3
   specification:
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -253,7 +256,6 @@ jobs:
           CODEXIA_CI_TASK: pages-requirements-trace
         run: |
           node scripts/strictdoc/verify.mjs --strictdoc "$RUNNER_TEMP/strictdoc/bin/strictdoc" --output-dir "$RUNNER_TEMP/strictdoc-output"
-          node scripts/audit/specifications.mjs "$RUNNER_TEMP/site" "$RUNNER_TEMP/strictdoc-output" "$(git rev-parse HEAD)"
       - name: Generate source graph for the checkout
         env:
           GRAPHIFY_BACKEND: none
@@ -273,6 +275,15 @@ jobs:
           node scripts/graphify-pages/pack.mjs \
             "$RUNNER_TEMP/graphify-out/graphify-out" "$RUNNER_TEMP/site" "$(git rev-parse HEAD)" \
             "$RUNNER_TEMP/graphify-out/graphify-out/candidates.json"
+      - name: Read exact-source Verify artifact receipt and stage specifications
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODEXIA_TRACE_VERIFY_WAIT_SECONDS: '600'
+        run: |
+          VERIFY_EVENT="$GITHUB_EVENT_NAME"
+          if [[ "$VERIFY_EVENT" == workflow_dispatch ]]; then VERIFY_EVENT=push; fi
+          node scripts/ci/evidence/trace-receipt.mjs "$(git rev-parse HEAD)" "$VERIFY_EVENT" "$RUNNER_TEMP/verify-receipt.json"
+          node scripts/audit/specifications.mjs "$RUNNER_TEMP/site" "$RUNNER_TEMP/strictdoc-output" "$(git rev-parse HEAD)" "$RUNNER_TEMP/verify-receipt.json"
       - name: Stamp specification source and content digest
         run: node scripts/audit/assemble-parts.mjs stamp "$RUNNER_TEMP/site" specification "$(git rev-parse HEAD)"
       - uses: actions/upload-artifact@v7.0.2
@@ -444,7 +455,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: scripts/verification/artifacts/pages-live-ux.mjs
           sparse-checkout-cone-mode: false
-      - name: Verify the published UX projection
+      - name: Verify the published Pages projection
         env:
           PAGES_URL: ${{ steps.deployment.outputs.page_url }}
         run: node scripts/verification/artifacts/pages-live-ux.mjs "$PAGES_URL" "$GITHUB_SHA"

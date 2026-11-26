@@ -28,13 +28,14 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
   try {
     browser = await chromium.launch({headless:true, executablePath:process.env.CODEXIA_E2E_CHROMIUM});
     const page = await browser.newPage();
+    await page.route('https://api.github.com/**', route => route.abort());
     const base = `http://127.0.0.1:${server.address().port}`;
     assert.equal((await page.goto(`${base}/`)).status(), 200);
     const link = page.locator('a[href="requirements/html/"]').first();
     assert.equal(await link.count(), 1);
     await link.click();
     assert.match(page.url(), /\/requirements\/html\/$/u);
-    assert.ok(await page.getByRole('link', {name:'Development Portal'}).isVisible());
+    await page.getByRole('link', { name: 'Development Portal', exact: true }).waitFor({ state: 'visible' });
     assert.equal((await page.goto(`${base}/requirements/html/requirements/REQUIREMENT-REGISTER.md-TRACE.html`)).status(), 200);
     assert.match(await page.locator('body').innerText(), /REQ-CORE-001/u);
     assert.equal((await page.goto(`${base}/`)).status(), 200);
@@ -43,6 +44,9 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     assert.match(page.url(), /\/requirements\/traceability\/$/u);
     assert.equal((await page.goto(`${base}/requirements/traceability/`)).status(), 200);
     assert.match(await page.getByRole('heading', { name: '実装トレーサビリティ' }).innerText(), /実装トレーサビリティ/u);
+    await page.locator('#pages-live-confirmation[data-status="pending"]').waitFor();
+    assert.match(await page.locator('#pages-live-confirmation').innerText(), /Not confirmed for the canonical public URL/u);
+    assert.match(await page.locator('section:has(#qualification-gates) table').innerText(), /G7/u);
     assert.match(await page.locator('body').innerText(), /実装面の逆引き/u);
     assert.match(await page.locator('body').innerText(), /UNMAPPED|No exact-source run/u);
     const traceResponse = await page.request.get(`${base}/requirements/traceability/traceability.json`);
@@ -84,11 +88,11 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     const visibleSurfaceKinds = await surfaceRows.filter({ visible: true }).evaluateAll(rows => rows.map(row => row.dataset.kind));
     assert.ok(visibleSurfaceKinds.length > 0 && visibleSurfaceKinds.every(kind => kind === 'mcpTool'));
     await page.getByRole('combobox', { name: 'surface種別', exact: true }).selectOption('');
-    await page.getByRole('combobox', { name: '状態', exact: true }).selectOption('UNVERIFIED');
+    await page.getByRole('combobox', { name: '状態', exact: true }).selectOption('MAPPED_UNVERIFIED');
     const visibleSurfaceStatuses = await surfaceRows.filter({ visible: true }).evaluateAll(rows => rows.map(row => row.dataset.status.split(/\s+/u)));
-    assert.ok(visibleSurfaceStatuses.length > 0 && visibleSurfaceStatuses.every(statuses => statuses.includes('UNVERIFIED')));
-    const unverifiedColor = await page.locator('#surface-table .state[data-state="UNVERIFIED"]').first().evaluate(element => getComputedStyle(element).color);
-    assert.notEqual(unverifiedColor, 'rgb(120, 223, 180)', 'UNVERIFIED must not use the VERIFIED success color');
+    assert.ok(visibleSurfaceStatuses.length > 0 && visibleSurfaceStatuses.every(statuses => statuses.includes('MAPPED_UNVERIFIED')));
+    const unverifiedColor = await page.locator('#surface-table .state[data-state="MAPPED_UNVERIFIED"]').first().evaluate(element => getComputedStyle(element).color);
+    assert.notEqual(unverifiedColor, 'rgb(120, 223, 180)', 'MAPPED_UNVERIFIED must not use the VERIFIED success color');
     await page.getByRole('button', { name: '条件を解除' }).click();
 
     await page.getByRole('combobox', { name: '状態', exact: true }).selectOption('CANDIDATE_ONLY');

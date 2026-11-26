@@ -194,6 +194,25 @@ test('Preflight and R4 restart interrupted schema initialization only with exact
   assert.deepEqual(admitBootstrap({ ...input, mode: 'bootstrap', initializeDatabase: true }), {
     route: 'R4', stages: ['auth-runtime'], installIntent: true,
   });
+  const altered = structuredClone(input);
+  altered.plan.observation.bootstrapResume.checkpoint = 'auth-schema-with-tables';
+  assert.throws(() => admitBootstrap({ ...altered, mode: 'bootstrap', initializeDatabase: true }), /altered|Invalid/u);
+});
+
+test('R4 admits only the explicit empty-auth checkpoint and binds its distinct resume mode', () => {
+  const input = observedSetup({ ...schemaWithoutMarker, emptyAuthSchema: true,
+    bootstrapIntent: installation, authSchemaSha256: schema });
+  assert.deepEqual(input.plan.observation.bootstrapResume, {
+    ...installation, migrationFingerprint: migrationSetFingerprint(ledger), checkpoint: 'empty-auth-schema',
+  });
+  assert.equal(input.plan.candidateRoute, 'R4');
+  assert.deepEqual(input.plan.requiredApprovals, ['bootstrap', 'database-initialization']);
+  assert.deepEqual(admitBootstrap({ ...input, mode: 'bootstrap', initializeDatabase: true }), {
+    route: 'R4', stages: ['auth-runtime'], installIntent: true,
+  });
+  const dirty = observedSetup({ ...schemaWithoutMarker, emptyAuthSchema: false,
+    authState: 'unknown', bootstrapIntent: installation });
+  assert.equal(dirty.plan.route, 'R0');
 });
 
 test('Preflight stops at R0 when an initialized database lacks matching installation intent', () => {

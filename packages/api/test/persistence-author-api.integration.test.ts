@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { type TestContext, test } from 'node:test';
-import type { DocumentId, ProjectId } from '@codexia/persistence-contracts';
+import type { ChangeSetId, DocumentId, ProjectId } from '@codexia/persistence-contracts';
 import { createPostgresPersistence } from '@codexia/persistence-postgres';
 import { startBetterAuthFixture } from './fixtures/better-auth-server.js';
 
@@ -376,6 +376,137 @@ test('authenticated PostgreSQL API saves, replays, follows Evidence, conflicts a
   const restored = (await restore.json()) as { document: { headRevisionId: string }; revision: { id: string; markdown: string } };
   assert.equal(restored.revision.markdown, initialMarkdown);
   assert.equal(restored.document.headRevisionId, restored.revision.id);
+});
+
+test('authenticated PostgreSQL API rejects stale manuscript restore approval without side effects', async t => {
+  const { base, ownerHeaders, persistence } = await startAuthorApi(t);
+  const projectResponse = await fetch(`${base}/api/v1/persistence/projects`, {
+    method: 'POST',
+    headers: ownerHeaders,
+    body: JSON.stringify({ title: `restore-approval-${randomUUID()}`, settings: { language: 'ja' } }),
+  });
+  assert.equal(projectResponse.status, 201);
+  const { project } = (await projectResponse.json()) as { project: { id: string } };
+
+  const originalMarkdown = 'Original manuscript';
+  const initialResponse = await fetch(`${base}/api/v1/persistence/projects/${project.id}/documents`, {
+    method: 'POST',
+    headers: { ...ownerHeaders, 'Idempotency-Key': `restore-create-${randomUUID()}` },
+    body: JSON.stringify({ kind: 'scene', title: 'Restore target', orderKey: '0001', markdown: originalMarkdown }),
+  });
+  assert.equal(initialResponse.status, 201);
+  const initial = (await initialResponse.json()) as { document: { id: string }; revision: { id: string; markdown: string } };
+  const documentId = initial.document.id;
+  const save = async (baseRevisionId: string, previousMarkdown: string, markdown: string) => {
+    const response = await fetch(`${base}/api/v1/persistence/projects/${project.id}/documents/${documentId}`, {
+      method: 'PATCH',
+      headers: {
+        ...ownerHeaders,
+        'Idempotency-Key': `restore-save-${randomUUID()}`,
+        'X-Client-Id': 'restore-approval-integration',
+      },
+      body: JSON.stringify({
+        baseRevisionId,
+        changes: [{ fromUtf16: 0, toUtf16: previousMarkdown.length, insert: markdown }],
+        resultingSha256: sha256(markdown),
+        clientId: 'restore-approval-integration',
+      }),
+    });
+    assert.equal(response.status, 200);
+    return (await response.json()) as { revision: { id: string; markdown: string } };
+  };
+  const proposedBase = await save(initial.revision.id, originalMarkdown, 'Manuscript before proposal');
+  const proposeRestore = async (baseRevisionId: string, sourceRevisionId: string) => {
+    const response = await fetch(`${base}/api/projects/${project.id}/actions/core.operation.restore`, {
+      method: 'POST',
+      headers: ownerHeaders,
+      body: JSON.stringify({
+        input: { documentId, baseRevisionId, sourceRevisionId, idempotencyKey: `restore-proposal-${randomUUID()}` },
+      }),
+    });
+    assert.equal(response.status, 200);
+    const result = (await response.json()) as {
+      ok: boolean;
+      data?: {
+        changeSet: {
+          id: string;
+          version: number;
+          status: string;
+          readSet: unknown[];
+          operations: Array<{ type: string; command: { baseRevisionId: string } }>;
+        };
+        replayed: boolean;
+      };
+      error?: unknown;
+    };
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.ok(result.data);
+    return result.data.changeSet;
+  };
+  const transition = (changeSetId: string, action: 'approve' | 'reject' | 'apply', expectedVersion: number) =>
+    fetch(`${base}/api/v1/persistence/projects/${project.id}/changesets/${changeSetId}/${action}`, {
+      method: 'POST',
+      headers: ownerHeaders,
+      body: JSON.stringify({ expectedVersion }),
+    });
+  const readHead = () =>
+    persistence.read(async reader => {
+      const document = await reader.getDocument(project.id as ProjectId, documentId as DocumentId);
+      if (!document?.headRevisionId) return null;
+      const revision = await reader.getRevision(project.id as ProjectId, documentId as DocumentId, document.headRevisionId);
+      return revision ? { headRevisionId: document.headRevisionId, markdown: revision.markdown } : null;
+    });
+  const readChangeSet = (id: string) => persistence.read(reader => reader.getChangeSet(project.id as ProjectId, id as ChangeSetId));
+  const readReceipt = (id: string) => persistence.read(reader => reader.getChangeSetReceipt(project.id as ProjectId, id as ChangeSetId));
+
+  const staleProposal = await proposeRestore(proposedBase.revision.id, initial.revision.id);
+  assert.equal(staleProposal.status, 'proposed');
+  assert.deepEqual(staleProposal.readSet, []);
+  assert.equal(staleProposal.operations[0]?.command.baseRevisionId, proposedBase.revision.id);
+  const changedBeforeApproval = await save(proposedBase.revision.id, proposedBase.revision.markdown, 'Edited after proposal');
+  const staleApproval = await transition(staleProposal.id, 'approve', staleProposal.version);
+  assert.equal(staleApproval.status, 409);
+  assert.equal(((await staleApproval.json()) as { code: string }).code, 'PERSISTENCE_CONFLICT');
+  assert.equal((await readChangeSet(staleProposal.id))?.status, 'proposed');
+  assert.equal(await readReceipt(staleProposal.id), undefined);
+  assert.deepEqual(await readHead(), {
+    headRevisionId: changedBeforeApproval.revision.id,
+    markdown: changedBeforeApproval.revision.markdown,
+  });
+
+  const rejection = await transition(staleProposal.id, 'reject', staleProposal.version);
+  assert.equal(rejection.status, 200);
+  assert.equal((await readChangeSet(staleProposal.id))?.status, 'rejected');
+  assert.equal(await readReceipt(staleProposal.id), undefined);
+  assert.deepEqual(await readHead(), {
+    headRevisionId: changedBeforeApproval.revision.id,
+    markdown: changedBeforeApproval.revision.markdown,
+  });
+
+  const validProposal = await proposeRestore(changedBeforeApproval.revision.id, initial.revision.id);
+  const approval = await transition(validProposal.id, 'approve', validProposal.version);
+  assert.equal(approval.status, 200);
+  assert.equal(await readReceipt(validProposal.id), undefined);
+  const application = await transition(validProposal.id, 'apply', validProposal.version + 1);
+  assert.equal(application.status, 200);
+  const applied = (await application.json()) as { changeSet: { status: string }; results: Array<{ revision?: { markdown: string } }> };
+  assert.equal(applied.changeSet.status, 'applied');
+  assert.equal(applied.results[0]?.revision?.markdown, originalMarkdown);
+  assert.equal((await readChangeSet(validProposal.id))?.status, 'applied');
+  assert.ok(await readReceipt(validProposal.id));
+  const restored = await readHead();
+  assert.ok(restored);
+  assert.equal(restored.markdown, originalMarkdown);
+
+  const applyAfterEditProposal = await proposeRestore(restored.headRevisionId, changedBeforeApproval.revision.id);
+  const applyAfterEditApproval = await transition(applyAfterEditProposal.id, 'approve', applyAfterEditProposal.version);
+  assert.equal(applyAfterEditApproval.status, 200);
+  const editedAfterApproval = await save(restored.headRevisionId, originalMarkdown, 'Edited after approval');
+  const rejectedApplication = await transition(applyAfterEditProposal.id, 'apply', applyAfterEditProposal.version + 1);
+  assert.equal(rejectedApplication.status, 409);
+  assert.equal((await readChangeSet(applyAfterEditProposal.id))?.status, 'approved');
+  assert.equal(await readReceipt(applyAfterEditProposal.id), undefined);
+  assert.deepEqual(await readHead(), { headRevisionId: editedAfterApproval.revision.id, markdown: editedAfterApproval.revision.markdown });
 });
 
 test('document mutations distinguish missing and soft-deleted targets from stale versions', async t => {

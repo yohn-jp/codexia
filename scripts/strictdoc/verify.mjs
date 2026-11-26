@@ -57,6 +57,30 @@ export function validateRequirementNodes(nodes) {
   return violations;
 }
 
+/** Project gate observations without promoting partial evidence to a product verdict. */
+export function projectTraceabilityGates({ requirementNodes, obligationTrace, reverseTrace, caseExecutions, run, publisherStatus = 'NOT_PUBLISHED' }) {
+  const byId = new Map(caseExecutions.map(item => [item.testId, item]));
+  const required = requirementNodes.flatMap(node => String(node['Test IDs'] ?? '').split(/[\s,;]+/u)
+    .filter(id => /^TEST-(?:[A-Z0-9]+-)+\d{3}$/u.test(id)));
+  const unresolvedCases = required.filter(id => byId.get(id)?.result !== 'PASSED');
+  const hasTraceFailures = obligationTrace.violations.length > 0 || reverseTrace.violations.length > 0;
+  const gapCount = obligationTrace.gaps.length + reverseTrace.gaps.length;
+  const blockers = reverseTrace.gaps.filter(gap => gap.kind === 'BLOCKED');
+  const runStatus = run.status === 'IN_PROGRESS' ? 'OBSERVED_PENDING_ARTIFACT_CERTIFICATION' : 'NOT_RUN';
+  return {
+    G0: { status: 'PARTIAL', evidence: 'StrictDoc parse, UID/relation validation, and deterministic HTML/JSON export passed. This task does not authenticate the remaining G0 checks.' },
+    G1: { status: 'NOT_RUN', evidence: 'No TypeSpec/OpenAPI runtime contract gate is authenticated by this trace task.' },
+    G2: { status: 'NOT_RUN', evidence: 'No isolated HTTP/MCP runtime contract execution is authenticated by this trace task.' },
+    G3: { status: 'NOT_RUN', evidence: 'No live database catalog or migration execution is authenticated by this trace task.' },
+    G4: { status: 'NOT_RUN', evidence: 'No product UI/host acceptance execution is authenticated by this trace task.' },
+    G5: { status: 'NOT_RUN', evidence: 'No authenticated LikeC4 validation or Threagile risk analysis is included in this trace producer run.' },
+    G6: { status: 'NOT_RUN', evidence: 'No performance execution is authenticated by this trace task.' },
+    G7: { status: hasTraceFailures ? 'BLOCKED' : 'PARTIAL',
+      runStatus, publisherStatus, unresolvedCases, gapCount, blockers,
+      evidence: 'Requirement/source/test relations are projections. Verify certification authenticates the trace artifact. Product cases without matching execution evidence remain NOT_RUN.' },
+  };
+}
+
 export async function validateRelations(nodes, repositoryRoot) {
   const violations = [];
   const root = await realpath(repositoryRoot);
@@ -145,9 +169,8 @@ export async function validateScenarioNodes(scenarios, requirements, repositoryR
     if (scenario.MID !== deterministicMid(uid)) violations.push(`MID for ${uid} is not deterministic`);
     const caseName = scenario['Case name'];
     if (typeof caseName !== 'string' || caseName.trim() === '') violations.push(`Missing Case name for ${uid}`);
-    const exactRun = scenario['Exact-run reference'];
-    if (exactRun !== 'NOT_RUN' && (typeof exactRun !== 'string' || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/\d+$/u.test(exactRun))) {
-      violations.push(`Invalid exact-run reference for ${uid}`);
+    if (scenario['Exact-run reference'] !== 'NOT_RUN') {
+      violations.push(`${uid} authored Exact-run reference must be NOT_RUN; observed runs are attached in Verify evidence`);
     }
     const parentRelations = (scenario.RELATIONS ?? []).filter((relation) => relation.TYPE === 'Parent');
     if (parentRelations.length === 0) violations.push(`${uid} is missing a parent requirement`);
@@ -165,6 +188,7 @@ export async function validateScenarioNodes(scenarios, requirements, repositoryR
     const fileRelations = (scenario.RELATIONS ?? []).filter((relation) => relation.TYPE === 'File');
     if (fileRelations.length === 0) violations.push(`${uid} is missing a test source File relation`);
     let caseFound = false;
+    let rangedCaseFound = false;
     for (const relation of fileRelations) {
       const relativePath = relation.VALUE ?? relation.PATH;
       if (typeof relativePath !== 'string' || path.isAbsolute(relativePath)) continue;
@@ -174,12 +198,24 @@ export async function validateScenarioNodes(scenarios, requirements, repositoryR
         const realSource = await realpath(resolved);
         if (!realSource.startsWith(`${root}${path.sep}`)) continue;
         const source = await readRegularFile(realSource);
-        if (typeof caseName === 'string' && source.includes(caseName)) caseFound = true;
+        if (typeof caseName === 'string' && source.includes(caseName)) {
+          caseFound = true;
+          if (relation.LINE_RANGE === undefined) rangedCaseFound = true;
+          else {
+            const match = /^(\d+)\s*,\s*(\d+)$/u.exec(String(relation.LINE_RANGE));
+            if (match) {
+              const [start, end] = match.slice(1).map(Number);
+              const lines = source.split(/\r?\n/u);
+              if (lines.some((line, index) => index + 1 >= start && index + 1 <= end && line.includes(caseName))) rangedCaseFound = true;
+            }
+          }
+        }
       } catch {
         // File relation failures are also checked by validateRelations.
       }
     }
     if (typeof caseName === 'string' && !caseFound) violations.push(`${uid} Case name was not found in its test source file`);
+    else if (typeof caseName === 'string' && !rangedCaseFound) violations.push(`${uid} Case name was not found within its declared test source line range`);
   }
   for (const requirement of requirements) {
     const ids = String(requirement['Test IDs'] ?? '').split(/[\s,;]+/u)
@@ -851,7 +887,8 @@ async function runVerifier(args) {
     const nodeTraceTests = [
       'scripts/strictdoc/verify.test.mjs', 'scripts/strictdoc/case-results.test.mjs',
       'scripts/strictdoc/obligation-trace.test.mjs', 'scripts/strictdoc/reverse-trace.test.mjs',
-      'scripts/audit/specifications.test.mjs',
+      'scripts/audit/specifications.test.mjs', 'scripts/ci/evidence/trace-receipt.test.mjs',
+      'scripts/verification/artifacts/pages-live-ux.test.mjs',
     ];
     const browserTraceTests = ['scripts/strictdoc/verify.browser.mjs'];
     const nodeTest = await executeTraceTests(root, tempRoot, 'node', nodeTraceTests);
@@ -931,6 +968,7 @@ async function runVerifier(args) {
         TRC05: { status: run.status === 'NOT_RUN' ? 'LOCAL_PASS_NO_RUN' : 'IN_PROGRESS', nodeTests: 'PASSED', browserTests: 'PASSED', detail: 'See caseExecutions for observed TEST IDs. The existing CI certifier binds the uploaded report to its job and artifact.' },
         TRC06: { status: 'LOCAL_PASS', detail: 'Fault injection is exercised by the scoped Node test suite.' },
         TRC07: { status: 'PENDING_PAGES_PUBLISH', staticStaging: 'PASSED', browserAcceptance: 'PASSED', detail: 'Static output is staged safely; publication remains with the existing Repository Audit Pages publisher and DOC-01.' },
+        gates: projectTraceabilityGates({ requirementNodes, obligationTrace, reverseTrace, caseExecutions, run }),
       },
       tests: {
         node: { status: 'PASSED', output: nodeTest.stdout },

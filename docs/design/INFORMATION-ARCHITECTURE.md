@@ -24,7 +24,7 @@ Codexiaは、作品を書く、世界を理解する、外部エージェント�
 - レビュー：Native ChangeSetと既存module proposalを権限・状態別に整理し、対象と影響を理解する。異なる適用契約を見かけ上の一括操作にしない。
 - 設定：外観、組版、レイアウト、接続、任意module、アカウント。管理用の情報を通常の操作列から分離する。
 
-執筆・知識・レビューの切替えは同じ author/project/document scope、既存の journal／navigation guard とレイアウト基盤を使う。別のルーティングライブラリ、データ正本、保存セッションを導入することは本設計の要件ではない。Desktop React WebとSwiftUI Native iOSを独立したUIとして採用し、公開readerとCore/APIの意味論を維持する。旧Mobile Web shell/モード選択は撤去対象とする。どの領域からも現在の作品と本文へ戻れる。
+執筆・知識・レビューの切替えは同じ author/project/document scope、既存の journal／navigation guard とレイアウト基盤を使う。別のルーティングライブラリ、データ正本、保存セッションを導入することは本設計の要件ではない。Desktop React WebとSwiftUI Native iOSを独立したUIとして採用し、公開readerとCore/APIの意味論を維持する。旧Mobile Web shell/モード選択は製品導線から撤去済み。どの領域からも現在の作品と本文へ戻れる。
 
 ## 表示の語彙
 

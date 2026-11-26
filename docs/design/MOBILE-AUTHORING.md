@@ -1,6 +1,6 @@
 # iOSネイティブ執筆・読書の設計
 
-**種別: 採用済みSwiftUI目標・実装未検証。** このパスは既存リンクのため維持するが、Mobile Web/PWAの継続サポートを意味しない。実装設計の正本は [iOS SwiftUI architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)、作者の体験・遷移・保存は [UX contract](UX-CONTRACT.md) と [User flow](USER-SCREEN-FLOW.md) が所有する。
+**種別: 採用済みSwiftUI目標・実装未検証。iOS開発と自動Xcode検証は一時停止中。** このパスは既存リンクのため維持するが、Mobile Web/PWAの継続サポートを意味しない。実装設計の正本は [iOS SwiftUI architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)、作者の体験・遷移・保存は [UX contract](UX-CONTRACT.md) と [User flow](USER-SCREEN-FLOW.md) が所有する。
 
 ## 製品境界
 
@@ -20,4 +20,4 @@
 
 Dynamic Type、VoiceOver、safe area、ソフト/ハードキーボード、native back、IME、長文・長い構成名を実機で検証する。競合・応答喪失・401/403/409/412・force quitを実APIと隔離DBで確認する。
 
-**Mobile Reactの320/375/390/430 CSS px、Ionic sheet、WebKitモバイルエミュレーションは製品受入対象外。** 旧コードとテストは別の移行PRで撤去し、設計のみで実装完了としない。
+**Mobile Reactの320/375/390/430 CSS px、Ionic sheet、WebKitモバイルエミュレーションは製品受入対象外。** Mobile Webのrouteとauthoring shellは現行製品から撤去済みで、残る旧依存・テストは受入証拠ではない。native iOSの未完了実装・実機受入を設計だけで完了扱いしない。

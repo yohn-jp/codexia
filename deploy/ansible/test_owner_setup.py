@@ -130,6 +130,54 @@ esac
         result = verify()
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_empty_auth_resume_rechecks_catalog_under_the_lock_before_migrating(self):
+        self.executable("codexia-auth-runtime-bootstrap", AUTH_BOOTSTRAP.read_text())
+        self.executable("codexia-require-clean-api-target", '''#!/bin/bash
+if flock --exclusive --nonblock "$HOME/.local/state/codexia-deploy/host.lock" true; then exit 75; fi
+echo clean >>"$TRACE"
+''')
+        self.executable("podman", r'''#!/bin/bash
+set -eu
+case "$1" in
+    exec)
+        if [[ "${*: -1}" == *pg_control_system* ]]; then
+            printf '%s\n' '123:456'
+        else
+            query=$(cat)
+            if [[ "$query" == *pg_control_system* ]]; then
+                [[ "$query" == *pg_namespace* && "$query" == *pg_depend* && "$query" == *pg_default_acl* ]] || exit 76
+                printf '%s' "${EMPTY_AUTH_DATABASE:-}"
+            else
+                [[ "$query" == *codexia_auth_check* ]]
+            fi
+        fi
+        ;;
+    run)
+        case "${*: -1}" in
+            sha256:*) [[ "${*: -2:1}" == require-ledger && "${*: -1}" == "$LEDGER" ]]; echo ledger >>"$TRACE" ;;
+            --apply) echo migrated >>"$TRACE" ;;
+            --describe) printf '%s\n' "$DESCRIPTION" ;;
+            *) exit 77 ;;
+        esac
+        ;;
+    *) exit 78 ;;
+esac
+''')
+        marker = self.state / "owner-setup.installation"
+        marker.unlink()
+        self.private_file(self.state / "owner-setup.intent", f"123:456:{IMAGE}\n")
+        self.private_file(self.state / "host.lock", "")
+        self.environment["LEDGER"] = LEDGER
+        rejected = self.run_setup("--initialize", "--resume-bootstrap", "123:456", LEDGER)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertFalse(marker.exists())
+        self.assertEqual(self.trace.read_text().splitlines(), ["clean"])
+        self.environment["EMPTY_AUTH_DATABASE"] = "123:456"
+        resumed = self.run_setup("--initialize", "--resume-bootstrap", "123:456", LEDGER)
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.assertEqual(self.trace.read_text().splitlines(), ["clean", "clean", "ledger", "migrated"])
+        self.assertEqual(marker.read_text(), "123\n")
+
     def test_initialized_schema_with_matching_intent_can_issue_only_first_grant(self):
         self.private_file(self.state / "owner-setup.intent", f"123:456:{IMAGE}\n")
         result = self.run_setup("--converge", "NEW_APPROVED", "age1fixture")
