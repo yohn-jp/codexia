@@ -80,6 +80,27 @@ test('R5 separates enrollment start from preparation, and rejects existing owner
   }), /route/);
 });
 
+test('owner setup resumes a legacy artifact with its exact client and registered callbacks', () => {
+  const origin = 'https://example.invalid';
+  const current = JSON.parse(frontendOAuthConfigIdentity({
+    VITE_CODEXIA_OAUTH_ISSUER: origin + '/api/auth',
+    VITE_CODEXIA_OAUTH_CLIENT_ID: 'codexia-web',
+    VITE_CODEXIA_API_AUDIENCE: origin + '/api',
+    VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: origin + '/desktop/',
+  }));
+  const { scopes, ...desktopSettings } = current.settings;
+  const legacyIdentity = JSON.stringify({
+    format: 'codexia-web-oauth-config/v1',
+    settings: { ...desktopSettings, mobileRedirectUri: origin + '/mobile/', scopes },
+  });
+
+  assert.deepEqual(ownerSetupFrontendBindings(legacyIdentity, origin), {
+    codexia_owner_setup_expected_origin: origin,
+    codexia_owner_setup_expected_web_client_id: 'codexia-web',
+    codexia_owner_setup_expected_web_redirect_uris: [origin + '/desktop/', origin + '/mobile/'],
+  });
+});
+
 test('owner setup uses the exact certified browser origin, client and return URIs', () => {
   const origin = 'https://example.invalid';
   const identity = frontendOAuthConfigIdentity({
