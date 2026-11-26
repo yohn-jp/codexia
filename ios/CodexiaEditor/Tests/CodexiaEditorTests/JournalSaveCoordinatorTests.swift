@@ -1,6 +1,11 @@
 import XCTest
 import CodexiaTransport
 @testable import CodexiaEditor
+#if os(Linux)
+import Glibc
+#elseif os(macOS)
+import Darwin
+#endif
 
 final class JournalSaveCoordinatorTests: XCTestCase {
     func testDistantEditsInLongDraftPreserveUnchangedInterior() async throws {
@@ -51,6 +56,72 @@ final class JournalSaveCoordinatorTests: XCTestCase {
             projectID: "project", clientID: "ios-test", journal: reopened, api: api)
         let otherAuthorDraft = try await authorB.recover(documentID: "document")
         XCTAssertNil(otherAuthorDraft)
+
+        let otherProject = try JournalSaveCoordinator(authorID: "author-a", apiOrigin: URL(string: "https://api.example.test")!,
+            projectID: "another-project", clientID: "ios-test", journal: reopened, api: api)
+        let otherProjectDraft = try await otherProject.recover(documentID: "document")
+        XCTAssertNil(otherProjectDraft)
+    }
+
+#if os(Linux) || os(macOS)
+    func testForcedProcessTerminationRecoversTheSameOperation() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        process.arguments = ["CodexiaEditorTests.JournalSaveCoordinatorTests/testForcedKillProbe"]
+        var environment = ProcessInfo.processInfo.environment
+        environment["CODEXIA_JOURNAL_CRASH_PROBE_DIRECTORY"] = root.path
+        process.environment = environment
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationReason, .uncaughtSignal)
+        XCTAssertEqual(process.terminationStatus, SIGKILL)
+
+        let origin = URL(string: "https://api.example.test")!
+        let restarted = try JournalSaveCoordinator(authorID: "author", apiOrigin: origin,
+            projectID: "project", clientID: "ios-test", journal: ProtectedDraftJournal(directory: root),
+            api: APITransport(origin: origin).client)
+        let recovered = try await restarted.recover(documentID: "document")
+        XCTAssertEqual(recovered?.text, "durable before process death")
+        XCTAssertEqual(recovered?.state, .protected)
+        let expectedOperationID = try String(contentsOf: root.appendingPathComponent("expected-operation-id"), encoding: .utf8)
+        XCTAssertEqual(recovered?.operationID, expectedOperationID)
+    }
+
+    /// Invoked in a child XCTest process. SIGKILL proves recovery survives loss
+    /// of process memory immediately after the atomic journal write returns.
+    func testForcedKillProbe() async throws {
+        guard let path = ProcessInfo.processInfo.environment["CODEXIA_JOURNAL_CRASH_PROBE_DIRECTORY"] else { return }
+        let root = URL(fileURLWithPath: path, isDirectory: true)
+        let origin = URL(string: "https://api.example.test")!
+        let coordinator = try JournalSaveCoordinator(authorID: "author", apiOrigin: origin,
+            projectID: "project", clientID: "ios-test", journal: ProtectedDraftJournal(directory: root),
+            api: APITransport(origin: origin).client)
+        var editor = EditorState(documentID: "document", text: "base")
+        editor.edit("durable before process death")
+        let protected = try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: "revision-1", baseText: "base")
+        try Data(protected.operationID.utf8).write(to: root.appendingPathComponent("expected-operation-id"))
+        _ = kill(getpid(), SIGKILL)
+        XCTFail("The child process should be terminated by SIGKILL")
+    }
+#endif
+
+    func testNonASCIIContentDigestAndScopeFilenameStayStable() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let origin = URL(string: "https://api.example.test")!
+        let coordinator = try JournalSaveCoordinator(authorID: "作者😀", apiOrigin: origin,
+            projectID: "案件", clientID: "ios-test", journal: ProtectedDraftJournal(directory: root), api: APITransport(origin: origin).client)
+        var editor = EditorState(documentID: "文書", text: "base")
+        editor.edit("本文😀")
+
+        let record = try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: "revision-1", baseText: "base")
+        XCTAssertEqual(record.contentSHA256, "253a6340aa6b23d9b592d5db134b6f64785df16e4d72f02b7f0413bd8d5de7ab")
+        let files = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        XCTAssertEqual(files, ["d1cb08607a3894ef234923814bd9b515d617af2518034abc29a237de5ef4e2b6.json"])
     }
 
     func testComposingSnapshotIsRecoveredAsPendingLocalDraft() async throws {
