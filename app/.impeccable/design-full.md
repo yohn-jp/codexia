@@ -21,7 +21,7 @@ Quiet Page を Writing の基本とする。Folio Atlas の考え方は、構成
 
 ## プラットフォームとシェル
 
-このImpeccable Webデザインシステムの対象はDesktop React Webのみ。iOSは独立SwiftUI Nativeアプリで、Mobile Web/PWA・Capacitor WebView authoringは撤去対象。WebとiOSのReact部品・CSS・デザイントークンの共用は要求しない。Native詳細は[SwiftUI設計](../../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md)。
+このImpeccable Webデザインシステムの対象はDesktop React Webのみ。iOSは独立SwiftUI Nativeアプリで、Mobile Web/PWAとCapacitor WebViewによる執筆機能は撤去済み。WebとiOSのReact部品・CSS・デザイントークンの共用は要求しない。Native詳細は[SwiftUI設計](../../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md)。
 
 Desktop WebとNative iOSは独立UIを持つ。原稿・Revision・保護・認可のCore/API契約は同じだが、画面・操作・クライアント状態のコード共有は不要。Desktop Webのズーム・リサイズには配慮し、React Mobile専用viewport受入は行わない。
 

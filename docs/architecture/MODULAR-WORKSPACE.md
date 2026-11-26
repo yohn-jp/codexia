@@ -2,7 +2,7 @@
 
 ## 1. Product decision
 
-The interface is assembled from movable, replaceable components over PostgreSQL projects, documents, revisions, Knowledge and Evidence. The adopted product target is Desktop React Web and independent native SwiftUI iOS. They **share Core/API/Revision contracts but not frontend shells, UI components or local authoring/recovery implementations**. The existing React Mobile shell is legacy until cutover. Search, terminology, NLP and Semantic remain optional modules on top of Core.
+The interface is assembled from movable, replaceable components over PostgreSQL projects, documents, revisions, Knowledge and Evidence. The adopted product target is Desktop React Web and independent native SwiftUI iOS. They **share Core/API/Revision contracts but not frontend shells, UI components or local authoring/recovery implementations**. Desktop Web is the supported authoring client during the iOS freeze. The [Desktop-only interim decision](IOS-SWIFTUI-ARCHITECTURE.md#7-implementation-slices-and-acceptance-gates) retires Mobile Web independently of native acceptance. Search, terminology, NLP and Semantic remain optional modules on top of Core.
 
 The three product goals are:
 

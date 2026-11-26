@@ -11,8 +11,8 @@
 | 論点 | 現時点の合意 | 未決定 |
 | --- | --- | --- |
 | 基調 | 静かで文学的、明晰。Writing は Quiet Page、構成・調査・レビューでは Folio Atlas の考え方を作業別に取り入れる | 各作業の実画面で必要な面の細部 |
-| Platform | Web/PWA と Capacitor iOS Mobile shell を共通のデザインシステムで扱う | Android 対応はこの合意に含まない |
-| 色 | Desktop 由来のココア／ティール／墨を Desktop・Mobile 共通の方向とし、Light／Dark／Paper を維持。3テーマの共通色tokenを採用。Dark accent は `#7DAF9F` | 背景・surface・状態色を含めた実画面でのコントラスト再計算 |
+| Platform | Desktop Web と native SwiftUI iOS は独立した UI 実装とし、API と意味論を共有する | Android 対応はこの合意に含まない |
+| 色 | Desktop Webではココア／ティール／墨を基調とし、Light／Dark／Paper の3テーマで色tokenを管理する。Dark accent は `#7DAF9F` | 背景・surface・状態色を含めた実画面でのコントラスト再計算 |
 | 日本語組版 | UI は和文 sans、原稿は作者が明朝／ゴシックを選択。原稿の基準は16px、行間1.8、最大幅960px | 画面幅に応じた実表示は可読性とともに比較する |
 | 密度 | Writing はQuiet Page。Research／Structure／Review は作業ごとに必要な面を組み合わせ、常時3面を要求しない | 個々の作業での配置・密度 |
 | 面の分離 | 共通余白4／8／12／16／24／32px。背景トーン、境界、ラベル、余白で階層化。影はシート等の浮上面に限定 | 実画面で操作境界が十分に判別できるか確認する |
@@ -29,7 +29,7 @@ Mobile由来の補助文字 #72766D と #FBFAF6 は4.44:1。過去の候補比�
 
 ## 第4ラウンドで採用した共通色token
 
-下記の色値はオーナー合意済みであり、Desktop・Mobile 共通の意味tokenとする。計算には現行 Desktop CSS の面色を比較背景として使った。背景色や状態色を変えた場合は、Desktop・Mobileの実際の隣接色でコントラストを再計算する。
+下記の色値はオーナー合意済みであり、Desktopの意味tokenとする。計算には現行 Desktop CSS の面色を比較背景として使った。背景色や状態色を変えた場合は、Desktopの実際の隣接色でコントラストを再計算する。
 
 | テーマ | 補助文字 | 操作境界 | 選択境界 | focus | 最小コントラスト |
 | --- | --- | --- | --- | --- | --- |
@@ -45,9 +45,9 @@ Light のアクセント／on-accent は #70452F／#FFFEFA（8.06:1）、Dark �
 
 この再設計では二つの大きく異なる実画面案を比較した。[Folio Atlas](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/direction-folio.png) は左に章の索引、中央にfolio、右に引用とKnowledgeを並べ、文脈の見比べを優先する。[Quiet Page](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/direction-focus.png) は本文を一続きの面として広く取り、章の索引だけを細く添え、参照は明示操作で呼び出す。構成と引用の同時比較にはFolio Atlasが向く。継続執筆の視覚的な重心、日本語の行長、モバイルへの連続した展開ではQuiet Pageが優れたため、**Quiet Pageを標準Writingとして採用する。**
 
-Quiet Pageでは、DesktopのWriting初期配置を構成20%・原稿80%とし、Knowledge／Evidenceのinspectorは隠してWorkspaceから呼び出す。Researchは原稿と補助panelのsplit、Reviewは原稿と提案レビューを並べる。Mobileは別のIonic画面とし、文書名・簡潔な保存表示・原稿・参照dock・4項目のbottom navigationで構成する。settingsへはtitle barから進む。ユーザーが保存したWorkspace配置は自動的に置換しない。
+Quiet Pageでは、DesktopのWriting初期配置を構成20%・原稿80%とし、Knowledge／Evidenceのinspectorは隠してWorkspaceから呼び出す。Researchは原稿と補助panelのsplit、Reviewは原稿と提案レビューを並べる。過去のMobile Web/Ionic画面案は比較履歴であり、撤去済みの製品経路を示さない。iOS UIの正本は[SwiftUI architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)である。ユーザーが保存したWorkspace配置は自動的に置換しない。
 
-選択の基準は色の好みではない。縮小表示で本文が第一に見えるか、日本語の長文を実際に読めるか、構成・Knowledge・差分へ戻れるか、DesktopとMobileがそれぞれの操作方法に合うかで比較する。紙の質感や大きなロゴ、装飾的な影を主役にせず、原稿そのものと静かな見出し階層を視覚面にする。
+選択の基準は色の好みではない。縮小表示で本文が第一に見えるか、日本語の長文を実際に読めるか、構成・Knowledge・差分へ戻れるか、Desktopとnative iOSがそれぞれの操作方法に合うかで比較する。紙の質感や大きなロゴ、装飾的な影を主役にせず、原稿そのものと静かな見出し階層を視覚面にする。
 
 実装した全画面、Before / after、操作・accessibility・persistence・performanceの別評価は[視覚受入記録](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/acceptance.md)にまとめた。以前の画面は[Desktop](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/before-desktop.png)と[Mobile](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/before-mobile.png)、採用後は[Writing](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/after-desktop-writing.png)、[Research](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/after-desktop-research.png)、[Review](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/after-desktop-review.png)、[Mobile Writing](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/after-mobile-writing.png)を参照する。MobileのBeforeは同じorigin/mainから390×844 CSS pxで撮影した。
 
@@ -86,7 +86,7 @@ Light／Dark／Paper（既存 `ThemeMode`）を維持し、既存保存keyを変
 ## 部品の優先順位と挙動
 
 - Button：主操作は一作業面につき意味のある一つ。通常操作はtext／outline、破壊的操作は確認内で識別。disabledには理由を示す。pending中は二重実行を防ぐが無関係な閲覧を止めない。
-- Menu／Tabs／Dialog：既存Radix、MobileではIonic、単純な入力はnative。ARIA、focus、Esc、戻り先を既存primitiveに委ねる。アイコンの意味はアクセシブルな名前で示す。
+- Menu／Tabs／Dialog：Desktop Webでは既存Radix、単純な入力はnative。iOSはSwiftUI native controlを使う。ARIA、focus、Esc、戻り先を既存primitiveに委ねる。アイコンの意味はアクセシブルな名前で示す。
 - Row：名前が最優先、補助情報・状態は近接配置。選択行とhoverを区別し、行全体の選択と行内の破壊的操作が誤作動しない。
 - Field：ラベル、必須条件、エラー、入力保持、決定操作を明確にする。常時開いた作成フォームを一覧の上に積まない。
 - State：保存・接続・提案は [操作と復旧](INTERACTION-CONTRACT.md) の語彙に従う。状態の変化をaria-liveで適切に伝え、同じ内容を複数箇所から読み上げない。
@@ -96,11 +96,11 @@ Light／Dark／Paper（既存 `ThemeMode`）を維持し、既存保存keyを変
 
 ## Motion
 
-参照パネル開閉、sheet、選択移動のような空間的な変化にのみ短いtransition（目安120–180ms、既存Ionicのsheet animationはnative設定を使用）を使う。保存や取得待ちで擬似progressを作らない。動きが中断されても最終の権威ある状態とfocusが一致し、reduced motionでは同じ操作結果を即時表示する。本文位置やeditorの高さを保存通知で変化させない。大きなhover変形、スクロール連動装飾、連続するカード登場animationを標準にしない。
+参照パネル開閉、sheet、選択移動のような空間的な変化にのみ短いtransition（目安120–180ms、platformのreduced motion設定を守る）を使う。保存や取得待ちで擬似progressを作らない。動きが中断されても最終の権威ある状態とfocusが一致し、reduced motionでは同じ操作結果を即時表示する。本文位置やeditorの高さを保存通知で変化させない。大きなhover変形、スクロール連動装飾、連続するカード登場animationを標準にしない。
 
 ## 視覚受入
 
-実レンダリングで以下を確認する。代表原稿は公開可能な架空fixture（日本語長文、括弧、ルビ、数字、欧文、長い章名）とし、実際の作品データをスクリーンショットに使わない。原寸、25%程度の縮小、グレースケールで主要対象が判別できること、ライト／ダーク／Paperで本文・状態・focusが読めること、1440×900・1024×768 Desktopおよび390×844・320px Mobileで主要操作に到達できることを観測する。比較画面は本質的に必要な二次元表示を許容するが、通常本文の無用な横スクロールを避ける。
+実レンダリングで以下を確認する。代表原稿は公開可能な架空fixture（日本語長文、括弧、ルビ、数字、欧文、長い章名）とし、実際の作品データをスクリーンショットに使わない。原寸、25%程度の縮小、グレースケールで主要対象が判別できること、ライト／ダーク／Paperで本文・状態・focusが読めること、Desktopの1440×900・1024×768で主要操作に到達できることを確認する。ブラウザーの縮小表示やリサイズ時のアクセシビリティは[UX contract](UX-CONTRACT.md)に従って検証する。比較画面は本質的に必要な二次元表示を許容するが、通常本文の無用な横スクロールを避ける。
 
 実際のブラウザでの見た目、操作連続性、製品契約の3ゲートを分け、成功したビルドやデザイン文書から画面品質を推定しない。CSPや認証・保存要件の緩和によって視覚を実現しない。
 

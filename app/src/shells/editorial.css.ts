@@ -203,7 +203,7 @@ globalStyle('.st-desktop-shell .durability-badge.is-current', {
   background: 'var(--badge-selected-bg)',
   fontWeight: '700',
 });
-globalStyle('.st-desktop-shell .durability-badge.is-current::before,\n.mobile-shell .durability-badge.is-current::before', {
+globalStyle('.st-desktop-shell .durability-badge.is-current::before', {
   display: 'inline-block',
   width: '0.42rem',
   height: '0.42rem',
@@ -260,12 +260,6 @@ globalStyle('.st-desktop-shell .cm-content', { maxWidth: '46em', marginInline: '
 globalStyle('.st-desktop-shell .preview-column', { background: 'var(--surface-subtle)' });
 globalStyle('.st-desktop-shell .manuscript-preview', { borderColor: 'transparent', background: 'transparent' });
 globalStyle('.st-desktop-shell .editor-hint', { lineHeight: '1.7' });
-globalStyle('.st-desktop-shell .mobile-keyboard button', {
-  borderColor: 'var(--line)',
-  borderRadius: '0.4rem',
-  color: 'var(--accent-strong)',
-  background: 'transparent',
-});
 globalStyle('.st-desktop-shell .reading-view', {
   borderColor: 'var(--st-folio-edge)',
   borderRadius: '0.4rem',
@@ -300,168 +294,7 @@ globalStyle('.st-desktop-shell .st-desktop-panel-tab', {
   '@media': { '(max-width: 680px)': { paddingInline: '0.35rem', fontSize: '0.71rem' } },
 });
 globalStyle('.st-desktop-shell .st-desktop-slot', { '@media': { '(max-width: 680px)': { padding: '0.65rem' } } });
-globalStyle('.mobile-shell .mobile-shell-ion-header', { boxShadow: '0 1px 0 var(--st-folio-edge)' });
-globalStyle('.mobile-shell .mobile-shell-toolbar', { vars: { '--min-height': '3.6rem', '--background': 'var(--paper)' } });
-globalStyle('.mobile-shell ion-title', { paddingInline: '0.35rem', fontSize: '1rem', fontWeight: '700', letterSpacing: '0.035em' });
-globalStyle('.mobile-shell .mobile-shell-shared-header', {
-  padding: '0.3rem 0.85rem 0.55rem',
-  borderTopColor: 'var(--st-folio-edge)',
-  background: 'var(--paper)',
-});
-globalStyle('.mobile-shell .mobile-shell-shared-header .topbar', { gap: '0.3rem 0.5rem' });
-globalStyle('.mobile-shell .mobile-shell-shared-header .topbar-status', { fontSize: '0.75rem' });
-globalStyle('.mobile-shell .mobile-shell-content', { background: 'var(--st-canvas)', vars: { '--background': 'var(--st-canvas)' } });
-globalStyle('.mobile-shell .mobile-shell-view', { padding: '1.2rem clamp(0.75rem, 3.5vw, 1.4rem) 2rem' });
-globalStyle('.mobile-shell .mobile-shell-page-title', {
-  margin: '0 0 1.1rem',
-  fontFamily: 'var(--manuscript-serif)',
-  fontSize: '1.6rem',
-  fontWeight: '600',
-  lineHeight: '1.35',
-});
-globalStyle('.mobile-shell #mobile-writing-title', {
-  marginBottom: '0.75rem',
-  color: 'var(--muted)',
-  fontFamily: 'var(--manuscript-sans)',
-  fontSize: '0.75rem',
-  fontWeight: '750',
-  letterSpacing: '0.1em',
-});
-globalStyle('.mobile-shell .mobile-shell-slot .editor-header', {
-  gap: '0.85rem',
-  padding: '0 0 1rem',
-  borderBottomColor: 'var(--st-folio-edge)',
-});
-globalStyle('.mobile-shell .mobile-shell-slot .editor-header h1', {
-  marginTop: '0.4rem',
-  fontFamily: 'var(--manuscript-serif)',
-  fontSize: 'clamp(1.85rem, 7.5vw, 2.5rem)',
-  fontWeight: '600',
-  letterSpacing: '-0.045em',
-  lineHeight: '1.4',
-});
-globalStyle('.mobile-shell .mobile-shell-slot .scene-heading .eyebrow', { color: 'var(--muted)', fontSize: '0.71rem', lineHeight: '1.55' });
-globalStyle('.mobile-shell .durability-row', { gap: '0.3rem', marginTop: '0.8rem' });
-globalStyle('.mobile-shell .durability-badge', { padding: '0.27rem 0.45rem', borderRadius: '0.35rem', fontSize: '0.68rem' });
-globalStyle('.mobile-shell .mobile-shell-slot .editor-actions', {
-  display: 'grid',
-  width: '100%',
-  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-  gap: '0.4rem',
-});
-globalStyle('.mobile-shell .mobile-shell-slot .editor-actions button', {
-  minWidth: '0',
-  minHeight: '2.8rem',
-  padding: '0.45rem 0.25rem',
-  borderRadius: '0.4rem',
-  fontSize: '0.77rem',
-  fontWeight: '650',
-  overflowWrap: 'anywhere',
-});
-globalStyle('.mobile-shell .mobile-shell-slot .editor-actions .quiet-button', {
-  borderColor: 'var(--input-border)',
-  color: 'var(--ink)',
-  background: 'var(--st-folio)',
-});
-globalStyle('.mobile-shell .mobile-shell-slot .durability-message', {
-  margin: '0.9rem 0 1rem',
-  color: 'var(--muted)',
-  fontSize: '0.76rem',
-  lineHeight: '1.65',
-});
-globalStyle('.mobile-shell .mobile-shell-slot .typography-toolbar', {
-  display: 'flex',
-  flexWrap: 'nowrap',
-  gap: '0.45rem',
-  marginBottom: '1rem',
-  padding: '0.55rem',
-  overflowX: 'auto',
-  overscrollBehaviorX: 'contain',
-  borderColor: 'var(--st-folio-edge)',
-  borderRadius: '0.45rem',
-  background: 'var(--surface-subtle)',
-  scrollbarWidth: 'thin',
-});
-globalStyle(
-  '.mobile-shell .mobile-shell-slot .typography-toolbar > *,\n.mobile-shell .mobile-shell-slot .typography-toolbar .toolbar-group',
-  { flex: '0 0 auto', whiteSpace: 'nowrap' },
-);
-globalStyle('.mobile-shell .mobile-shell-slot .typography-toolbar button', {
-  minHeight: '2.5rem',
-  borderColor: 'var(--line)',
-  color: 'var(--accent-strong)',
-  background: 'transparent',
-});
-globalStyle('.mobile-shell .mobile-shell-slot .manuscript-column,\n.mobile-shell .mobile-shell-slot .preview-column', {
-  padding: '0.8rem',
-  border: '1px solid var(--st-folio-edge)',
-  borderRadius: '0.45rem',
-  background: 'var(--st-folio)',
-  boxShadow: 'var(--st-folio-shadow)',
-});
-globalStyle('.mobile-shell .mobile-shell-slot .manuscript-column', { gap: '0.6rem', borderColor: 'var(--accent)' });
-globalStyle('.mobile-shell .mobile-shell-slot .manuscript-column > label,\n.mobile-shell .mobile-shell-slot .preview-column h2', {
-  color: 'var(--muted)',
-  fontSize: '0.73rem',
-  fontWeight: '700',
-});
-globalStyle('.mobile-shell .mobile-shell-slot .manuscript-input', {
-  borderColor: 'var(--st-folio-edge)',
-  borderRadius: '0.2rem',
-  background: 'var(--st-folio)',
-});
-globalStyle('.mobile-shell .mobile-shell-slot .cm-content', { padding: '1.5rem 1rem' });
-globalStyle('.mobile-shell .mobile-shell-slot .preview-column', { background: 'var(--surface-subtle)' });
-globalStyle('.mobile-shell .mobile-shell-slot .manuscript-preview', { borderColor: 'transparent', background: 'transparent' });
-globalStyle('.mobile-shell .mobile-shell-slot .mobile-keyboard button', { borderColor: 'var(--line)', borderRadius: '0.4rem' });
-globalStyle('.mobile-shell .mobile-shell-slot .reading-view', {
-  borderColor: 'var(--st-folio-edge)',
-  borderRadius: '0.45rem',
-  background: 'var(--st-folio)',
-});
-globalStyle('.mobile-shell .mobile-shell-footer', {
-  borderTopColor: 'var(--st-folio-edge)',
-  background: 'var(--paper)',
-  boxShadow: '0 -4px 22px rgb(40 35 24 / 5%)',
-});
-globalStyle('.mobile-shell .mobile-shell-navigation', { minHeight: '4.2rem', gap: '0.2rem', padding: '0.3rem 0.45rem 0.35rem' });
-globalStyle('.mobile-shell .mobile-shell-navigation ion-button', {
-  minHeight: '3.55rem',
-  vars: {
-    '--background': 'transparent',
-    '--background-activated': 'var(--surface-hover)',
-    '--color': 'var(--muted)',
-    '--border-radius': '0.5rem',
-  },
-});
-globalStyle('.mobile-shell .mobile-shell-navigation ion-button[aria-current="page"]', {
-  vars: { '--background': 'var(--surface-selected)', '--color': 'var(--accent-strong)' },
-});
-globalStyle('.mobile-shell .mobile-shell-navigation ion-button::part(native)', { minHeight: '3.55rem' });
-globalStyle('.mobile-shell .mobile-shell-nav-content', {
-  display: 'grid',
-  minWidth: '0',
-  justifyItems: 'center',
-  gap: '0.1rem',
-  lineHeight: '1.2',
-  fontSize: '0.65rem',
-  fontWeight: '700',
-});
-globalStyle('.mobile-shell .mobile-shell-nav-mark', {
-  fontFamily: 'Georgia, "Yu Mincho", serif',
-  fontSize: '1.15rem',
-  fontWeight: '400',
-  lineHeight: '1',
-});
-globalStyle('.mobile-shell .mobile-shell-settings-card', { background: 'var(--st-folio)' });
-globalStyle('.mobile-shell .mobile-shell-view', { '@media': { '(min-width: 640px)': { maxWidth: '64rem', marginInline: 'auto' } } });
-globalStyle('.mobile-shell .mobile-shell-slot .editor-columns', {
-  '@media': { '(min-width: 640px)': { gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 0.8fr)' } },
-});
-globalStyle('.mobile-shell .mobile-shell-view', { '@media': { '(max-width: 350px)': { paddingInline: '0.6rem' } } });
-globalStyle('.mobile-shell .mobile-shell-slot .manuscript-column', { '@media': { '(max-width: 350px)': { padding: '0.55rem' } } });
-globalStyle('.mobile-shell .mobile-shell-slot .cm-content', { '@media': { '(max-width: 350px)': { padding: '1rem 0.55rem' } } });
-globalStyle('.st-desktop-shell *,\n  .mobile-shell *', {
+globalStyle('.st-desktop-shell *', {
   '@media': { '(prefers-reduced-motion: reduce)': { scrollBehavior: 'auto !important' as unknown as CSSProperties['scrollBehavior'] } },
 });
 globalStyle(
@@ -469,10 +302,10 @@ globalStyle(
   { '@media': { print: { height: 'auto !important', overflow: 'visible !important', background: 'white !important' } } },
 );
 globalStyle(
-  '.st-desktop-shell .st-desktop-chrome,\n  .st-desktop-shell .st-desktop-status,\n  .mobile-shell .mobile-shell-status,\n  .st-desktop-shell .st-desktop-navigation-panel,\n  .st-desktop-shell .st-desktop-resize-handle,\n  .mobile-shell .mobile-shell-footer',
+  '.st-desktop-shell .st-desktop-chrome,\n  .st-desktop-shell .st-desktop-status,\n  .st-desktop-shell .st-desktop-navigation-panel,\n  .st-desktop-shell .st-desktop-resize-handle',
   { '@media': { print: { display: 'none !important' } } },
 );
 globalStyle('.st-desktop-shell .st-desktop-editor-slot', { '@media': { print: { padding: '0 !important' } } });
-globalStyle('.st-desktop-shell .manuscript-column,\n  .mobile-shell .manuscript-column', {
+globalStyle('.st-desktop-shell .manuscript-column', {
   '@media': { print: { border: '0', boxShadow: 'none' } },
 });

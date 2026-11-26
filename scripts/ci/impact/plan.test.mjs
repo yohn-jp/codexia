@@ -357,19 +357,6 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
     assert.equal(matchesWorkflowPaths(pushPaths, files), expected, `standalone model trigger: ${label}`);
     assert.equal((await plan(files)).full_model_oci, expected, `PR model selection: ${label}`);
   }
-  const nativeConfig = 'app/native/capacitor.config.ts';
-  const bridgeDeclaration = 'app/native/plugins/codexia-auth/src/index.d.mts';
-  for (const [files, expected] of [
-    [[nativeConfig, 'app/native/scripts/configure-oauth-callback.mjs'], false],
-    [['app/native/plugins/codexia-auth/ios/CodexiaAuthPlugin.swift'], false],
-    [[bridgeDeclaration], true],
-    [[nativeConfig, bridgeDeclaration], true],
-    [[nativeConfig, 'app/src/entries/mobile.tsx'], true],
-    [['app/native/new-build-input.ts'], true],
-  ]) {
-    assert.equal(matchesWorkflowPaths(pushPaths, files), expected, `main push: ${files.join(', ')}`);
-    assert.equal((await plan(files)).full_model_oci, expected, `PR: ${files.join(', ')}`);
-  }
   assert.equal((await plan(null)).full_model_oci, true, 'Unknown PR diff must fail closed for the supplemental model proof');
   const unreviewedNativeCode = ['ios/CodexiaTransport/Sources/CodexiaAPI/unreviewed.mjs'];
   assert.equal(matchesWorkflowPaths(pushPaths, unreviewedNativeCode), false);
@@ -664,7 +651,6 @@ test('Orval manifest and transport changes verify the deployment API route asser
 });
 
 test('the native Swift app owns manual unsigned IPA packaging', () => {
-  assert.equal(existsSync(new URL('../../../.github/workflows/ios-unsigned-ipa.yml', import.meta.url)), false);
   const native = parse(readFileSync(new URL('../../../.github/workflows/ios-editor.yml', import.meta.url), 'utf8'));
   assert.deepEqual(Object.keys(native.on), ['workflow_dispatch']);
   const ipa = native.jobs['native-ipa'];
@@ -736,21 +722,19 @@ test('push backup changes retain root and independent exact-head verification', 
   assert.deepEqual((await plan(source, 'push')).tasks, VERIFICATION_TASKS);
 });
 
-test('iOS packaging and CI dashboard changes remain root-scoped, mixed source remains fully covered', async () => {
+test('CI dashboard changes remain root-scoped, mixed source remains fully covered', async () => {
   const { VERIFICATION_TASKS } = await import('./contract.mjs');
   for (const file of [
-    'scripts/ios/package-unsigned-ipa.mjs',
-    'app/native/package.json',
     'scripts/ci/dashboard/analysis.mjs',
     'scripts/ci/dashboard/site/dashboard.js',
   ]) {
     assert.deepEqual((await plan([file])).tasks, ['unit-root', 'coverage'], file);
     assert.equal((await plan([file])).full_model_oci, false);
   }
-  const changed = await plan(['scripts/ios/package-unsigned-ipa.mjs', 'app/src/main.tsx']);
-  assert.ok(changed.tasks.includes('build-full') && changed.tasks.includes('browser-full-ui-v1'));
+  const mixedSource = await plan(['scripts/ci/dashboard/analysis.mjs', 'app/src/main.tsx']);
+  assert.ok(mixedSource.tasks.includes('build-full') && mixedSource.tasks.includes('browser-full-ui-v1'));
   assert.deepEqual((await plan(['scripts/ci/dashboard/analysis.mjs', 'unknown/unreviewed.txt'])).tasks, VERIFICATION_TASKS);
-  assert.deepEqual((await plan(['scripts/ios/package-unsigned-ipa.mjs'], 'push')).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(['scripts/ci/dashboard/analysis.mjs'], 'push')).tasks, VERIFICATION_TASKS);
 });
 
 test('the Passkey browser acceptance source is owned by the API unit, package typecheck, and dedicated Core Chromium shard', async () => {
@@ -814,7 +798,6 @@ test('native ownership fails closed for unsupported or mixed inputs and main', a
     'ios/CodexiaTransport/Sources/CodexiaAPI/new-helper.mjs',
     'ios/Unreviewed/Sources/Unexpected.swift',
     '.github/workflows/ios-other.yml',
-    '.github/workflows/ios-unsigned-ipa.yml',
     'pnpm-lock.yaml',
     'packages/api/src/server.ts',
   ]) {

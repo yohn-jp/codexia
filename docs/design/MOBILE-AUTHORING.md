@@ -20,4 +20,4 @@
 
 Dynamic Type、VoiceOver、safe area、ソフト/ハードキーボード、native back、IME、長文・長い構成名を実機で検証する。競合・応答喪失・401/403/409/412・force quitを実APIと隔離DBで確認する。
 
-**Mobile Reactの320/375/390/430 CSS px、Ionic sheet、WebKitモバイルエミュレーションは製品受入対象外。** Mobile Webのrouteとauthoring shellは現行製品から撤去済みで、残る旧依存・テストは受入証拠ではない。native iOSの未完了実装・実機受入を設計だけで完了扱いしない。
+**Mobile Reactの320/375/390/430 CSS px、Ionic sheet、WebKitモバイルエミュレーションは製品受入対象外。** Mobile Webのroute、authoring shell、専用依存と実装テストは撤去済みとする。Desktop、コンソール、公開リーダーの狭幅検証は継続する。native iOSの未完了実装・実機受入を設計だけで完了扱いしない。

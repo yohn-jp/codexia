@@ -9,7 +9,7 @@ test('evidence checkout retains the complete test and workspace manifest invento
     'packages/persistence-postgres/package.json', 'packages/persistence-postgres/src/migration-set.ts',
     'packages/persistence-postgres/migrations/001.sql',
     'modules/story/package.json', 'modules/story/src/deep/example.spec.tsx',
-    'app/package.json', 'app/src/index.tsx', 'app/native/scripts/client.test.mjs',
+    'app/package.json', 'app/src/index.tsx', 'app/src/application/navigation.test.ts',
     'profiles/core/package.json', 'profiles/core.json',
     'scripts/ci/impact/plan.mjs', 'scripts/ci/evidence/package.json',
     'deploy/quadlet/codexia-api.container', '.github/workflows/verify.yml',

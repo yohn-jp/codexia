@@ -55,7 +55,7 @@ globalStyle('.identity-management__primary:hover:not(:disabled)', { background: 
 globalStyle('.identity-management__danger:hover:not(:disabled)', { background: '#f3e8e4' });
 globalStyle('.identity-management :is(button, input):focus-visible', { outline: '3px solid var(--focus-ring)', outlineOffset: '2px' });
 globalStyle('.identity-management :is(button, input):disabled', { opacity: '0.58', cursor: 'not-allowed' });
-globalStyle('.identity-management__unavailable,\n.identity-management--mobile', {
+globalStyle('.identity-management__unavailable', {
   marginBlockStart: '1rem',
   padding: '1rem',
   border: '1px solid var(--line)',
