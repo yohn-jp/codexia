@@ -27,7 +27,12 @@ function containsId(value: unknown, id: string): boolean {
   return Boolean(value && typeof value === 'object' && Object.values(value).some(item => containsId(item, id)));
 }
 
-export async function planKnowledgeMerge(reader: PersistenceReader, projectId: ProjectId, sourceId: KnowledgeNodeId, targetId: KnowledgeNodeId) {
+export async function planKnowledgeMerge(
+  reader: PersistenceReader,
+  projectId: ProjectId,
+  sourceId: KnowledgeNodeId,
+  targetId: KnowledgeNodeId,
+) {
   const project = requireValue(await reader.getProject(projectId), 'Project not found');
   if (sourceId === targetId) throw new PersistenceError('validation', 'Select two different nodes');
   const source = requireValue(await reader.getKnowledgeNode(projectId, sourceId), 'Source Knowledge not found');
@@ -40,7 +45,8 @@ export async function planKnowledgeMerge(reader: PersistenceReader, projectId: P
   const targetMentions = await reader.listNodeMentions(projectId, targetId, MAX_MENTION_INVENTORY);
   const allAssertions = await reader.listAssertions(projectId, MAX_ASSERTION_INVENTORY);
   const assertions = allAssertions.filter(
-    assertion => containsId(assertion.proposition, sourceId) || containsId(assertion.narrativeTime, sourceId) || assertion.perspective === sourceId,
+    assertion =>
+      containsId(assertion.proposition, sourceId) || containsId(assertion.narrativeTime, sourceId) || assertion.perspective === sourceId,
   );
   const conflicts: string[] = [];
   // The uniqueness constraint includes retired aliases and treats null/empty scope as the same key.
@@ -63,7 +69,8 @@ export async function planKnowledgeMerge(reader: PersistenceReader, projectId: P
   )
     conflicts.push('Inventory exceeds safe complete merge bound');
   for (const [key, value] of Object.entries(source.attributes)) {
-    if (key in target.attributes && JSON.stringify(target.attributes[key]) !== JSON.stringify(value)) conflicts.push(`Conflicting attribute: ${key}`);
+    if (key in target.attributes && JSON.stringify(target.attributes[key]) !== JSON.stringify(value))
+      conflicts.push(`Conflicting attribute: ${key}`);
   }
   for (const mention of sourceMentions) {
     const existing = targetMentions.find(link => link.evidenceId === mention.evidenceId);
@@ -211,7 +218,11 @@ export async function applyKnowledgeMerge(
       await tx.saveMentionLink({ ...mention, nodeId: targetId, source: 'author-merge' });
   }
   for (const assertion of plan.assertions)
-    await tx.saveAssertion({ ...assertion, proposition: { ...assertion.proposition, nodeId: targetId }, expectedVersion: assertion.version });
+    await tx.saveAssertion({
+      ...assertion,
+      proposition: { ...assertion.proposition, nodeId: targetId },
+      expectedVersion: assertion.version,
+    });
   const retired = await tx.saveKnowledgeNode({
     projectId,
     id: sourceId,
