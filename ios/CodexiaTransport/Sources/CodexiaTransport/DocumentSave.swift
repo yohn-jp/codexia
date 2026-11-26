@@ -59,7 +59,10 @@ public struct DocumentSave: Sendable {
                 return .committed(receipt)
             case .conflict(let conflict):
                 switch try conflict.body.json {
-                case .SaveConflictResponse(let body): return .conflict(body)
+                case .SaveConflictResponse(let body):
+                    // A 409 is definitive, but its current-document snapshot is
+                    // only safe to compare when it belongs to this request.
+                    return .conflict(validatedConflict(body))
                 case .SaveIdempotencyConflictResponse: return .conflict(nil)
                 }
             case .badRequest:
@@ -101,6 +104,39 @@ public struct DocumentSave: Sendable {
             && receipt.document.headRevisionId == receipt.revision.id
             && receipt.revision.parentRevisionId == body.baseRevisionId
             && receipt.revision.sha256 == body.resultingSha256
+    }
+
+    /// Returns a persisted or received stale-base conflict only when its
+    /// current document and revision agree with this save's request identity.
+    /// Journal restoration should use the same check before exposing a snapshot.
+    public func validatedConflict(
+        _ conflict: Components.Schemas.SaveConflictResponse?
+    ) -> Components.Schemas.SaveConflictResponse? {
+        guard let conflict, matchesConflict(conflict) else { return nil }
+        return conflict
+    }
+
+    private func matchesConflict(_ conflict: Components.Schemas.SaveConflictResponse) -> Bool {
+        guard let current = conflict.current else { return true }
+
+        guard current.document.id == input.path.documentId,
+              current.document.projectId == input.path.projectId else {
+            return false
+        }
+
+        let body: Components.Schemas.SaveDocumentRequest
+        switch input.body { case .json(let value): body = value }
+
+        guard let revision = current.revision else {
+            // A document without a revision cannot advertise a head revision.
+            return current.document.headRevisionId == nil
+        }
+
+        return !revision.id.isEmpty
+            && revision.projectId == input.path.projectId
+            && revision.documentId == input.path.documentId
+            && current.document.headRevisionId == revision.id
+            && revision.id != body.baseRevisionId
     }
 
     private func classify(_ status: Int) -> Outcome {

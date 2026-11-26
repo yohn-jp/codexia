@@ -10,6 +10,7 @@ public struct EditorState {
         /// Later edits to `EditorState` never change this payload.
         public let text: String
         let isComposing: Bool
+        let compositionBaseText: String?
     }
 
     public struct RemoteRequest {
@@ -28,6 +29,8 @@ public struct EditorState {
     private var pendingRemote: (String, RemoteRequest)?
     private var requestGeneration: UInt64 = 0
     private var compositionText: String?
+    public private(set) var recoveredComposition: String?
+    private var recoveredCompositionBase: String?
 
     public init(documentID: String, text: String) {
         self.documentID = documentID
@@ -46,12 +49,35 @@ public struct EditorState {
         self.committedVersion = alreadyCommitted ? version : nil
     }
 
+    init(recoveringComposition record: DraftRecord) {
+        self.init(recoveringDocumentID: record.documentID, text: record.compositionBaseText ?? record.text,
+                  version: record.version, sessionID: record.sessionID)
+        isComposing = true
+        compositionText = record.text
+        recoveredComposition = record.text
+        recoveredCompositionBase = record.compositionBaseText
+    }
+
+    public var canDiscardRecoveredComposition: Bool { recoveredCompositionBase != nil }
+
+    /// Legacy entries have no pre-composition body. Preserve their complete
+    /// text until the author confirms it and can make any desired edits.
+    public mutating func resolveRecoveredComposition(keepingText: Bool) {
+        guard let recoveredComposition,
+              keepingText || canDiscardRecoveredComposition else { return }
+        self.recoveredComposition = nil
+        recoveredCompositionBase = nil
+        if keepingText { edit(recoveredComposition) }
+        setComposing(false)
+    }
+
     /// Stable identity for this in-memory editing session; a reopened document gets a new value.
     var sessionID: UUID { session }
 
     public var snapshot: Snapshot {
-        Snapshot(sessionID: session, documentID: documentID, version: version, text: compositionText ?? text,
-                 isComposing: isComposing)
+        let priorText = recoveredComposition == nil ? text : recoveredCompositionBase
+        return Snapshot(sessionID: session, documentID: documentID, version: version, text: compositionText ?? text,
+                        isComposing: isComposing, compositionBaseText: isComposing ? priorText : nil)
     }
     public var canLeave: Bool { version == protectedVersion && !isComposing }
     public var isCurrentVersionProtected: Bool {
@@ -64,7 +90,7 @@ public struct EditorState {
     }
 
     public mutating func edit(_ text: String) {
-        guard !self.text.utf8.elementsEqual(text.utf8) else { return }
+        guard recoveredComposition == nil, !self.text.utf8.elementsEqual(text.utf8) else { return }
         compositionText = nil
         self.text = text
         version += 1
@@ -73,6 +99,7 @@ public struct EditorState {
 
     /// Capture UIKit's marked-text buffer for local protection without committing it as manuscript state.
     public mutating func updateComposition(_ text: String) {
+        guard recoveredComposition == nil else { return }
         isComposing = true
         if let current = compositionText, current.utf8.elementsEqual(text.utf8) { return }
         compositionText = text
@@ -81,6 +108,7 @@ public struct EditorState {
     }
 
     public mutating func setComposing(_ active: Bool) {
+        guard recoveredComposition == nil else { return }
         isComposing = active
         if !active, compositionText != nil {
             // Cancellation must replace any previously protected marked text.

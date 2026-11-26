@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFile, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { CERTIFICATION_DEPENDENCIES } from '../impact/contract.mjs';
-import { validateVerificationPlan, assertExactPrImpact } from '../impact/plan.mjs';
+import { validateVerificationPlan, assertExactPrImpact, readVerificationFiles } from '../impact/plan.mjs';
 import { assertDeploymentFixtureJobs, assertPlanEvidence } from '../evidence/validation.mjs';
 import { assertProfileArtifactEvidence } from '../evidence/profile-artifact.mjs';
 import { resolveProducerJobAttempts } from '../evidence/artifact-selection.mjs';
@@ -31,14 +31,15 @@ const [owner, repo] = GITHUB_REPOSITORY.split('/');
 const run = (await github.rest.actions.getWorkflowRun({ owner, repo, run_id: Number(GITHUB_RUN_ID) })).data;
 assert.equal(run.head_sha, CODEXIA_EXPECTED_SHA, 'Workflow run must bind exact source');
 assert.equal(run.event, plan.event, 'Impact plan event mismatch');
-if (run.event !== 'pull_request') assert.equal(plan.mode, 'full', 'Main/manual verification must execute all validations');
+if (run.event !== 'pull_request') assert.equal(plan.mode, 'full', 'Main/manual verification must execute all unconditional validations');
 if (run.event === 'pull_request') {
-  const changed = plan.mode === 'affected'
-    ? execFileSync('git', ['diff', '--name-only', '--no-renames', '-z',
-      `${process.env.CODEXIA_EXPECTED_BASE}...${plan.sha}`, '--'],
-      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split('\0').filter(Boolean)
-    : null;
-  assertExactPrImpact(plan, process.env.CODEXIA_EXPECTED_BASE, changed);
+  const base = process.env.CODEXIA_EXPECTED_BASE;
+  assertExactPrImpact(plan, base, readVerificationFiles({ event: run.event, base, sha: plan.sha }));
+} else if (run.event === 'push') {
+  const base = process.env.CODEXIA_PUSH_BASE;
+  assert.equal(plan.base, base, 'Impact plan push base does not match the event');
+  assert.deepEqual(plan.files, readVerificationFiles({ event: run.event, base, sha: plan.sha }),
+    'Impact plan does not match the exact push diff');
 }
 const jobs = await paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRun,
   { owner, repo, run_id: Number(GITHUB_RUN_ID), filter: 'latest' }, 'jobs');

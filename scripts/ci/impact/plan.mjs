@@ -235,9 +235,11 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/verification/infrastructure/public-oauth-edge.test.mjs',
   'scripts/release/frontend/verify-compatibility.mjs',
   'scripts/release/frontend/verify-compatibility.test.mjs',
+  'scripts/ios/verify-linux-swift.sh',
+  'scripts/ios/swift-linux-toolchain.json',
 ]);
-// Standalone native iOS sources belong to the dedicated Xcode workflows, not
-// the Desktop/Core/Full verification graph. Unknown file kinds remain fail-closed.
+// Reviewed Native inputs keep Apple acceptance in the dedicated workflows.
+// SwiftPM inputs also select the Linux task below. Unknown inputs fail closed.
 export const NATIVE_IOS_WORKFLOW_INPUTS = Object.freeze([
   '.github/workflows/ios-api.yml',
   '.github/workflows/ios-editor.yml',
@@ -259,6 +261,31 @@ export function isNativeIosOwnedInput(file) {
   return /\.(?:swift|entitlements|pbxproj|xcscheme|plist|xcconfig)$/u.test(file) ||
     /\/(?:Package\.swift|Package\.resolved|\.gitignore)$/u.test(file) ||
     NATIVE_IOS_GENERATOR_INPUTS.has(file);
+}
+
+const SWIFT_LINUX_INPUTS = new Set([
+  '.github/workflows/verify.yml',
+  'scripts/ci/certification/certify.mjs',
+  'scripts/ci/evidence/task-inputs.mjs',
+  'scripts/ci/execution/group.mjs',
+  'scripts/ci/impact/contract.mjs',
+  'scripts/ci/impact/plan.mjs',
+  'scripts/ios/verify-linux-swift.sh',
+  'scripts/ios/swift-linux-toolchain.json',
+  'scripts/shared/python-env.sh',
+  'packages/http-contract/tspconfig.yaml',
+  ...NATIVE_IOS_GENERATOR_INPUTS,
+]);
+
+function isSwiftLinuxInput(file) {
+  return SWIFT_LINUX_INPUTS.has(file) ||
+    /^ios\/(?:CodexiaEditor|CodexiaTransport)\/(?:Sources\/|Tests\/|Package\.(?:swift|resolved)$)/u.test(file) ||
+    /^packages\/http-contract\/(?:src|scripts|openapi)\//u.test(file);
+}
+
+function isChangedPath(file) {
+  return typeof file === 'string' && Boolean(file) &&
+    !file.startsWith('/') && !file.split('/').includes('..') && !file.includes('\\');
 }
 
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
@@ -283,15 +310,15 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   let full = event !== 'pull_request' || !Array.isArray(files);
   // An unavailable/invalid PR diff cannot prove that the real-model acceptance is irrelevant.
   let fullModelOci = event === 'pull_request' && (!Array.isArray(files) ||
-    files.some(file => typeof file !== 'string' || !file || file.startsWith('/') ||
-      file.split('/').includes('..') || file.includes('\\') || matchesFullModelOciPath(file)));
+    files.some(file => !isChangedPath(file) || matchesFullModelOciPath(file)));
+  const swiftLinux = !Array.isArray(files) || files.some(file => !isChangedPath(file) || isSwiftLinuxInput(file));
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
   for (const file of files ?? []) {
-    // Fail closed on changed JS/TS sources; native Swift-only PRs retain their Xcode owner.
+    // Fail closed on changed JS/TS sources.
     if (file === 'biome.json' ||
         (/^(?:app|packages|modules|edge\/frontend)\//u.test(file) && /\.(?:[cm]?js|jsx|[cm]?ts|tsx)$/u.test(file))) add('biome-ci');
-    if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..') || file.includes('\\')) { full = true; break; }
+    if (!isChangedPath(file)) { full = true; break; }
     const conformanceTask = Object.entries(CONFORMANCE_TASKS).find(([, entry]) => file.startsWith(`${path.dirname(entry)}/`));
     if (conformanceTask) {
       add(conformanceTask[0]);
@@ -349,7 +376,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       continue;
     }
     if (event === 'pull_request' && isNativeIosOwnedInput(file)) {
-      // Native compile/SDK/simulator proof is owned by the matching iOS workflow.
+      // Apple SDK and simulator proof is owned by the manual iOS workflows.
       // Root contract tests and canonical coverage still certify PR admission.
       add('unit-root');
       continue;
@@ -392,13 +419,13 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   }
   // A selected browser suite always consumes the same-profile build result.
   for (const profile of PROFILES) if ([...selected].some(task => task.startsWith(`browser-${profile}-`))) add(`build-${profile}`);
-  const tasks = VERIFICATION_TASKS.filter(task => full || selected.has(task));
+  const tasks = VERIFICATION_TASKS.filter(task => task === 'swift-linux' ? swiftLinux : full || selected.has(task));
   return {
     version: 3, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null,
     full_model_oci: fullModelOci,
     tasks,
     groups: Object.keys(VERIFICATION_GROUPS).filter(group => VERIFICATION_GROUPS[group].some(task => tasks.includes(task))),
-    excluded: VERIFICATION_TASKS.filter(task => !tasks.includes(task)).map(task => ({ task, reason: 'Outside the affected source/profile boundaries of this PR' })),
+    excluded: VERIFICATION_TASKS.filter(task => !tasks.includes(task)).map(task => ({ task, reason: 'Outside the affected source/profile boundaries' })),
   };
 }
 
@@ -454,15 +481,27 @@ function assertCoverageReuse(plan, receipt) {
 }
 
 
-/** Independently bind an affected PR plan to the actual event base and Git diff. */
+/** Read the immutable change boundary used by impact selection and certification. */
+export function readVerificationFiles({ event, base, sha }) {
+  if (!['pull_request', 'push'].includes(event) || !/^[a-f0-9]{40}$/u.test(base ?? '')) return null;
+  const range = event === 'pull_request' ? `${base}...${sha}` : `${base}..${sha}`;
+  try {
+    return execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', range, '--'], {
+      encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
+    }).split('\0').filter(Boolean);
+  } catch {
+    // Missing history must run full verification, never an empty selection.
+    return null;
+  }
+}
+
 export function assertExactPrImpact(plan, expectedBase, changedFiles) {
   validateVerificationPlan(plan);
   if (plan.event !== 'pull_request') throw new Error('Exact PR impact verification requires a PR plan');
   if (!/^[a-f0-9]{40}$/u.test(expectedBase ?? '') || plan.base !== expectedBase) {
     throw new Error('Impact plan PR base does not match the event');
   }
-  if (plan.mode === 'affected' &&
-      (!Array.isArray(changedFiles) || JSON.stringify(plan.files) !== JSON.stringify(changedFiles))) {
+  if (JSON.stringify(plan.files) !== JSON.stringify(changedFiles)) {
     throw new Error('Impact plan does not match the exact PR diff');
   }
 }
@@ -494,12 +533,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const pushBase = event === 'push' && payload.after === sha && /^[a-f0-9]{40}$/u.test(payload.before ?? '') &&
     !/^0{40}$/u.test(payload.before) ? payload.before : null;
   const base = payload.pull_request?.base?.sha ?? pushBase;
-  let files = null;
-  if (event === 'pull_request' && /^[a-f0-9]{40}$/.test(base ?? '')) {
-    try {
-      files = execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', `${base}...${sha}`, '--'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split('\0').filter(Boolean);
-    } catch { /* Missing history must run full verification, never an empty selection. */ }
-  }
+  const files = readVerificationFiles({ event, base, sha });
   const plan = createVerificationPlan({ files, event, sha, base });
   const planPath = process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json';
   mkdirSync(path.dirname(planPath), { recursive: true });

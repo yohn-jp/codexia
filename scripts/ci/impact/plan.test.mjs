@@ -4,9 +4,9 @@ import { createRequire } from 'node:module';
 import { matchesGlob } from 'node:path';
 import { test } from 'node:test';
 import { componentReleaseAffected } from '../../release/components/impact.mjs';
+import { VERIFICATION_TASKS } from './contract.mjs';
 import { UX_PROJECTION_DOCUMENTS } from '../evidence/task-inputs.mjs';
-const require = createRequire(new URL('../../../packages/core/package.json', import.meta.url));
-const { parse } = require('yaml');
+const { parse } = createRequire(new URL('../../../packages/core/package.json', import.meta.url))('yaml');
 
 function matchesWorkflowPaths(patterns, files) {
   return files.some(file => {
@@ -411,8 +411,10 @@ test('shared app changes retain both profile browser coverage without backend un
   assert.ok(!selected.tasks.includes('unit-api'));
 });
 
+const NON_SWIFT_TASKS = VERIFICATION_TASKS.filter(task => task !== 'swift-linux');
+const SWIFT_LINUX_RECIPES = ['scripts/ios/verify-linux-swift.sh', 'scripts/ios/swift-linux-toolchain.json'];
+
 test('main, manual, shared contracts, lockfiles, manifests and unknown files fail closed to full verification', async () => {
-  const { VERIFICATION_TASKS } = await import('./contract.mjs');
   for (const [files, event] of [
     [['modules/search/src/browser.ts'], 'push'], [[], 'workflow_dispatch'],
     [['packages/contracts/src/index.ts'], 'pull_request'],
@@ -423,7 +425,7 @@ test('main, manual, shared contracts, lockfiles, manifests and unknown files fai
     [['modules/search/package.json'], 'pull_request'], [['new-root-file'], 'pull_request'],
     [null, 'pull_request'],
   ]) {
-    assert.deepEqual((await plan(files, event)).tasks, VERIFICATION_TASKS);
+    assert.deepEqual((await plan(files, event)).tasks, files === null ? VERIFICATION_TASKS : NON_SWIFT_TASKS);
   }
 });
 
@@ -476,10 +478,9 @@ test('the canonical age backup script selects both DBV-007 and existing root bac
 });
 
 test('existing PostgreSQL migration changes retain full verification', async () => {
-  const { VERIFICATION_TASKS } = await import('./contract.mjs');
   const selected = await plan(['packages/persistence-postgres/migrations/0002-orphaned-evidence-ranges.sql']);
   assert.equal(selected.mode, 'full');
-  assert.deepEqual(selected.tasks, VERIFICATION_TASKS);
+  assert.deepEqual(selected.tasks, NON_SWIFT_TASKS);
 });
 
 test('architecture design documents select G5 in the existing Verify unit matrix', async () => {
@@ -498,7 +499,6 @@ test('architecture design documents select G5 in the existing Verify unit matrix
   assert.deepEqual((await plan(['docs/security/authorization.md'])).tasks, ['coverage', 'architecture-g5']);
   assert.deepEqual((await plan(['docs/deployment/IAC.md'])).tasks, ['unit-root', 'coverage', 'architecture-g5']);
 
-  const { VERIFICATION_TASKS } = await import('./contract.mjs');
   for (const file of [
     'docs/architecture/likec4/model.likec4',
     'docs/architecture/threagile/model.yaml',
@@ -507,14 +507,13 @@ test('architecture design documents select G5 in the existing Verify unit matrix
     'scripts/architecture-diagrams/pack.mjs',
   ]) {
     const modelSource = await plan([file]);
-    assert.deepEqual(modelSource.tasks, VERIFICATION_TASKS, file);
+    assert.deepEqual(modelSource.tasks, NON_SWIFT_TASKS, file);
     assert.ok(modelSource.tasks.includes('architecture-g5'), file);
   }
 });
 
 test('impact selection is independent of proof availability; unknown diffs still fail closed', async () => {
   const { createVerificationPlan, verificationPlanOutputs } = await import('./plan.mjs');
-  const { VERIFICATION_TASKS } = await import('./contract.mjs');
   const input = { event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) };
   const affected = createVerificationPlan({ ...input, files: ['docs/authoring.md'] });
   assert.equal(affected.mode, 'affected');
@@ -526,7 +525,7 @@ test('impact selection is independent of proof availability; unknown diffs still
   assert.equal(unknown.mode, 'full');
   assert.deepEqual(unknown.tasks, VERIFICATION_TASKS);
   assert.deepEqual(JSON.parse(verificationPlanOutputs(unknown).unit), ['core', 'api', 'db', 'modules', 'architecture']);
-  assert.deepEqual(createVerificationPlan({ ...input, files: ['unknown.js'] }).tasks, VERIFICATION_TASKS);
+  assert.deepEqual(createVerificationPlan({ ...input, files: ['unknown.js'] }).tasks, NON_SWIFT_TASKS);
   assert.equal(createVerificationPlan({ ...input, files: ['docs/authoring.md'], event: 'push' }).mode, 'full');
 });
 
@@ -541,6 +540,9 @@ test('certification rejects tampered PR base or changed-file inventory without h
   const full = createVerificationPlan({ ...input, files: null });
   assert.doesNotThrow(() => assertExactPrImpact(full, input.base, null), 'Unknown diff already selects full verification');
   assert.throws(() => assertExactPrImpact(full, 'c'.repeat(40), null), /PR base/);
+  const knownFull = createVerificationPlan({ ...input, files: ['pnpm-lock.yaml'] });
+  assert.throws(() => assertExactPrImpact(knownFull, input.base, ['pnpm-lock.yaml', 'ios/CodexiaEditor/Package.swift']),
+    /exact PR diff/, 'Full plans must not omit a changed Swift input');
 });
 
 test('OAuth browser acceptance is selected in both profile browser lanes', async () => {
@@ -556,7 +558,7 @@ test('OAuth browser acceptance is selected in both profile browser lanes', async
 });
 
 test('every selected task has one execution group and every exclusion has a reason', async () => {
-  const { VERIFICATION_GROUPS, VERIFICATION_TASKS } = await import('./contract.mjs');
+  const { VERIFICATION_GROUPS } = await import('./contract.mjs');
   const selected = await plan(['app/src/editor/SceneEditor.tsx']);
   assert.deepEqual(selected.groups, Object.keys(VERIFICATION_GROUPS).filter(group => VERIFICATION_GROUPS[group].some(task => selected.tasks.includes(task))));
   assert.equal(selected.excluded.length + selected.tasks.length, VERIFICATION_TASKS.length);
@@ -565,7 +567,6 @@ test('every selected task has one execution group and every exclusion has a reas
 
 test('known operational inputs retain root proof without unrelated browser or OCI work', async () => {
   const { OPERATIONAL_ROOT_PATHS } = await import('./plan.mjs');
-  const { VERIFICATION_TASKS } = await import('./contract.mjs');
   for (const file of OPERATIONAL_ROOT_PATHS) {
     const selected = await plan([file]);
     const expected = file === 'deploy/backup/backup.sh'
@@ -583,16 +584,17 @@ test('known operational inputs retain root proof without unrelated browser or OC
     ].includes(file)) expected.push('requirements-trace');
     if (file.startsWith('deploy/ansible/') && /\.ya?ml$/u.test(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf') && !expected.includes('requirements-trace')) expected.push('requirements-trace');
+    if (SWIFT_LINUX_RECIPES.includes(file)) expected.push('swift-linux');
     assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
   }
   for (const file of ['deploy/ansible/new-stage.yml','deploy/backup/new-runtime.mjs','scripts/new-tool.mjs','.github/workflows/unknown.yml']) {
-    assert.deepEqual((await plan([file])).tasks, VERIFICATION_TASKS, file);
+    assert.deepEqual((await plan([file])).tasks, NON_SWIFT_TASKS, file);
   }
   const mixed = await plan(['deploy/ansible/host.yml','app/src/api.ts']);
   assert.ok(mixed.tasks.includes('unit-root') && mixed.tasks.includes('unit-app') && mixed.tasks.includes('browser-core-core'));
-  assert.deepEqual((await plan(['deploy/ansible/host.yml','pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
-  assert.deepEqual((await plan(['deploy/ansible/host.yml'], 'push')).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(['deploy/ansible/host.yml','pnpm-lock.yaml'])).tasks, NON_SWIFT_TASKS);
+  assert.deepEqual((await plan(['deploy/ansible/host.yml'], 'push')).tasks, NON_SWIFT_TASKS);
   assert.deepEqual((await plan(null)).tasks, VERIFICATION_TASKS);
 });
 
@@ -671,10 +673,9 @@ test('CI contract-test changes select only root and coverage, including the iOS 
   }
   const freeze = await plan([...paths, '.github/workflows/ios-api.yml', '.github/workflows/ios-editor.yml']);
   assert.deepEqual(freeze.tasks, ['unit-root', 'coverage']);
-  const { VERIFICATION_TASKS } = await import('./contract.mjs');
   for (const file of ['scripts/ci/impact/plan.mjs', 'scripts/ci/evidence/proof-reuse.mjs', 'scripts/ci/impact/unknown.test.mjs']) {
     const result = await plan([...paths, file]);
-    assert.deepEqual(result.tasks, VERIFICATION_TASKS, file);
+    assert.deepEqual(result.tasks, file === 'scripts/ci/impact/plan.mjs' ? VERIFICATION_TASKS : NON_SWIFT_TASKS, file);
     assert.equal(result.full_model_oci, true, file);
   }
 });
@@ -689,7 +690,6 @@ test('root and coverage-only plans have a single owner for contract test executi
 });
 
 test('push backup changes retain root and independent exact-head verification', async () => {
-  const { VERIFICATION_TASKS } = await import('./contract.mjs');
   const backup = parse(readFileSync(new URL('../../../.github/workflows/push-backup.yml', import.meta.url), 'utf8'));
   const source = [
     'deploy/backup/backup.sh',
@@ -718,12 +718,11 @@ test('push backup changes retain root and independent exact-head verification', 
   assert.equal(steps.find(s => s.uses?.startsWith('actions/checkout')).with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
   assert.ok(steps.some(s => s.run?.includes('bash -n deploy/backup/backup.sh')));
   assert.ok(steps.some(s => s.run?.includes('scripts/deployment/recovery/backup.test.mjs')));
-  assert.deepEqual((await plan([...source, 'pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
-  assert.deepEqual((await plan(source, 'push')).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan([...source, 'pnpm-lock.yaml'])).tasks, NON_SWIFT_TASKS);
+  assert.deepEqual((await plan(source, 'push')).tasks, NON_SWIFT_TASKS);
 });
 
 test('CI dashboard changes remain root-scoped, mixed source remains fully covered', async () => {
-  const { VERIFICATION_TASKS } = await import('./contract.mjs');
   for (const file of [
     'scripts/ci/dashboard/analysis.mjs',
     'scripts/ci/dashboard/site/dashboard.js',
@@ -733,8 +732,8 @@ test('CI dashboard changes remain root-scoped, mixed source remains fully covere
   }
   const mixedSource = await plan(['scripts/ci/dashboard/analysis.mjs', 'app/src/main.tsx']);
   assert.ok(mixedSource.tasks.includes('build-full') && mixedSource.tasks.includes('browser-full-ui-v1'));
-  assert.deepEqual((await plan(['scripts/ci/dashboard/analysis.mjs', 'unknown/unreviewed.txt'])).tasks, VERIFICATION_TASKS);
-  assert.deepEqual((await plan(['scripts/ci/dashboard/analysis.mjs'], 'push')).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(['scripts/ci/dashboard/analysis.mjs', 'unknown/unreviewed.txt'])).tasks, NON_SWIFT_TASKS);
+  assert.deepEqual((await plan(['scripts/ci/dashboard/analysis.mjs'], 'push')).tasks, NON_SWIFT_TASKS);
 });
 
 test('the Passkey browser acceptance source is owned by the API unit, package typecheck, and dedicated Core Chromium shard', async () => {
@@ -782,17 +781,51 @@ test('native Swift-only PR inputs select owner contract without unrelated Deskto
     const expected = file.endsWith('.swift')
       ? ['unit-root', 'coverage', 'requirements-trace']
       : ['unit-root', 'coverage'];
+    if (!file.endsWith('/.gitignore') &&
+        (file.startsWith('ios/CodexiaEditor/') ||
+          (file.startsWith('ios/CodexiaTransport/') && !file.includes('/KeychainProbe/')))) {
+      expected.push('swift-linux');
+    }
     assert.deepEqual(result.tasks, expected, file);
     assert.equal(result.full_model_oci, false, file);
   }
-  assert.deepEqual((await plan(owned)).tasks, ['unit-root', 'coverage', 'requirements-trace']);
+  assert.deepEqual((await plan(owned)).tasks, ['unit-root', 'coverage', 'requirements-trace', 'swift-linux']);
   const nativeApi = parse(readFileSync(new URL('../../../.github/workflows/ios-api.yml', import.meta.url), 'utf8'));
   assert.deepEqual(Object.keys(nativeApi.on), ['workflow_dispatch']);
   assert.equal(nativeApi.jobs.api['runs-on'], 'xcode-27');
 });
 
+test('Linux Swift verification follows SwiftPM and generation inputs even in full plans', async () => {
+  for (const event of ['pull_request', 'push']) {
+    for (const file of [
+      'ios/CodexiaEditor/Package.resolved',
+      'ios/CodexiaEditor/Tests/CodexiaEditorTests/EditorStateTests.swift',
+      'ios/CodexiaTransport/Sources/CodexiaAPI/Client.swift',
+      'ios/CodexiaTransport/normalize-openapi.py',
+      'packages/http-contract/openapi/codexia.openapi.yaml',
+      'packages/http-contract/src/main.tsp',
+      ...SWIFT_LINUX_RECIPES,
+      '.github/workflows/verify.yml',
+      'scripts/ci/execution/group.mjs',
+      'scripts/ci/evidence/task-inputs.mjs',
+    ]) {
+      assert.ok((await plan([file], event)).tasks.includes('swift-linux'), event + ': ' + file);
+    }
+    for (const file of [
+      'ios/CodexiaApp/UITests/AuthoringFlowUITests.swift',
+      '.github/workflows/ios-api.yml',
+      'packages/api/src/server.ts',
+      'scripts/ci/dashboard/timing.mjs',
+      'pnpm-lock.yaml',
+      'docs/README.md',
+    ]) {
+      assert.ok(!(await plan([file], event)).tasks.includes('swift-linux'), event + ': ' + file);
+    }
+  }
+  assert.ok((await plan(null)).tasks.includes('swift-linux'), 'Unknown diff fails closed');
+});
+
 test('native ownership fails closed for unsupported or mixed inputs and main', async () => {
-  const { VERIFICATION_TASKS } = await import('./contract.mjs');
   const source = 'ios/CodexiaEditor/Sources/CodexiaEditor/ManuscriptEditor.swift';
   for (const file of [
     'ios/CodexiaTransport/Sources/CodexiaAPI/new-helper.mjs',

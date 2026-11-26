@@ -51,7 +51,23 @@ public struct AuthoringView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
                 .accessibilityIdentifier("editor.protection-status")
-            ManuscriptEditor(state: $state)
+            if let recovered = state.recoveredComposition {
+                VStack(spacing: 8) {
+                    ScrollView {
+                        Text(recovered).frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    Button("復元した入力を確定") { state.resolveRecoveredComposition(keepingText: true) }
+                    if state.canDiscardRecoveredComposition {
+                        Button("復元した変換を取り消す", role: .destructive) {
+                            state.resolveRecoveredComposition(keepingText: false)
+                        }
+                    }
+                }
+                .padding()
+            } else {
+                ManuscriptEditor(state: $state)
+            }
         }
         .navigationTitle("原稿")
         .navigationBarBackButtonHidden(true)
@@ -74,7 +90,7 @@ public struct AuthoringView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 if onProtect != nil {
                     Button("保護") { protectCurrentSnapshot(thenLeave: false) }
-                        .disabled(state.canLeave || state.isComposing || isProtecting)
+                        .disabled(state.isCurrentVersionProtected || isProtecting)
                         .accessibilityIdentifier("editor.protect")
                 }
             }
@@ -137,14 +153,6 @@ public struct AuthoringView: View {
 
     private func protectCurrentSnapshot(thenLeave: Bool) {
         guard let onProtect else { return }
-        guard !state.isComposing else {
-            showProtectionNotice(
-                title: "日本語入力が確定していません",
-                message: "変換中の文字を確定または取り消してから、原稿を保護してください。"
-            )
-            return
-        }
-
         let snapshot = state.snapshot
         isProtecting = true
         Task { @MainActor in

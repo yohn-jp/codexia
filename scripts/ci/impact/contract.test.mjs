@@ -98,8 +98,8 @@ test('the certified graph covers every declared obligation within the twenty-two
   assert.equal(requiresWorkspacePreparation(['db-contract']), true);
   assert.ok(VERIFICATION_TASKS.includes('db-contract'));
   assert.match(readFileSync(new URL('../execution/group.mjs', import.meta.url), 'utf8'), /CODEXIA_CI_REPORT_DIR: path\.join\(reportDirectory, task\)/u);
-  assert.deepEqual(VERIFICATION_GROUPS['unit-architecture'], ['architecture-g5']);
-  assert.equal(requiresWorkspacePreparation(['architecture-g5']), false);
+  assert.deepEqual(VERIFICATION_GROUPS['unit-architecture'], ['architecture-g5', 'swift-linux']);
+  assert.equal(requiresWorkspacePreparation(['architecture-g5', 'swift-linux']), false);
   assert.equal(requiresWorkspacePreparation(['unit-root']), true);
   const runner = readFileSync(new URL('../execution/group.mjs', import.meta.url), 'utf8');
   assert.match(runner, /CODEXIA_ARCHITECTURE_EVIDENCE_DIR: path\.join\(reportDirectory, 'architecture'\)/u);

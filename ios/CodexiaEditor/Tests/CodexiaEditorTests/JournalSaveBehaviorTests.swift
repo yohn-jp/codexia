@@ -110,7 +110,8 @@ final class JournalSaveBehaviorTests: XCTestCase {
 
         var editor = EditorState(documentID: "document", text: "base")
         editor.edit("first")
-        _ = try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: baseRevision, baseText: "base")
+        let first = editor.snapshot
+        _ = try await coordinator.protect(snapshot: first, baseRevisionID: baseRevision, baseText: "base")
         let saving = Task { await coordinator.save(documentID: "document") }
         await fixture.waitForRequestCount(1)
         let secondCoordinator = try makeCoordinator(journal: journal, transport: fixture)
@@ -125,7 +126,10 @@ final class JournalSaveBehaviorTests: XCTestCase {
         XCTAssertEqual(whileInFlight.last?.text, "second")
 
         await fixture.release(status: 200, body: firstReceipt)
-        guard case .saved(_) = await saving.value else { return XCTFail("First save should match the server receipt") }
+        guard case .saved(_, let submitted) = await saving.value else {
+            return XCTFail("First save should match the server receipt")
+        }
+        XCTAssertEqual(submitted, first)
         let rebased = try await coordinator.records(documentID: "document")
         XCTAssertEqual(rebased.count, 1)
         XCTAssertEqual(rebased[0].text, "second")
@@ -135,9 +139,13 @@ final class JournalSaveBehaviorTests: XCTestCase {
         XCTAssertEqual(apply(rebased[0].saveRequest.changes, to: "first"), "second")
         XCTAssertEqual(rebased[0].operationID, queued.operationID)
 
-        guard case .saved(_) = await coordinator.save(documentID: "document") else { return XCTFail("Queued save should commit") }
+        guard case .saved = await coordinator.save(documentID: "document") else { return XCTFail("Queued save should commit") }
         let remaining = try await coordinator.records(documentID: "document")
         XCTAssertTrue(remaining.isEmpty)
+        do {
+            _ = try await coordinator.protect(snapshot: first, baseRevisionID: baseRevision, baseText: "base")
+            XCTFail("A delayed protection write must not resurrect a committed version")
+        } catch DraftJournalError.staleSnapshot {}
         let exchanges = await fixture.recordedExchanges()
         XCTAssertEqual(exchanges.count, 2)
     }
@@ -197,7 +205,7 @@ final class JournalSaveBehaviorTests: XCTestCase {
         guard case .pending = await restarted.save(documentID: "document") else {
             return XCTFail("An unknown operation needs explicit reconciliation after restart")
         }
-        guard case .saved(_) = await restarted.reconcile(documentID: "document") else {
+        guard case .saved = await restarted.reconcile(documentID: "document") else {
             return XCTFail("The same operation should reconcile through its stored receipt")
         }
         let exchanges = await fixture.recordedExchanges()
@@ -207,6 +215,45 @@ final class JournalSaveBehaviorTests: XCTestCase {
         XCTAssertEqual(exchanges[0].request.headerFields[HTTPField.Name("X-Client-Id")!], "old-client")
         XCTAssertEqual(exchanges[1].request.headerFields[HTTPField.Name("X-Client-Id")!], "old-client")
         XCTAssertEqual(exchanges[0].payload, exchanges[1].payload)
+    }
+
+    func testRecoveryHidesForeignComparisonFromLegacyConflictRecord() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = JournalSaveFixture()
+        let remote = try JSONSerialization.jsonObject(with: makeReceipt(
+            markdown: "first", sha256: "a7937b64b8caa58f03721bb6bacf5c78cb235febe0e70b1b84cd99541461a08e",
+            parent: baseRevision, revision: "head-at-conflict"
+        ))
+        let conflict = responseJSON(["code": "PERSISTENCE_CONFLICT", "error": "stale", "details": NSNull(), "current": remote])
+        await fixture.append(.status(409, conflict))
+        let coordinator = try makeCoordinator(journal: ProtectedDraftJournal(directory: root), transport: fixture)
+        var editor = EditorState(documentID: "document", text: "base")
+        editor.edit("local")
+        let original = try await coordinator.protect(snapshot: editor.snapshot, baseRevisionID: baseRevision, baseText: "base")
+        guard case .conflict(let response) = await coordinator.save(documentID: "document") else {
+            return XCTFail("Expected a stale-base conflict")
+        }
+        XCTAssertEqual(response?.current?.revision?.id, "head-at-conflict")
+
+        let reopened = try makeCoordinator(journal: ProtectedDraftJournal(directory: root), transport: fixture)
+        let valid = try await reopened.recover(documentID: "document")
+        XCTAssertEqual(valid?.conflict?.current?.revision?.id, "head-at-conflict")
+        let file = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
+        var records = try JSONDecoder().decode([DraftRecord].self, from: Data(contentsOf: file))
+        records[0].conflict?.current?.revision?.projectId = "foreign-project"
+        try JSONEncoder().encode(records).write(to: file, options: .atomic)
+
+        let recovered = try await reopened.recover(documentID: "document")
+        XCTAssertEqual(recovered?.text, "local")
+        XCTAssertEqual(recovered?.operationID, original.operationID)
+        XCTAssertEqual(recovered?.state, .conflict)
+        XCTAssertNil(recovered?.conflict)
+        guard case .conflict(nil) = await reopened.reconcile(documentID: "document") else {
+            return XCTFail("The conflict must still require resolution without rejected comparison data")
+        }
+        let exchanges = await fixture.recordedExchanges()
+        XCTAssertEqual(exchanges.count, 1)
     }
 
     func testConflictRequiresExplicitFreshHeadResolution() async throws {
@@ -235,7 +282,7 @@ final class JournalSaveBehaviorTests: XCTestCase {
             snapshot: approved, currentRevisionID: "server-head", currentText: "server text")
         XCTAssertNotEqual(resolved.operationID, original.operationID)
         XCTAssertEqual(resolved.saveRequest.baseRevisionId, "server-head")
-        guard case .saved(_) = await coordinator.save(documentID: "document") else {
+        guard case .saved = await coordinator.save(documentID: "document") else {
             return XCTFail("The explicit merged result should save against the fetched head")
         }
     }

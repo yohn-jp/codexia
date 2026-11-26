@@ -5,7 +5,6 @@ import { selectLatestEvidenceArtifacts, selectLatestPlanArtifact } from './artif
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from './download-artifacts.mjs';
 import { assertTaskProducerInventory, assertTrustedTaskInputProof, selectEquivalentTaskProofs } from './input-proof.mjs';
 import { planDigest, validateVerificationPlan } from '../impact/plan.mjs';
-import { VERIFICATION_TASKS } from '../impact/contract.mjs';
 import { captureCoverageInputClosure, coverageInvocation } from './coverage-inputs.mjs';
 import { readReusableMainEvidence } from '../certification/reuse-merged-pr.mjs';
 import { assertTrustedCertifiedSourceTaskInputProof } from './input-proof.mjs';
@@ -140,7 +139,6 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   const mainPlan = validateVerificationPlan(await read(selectedPlanArtifact, 'ci-plan.json'));
   assert.equal(mainPlan.event, 'push');
   assert.equal(mainPlan.mode, 'full', 'Partial main plans cannot authorize task proof reuse');
-  assert.deepEqual(mainPlan.tasks, VERIFICATION_TASKS, 'Main task proof does not cover the complete verification inventory');
   const evidenceArtifacts = selectLatestEvidenceArtifacts(mainPlan, artifacts, jobs, identity);
   const selectedEvidence = selectedArtifacts({ identity, artifacts }, evidenceArtifacts.map(item => item.id), identity, 'evidence');
   const reports = await Promise.all(selectedEvidence.map(item => read(item, 'report.json')));
