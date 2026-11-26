@@ -55,6 +55,11 @@
     },
     {
       "kind": "ansibleSource",
+      "id": "deploy/ansible/deploy-ssh-key.yml",
+      "classification": "REQ-OPS-001 candidate; host execution remains unverified"
+    },
+    {
+      "kind": "ansibleSource",
       "id": "deploy/ansible/deploy-transaction.yml",
       "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
     },

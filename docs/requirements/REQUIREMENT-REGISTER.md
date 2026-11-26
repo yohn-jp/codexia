@@ -1258,7 +1258,7 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 **UID**: OBL-REQ-OPS-001-O01
 **Design reference**: [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md)
 **Implementation identifiers**: deploy/ansible/site.yml
-**Surface identifiers**: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/verify-base-tunnel-container.yml
+**Surface identifiers**: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/deploy-ssh-key.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/verify-base-tunnel-container.yml
 **Test IDs**: TEST-OPS-001-001
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1281,6 +1281,9 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 
 - **Type**: File
   **Path**: deploy/ansible/base-secrets.yml
+
+- **Type**: File
+  **Path**: deploy/ansible/deploy-ssh-key.yml
 
 - **Type**: File
   **Path**: deploy/ansible/host-validate.yml
