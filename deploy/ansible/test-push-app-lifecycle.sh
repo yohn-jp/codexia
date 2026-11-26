@@ -722,6 +722,7 @@ set_state compatible_update PASS "$initial_key to $update_key activated the veri
 
 source "$repo_root/deploy/ansible/test-push-backup-host-lifecycle.sh"
 verify_backup_host_lifecycle "$update_key" "$initial_key"
+verify_s3_restore_lifecycle "$initial_key" "${backup_artifacts[0]}"
 
 # Deliberately alter only a disposable image entrypoint to exercise real rollback.
 failed_context="$build_context/failed"

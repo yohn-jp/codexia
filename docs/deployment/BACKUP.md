@@ -8,6 +8,8 @@ The Ansible `deploy` stage creates or validates a private backup directory (defa
 
 An independent `restore-drill` stage decrypts a **v2** artifact on an isolated recovery host, imports it into disposable PostgreSQL/history resources, checks the logical database and history fingerprints, and removes the temporary resources. It never restores production data or writes credentials to the repository. Versions preceding v2 and the retired updater's rollback receipts are deliberately unsupported.
 
+An operator can extend the isolated drill with `--candidate-full-image` and `--candidate-ledger` for the exact reviewed Full image. The `--candidate-api-ready` check also takes `--candidate-runtime-settings` and `--candidate-introspection-secret-file`, both protected recovery inputs for the restored Better Auth catalog. It verifies API readiness against the restored PostgreSQL and history during the drill.
+
 Use an approved protected Ansible inventory and independently supplied recipient/recovery identity. Only the holder of the external backup encryption private key can perform the restore drill.
 
 The deployment backup is a pre-rollout recovery point for the database and history resources. PostgreSQL roles and Podman secrets require separate recovery. Current push deployment admission rejects migration-fingerprint, API-epoch, and persistence-format changes. These changes require a separately reviewed operation with its own approval, encrypted pre-change backup, migration verification, and tested restore procedure.

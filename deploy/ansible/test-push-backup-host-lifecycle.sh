@@ -107,3 +107,49 @@ SYSTEMCTL
   rootless rm -- "$units/codexia-tunnel.service" "$settings/executor.env" "$state/backup-admission-enabled"
   rootless_systemctl daemon-reload
 }
+
+verify_s3_restore_lifecycle(){
+  local candidate_key="$1" source_artifact="$2"
+  local inputs="$tmp/s3-lifecycle-input" outputs="$tmp/s3-lifecycle-output"
+  local drill="$fixture_home/.local/state/codexia-restore-fixture"
+  local source_sha image ledger runtime_settings archive file digest
+  local -a received
+  read -r source_sha image ledger < <(node - "$evidence" "$candidate_key" <<'CANDIDATE'
+const fs = require('node:fs');
+const [path, key] = process.argv.slice(2);
+const candidate = JSON.parse(fs.readFileSync(path, 'utf8')).candidates[key];
+console.log(candidate.identity.sourceSha, candidate.image, candidate.identity.migrationFingerprint);
+CANDIDATE
+  )
+  runtime_settings="$(rootless sed -n 's/^EnvironmentFile=//p' "$fixture_home/.config/containers/systemd/codexia-api.container")"
+  mkdir -m 0700 "$inputs" "$outputs"
+  archive="$inputs/$(basename -- "$source_artifact")"
+  mkdir -m 0700 "$archive"
+  for file in database.dump.age history.tar.age manifest.age SHA256SUMS; do
+    rootless cat "$source_artifact/$file" > "$archive/$file"
+  done
+  digest="$(sha256sum "$archive/SHA256SUMS" | cut -d ' ' -f1)"
+  bash "$repo_root/deploy/backup/s3-fixture.sh" --transfer-only "$archive" "$source_sha" "$outputs" >"$tmp/s3-lifecycle-transfer.log" 2>&1
+  mapfile -t received < <(find "$outputs" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
+  [[ "${#received[@]}" == 1 ]]
+  cmp -- "$archive/SHA256SUMS" "${received[0]}/SHA256SUMS"
+  rootless install -d -m 0700 "$drill" "$drill/backup"
+  for file in database.dump.age history.tar.age manifest.age SHA256SUMS; do
+    sudo install -o codexia -g codexia -m 0600 "${received[0]}/$file" "$drill/backup/$file"
+  done
+  sudo install -o codexia -g codexia -m 0600 "$tmp/age-identity" "$drill/identity"
+  sudo install -o codexia -g codexia -m 0600 "$tmp/auth-introspection-secret" "$drill/introspection-secret"
+  rootless env CODEXIA_PUSH_STATE_DIR="$drill" "$fixture_home/.local/bin/codexia-backup" drill \
+    "$drill/backup" "$drill/identity" --approved --candidate-full-image "$image" --candidate-ledger "$ledger" \
+    --candidate-api-ready --candidate-runtime-settings "$runtime_settings" \
+    --candidate-introspection-secret-file "$drill/introspection-secret" >"$tmp/s3-lifecycle-drill.log" 2>&1
+  grep -Fxq "Verified checksum manifest sha256: $digest" "$tmp/s3-lifecycle-drill.log"
+  grep -Fxq "Isolated candidate ledger verified: $ledger" "$tmp/s3-lifecycle-drill.log"
+  grep -Fxq 'Isolated candidate API readiness verified' "$tmp/s3-lifecycle-drill.log"
+  rootless rm -r -- "$drill"
+  append_observation s3_restore_lifecycle "$(node -e '
+    const [sourceSha, image, ledger, manifestSha256] = process.argv.slice(1);
+    console.log(JSON.stringify({sourceSha, image, ledger, manifestSha256, provider: "Silo",
+      databaseAndHistoryRecovered: true, apiReady: true, physicalIndependence: "NOT_PROVEN_BY_CI_FIXTURE"}));
+  ' "$source_sha" "$image" "$ledger" "$digest")"
+}

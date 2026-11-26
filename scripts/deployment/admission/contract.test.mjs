@@ -310,6 +310,7 @@ test('first activation checks the real transaction window after backup and readi
     'date() { if [[ -f "$FIXTURE/clock" ]]; then cat "$FIXTURE/clock"; else printf "%s\\n" "$clock"; fi; }',
     'backup_fixture() { echo backup >> "$trace"; if [[ "$SCENARIO" == backup ]]; then echo 2001 > "$FIXTURE/clock"; fi; }',
     'run_auth_cli() { echo auth >> "$trace"; }',
+    'install_wants_links() { :; }',
     'podman() { case "$*" in *State.Health.Status*) echo healthy;; *ImageName*) echo "$candidate_image";; run*) echo ledger >> "$trace";; *) return 99;; esac; }',
     'systemctl() { printf "%s\\n" "$*" >> "$trace"; if [[ "$*" == "--user start codexia-api.service" && "$SCENARIO" == startup ]]; then clock=2001; fi; if [[ "$*" == "--user start codexia-api.service" && "$SCENARIO" == stop-failure ]]; then clock=2001; fi; if [[ "$*" == "--user stop codexia-api.service" && "$SCENARIO" == stop-failure ]]; then return 1; fi; }',
     'test -f "$candidate_unit"',
