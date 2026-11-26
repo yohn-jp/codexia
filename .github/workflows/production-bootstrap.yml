@@ -51,9 +51,18 @@ on:
       - scripts/deployment/bootstrap/**
       - scripts/deployment/preflight/**
       - deploy/ansible/site.yml
+      - deploy/ansible/host.yml
+      - deploy/ansible/deploy-ssh-key.yml
+      - deploy/ansible/prepare-deploy-ssh.sh
       - docs/deployment/PRODUCTION-BOOTSTRAP.md
 permissions:
   contents: read
+# Keep the production queue across the runtime-key handoff, privileged R4
+# convergence and independent runtime SSH acceptance; no nested queue.
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && 'codexia-production' || format('codexia-bootstrap-contract-{0}', github.run_id) }}
+  cancel-in-progress: false
+  queue: max
 jobs:
   contract:
     name: Verify isolated bootstrap controller contract
@@ -99,17 +108,47 @@ jobs:
           grep -F 'An unfinished coordinated cutover must be recovered before ordinary convergence.' "$fixture/result"
           if grep -F 'TASK [Converge the rootless host account and dependencies]' "$fixture/result"; then exit 1; fi
 
+  runtime-identity:
+    name: Derive the existing runtime SSH public key before R4
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'yohn-jp/codexia' && inputs.mode == 'bootstrap'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: codexia-production
+    outputs:
+      public-key: ${{ steps.public-key.outputs.key }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Prepare existing protected runtime SSH identity
+        id: runtime
+        env:
+          CODEXIA_DEPLOY_HOST: ${{ vars.CODEXIA_DEPLOY_HOST }}
+          CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
+          CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}
+        run: bash deploy/ansible/prepare-deploy-ssh.sh
+      - name: Export only the public half of the existing runtime credential
+        id: public-key
+        run: |
+          set -euo pipefail
+          key=$(ssh-keygen -y -P '' -f "$RUNNER_TEMP/codexia-ssh/id_ed25519" | awk '{print $1 " " $2}')
+          [[ "$key" =~ ^ssh-ed25519\ [A-Za-z0-9+/]+={0,2}$ ]]
+          printf 'key=%s\n' "$key" >> "$GITHUB_OUTPUT"
+      - name: Remove the temporary runtime identity
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/codexia-ssh"
+
   bootstrap:
+    needs: runtime-identity
     name: Protected production controller (${{ inputs.mode }})
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'yohn-jp/codexia'
+    if: always() && !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'yohn-jp/codexia' && (inputs.mode != 'bootstrap' || needs.runtime-identity.result == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment:
       name: codexia-bootstrap
-    concurrency:
-      group: codexia-production
-      cancel-in-progress: false
-      queue: max
+    outputs:
+      host-id: ${{ steps.bound-host.outputs.host-id }}
     permissions:
       contents: read
       actions: read
@@ -225,6 +264,7 @@ jobs:
           CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS }}
           CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY }}
           CODEXIA_BOOTSTRAP_BUNDLE_B64: ${{ secrets.CODEXIA_BOOTSTRAP_BUNDLE_B64 }}
+          CODEXIA_RUNTIME_SSH_PUBLIC_KEY: ${{ needs.runtime-identity.outputs.public-key }}
           CODEXIA_BOOTSTRAP_FULL_IMAGE: ${{ inputs.full_image }}
           CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED: ${{ inputs.mode == 'bootstrap' && inputs.initialize_database && vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED == 'true' }}
         run: |
@@ -259,6 +299,13 @@ jobs:
           CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.control.outputs.host }}
           ANSIBLE_HOST_KEY_CHECKING: 'True'
         run: node scripts/deployment/preflight/run.mjs bootstrap-host
+      - name: Bind subsequent runtime SSH acceptance to the observed VM
+        if: inputs.mode == 'bootstrap'
+        id: bound-host
+        run: |
+          set -euo pipefail
+          host_id=$(jq -er '.host.hostId | select(test("^[a-f0-9]{64}$"))' "$RUNNER_TEMP/codexia-lifecycle-host.json")
+          printf 'host-id=%s\n' "$host_id" >> "$GITHUB_OUTPUT"
       - name: Resolve current edge state and match the approved Preflight plan
         if: inputs.mode != 'preflight'
         env:
@@ -301,3 +348,49 @@ jobs:
           if [[ -d "$controller" && ! -L "$controller" ]]; then
             rm -rf -- "$controller"
           fi
+
+  runtime-acceptance:
+    name: Verify R4 runtime SSH on the same pinned VM
+    needs: bootstrap
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'yohn-jp/codexia' && inputs.mode == 'bootstrap' && needs.bootstrap.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: codexia-production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Prepare existing protected runtime SSH identity
+        id: runtime
+        env:
+          CODEXIA_DEPLOY_HOST: ${{ vars.CODEXIA_DEPLOY_HOST }}
+          CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
+          CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}
+        run: bash deploy/ansible/prepare-deploy-ssh.sh
+      - name: Connect the existing protected management plane
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: api.tailscale.com/Ts4P9VFjmJ11CNTRL-khX5P9DgL421CNTRL
+          tags: tag:ci
+          ping: ${{ steps.runtime.outputs.host }}
+      - name: Prove the runtime credential reaches the same rootless service account and VM
+        env:
+          EXPECTED_HOST_ID: ${{ needs.bootstrap.outputs.host-id }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_HOST_ID" =~ ^[a-f0-9]{64}$ ]]
+          ssh_config="$RUNNER_TEMP/codexia-ssh/config"
+          [[ "$(ssh -F "$ssh_config" codexia-target 'id -un')" == codexia ]]
+          machine=$(ssh -F "$ssh_config" codexia-target 'cat /etc/machine-id')
+          [[ "$machine" =~ ^[a-f0-9]{32}$ ]]
+          actual=$(printf '%s' "$machine" | sha256sum | cut -d' ' -f1)
+          [[ "$actual" == "$EXPECTED_HOST_ID" ]]
+          echo 'R4 runtime SSH identity and host binding verified.'
+      - name: Remove the temporary runtime identity
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/codexia-ssh"

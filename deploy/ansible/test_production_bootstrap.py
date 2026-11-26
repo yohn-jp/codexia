@@ -65,6 +65,7 @@ class BootstrapControllerTests(unittest.TestCase):
             "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS": f"{self.host} {pubkey}",
             "CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED": "false",
             "CODEXIA_BOOTSTRAP_FULL_IMAGE": "",
+            "CODEXIA_RUNTIME_SSH_PUBLIC_KEY": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureRuntimeKey",
         }
         self.image = "ghcr.io/yohn-jp/codexia-backend@sha256:" + "a" * 64
         self.candidate = self.base / "codexia-lifecycle-candidate.json"
@@ -131,6 +132,17 @@ class BootstrapControllerTests(unittest.TestCase):
         self.assertTrue(runtime["codexia_database_initialization_approved"])
         self.assertNotIn("codexia_recreate_missing_app_database_approved", runtime)
         self.assertEqual(runtime["codexia_auth_bootstrap_image"], self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"])
+        inventory = yaml.safe_load((Path(out["control"]) / "inventory.yml").read_text())
+        self.assertEqual(inventory["all"]["children"]["codexia"]["vars"]["codexia_deploy_ssh_public_key"],
+                         self.env["CODEXIA_RUNTIME_SSH_PUBLIC_KEY"])
+
+    def test_bootstrap_refuses_missing_or_invalid_runtime_public_key(self):
+        self.env["CODEXIA_BOOTSTRAP_MODE"] = "bootstrap"
+        self.env["CODEXIA_BOOTSTRAP_FULL_IMAGE"] = self.image
+        self.certify()
+        self.env["CODEXIA_RUNTIME_SSH_PUBLIC_KEY"] = "not-a-public-key"
+        with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "runtime SSH public key is invalid"):
+            bootstrap.prepare(self.env)
 
     def test_bootstrap_refuses_format_valid_digest_without_candidate_verification(self):
         self.env["CODEXIA_BOOTSTRAP_MODE"] = "bootstrap"

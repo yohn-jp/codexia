@@ -222,6 +222,15 @@ def prepare(env: dict[str, str]) -> dict[str, str]:
     control.mkdir(mode=0o700)
     names = unpack_bundle(required(env, "CODEXIA_BOOTSTRAP_BUNDLE_B64"), control)
     vars_ = inventory_vars(control / "inventory.yml", host, user, operation)
+    if operation == "bootstrap":
+        runtime_key = required(env, "CODEXIA_RUNTIME_SSH_PUBLIC_KEY")
+        if not re.fullmatch(r"ssh-ed25519 [A-Za-z0-9+/]+={0,2}", runtime_key):
+            raise InvalidBootstrapInput("Protected runtime SSH public key is invalid")
+        declared_key = vars_.get("codexia_deploy_ssh_public_key")
+        if declared_key is not None and (not isinstance(declared_key, str) or
+                declared_key.split()[:2] != runtime_key.split()):
+            raise InvalidBootstrapInput("Inventory runtime public key differs from the protected deployment identity")
+        vars_["codexia_deploy_ssh_public_key"] = runtime_key
     oidc = "private/codexia-oidc-client-secret" in names
     if ("codexia_oidc_client_id" in vars_) != oidc or ("codexia_oidc_issuer" in vars_) != oidc:
         raise InvalidBootstrapInput("OIDC client settings and their protected credential must be supplied together")

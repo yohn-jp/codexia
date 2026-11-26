@@ -21,7 +21,7 @@ Review the redacted lifecycle plan's `candidateRoute`, `route`, `blockers`, `req
 | `owner-setup` | Use R5 to run the existing setup-only API and prepare the encrypted registration handoff. |
 | `prepare-activation` | Use R5 to verify the enrolled owner and clients and stop setup-only. Obtain a new Preflight plan for R6. |
 
-The administrator SSH identity must be distinct from `codexia` and have approved noninteractive sudo. The rootless service account keeps its existing authority. Each mutation revalidates the Full OCI certificate, exact source and producer, actual image identity and candidate compatibility before it uses the administrator connection.
+R4 derives the public half of the existing protected production SSH key in `codexia-production`, converges it through the existing authorized-key task even when the host baseline is already ready, and verifies a real pinned `codexia` SSH connection to the same observed VM before reporting Bootstrap success. No runtime private key is copied into the administrator environment. An inventory-supplied deployment public key must match the derived key; omission is supported. The administrator SSH identity must be distinct from `codexia` and have approved noninteractive sudo. The rootless service account keeps its existing authority. Each mutation revalidates the Full OCI certificate, exact source and producer, actual image identity and candidate compatibility before it uses the administrator connection.
 
 Configure a separate GitHub Environment `codexia-bootstrap` with required operator reviewers, restricted deployment branch `main`, and the following entries. The `codexia-production` deploy Environment and its credentials remain separate.
 
