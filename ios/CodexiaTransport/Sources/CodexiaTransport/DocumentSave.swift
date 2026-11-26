@@ -67,6 +67,8 @@ public struct DocumentSave: Sendable {
                 }
             case .badRequest:
                 return .rejected(status: 400)
+            case .unauthorized:
+                return .unauthorized
             case .notFound:
                 return .rejected(status: 404)
             case .undocumented(let status, _):
