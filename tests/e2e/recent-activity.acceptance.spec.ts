@@ -445,14 +445,23 @@ test("recent activity ignores a delayed write response from an earlier visit to 
   let release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
   let responseHeld = false;
-  let intercepted = false;
-  await page.route(`**${activityPath}`, async (route) => {
-    if (intercepted || route.request().method() !== "PUT") return route.continue();
-    intercepted = true;
-    const response = await route.fetch();
-    responseHeld = true;
-    await held;
-    await route.fulfill({ response });
+  let laterWrites = 0;
+  let delivery: Promise<void> | undefined;
+  await page.route(`**${activityPath}`, (route) => {
+    const request = route.request();
+    if (request.method() !== "PUT") return route.continue();
+    if (delivery) {
+      laterWrites += 1;
+      return route.continue();
+    }
+    const position = request.postDataJSON();
+    if (position.sceneId !== f.scene.id || position.sentenceOffset !== 1) return route.continue();
+    delivery = route.fetch().then(async (response) => {
+      responseHeld = true;
+      await held;
+      await route.fulfill({ response });
+    });
+    return delivery;
   });
 
   try {
@@ -460,25 +469,39 @@ test("recent activity ignores a delayed write response from an earlier visit to 
     await expect.poll(() => responseHeld).toBe(true);
     await remotePosition(f.author, f.project.id, f.second.id, 4, 4, "desktop");
 
-    const select = async (scene: { id: string; title: string }) => {
-      await page.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`).click();
-      await expect(page.getByRole("heading", { name: scene.title, exact: true })).toBeVisible();
-    };
-    await select(f.second);
-    await select(f.scene);
-    const secondCandidate = panel.locator("p").filter({ hasText: f.second.title });
-    await expect(secondCandidate.getByRole("button", { name: "読書位置を開く" })).toBeVisible();
+    const secondCandidate = panel.locator("p").filter({ hasText: f.second.title }).getByRole("button", { name: "読書位置を開く" });
+    await page.locator(`.pg-outline-item[data-document-id="${f.second.id}"] > .pg-outline-row > .pg-outline-document`).click();
+    await expect(page).toHaveURL(f.author.origin + writingFixturePath("desktop", f.project, f.second));
+    await expect(page.getByRole("heading", { name: f.second.title, exact: true })).toBeVisible();
+    await expect(secondCandidate).toBeVisible();
+
+    // Traverse the real browser history after B's editor and resume snapshot
+    // have loaded. The same workspace must receive A's held response.
+    expect(await page.goBack()).toBeNull();
+    await expect(page).toHaveURL(f.author.origin + writingFixturePath("desktop", f.project, f.scene));
+    await expect(page.getByRole("heading", { name: f.scene.title, exact: true })).toBeVisible();
+    await expect(secondCandidate).toBeVisible();
+    // A newer browser PUT would independently supersede the held response.
+    expect(laterWrites).toBe(0);
 
     const delayedWrite = page.waitForResponse((response) =>
       new URL(response.url()).pathname === activityPath && response.request().method() === "PUT" &&
-      response.request().postDataJSON().sceneId === f.scene.id);
+      response.request().postDataJSON().sceneId === f.scene.id &&
+      response.request().postDataJSON().sentenceOffset === 1);
     release();
-    expect((await delayedWrite).ok()).toBe(true);
+    const response = await delayedWrite;
+    expect(response.ok()).toBe(true);
+    expect(await response.json()).toMatchObject({ items: [{ sceneId: f.scene.id, sentenceOffset: 1, deviceType: "desktop" }] });
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    await expect(secondCandidate.getByRole("button", { name: "読書位置を開く" })).toBeVisible();
+    expect(await secondCandidate.isVisible()).toBe(true);
+    expect(laterWrites).toBe(0);
   } finally {
     release();
-    await page.unroute(`**${activityPath}`);
+    try {
+      await delivery;
+    } finally {
+      await page.unroute(`**${activityPath}`);
+    }
   }
 });
 
