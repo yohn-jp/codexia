@@ -203,7 +203,13 @@ export class BackupConsoleStore {
   async status(requestId?: string) {
     const {
       rows: [state],
-    } = await this.pool.query<State & { operation: Record<string, unknown> | null; last_verified_run: BackupRun | null; last_restore_drill: Record<string, unknown> | null }>(
+    } = await this.pool.query<
+      State & {
+        operation: Record<string, unknown> | null;
+        last_verified_run: BackupRun | null;
+        last_restore_drill: Record<string, unknown> | null;
+      }
+    >(
       `SELECT s.*, COALESCE(executor_seen_at > clock_timestamp() - interval '90 seconds', false) AS executor_live,
          CASE WHEN o.id IS NOT NULL THEN jsonb_build_object(
            'operationId', o.id, 'requestId', o.request_id, 'revision', o.revision, 'status', o.state,
@@ -286,10 +292,14 @@ export class BackupConsoleStore {
       const settings = await readBackupRevision(client, state.active_revision);
       if (!settings) throw conflict('BACKUP_DESTINATION_MISSING');
       if (!state.active_usable || state.active_health !== 'ready') throw conflict('BACKUP_DESTINATION_UNAVAILABLE');
-      const { rowCount: operationCount } = await client.query("SELECT 1 FROM codexia_backup.operations WHERE state IN ('QUEUED', 'RUNNING')");
+      const { rowCount: operationCount } = await client.query(
+        "SELECT 1 FROM codexia_backup.operations WHERE state IN ('QUEUED', 'RUNNING')",
+      );
       const { rowCount: runCount } = await client.query("SELECT 1 FROM codexia_backup.runs WHERE state IN ('QUEUED', 'RUNNING')");
       if (operationCount || runCount) throw conflict('BACKUP_OPERATION_IN_PROGRESS');
-      const { rows: [run] } = await client.query<BackupRun>(
+      const {
+        rows: [run],
+      } = await client.query<BackupRun>(
         `INSERT INTO codexia_backup.runs (id, request_id, kind, revision, maintenance_window_id)
          VALUES ($1, $2, 'manual', $3, $4) RETURNING *`,
         [randomUUID(), requestId, state.active_revision, maintenanceWindowId],
@@ -300,8 +310,11 @@ export class BackupConsoleStore {
   }
 
   async existingRun(requestId: string, maintenanceWindowId: string, client: Pool | PoolClient = this.pool) {
-    const { rows: [existing] } = await client.query<BackupRun>('SELECT * FROM codexia_backup.runs WHERE request_id = $1', [requestId]);
-    if (existing && (existing.kind !== 'manual' || existing.maintenance_window_id !== maintenanceWindowId)) throw conflict('BACKUP_REQUEST_REUSED');
+    const {
+      rows: [existing],
+    } = await client.query<BackupRun>('SELECT * FROM codexia_backup.runs WHERE request_id = $1', [requestId]);
+    if (existing && (existing.kind !== 'manual' || existing.maintenance_window_id !== maintenanceWindowId))
+      throw conflict('BACKUP_REQUEST_REUSED');
     return existing ?? null;
   }
 
@@ -311,27 +324,46 @@ export class BackupConsoleStore {
        ORDER BY created_at DESC, id DESC LIMIT $2`,
       [cursor ?? null, limit],
     );
-    return { runs: rows.map(viewRun), nextCursor: rows.length === limit ? rows.at(-1)?.created_at.toISOString() ?? null : null };
+    return { runs: rows.map(viewRun), nextCursor: rows.length === limit ? (rows.at(-1)?.created_at.toISOString() ?? null) : null };
   }
 
   async run(id: string) {
-    const { rows: [run] } = await this.pool.query<BackupRun>('SELECT * FROM codexia_backup.runs WHERE id = $1', [id]);
+    const {
+      rows: [run],
+    } = await this.pool.query<BackupRun>('SELECT * FROM codexia_backup.runs WHERE id = $1', [id]);
     if (!run) throw new BackupConsoleError(404, 'BACKUP_RUN_NOT_FOUND');
     return viewRun(run);
   }
 
   async recovery() {
-    const { rows: [drill] } = await this.pool.query<{ run_id: string; source_sha: string; manifest_sha256: string; receipt_sha256: string; observed_at: Date; api_ready: boolean }>(
+    const {
+      rows: [drill],
+    } = await this.pool.query<{
+      run_id: string;
+      source_sha: string;
+      manifest_sha256: string;
+      receipt_sha256: string;
+      observed_at: Date;
+      api_ready: boolean;
+    }>(
       `SELECT run_id, source_sha, manifest_sha256, receipt_sha256, observed_at, api_ready FROM codexia_backup.restore_drills
        ORDER BY observed_at DESC LIMIT 1`,
     );
-    const { rows: [latest] } = await this.pool.query<{ id: string; source_sha: string | null; manifest_sha256: string | null; observed_at: Date }>(
+    const {
+      rows: [latest],
+    } = await this.pool.query<{ id: string; source_sha: string | null; manifest_sha256: string | null; observed_at: Date }>(
       "SELECT id, source_sha, manifest_sha256, observed_at FROM codexia_backup.runs WHERE state = 'REMOTE_VERIFIED' ORDER BY observed_at DESC LIMIT 1",
     );
-    const evidence = drill ? {
-      status: drill.api_ready ? 'DRILL_PASSED' : 'partial', runId: drill.run_id, sourceSha: drill.source_sha, manifestSha256: drill.manifest_sha256,
-      receiptSha256: drill.receipt_sha256, observedAt: drill.observed_at.toISOString(),
-    } : null;
+    const evidence = drill
+      ? {
+          status: drill.api_ready ? 'DRILL_PASSED' : 'partial',
+          runId: drill.run_id,
+          sourceSha: drill.source_sha,
+          manifestSha256: drill.manifest_sha256,
+          receiptSha256: drill.receipt_sha256,
+          observedAt: drill.observed_at.toISOString(),
+        }
+      : null;
     const current = Boolean(drill && latest && drill.run_id === latest.id && drill.manifest_sha256 === latest.manifest_sha256);
     const missingConditions = [
       ...(!latest ? ['verified_off_vm_backup'] : []),
@@ -341,7 +373,14 @@ export class BackupConsoleStore {
     return {
       status: current && evidence ? evidence.status : evidence ? 'stale' : 'unknown',
       restoreDrill: evidence ?? 'unknown',
-      lastVerifiedOffVmBackup: latest ? { runId: latest.id, sourceSha: latest.source_sha, manifestSha256: latest.manifest_sha256, observedAt: latest.observed_at.toISOString() } : 'unknown',
+      lastVerifiedOffVmBackup: latest
+        ? {
+            runId: latest.id,
+            sourceSha: latest.source_sha,
+            manifestSha256: latest.manifest_sha256,
+            observedAt: latest.observed_at.toISOString(),
+          }
+        : 'unknown',
       missingConditions,
     };
   }
@@ -417,7 +456,7 @@ export class BackupConsoleStore {
 }
 
 function viewRun(run: BackupRun) {
-  const iso = (value: Date | string) => value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+  const iso = (value: Date | string) => (value instanceof Date ? value.toISOString() : new Date(value).toISOString());
   return {
     runId: run.id,
     requestId: run.request_id,

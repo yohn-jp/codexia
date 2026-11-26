@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
-import { BackupConsoleExecutor, backupExecutorConfigSchema, pythonBackupProbe } from '../src/backup-console-executor.js';
 import { BackupConsoleControl } from '../src/backup-console-control.js';
+import { BackupConsoleExecutor, backupExecutorConfigSchema, pythonBackupProbe } from '../src/backup-console-executor.js';
 import type { BackupPolicy } from '../src/backup-console-routes.js';
 import { BackupConsoleStore } from '../src/backup-console-store.js';
 import { backupCredentialKeyId } from '../src/backup-credential-envelope.js';
@@ -55,10 +55,15 @@ test('backup console requires owner proof, isolates credentials, and applies onl
     secretAccessKey: 'test-fixture-secret-key',
   } as const;
   const policy: BackupPolicy = {
-    maintenanceWindows: [{
-      id: 'fixture-window', timeZone: 'UTC', daysOfWeek: [new Date().getUTCDay()],
-      start: `${String(Math.floor(new Date().getUTCHours() / 6) * 6).padStart(2, '0')}:00`, durationMinutes: 360,
-    }],
+    maintenanceWindows: [
+      {
+        id: 'fixture-window',
+        timeZone: 'UTC',
+        daysOfWeek: [new Date().getUTCDay()],
+        start: `${String(Math.floor(new Date().getUTCHours() / 6) * 6).padStart(2, '0')}:00`,
+        durationMinutes: 360,
+      },
+    ],
     destinations: [
       {
         provider: draft.provider,
@@ -251,33 +256,56 @@ test('backup console requires owner proof, isolates credentials, and applies onl
   const runRequestId = randomUUID();
   const runBody = { maintenanceWindowId: 'fixture-window', confirmed: true };
   const runResponse = await fetch(base + '/runs', {
-    method: 'POST', headers: { ...writeHeaders, 'idempotency-key': runRequestId }, body: JSON.stringify(runBody),
+    method: 'POST',
+    headers: { ...writeHeaders, 'idempotency-key': runRequestId },
+    body: JSON.stringify(runBody),
   });
   assert.equal(runResponse.status, 202);
-  const runReceipt = await runResponse.json() as { runId: string; state: string };
+  const runReceipt = (await runResponse.json()) as { runId: string; state: string };
   assert.equal(runReceipt.state, 'queued');
-  assert.deepEqual(await (await fetch(base + '/runs', {
-    method: 'POST', headers: { ...writeHeaders, 'idempotency-key': runRequestId }, body: JSON.stringify(runBody),
-  })).json(), runReceipt);
+  assert.deepEqual(
+    await (
+      await fetch(base + '/runs', {
+        method: 'POST',
+        headers: { ...writeHeaders, 'idempotency-key': runRequestId },
+        body: JSON.stringify(runBody),
+      })
+    ).json(),
+    runReceipt,
+  );
   assert.equal((await get('/runs/' + runReceipt.runId)).status, 200);
-  const runHistory = await (await get('/runs')).json() as { runs: Array<{ runId: string; status: string }> };
+  const runHistory = (await (await get('/runs')).json()) as { runs: Array<{ runId: string; status: string }> };
   assert.ok(runHistory.runs.some(run => run.runId === runReceipt.runId && run.status === 'QUEUED'));
   assert.equal(await worker.processNext(), true);
   assert.equal((await (await get('/runs/' + runReceipt.runId)).json()).status, 'REMOTE_VERIFIED');
   assert.equal(typeof (await (await get('/status')).json()).lastVerifiedOffVmBackup.manifestSha256, 'string');
-  assert.deepEqual((await get('/recovery').then(response => response.json())).missingConditions, ['independent_restore_drill_for_latest_backup']);
+  assert.deepEqual((await get('/recovery').then(response => response.json())).missingConditions, [
+    'independent_restore_drill_for_latest_backup',
+  ]);
   const restoreDirectory = await mkdtemp(join(tmpdir(), 'codexia-restore-receipt-'));
   try {
     const restoreReceipt = join(restoreDirectory, 'receipt.json');
-    await writeFile(restoreReceipt, JSON.stringify({ format: 'codexia-restore-receipt/v1', checksumManifestSha256: 'c'.repeat(64) }), { mode: 0o600 });
-    const control = new BackupConsoleControl({ pool: workerPool, policy, config: backupExecutorConfigSchema.parse({}), python: '/usr/bin/python3', transferScript: '/unused', receiptDirectory: restoreDirectory, backupScript: '/unused' });
+    await writeFile(restoreReceipt, JSON.stringify({ format: 'codexia-restore-receipt/v1', checksumManifestSha256: 'c'.repeat(64) }), {
+      mode: 0o600,
+    });
+    const control = new BackupConsoleControl({
+      pool: workerPool,
+      policy,
+      config: backupExecutorConfigSchema.parse({}),
+      python: '/usr/bin/python3',
+      transferScript: '/unused',
+      receiptDirectory: restoreDirectory,
+      backupScript: '/unused',
+    });
     await control.recordRestore(runReceipt.runId, restoreReceipt);
     const partial = await (await get('/recovery')).json();
     assert.equal(partial.status, 'partial');
     assert.deepEqual(partial.missingConditions, ['candidate_api_readiness']);
     const readinessReceipt = {
-      format: 'codexia-restore-receipt/v1', checksumManifestSha256: 'c'.repeat(64),
-      readyImageDigest: 'sha256:' + 'e'.repeat(64), verifiedLedger: 'sha256:' + 'd'.repeat(64),
+      format: 'codexia-restore-receipt/v1',
+      checksumManifestSha256: 'c'.repeat(64),
+      readyImageDigest: 'sha256:' + 'e'.repeat(64),
+      verifiedLedger: 'sha256:' + 'd'.repeat(64),
     };
     await writeFile(restoreReceipt, JSON.stringify(readinessReceipt));
     await assert.rejects(control.recordRestore(runReceipt.runId, restoreReceipt), /different backup source image/u);
@@ -293,5 +321,14 @@ test('backup console requires owner proof, isolates credentials, and applies onl
   assert.equal((await put(draft, '"4"')).status, 403);
   assert.equal((await post('disable', { revision: 2, confirmed: true })).status, 403);
   assert.equal((await post('activate', activation, activationRequest)).status, 403);
-  assert.equal((await fetch(base + '/runs', { method: 'POST', headers: { ...writeHeaders, 'idempotency-key': randomUUID() }, body: JSON.stringify(runBody) })).status, 403);
+  assert.equal(
+    (
+      await fetch(base + '/runs', {
+        method: 'POST',
+        headers: { ...writeHeaders, 'idempotency-key': randomUUID() },
+        body: JSON.stringify(runBody),
+      })
+    ).status,
+    403,
+  );
 });

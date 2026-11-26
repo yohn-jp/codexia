@@ -7,16 +7,16 @@ import { setTimeout } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { Pool, type PoolClient } from 'pg';
 import { z } from 'zod';
-import { allowedBackupDestination, backupMaintenanceWindowSlot, type BackupPolicy, backupPolicySchema } from './backup-console-routes.js';
+import { allowedBackupDestination, type BackupPolicy, backupMaintenanceWindowSlot, backupPolicySchema } from './backup-console-routes.js';
 import {
   type BackupOperation,
   type BackupRevision,
+  type BackupRun,
   backupRetentionProven,
   backupTransaction,
   readBackupRevision,
   readBackupState,
   readCurrentBackupProbe,
-  type BackupRun,
 } from './backup-console-store.js';
 import {
   type BackupCredential,
@@ -106,21 +106,42 @@ export class BackupConsoleExecutor {
           await backupTransaction(client, async () => {
             const slot = backupMaintenanceWindowSlot(this.options.policy, this.options.scheduleWindowId!);
             if (!slot?.open) return;
-            const { rows: [state] } = await client.query<{ active_revision: number | null; active_usable: boolean }>('SELECT active_revision, active_usable FROM codexia_backup.state');
-            const { rowCount: operationCount } = await client.query("SELECT 1 FROM codexia_backup.operations WHERE state IN ('QUEUED', 'RUNNING')");
+            const {
+              rows: [state],
+            } = await client.query<{ active_revision: number | null; active_usable: boolean }>(
+              'SELECT active_revision, active_usable FROM codexia_backup.state',
+            );
+            const { rowCount: operationCount } = await client.query(
+              "SELECT 1 FROM codexia_backup.operations WHERE state IN ('QUEUED', 'RUNNING')",
+            );
             const { rowCount: runCount } = await client.query("SELECT 1 FROM codexia_backup.runs WHERE state IN ('QUEUED', 'RUNNING')");
             if (operationCount || runCount) return;
             const stateValue = !state?.active_revision ? 'BLOCKED' : state.active_usable ? 'QUEUED' : 'BLOCKED';
-            const reason = !state?.active_revision ? 'active_destination_missing' : state.active_usable ? null : 'active_destination_unavailable';
+            const reason = !state?.active_revision
+              ? 'active_destination_missing'
+              : state.active_usable
+                ? null
+                : 'active_destination_unavailable';
             await client.query(
               `INSERT INTO codexia_backup.runs (id, request_id, kind, revision, maintenance_window_id, schedule_slot_key, state, phase, reason_code)
                VALUES ($1, $2, 'scheduled', $3, $4, $5, $6, $7, $8) ON CONFLICT (schedule_slot_key) DO NOTHING`,
-              [randomUUID(), `schedule:${this.options.scheduleWindowId}:${slot.localDate}`, state?.active_revision ?? null, this.options.scheduleWindowId, slot.slotKey, stateValue, stateValue === 'QUEUED' ? 'queued' : 'blocked', reason],
+              [
+                randomUUID(),
+                `schedule:${this.options.scheduleWindowId}:${slot.localDate}`,
+                state?.active_revision ?? null,
+                this.options.scheduleWindowId,
+                slot.slotKey,
+                stateValue,
+                stateValue === 'QUEUED' ? 'queued' : 'blocked',
+                reason,
+              ],
             );
           });
         }
         const run = await backupTransaction(client, async () => {
-          const { rows: [queued] } = await client.query<BackupRun>(
+          const {
+            rows: [queued],
+          } = await client.query<BackupRun>(
             "SELECT * FROM codexia_backup.runs WHERE state = 'QUEUED' ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED",
           );
           if (!queued) return null;
@@ -137,11 +158,14 @@ export class BackupConsoleExecutor {
           const code = (error as { code?: string | number }).code;
           await backupTransaction(client, async () => {
             if (code === 75 || code === '75') {
-              const { rows: [current] } = await client.query<{ state: string }>('SELECT state FROM codexia_backup.runs WHERE id = $1', [run.id]);
-              if (current?.state === 'RUNNING') await client.query(
-                "UPDATE codexia_backup.runs SET state = 'QUEUED', phase = 'queued', reason_code = 'host_lock_busy', observed_at = clock_timestamp() WHERE id = $1 AND state = 'RUNNING'",
-                [run.id],
-              );
+              const {
+                rows: [current],
+              } = await client.query<{ state: string }>('SELECT state FROM codexia_backup.runs WHERE id = $1', [run.id]);
+              if (current?.state === 'RUNNING')
+                await client.query(
+                  "UPDATE codexia_backup.runs SET state = 'QUEUED', phase = 'queued', reason_code = 'host_lock_busy', observed_at = clock_timestamp() WHERE id = $1 AND state = 'RUNNING'",
+                  [run.id],
+                );
             } else {
               await client.query(
                 "UPDATE codexia_backup.runs SET state = 'UNKNOWN', phase = 'recovery_required', reason_code = 'runner_interrupted', observed_at = clock_timestamp() WHERE id = $1 AND state = 'RUNNING'",
@@ -151,7 +175,9 @@ export class BackupConsoleExecutor {
           });
           return true;
         }
-        const { rows: [result] } = await client.query<{ state: string }>('SELECT state FROM codexia_backup.runs WHERE id = $1', [run.id]);
+        const {
+          rows: [result],
+        } = await client.query<{ state: string }>('SELECT state FROM codexia_backup.runs WHERE id = $1', [run.id]);
         if (result?.state === 'RUNNING') {
           await client.query(
             "UPDATE codexia_backup.runs SET state = 'UNKNOWN', phase = 'recovery_required', reason_code = 'receipt_missing', observed_at = clock_timestamp() WHERE id = $1 AND state = 'RUNNING'",
@@ -260,24 +286,31 @@ export class BackupConsoleExecutor {
 export function protectedBackupRunner(executable: string, timeoutMs = 30 * 60_000) {
   if (!isAbsolute(executable)) throw new Error('Backup runner must be an absolute operator-provisioned path');
   const environment: NodeJS.ProcessEnv = {
-    PATH: '/usr/bin:/bin', LANG: 'C.UTF-8',
+    PATH: '/usr/bin:/bin',
+    LANG: 'C.UTF-8',
     HOME: process.env.HOME ?? '/home/codexia',
     ...(process.env.XDG_RUNTIME_DIR ? { XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR } : {}),
     ...(process.env.DBUS_SESSION_BUS_ADDRESS ? { DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS } : {}),
     ...(process.env.CODEXIA_BACKUP_DESTINATION ? { CODEXIA_BACKUP_DESTINATION: process.env.CODEXIA_BACKUP_DESTINATION } : {}),
     ...(process.env.CODEXIA_BACKUP_AGE_RECIPIENT ? { CODEXIA_BACKUP_AGE_RECIPIENT: process.env.CODEXIA_BACKUP_AGE_RECIPIENT } : {}),
   };
-  const invoke = (args: string[]) => new Promise<void>((resolveRun, rejectRun) => {
-    execFile(executable, args, {
-      timeout: timeoutMs,
-      maxBuffer: 4096,
-      killSignal: 'SIGKILL',
-      env: environment,
-    }, error => {
-      if (error) rejectRun(error);
-      else resolveRun();
+  const invoke = (args: string[]) =>
+    new Promise<void>((resolveRun, rejectRun) => {
+      execFile(
+        executable,
+        args,
+        {
+          timeout: timeoutMs,
+          maxBuffer: 4096,
+          killSignal: 'SIGKILL',
+          env: environment,
+        },
+        error => {
+          if (error) rejectRun(error);
+          else resolveRun();
+        },
+      );
     });
-  });
   return {
     run: (runId: string) => invoke([runId]),
     recover: () => invoke(['recover']),
@@ -449,9 +482,7 @@ async function main() {
         }
       : {}),
     probe: pythonBackupProbe(python, script, policy, config.transportByOrigin),
-    ...(runnerPath
-      ? { ...protectedBackupRunner(runnerPath), scheduleWindowId: policy.scheduleWindowId }
-      : {}),
+    ...(runnerPath ? { ...protectedBackupRunner(runnerPath), scheduleWindowId: policy.scheduleWindowId } : {}),
   });
   const stop = new AbortController();
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => stop.abort());
