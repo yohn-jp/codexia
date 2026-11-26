@@ -1401,18 +1401,21 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 **Conformance status**: PARTIAL
 **Applicability**: CURRENT
 **Design owner**: [Backup](../deployment/BACKUP.md)
-**Implementation identifiers**: deploy/backup/; deploy/ansible/restore-drill.yml
+**Implementation identifiers**: `deploy/backup/backup.sh`, `deploy/backup/s3_transfer.py`, `deploy/ansible/restore-drill.yml`
 **Verification identifiers**: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
 **Test IDs**: TEST-OPS-003-001
 **Exact-run reference**: NOT_RUN
-**Comment**: ACCEPTED／S3対応は未実装・適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+**Comment**: S3互換の転送と隔離復元の実装を参照する。AWS S3での転送と読み戻し、および独立した復旧ホストでの復元は受入証拠が必要。
 
-バックアップと隔離復元でPostgreSQL正本と運用状態の復旧を検証する。**S3互換ストレージへのage暗号化済みバックアップの転送・検証・取得・隔離復元をサポートする（追加機能は未実装）**
+バックアップと隔離復元でPostgreSQL正本と運用状態の復旧を検証する。
+S3互換ストレージへのage暗号化済みバックアップの転送、検証、取得、および隔離復元をサポートする。
 
 **Relations**:
 
 - **Type**: File
   **Path**: docs/deployment/BACKUP.md
+- **Type**: File
+  **Path**: deploy/backup/s3_transfer.py
 - **Type**: File
   **Path**: deploy/ansible/restore-drill.yml
 
@@ -1443,18 +1446,24 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 **Type**: OBLIGATION
 **MID**: 3b0d4955a5e6732c8786dc25527f603a
 **UID**: OBL-REQ-OPS-003-O02
-**Design reference**: [Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md)
-**Implementation identifiers**: UNMAPPED (S3 transfer and isolated restore are unimplemented)
+**Design reference**: [Backup](../deployment/BACKUP.md)、[Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md)
+**Implementation identifiers**: `S3BackupTransfer.upload_artifact`, `S3BackupTransfer.download_artifact`, `restore-drill.yml`
 **Test IDs**: NOT_ASSIGNED
 **Exact-run reference**: NOT_RUN
-**Comment**: An exact-source S3 transfer receipt and independent isolated restore result are required.
+**Comment**: AWS S3での転送と読み戻し、および独立した復旧ホストでの復元について、対象ソースに紐づく証拠が必要。
 
-S3互換ストレージへのage暗号化済みバックアップの転送・検証・取得・隔離復元をサポートする（追加機能は未実装）
+S3互換ストレージへのage暗号化済みバックアップの転送、検証、取得、および隔離復元をサポートする。
 
 **Relations**:
 
 - **Type**: Parent
   **ID**: REQ-OPS-003
+
+- **Type**: File
+  **Path**: deploy/backup/s3_transfer.py
+
+- **Type**: File
+  **Path**: deploy/ansible/restore-drill.yml
 
 ## REQ-OPS-004
 

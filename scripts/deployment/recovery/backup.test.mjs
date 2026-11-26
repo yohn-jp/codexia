@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -88,9 +88,17 @@ test('the protected run shares the deploy lock and recovers both services after 
   const manifest = 'c'.repeat(64);
   const trace = path.join(fixture.directory, 'trace');
   const localBin = path.join(fixture.home, '.local/bin');
+  const launcher = path.join(fixture.bin, 'run-backup-fixture');
   await mkdir(localBin, { recursive: true });
+  await symlink(process.execPath, path.join(fixture.bin, 'node'));
   await Promise.all(['trace', 'api', 'tunnel'].map(name => writeFile(path.join(fixture.directory, name), '')));
   const scripts = {
+    [launcher]: [
+      'if [[ "$1" == lock ]]; then exec 8>>"$CODEXIA_PUSH_STATE_DIR/host.lock"; /usr/bin/flock -n 8 || exit; fi',
+      'shift',
+      'export RUNNER_PID=$$',
+      'exec /bin/bash "$@"',
+    ],
     [path.join(fixture.bin, 'systemctl')]: [
       'for unit; do :; done',
       'case "$unit" in codexia-api.service) state="$FIXTURE/api";; codexia-tunnel.service) state="$FIXTURE/tunnel";; *) exit 4;; esac',
@@ -127,18 +135,14 @@ test('the protected run shares the deploy lock and recovers both services after 
     await chmod(file, 0o700);
   }
   const env = {
-    ...process.env,
     HOME: fixture.home,
     CODEXIA_PUSH_STATE_DIR: fixture.stateDir,
     CODEXIA_BACKUP_DESTINATION: fixture.backupDestination,
     CODEXIA_BACKUP_AGE_RECIPIENT: 'age1test',
     FIXTURE: fixture.directory,
-    PATH: fixture.bin + ':' + process.env.PATH,
+    PATH: `${fixture.bin}:/usr/bin:/bin`,
   };
-  const invoke = (mode, ...args) => spawnSync('/bin/bash', [
-    '-c', 'if [[ "$1" == lock ]]; then exec 8>>"$CODEXIA_PUSH_STATE_DIR/host.lock"; flock -n 8 || exit; fi\n' +
-      'shift\nexport RUNNER_PID=$$\nexec /bin/bash "$@"', 'fixture', mode, backupRunner, ...args,
-  ], {
+  const invoke = (mode, ...args) => spawnSync('/bin/bash', [launcher, mode, backupRunner, ...args], {
     encoding: 'utf8',
     env: {
       ...env,
