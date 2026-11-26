@@ -36,6 +36,13 @@ test('projects obligations, reverse surfaces, and evidence links without conform
       publication: { status: 'NOT_PUBLISHED', publisher: '.github/workflows/repository-audit.yml' },
       execution: { status: 'IN_PROGRESS', sourceSha: sha, repository: 'yohn-jp/codexia', runId: '42', runAttempt: 1, job: 'specification', task: 'pages-requirements-trace', runUrl: 'https://github.com/yohn-jp/codexia/actions/runs/42' },
     };
+    report.obligationTrace.rows.push({
+      ...report.obligationTrace.rows[0],
+      requirementId: 'REQ-UI-006', obligationId: 'OBL-REQ-UI-006-O01',
+      requirementImplementationIdentifiers: ['WRT-01/REC-01 部分導入済み', 'ChangeSet・認証・バックアップは未実装'],
+      requirementComment: 'XState v5 は部分導入済み。全受入は未認定。',
+      testIds: [], exactRuns: [],
+    });
     writeFileSync(join(output, 'trace-report.json'), JSON.stringify(report));
     packSpecifications(site, output, sha, { status: 'CERTIFIED', sourceSha: sha, repository: 'yohn-jp/codexia', runId: '43', attempt: 2, job: 'types', task: 'requirements-trace', runUrl: 'https://github.com/yohn-jp/codexia/actions/runs/43', artifactId: 987, artifactDigest: 'sha256:' + 'd'.repeat(64), passedCaseIds: ['TEST-TRC-01-001'] });
     assert.equal(verifySpecifications(site, sha).sourceSha, sha);
@@ -66,7 +73,13 @@ test('projects obligations, reverse surfaces, and evidence links without conform
     assert.equal(traceJson.execution.runUrl, 'https://github.com/yohn-jp/codexia/actions/runs/42');
     assert.equal(traceJson.obligations[0].exactRuns[0].job, 'specification');
     assert.equal(traceJson.requirements[0].area, 'UI');
-    assert.equal(traceJson.summary.areaCounts.UI.obligationCount, 1);
+    assert.equal(traceJson.summary.areaCounts.UI.obligationCount, 2);
+    const partial = traceJson.requirements.find(item => item.requirementId === 'REQ-UI-006');
+    assert.equal(partial.implementationDeclarationStatus, 'EXPLICIT_PARTIALLY_IMPLEMENTED');
+    assert.equal(partial.conformanceStatus, 'PARTIAL');
+    assert.equal(traceJson.summary.implementationDeclarationCounts.EXPLICIT_PARTIALLY_IMPLEMENTED, 1);
+    assert.match(tracePage, /明示: 部分導入済み/u);
+    assert.match(tracePage, /ChangeSet・認証・バックアップは未実装/u);
     assert.equal(traceJson.summary.reverseDispositionCounts.CANDIDATE_ONLY, 1);
     assert.match(tracePage, /id="surface-2"[^>]*data-status="UNMAPPED CANDIDATE_ONLY"/u);
     assert.match(tracePage, /id="surface-1"[^>]*data-status="UNVERIFIED LINKED"/u);
