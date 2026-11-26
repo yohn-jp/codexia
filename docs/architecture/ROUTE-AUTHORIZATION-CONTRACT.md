@@ -28,7 +28,7 @@
 | `/oauth/consent` | 登録済みclient/scopeの許可または拒否 | OWNER-SESSION、same-origin、認可要求の検証 | 実装済み |
 | `/r/:module/:project/:slug` | 公開linkを受け取ったSHARE-READER。公開する場合のみAccess例外を明示 | share capabilityをAPIが確認し公開版のGETに限定 | 公開reader実装あり／実Edge受入は別 |
 | `/console` | ownerの管理home | OWNER-SESSION＋API側owner確認 | セットアップ実装あり。Cloudflare・VM 受入は別 |
-| `/console/setup` | 初回だけの本人登録ウィザード | SETUP＋DBが新規構築承認済みかつowner未登録 | **合意済み目標・未実装** |
+| `/console/setup` | 初回だけの本人登録ウィザード | SETUP＋DBが新規構築承認済みかつowner未登録 | 実装済み。Cloudflare・VM 受入は別 |
 | `/console/security` | Passkey/sessionの本人管理 | OWNER-SESSION＋危険操作のfresh再認証 | Desktop Web 実装あり。実 Edge 受入は別 |
 | `/console/identity` | 連携OIDC、OAuth clients/grantsの管理 | OWNER-SESSION＋owner確認＋対象別権限 | 運用者設定状態と保存済み同意の参照を実装。管理操作は目標 |
 | `/console/backups` | S3保管先設定、remote保全・復元証拠、手動保全要求 | OWNER-SESSION、危険変更はfresh reauth | **合意済み目標・未実装** |
