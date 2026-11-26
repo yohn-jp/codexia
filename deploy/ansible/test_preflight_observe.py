@@ -348,5 +348,40 @@ class AbsentDatabaseResetTests(unittest.TestCase):
                 stop.assert_not_called()
 
 
+class LockedCredentialTests(unittest.TestCase):
+    def test_mutation_and_missing_or_new_credential_invalidate_preserved_set_under_host_lock(self):
+        names = observer.BASE_SECRETS + observer.AUTH_SECRETS
+        ids = {name: "initial-" + name for name in names}
+
+        def podman(argv, *args):
+            self.assertEqual(argv[:2], ["podman", "secret"])
+            name = argv[-1]
+            if argv[2] == "exists":
+                return (0 if name in ids else 1), ""
+            self.assertEqual(argv[2:-1], ["inspect", "--format", "{{.ID}}"])
+            return 0, ids[name]
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(Path, "home", return_value=Path(directory)):
+            path = Path(directory) / ".local/state/codexia-deploy/host.lock"
+            path.parent.mkdir(parents=True)
+            with path.open("w") as lock, patch.object(observer, "command", side_effect=podman):
+                expected = observer.digest(observer.secret_identities())
+                observer.verify_preserved_secrets(expected, lock.fileno())
+                with (path.parent / "other").open("w") as other:
+                    with self.assertRaises(ValueError):
+                        observer.verify_preserved_secrets(expected, other.fileno())
+                ids[observer.AUTH_SECRETS[1]] = "rotated"
+                with self.assertRaises(ValueError):
+                    observer.verify_preserved_secrets(expected, lock.fileno())
+                ids[observer.AUTH_SECRETS[1]] = "initial-" + observer.AUTH_SECRETS[1]
+                ids[observer.OPTIONAL_SECRET] = "new"
+                with self.assertRaises(ValueError):
+                    observer.verify_preserved_secrets(expected, lock.fileno())
+                del ids[observer.OPTIONAL_SECRET]
+                del ids[names[0]]
+                with self.assertRaises(ValueError):
+                    observer.verify_preserved_secrets(observer.digest(observer.secret_identities()), lock.fileno())
+
+
 if __name__ == "__main__":
     unittest.main()

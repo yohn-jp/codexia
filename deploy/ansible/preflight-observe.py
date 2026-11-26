@@ -13,6 +13,7 @@ import pwd
 import re
 import stat
 import subprocess
+import sys
 from datetime import datetime, timezone
 
 FULL_IMAGE = r"ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}"
@@ -33,6 +34,34 @@ def command(args, allowed=(0,), stdin=None):
                             timeout=30, check=False)
     require(result.returncode in allowed)
     return result.returncode, result.stdout.strip()
+
+
+# Both the read-only observer and the locked R6 admission bind Podman IDs.
+# Lookup metadata only. Never request secret contents.
+BASE_SECRETS = ("codexia-tunnel-token", "codexia-postgres-admin-password", "codexia-postgres-app-password")
+AUTH_SECRETS = ("codexia-auth-database-url", "codexia-auth-secret", "codexia-oauth-introspection-client-secret")
+OPTIONAL_SECRET = "codexia-oidc-client-secret"
+
+
+def secret_identities():
+    hashes = {}
+    for name in (*BASE_SECRETS, *AUTH_SECRETS, OPTIONAL_SECRET):
+        if command(["podman", "secret", "exists", name], (0, 1))[0] == 0:
+            identity = command(["podman", "secret", "inspect", "--format", "{{.ID}}", name])[1]
+            require(bool(identity))
+            hashes[name] = digest(identity)
+    return hashes
+
+
+def verify_preserved_secrets(expected, lock_fd):
+    require(re.fullmatch(r"[a-f0-9]{64}", expected))
+    lock = Path.home() / ".local/state/codexia-deploy/host.lock"
+    actual = os.fstat(lock_fd)
+    require(stat.S_ISREG(actual.st_mode) and actual.st_uid == os.getuid() and
+            os.path.samestat(actual, lock.stat(follow_symlinks=False)))
+    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    hashes = secret_identities()
+    require(set(BASE_SECRETS + AUTH_SECRETS).issubset(hashes) and digest(hashes) == expected)
 
 
 def metadata(path):
@@ -323,8 +352,7 @@ def observe():
 
         networks = existence("network", ("codexia", "codexia-data"))
         volumes = existence("volume", ("codexia-postgres", "codexia-data", "codexia-history"))
-        secrets = existence("secret", ("codexia-tunnel-token", "codexia-postgres-admin-password",
-                                       "codexia-postgres-app-password"))
+        secrets = existence("secret", BASE_SECRETS)
         containers = existence("container", ("codexia-db", "codexia-api", "codexia-tunnel"))
         if not lock_handle:
             require(not containers["codexia-api"] and not residue and transaction is None)
@@ -338,7 +366,6 @@ def observe():
                 drift |= actual != expected
         network_hashes = {}
         volume_hashes = {}
-        secret_hashes = {}
         container_hashes = {}
         for name, exists in networks.items():
             if exists:
@@ -351,10 +378,7 @@ def observe():
                 detail = command(["podman", "volume", "inspect", "--format", "{{.Name}}|{{.Mountpoint}}", name])[1]
                 volume_hashes[name] = digest(detail)
                 drift |= not detail.startswith(name + "|/")
-        for name in (*secrets, "codexia-auth-database-url", "codexia-auth-secret",
-                     "codexia-oauth-introspection-client-secret", "codexia-oidc-client-secret"):
-            if command(["podman", "secret", "exists", name], (0, 1))[0] == 0:
-                secret_hashes[name] = digest(command(["podman", "secret", "inspect", "--format", "{{.ID}}", name])[1])
+        secret_hashes = secret_identities()
         for name, exists in containers.items():
             if exists:
                 container_hashes[name] = digest(command(["podman", "inspect", "--format",
@@ -427,6 +451,11 @@ def observe():
 
 if __name__ == "__main__":
     try:
+        if sys.argv[1:2] == ["verify-preserved-secrets"]:
+            require(len(sys.argv) == 3)
+            verify_preserved_secrets(sys.argv[2], 9)
+            sys.exit(0)
+        require(len(sys.argv) == 1)
         result = observe()
         result["observedAt"] = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         print(json.dumps(result, separators=(",", ":")))

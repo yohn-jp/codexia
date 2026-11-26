@@ -546,6 +546,10 @@
         )" || stale_admission 'the prepared first activation database or owner could not be verified'
         [[ "$first_database" == "$approved_cluster $approved_database $approved_owner" ]] ||
           stale_admission 'the prepared first activation database or owner changed'
+        secret_set="$(jq -er '.secretSetSha256 | select(test("^[a-f0-9]{64}$"))' <<< "$first_activation")" ||
+          stale_admission 'independent restore credential identities are missing'
+        "$HOME/.local/bin/codexia-preflight-observe" verify-preserved-secrets "$secret_set" ||
+          stale_admission 'the prepared credentials changed after the independent restore'
         restored_fingerprints="$(node -e '
           const {databaseFingerprint, historyFingerprint} = JSON.parse(process.argv[1]);
           if (![databaseFingerprint, historyFingerprint].every(x => /^[a-f0-9]{64}$/.test(x))) process.exit(1);

@@ -94,7 +94,8 @@ async function main(stage, env) {
     initialInstall: env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
     databaseUse: env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
   } });
-  await writeFile(join(env.RUNNER_TEMP, 'codexia-first-activation.json'), JSON.stringify({ ...evidence, databaseFingerprint: preservationReceipt.databaseFingerprint,
+  await writeFile(join(env.RUNNER_TEMP, 'codexia-first-activation.json'), JSON.stringify({ ...evidence, secretSetSha256: preservationReceipt.secretSetSha256,
+    databaseFingerprint: preservationReceipt.databaseFingerprint,
     historyFingerprint: preservationReceipt.historyFingerprint }) + '\n',
     { flag: 'wx', mode: 0o600 });
   console.log('Protected R6 Backend-only activation admitted against the deployed Frontend.');

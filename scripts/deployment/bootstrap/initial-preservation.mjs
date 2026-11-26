@@ -73,7 +73,8 @@ async function main(operation) {
 
   assert.equal(operation, 'verify');
   await privateFile(ageIdentity, env.CODEXIA_INITIAL_BACKUP_IDENTITY);
-  const metadata = JSON.parse(run('age', ['-d', '-i', ageIdentity, join(handoff, 'transfer.age')]));
+  const encryptedReceipt = await readFile(join(handoff, 'transfer.age'));
+  const metadata = JSON.parse(run('age', ['-d', '-i', ageIdentity], encryptedReceipt));
   for (const [key, value] of Object.entries(source)) assert.equal(metadata[key], value);
   const { sourceHostId, databaseSha256, secretSetSha256, backupId } = metadata;
   assert.match(sourceHostId, /^[a-f0-9]{64}$/u);
@@ -90,6 +91,8 @@ async function main(operation) {
     join(directory, 'manifest.age')]).trimEnd().split('\n');
   assert.equal(format, 'codexia-backup/v2');
   assert.ok([databaseFingerprint, historyFingerprint].every(value => /^[a-f0-9]{64}$/u.test(value)));
+  run(join(env.RUNNER_TEMP, 'bootstrap-s3/bin/python'), ['deploy/backup/bootstrap_escrow.py',
+    'retain-v2-receipt', '--host-id', sourceHostId, '--backup-id', backupId], encryptedReceipt);
   const evidence = { format: 'codexia-initial-preservation/v1', ...source, sourceHostId, databaseSha256, secretSetSha256,
     databaseFingerprint, historyFingerprint, independentBackupEvidenceSha256: digestEvidence(metadata.transfer) };
   await privateFile(join(scratch, 'preservation.json'), JSON.stringify(evidence));

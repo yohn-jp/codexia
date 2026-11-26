@@ -30,6 +30,9 @@ class BootstrapEscrowTest(unittest.TestCase):
                                                 "region": "us-east-1", "bucket": "test-bucket", "prefix": "escrow"})
         self.client = FakeS3Client()
         self.values = {name: "fixture-" + name for name in snapshot.REQUIRED}
+        self.values.update({"codexia-postgres-admin-password": "1" * 64, "codexia-postgres-app-password": "2" * 64,
+                            "codexia-auth-database-url": "postgresql://codexia_auth_runtime:fixture-secret@codexia-db:5432/codexia",
+                            "codexia-auth-secret": "fixture-secret-" * 3})
         self.values["codexia-tunnel-token"] += "\n"
         self.env = {"HOME": str(self.root), "PATH": str(self.root) + os.pathsep + os.environ["PATH"]}
         self.state = self.root / ".local/state/codexia-deploy"
@@ -39,6 +42,9 @@ class BootstrapEscrowTest(unittest.TestCase):
         fake.write_text("""#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
+if sys.argv[1:3] == ["info", "--format"]:
+    print("true")
+    sys.exit(0)
 if sys.argv[1:4] == ["secret", "exists", "codexia-oidc-client-secret"]:
     sys.exit(1)
 if sys.argv[1:4] != ["secret", "inspect", "--showsecret"]:
@@ -57,6 +63,69 @@ print(json.dumps([{"ID": name + "-id", "Spec": {"Name": name}, "SecretData": val
     def capture(self, seal=True):
         with patch.dict(os.environ, self.env):
             return snapshot.snapshot(self.recipient, self.host_id, seal)
+
+    def test_adopts_preexisting_complete_set_without_writing_to_target(self):
+        record = self.state / "bootstrap-secret-ids.json"
+        admitted = json.loads(record.read_bytes())
+        record.unlink()  # A VM that reached R5 before managed bootstrap was introduced.
+        script = Path(snapshot.__file__)
+        def capture():
+            result = subprocess.run(["python3", str(script), "adopt", self.host_id, self.recipient],
+                                    input=json.dumps(admitted), env=os.environ | self.env, text=True,
+                                    capture_output=True, check=True)
+            return json.loads(result.stdout)
+        files = set(self.state.iterdir())
+        sealed = capture()
+        another = capture()
+        self.assertTrue(sealed["existingSet"])
+        self.assertEqual(another["generation"], sealed["generation"])
+        self.assertNotEqual(another["ciphertext"], sealed["ciphertext"])
+        receipt = escrow.upload(self.client, self.profile, sealed)
+        self.assertEqual(escrow.upload(self.client, self.profile, another), receipt)
+        escrow.recover(self.client, self.profile, receipt, self.identity)
+        escrow.check(self.client, self.profile, self.capture(False))
+        decoded = subprocess.run(["age", "-d", "-i", self.identity],
+                                 input=base64.b64decode(sealed["ciphertext"]), capture_output=True, check=True)
+        self.assertEqual(json.loads(decoded.stdout)["secrets"], self.values)
+        self.assertNotIn("fixture-", json.dumps(sealed))
+        self.assertEqual(set(self.state.iterdir()), files)
+        self.assertEqual(json.loads((self.root / "values.json").read_bytes()), self.values)
+
+    def test_existing_escrow_rejects_replaced_identity_missing_approval_and_journal(self):
+        record = self.state / "bootstrap-secret-ids.json"
+        approved = json.loads(record.read_bytes())
+        drift = {**approved, "codexia-auth-secret": "0" * 64}
+        with patch.dict(os.environ, self.env):
+            record.write_text(json.dumps(drift))
+            with self.assertRaisesRegex(ValueError, "changed before escrow"):
+                snapshot.snapshot(self.recipient, self.host_id, True, approved)
+            record.unlink()
+            with self.assertRaisesRegex(ValueError, "changed since preflight"):
+                snapshot.snapshot(self.recipient, self.host_id, True, drift)
+            with self.assertRaisesRegex(ValueError, "complete reviewed"):
+                snapshot.snapshot(self.recipient, self.host_id, True, {})
+            (self.state / "deploy-transaction.json").touch()
+            with self.assertRaisesRegex(ValueError, "transaction"):
+                snapshot.snapshot(self.recipient, self.host_id, True, approved)
+        self.assertFalse((self.state / "bootstrap-escrow").exists())
+
+    def test_retains_exact_encrypted_v2_receipt_under_recovery_proof_prefix(self):
+        cipher = base64.b64decode(self.capture()["ciphertext"])
+        backup_id = "20261023T120000Z-bf8699f2-af84-4fe4-bf58-d548c5a4a2eb"
+        archive = (self.profile["bucket"], f"escrow/verified/v2-backups/{self.host_id}/{backup_id}.age")
+        escrow.retain_v2_receipt(self.client, self.profile, self.host_id, backup_id, cipher)
+        escrow.retain_v2_receipt(self.client, self.profile, self.host_id, backup_id, cipher)
+        self.assertEqual(self.client.objects[archive]["Body"], cipher)
+        with self.assertRaises(ValueError):
+            escrow.retain_v2_receipt(self.client, self.profile, self.host_id, backup_id, cipher + b"x")
+        for bad_host, bad_id, invalid in [(self.host_id, "../foreign", cipher), ("", backup_id, cipher),
+                                          (self.host_id, "fresh", b"unencrypted receipt")]:
+            with self.assertRaises(ValueError):
+                escrow.retain_v2_receipt(self.client, self.profile, bad_host, bad_id, invalid)
+        self.client.corrupt_readback_for = archive[1]
+        with self.assertRaises(ValueError):
+            escrow.retain_v2_receipt(self.client, self.profile, self.host_id, backup_id, cipher)
+        self.assertEqual(set(self.client.objects), {archive})
 
     def test_round_trip_retry_and_selective_restore(self):
         sealed = self.capture()
@@ -171,6 +240,14 @@ Path(sys.argv[4]).touch()
         self.assertEqual(result.returncode, 0, result.stdout.decode() + result.stderr.decode())
         self.assertTrue((control / "escrow-receipt.json").is_file())
         self.assertNotIn(b"fixture-codexia-", result.stdout + result.stderr)
+
+    def test_recovery_rejects_unusable_database_role_credentials(self):
+        self.values["codexia-auth-database-url"] = "postgresql://postgres:fixture-secret@codexia-db:5432/codexia"
+        (self.root / "values.json").write_text(json.dumps(self.values))
+        receipt = escrow.upload(self.client, self.profile, self.capture())
+        with self.assertRaises(ValueError):
+            escrow.recover(self.client, self.profile, receipt, self.identity)
+        self.assertEqual(len(self.client.objects), 1)
 
     def test_refuses_incomplete_recovered_payload(self):
         source = self.capture(False)

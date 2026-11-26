@@ -123,8 +123,8 @@ assert.match(deploymentDocs, /CORS/u);
 assert.match(deploymentDocs, /restore/u);
 assert.match(deploymentDocs, /127\.0\.0\.1:2000\/ready/u);
 const operationsDocs = [deploymentDocs, pushDeploymentDocs, iacDocs, ansibleDocs, backupDocs].join('\n');
-assert.ok(pushDeploymentDocs.includes('deploy/ansible/site.yml -e codexia_stage=bootstrap'),
-  'The first activation runbook must include the supported bootstrap command');
+assert.ok(pushDeploymentDocs.includes('](PRODUCTION-BOOTSTRAP.md)') && pushDeploymentDocs.includes('`preflight_run_id`'),
+  'The first activation runbook must use protected Bootstrap and the reviewed Preflight run');
 assert.match(operationsDocs, /codexia_initial_install_approved=true/u);
 assert.match(operationsDocs, /codexia_database_initialization_approved=true/u);
 assert.match(operationsDocs, /CODEXIA_INITIAL_INSTALL_APPROVED=true/u);

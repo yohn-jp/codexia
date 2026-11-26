@@ -2,9 +2,11 @@
 - name: Verify independent credential recovery before initial frontend publication
   hosts: codexia
   gather_facts: false
+  become: "{{ codexia_escrow_adopt_ids is defined }}"
+  become_user: codexia
   any_errors_fatal: true
   vars:
-    codexia_stage: verify-escrow
+    codexia_stage: "{{ 'adopt-escrow' if codexia_escrow_adopt_ids is defined else 'verify-escrow' }}"
   tasks:
     - name: Identify the pinned runtime connection
       ansible.builtin.setup:

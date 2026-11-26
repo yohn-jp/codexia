@@ -25,6 +25,7 @@ on:
     paths:
       - scripts/shared/python-env.sh
       - .github/workflows/production-bootstrap.yml
+      - .github/workflows/initial-preservation.yml
       - .github/actions/reviewed-preflight/**
       - .github/workflows/bootstrap-recovery.yml
       - deploy/production.json
@@ -33,6 +34,7 @@ on:
       - deploy/backup/test_bootstrap_escrow.py
       - deploy/ansible/*managed*secret*
       - deploy/ansible/*escrow*
+      - deploy/ansible/test_preflight_observe.py
       - deploy/ansible/prepare-production-bootstrap.py
       - deploy/ansible/test_production_bootstrap.py
       - deploy/ansible/prepare-owner-activation.yml
@@ -82,9 +84,9 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install --no-install-recommends -y age
-          python3 -m unittest discover -s deploy/backup -p test_bootstrap_escrow.py -v
-          node --test scripts/deployment/bootstrap/admission.test.mjs scripts/deployment/preflight/discover.test.mjs
-          for fixture in test_production_bootstrap.py test_managed_bootstrap_secrets.py test_owner_setup.py test_preflight_observe.py; do
+          PATH="$RUNNER_TEMP/codexia-ansible/bin:$PATH" python3 -m unittest discover -s deploy/backup -p test_bootstrap_escrow.py -v
+          node --test scripts/deployment/bootstrap/admission.test.mjs scripts/deployment/bootstrap/initial-preservation.test.mjs scripts/deployment/bootstrap/escrow-admission.test.mjs scripts/deployment/preflight/discover.test.mjs
+          for fixture in test_production_bootstrap.py test_managed_bootstrap_secrets.py test_escrow_producer.py test_owner_setup.py test_preflight_observe.py; do
             PYTHONDONTWRITEBYTECODE=1 "$RUNNER_TEMP/codexia-ansible/bin/python" -m unittest discover -s deploy/ansible -p "$fixture" -v
           done
           for playbook in site preflight-observe prepare-owner-activation verify-bootstrap-escrow; do

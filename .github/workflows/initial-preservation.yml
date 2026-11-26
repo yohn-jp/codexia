@@ -88,8 +88,10 @@ jobs:
           name: encrypted-v2-receipt-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/initial-handoff
       - id: drill
-        name: Download from S3 and restore into isolated PostgreSQL and history volumes
+        name: Restore DB and history independently and retain the verified encrypted receipt
         env:
+          CODEXIA_BOOTSTRAP_ESCROW_PROFILE: ${{ vars.CODEXIA_BOOTSTRAP_ESCROW_PROFILE }}
+          CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL: ${{ secrets.CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL }}
           CODEXIA_INITIAL_BACKUP_PROFILE: ${{ vars.CODEXIA_INITIAL_BACKUP_PROFILE }}
           CODEXIA_INITIAL_BACKUP_CREDENTIAL: ${{ secrets.CODEXIA_INITIAL_BACKUP_CREDENTIAL }}
           CODEXIA_INITIAL_BACKUP_IDENTITY: ${{ secrets.CODEXIA_INITIAL_BACKUP_IDENTITY }}
