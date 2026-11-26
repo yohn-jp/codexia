@@ -1,0 +1,13 @@
+{
+  "name": "@codexia/mcp-conformance-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned official MCP conformance and Inspector CLI tooling",
+  "scripts": {
+    "verify": "node --import tsx run.mjs"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/conformance": "0.2.0-alpha.12",
+    "@modelcontextprotocol/inspector": "2.16.0"
+  }
+}
