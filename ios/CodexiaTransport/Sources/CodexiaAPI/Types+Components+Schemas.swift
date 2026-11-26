@@ -14659,6 +14659,41 @@ extension Components {
                 case current
             }
         }
+        /// - Remark: Generated from `#/components/schemas/SaveDocumentConflictResponse`.
+        @frozen public enum SaveDocumentConflictResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/SaveDocumentConflictResponse/case1`.
+            case SaveConflictResponse(Components.Schemas.SaveConflictResponse)
+            /// - Remark: Generated from `#/components/schemas/SaveDocumentConflictResponse/case2`.
+            case SaveIdempotencyConflictResponse(Components.Schemas.SaveIdempotencyConflictResponse)
+            public init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self = .SaveConflictResponse(try .init(from: decoder))
+                    return
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self = .SaveIdempotencyConflictResponse(try .init(from: decoder))
+                    return
+                } catch {
+                    errors.append(error)
+                }
+                throw Swift.DecodingError.failedToDecodeOneOfSchema(
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                switch self {
+                case let .SaveConflictResponse(value):
+                    try value.encode(to: encoder)
+                case let .SaveIdempotencyConflictResponse(value):
+                    try value.encode(to: encoder)
+                }
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/SaveDocumentRequest`.
         public struct SaveDocumentRequest: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/SaveDocumentRequest/baseRevisionId`.
@@ -14725,6 +14760,57 @@ extension Components {
                 case document
                 case revision
                 case replayed
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/SaveIdempotencyConflictResponse`.
+        public struct SaveIdempotencyConflictResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/SaveIdempotencyConflictResponse/code`.
+            @frozen public enum codePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
+            }
+            /// - Remark: Generated from `#/components/schemas/SaveIdempotencyConflictResponse/code`.
+            public var code: Components.Schemas.SaveIdempotencyConflictResponse.codePayload
+            /// - Remark: Generated from `#/components/schemas/SaveIdempotencyConflictResponse/error`.
+            public var error: Swift.String
+            /// - Remark: Generated from `#/components/schemas/SaveIdempotencyConflictResponse/details`.
+            public struct detailsPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                public var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                /// Creates a new `detailsPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                public init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                public init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                public func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/SaveIdempotencyConflictResponse/details`.
+            public var details: Components.Schemas.SaveIdempotencyConflictResponse.detailsPayload?
+            /// Creates a new `SaveIdempotencyConflictResponse`.
+            ///
+            /// - Parameters:
+            ///   - code:
+            ///   - error:
+            ///   - details:
+            public init(
+                code: Components.Schemas.SaveIdempotencyConflictResponse.codePayload,
+                error: Swift.String,
+                details: Components.Schemas.SaveIdempotencyConflictResponse.detailsPayload? = nil
+            ) {
+                self.code = code
+                self.error = error
+                self.details = details
+            }
+            public enum CodingKeys: String, CodingKey {
+                case code
+                case error
+                case details
             }
         }
         /// - Remark: Generated from `#/components/schemas/SceneWritingStatsBody`.
