@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const backupProgram = path.join(root, 'deploy/backup/backup.sh');
 const backupRunner = path.join(root, 'deploy/backup/backup-runner.sh');
+const backupControl = path.join(root, 'deploy/backup/backup-control.sh');
 const shellQuote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 
 async function createFixture() {
@@ -57,6 +58,24 @@ function invokeBackup(fixture, { activeUnits = '', approved = true, lockFile = f
     },
   });
 }
+
+test('operator startup persists push admission before the console executor can activate a destination', async t => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.directory, { recursive: true, force: true }));
+  const config = path.join(fixture.home, '.config', 'codexia-backup');
+  const marker = path.join(fixture.stateDir, 'backup-admission-enabled');
+  await mkdir(config, { recursive: true, mode: 0o700 });
+  const control = path.join(config, 'backup-console-control.js');
+  await writeFile(path.join(config, 'executor.env'), 'CODEXIA_BACKUP_EXECUTOR_ENTRYPOINT=' + control + '\n', { mode: 0o600 });
+  await writeFile(control, 'throw new Error("Unexpected control command");\n');
+  await writeFile(path.join(config, 'backup-console-executor.js'),
+    'if (!require("node:fs").existsSync(' + JSON.stringify(marker) + ')) process.exit(2);\n');
+  const boot = spawnSync('bash', [backupControl], {
+    encoding: 'utf8', env: { ...process.env, HOME: fixture.home },
+  });
+  assert.equal(boot.status, 0, boot.stderr);
+  assert.equal(await readFile(marker, 'utf8'), '');
+});
 
 test('the protected run shares the deploy lock and recovers both services after SIGKILL', async t => {
   const fixture = await createFixture();

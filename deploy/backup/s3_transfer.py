@@ -41,6 +41,7 @@ MIN_MULTIPART_PART_BYTES = 5 * 1024 * 1024
 DEFAULT_MULTIPART_THRESHOLD_BYTES = 16 * 1024 * 1024
 DEFAULT_MULTIPART_PART_BYTES = 8 * 1024 * 1024
 MAX_COMMIT_MARKER_BYTES = 64 * 1024
+PRIVATE_IPV4_NETWORKS = tuple(ipaddress.ip_network(cidr) for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
 
 
 class TransferError(Exception):
@@ -69,6 +70,23 @@ def _transfer_failure(error: BaseException) -> tuple[str, bool]:
 
 def _fail(message: str) -> None:
     raise TransferError(message)
+
+
+def validate_private_addresses(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        _fail("S3 private address policy is invalid")
+    addresses: list[str] = []
+    for raw in value:
+        try:
+            if not isinstance(raw, str):
+                _fail("S3 private address policy is invalid")
+            address = ipaddress.ip_address(raw)
+        except ValueError as error:
+            raise TransferError("S3 private address policy is invalid") from error
+        if address.version != 4 or not any(address in network for network in PRIVATE_IPV4_NETWORKS) or address.compressed in addresses:
+            _fail("S3 private address policy is invalid")
+        addresses.append(address.compressed)
+    return tuple(addresses)
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -200,19 +218,7 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
     ca_bundle = value.get("caBundle")
     if ca_bundle is not None and (not isinstance(ca_bundle, str) or not os.path.isabs(ca_bundle)):
         _fail("S3 CA bundle path must be absolute")
-    private_addresses = value.get("allowedPrivateAddresses", [])
-    if not isinstance(private_addresses, list) or any(not isinstance(item, str) for item in private_addresses):
-        _fail("S3 private address policy is invalid")
-    normalized_private: list[str] = []
-    for item in private_addresses:
-        try:
-            parsed = ipaddress.ip_address(item)
-        except ValueError as error:
-            raise TransferError("S3 private address policy is invalid") from error
-        if parsed.is_global or parsed.compressed != item or item in normalized_private:
-            _fail("S3 private address policy is invalid")
-        normalized_private.append(item)
-    value["allowedPrivateAddresses"] = normalized_private
+    value["allowedPrivateAddresses"] = list(validate_private_addresses(value.get("allowedPrivateAddresses", [])))
     value["multipartThresholdBytes"] = threshold
     value["multipartPartBytes"] = part_size
     return value
@@ -1072,13 +1078,13 @@ class EndpointGuard:
         profile: dict[str, Any],
         endpoint_url: str,
         *,
-        allowed_private_addresses: list[str] | None = None,
+        allowed_private_addresses: list[str] | tuple[str, ...] | None = None,
         _allow_private_test_addresses: bool = False,
     ):
         self.profile = profile
         self.endpoint_url = endpoint_url
         self._allow_private_test_addresses = _allow_private_test_addresses
-        self.allowed_private_addresses = set(allowed_private_addresses or ())
+        self.allowed_private_addresses = set(validate_private_addresses(allowed_private_addresses or ()))
         self.expected = _origin(endpoint_url)
 
     def _approved_host(self, url: str) -> tuple[str, int]:
@@ -1115,11 +1121,16 @@ class EndpointGuard:
                 parsed = ipaddress.ip_address(address)
             except (IndexError, TypeError, ValueError) as error:
                 raise TransferError("S3 endpoint returned an invalid IP address") from error
-            if not parsed.is_global and not self._allow_private_test_addresses and parsed.compressed not in self.allowed_private_addresses:
+            if self.allowed_private_addresses:
+                if parsed.compressed not in self.allowed_private_addresses:
+                    _fail("S3 endpoint resolved outside its operator-approved private addresses")
+            elif not self._allow_private_test_addresses and (not parsed.is_global or parsed.is_multicast):
                 _fail("S3 endpoint resolved to a private, local, or reserved address")
             normalized = parsed.compressed
             if normalized not in addresses:
                 addresses.append(normalized)
+        if self.allowed_private_addresses and set(addresses) != self.allowed_private_addresses:
+            _fail("S3 endpoint DNS answer differs from its operator-approved private addresses")
         return tuple(addresses)
 
     def _check_dns(self, host: str, port: int) -> None:

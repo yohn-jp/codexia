@@ -154,7 +154,7 @@ class ProbeTlsFixtureTests(unittest.TestCase):
                 return original(self.private_ip, port, *args, **kwargs)
             return original(host, port, *args, **kwargs)
 
-        self.dns_patch = patch("s3_probe.socket.getaddrinfo", side_effect=fixture_dns)
+        self.dns_patch = patch("s3_transfer.socket.getaddrinfo", side_effect=fixture_dns)
         self.dns_patch.start()
         self.addCleanup(self.dns_patch.stop)
 

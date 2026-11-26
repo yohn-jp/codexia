@@ -321,24 +321,25 @@ export class BackupConsoleStore {
   }
 
   async recovery() {
-    const { rows: [drill] } = await this.pool.query<{ run_id: string; source_sha: string; manifest_sha256: string; receipt_sha256: string; observed_at: Date }>(
-      `SELECT run_id, source_sha, manifest_sha256, receipt_sha256, observed_at FROM codexia_backup.restore_drills
+    const { rows: [drill] } = await this.pool.query<{ run_id: string; source_sha: string; manifest_sha256: string; receipt_sha256: string; observed_at: Date; api_ready: boolean }>(
+      `SELECT run_id, source_sha, manifest_sha256, receipt_sha256, observed_at, api_ready FROM codexia_backup.restore_drills
        ORDER BY observed_at DESC LIMIT 1`,
     );
     const { rows: [latest] } = await this.pool.query<{ id: string; source_sha: string | null; manifest_sha256: string | null; observed_at: Date }>(
       "SELECT id, source_sha, manifest_sha256, observed_at FROM codexia_backup.runs WHERE state = 'REMOTE_VERIFIED' ORDER BY observed_at DESC LIMIT 1",
     );
     const evidence = drill ? {
-      status: 'DRILL_PASSED', runId: drill.run_id, sourceSha: drill.source_sha, manifestSha256: drill.manifest_sha256,
+      status: drill.api_ready ? 'DRILL_PASSED' : 'partial', runId: drill.run_id, sourceSha: drill.source_sha, manifestSha256: drill.manifest_sha256,
       receiptSha256: drill.receipt_sha256, observedAt: drill.observed_at.toISOString(),
     } : null;
     const current = Boolean(drill && latest && drill.run_id === latest.id && drill.manifest_sha256 === latest.manifest_sha256);
     const missingConditions = [
       ...(!latest ? ['verified_off_vm_backup'] : []),
       ...(!current ? ['independent_restore_drill_for_latest_backup'] : []),
+      ...(current && !drill?.api_ready ? ['candidate_api_readiness'] : []),
     ];
     return {
-      status: current ? 'DRILL_PASSED' : evidence ? 'stale' : 'unknown',
+      status: current && evidence ? evidence.status : evidence ? 'stale' : 'unknown',
       restoreDrill: evidence ?? 'unknown',
       lastVerifiedOffVmBackup: latest ? { runId: latest.id, sourceSha: latest.source_sha, manifestSha256: latest.manifest_sha256, observedAt: latest.observed_at.toISOString() } : 'unknown',
       missingConditions,

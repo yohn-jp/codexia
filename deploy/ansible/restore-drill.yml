@@ -43,9 +43,31 @@
   delegate_to: localhost
   become: false
   no_log: true
+- name: Validate the reviewed candidate and protected inputs for optional API verification
+  ansible.builtin.assert:
+    that:
+      - codexia_restore_candidate_image is string
+      - codexia_restore_candidate_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - codexia_restore_candidate_ledger is string
+      - codexia_restore_candidate_ledger is match('^sha256:[a-f0-9]{64}$')
+      - codexia_restore_candidate_settings is string
+      - codexia_restore_candidate_settings is match('^/[^\r\n]+$')
+      - codexia_restore_candidate_introspection_secret_file is string
+      - codexia_restore_candidate_introspection_secret_file is match('^/[^\r\n]+$')
+  when: >-
+    codexia_restore_candidate_image is defined or codexia_restore_candidate_ledger is defined or
+    codexia_restore_candidate_settings is defined or codexia_restore_candidate_introspection_secret_file is defined
+  delegate_to: localhost
+  become: false
+  no_log: true
 - name: Run the restore only in isolated scratch storage on the recovery host
   ansible.builtin.command:
-    argv: ["bash", "{{ repo_root }}/deploy/backup/backup.sh", "drill", "{{ codexia_backup_directory }}", "{{ codexia_recovery_identity_file }}", "--approved"]
+    argv: >-
+      {{ ['bash', repo_root + '/deploy/backup/backup.sh', 'drill', codexia_backup_directory, codexia_recovery_identity_file, '--approved']
+         + (['--candidate-full-image', codexia_restore_candidate_image, '--candidate-ledger', codexia_restore_candidate_ledger,
+             '--candidate-api-ready', '--candidate-runtime-settings', codexia_restore_candidate_settings,
+             '--candidate-introspection-secret-file', codexia_restore_candidate_introspection_secret_file]
+             if codexia_restore_candidate_image is defined else []) }}
   register: codexia_restore_drill_result
   changed_when: true
   delegate_to: localhost
@@ -53,7 +75,9 @@
   no_log: true
 - name: Require encrypted artifact fingerprints to match the isolated restore
   ansible.builtin.assert:
-    that: "'Isolated restore verified: database and history fingerprints match' in codexia_restore_drill_result.stdout"
+    that:
+      - "'Isolated restore verified: database and history fingerprints match' in codexia_restore_drill_result.stdout_lines"
+      - codexia_restore_candidate_image is not defined or 'Isolated candidate API readiness verified' in codexia_restore_drill_result.stdout_lines
     fail_msg: Isolated restore verification failed; production storage was not used.
   delegate_to: localhost
   become: false
@@ -96,7 +120,11 @@
 - name: Save exact receipt only after successful restore and cleanup
   ansible.builtin.copy:
     dest: "{{ codexia_restore_receipt_output_file }}"
-    content: "{{ {'format': 'codexia-restore-receipt/v1', 'checksumManifestSha256': (codexia_restore_manifest_lines[0].split(' ') | last)} | to_json }}\n"
+    content: >-
+      {{ {'format': 'codexia-restore-receipt/v1', 'checksumManifestSha256': (codexia_restore_manifest_lines[0].split(' ') | last)}
+         | combine({'readyImageDigest': (codexia_restore_candidate_image.split('@') | last),
+                    'verifiedLedger': codexia_restore_candidate_ledger} if codexia_restore_candidate_image is defined else {})
+         | to_json }}
     mode: '0600'
     force: false
   register: codexia_restore_receipt_written

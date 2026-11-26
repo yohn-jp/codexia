@@ -272,6 +272,17 @@ test('backup console requires owner proof, isolates credentials, and applies onl
     await writeFile(restoreReceipt, JSON.stringify({ format: 'codexia-restore-receipt/v1', checksumManifestSha256: 'c'.repeat(64) }), { mode: 0o600 });
     const control = new BackupConsoleControl({ pool: workerPool, policy, config: backupExecutorConfigSchema.parse({}), python: '/usr/bin/python3', transferScript: '/unused', receiptDirectory: restoreDirectory, backupScript: '/unused' });
     await control.recordRestore(runReceipt.runId, restoreReceipt);
+    const partial = await (await get('/recovery')).json();
+    assert.equal(partial.status, 'partial');
+    assert.deepEqual(partial.missingConditions, ['candidate_api_readiness']);
+    const readinessReceipt = {
+      format: 'codexia-restore-receipt/v1', checksumManifestSha256: 'c'.repeat(64),
+      readyImageDigest: 'sha256:' + 'e'.repeat(64), verifiedLedger: 'sha256:' + 'd'.repeat(64),
+    };
+    await writeFile(restoreReceipt, JSON.stringify(readinessReceipt));
+    await assert.rejects(control.recordRestore(runReceipt.runId, restoreReceipt), /different backup source image/u);
+    await writeFile(restoreReceipt, JSON.stringify({ ...readinessReceipt, readyImageDigest: 'sha256:' + 'b'.repeat(64) }));
+    await control.recordRestore(runReceipt.runId, restoreReceipt);
     assert.equal((await (await get('/recovery')).json()).status, 'DRILL_PASSED');
   } finally {
     await rm(restoreDirectory, { recursive: true, force: true });

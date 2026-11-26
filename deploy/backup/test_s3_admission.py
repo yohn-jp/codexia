@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.util import find_spec
+import json
 import os
 from pathlib import Path
 import ssl
@@ -85,6 +86,26 @@ def serve_loopback(handler, *, tls_context=None):
 
 
 class ProxyAdmissionTests(unittest.TestCase):
+    def test_operator_private_addresses_cannot_approve_local_or_metadata_endpoints(self):
+        with tempfile.TemporaryDirectory(prefix="codexia-s3-private-") as directory:
+            path = Path(directory) / "profile.json"
+            for address in ("127.0.0.1", "169.254.169.254", "0.0.0.0", "::1", "224.0.0.1"):
+                with self.subTest(address=address):
+                    path.write_text(json.dumps(profile(allowedPrivateAddresses=[address])))
+                    path.chmod(0o600)
+                    with self.assertRaises(s3_transfer.TransferError):
+                        s3_transfer.load_profile(path)
+            path.write_text(json.dumps(profile(allowedPrivateAddresses=["10.20.30.40"])))
+            selected = s3_transfer.load_profile(path)
+            guard = s3_transfer.EndpointGuard(selected, selected["endpointUrl"], allowed_private_addresses=selected["allowedPrivateAddresses"])
+            for address, accepted in (("10.20.30.40", True), ("10.20.30.41", False), ("8.8.8.8", False)):
+                with self.subTest(resolved=address), patch.object(socket, "getaddrinfo", return_value=[(0, 0, 0, "", (address, 443))]):
+                    if accepted:
+                        self.assertEqual(guard._resolve_public_addresses("objects.example.test", 443), (address,))
+                    else:
+                        with self.assertRaises(s3_transfer.TransferError):
+                            guard._resolve_public_addresses("objects.example.test", 443)
+
     def test_s3_sdk_config_explicitly_disables_proxies(self):
         sdk_config = Mock()
         sdk_client = SimpleNamespace(meta=SimpleNamespace(endpoint_url=profile()["endpointUrl"], events=Mock()))

@@ -188,17 +188,25 @@ export class BackupConsoleControl {
   async recordRestore(runId: string, receiptPath: string) {
     if (!uuid.safeParse(runId).success || !isAbsolute(receiptPath)) throw new Error('Restore receipt input is invalid');
     const receiptBytes = await readPrivateBackupFile(receiptPath);
-    const receipt = z.strictObject({ format: z.literal('codexia-restore-receipt/v1'), checksumManifestSha256: manifestSchema }).parse(JSON.parse(receiptBytes));
-    const { rows: [run] } = await this.options.pool.query<{ source_sha: string | null; manifest_sha256: string | null; state: string }>(
-      'SELECT source_sha, manifest_sha256, state FROM codexia_backup.runs WHERE id = $1', [runId]);
+    const receipt = z.strictObject({
+      format: z.literal('codexia-restore-receipt/v1'),
+      checksumManifestSha256: manifestSchema,
+      readyImageDigest: imageDigestSchema.optional(),
+      verifiedLedger: imageDigestSchema.optional(),
+    }).refine(value => Boolean(value.readyImageDigest) === Boolean(value.verifiedLedger)).parse(JSON.parse(receiptBytes));
+    const { rows: [run] } = await this.options.pool.query<{ source_sha: string | null; image_digest: string | null; manifest_sha256: string | null; state: string }>(
+      'SELECT source_sha, COALESCE(image_digest, candidate_image_digest) AS image_digest, manifest_sha256, state FROM codexia_backup.runs WHERE id = $1', [runId]);
     if (!run?.source_sha || !run.manifest_sha256 || run.manifest_sha256 !== receipt.checksumManifestSha256 || run.state !== 'REMOTE_VERIFIED') {
       throw new Error('Restore receipt does not match a remotely verified source run');
     }
+    if (receipt.readyImageDigest && receipt.readyImageDigest !== run.image_digest) {
+      throw new Error('Restore readiness receipt identifies a different backup source image');
+    }
     const receiptSha = createHash('sha256').update(receiptBytes).digest('hex');
     await this.options.pool.query(
-      `INSERT INTO codexia_backup.restore_drills (id, run_id, source_sha, manifest_sha256, receipt_sha256)
-       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (run_id, receipt_sha256) DO NOTHING`,
-      [randomUUID(), runId, run.source_sha, receipt.checksumManifestSha256, receiptSha],
+      `INSERT INTO codexia_backup.restore_drills (id, run_id, source_sha, manifest_sha256, receipt_sha256, api_ready)
+       VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (run_id, receipt_sha256) DO NOTHING`,
+      [randomUUID(), runId, run.source_sha, receipt.checksumManifestSha256, receiptSha, Boolean(receipt.readyImageDigest)],
     );
   }
 

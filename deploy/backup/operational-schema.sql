@@ -100,6 +100,7 @@ CREATE TABLE codexia_backup.restore_drills (
   source_sha text NOT NULL CHECK (source_sha ~ '^[0-9a-f]{40}$'),
   manifest_sha256 text NOT NULL CHECK (manifest_sha256 ~ '^[0-9a-f]{64}$'),
   receipt_sha256 text NOT NULL CHECK (receipt_sha256 ~ '^[0-9a-f]{64}$'),
+  api_ready boolean NOT NULL DEFAULT false,
   observed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   UNIQUE (run_id, receipt_sha256)
 );
@@ -119,7 +120,7 @@ GRANT INSERT ON codexia_backup.revisions TO codexia_backup_api;
 GRANT UPDATE (draft_revision) ON codexia_backup.state TO codexia_backup_api;
 GRANT INSERT (id, request_id, kind, revision, probe_id) ON codexia_backup.operations TO codexia_backup_api;
 GRANT INSERT (id, request_id, kind, revision, maintenance_window_id) ON codexia_backup.runs TO codexia_backup_api;
-GRANT INSERT (id, run_id, source_sha, manifest_sha256, receipt_sha256) ON codexia_backup.restore_drills TO codexia_backup_executor;
+GRANT INSERT (id, run_id, source_sha, manifest_sha256, receipt_sha256, api_ready) ON codexia_backup.restore_drills TO codexia_backup_executor;
 GRANT INSERT (id, request_id, kind, revision, maintenance_window_id, schedule_slot_key, state, phase, reason_code, source_sha, image_digest, candidate_source_sha, candidate_image_digest)
   ON codexia_backup.runs TO codexia_backup_executor;
 GRANT UPDATE (active_revision, applied_at, executor_seen_at, executor_key_ids, executor_operator_origin, active_health, active_usable, run_executor_enabled)

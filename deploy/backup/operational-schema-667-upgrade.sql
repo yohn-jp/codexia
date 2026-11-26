@@ -40,9 +40,10 @@ CREATE TABLE IF NOT EXISTS codexia_backup.restore_drills (
   observed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   UNIQUE (run_id, receipt_sha256)
 );
+ALTER TABLE codexia_backup.restore_drills ADD COLUMN IF NOT EXISTS api_ready boolean NOT NULL DEFAULT false;
 REVOKE ALL ON codexia_backup.restore_drills FROM PUBLIC;
 GRANT SELECT ON codexia_backup.restore_drills TO codexia_backup_api, codexia_backup_executor;
-GRANT INSERT (id, run_id, source_sha, manifest_sha256, receipt_sha256) ON codexia_backup.restore_drills TO codexia_backup_executor;
+GRANT INSERT (id, run_id, source_sha, manifest_sha256, receipt_sha256, api_ready) ON codexia_backup.restore_drills TO codexia_backup_executor;
 REVOKE ALL ON codexia_backup.runs FROM PUBLIC;
 GRANT SELECT ON codexia_backup.runs TO codexia_backup_api, codexia_backup_executor;
 GRANT INSERT (id, request_id, kind, revision, maintenance_window_id) ON codexia_backup.runs TO codexia_backup_api;

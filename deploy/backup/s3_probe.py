@@ -8,12 +8,10 @@ under the already-approved prefix. It does not alter retention or bucket policy.
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import json
 import re
 import sys
 import secrets
-import socket
 from typing import Any
 
 import s3_transfer
@@ -78,23 +76,10 @@ def _prefix_allowed(prefix: str, allowed: Any) -> bool:
 
 
 def _private_allowlist(value: Any) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        raise ProbeError("invalid_operator_policy")
-    addresses: list[str] = []
-    for raw in value:
-        try:
-            address = ipaddress.ip_address(raw)
-        except (TypeError, ValueError) as error:
-            raise ProbeError("invalid_operator_policy") from error
-        if address.version != 4 or not any(address in network for network in (
-            ipaddress.ip_network("10.0.0.0/8"), ipaddress.ip_network("172.16.0.0/12"),
-            ipaddress.ip_network("192.168.0.0/16"),
-        )):
-            raise ProbeError("invalid_operator_policy")
-        addresses.append(address.compressed)
-    if len(set(addresses)) != len(addresses):
-        raise ProbeError("invalid_operator_policy")
-    return tuple(addresses)
+    try:
+        return s3_transfer.validate_private_addresses(value)
+    except s3_transfer.TransferError as error:
+        raise ProbeError("invalid_operator_policy") from error
 
 
 def probe_destination(
@@ -199,45 +184,12 @@ def _make_explicit_client(profile: dict[str, Any], credential: dict[str, str]) -
         endpoint_url = f"https://s3.{profile['region']}.amazonaws.com"
     client = session.client("s3", region_name=profile["region"], endpoint_url=endpoint_url,
                             config=config, verify=profile.get("caBundle") or True)
-    guard = s3_transfer.EndpointGuard(profile, client.meta.endpoint_url)
-    allowed_private = profile.get("_allowedPrivateAddresses", ())
-    if allowed_private:
-        guard._resolve_public_addresses = _checked_private_resolver(guard, allowed_private)  # type: ignore[method-assign]
+    guard = s3_transfer.EndpointGuard(profile, client.meta.endpoint_url,
+                                      allowed_private_addresses=profile.get("_allowedPrivateAddresses", ()))
     s3_transfer._install_pinned_https_transport(client, guard)
     client.meta.events.register_first("before-send.s3", guard.before_send)
     client.meta.events.register_first("needs-retry.s3", guard.needs_retry)
     return client
-
-
-def _checked_private_resolver(guard: Any, allowed: tuple[str, ...]):
-    """Re-resolve every connection; pin only exact operator-approved RFC1918 IPs."""
-    def resolve(host: str, port: int) -> tuple[str, ...]:
-        try:
-            results = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        except OSError as error:
-            raise s3_transfer.TransferError("S3 endpoint DNS lookup failed") from error
-        if not results:
-            raise s3_transfer.TransferError("S3 endpoint resolved to no addresses")
-        observed: list[str] = []
-        for item in results:
-            raw = item[4][0]
-            try:
-                ip = ipaddress.ip_address(raw)
-            except (TypeError, ValueError) as error:
-                raise s3_transfer.TransferError("S3 endpoint returned an invalid IP address") from error
-            if ip.is_global:
-                # Public endpoints continue to use the transport's normal strict policy.
-                raise s3_transfer.TransferError("Private fixture endpoint changed to a public address")
-            if ip.version != 4 or ip.compressed not in allowed or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                raise s3_transfer.TransferError("S3 endpoint resolved outside its operator-approved private addresses")
-            if ip.compressed not in observed:
-                observed.append(ip.compressed)
-        if set(observed) != set(allowed):
-            raise s3_transfer.TransferError("S3 endpoint DNS answer differs from its operator-approved private addresses")
-        if not observed:
-            raise s3_transfer.TransferError("S3 endpoint resolved to no approved addresses")
-        return tuple(observed)
-    return resolve
 
 
 def _is_denied(error: Exception) -> bool:
