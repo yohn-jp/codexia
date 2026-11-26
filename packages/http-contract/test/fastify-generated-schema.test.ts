@@ -93,10 +93,19 @@ test('generated Fastify schemas validate project creation and preserve actual pe
   });
 
   const importPayload = {
-    format: 'codexia-work/v1', project: { title: project.title, settings: {} },
-    documents: [], knowledge: { nodes: [], aliases: [], relations: [] },
-    evidence: { anchors: [], mentions: [], assertions: [], assertionEvidence: [], unresolved: { anchors: [], mentions: [], assertionEvidence: [] } },
-    moduleRecords: [], omittedRecords: [],
+    format: 'codexia-work/v1',
+    project: { title: project.title, settings: {} },
+    documents: [],
+    knowledge: { nodes: [], aliases: [], relations: [] },
+    evidence: {
+      anchors: [],
+      mentions: [],
+      assertions: [],
+      assertionEvidence: [],
+      unresolved: { anchors: [], mentions: [], assertionEvidence: [] },
+    },
+    moduleRecords: [],
+    omittedRecords: [],
   };
   const missingImportKey = await app.inject({
     method: 'POST',
@@ -162,7 +171,10 @@ test('generated Fastify document response schema preserves PostgreSQL DTOs and a
     }),
   });
 
-  const response = await app.inject({ method: 'GET', url: '/api/v1/persistence/projects/00000000-0000-4000-8000-000000000001/documents/00000000-0000-4000-8000-000000000002' });
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/v1/persistence/projects/00000000-0000-4000-8000-000000000001/documents/00000000-0000-4000-8000-000000000002',
+  });
   assert.equal(response.statusCode, 200, response.payload);
   assert.equal(response.json().document.title, 'Opening');
   assert.deepEqual(response.json().document.projectionMetadata, { generation: 1 });
@@ -236,7 +248,11 @@ test('generated anchor write responses preserve persisted evidence and reject in
     handler: async (request, reply) =>
       reply
         .code(201)
-        .send(request.params.documentId === '00000000-0000-4000-8000-000000000009' ? { ...created, anchor: { ...anchor, quoteSha256: undefined } } : created),
+        .send(
+          request.params.documentId === '00000000-0000-4000-8000-000000000009'
+            ? { ...created, anchor: { ...anchor, quoteSha256: undefined } }
+            : created,
+        ),
   });
   app.route({
     method: updateAnchor.method,
@@ -251,11 +267,19 @@ test('generated anchor write responses preserve persisted evidence and reject in
   assert.equal(creation.statusCode, 201, creation.payload);
   assert.deepEqual(creation.json(), created);
 
-  const update = await app.inject({ method: 'PATCH', url: `${url}/00000000-0000-4000-8000-000000000005`, payload: { ...input, expectedVersion: 1 } });
+  const update = await app.inject({
+    method: 'PATCH',
+    url: `${url}/00000000-0000-4000-8000-000000000005`,
+    payload: { ...input, expectedVersion: 1 },
+  });
   assert.equal(update.statusCode, 200, update.payload);
   assert.deepEqual(update.json(), { ...anchor, version: 2 });
 
-  const incomplete = await app.inject({ method: 'POST', url: url.replace('00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000009'), payload: input });
+  const incomplete = await app.inject({
+    method: 'POST',
+    url: url.replace('00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000009'),
+    payload: input,
+  });
   assert.equal(incomplete.statusCode, 500, incomplete.payload);
   assert.match(incomplete.json().message, /quoteSha256.*required/u);
 });

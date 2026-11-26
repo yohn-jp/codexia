@@ -8,6 +8,7 @@ import { basename, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { startLiveHost } from './live-host.mjs';
+import { evaluateProductProfile } from './product-profile.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const toolRoot = dirname(fileURLToPath(import.meta.url));
@@ -129,6 +130,10 @@ async function runOfficialScenario({ target, url, scenario, classification, reas
   return {
     target, classification, scenario, ...(reason ? { reason } : {}), force,
     exitCode: result.code, status,
+    ...(scenario === 'server-stateless' ? {
+      discoveredCapabilities: checks?.find(check => check.id === 'sep-2575-server-implements-discover')?.details?.result?.capabilities ?? null,
+      discoveredToolNames: checks?.find(check => check.id === 'sep-2575-discover-capabilities-match-handlers')?.details?.response?.result?.tools?.map(tool => tool.name) ?? null,
+    } : {}),
     ...(typeof toolCount === 'number' ? { toolCount } : {}),
     checkCounts: (checks ?? []).reduce((counts, check) => ({ ...counts, [check.status]: (counts[check.status] ?? 0) + 1 }), {}),
     checks: checks?.map(({ id, status: checkStatus, errorMessage }) => ({ id, status: checkStatus, ...(errorMessage ? { error: errorMessage.slice(0, 600) } : {}) })) ?? null,
@@ -156,6 +161,7 @@ async function runOfficialMatrix(target, url, rawRoot) {
     unscored: { attempted: unscored.length, counts: counts(unscored), results: unscored },
     excluded: excludedScenarios,
     eligibleRequiredPassed,
+    productProfile: evaluateProductProfile(required),
     fullRequirementSetPassed: eligibleRequiredPassed && excludedScenarios.length === 0,
   };
 }
@@ -292,6 +298,7 @@ let productConformanceProxy;
 let tempRoot;
 let rawReports;
 try {
+  execFileSync(process.execPath, ['--test', resolve(toolRoot, 'product-profile.test.mjs')], { cwd: root, stdio: 'inherit' });
   tempRoot = await mkdtemp(resolve(tmpdir(), 'codexia-mcp-conformance-'));
   rawReports = resolve(tempRoot, 'official-reports');
   protocolFixture = await startProtocolFixture();
@@ -301,7 +308,7 @@ try {
     manifest: '@modelcontextprotocol/conformance requirements/2026-07-28.yaml',
     ...syntheticConformance,
   };
-  if (!syntheticConformance.eligibleRequiredPassed) failures.push('official eligible required 2026-07-28 synthetic SDK fixture scenarios failed; see the per-scenario native reports');
+  if (!syntheticConformance.productProfile.passed) failures.push('2026-07-28 synthetic fixture product-profile acceptance failed; see native reports and applicability results');
   if (syntheticConformance.excluded.length) failures.push('full 2026-07-28 synthetic requirement set is not certified because required scenarios were excluded');
 
   mutationFixture = await startProtocolFixture(true);
@@ -349,17 +356,13 @@ try {
     });
     const body = await response.json();
     const conforms = response.status === 400 && body.jsonrpc === '2.0' && body.id === null && body.error?.code === -32700;
-    const observedFastifyParserError = response.status === 400 && body.code === 'INVALID_JSON';
     evidence.transportErrors.malformedJson = {
-      status: conforms ? 'PASS' : observedFastifyParserError ? 'PRODUCT_DEVIATION' : 'UNEXPECTED_RESPONSE',
+      status: conforms ? 'PASS' : 'FAIL',
       httpStatus: response.status,
       body,
       expected: { status: 400, jsonrpc: '2.0', id: null, errorCode: -32700 },
-      blocker: observedFastifyParserError ? 'Fastify returns generic INVALID_JSON; changing the published MCP 400 schema is breaking against the approved OpenAPI baseline and cannot be bundled without the owning compatibility decision/API epoch change.' : null,
     };
-    if (!conforms) failures.push(observedFastifyParserError
-      ? 'live MCP malformed JSON response differs from the official SDK JSON-RPC parse error; published response-shape correction is blocked by the compatibility guard'
-      : `live MCP malformed JSON returned unexpected status/body (${response.status}, ${JSON.stringify(body).slice(0, 250)})`);
+    assert.ok(conforms, 'live MCP malformed JSON response must be a JSON-RPC parse error');
   });
 
   await guarded('live product loopback and configured origin policy', async () => {
@@ -398,7 +401,7 @@ try {
     manifest: '@modelcontextprotocol/conformance requirements/2026-07-28.yaml',
     ...productConformance,
   };
-  if (!productConformance.eligibleRequiredPassed) failures.push('official eligible required 2026-07-28 live product scenarios failed; see the per-scenario native reports');
+  if (!productConformance.productProfile.passed) failures.push('2026-07-28 live product-profile acceptance failed; see native reports and applicability results');
   if (productConformance.excluded.length) failures.push('full 2026-07-28 product requirement set is not certified because required scenarios were excluded');
   const productToolListCheck = productConformance.required.results.find(item => item.scenario === 'tools-list');
   evidence.productToolsListScenario = {

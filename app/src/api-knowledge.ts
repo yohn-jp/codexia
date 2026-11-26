@@ -255,13 +255,17 @@ export const knowledgeApi = {
     filters: { q: string; type: string; status: string; cursor?: string },
     signal?: AbortSignal,
   ): Promise<PersistenceKnowledgePage> => {
+    const { status } = filters;
+    if (status !== '' && status !== 'confirmed' && status !== 'proposed' && status !== 'retired') {
+      throw new TypeError('Invalid knowledge status filter');
+    }
     const page = await persistenceNodesGet(
       projectId,
       {
         limit: 50,
         q: filters.q,
         type: filters.type,
-        status: filters.status,
+        status,
         ...(filters.cursor ? { cursor: filters.cursor } : {}),
       },
       options(signal),

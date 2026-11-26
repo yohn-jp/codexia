@@ -6,7 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { readApprovedOpenapi } from './approved-openapi.mjs';
 import { resolveBaseCommit, selectBaseReference } from './base-reference.mjs';
-import { approvedEpochTransition, assertBreakingComparison, assertCandidateManifestEpoch, assertComparisonManifestEpoch } from './breaking-policy.mjs';
+import {
+  approvedEpochTransition,
+  assertBreakingComparison,
+  assertCandidateManifestEpoch,
+  assertComparisonManifestEpoch,
+} from './breaking-policy.mjs';
 import { resolveOasdiffBinary } from './oasdiff.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -70,7 +75,11 @@ try {
   process.stdout.write(comparison.stdout ?? '');
   process.stderr.write(comparison.stderr ?? '');
   assertBreakingComparison({ stdout: comparison.stdout ?? '', status: comparison.status, transition });
-  console.log(transition ? `oasdiff accepted only the reviewed ${transition.from} -> ${transition.to} contract correction from ${baseSha}.` : `oasdiff found no breaking changes at API epoch ${epoch}, comparing approved ${packageContractPath} from ${baseSha}.`);
+  console.log(
+    transition
+      ? `oasdiff accepted only the reviewed ${transition.from} -> ${transition.to} contract correction from ${baseSha}.`
+      : `oasdiff found no breaking changes at API epoch ${epoch}, comparing approved ${packageContractPath} from ${baseSha}.`,
+  );
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });
 }

@@ -91,7 +91,7 @@ Existing Core / PostgreSQL snapshot / proposal
 | ID | 層 | 試験と合否 |
 | --- | --- | --- |
 | MCPV-001 | Compile/schema | v2 SDK+Zod v4で全toolの登録・入出力schemaが型・実行時に有効 |
-| MCPV-002 | Protocol conformance | `npx @modelcontextprotocol/conformance server --url <isolated-url>/mcp --requirements 2026-07-28` を隔離認可環境で実行。required failureなし。スコア対象外failureは別記 |
+| MCPV-002 | Protocol conformance | `npx @modelcontextprotocol/conformance server --url <isolated-url>/mcp --requirements 2026-07-28` を隔離認可環境で実行。全required scenarioを実行しnative結果を保存。採用済みtools-only製品プロファイルの適用対象にfailureなし。汎用参照サーバーのfull-suite結果とスコア対象外failureは別記 |
 | MCPV-003 | Inspector | Inspector CLI/Webでツール名/Schema、各transport、相互運用・再接続・新世代へのnegotiationを確認 |
 | MCPV-004 | Cross-principal | owner、MCP、失効client、別project、scope不足/過剰の認可拒否。MCPによるapprove/apply不可 |
 | MCPV-005 | State integrity | snapshot競合、提案後の作者承認、replay/duplicate、transaction receipt、実PostgreSQL再起動 |
@@ -100,6 +100,8 @@ Existing Core / PostgreSQL snapshot / proposal
 | MCPV-008 | Client interop | 採用する外部AIクライアントでOAuth PKCE、token refresh、対象選択、Tool/Resultの実通信 |
 
 conformanceの `--requirements 2026-07-28` は仕様リリース時点のrequired scenario集合に対応し、単なる最新のall-suitesと区別する。テスト対象のOAuth authorization-server部分はMCP resource serverのconformanceだけでは証明できないため、Better Authの実認証E2Eで検証する。Inspectorが接続できることだけでconformance済みとしない。
+
+製品はtools-onlyのcapabilityを宣言する。公式suiteの診断専用toolや未採用のprompts/resources/completion/input-required機能を本番に追加しない。全required scenarioを実行してnative failureを保持したうえで、実際のdiscovery・tool catalogがtools-onlyである場合に限り、未採用機能または診断専用toolの欠如を示す固定版の個別checkを適用外として区別する。予期しないfailure・未実行・wire schema不整合・capability変化は不合格。製品固有の実tool成功、引数検証、未知tool拒否、HTTP/stdio、認可、Host/Originは必須とする。製品受入の合格を汎用suite全件合格とは表記しない。
 
 ## 実装順序と禁止
 

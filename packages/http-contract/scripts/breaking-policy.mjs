@@ -33,12 +33,23 @@ export function approvedEpochTransition(baseSha, baseEpoch, candidateEpoch) {
   return undefined;
 }
 
-export function assertComparisonManifestEpoch({ baseSpec, candidateSpec, baseUpdate, baseFrontend, candidateUpdate, candidateFrontend, baseSha }) {
+export function assertComparisonManifestEpoch({
+  baseSpec,
+  candidateSpec,
+  baseUpdate,
+  baseFrontend,
+  candidateUpdate,
+  candidateFrontend,
+  baseSha,
+}) {
   const baseEpoch = validateManifestEpoch(baseSpec, baseUpdate, baseFrontend, 'Approved base');
   const candidateEpoch = validateManifestEpoch(candidateSpec, candidateUpdate, candidateFrontend, 'Candidate');
 
   if (candidateEpoch !== baseEpoch) {
-    assert.ok(approvedEpochTransition(baseSha, baseEpoch, candidateEpoch), 'API epoch changed without an approved OpenAPI compatibility policy');
+    assert.ok(
+      approvedEpochTransition(baseSha, baseEpoch, candidateEpoch),
+      'API epoch changed without an approved OpenAPI compatibility policy',
+    );
   }
   return candidateEpoch;
 }
@@ -60,11 +71,15 @@ export function assertBreakingComparison({ stdout, status, transition }) {
       const id = issue?.id ?? '';
       // Limit approval to persistence wire constraints and MCP POST responses.
       if (/^\/api\/v1\/persistence(?:\/|$)/u.test(path)) {
-        return !/^(?:request-(?:body|property|parameter|header|additional-properties)|new-required-request-property|response-property-pattern|response-property-format|response-property-max|response-property-min)/u.test(id);
+        return !/^(?:request-(?:body|property|parameter|header|additional-properties)|new-required-request-property|response-property-pattern|response-property-format|response-property-max|response-property-min)/u.test(
+          id,
+        );
       }
-      return !(issue.operation === 'POST' &&
+      return !(
+        issue.operation === 'POST' &&
         (path === '/mcp' || path === '/api/projects/{projectId}/modules/mcp/streamable') &&
-        /^response-(?:body|property|schema|header)/u.test(id));
+        /^response-(?:body|property|schema|header)/u.test(id)
+      );
     });
     assert.equal(outside.length, 0, `oasdiff reported breaking changes outside approved epoch transition: ${JSON.stringify(outside)}`);
     assert.equal(status, errors.length ? 1 : 0, 'oasdiff exit does not match reported ERR issues');
