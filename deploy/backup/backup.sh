@@ -285,9 +285,17 @@ GRANT CONNECT ON DATABASE codexia TO codexia, codexia_auth_runtime;
 GRANT USAGE, CREATE ON SCHEMA public TO codexia;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO codexia;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO codexia;
-GRANT USAGE ON SCHEMA codexia_auth TO codexia_auth_runtime;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA codexia_auth TO codexia_auth_runtime;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA codexia_auth TO codexia_auth_runtime;
+-- pg_restore --no-owner makes postgres the owner of the restored catalog.
+-- Rebind only this scratch auth schema and its objects to the normal runtime role.
+ALTER SCHEMA codexia_auth OWNER TO codexia_auth_runtime;
+SELECT format('ALTER %s %I.%I OWNER TO codexia_auth_runtime',
+              CASE c.relkind WHEN 'S' THEN 'SEQUENCE' WHEN 'v' THEN 'VIEW'
+                WHEN 'm' THEN 'MATERIALIZED VIEW' WHEN 'f' THEN 'FOREIGN TABLE' ELSE 'TABLE' END,
+              n.nspname, c.relname)
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'codexia_auth' AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+ORDER BY (c.relkind = 'S'), c.relname
+\gexec
 SQL
   then
     die 'Could not provision isolated candidate API database roles'
