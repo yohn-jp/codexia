@@ -28,6 +28,7 @@ preparedAuthorTest("preserves unsent Knowledge forms per node while switching A 
   const browse = page.locator(".pg-knowledge-list");
   const detail = page.getByRole("region", { name: "Knowledge詳細" });
   const relationTarget = detail.locator("form.kci__form--relation select");
+  const assertionStatement = detail.getByRole("textbox", { name: "命題", exact: true });
   const assertionModality = detail.locator('section[aria-labelledby="kci-assertions-heading"] form select');
   const selectNode = async (name: string) => {
     const row = browse.locator("li").filter({ hasText: name });
@@ -42,7 +43,7 @@ preparedAuthorTest("preserves unsent Knowledge forms per node while switching A 
   await detail.getByLabel("別名候補").fill("A alias unsent");
   await detail.getByLabel("関係の種類", { exact: true }).fill("knows unsent");
   await relationTarget.selectOption(nodeB);
-  await detail.getByLabel("命題", { exact: true }).fill("A statement unsent");
+  await assertionStatement.fill("A statement unsent");
   await detail.getByLabel("視点", { exact: true }).fill("A perspective unsent");
   await assertionModality.selectOption("hypothesis");
 
@@ -50,14 +51,14 @@ preparedAuthorTest("preserves unsent Knowledge forms per node while switching A 
   await expect(detail.getByLabel("別名候補", { exact: true })).toHaveValue("");
   await expect(detail.getByLabel("関係の種類", { exact: true })).toHaveValue("");
   await expect(relationTarget).toHaveValue("");
-  await expect(detail.getByLabel("命題", { exact: true })).toHaveValue("");
+  await expect(assertionStatement).toHaveValue("");
   await expect(detail.getByLabel("視点", { exact: true })).toHaveValue("author");
   await expect(assertionModality).toHaveValue("fact");
   await selectNode("Draft A");
   await expect(detail.getByLabel("別名候補", { exact: true })).toHaveValue("A alias unsent");
   await expect(detail.getByLabel("関係の種類", { exact: true })).toHaveValue("knows unsent");
   await expect(relationTarget).toHaveValue(nodeB);
-  await expect(detail.getByLabel("命題", { exact: true })).toHaveValue("A statement unsent");
+  await expect(assertionStatement).toHaveValue("A statement unsent");
   await expect(detail.getByLabel("視点", { exact: true })).toHaveValue("A perspective unsent");
   await expect(assertionModality).toHaveValue("hypothesis");
 });
