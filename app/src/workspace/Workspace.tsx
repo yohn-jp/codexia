@@ -631,7 +631,18 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
           candidate => candidate.dataset.workspacePanel === panelId,
         );
         if (!element) return;
-        (getFocusTarget?.(element) ?? element).focus();
+        const focusTarget = getFocusTarget?.(element) ?? element;
+        focusTarget.focus();
+        if (getFocusTarget && document.activeElement !== focusTarget) {
+          window.requestAnimationFrame(() => {
+            if (!isCurrent()) return;
+            const currentPanel = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>('[data-workspace-panel]') ?? []).find(
+              candidate => candidate.dataset.workspacePanel === panelId,
+            );
+            if (!currentPanel) return;
+            (getFocusTarget(currentPanel) ?? currentPanel).focus();
+          });
+        }
       });
     };
     void reveal();
