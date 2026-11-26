@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
-import { BackupConsoleExecutor, pythonBackupProbe } from '../src/backup-console-executor.js';
+import { BackupConsoleExecutor, backupExecutorConfigSchema, pythonBackupProbe } from '../src/backup-console-executor.js';
+import { BackupConsoleControl } from '../src/backup-console-control.js';
 import type { BackupPolicy } from '../src/backup-console-routes.js';
 import { BackupConsoleStore } from '../src/backup-console-store.js';
 import { backupCredentialKeyId } from '../src/backup-credential-envelope.js';
@@ -29,6 +32,7 @@ test('backup console requires owner proof, isolates credentials, and applies onl
   await assert.rejects(apiPool.query('SELECT envelope FROM codexia_backup.credentials'), { code: '42501' });
   await assert.rejects(apiPool.query('UPDATE codexia_backup.state SET active_revision = NULL'), { code: '42501' });
   await assert.rejects(apiPool.query("UPDATE codexia_backup.operations SET state = 'PASSED'"), { code: '42501' });
+  await assert.rejects(apiPool.query("UPDATE codexia_backup.runs SET state = 'REMOTE_VERIFIED'"), { code: '42501' });
   await assert.rejects(workerPool.query('UPDATE codexia_backup.state SET draft_revision = NULL'), { code: '42501' });
 
   const keys = generateKeyPairSync('rsa', {
@@ -51,6 +55,10 @@ test('backup console requires owner proof, isolates credentials, and applies onl
     secretAccessKey: 'test-fixture-secret-key',
   } as const;
   const policy: BackupPolicy = {
+    maintenanceWindows: [{
+      id: 'fixture-window', timeZone: 'UTC', daysOfWeek: [new Date().getUTCDay()],
+      start: `${String(Math.floor(new Date().getUTCHours() / 6) * 6).padStart(2, '0')}:00`, durationMinutes: 360,
+    }],
     destinations: [
       {
         provider: draft.provider,
@@ -71,6 +79,12 @@ test('backup console requires owner proof, isolates credentials, and applies onl
     pool: workerPool,
     policy,
     privateKeys,
+    async run(runId) {
+      await admin.query(
+        "UPDATE codexia_backup.runs SET state = 'REMOTE_VERIFIED', phase = 'complete', source_sha = $2, image_digest = $3, manifest_sha256 = $4, evidence = $5, observed_at = clock_timestamp() WHERE id = $1",
+        [runId, 'a'.repeat(40), 'sha256:' + 'b'.repeat(64), 'c'.repeat(64), { offVmMethod: 's3', markerSha256: 'd'.repeat(64) }],
+      );
+    },
     async probe(revision, credential) {
       assert.equal(revision.destination.endpoint, draft.endpoint);
       assert.equal(credential.accessKeyId, draft.accessKeyId);
@@ -121,6 +135,9 @@ test('backup console requires owner proof, isolates credentials, and applies onl
     ['GET', '/config/probes/' + randomUUID()],
     ['POST', '/config/activate'],
     ['POST', '/config/disable'],
+    ['POST', '/runs'],
+    ['GET', '/runs'],
+    ['GET', '/recovery'],
   ];
   for (const [method, path] of routes) {
     for (const principal of principals) {
@@ -134,7 +151,7 @@ test('backup console requires owner proof, isolates credentials, and applies onl
   assert.equal((await put({ ...draft, endpoint: 'https://169.254.169.254' })).status, 422);
   assert.equal((await put({ ...draft, prefix: 'install/backup-other' })).status, 422);
   assert.equal((await put({ ...draft, staging: '/tmp/override' })).status, 422);
-  for (const outOfScope of ['/runs', '/recovery', '/restore', '/config/iam']) {
+  for (const outOfScope of ['/restore', '/config/iam']) {
     assert.equal((await get(outOfScope)).status, 404);
   }
   const concurrent = await Promise.all([put(draft), put(draft)]);
@@ -150,6 +167,9 @@ test('backup console requires owner proof, isolates credentials, and applies onl
     rows: [stored],
   } = await admin.query<{ envelope: unknown }>('SELECT envelope FROM codexia_backup.credentials');
   assert.ok(stored && !JSON.stringify(stored.envelope).includes(draft.secretAccessKey));
+  await admin.query(await readFile(new URL('../../../deploy/backup/operational-schema-667-upgrade.sql', import.meta.url), 'utf8'));
+  assert.equal((await api.config()).revision, 1);
+  assert.ok((await admin.query('SELECT envelope FROM codexia_backup.credentials')).rowCount === 1);
 
   const probeKey = randomUUID();
   const queued = await post('probes', { revision: 1 }, probeKey);
@@ -228,9 +248,39 @@ test('backup console requires owner proof, isolates credentials, and applies onl
   ]);
   assert.equal((await post('activate', { revision: 4, probeId: retentionProbeId, confirmed: true })).status, 409);
 
+  const runRequestId = randomUUID();
+  const runBody = { maintenanceWindowId: 'fixture-window', confirmed: true };
+  const runResponse = await fetch(base + '/runs', {
+    method: 'POST', headers: { ...writeHeaders, 'idempotency-key': runRequestId }, body: JSON.stringify(runBody),
+  });
+  assert.equal(runResponse.status, 202);
+  const runReceipt = await runResponse.json() as { runId: string; state: string };
+  assert.equal(runReceipt.state, 'queued');
+  assert.deepEqual(await (await fetch(base + '/runs', {
+    method: 'POST', headers: { ...writeHeaders, 'idempotency-key': runRequestId }, body: JSON.stringify(runBody),
+  })).json(), runReceipt);
+  assert.equal((await get('/runs/' + runReceipt.runId)).status, 200);
+  const runHistory = await (await get('/runs')).json() as { runs: Array<{ runId: string; status: string }> };
+  assert.ok(runHistory.runs.some(run => run.runId === runReceipt.runId && run.status === 'QUEUED'));
+  assert.equal(await worker.processNext(), true);
+  assert.equal((await (await get('/runs/' + runReceipt.runId)).json()).status, 'REMOTE_VERIFIED');
+  assert.equal(typeof (await (await get('/status')).json()).lastVerifiedOffVmBackup.manifestSha256, 'string');
+  assert.deepEqual((await get('/recovery').then(response => response.json())).missingConditions, ['independent_restore_drill_for_latest_backup']);
+  const restoreDirectory = await mkdtemp(join(tmpdir(), 'codexia-restore-receipt-'));
+  try {
+    const restoreReceipt = join(restoreDirectory, 'receipt.json');
+    await writeFile(restoreReceipt, JSON.stringify({ format: 'codexia-restore-receipt/v1', checksumManifestSha256: 'c'.repeat(64) }), { mode: 0o600 });
+    const control = new BackupConsoleControl({ pool: workerPool, policy, config: backupExecutorConfigSchema.parse({}), python: '/usr/bin/python3', transferScript: '/unused', receiptDirectory: restoreDirectory, backupScript: '/unused' });
+    await control.recordRestore(runReceipt.runId, restoreReceipt);
+    assert.equal((await (await get('/recovery')).json()).status, 'DRILL_PASSED');
+  } finally {
+    await rm(restoreDirectory, { recursive: true, force: true });
+  }
+
   await fixture.expireOwnerFreshProof();
   assert.equal((await get('/config')).status, 200);
   assert.equal((await put(draft, '"4"')).status, 403);
   assert.equal((await post('disable', { revision: 2, confirmed: true })).status, 403);
   assert.equal((await post('activate', activation, activationRequest)).status, 403);
+  assert.equal((await fetch(base + '/runs', { method: 'POST', headers: { ...writeHeaders, 'idempotency-key': randomUUID() }, body: JSON.stringify(runBody) })).status, 403);
 });

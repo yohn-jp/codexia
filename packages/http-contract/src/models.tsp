@@ -1848,5 +1848,10 @@ model BackupRunReceipt {
   runId: string;
   state: "queued";
   createdAt: utcDateTime;
+  requestId?: string;
+  status?: "QUEUED" | "RUNNING" | "UNKNOWN" | "FAILED" | "BLOCKED" | "REMOTE_VERIFIED";
+  phase?: string;
+  reasonCode?: string | null;
+  observedAt?: utcDateTime;
   ...Record<never>;
 }

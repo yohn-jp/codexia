@@ -1,6 +1,6 @@
 # Backup console control plane
 
-BKC-001 through BKC-007 are enabled by an operator on a single-owner installation. The Fastify routes and the executor share the `codexia_backup` operational schema on PostgreSQL. The executor has no HTTP listener.
+BKC-001 through BKC-010 are enabled by an operator on a single-owner installation. The Fastify routes and executor share the `codexia_backup` operational schema on PostgreSQL. The executor has no HTTP listener. Existing #897 installations apply [operational-schema-667-upgrade.sql](operational-schema-667-upgrade.sql) as the database administrator; it adds the durable run journal without resetting backup settings.
 
 ## Provisioning
 
@@ -19,15 +19,22 @@ Supply both processes a read-only operator-owned JSON policy file. Each entry bi
       "prefix": "instance-a/backup",
       "credentialModes": ["sealed-access-key"]
     }
+  ],
+  "maintenanceWindows": [
+    { "id": "weekly-sunday-0200", "timeZone": "Asia/Tokyo", "daysOfWeek": [0], "start": "02:00", "durationMinutes": 60 }
   ]
 }
 ```
+
+An owner manual run can be requested only during the selected currently-open operator-approved window and requires explicit confirmation. Scheduled runs remain disabled by default. To opt in, set `scheduleWindowId` in the protected policy to one of `maintenanceWindows`; there is no public schedule mutation or timer. The executor records one durable slot per local window date and never replays a missed/expired slot. Manual and scheduled work use the same protected host runner and lock.
+
+After an isolated `restore-drill.yml` succeeds, an operator may import its protected receipt with `codexia-backup-control record-restore <runId> <receiptFile>`. The fixed control command accepts only a private regular receipt whose manifest SHA-256 matches that run's durable source receipt. BKC-010 exposes the receipt digest, source SHA and observation time; it never performs a restore or reads the recovery identity.
 
 Set `CODEXIA_BACKUP_POLICY_FILE` on both services. Set `CODEXIA_BACKUP_API_DATABASE_URL` and `CODEXIA_BACKUP_PUBLIC_KEY_FILE` on the API. The latter is a PEM SPKI public key (RSA, at least 2048 bits). Set `CODEXIA_BACKUP_EXECUTOR_DATABASE_URL` and `CODEXIA_BACKUP_EXECUTOR_CONFIG_FILE` on the separately isolated executor service. Its JSON configuration contains `privateKeyFiles`, an array of absolute PEM private key paths. Protect the config and private keys with mode 0400 or 0600 and the executor's UID. The private files and executor DSN belong exclusively to the executor identity.
 
 For `operator-role`, the protected executor configuration can instead supply a preprovisioned `operatorCredential` with `origin`, `accessKeyId`, `secretAccessKey` and optional `sessionToken`. Restrict the underlying service identity to the approved bucket and prefix. An optional `transportByOrigin` object keys transport settings by exact destination origin. Entries can supply an operator-provided `caBundle` path and explicit `allowedPrivateAddresses` for approved private IPv4 endpoints. Loopback and metadata destinations are rejected. Keep `allowProbeCleanup` disabled unless the provisioned identity is allowed to clean up only the dedicated `.codexia-probes/` keyspace.
 
-Install the [pinned S3 runtime](install-s3-runtime.sh) for the executor. Set `CODEXIA_BACKUP_PYTHON` to its absolute interpreter path and `CODEXIA_BACKUP_PROBE_SCRIPT` to the trusted absolute path of [s3_probe.py](s3_probe.py). Start `node packages/api/dist/backup-console-executor.js` using the isolated executor identity after building the API package. The process consumes only configuration operations.
+Install the [pinned S3 runtime](install-s3-runtime.sh) for the executor. Set `CODEXIA_BACKUP_PYTHON` to its absolute interpreter path and `CODEXIA_BACKUP_PROBE_SCRIPT` to the trusted absolute path of [s3_probe.py](s3_probe.py). The rootless host integration is activated only by the operator-owned `/home/codexia/.config/codexia-backup/executor.env`, mode 0600. Its launcher sets `CODEXIA_BACKUP_EXECUTOR_ENTRYPOINT` to the exact absolute `backup-console-control.js` path and starts the fixed control CLI; the long-lived executor receives `CODEXIA_BACKUP_RUNNER` pointing to the fixed host wrapper. The wrapper reuses the existing deployment host lock, backup.sh, API/Tunnel quiesce and recovery flow. The executor polls durable configuration and run queues; it does not expose an HTTP listener or public shell RPC.
 
 For a key rotation, load the new private key alongside the old one, switch the API to the new public key, and submit a fresh draft credential. Probe and activate the new revision before removing the old worker key. Removing a key makes revisions sealed to it unavailable to the executor. Revoke upstream credentials through the provider's existing operator process.
 

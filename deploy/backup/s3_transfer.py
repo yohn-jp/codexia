@@ -31,7 +31,7 @@ OBJECT_FILES = (*ARTIFACT_FILES, "SHA256SUMS")
 PROFILE_FIELDS = {
     "schemaVersion", "provider", "region", "bucket", "prefix", "endpointUrl",
     "allowedOrigins", "addressingStyle", "multipartThresholdBytes",
-    "multipartPartBytes", "retentionMode", "retentionDays", "caBundle",
+    "multipartPartBytes", "retentionMode", "retentionDays", "caBundle", "allowedPrivateAddresses",
 }
 BACKUP_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 SOURCE_ID_RE = re.compile(r"^[a-f0-9]{40}$")
@@ -45,6 +45,26 @@ MAX_COMMIT_MARKER_BYTES = 64 * 1024
 
 class TransferError(Exception):
     """A deliberately redacted, operator-safe transfer failure."""
+
+
+def _transfer_failure(error: BaseException) -> tuple[str, bool]:
+    current: BaseException | None = error
+    while current is not None:
+        code = _error_code(current)
+        if code in ("AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch", "ExpiredToken", "InvalidToken"):
+            return "credentials_unavailable", False
+        if code in ("SlowDown", "RequestTimeout", "ServiceUnavailable", "InternalError", "Throttling", "ThrottlingException"):
+            return "s3_unavailable", True
+        name = type(current).__name__
+        if name in ("EndpointConnectionError", "ConnectTimeoutError", "ReadTimeoutError", "ConnectionClosedError", "ConnectionResetError", "TimeoutError") or isinstance(current, (TimeoutError, socket.timeout, ConnectionError)):
+            return "s3_unavailable", True
+        response = getattr(current, "response", None)
+        metadata = response.get("ResponseMetadata") if isinstance(response, dict) else None
+        status = metadata.get("HTTPStatusCode") if isinstance(metadata, dict) else None
+        if isinstance(status, int) and (status == 429 or status >= 500):
+            return "s3_unavailable", True
+        current = current.__cause__
+    return "transfer_failed", False
 
 
 def _fail(message: str) -> None:
@@ -180,6 +200,19 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
     ca_bundle = value.get("caBundle")
     if ca_bundle is not None and (not isinstance(ca_bundle, str) or not os.path.isabs(ca_bundle)):
         _fail("S3 CA bundle path must be absolute")
+    private_addresses = value.get("allowedPrivateAddresses", [])
+    if not isinstance(private_addresses, list) or any(not isinstance(item, str) for item in private_addresses):
+        _fail("S3 private address policy is invalid")
+    normalized_private: list[str] = []
+    for item in private_addresses:
+        try:
+            parsed = ipaddress.ip_address(item)
+        except ValueError as error:
+            raise TransferError("S3 private address policy is invalid") from error
+        if parsed.is_global or parsed.compressed != item or item in normalized_private:
+            _fail("S3 private address policy is invalid")
+        normalized_private.append(item)
+    value["allowedPrivateAddresses"] = normalized_private
     value["multipartThresholdBytes"] = threshold
     value["multipartPartBytes"] = part_size
     return value
@@ -498,11 +531,12 @@ class S3BackupTransfer:
         profile: dict[str, Any],
         *,
         client: Any | None = None,
+        credential: dict[str, str] | None = None,
         _allow_private_test_addresses: bool = False,
     ):
         self.profile = validate_profile(profile)
         self.client = client if client is not None else _make_client(
-            self.profile, _allow_private_test_addresses=_allow_private_test_addresses
+            self.profile, _allow_private_test_addresses=_allow_private_test_addresses, credential=credential
         )
 
     def _load_pending_uploads(
@@ -932,7 +966,10 @@ class S3BackupTransfer:
             raise
 
 
-def _make_client(profile: dict[str, Any], *, _allow_private_test_addresses: bool = False) -> Any:
+def _make_client(
+    profile: dict[str, Any], *, _allow_private_test_addresses: bool = False,
+    credential: dict[str, str] | None = None,
+) -> Any:
     try:
         import boto3
         from botocore.config import Config
@@ -946,13 +983,23 @@ def _make_client(profile: dict[str, Any], *, _allow_private_test_addresses: bool
         connect_timeout=5,
         read_timeout=120,
     )
-    client = boto3.session.Session().client(
+    session_fields = {}
+    if credential is not None:
+        if set(credential) - {"accessKeyId", "secretAccessKey", "sessionToken"} or not credential.get("accessKeyId") or not credential.get("secretAccessKey"):
+            _fail("S3 transfer credential is invalid")
+        session_fields = {
+            "aws_access_key_id": credential["accessKeyId"],
+            "aws_secret_access_key": credential["secretAccessKey"],
+            **({"aws_session_token": credential["sessionToken"]} if credential.get("sessionToken") else {}),
+        }
+    client = boto3.session.Session(**session_fields).client(
         "s3", region_name=profile["region"], endpoint_url=profile.get("endpointUrl"),
         config=config, verify=profile.get("caBundle") or True,
     )
     guard = EndpointGuard(
         profile,
         client.meta.endpoint_url,
+        allowed_private_addresses=profile.get("allowedPrivateAddresses", []),
         _allow_private_test_addresses=_allow_private_test_addresses,
     )
     _install_pinned_https_transport(client, guard)
@@ -1025,11 +1072,13 @@ class EndpointGuard:
         profile: dict[str, Any],
         endpoint_url: str,
         *,
+        allowed_private_addresses: list[str] | None = None,
         _allow_private_test_addresses: bool = False,
     ):
         self.profile = profile
         self.endpoint_url = endpoint_url
         self._allow_private_test_addresses = _allow_private_test_addresses
+        self.allowed_private_addresses = set(allowed_private_addresses or ())
         self.expected = _origin(endpoint_url)
 
     def _approved_host(self, url: str) -> tuple[str, int]:
@@ -1066,7 +1115,7 @@ class EndpointGuard:
                 parsed = ipaddress.ip_address(address)
             except (IndexError, TypeError, ValueError) as error:
                 raise TransferError("S3 endpoint returned an invalid IP address") from error
-            if not parsed.is_global and not self._allow_private_test_addresses:
+            if not parsed.is_global and not self._allow_private_test_addresses and parsed.compressed not in self.allowed_private_addresses:
                 _fail("S3 endpoint resolved to a private, local, or reserved address")
             normalized = parsed.compressed
             if normalized not in addresses:
@@ -1102,18 +1151,29 @@ def _cli() -> argparse.ArgumentParser:
     upload.add_argument("--backup-id", required=True)
     upload.add_argument("--source-identity", required=True)
     upload.add_argument("--receipt", required=True)
+    upload.add_argument("--credential-stdin", action="store_true")
+    upload.add_argument("--machine-result", action="store_true")
     download = subparsers.add_parser("download", help="retrieve only a receipt-verified artifact for an isolated drill")
     download.add_argument("--profile", required=True)
     download.add_argument("--backup-id", required=True)
     download.add_argument("--receipt", required=True)
     download.add_argument("--output-dir", required=True)
+    download.add_argument("--credential-stdin", action="store_true")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _cli().parse_args(argv)
     try:
-        transfer = S3BackupTransfer(_command_profile(args.profile))
+        credential = None
+        if args.credential_stdin:
+            try:
+                credential = json.load(sys.stdin, object_pairs_hook=_strict_object)
+            except (UnicodeError, json.JSONDecodeError) as error:
+                raise TransferError("S3 transfer credential input is invalid") from error
+            if not isinstance(credential, dict):
+                raise TransferError("S3 transfer credential input is invalid")
+        transfer = S3BackupTransfer(_command_profile(args.profile), credential=credential)
         if args.operation == "upload":
             receipt = transfer.upload_artifact(
                 Path(args.artifact_dir), backup_id=args.backup_id,
@@ -1127,6 +1187,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"status": "VERIFIED", "backupId": args.backup_id, "artifactDirectory": str(path)}, sort_keys=True))
         return 0
     except TransferError as error:
+        if getattr(args, "machine_result", False):
+            reason_code, retryable = _transfer_failure(error)
+            print(json.dumps({"status": "UNKNOWN" if retryable else "FAILED", "reasonCode": reason_code}, sort_keys=True))
+            return 75 if retryable else 1
         print(str(error), file=sys.stderr)
         return 1
 
