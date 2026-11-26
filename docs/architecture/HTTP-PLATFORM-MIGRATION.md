@@ -67,7 +67,7 @@ TypeSpecからの生成、スキーマ変換と検査は `packages/http-contract
 | `/api/health`、`/health/*` | 公開するmethod/pathを明示登録 | 最小healthのみ |
 | `/api/*` の作品・job・persistence | method/pathごとのschema付きroute | OWNER-API、必要なMCP effectを区別。persistenceはOWNER-API専用 |
 | `/api/auth/*` | Better Auth公式Web Request handlerをFastify adapterから呼ぶ。auth固有のbody/cookie/streamingを壊さない | OWNER-SESSION、OAuthの登録client、PKCE/CSRF |
-| `/mcp` とmodule MCP HTTP | 既存の SDK v1 Web adapter を明示ルートへ接続する。SDK v2 は [MCP 移行設計](MCP-V2-MIGRATION.md) に従って切り替える | MCP-CLIENTのresource/audience、scope、project、effectを毎request確認 |
+| `/mcp` とmodule MCP HTTP | [MCP 移行設計](MCP-V2-MIGRATION.md) に従い、明示ルートから公式 SDK v2 の HTTP ハンドラーへ接続する | MCP-CLIENTのresource/audience、scope、project、effectを毎request確認 |
 | `/api/public/projects/*` | share reader専用route | share capability以外のprivate情報を返さない |
 | module HTTP contribution | manifestから明示method/pathを登録するhost-owned adapter | module access/effectとcentral admission。未知routeはfail closed |
 | setup API | [初期導入設計](../deployment/INITIAL-DEPLOYMENT-FLOW.md) に従うsetup専用Fastifyのroute | SETUPに限定した操作と公開可否応答を区別する。稼働環境での登録受入は別途確認する |
