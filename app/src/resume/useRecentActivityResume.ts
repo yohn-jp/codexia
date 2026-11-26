@@ -71,9 +71,14 @@ export function useRecentActivityResume({
     : null;
   const projectIdentityKey = projectIdentity ? recentActivityIdentityKey(projectIdentity) : '';
   const identityKey = binding ? recentActivityIdentityKey(binding) : '';
-  const currentBinding: Binding | null = binding ? { ...binding, identityKey, projectIdentityKey } : null;
-  const bindingRef = useRef<Binding | null>(currentBinding);
-  bindingRef.current = currentBinding;
+  const bindingRef = useRef<Binding | null>(null);
+  // Keep one binding per visit. Returning to the same identity after a
+  // switch must not revive responses from the earlier visit.
+  if (!binding || !enabled) bindingRef.current = null;
+  else if (bindingRef.current?.identityKey !== identityKey) {
+    bindingRef.current = { ...binding, identityKey, projectIdentityKey };
+  }
+  const currentBinding = bindingRef.current;
   const [deviceType, setDeviceType] = useState<RecentActivityDeviceType>(deviceTypeForViewport);
   const [items, setItems] = useState<RecentActivityItem[]>([]);
   const [snapshotIdentityKey, setSnapshotIdentityKey] = useState('');
@@ -122,11 +127,7 @@ export function useRecentActivityResume({
       .putRecentActivity(pending.binding.projectId, pending.input, { keepalive, order })
       .then(response => {
         const active = bindingRef.current;
-        if (
-          version === latestWriteVersionRef.current &&
-          active?.identityKey === pending.binding.identityKey &&
-          active.authorScope === pending.binding.authorScope
-        ) {
+        if (version === latestWriteVersionRef.current && active === pending.binding) {
           setItems(response.items);
           setSnapshotIdentityKey(active.identityKey);
           setItemsProjectIdentityKey(active.projectIdentityKey);
@@ -134,8 +135,7 @@ export function useRecentActivityResume({
         }
       })
       .catch((caught: unknown) => {
-        const active = bindingRef.current;
-        if (version === latestWriteVersionRef.current && active?.identityKey === pending.binding.identityKey) {
+        if (version === latestWriteVersionRef.current && bindingRef.current === pending.binding) {
           setError(caught instanceof Error ? caught.message : '再開位置を同期できませんでした。');
         }
       });
@@ -147,7 +147,7 @@ export function useRecentActivityResume({
   }, []);
 
   useEffect(() => {
-    if (!binding || !enabled) {
+    if (!currentBinding) {
       setItems([]);
       setSnapshotIdentityKey('');
       setItemsProjectIdentityKey('');
@@ -156,7 +156,6 @@ export function useRecentActivityResume({
       return;
     }
     const captured = currentBinding;
-    if (!captured) return;
     const controller = new AbortController();
     let alive = true;
     setItems([]);
@@ -184,13 +183,12 @@ export function useRecentActivityResume({
       const startedAt = latestWriteVersionRef.current;
       try {
         const response = await api.recentActivity(captured.projectId, controller.signal);
-        const active = bindingRef.current;
         if (
           alive &&
           !controller.signal.aborted &&
           sequence === refreshSequenceRef.current &&
           startedAt === latestWriteVersionRef.current &&
-          active?.identityKey === captured.identityKey
+          bindingRef.current === captured
         ) {
           setItems(response.items);
           setSnapshotIdentityKey(captured.identityKey);
@@ -199,7 +197,7 @@ export function useRecentActivityResume({
         }
       } catch (caught) {
         if (!alive || controller.signal.aborted) return;
-        if (bindingRef.current?.identityKey === captured.identityKey) {
+        if (bindingRef.current === captured) {
           setError(caught instanceof Error ? caught.message : '再開位置を読み込めませんでした。');
         }
       }
@@ -242,9 +240,7 @@ export function useRecentActivityResume({
       window.removeEventListener('pageshow', onPageShow);
       flush(true);
     };
-    // identityKey captures author/work/document/view; enabled controls authenticated lifecycle.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identityKey, enabled, flush]);
+  }, [currentBinding, flush]);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 760px)');

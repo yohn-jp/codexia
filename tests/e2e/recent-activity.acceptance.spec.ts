@@ -432,6 +432,56 @@ test("recent activity ignores a delayed response for a document that is no longe
   }
 });
 
+test("recent activity ignores a delayed write response from an earlier visit to the same document", async ({ page, authorizeAuthor }) => {
+  const f = await longFixture(authorizeAuthor, page);
+  const activityPath = `/api/projects/${f.project.id}/recent-activity`;
+
+  const editor = manuscriptEditor(page);
+  await editor.press("Control+End");
+  await expect.poll(async () => (await activity(f.author, f.project.id)).items.some((item) =>
+    item.sceneId === f.scene.id && item.deviceType === "desktop" && (item.sentenceOffset ?? 0) > 1)).toBe(true);
+
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let responseHeld = false;
+  let intercepted = false;
+  await page.route(`**${activityPath}`, async (route) => {
+    if (intercepted || route.request().method() !== "PUT") return route.continue();
+    intercepted = true;
+    const response = await route.fetch();
+    responseHeld = true;
+    await held;
+    await route.fulfill({ response });
+  });
+
+  try {
+    await editor.press("Control+Home");
+    await expect.poll(() => responseHeld).toBe(true);
+    await remotePosition(f.author, f.project.id, f.second.id, 4, 4, "desktop");
+
+    const select = async (scene: { id: string; title: string }) => {
+      await page.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`).click();
+      await expect(page.getByRole("heading", { name: scene.title, exact: true })).toBeVisible();
+    };
+    await select(f.second);
+    await select(f.scene);
+    const panel = await openContinuePanel(page);
+    const secondCandidate = panel.locator("p").filter({ hasText: f.second.title });
+    await expect(secondCandidate.getByRole("button", { name: "読書位置を開く" })).toBeVisible();
+
+    const delayedWrite = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === activityPath && response.request().method() === "PUT" &&
+      response.request().postDataJSON().sceneId === f.scene.id);
+    release();
+    expect((await delayedWrite).ok()).toBe(true);
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(secondCandidate.getByRole("button", { name: "読書位置を開く" })).toBeVisible();
+  } finally {
+    release();
+    await page.unroute(`**${activityPath}`);
+  }
+});
+
 test("recent activity coalesces repeated positions and records 50 input reports", async ({ page, authorizeAuthor }) => {
   const f = await longFixture(authorizeAuthor, page);
   const { author } = f;

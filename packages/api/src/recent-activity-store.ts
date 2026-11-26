@@ -162,9 +162,16 @@ export class RecentActivityStore {
       let orderBytes: string | undefined;
       if (order && writerKey) {
         const device = deviceOrder ?? { lastWriter: null, itemHash: null, writers: {} };
+        // A document transition closes the previous visit. A report newer
+        // than that visit may still supply an omitted page for this one.
         device.writers[writerKey] = {
           sequence: order.sequence,
-          pageSequence: normalizedInput.pageIndex === undefined ? (previous?.pageSequence ?? 0) : order.sequence,
+          pageSequence:
+            normalizedInput.pageIndex !== undefined
+              ? order.sequence
+              : existing && existing.sceneId !== normalizedInput.sceneId
+                ? (previous?.sequence ?? 0)
+                : (previous?.pageSequence ?? 0),
         };
         device.lastWriter = writerKey;
         device.itemHash = hash(JSON.stringify(item));

@@ -149,4 +149,28 @@ describe('RecentActivityStore', () => {
     assert.equal(latest?.sentenceOffset, 20);
     assert.equal(latest?.pageIndex, null);
   });
+
+  it('does not restore a delayed page from a previous visit to the same document', async t => {
+    const root = await mkdtemp(resolve(tmpdir(), 'codexia-recent-return-order-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const history = resolve(root, 'history');
+    const writer = '12345678-1234-4234-8234-123456789abc';
+
+    const put = (store: RecentActivityStore, sceneId: string, sequence: number, pageIndex?: number) =>
+      store.upsert(
+        'owner',
+        repository,
+        { sceneId, sentenceOffset: sequence, deviceType: 'desktop', ...(pageIndex === undefined ? {} : { pageIndex }) },
+        { writer, sequence },
+      );
+
+    const store = new RecentActivityStore(history);
+    await put(store, 'scene-one', 1);
+    await put(store, 'scene-two', 3);
+    await put(store, 'scene-one', 5);
+    const restarted = new RecentActivityStore(history);
+    assert.equal((await put(restarted, 'scene-one', 2, 8))[0]?.pageIndex, null);
+    assert.equal((await put(restarted, 'scene-one', 4, 4))[0]?.pageIndex, 4);
+    assert.equal((await restarted.list('owner', repository))[0]?.sentenceOffset, 5);
+  });
 });
