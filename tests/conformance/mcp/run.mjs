@@ -20,10 +20,10 @@ const inspectorBin = resolve(toolRoot, 'node_modules/.bin/mcp-inspector');
 const conformanceRequire = createRequire(resolve(toolRoot, 'node_modules/@modelcontextprotocol/conformance/package.json'));
 const { parse: parseYaml } = conformanceRequire('yaml');
 const requirements = parseYaml(await readFile(resolve(toolRoot, 'node_modules/@modelcontextprotocol/conformance/requirements/2026-07-28.yaml'), 'utf8'));
-const excludedScenarios = [{ scenario: 'dns-rebinding-protection', reason: 'excluded by task safety scope; no DNS-rebinding or forged-Host scenario is executed' }];
-const excludedScenarioNames = new Set(excludedScenarios.map(({ scenario }) => scenario));
-const requiredServerScenarios = requirements.server.filter(scenario => !excludedScenarioNames.has(scenario));
-const unscoredServerScenarios = requirements.not_scored.filter(item => item.leg === 'server' && !excludedScenarioNames.has(item.scenario));
+// Exercise the entire pinned requirement manifest against isolated loopback targets.
+const excludedScenarios = [];
+const requiredServerScenarios = requirements.server;
+const unscoredServerScenarios = requirements.not_scored.filter(item => item.leg === 'server');
 const secretValues = databaseUrl ? [databaseUrl] : [];
 const failures = [];
 const evidence = {
@@ -207,8 +207,7 @@ function assertLiveProjectStatus(result, projectId) {
   assert.equal(structuredContent.data.state, 'durable');
 }
 
-// This is a normal loopback/CORS policy check. The official DNS-rebinding scenario
-// separately exercises forged Host handling and is excluded by task safety scope.
+// Connect to the fixed loopback endpoint; vary only admission headers.
 async function discoverWithHeaders(endpoint, token, headers) {
   const body = JSON.stringify({
     jsonrpc: '2.0', id: 1, method: 'server/discover',
@@ -303,7 +302,7 @@ try {
     ...syntheticConformance,
   };
   if (!syntheticConformance.eligibleRequiredPassed) failures.push('official eligible required 2026-07-28 synthetic SDK fixture scenarios failed; see the per-scenario native reports');
-  if (syntheticConformance.excluded.length) failures.push('full 2026-07-28 requirement set is not certified because the required dns-rebinding-protection scenario is excluded by task safety scope');
+  if (syntheticConformance.excluded.length) failures.push('full 2026-07-28 synthetic requirement set is not certified because required scenarios were excluded');
 
   mutationFixture = await startProtocolFixture(true);
   const mutationDir = resolve(rawReports, 'official-tools-list-deliberate-mutation');
@@ -372,14 +371,27 @@ try {
     const deniedOrigin = await discoverWithHeaders(endpoint, liveHost.tokens.full, { Host: host, Origin: 'https://foreign.example.test' });
     assert.equal(deniedOrigin.status, 403);
     assert.equal(deniedOrigin.body.code, 'CORS_ORIGIN_DENIED');
+    const deniedHost = await discoverWithHeaders(endpoint, liveHost.tokens.full, { Host: 'unconfigured.example.test' });
+    assert.equal(deniedHost.status, 403);
+    assert.equal(deniedHost.body.code, 'MCP_HOST_DENIED');
     evidence.authorization.originPolicy = {
       sameOrigin: { status: control.status, jsonrpc: control.body.jsonrpc },
       unconfiguredOrigin: { status: deniedOrigin.status, code: deniedOrigin.body.code },
-      forgedHost: 'NOT_RUN under task safety scope',
+      forgedHost: { status: deniedHost.status, code: deniedHost.body.code },
     };
   });
 
   productConformanceProxy = await startAuthProxy(endpoint, liveHost.tokens.full);
+  await guarded('conformance proxy preserves product Host admission', async () => {
+    const proxyUrl = new URL(productConformanceProxy.url);
+    const control = await discoverWithHeaders(proxyUrl, liveHost.tokens.full, { Host: proxyUrl.host, Origin: proxyUrl.origin });
+    assert.equal(control.status, 200);
+    assert.equal(control.body.jsonrpc, '2.0');
+    const denied = await discoverWithHeaders(proxyUrl, liveHost.tokens.full, { Host: 'unconfigured.example.test' });
+    assert.equal(denied.status, 403);
+    assert.equal(denied.body.code, 'MCP_HOST_DENIED');
+    evidence.authorization.proxyHostPolicy = { validHost: control.status, forgedHost: denied.status, code: denied.body.code };
+  });
   const productConformance = await runOfficialMatrix('product', productConformanceProxy.url, rawReports);
   evidence.fullRequiredSuiteAgainstProduct = {
     target: 'loopback auth proxy to isolated live Fastify/Core/PostgreSQL MCP endpoint',
@@ -387,7 +399,7 @@ try {
     ...productConformance,
   };
   if (!productConformance.eligibleRequiredPassed) failures.push('official eligible required 2026-07-28 live product scenarios failed; see the per-scenario native reports');
-  if (productConformance.excluded.length) failures.push('full 2026-07-28 product requirement set is not certified because the required dns-rebinding-protection scenario is excluded by task safety scope');
+  if (productConformance.excluded.length) failures.push('full 2026-07-28 product requirement set is not certified because required scenarios were excluded');
   const productToolListCheck = productConformance.required.results.find(item => item.scenario === 'tools-list');
   evidence.productToolsListScenario = {
     exitCode: productToolListCheck?.exitCode ?? null,
@@ -521,7 +533,7 @@ try {
   if (rawReports) await guarded('publish native reports', () => publishOfficialEvidence(rawReports));
   if (tempRoot) await guarded('remove fixture directory', () => rm(tempRoot, { recursive: true, force: true }));
   evidence.inspector.status = evidence.inspector.http && evidence.inspector.stdio ? 'PASSED' : 'INCOMPLETE';
-  evidence.authorization.status = ['owner', 'wrongScope', 'expired', 'unassignedProject', 'readScope', 'originPolicy'].every(key => evidence.authorization[key]) ? 'PARTIAL' : 'INCOMPLETE';
+  evidence.authorization.status = ['owner', 'wrongScope', 'expired', 'unassignedProject', 'readScope', 'originPolicy', 'proxyHostPolicy'].every(key => evidence.authorization[key]) ? 'PASSED' : 'INCOMPLETE';
   evidence.authorization.excluded = excludedScenarios;
   evidence.contract.status = evidence.contract.wire ? 'PASSED' : 'INCOMPLETE';
   evidence.stdioProtocolProbe.status = evidence.stdioProtocolProbe.legacy && evidence.stdioProtocolProbe.modern ? 'PASSED' : 'INCOMPLETE';
