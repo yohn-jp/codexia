@@ -86,4 +86,24 @@ describe("RecentActivityStore", () => {
     const legacyFile = JSON.parse(await readFile(resolve(history, "recent-activity", "recent-activity-state.json"), "utf8")) as Record<string, unknown>;
     assert.deepEqual(Object.keys(legacyFile).sort(), ["entries", "legacySources", "version"]);
   });
+
+  it("does not merge a delayed reading page into a newer document", async (t) => {
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-recent-identity-order-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const store = new RecentActivityStore(resolve(root, "history"));
+    const writer = "12345678-1234-4234-8234-123456789abc";
+
+    await store.upsert("owner", repository, { sceneId: "scene-two", sentenceOffset: 20, deviceType: "desktop" }, { writer, sequence: 2 });
+    const delayedReading = await store.upsert(
+      "owner",
+      repository,
+      { sceneId: "scene-one", sentenceOffset: 10, pageIndex: 8, deviceType: "desktop" },
+      { writer, sequence: 1 },
+    );
+
+    const latest = delayedReading.find((item) => item.deviceType === "desktop");
+    assert.equal(latest?.sceneId, "scene-two");
+    assert.equal(latest?.sentenceOffset, 20);
+    assert.equal(latest?.pageIndex, null);
+  });
 });

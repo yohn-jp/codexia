@@ -115,7 +115,7 @@ export class RecentActivityStore {
         // newer writing report. Never change the newer cursor or timestamp,
         // and never apply the old page over another writer's current record.
         if (order.sequence < previous.sequence && order.sequence > previous.pageSequence &&
-            normalizedInput.pageIndex !== undefined && existing &&
+            normalizedInput.pageIndex !== undefined && existing && existing.sceneId === normalizedInput.sceneId &&
             deviceOrder?.lastWriter === writerKey && deviceOrder.itemHash === hash(JSON.stringify(existing))) {
           existing.pageIndex = normalizedInput.pageIndex;
           previous.pageSequence = order.sequence;

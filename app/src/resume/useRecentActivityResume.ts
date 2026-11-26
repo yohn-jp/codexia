@@ -5,6 +5,9 @@ import {
   loadWritingResume,
   saveReadingPage,
   saveWritingResume,
+  recentActivityIdentityKey,
+  type RecentActivityProjectIdentity,
+  type RecentActivityIdentity,
   type WritingResumePosition,
 } from "./continueCandidates";
 
@@ -16,11 +19,9 @@ const REFRESH_INTERVAL_MS = 15_000;
 let activityWriter: string | undefined;
 let activitySequence = 0;
 
-interface Binding {
-  projectId: string;
-  authorScope: string;
-  projectScopeKey: string;
+interface Binding extends RecentActivityIdentity {
   identityKey: string;
+  projectIdentityKey: string;
 }
 
 interface PendingLocal {
@@ -36,7 +37,8 @@ interface PendingServer {
 
 export interface RecentActivityResumeState {
   items: RecentActivityItem[];
-  projectKey: string;
+  snapshotIdentityKey: string;
+  itemsProjectIdentityKey: string;
   localWriting: WritingResumePosition | null;
   error: string;
   deviceType: RecentActivityDeviceType;
@@ -57,16 +59,23 @@ export function useRecentActivityResume({
   binding,
   enabled,
 }: {
-  binding: Omit<Binding, "identityKey"> | null;
+  binding: Omit<Binding, "identityKey" | "projectIdentityKey"> | null;
   enabled: boolean;
 }): RecentActivityResumeState {
-  const identityKey = binding ? JSON.stringify([binding.authorScope, binding.projectScopeKey, binding.projectId]) : "";
-  const currentBinding: Binding | null = binding ? { ...binding, identityKey } : null;
+  const projectIdentity: RecentActivityProjectIdentity | null = binding ? {
+    authorScope: binding.authorScope,
+    projectScopeKey: binding.projectScopeKey,
+    projectId: binding.projectId,
+  } : null;
+  const projectIdentityKey = projectIdentity ? recentActivityIdentityKey(projectIdentity) : "";
+  const identityKey = binding ? recentActivityIdentityKey(binding) : "";
+  const currentBinding: Binding | null = binding ? { ...binding, identityKey, projectIdentityKey } : null;
   const bindingRef = useRef<Binding | null>(currentBinding);
   bindingRef.current = currentBinding;
   const [deviceType, setDeviceType] = useState<RecentActivityDeviceType>(deviceTypeForViewport);
   const [items, setItems] = useState<RecentActivityItem[]>([]);
-  const [projectKey, setProjectKey] = useState("");
+  const [snapshotIdentityKey, setSnapshotIdentityKey] = useState("");
+  const [itemsProjectIdentityKey, setItemsProjectIdentityKey] = useState("");
   const [localWriting, setLocalWriting] = useState<WritingResumePosition | null>(null);
   const [error, setError] = useState("");
   const pendingLocalRef = useRef<PendingLocal>({});
@@ -88,8 +97,8 @@ export function useRecentActivityResume({
     if (!captured) return;
     if (pending.writing) {
       saveWritingResume(captured.authorScope, captured.projectScopeKey, pending.writing);
-      lastWritingRef.current = { bindingKey: captured.identityKey, position: pending.writing };
-      if (bindingRef.current?.identityKey === captured.identityKey) setLocalWriting(pending.writing);
+      lastWritingRef.current = { bindingKey: captured.projectIdentityKey, position: pending.writing };
+      if (bindingRef.current?.projectIdentityKey === captured.projectIdentityKey) setLocalWriting(pending.writing);
     }
     if (pending.reading) saveReadingPage(captured.authorScope, captured.projectScopeKey, pending.reading.sceneId, pending.reading.pageIndex);
   };
@@ -111,7 +120,8 @@ export function useRecentActivityResume({
       if (version === latestWriteVersionRef.current && active?.identityKey === pending.binding.identityKey &&
           active.authorScope === pending.binding.authorScope) {
         setItems(response.items);
-        setProjectKey(active.identityKey);
+        setSnapshotIdentityKey(active.identityKey);
+        setItemsProjectIdentityKey(active.projectIdentityKey);
         setError("");
       }
     }).catch((caught: unknown) => {
@@ -130,7 +140,8 @@ export function useRecentActivityResume({
   useEffect(() => {
     if (!binding || !enabled) {
       setItems([]);
-      setProjectKey("");
+      setSnapshotIdentityKey("");
+      setItemsProjectIdentityKey("");
       setLocalWriting(null);
       setError("");
       return;
@@ -140,9 +151,10 @@ export function useRecentActivityResume({
     const controller = new AbortController();
     let alive = true;
     setItems([]);
-    setProjectKey(captured.identityKey);
+    setSnapshotIdentityKey(captured.identityKey);
+    setItemsProjectIdentityKey(captured.projectIdentityKey);
     const local = loadWritingResume(captured.authorScope, captured.projectScopeKey);
-    lastWritingRef.current = local ? { bindingKey: captured.identityKey, position: local } : null;
+    lastWritingRef.current = local ? { bindingKey: captured.projectIdentityKey, position: local } : null;
     setLocalWriting(local);
 
     let refreshTimer: number | null = null;
@@ -167,7 +179,8 @@ export function useRecentActivityResume({
         if (alive && !controller.signal.aborted && sequence === refreshSequenceRef.current &&
             startedAt === latestWriteVersionRef.current && active?.identityKey === captured.identityKey) {
           setItems(response.items);
-          setProjectKey(captured.identityKey);
+          setSnapshotIdentityKey(captured.identityKey);
+          setItemsProjectIdentityKey(captured.projectIdentityKey);
           setError("");
         }
       } catch (caught) {
@@ -215,7 +228,7 @@ export function useRecentActivityResume({
       window.removeEventListener("pageshow", onPageShow);
       flush(true);
     };
-  // identityKey captures author/project/repository; enabled controls authenticated lifecycle.
+  // identityKey captures author/work/document/view; enabled controls authenticated lifecycle.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identityKey, enabled, flush]);
 
@@ -228,9 +241,9 @@ export function useRecentActivityResume({
 
   const onWritingPosition = useCallback((sceneId: string, cursorSentenceIndex: number | null, scrollTop: number) => {
     const active = bindingRef.current;
-    if (!active || !enabled || !sceneId) return;
+    if (!active || !enabled || active.viewTarget !== "writing" || sceneId !== active.documentId) return;
     const position: WritingResumePosition = { sceneId, cursorSentenceIndex, scrollTop: Math.max(0, scrollTop) };
-    lastWritingRef.current = { bindingKey: active.identityKey, position };
+    lastWritingRef.current = { bindingKey: active.projectIdentityKey, position };
     if (pendingLocalRef.current.binding && pendingLocalRef.current.binding.identityKey !== active.identityKey) localFlushRef.current();
     pendingLocalRef.current = { ...pendingLocalRef.current, binding: active, writing: position };
     if (localTimerRef.current !== null) window.clearTimeout(localTimerRef.current);
@@ -243,15 +256,16 @@ export function useRecentActivityResume({
 
   const onReadingPage = useCallback((sceneId: string, pageIndex: number) => {
     const active = bindingRef.current;
-    if (!active || !enabled || !sceneId || !Number.isSafeInteger(pageIndex) || pageIndex < 0) return;
+    if (!active || !enabled || active.viewTarget !== "reading" || sceneId !== active.documentId ||
+        !Number.isSafeInteger(pageIndex) || pageIndex < 0) return;
     if (pendingLocalRef.current.binding && pendingLocalRef.current.binding.identityKey !== active.identityKey) localFlushRef.current();
     pendingLocalRef.current = { ...pendingLocalRef.current, binding: active, reading: { sceneId, pageIndex } };
     if (localTimerRef.current !== null) window.clearTimeout(localTimerRef.current);
     localTimerRef.current = window.setTimeout(() => localFlushRef.current(), LOCAL_DEBOUNCE_MS);
-    const localWriting = lastWritingRef.current?.bindingKey === active.identityKey
+    const localWriting = lastWritingRef.current?.bindingKey === active.projectIdentityKey
       ? lastWritingRef.current.position
       : null;
-    const serverWriting = projectKey === active.identityKey
+    const serverWriting = itemsProjectIdentityKey === active.projectIdentityKey
       ? items.find((item) => item.deviceType === deviceType && item.sceneId === sceneId)?.sentenceOffset
       : null;
     const writing = localWriting?.sceneId === sceneId ? localWriting.cursorSentenceIndex : serverWriting ?? null;
@@ -264,7 +278,7 @@ export function useRecentActivityResume({
     pendingServerRef.current = { binding: active, input };
     if (serverTimerRef.current !== null) window.clearTimeout(serverTimerRef.current);
     serverTimerRef.current = window.setTimeout(() => serverFlushRef.current(), SERVER_DEBOUNCE_MS);
-  }, [enabled, items, projectKey, deviceType]);
+  }, [enabled, items, itemsProjectIdentityKey, deviceType]);
 
-  return { items, projectKey, localWriting, error, onWritingPosition, onReadingPage, flush, deviceType };
+  return { items, snapshotIdentityKey, itemsProjectIdentityKey, localWriting, error, onWritingPosition, onReadingPage, flush, deviceType };
 }

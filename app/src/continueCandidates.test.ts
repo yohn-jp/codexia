@@ -11,6 +11,7 @@ import {
   loadWritingResume,
   mergeContinueCandidates,
   offsetAtUiSentenceIndex,
+  recentActivityIdentityKey,
   saveReadingPage,
   saveWritingResume,
   uiSentenceIndexAtOffset,
@@ -36,11 +37,54 @@ test("continue candidates keep distinct device scenes and prefer the local curso
     { sceneId: "scene-2", sentenceOffset: 2, pageIndex: null, deviceType: "desktop", updatedAt: "2026-10-17T01:02:00Z" },
     { sceneId: "deleted-scene", sentenceOffset: 1, deviceType: "desktop", updatedAt: "2026-10-17T01:03:00Z" },
   ];
-  const candidates = mergeContinueCandidates({ sceneId: "scene-1", cursorSentenceIndex: 7, scrollTop: 120 }, remote, tree);
+  const identity = {
+    authorScope: "owner-a",
+    projectScopeKey: "work-a",
+    projectId: "project-a",
+    documentId: "scene-1",
+    viewTarget: "writing" as const,
+  };
+  const candidates = mergeContinueCandidates(
+    { sceneId: "scene-1", cursorSentenceIndex: 7, scrollTop: 120 },
+    remote,
+    tree,
+    { identity, snapshotIdentityKey: recentActivityIdentityKey(identity) },
+  );
   assert.deepEqual(candidates, [
     { sceneId: "scene-1", sentenceOffset: 7, pageIndex: 4, source: "local", deviceType: "mobile", updatedAt: "2026-10-17T01:01:00Z", scrollTop: 120 },
     { sceneId: "scene-2", sentenceOffset: 2, pageIndex: null, source: "server", deviceType: "desktop", updatedAt: "2026-10-17T01:02:00Z" },
   ]);
+});
+
+test("continue candidates reject a snapshot from a different work identity", () => {
+  const serverItems: RecentActivityItem[] = [
+    { sceneId: "scene-1", sentenceOffset: 4, pageIndex: 8, deviceType: "desktop", updatedAt: "2026-10-17T01:00:00Z" },
+  ];
+  const snapshotIdentityKey = '["owner-a","work-a","project-a","scene-1","reading"]';
+  const identities = [
+    { authorScope: "owner-b", projectScopeKey: "work-a", projectId: "project-a", documentId: "scene-1", viewTarget: "reading" as const },
+    { authorScope: "owner-a", projectScopeKey: "work-b", projectId: "project-a", documentId: "scene-1", viewTarget: "reading" as const },
+    { authorScope: "owner-a", projectScopeKey: "work-a", projectId: "project-b", documentId: "scene-1", viewTarget: "reading" as const },
+    { authorScope: "owner-a", projectScopeKey: "work-a", projectId: "project-a", documentId: "scene-2", viewTarget: "reading" as const },
+    { authorScope: "owner-a", projectScopeKey: "work-a", projectId: "project-a", documentId: "scene-1", viewTarget: "writing" as const },
+  ];
+
+  for (const identity of identities) {
+    assert.deepEqual(mergeContinueCandidates(
+      { sceneId: "scene-1", cursorSentenceIndex: 9, scrollTop: 40 },
+      serverItems,
+      tree,
+      { identity, snapshotIdentityKey },
+    ), []);
+  }
+});
+
+test("recent activity request identity includes the document and view target", () => {
+  const work = { authorScope: "owner-a", projectScopeKey: "work-a", projectId: "project-a" };
+  const referenceA = { ...work, documentId: "scene-a", viewTarget: "reading" as const };
+  const writingB = { ...work, documentId: "scene-b", viewTarget: "writing" as const };
+
+  assert.notEqual(recentActivityIdentityKey(referenceA), recentActivityIdentityKey(writingB));
 });
 
 test("handoff hints identify the other device without displaying prose", () => {

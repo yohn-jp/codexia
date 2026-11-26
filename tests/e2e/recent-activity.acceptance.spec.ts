@@ -134,10 +134,17 @@ async function activity(author: AuthorSession, projectId: string) {
   expect(response.ok()).toBe(true);
   return response.json() as Promise<{ items: Array<{ sceneId: string; sentenceOffset: number | null; pageIndex?: number | null; deviceType: string; updatedAt: string }> }>;
 }
-async function remotePosition(author: AuthorSession, projectId: string, sceneId: string, sentenceOffset = 2) {
+async function remotePosition(
+  author: AuthorSession,
+  projectId: string,
+  sceneId: string,
+  sentenceOffset = 2,
+  pageIndex = 2,
+  deviceType = "mobile",
+) {
   const response = await author.fetch(`/api/projects/${projectId}/recent-activity`, {
     method: "PUT", headers: { Origin: author.origin },
-    data: { sceneId, sentenceOffset, pageIndex: 2, deviceType: "mobile" },
+    data: { sceneId, sentenceOffset, pageIndex, deviceType },
   });
   expect(response.ok()).toBe(true);
 }
@@ -335,6 +342,94 @@ test("recent activity ignores a refresh response invalidated by natural hide", a
     await expect(panel).not.toHaveAttribute("data-observed-stale-entry", "true");
     await expect(manuscriptEditor(page)).toContainText("読書位置");
   } finally { release?.(); await background?.close(); await native.close(); }
+});
+
+test("writing in another document does not inherit the previous reference page", async ({ page, authorizeAuthor }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  const f = await longFixture(authorizeAuthor, page);
+  await page.getByRole("button", { name: "読む", exact: true }).click();
+  const pager = page.locator(".reading-pager");
+  await expect(pager).toBeVisible();
+  await expect.poll(async () => Number(await pager.getAttribute("data-page-count"))).toBeGreaterThanOrEqual(8);
+
+  for (let pageIndex = 1; pageIndex <= 7; pageIndex += 1) {
+    await pager.getByRole("button", { name: "次のページ" }).click();
+    await expect(pager).toHaveAttribute("data-page-index", String(pageIndex));
+  }
+  await expect.poll(async () => {
+    const item = (await activity(f.author, f.project.id)).items.find((candidate) => candidate.sceneId === f.scene.id);
+    return item?.pageIndex;
+  }).toBe(7);
+
+  const secondDocument = page.locator(`.pg-document-list .pg-outline-item[data-document-id="${f.second.id}"] > .pg-outline-row > .pg-outline-document`);
+  await secondDocument.focus();
+  await secondDocument.press("Enter");
+  await expect(secondDocument).toHaveAttribute("aria-current", "page");
+  await expect(manuscriptEditor(page)).toBeVisible();
+  await manuscriptEditor(page).press("Control+End");
+  await expect.poll(async () => {
+    const item = (await activity(f.author, f.project.id)).items.find((candidate) => candidate.deviceType === "mobile");
+    return item?.sceneId === f.second.id ? item.pageIndex : "pending";
+  }).toBeNull();
+
+  const panel = await openContinuePanel(page);
+  const secondCandidate = panel.locator("p").filter({ hasText: f.second.title });
+  await expect(secondCandidate).toBeVisible();
+  await expect(secondCandidate.getByRole("button", { name: "続きを書く" })).toBeVisible();
+  await expect(secondCandidate.getByRole("button", { name: "読書位置を開く" })).toHaveCount(0);
+});
+
+test("recent activity ignores a delayed response for a document that is no longer selected", async ({ page, authorizeAuthor }) => {
+  const f = await longFixture(authorizeAuthor, page);
+  const activityPath = `/api/projects/${f.project.id}/recent-activity`;
+  await remotePosition(f.author, f.project.id, f.scene.id, 12, 12, "desktop");
+
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let signalStarted!: () => void;
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  await page.route(`**${activityPath}`, async (route) => {
+    if (route.request().method() !== "PUT" || route.request().postDataJSON().sceneId !== f.scene.id) return route.continue();
+    const response = await route.fetch();
+    signalStarted();
+    await held;
+    await route.fulfill({ response });
+  });
+
+  try {
+    await manuscriptEditor(page).press("Control+End");
+    await started;
+    await remotePosition(f.author, f.project.id, f.second.id, 4, 4, "desktop");
+
+    const currentSnapshot = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === activityPath && response.request().method() === "GET");
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    expect((await currentSnapshot).ok()).toBe(true);
+
+    const panel = await openContinuePanel(page);
+    const secondCandidate = panel.locator("p").filter({ hasText: f.second.title });
+    await expect(secondCandidate).toBeVisible();
+    await expect(secondCandidate.getByRole("button", { name: "読書位置を開く" })).toBeVisible();
+    await page.locator(`.pg-outline-item[data-document-id="${f.second.id}"] .pg-outline-document`).click();
+    await expect(page.getByRole("heading", { name: f.second.title, exact: true })).toBeVisible();
+
+    const delayedWrite = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === activityPath && response.request().method() === "PUT" &&
+      response.request().postDataJSON().sceneId === f.scene.id);
+    release();
+    expect((await delayedWrite).ok()).toBe(true);
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+
+    await expect(secondCandidate).toBeVisible();
+    await expect(secondCandidate.getByRole("button", { name: "読書位置を開く" })).toBeVisible();
+    await expect.poll(async () => {
+      const item = (await activity(f.author, f.project.id)).items.find((candidate) => candidate.deviceType === "desktop");
+      return item?.sceneId;
+    }).toBe(f.second.id);
+  } finally {
+    release();
+    await page.unroute(`**${activityPath}`);
+  }
 });
 
 test("recent activity coalesces repeated positions and records 50 input reports", async ({ page, authorizeAuthor }) => {

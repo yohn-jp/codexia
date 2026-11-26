@@ -19,6 +19,29 @@ export interface ContinueCandidate {
 
 export type ContinueSceneSource = Tree | { documents: ReadonlyArray<{ id: string }> };
 
+export interface RecentActivityProjectIdentity {
+  authorScope: string;
+  projectScopeKey: string;
+  projectId: string;
+}
+
+export interface RecentActivityIdentity extends RecentActivityProjectIdentity {
+  documentId: string;
+  viewTarget: "writing" | "reading";
+}
+
+export interface ContinueCandidateScope {
+  identity: RecentActivityIdentity;
+  snapshotIdentityKey: string;
+}
+
+export function recentActivityIdentityKey(identity: RecentActivityProjectIdentity | RecentActivityIdentity): string {
+  const workIdentity = [identity.authorScope, identity.projectScopeKey, identity.projectId];
+  return "documentId" in identity && "viewTarget" in identity
+    ? JSON.stringify([...workIdentity, identity.documentId, identity.viewTarget])
+    : JSON.stringify(workIdentity);
+}
+
 export function sceneExistsInTree(tree: Tree, sceneId: string): boolean {
   return tree.volumes.some((volume) => volume.chapters.some((chapter) => chapter.scenes.some((scene) => scene.id === sceneId)));
 }
@@ -38,7 +61,9 @@ export function mergeContinueCandidates(
   local: WritingResumePosition | null,
   serverItems: RecentActivityItem[],
   source: ContinueSceneSource,
+  scope: ContinueCandidateScope,
 ): ContinueCandidate[] {
+  if (scope.snapshotIdentityKey !== recentActivityIdentityKey(scope.identity)) return [];
   const exists = (sceneId: string) => "volumes" in source
     ? sceneExistsInTree(source, sceneId)
     : source.documents.some((document) => document.id === sceneId);
