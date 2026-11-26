@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -137,6 +138,36 @@ async function verifyAdmissionError(result, endpoint, token, expectedStatus, exp
   return { inspectorCode: error.code, httpStatus: response.status, httpCode: body.code };
 }
 
+// Connect to the actual loopback socket even when the test deliberately forges Host.
+async function discoverWithHeaders(endpoint, token, headers) {
+  const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover' });
+  return new Promise((resolveRequest, rejectRequest) => {
+    const request = httpRequest(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        ...headers,
+      },
+    }, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.once('error', rejectRequest);
+      response.once('end', () => {
+        try {
+          resolveRequest({ status: response.statusCode, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+        } catch (error) {
+          rejectRequest(error);
+        }
+      });
+    });
+    request.setTimeout(5_000, () => request.destroy(new Error('MCP admission probe timed out')));
+    request.once('error', rejectRequest);
+    request.end(body);
+  });
+}
+
 function assertLiveProjectStatus(result, projectId) {
   const { structuredContent } = JSON.parse(result.stdout).result;
   assert.equal(structuredContent.snapshot.projectId, projectId);
@@ -236,6 +267,25 @@ try {
   liveHost = await startLiveHost(databaseUrl, tempRoot);
   for (const token of Object.values(liveHost.tokens)) secretValues.push(token);
   const endpoint = `${liveHost.baseUrl}/mcp?projectId=${encodeURIComponent(liveHost.projectId)}`;
+
+  await guarded('live product DNS rebinding admission', async () => {
+    const origin = new URL(endpoint).origin;
+    const host = new URL(endpoint).host;
+    const control = await discoverWithHeaders(endpoint, liveHost.tokens.full, { Host: host, Origin: origin });
+    assert.equal(control.status, 200);
+    assert.equal(control.body.jsonrpc, '2.0');
+    const deniedHost = await discoverWithHeaders(endpoint, liveHost.tokens.full, { Host: 'evil.example.com' });
+    assert.equal(deniedHost.status, 403);
+    assert.equal(deniedHost.body.code, 'MCP_HOST_DENIED');
+    const deniedOrigin = await discoverWithHeaders(endpoint, liveHost.tokens.full, { Host: host, Origin: 'http://evil.example.com' });
+    assert.equal(deniedOrigin.status, 403);
+    assert.equal(deniedOrigin.body.code, 'CORS_ORIGIN_DENIED');
+    evidence.authorization.dnsRebinding = {
+      validLoopback: control.status,
+      invalidHost: { status: deniedHost.status, code: deniedHost.body.code },
+      invalidOrigin: { status: deniedOrigin.status, code: deniedOrigin.body.code },
+    };
+  });
 
   productConformanceProxy = await startAuthProxy(endpoint, liveHost.tokens.full);
   const productScenarioDir = resolve(rawReports, 'product-tools-list-2026-07-28');
@@ -370,7 +420,7 @@ try {
   if (rawReports) await guarded('publish native reports', () => publishOfficialEvidence(rawReports));
   if (tempRoot) await guarded('remove fixture directory', () => rm(tempRoot, { recursive: true, force: true }));
   evidence.inspector.status = evidence.inspector.http && evidence.inspector.stdio ? 'PASSED' : 'INCOMPLETE';
-  evidence.authorization.status = ['owner', 'wrongScope', 'expired', 'unassignedProject', 'readScope'].every(key => evidence.authorization[key]) ? 'PASSED' : 'INCOMPLETE';
+  evidence.authorization.status = ['owner', 'wrongScope', 'expired', 'unassignedProject', 'readScope', 'dnsRebinding'].every(key => evidence.authorization[key]) ? 'PASSED' : 'INCOMPLETE';
   evidence.contract.status = evidence.contract.wire ? 'PASSED' : 'INCOMPLETE';
   evidence.stdioProtocolProbe.status = evidence.stdioProtocolProbe.legacy && evidence.stdioProtocolProbe.modern ? 'PASSED' : 'INCOMPLETE';
   evidence.mutation.status = evidence.mutation.detectedByOfficialTool ? 'DETECTED' : 'NOT_DETECTED';
