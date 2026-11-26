@@ -22,7 +22,7 @@ test('projects obligations, reverse surfaces, and evidence links without conform
       exports: { rawFiles },
       source: { sourceSha: sha, worktreeClean: true, registerPath: 'docs/requirements/REQUIREMENT-REGISTER.md' },
       toolchain: { strictdocVersion: '0.32.1', requirementsLockSha256: createHash('sha256').update(readFileSync('scripts/strictdoc/requirements.lock.txt')).digest('hex') },
-      traceability: { TRC01: { status: 'LOCAL_PASS' }, TRC02: { status: 'LOCAL_PASS' }, TRC07: { staticStaging: 'PASSED', browserAcceptance: 'PASSED' } },
+      traceability: { TRC01: { status: 'LOCAL_PASS' }, TRC02: { status: 'LOCAL_PASS' }, TRC07: { status: 'PENDING_PAGES_PUBLISH', staticStaging: 'PASSED', browserAcceptance: 'PASSED' }, gates: Object.fromEntries(Array.from({length: 8}, (_, index) => [`G${index}`, {status: index === 0 ? 'LOCAL_PASS' : index === 7 ? 'PARTIAL' : 'NOT_RUN', evidence: `Gate ${index} evidence` }])) },
       obligationTrace: { rows: [{ requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', obligationText: 'Native UI remains separately accepted', decisionStatus: 'ACCEPTED', conformanceStatus: 'PARTIAL', applicability: 'CURRENT', requirementImplementationIdentifiers: ['Native state machine 未導入'], requirementComment: 'XState actorは目標・未実装', status: 'PARTIAL', designRefs: ['[Traceability design](STRICTDOC-TRACEABILITY.md)'], sourceRefs: [{ path: 'scripts/strictdoc/case-results.mjs', range: '17, 28' }], implementationIdentifiers: ['scripts/strictdoc/case-results.mjs'], surfaceIdentifiers: [], testIds: ['TEST-TRC-01-001', 'TEST-TRC-02-001', 'TEST-TRC-03-001'], exactRuns: [exactRun] }], gaps: ['OBL-REQ-UI-001-O01: no semantic/device acceptance'] },
       reverseTrace: { rows: [
         { surface: { kind: 'mcpTool', id: 'list_projects' }, requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', status: 'UNVERIFIED', provenance: 'Literal registration', source: { path: 'scripts/strictdoc/reverse-trace.mjs', line: 18 }, testIds: ['TEST-TRC-01-001'], exactRuns: [exactRun] },
@@ -33,10 +33,18 @@ test('projects obligations, reverse surfaces, and evidence links without conform
         { testId: 'TEST-TRC-02-001', name: 'declared test not run', result: 'NOT_RUN', sourceRefs: [{ path: 'scripts/strictdoc/verify.test.mjs' }] },
         { testId: 'TEST-TRC-03-001', name: 'declared test skipped', result: 'SKIPPED', sourceRefs: [{ path: 'scripts/strictdoc/verify.test.mjs' }] },
       ],
+      publication: { status: 'NOT_PUBLISHED', publisher: '.github/workflows/repository-audit.yml' },
       execution: { status: 'IN_PROGRESS', sourceSha: sha, repository: 'yohn-jp/codexia', runId: '42', runAttempt: 1, job: 'specification', task: 'pages-requirements-trace', runUrl: 'https://github.com/yohn-jp/codexia/actions/runs/42' },
     };
+    report.obligationTrace.rows.push({
+      ...report.obligationTrace.rows[0],
+      requirementId: 'REQ-UI-006', obligationId: 'OBL-REQ-UI-006-O01',
+      requirementImplementationIdentifiers: ['WRT-01/REC-01 部分導入済み', 'ChangeSet・認証・バックアップは未実装'],
+      requirementComment: 'XState v5 は部分導入済み。全受入は未認定。',
+      testIds: [], exactRuns: [],
+    });
     writeFileSync(join(output, 'trace-report.json'), JSON.stringify(report));
-    packSpecifications(site, output, sha);
+    packSpecifications(site, output, sha, { status: 'CERTIFIED', sourceSha: sha, repository: 'yohn-jp/codexia', runId: '43', attempt: 2, job: 'types', task: 'requirements-trace', runUrl: 'https://github.com/yohn-jp/codexia/actions/runs/43', artifactId: 987, artifactDigest: 'sha256:' + 'd'.repeat(64), passedCaseIds: ['TEST-TRC-01-001'] });
     assert.equal(verifySpecifications(site, sha).sourceSha, sha);
     assert.match(readFileSync(join(site, 'requirements/html/index.html'), 'utf8'), /href="\.\.\/\.\.\/"/u);
     const tracePage = readFileSync(join(site, 'requirements/traceability/index.html'), 'utf8');
@@ -45,6 +53,18 @@ test('projects obligations, reverse surfaces, and evidence links without conform
     assert.match(tracePage, /no semantic\/device acceptance/u);
     assert.match(tracePage, /mcpTool/u);
     assert.equal(traceJson.sourceSha, sha);
+    assert.equal(traceJson.pagesQualification.status, 'PENDING_PAGES_PUBLISH');
+    assert.equal(traceJson.pagesQualification.sourceSha, sha);
+    assert.equal(traceJson.pagesQualification.publicUrlConfirmation, 'PENDING');
+    assert.equal(traceJson.verificationReceipt.status, 'CERTIFIED');
+    assert.equal(traceJson.qualificationGates.G7.status, 'PARTIAL');
+    assert.equal(traceJson.qualificationGates.G7.runStatus, undefined, 'private gate diagnostics must not be projected');
+    assert.match(tracePage, /Specification qualification gates/u);
+    assert.match(tracePage, /Gate 7 evidence/u);
+    assert.equal(traceJson.verificationReceipt.artifactId, 987);
+    assert.equal(traceJson.caseExecutions[0].verificationArtifact.url, 'https://github.com/yohn-jp/codexia/actions/runs/43/artifacts/987');
+    assert.equal(traceJson.caseExecutions[1].verificationArtifact, undefined, 'artifact identity must only be attached to certified passed case IDs');
+    assert.match(tracePage, /TRC-07 生成時点: <strong>PENDING_PAGES_PUBLISH<\/strong>/u);
     assert.equal(traceJson.requirements[0].conformanceStatus, 'PARTIAL');
     assert.equal(traceJson.requirements[0].implementationDeclarationStatus, 'EXPLICIT_NOT_IMPLEMENTED');
     assert.deepEqual(traceJson.requirements[0].implementationDeclarations.map(item => item.sourceField), ['Implementation identifiers', 'Comment']);
@@ -53,7 +73,13 @@ test('projects obligations, reverse surfaces, and evidence links without conform
     assert.equal(traceJson.execution.runUrl, 'https://github.com/yohn-jp/codexia/actions/runs/42');
     assert.equal(traceJson.obligations[0].exactRuns[0].job, 'specification');
     assert.equal(traceJson.requirements[0].area, 'UI');
-    assert.equal(traceJson.summary.areaCounts.UI.obligationCount, 1);
+    assert.equal(traceJson.summary.areaCounts.UI.obligationCount, 2);
+    const partial = traceJson.requirements.find(item => item.requirementId === 'REQ-UI-006');
+    assert.equal(partial.implementationDeclarationStatus, 'EXPLICIT_PARTIALLY_IMPLEMENTED');
+    assert.equal(partial.conformanceStatus, 'PARTIAL');
+    assert.equal(traceJson.summary.implementationDeclarationCounts.EXPLICIT_PARTIALLY_IMPLEMENTED, 1);
+    assert.match(tracePage, /明示: 部分導入済み/u);
+    assert.match(tracePage, /ChangeSet・認証・バックアップは未実装/u);
     assert.equal(traceJson.summary.reverseDispositionCounts.CANDIDATE_ONLY, 1);
     assert.match(tracePage, /id="surface-2"[^>]*data-status="UNMAPPED CANDIDATE_ONLY"/u);
     assert.match(tracePage, /id="surface-1"[^>]*data-status="UNVERIFIED LINKED"/u);
@@ -88,11 +114,14 @@ test('projects obligations, reverse surfaces, and evidence links without conform
     assert.ok(staleTrace.referenceAudit.broken.some(item => item.path === 'packages/api/src/missing-trace-target.ts'));
     assert.ok(staleTrace.referenceAudit.broken.some(item => item.path === 'packages/api/src/missing-gap-source.ts'));
     assert.equal(staleTrace.summary.brokenReferenceCount, staleTrace.referenceAudit.broken.length);
+    assert.deepEqual(staleTrace.verificationReceipt, { status: 'NOT_AVAILABLE', sourceSha: sha }, 'missing Verify certification must remain explicit');
     assert.match(readFileSync(join(staleSite, 'requirements/traceability/index.html'), 'utf8'), /data-status="UNVERIFIED"[^>]*data-search="[^"]*no exact-source run evidence/u);
     assert.match(readFileSync(join(staleSite, 'requirements/traceability/index.html'), 'utf8'), /missing-trace-target\.ts/u);
     writeFileSync(join(output, 'trace-report.json'), JSON.stringify(report));
 
     for (const [name, mutate, message] of [
+      ['pages-complete-without-public-proof', data => { data.traceability.TRC07.status = 'PASSED'; }, /TRC-07/iu],
+      ['foreign-publisher-claim', data => { data.publication.publisher = 'other-workflow.yml'; }, /publication claim/iu],
       ['obligation-job', data => { data.obligationTrace.rows[0].exactRuns[0].job = 'other-job'; }, /job/iu],
       ['obligation-task', data => { data.obligationTrace.rows[0].exactRuns[0].task = 'other-task'; }, /task/iu],
       ['unobserved-test', data => { data.obligationTrace.rows[0].exactRuns[0].testId = 'TEST-TRC-02-001'; }, /TEST-ID|test execution/iu],
