@@ -56,7 +56,7 @@ flowchart TD
 | 静的 UI のみの変更 | **別の Frontend lane** | 稼働 API epoch と Access / route の preflight を確認 |
 | PostgreSQL の物理 migration / ledger 差分 | **禁止** | 停止・バックアップ・隔離検証・migration・データ復旧の独立承認 |
 | Better Auth の認証 schema 差分 | **通常更新では禁止** | 期待する catalog との読取検査が合致しなければ更新しない |
-| API epoch / persistence format の変更 | **禁止** | 無変更停止。必要な非互換移行は別途仕様・承認が必要。初回導入用の epoch 4 契約是正は既存稼働環境の更新許可ではない |
+| API epoch / persistence format の変更 | **禁止** | 無変更停止。必要な非互換移行は別途仕様・承認が必要。初回導入用の [API 契約是正](../architecture/API-CONTRACT.md#操作の追加変更廃止) は既存稼働環境の更新許可ではない |
 | 再構築可能な cache/model データ | **条件付き** | 派生データとして再作成可能で、Core 執筆の妨げにならないこと |
 | Secret、サービス ID、Access policy の変更 | **画像更新と分離** | IaC / セキュリティの独立承認と実環境での適合確認 |
 

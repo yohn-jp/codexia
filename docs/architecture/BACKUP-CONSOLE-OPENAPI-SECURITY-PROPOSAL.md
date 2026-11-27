@@ -1,6 +1,6 @@
-# Backup Console の OpenAPI 認証宣言を訂正する提案
+# Backup Console の OpenAPI 認証宣言の訂正
 
-**承認待ちの提案。** HTTP ワイヤ契約と Backup Console の所有者を対象とする。
+**種別は承認済みの API epoch 5 設計。** HTTP ワイヤ契約と Backup Console の所有者を対象とする。
 扱う変更は、公開 OpenAPI の `security` 宣言の訂正である。
 
 ## 公開スキーマと認可の差
@@ -33,9 +33,9 @@ OpenAPI を読む利用者やクライアント生成器には、実際には拒
 
 全 11 操作の `security` に既存の `OwnerSessionCookie` を指定する。
 既存の認証方式の削除は oasdiff の `api-security-removed` に該当する。
-実装に進む条件は、対象の `ERR` と比較基準を含む API epoch の遷移が明示的に承認されることである。 [互換性手順の提案](API-COMPATIBILITY-TRANSITION-PROPOSAL.md)
+実装前に初回本番導入前であることを確認し、基準 SHA と `ERR` の完全照合を行う。 [API epoch 5 契約是正](API-COMPATIBILITY-TRANSITION-PROPOSAL.md)
 
-## 承認後の受入条件
+## 受入条件
 
 1. 生成 OpenAPI で表の 11 操作の認証宣言が owner session cookie に揃い、表の対象外では `security` の差分がないことを確認する。削除するのは、訂正した `security` 宣言に対応する `x-codexia-security-deviation` の注記に限る。
 2. 隔離 API で owner session の提示、Bearer token と他 principal の拒否、CSRF、Origin および再認証を再検証する。

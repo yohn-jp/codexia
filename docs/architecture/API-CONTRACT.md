@@ -12,7 +12,7 @@ Codexiaが所有するHTTPのmethodとpath、DTO、header、ステータス、�
 MCP の HTTP 入口は TypeSpec で定義し、JSON-RPC のペイロードは [MCP プロトコル契約](MCP-V2-MIGRATION.md) に従う。
 `POST /mcp` と作品別の POST 入口を公式 SDK に委譲する。
 同じ二つの URL に対する GET と DELETE は、認可されたリクエストにも 405 を返す。
-初回本番導入前の API epoch 4 では persistence の UUID、版番号、必須項目、長さ・範囲制約およびポータブルアーカイブの形状を TypeSpec 正本に記述する。MCP POST の 400 応答は、認可等の ApiError と JSON-RPC parse error の両方を明示する。Persistence の JSON body を要求する操作は未対応メディア型に415を返す。opaque cursorはAPIから返された値を使用する。保存はX-Client-Idまたは本文clientIdを必須とし、ChangeSetは7種のnative operationの形状、pathとcommandのproject一致およびwrite identity一意性を要求する。アーカイブの参照整合性、自己merge禁止等の業務制約は静的スキーマとは別に実行時に検証する。
+API epoch 4 で承認した契約是正では persistence の UUID、版番号、必須項目、長さ・範囲制約およびポータブルアーカイブの形状を TypeSpec 正本に記述する。MCP POST の 400 応答は、認可等の ApiError と JSON-RPC parse error の両方を明示する。Persistence の JSON body を要求する操作は未対応メディア型に415を返す。opaque cursorはAPIから返された値を使用する。保存はX-Client-Idまたは本文clientIdを必須とし、ChangeSetは7種のnative operationの形状、pathとcommandのproject一致およびwrite identity一意性を要求する。アーカイブの参照整合性、自己merge禁止等の業務制約は静的スキーマとは別に実行時に検証する。
 
 ## 契約境界
 
@@ -179,9 +179,11 @@ Coreのoperation上限は書き込み内容の合計8,388,608 UTF-16コード単
 2. `pnpm --filter @codexia/http-contract generate` でOpenAPIを再生成する。TypeSpecと生成差分を同じ変更に含める。
 3. `pnpm test:http-contract` で生成差分、Redocly、oasdiff、Fastifyのスキーマ適合を確認する。
    `pnpm --filter @codexia/app generate:http` と `pnpm --filter @codexia/app check-generated:http` でDesktop Webの生成クライアントとoperation照合を更新・検査する。
-   iOSの再生成検査も実行する。
+   iOS の API 生成契約への影響も確認する。Native iOS 開発と IPA CI の凍結はそのまま適用する。
 4. 廃止予定を告知する場合はTypeSpecに廃止予定を記載する。互換性を壊す削除や変更は、利用者の移行とAPI epochの切替を規定する互換手順で扱う。
-5. 初回本番導入の契約是正に限り、基準コミット `ed11a58d1c92f749d67e2d0db2c3d251c0bc5c87` からの epoch 3 → 4 を認める。oasdiff の実行・結果保存は必須で、許容対象は persistence 入力制約・アーカイブ形状と MCP POST の 400 応答の是正に限定する。同一 epoch の破壊的変更、他の基準・epoch 遷移、認可・経路の破壊的変更は拒否する。既存稼働環境への非互換自動更新は許可しない。
+5. 初回本番導入の契約是正に限り、基準コミット `ed11a58d1c92f749d67e2d0db2c3d251c0bc5c87` からの epoch 3 → 4 を認める。oasdiff の実行・結果保存は必須で、許容対象は persistence 入力制約・アーカイブ形状と MCP POST の 400 応答の是正に限定する。この基準に対する許容範囲は当時の是正に限る。
+
+6. 初回本番導入前であることを確認できた場合に限り、Backup Console の owner cookie 宣言と必須リクエスト、および MCP の 405 応答型を、一度の API epoch 4 → 5 で是正する。対象、基準 SHA、oasdiff の差分の完全照合と検証義務は [API epoch 5 契約是正](API-COMPATIBILITY-TRANSITION-PROPOSAL.md) に従う。同一 epoch の破壊的変更、承認外の基準や epoch、既存稼働環境への非互換自動更新は拒否する。
 
 ## バックアップ管理API（採用済み目標・未実装）
 
