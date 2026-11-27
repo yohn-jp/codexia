@@ -10,8 +10,9 @@ import { validateVerificationPlan, planDigest } from '../impact/plan.mjs';
 import { assertPlanEvidence } from '../evidence/validation.mjs';
 import { assertProfileArtifactEvidence } from '../evidence/profile-artifact.mjs';
 import { selectLatestPlanArtifact, selectLatestEvidenceArtifacts, resolveProducerJobAttempts } from '../evidence/artifact-selection.mjs';
+import { isSkippedProfileBrowserPlaceholder, normalizeVerificationJobs } from '../evidence/job-name.mjs';
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from '../evidence/download-artifacts.mjs';
-import { REUSED_MAIN_SKIPPED_JOBS } from '../../release/components/policy.mjs';
+import { ALLOWED_SKIPPED_VERIFICATION_JOBS } from '../../release/components/policy.mjs';
 import { createGitHubProofClient } from '../evidence/proof-client.mjs';
 
 const WORKFLOW = '.github/workflows/verify.yml';
@@ -170,7 +171,7 @@ async function mergedPrRun({ context, candidate, request }) {
   const pr = await request('pulls/' + prNumber);
   const mergedAt = assertMergedPull(pr, prNumber, candidate, context.repoId);
   assert.equal(run.head_branch, pr.head.ref, 'Workflow branch does not identify the merged PR head');
-  const jobs = await apiList(request, 'actions/runs/' + run.id + '/jobs', 'jobs', { filter: 'latest' });
+  const jobs = normalizeVerificationJobs(await apiList(request, 'actions/runs/' + run.id + '/jobs', 'jobs', { filter: 'latest' }));
   assertJobRunBindings(jobs, run);
   for (const job of jobs.filter(success)) {
     const completed = Date.parse(job.completed_at);
@@ -210,7 +211,8 @@ export async function readReusableMainEvidence({ sourceSha, before, repository, 
     ['build-core', 'build-full']);
   assertProfileArtifactEvidence(plan, producerJobs, reports, artifacts, run.id);
   for (const job of jobs.filter(job => job.conclusion === 'skipped')) {
-    assert.ok(REUSED_MAIN_SKIPPED_JOBS.includes(job.name), 'Unexpected skipped PR job');
+    assert.ok(ALLOWED_SKIPPED_VERIFICATION_JOBS.includes(job.name) || isSkippedProfileBrowserPlaceholder(job.name),
+      'Unexpected skipped PR job');
   }
   const receipt = {
     version: 1, sourceSha, tree: candidate.tree, baseSha: candidate.base, headSha: candidate.head,

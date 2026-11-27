@@ -1,6 +1,7 @@
 // Read-only CI observability. Neither a verification gate nor release authority.
 import { summarizeCiTiming, seconds } from './timing.mjs';
-import { VERIFICATION_LEAF_JOBS } from '../impact/contract.mjs';
+import { VERIFICATION_GROUPS, VERIFICATION_LEAF_JOBS } from '../impact/contract.mjs';
+import { normalizeVerificationJobName } from '../evidence/job-name.mjs';
 
 const stamp = input => { const n = Date.parse(input ?? ''); return Number.isFinite(n) ? n : null; };
 const value = input => String(input ?? '').slice(0, 180);
@@ -10,7 +11,7 @@ const currentAttempt = (run, job) =>
   (Number(run.run_attempt) <= 1 || stamp(job.started_at) >= stamp(run.run_started_at));
 const current = (run, job) => job.conclusion !== 'skipped' && currentAttempt(run, job);
 
-export function readVerifyGraph(source) {
+function parseWorkflowGraph(source) {
   const graph = [];
   let inJobs = false, active = null, readingNeeds = false;
   for (const line of source.split(/\r?\n/u)) {
@@ -33,14 +34,59 @@ export function readVerifyGraph(source) {
     }
     if (/^    [^\s#]/u.test(line)) readingNeeds = false;
   }
+  return graph;
+}
+
+export function readVerifyGraph(source, profileSource) {
+  const mainSource = typeof source === 'object' && source !== null ? source.verify : source;
+  const nestedSource = profileSource ?? (typeof source === 'object' && source !== null ? source.profile : null);
+  const graph = parseWorkflowGraph(mainSource);
+  if (nestedSource) {
+    const nested = parseWorkflowGraph(nestedSource);
+    const build = nested.find(job => job.id === 'build');
+    const browser = nested.find(job => job.id === 'browser');
+    if (!build?.template || !browser?.template || !browser.needs.includes('build')) {
+      throw new Error('Unrecognized Verify profile dependency graph');
+    }
+    const callers = ['core', 'full'].map(profile => ({
+      id: `profile_${profile}`, template: `profile-${profile}`, needs: ['plan'],
+    }));
+    if (callers.some(caller => !graph.some(job => job.id === caller.id && job.template === caller.template))) {
+      throw new Error('Verify profile callers are unavailable');
+    }
+    for (const caller of callers) {
+      const profile = caller.id.slice('profile_'.length);
+      const callerNeeds = graph.find(job => job.id === caller.id).needs;
+      const nestedName = value => value.replace(/\$\{\{\s*inputs\.profile\s*\}\}/gu, profile);
+      const prefix = `profile-${profile} / `;
+      graph.push({ id: `${caller.id}_build`, family: caller.id,
+        template: prefix + nestedName(build.template), needs: [...callerNeeds] });
+      graph.push({ id: `${caller.id}_browser`, family: caller.id,
+        template: prefix + nestedName(browser.template), needs: [`${caller.id}_build`] });
+      graph.push({ id: `${caller.id}_legacy_build`, family: caller.id,
+        template: `build-${profile}`, needs: ['plan'] });
+      for (const group of Object.keys(VERIFICATION_GROUPS).filter(name => name.startsWith(`browser-${profile}-`))) {
+        graph.push({ id: `${caller.id}_legacy_${group}`, family: caller.id, template: group, needs: ['plan'] });
+      }
+    }
+    for (let index = graph.length - 1; index >= 0; index--) {
+      if (callers.some(caller => graph[index].id === caller.id)) graph.splice(index, 1);
+    }
+  }
   if (!graph.some(j => j.id === 'plan') || !graph.some(j => j.id === 'certification') ||
-    graph.some(j => !j.template || j.needs.some(id => !graph.some(p => p.id === id)))) {
+    graph.some(j => !j.template || j.needs.some(id => !graph.some(p => p.id === id || p.family === id)))) {
     throw new Error('Unrecognized Verify dependency graph');
   }
   return graph;
 }
 
 export function nameMatches(template, name) {
+  const wrappedTemplate = /^profile-(?:core|full) \/ /u.test(template);
+  const canonicalTemplate = normalizeVerificationJobName(template);
+  const canonicalName = normalizeVerificationJobName(name);
+  if (canonicalTemplate !== null && !template.includes('${{')) return name === template;
+  if (/^profile-(?:core|full) \/ /u.test(name) && canonicalName === null) return false;
+  if (/^profile-(?:core|full) \/ /u.test(name) && !wrappedTemplate) return false;
   const parts = template.split(/\$\{\{[^}]*\}\}/u);
   const quote = part => part.replace(/[|\\{}()[\]^$+*?.]/gu, '\\$&');
   return new RegExp('^' + parts.map(quote).join('.+') + '$', 'u').test(name);
@@ -65,7 +111,7 @@ export function blockingChain(run, jobs, workflowSource) {
       seen.add(at.job.id);
       names.unshift(at.job.name);
       if (!at.spec.needs.length) break;
-      const parents = mapped.filter(p => at.spec.needs.includes(p.spec.id) &&
+      const parents = mapped.filter(p => (at.spec.needs.includes(p.spec.id) || at.spec.needs.includes(p.spec.family)) &&
         stamp(p.job.completed_at) <= stamp(at.job.started_at));
       if (!parents.length) return { names: [], verified: false, reason: 'Predecessor timing unavailable' };
       parents.sort((a,b) => stamp(b.job.completed_at) - stamp(a.job.completed_at));

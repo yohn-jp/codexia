@@ -8,6 +8,7 @@ import { validateVerificationPlan, assertExactPrImpact, readVerificationFiles } 
 import { assertPlanEvidence } from '../evidence/validation.mjs';
 import { assertProfileArtifactEvidence } from '../evidence/profile-artifact.mjs';
 import { resolveProducerJobAttempts } from '../evidence/artifact-selection.mjs';
+import { normalizeVerificationJobs } from '../evidence/job-name.mjs';
 import { assertReusedCoverageProof } from '../evidence/proof-reuse.mjs';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
@@ -40,8 +41,8 @@ if (run.event === 'pull_request') {
   assert.deepEqual(plan.files, readVerificationFiles({ event: run.event, base, sha: plan.sha }),
     'Impact plan does not match the exact push diff');
 }
-const jobs = await paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRun,
-  { owner, repo, run_id: Number(GITHUB_RUN_ID), filter: 'latest' }, 'jobs');
+const jobs = normalizeVerificationJobs(await paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRun,
+  { owner, repo, run_id: Number(GITHUB_RUN_ID), filter: 'latest' }, 'jobs'));
 const directory = process.env.CODEXIA_CI_EVIDENCE_DIR;
 assert.ok(directory, 'Execution evidence directory is required');
 const reports = [];
