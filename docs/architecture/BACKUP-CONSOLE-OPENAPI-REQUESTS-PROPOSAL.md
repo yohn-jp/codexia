@@ -1,6 +1,6 @@
-# Backup Console の OpenAPI リクエスト条件を訂正する提案
+# Backup Console の OpenAPI リクエスト条件の訂正
 
-**承認待ちの提案。** HTTP ワイヤ契約と Backup Console の所有者を対象とする。
+**種別は承認済みの API epoch 5 設計。** HTTP ワイヤ契約と Backup Console の所有者を対象とする。
 扱う変更は、公開 OpenAPI の JSON 本文と `Idempotency-Key` の訂正である。
 
 ## 実際の受付条件
@@ -25,9 +25,9 @@ Backup Console の4つの POST は、`Idempotency-Key` で保存済みの操作�
 
 oasdiff の検出対象には、本文の必須プロパティの追加、任意だったキーの必須化、およびキーパターンの追加が含まれる。
 実行時の受付条件は維持するが、生成クライアントで必須となるプロパティが増える。
-実装に進む条件は、対象の `ERR` と比較基準を含む API epoch の遷移が明示的に承認されることである。 [互換性手順の提案](API-COMPATIBILITY-TRANSITION-PROPOSAL.md)
+実装前に初回本番導入前であることを確認し、基準 SHA と `ERR` の完全照合を行う。 [API epoch 5 契約是正](API-COMPATIBILITY-TRANSITION-PROPOSAL.md)
 
-## 承認後の検証
+## 受入条件
 
 1. TypeSpec に表の 4 操作の本文とキーの条件を記述する。生成 OpenAPI の差分で、操作、本文のプロパティ、未知フィールドの拒否、キーの必須指定とパターンを照合する。
 2. 隔離 PostgreSQL を使う実 API で、正常な受付、必須フィールドやキーの欠落、不正形式、未知フィールド、同じキーでの再送と異なる入力での拒否を確認する。owner session、CSRF および再認証は採用済みの認可契約に従う。 [バックアップ管理契約](BACKUP-CONSOLE-CONTRACT.md)
