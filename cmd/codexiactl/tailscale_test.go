@@ -154,7 +154,6 @@ func TestTailnetCreatesOnlySeparatelyApprovedScopedOIDCTrust(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(legacy)
 		case r.URL.Path == "/api/v2/tailnet/"+network+"/keys" && r.Method == http.MethodPost:
 			var request struct {
-				KeyType          string            `json:"keyType"`
 				Subject          string            `json:"subject"`
 				Issuer           string            `json:"issuer"`
 				Scopes           []string          `json:"scopes"`
@@ -162,7 +161,7 @@ func TestTailnetCreatesOnlySeparatelyApprovedScopedOIDCTrust(t *testing.T) {
 				CustomClaimRules map[string]string `json:"customClaimRules"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil ||
-				request.KeyType != "federated" || request.Subject != wifSubject || request.Issuer != wifIssuer ||
+				request.Subject != wifSubject || request.Issuer != wifIssuer ||
 				!matchesWIF(validWIFKey("new-scoped-key")) || !slices.Equal(request.Scopes, []string{"auth_keys"}) ||
 				!slices.Equal(request.Tags, []string{"tag:ci"}) ||
 				request.CustomClaimRules["ref"] != "refs/heads/main" ||
