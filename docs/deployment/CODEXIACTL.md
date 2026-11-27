@@ -32,8 +32,9 @@ flowchart TD
     A --> V["対象 VM: DB / Auth / Quadlet"]
     P --> W["通常 Frontend Worker"]
     U --> O["通常 HTTPS /console/setup: Passkey"]
-    O --> P
-    P --> X["ACTIVE: Backend + Console"]
+    O --> H["CLI 外: 既存保護配備経路"]
+    H --> X
+    X["ACTIVE: Backend + Console"]
     X --> B["Console 保全設定・独立復元受入"]
     B --> R["ACCEPTED: 通常互換自動配備 R8"]
 ```
@@ -46,7 +47,7 @@ flowchart TD
 
 | コマンド | 入力・動作 | 終了条件 |
 | --- | --- | --- |
-| `codexiactl init` | 対話 TTY 必須。§3 の順序で現況を観測し、不足分だけ承認の下で整備して初回導入を進める。再実行が再開操作を兼ねる | ACTIVE の実確認、または既存 ACTIVE/ACCEPTED の安全な再確認。保全未受入なら通常更新は停止のまま |
+| `codexiactl init` | 対話 TTY 必須。§3 の順序で現況を観測し、不足分だけ承認の下で整備して初回導入を進める。再実行が再開操作を兼ねる | R5 の登録専用 API と Frontend の稼働、Owner Setup Grant の安全な引き渡しを確認して終了。既存 Owner には再発行しない |
 | `codexiactl init --plan` | ローカル読取りと外部読取り・必要な一時認証のみ。変更予定・資格不足・利用する Workflow と承認を表示。秘密値は出さない | 計画の提示。VM・GitHub・Tailscale・Cloudflare の構成変更や deploy dispatch はしない |
 | `codexiactl status [--json]` | 観測済み VM/外部 identity、Environment 設定の存在、最新対象 run、R 状態、ACTIVE/ACCEPTED、通常更新可否を読取り | 観測結果。未観測・不明・到達不能を成功としない |
 | `codexiactl doctor [--json]` | 同じ観測を使い、OS/sudo/SSH、Tailnet/ACL、GitHub 権限と認定、Edge、設定欠落を診断。保護 preflight は既存の読取り専用 Workflow を明示承認の下で起動する `init` から利用する | 阻害要因、原因の証拠、次に解決すべき操作。構成変更なし |
@@ -69,10 +70,9 @@ flowchart TD
 | 07 R4 | fresh lifecycle Preflight（install, bootstrap）。対象と DB 意図を承認し、必要な場合のみ独立した DB 初期化承認を取得。既存 Bootstrap に Plan ID を渡す | R4 の実ジョブ成功、runtime SSH、DB/Auth の同一性を再観測 |
 | 08 R5 Frontend | fresh lifecycle Preflight（install, runtime）。既存 Frontend の初回公開を dispatch | 通常 Worker で認定 Frontend identity を確認 |
 | 09 R5 owner-setup | §4.4 の配送用公開鍵を確定。fresh lifecycle Preflight（install, bootstrap）。setup-only 起動と一回限り grant 発行を dispatch | 同一 origin、登録時の edge 保護、業務 API 拒否、暗号化 handoff を確認 |
-| 10 Owner | Owner が通常 HTTPS の /console/setup を開き、本人認証・Passkey を登録。CLI はブラウザー操作を代行せず、観測と承認待ちを表示 | Owner/clients の確定を既存 read-only 観測から確認。既存 Owner が存在すれば新規発行しない |
-| 11 R5 prepare-activation | fresh lifecycle Preflight（install, bootstrap）。既存 Bootstrap の activation preparation を dispatch | setup-only API/Tunnel 停止と clean slot、Owner/clients を確認 |
-| 12 R6 | fresh lifecycle Preflight（install, runtime）、有効な UTC 作業枠。既存 protected Backend activation を dispatch | 実 deploy job、同一 source/digest、frontend epoch、通常 HTTPS Console/readiness を照合。新規 install で backup は前提外 |
-| 13 ACTIVE / 継続配備 | §7 の状態に従い初回用承認・一時管理資格を片付ける。Console の保全設定・独立復元受入への案内を表示。既存の R8 条件が成立したときだけ通常更新を有効化 | CLI を終了・削除しても通常配備可能な制御面。実環境受入を未観測のまま ACCEPTED にしない |
+| 10 引き渡し・終了 | 通常端末のブラウザーで /console/setup を開く案内を表示し、一時認証を片付ける | 登録可能な状態を確認して終了。本人登録を待機しない |
+
+以降の Owner 登録、R5 prepare-activation、R6 は CLI の実行範囲外であり、既存の保護配備経路が所有する。Owner 未登録のまま通常 Backend を起動してはならない。
 
 R0（不明・不一致）、R1/R3（中断・復旧）、R2（restore）、R8（互換更新）は lifecycle の判定を尊重する。CLI は既存 DB の採用/削除や復元を新規 install と推定しない。既存データ・不明な host/DB/owner/transaction があれば該当保護経路への案内と証拠提示で停止する。新 VM への交換でも独立復旧受入の代わりに新規 Owner を発行しない。バックアップの実装変更を CLI の初回稼働条件にしない。
 
@@ -120,7 +120,7 @@ R5 の既存 owner-setup grant と age 暗号化 handoff を利用し、CLI は 
 
 原則として Owner の公開 age recipient を独立に確認して登録し、暗号化 handoff を信頼済み SSH セッションで Owner に配送する。Owner と配備運用者が同一で対象 VM を信頼することを明示確認した場合に限り、CLI は Go の age ライブラリで一時配送用鍵を当該プロセスに生成し、公開 recipient のみを GitHub に登録できる。秘密鍵はプロセス外・GitHub・ログ・artifact・恒久ファイルに出さない。R5 が成功した後、現行の service-owned `~/.local/state/codexia-deploy/owner-setup.age` を最小限の権限で読取り、既存の envelope の recipient と origin を検証して復号する。Owner が信頼済みのブラウザーに貼り付ける一度の TTY 表示以外に grant を出さない。URL query、shell history、clipboard 自動転送、CI 出力は禁止する。Owner が別人の場合は Owner の端末で復号し、CLI は暗号文のみを安全な既存配送経路で渡す。
 
-一時鍵の喪失・grant 期限切れ・中断は、Owner 未登録を再確認して現行の承認済み reissue を使う。既存有効 grant の無断破棄・再発行を禁止する。独立 Owner recipient を利用すれば中断後も既存暗号文を復号できる。本人 Passkey 登録後は grant の無効化と clients の確定を保護 preflight で確認する。WebAuthn RP ID は通常 production origin のままであり、localhost や SSH callback を登録 origin に使わない。
+一時鍵の喪失・grant 期限切れ・中断は、Owner 未登録を再確認して現行の承認済み reissue を使う。既存有効 grant の無断破棄・再発行を禁止する。独立 Owner recipient を利用すれば中断後も既存暗号文を復号できる。本人 Passkey 登録後の grant 無効化と clients の確定は既存認証・保護配備経路の責務であり、CLI は待機・確認しない。WebAuthn RP ID は通常 production origin のままであり、localhost や SSH callback を登録 origin に使わない。
 
 ## 5. 入力の整備と GitHub Environment
 
@@ -140,7 +140,7 @@ R5 の既存 owner-setup grant と age 暗号化 handoff を利用し、CLI は 
 | Worker publication の限定資格 | S: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID（現行入力名） | production のみ。read token と分離 |
 | Owner 確認済み公開 recipient | V: CODEXIA_OWNER_SETUP_AGE_RECIPIENT | bootstrap のみ。R5 配送時に設定 |
 | 初回 operation 承認 | V: CODEXIA_BOOTSTRAP_ENABLED、CODEXIA_DATABASE_INITIALIZATION_APPROVED | bootstrap のみ。§6 の承認と範囲・時点を照合して設定 |
-| R6 operation 承認 | V: CODEXIA_INITIAL_INSTALL_APPROVED、CODEXIA_DATABASE_INITIALIZATION_APPROVED、CODEXIA_PUSH_DEPLOYMENT_ENABLED | production のみ。§6/§7 の明示承認と実際の状態に従う |
+| CLI 外の R6 operation 承認 | V: CODEXIA_INITIAL_INSTALL_APPROVED、CODEXIA_DATABASE_INITIALIZATION_APPROVED、CODEXIA_PUSH_DEPLOYMENT_ENABLED | production のみ。CLI は設定せず、既存保護配備経路が管理する |
 
 V=Variable、S=Secret。現行 `CODEXIA_DEPLOYMENT_PRESERVATION` は既存データの保全/復旧経路で必要となる個別保護入力であり、純新規 install の必須入力ではない。DB admin/app/auth passwords、Better Auth secret、introspection secret 等は既存 R4 の VM 上の生成・保管に委譲する。S3/復号鍵・バックアップ executor 資格は CLI の登録入力に含めない。
 
@@ -157,8 +157,6 @@ SSH host pin は既に独立認証された SSH 接続または provider console
 | R4 | production-bootstrap.yml | mode=bootstrap, preflight_run_id, approval_phrase=BOOTSTRAP_CODEXIA, initialize_database=承認済みの真の DB 不在の場合のみ true |
 | R5 Frontend | frontend-release.yml | preflight_run_id, approval_phrase=PUBLISH_INITIAL_FRONTEND |
 | R5 grant | production-bootstrap.yml | mode=owner-setup, preflight_run_id, approval_phrase=OWNER_SETUP_CODEXIA |
-| R5 preparation | production-bootstrap.yml | mode=prepare-activation, preflight_run_id, approval_phrase=OWNER_SETUP_CODEXIA |
-| R6 | backend-deployment-handoff.yml | preflight_run_id, approval_phrase=ACTIVATE_CODEXIA_BACKEND |
 
 各 protected operation の内容・状態・計画の run link・candidate・対象・承認範囲を提示し、運用者の承認なしに approval phrase や gate を送らない。人間に固定文字列を転記させる必要はない。CLI が正規の承認 phrase を送る条件はその operation の明示承認である。Environment required reviewer の独立した承認は GitHub の既存画面に案内して待機し、CLI は pending approval の自動承認 API を呼ばない。preflight のみでは書込み承認にならない。DB 初期化の承認を既存データの破棄承認と混同しない。時刻枠は運用者が選択・承認した UTC start/end として明示し、CLI は無期限の window を設定しない。
 
@@ -168,9 +166,9 @@ HTTP 200/202、dispatch 成功、Workflow conclusion=success だけを配備成�
 
 ## 7. 完了条件・継続配備・資格の片付け
 
-CLI の初回実行は通常 Frontend、通常 Backend、Owner の認証済み Console と API readiness、R6 release identity、同じ runtime SSH 管理経路を確認して ACTIVE と報告する。CLI の非秘密の結果は run URL・source SHA・target・release digest と確認項目を含む。Owner が行う実ブラウザー受入や独立復旧受入を未確認のまま成功と表示しない。
+CLI の初回実行は通常 Frontend、登録専用 API、業務 API の拒否、Owner Setup Grant の安全な引き渡しを確認して終了する。ACTIVE とは報告しない。本人登録・ログインは通常端末のブラウザーで行い、以後の保護配備は CLI に依存しない。
 
-R6 後、初回用 gate を解除し、必要なら GitHub の既存通常配備設定を安全側に戻す。R6 中だけ必要となる CODEXIA_PUSH_DEPLOYMENT_ENABLED は明示承認の作業枠内で扱う。通常 R8 に必要な保全・独立復元の受入を満たさない限り、初回終了後の通常 push は有効にしない。中断時は変更した gate と run の現在状態を再観測し、安全に停止させるか未解決として報告する。既存の正当に稼働中の production 設定を無断で無効化しない。常設 R8 は [Update flow](UPDATE-FLOW.md) と [Backup](BACKUP.md) の受入を証拠で確認した後の別途明示承認で有効にする。再度 init を起動した場合、ACTIVE/ACCEPTED の状態を検査し不足する受入・承認だけを案内する。CLI は R8 の自動実行に関与しない。
+CLI 外の既存保護配備経路は R6 後、初回用 gate を解除し、必要なら GitHub の既存通常配備設定を安全側に戻す。R6 中だけ必要となる CODEXIA_PUSH_DEPLOYMENT_ENABLED は明示承認の作業枠内で扱う。通常 R8 に必要な保全・独立復元の受入を満たさない限り、初回終了後の通常 push は有効にしない。中断時は変更した gate と run の現在状態を再観測し、安全に停止させるか未解決として報告する。既存の正当に稼働中の production 設定を無断で無効化しない。常設 R8 は [Update flow](UPDATE-FLOW.md) と [Backup](BACKUP.md) の受入を証拠で確認した後の別途明示承認で有効にする。再度 init を起動した場合、既存 Owner や ACTIVE/ACCEPTED を観測したら変更せず既存運用経路を案内する。CLI は R8 の自動実行に関与しない。
 
 provider 管理 token、device code、refresh token、age 一時鍵、生成中の private key は一時認証のためだけに使う。CLI 内の保持を最短化し、永続ファイルや command line、stdout/stderr の診断、JSON、shell history、CI artifacts、git に流さない。必要な公式 CLI の一時認証ディレクトリを隔離して権限を制限し、終了/中断時に CLI が生成したものを消去する。管理認証は可能な場合に失効またはログアウトし、既存利用者の認証・通常配備用資格・VM 内部秘密を削除しない。初回の独立管理者 SSH key は一時 bootstrap 権限として扱い、R6 成功後に bootstrap 無効化と、当該 CLI が作成した鍵の安全な撤去/再利用方針を運用者に提示する。復旧時に必要な独立管理経路を失わない。初回専用 Secret の廃止は明示承認と実接続確認後に限る。
 
@@ -185,8 +183,8 @@ Go の標準 crypto/net/http、維持されている GitHub/Tailscale/Cloudflare
 | CLI-01 | 認定バイナリを SSH のみの新規 VM で取得・実行。Go/Node/Ansible/Terraform を VM に要求せず、既存 SSH を失わない |
 | CLI-02 | GitHub Device Flow、Tailscale node 認証と管理 API 認証、Cloudflare Device Flow または必要 scope の認証ガイドを実証。拒否・期限・slow_down・権限不足・誤 account を安全停止。Device Flow で転送不要、loopback 型のみ local forwarding、port conflict と転送禁止、state 不一致を検証 |
 | CLI-03 | 既存 production の値を維持し、不足 bootstrap 入力を整備。Secrets 読み出し不可、鍵分離、pin、既存 Token の保持、保護 Environment、provider token の分離、実 runner SSH/probe を確認 |
-| CLI-04 | 新規 install で 06–12 の既存 Workflow を順番に起動し、毎回 fresh preflight と同じ source/実ジョブを照合。人間は認証・承認・Owner 登録のみ、backup 未設定のまま ACTIVE。skipped / stale main / denied approvals を成功にしない |
-| CLI-05 | R4/R5/R6 の各境界で切断/中断/応答喪失から再開。既存 owner/DB/有効鍵/資格を再生成しない。二重 dispatch、別 VM、未知 DB、既存 writer、失われた age handoff を安全に処理 |
+| CLI-04 | 新規 install で 06–09 の既存 Workflow を順番に起動し、毎回 fresh preflight と同じ source/実ジョブを照合。Grant 引き渡しで終了し、Owner 登録を待たず、R6 を起動しない。skipped / stale main / denied approvals を成功にしない |
+| CLI-05 | R4/R5 の各境界で切断/中断/応答喪失から再開。既存 owner/DB/有効鍵/資格を再生成しない。二重 dispatch、別 VM、未知 DB、既存 writer、失われた age handoff を安全に処理 |
 | CLI-06 | CLI 終了後に管理 token/一時鍵が残らず、通常配備が CLI 非依存。保全未受入で R8 が停止し、独立受入後は既存の compatible update が実際に成功 |
 | CLI-07 | plan/status/doctor は構成を変更せず、JSON/log に秘密がない。失敗した実ステップ・不足する権限・対象 run を表示し、不明状態を成功としない |
 | CLI-08 | リポジトリと運用入口を照合し、CLI と重複する設定同期・手作業だけの通常経路を除去。Ansible/Terraform/Actions/認定/復旧の正本が二重化されていない |
