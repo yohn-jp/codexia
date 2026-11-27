@@ -71,6 +71,8 @@ APIは認証と作品へのアクセス権限を確認します。ブラウザ�
 
 **種別: 採用済みの規範的設計目標・未実装。** 本節は作者がCodexiaから離脱する場合の作品データ取得を所有する。対象読者は作者・開発者。上記 `codexia-work/v1` は現行のバージョン付きJSON交換（新規作品へのimportを含む）として区別する。運用DR、SQL/DB dump、ZIP import、専用viewer、EPUB/DOCX出版形式の拡張はこの決定の対象外。運用DRは [Backup](deployment/BACKUP.md)、永続データ境界は [Data model](architecture/DATA-MODEL.md) が所有する。
 
+[実装契約案](architecture/OPEN-WORK-EXPORT-PROPOSAL.md)は、HTTP、認可、画面および資源上限の承認前の詳細を扱う。
+
 ### 形式と内容
 
 - 作品単位で標準ZIPを一つ取得する。テキストはUTF-8 Markdown（[CommonMark](https://spec.commonmark.org/) を参照し、原文の文字・改行・構文を変換しない）、構造化データは [RFC 8259 JSON](https://www.rfc-editor.org/rfc/rfc8259) と公開 [JSON Schema](https://json-schema.org/) を使用する。Codexia独自の実行環境・プラグイン・DB・ネット接続なしで閲覧、解析、編集できること。
