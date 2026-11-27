@@ -20,7 +20,7 @@ test('coverage closure changes when a declared test input changes and is stable 
   for (const directory of ['app', 'packages/core', 'packages/api', 'packages/http-contract', 'modules/story', '.github/workflows']) {
     await mkdir(path.join(root, directory), { recursive: true });
   }
-  for (const file of ['.github/workflows/verify.yml', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml',
+  for (const file of ['.github/workflows/verify.yml', '.github/workflows/verify-profile.yml', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml',
     'app/package.json', 'packages/core/package.json', 'packages/api/package.json', 'packages/http-contract/package.json', 'modules/story/package.json']) {
     await cp(new URL(`../../../${file}`, import.meta.url), path.join(root, file));
   }
@@ -95,4 +95,8 @@ test('coverage closure changes when a declared test input changes and is stable 
   const changedArtifactParser = await captureCoverageInputClosure(input);
   assert.notEqual(changedArtifactParser.source, changedArtifactManifest.source,
     'changing the artifact parser implementation must invalidate coverage proof');
+  await writeFile(path.join(root, '.github/workflows/verify-profile.yml'), 'changed profile DAG\n');
+  const changedProfileWorkflow = await captureCoverageInputClosure(input);
+  assert.notEqual(changedProfileWorkflow.source, changedArtifactParser.source,
+    'changing the reusable profile workflow must invalidate coverage proof');
 });

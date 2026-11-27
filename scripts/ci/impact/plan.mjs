@@ -512,6 +512,13 @@ export function planDigest(plan) {
 
 export function verificationPlanOutputs(plan) {
   validateVerificationPlan(plan);
+  const browserMatrix = profile => JSON.stringify(['writing', 'reference', 'ui-v1']
+    .filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => {
+      const group = `${profile}-${id}`;
+      const visualTask = `browser-${profile}-redesign-visual`;
+      const captureUiReview = VERIFICATION_GROUPS[`browser-${group}`].includes(visualTask) && plan.tasks.includes(visualTask);
+      return { group, profile, captureUiReview };
+    }));
   return {
     plan: JSON.stringify(plan),
     biome: String(plan.groups.includes('biome')),
@@ -519,13 +526,8 @@ export function verificationPlanOutputs(plan) {
     types: JSON.stringify(plan.groups.filter(group => group.startsWith('types-')).map(group => group.slice(6))),
     build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),
     oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
-    browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'ui-v1']
-      .filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => {
-        const group = `${profile}-${id}`;
-        const visualTask = `browser-${profile}-redesign-visual`;
-        const captureUiReview = VERIFICATION_GROUPS[`browser-${group}`].includes(visualTask) && plan.tasks.includes(visualTask);
-        return { group, profile, captureUiReview };
-      }))),
+    browser_core: browserMatrix('core'),
+    browser_full: browserMatrix('full'),
     full_model_oci: String(plan.full_model_oci),
   };
 }

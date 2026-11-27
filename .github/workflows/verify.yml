@@ -29,7 +29,8 @@ jobs:
       types: ${{ steps.taskproof.outputs.types || steps.select.outputs.types }}
       build: ${{ steps.taskproof.outputs.build || steps.select.outputs.build }}
       oci: ${{ steps.taskproof.outputs.oci || steps.select.outputs.oci }}
-      browser: ${{ steps.taskproof.outputs.browser || steps.select.outputs.browser }}
+      browser_core: ${{ steps.taskproof.outputs.browser_core || steps.select.outputs.browser_core }}
+      browser_full: ${{ steps.taskproof.outputs.browser_full || steps.select.outputs.browser_full }}
       full_model_oci: ${{ steps.select.outputs.full_model_oci }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -376,80 +377,32 @@ jobs:
           path: ${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}
           if-no-files-found: error
           retention-days: 7
-  build:
-    name: build-${{ matrix.profile }}
+  profile_core:
+    name: profile-core
     needs:
       - plan
-    if: needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && needs.plan.outputs.build != '[]'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        profile: ${{ fromJSON(needs.plan.outputs.build) }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: 24.22.3
-      - name: Prepare exact pnpm toolchain
-        id: pnpm
-        run: |
-          corepack enable
-          corepack pnpm@12.21.0 --version
-          echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-      - name: Restore content-addressed dependency cache
-        id: dependencies
-        uses: actions/cache/restore@v6.1.0
-        if: matrix.profile == 'full'
-        with:
-          path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
-      - name: Install frozen dependencies
-        env:
-          PROFILE: ${{ matrix.profile }}
-        run: |
-          set -euo pipefail
-          case "$PROFILE" in
-            core)
-              pnpm --filter '@codexia/profile-core...' --filter '@codexia/app...' --filter @codexia/ci-evidence --fail-if-no-match install --frozen-lockfile --prefer-offline
-              ;;
-            full) pnpm install --frozen-lockfile --prefer-offline ;;
-            *) exit 2 ;;
-          esac
-      - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
-        env:
-          CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
-        run: echo "Dependency cache hit=${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/download-artifact@v8.0.2
-        with:
-          name: ci-plan
-          path: ${{ runner.temp }}/ci-plan
-      - name: Run selected validations
-        env:
-          CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/build-${{ matrix.profile }}
-          CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-        run: node scripts/ci/execution/group.mjs "build-${{ matrix.profile }}"
-      - name: Pack immutable profile build
-        env:
-          CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-        run: node scripts/ci/evidence/profile-artifact.mjs pack "${{ matrix.profile }}" "${{ runner.temp }}/profile-build/profile-build.json"
-      - uses: actions/upload-artifact@v7.0.2
-        with:
-          name: ci-profile-build-${{ matrix.profile }}
-          path: ${{ runner.temp }}/profile-build/profile-build.json
-          if-no-files-found: error
-          retention-days: 7
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: ci-evidence-build-${{ matrix.profile }}
-          path: ${{ runner.temp }}/ci-evidence/build-${{ matrix.profile }}
-          if-no-files-found: error
-          retention-days: 7
+    if: needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && contains(fromJSON(needs.plan.outputs.build), 'core')
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    uses: ./.github/workflows/verify-profile.yml
+    with:
+      profile: core
+      browser: ${{ needs.plan.outputs.browser_core }}
+  profile_full:
+    name: profile-full
+    needs:
+      - plan
+    if: needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && contains(fromJSON(needs.plan.outputs.build), 'full')
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    uses: ./.github/workflows/verify-profile.yml
+    with:
+      profile: full
+      browser: ${{ needs.plan.outputs.browser_full }}
   oci:
     name: oci-${{ matrix.profile }}
     needs:
@@ -487,157 +440,6 @@ jobs:
           path: ${{ runner.temp }}/ci-evidence/oci-${{ matrix.profile }}
           if-no-files-found: error
           retention-days: 7
-  browser:
-    name: browser-${{ matrix.group }}
-    needs:
-      - plan
-    if: always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && needs.plan.outputs.browser != '[]'
-    permissions:
-      contents: read
-      actions: read
-      packages: read
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    services:
-      postgres:
-        image: docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536
-        env:
-          POSTGRES_DB: codexia_test
-          POSTGRES_USER: codexia
-          POSTGRES_PASSWORD: codexia
-        options: >-
-          --health-cmd "pg_isready -U codexia -d codexia_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.plan.outputs.browser) }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: 24.22.3
-      - name: Prepare exact pnpm toolchain
-        id: pnpm
-        run: |
-          corepack enable
-          corepack pnpm@12.21.0 --version
-          echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-      # PR caches are scoped to that PR and cannot accelerate other PRs.
-      # Browser shards restore main's trusted cache but never race to save it.
-      - name: Restore content-addressed dependency cache
-        id: dependencies
-        uses: actions/cache/restore@v6.1.0
-        if: matrix.profile == 'full'
-        with:
-          path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
-      - name: Install frozen dependencies
-        env:
-          PROFILE: ${{ matrix.profile }}
-        run: |
-          set -eu
-          case "$PROFILE" in
-            core)
-              pnpm --filter '@codexia/profile-core...' --filter '@codexia/app...' --filter @codexia/ci-evidence --fail-if-no-match install --frozen-lockfile --prefer-offline
-              ;;
-            full) pnpm install --frozen-lockfile --prefer-offline ;;
-            *) exit 2 ;;
-          esac
-      - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
-        env:
-          CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
-        run: echo "Dependency cache hit=${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/download-artifact@v8.0.2
-        with:
-          name: ci-plan
-          path: ${{ runner.temp }}/ci-plan
-      # Runner/container setup and dependency installation overlap build.
-      # The exact same-profile producer must finish successfully before restore.
-      - name: Restore exact profile producer
-        id: restore-profile
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-          CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
-        run: node scripts/ci/evidence/profile-artifact.mjs restore "${{ matrix.profile }}" "$CODEXIA_CI_PROFILE_RECEIPT"
-      - name: Observe browser runner before validation
-        if: always() && !cancelled()
-        continue-on-error: true
-        run: node scripts/ci/dashboard/runner-observation.mjs before "${{ runner.temp }}/browser-runner-observation"
-      - name: Run selected validations
-        if: always() && !cancelled()
-        env:
-          CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}
-          CODEXIA_UI_REVIEW_CAPTURE_DIR: ${{ runner.temp }}/ui-review-screens
-          CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-          CODEXIA_CI_PROFILE_RESTORE: ${{ steps.restore-profile.outcome }}
-          CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
-        run: node scripts/ci/execution/group.mjs "browser-${{ matrix.group }}"
-      - name: Observe browser runner after validation
-        if: always() && !cancelled()
-        continue-on-error: true
-        run: node scripts/ci/dashboard/runner-observation.mjs after "${{ runner.temp }}/browser-runner-observation"
-      - uses: actions/upload-artifact@v7.0.2
-        if: always() && !cancelled()
-        continue-on-error: true
-        with:
-          name: browser-runner-observation-${{ matrix.group }}-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/browser-runner-observation
-          if-no-files-found: warn
-          retention-days: 7
-      # Only one full-install main-push browser job populates the scoped cache after passing
-      # every selected validation. A cache failure must not replace CI evidence.
-      - name: Save browser pnpm cache from main
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.group == 'full-reference' && steps.dependencies.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: ${{ steps.pnpm.outputs.store }}
-          key: ${{ steps.dependencies.outputs.cache-primary-key }}
-      - uses: actions/upload-artifact@v7.0.2
-        if: always() && matrix.captureUiReview
-        with:
-          name: ui-refinement-visual-${{ matrix.group }}-${{ github.event.pull_request.head.sha || github.sha }}
-          path: ${{ runner.temp }}/ui-review-screens
-          if-no-files-found: error
-          retention-days: 14
-          compression-level: 0
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: playwright-failure-${{ matrix.group }}-${{ github.event.pull_request.head.sha || github.sha }}
-          path: |
-            tests/e2e/test-results/**/trace.zip
-            tests/e2e/test-results/**/error-context.md
-            tests/e2e/test-results/**/journal-draft-*-diagnostic.json
-          if-no-files-found: ignore
-          retention-days: 7
-          compression-level: 0
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: ci-evidence-browser-${{ matrix.group }}
-          path: ${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}
-          if-no-files-found: error
-          retention-days: 7
-    # All browser lanes use the Git-capable immutable Chromium Ubuntu image.
-    container:
-      image: ${{ format('ghcr.io/{0}/playwright-ubuntu-chromium@sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725', github.repository) }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-      options: --init --ipc=host
-    env:
-      CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      CODEXIA_CI_BROWSER_GROUP: ${{ matrix.group }}
-      CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725
-      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
   certification:
     name: certification
     if: ${{ always() && !cancelled() }}
@@ -646,9 +448,9 @@ jobs:
       - biome
       - unit
       - types
-      - build
+      - profile_core
+      - profile_full
       - oci
-      - browser
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

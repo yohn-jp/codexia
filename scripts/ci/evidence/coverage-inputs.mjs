@@ -61,9 +61,11 @@ export async function discoverWorkspacePaths(root) {
 export async function captureCoverageInputClosure({ root, runtime, invocation, workflowJob }) {
   const sourcePaths = ['scripts/ci/execution/workspace.mjs', 'scripts/ci/impact/contract.mjs', 'scripts/ci/execution/parallel.mjs',
     'scripts/ci/impact/plan.mjs', 'scripts/ci/execution/group.mjs', 'scripts/ci/evidence/profile-artifact.mjs',
-    'scripts/ci/evidence/download-artifacts.mjs',
+    'scripts/ci/evidence/download-artifacts.mjs', 'scripts/ci/evidence/job-name.mjs',
+    'scripts/ci/evidence/producer-artifact.mjs',
     'scripts/ci/browser/fixture.mjs', 'scripts/ci/browser/image-digests.mjs', 'scripts/ci/evidence/input-proof.mjs',
-    'scripts/ci/evidence/task-inputs.mjs', 'scripts/ci/evidence/coverage-inputs.mjs', '.github/workflows/verify.yml'];
+    'scripts/ci/evidence/task-inputs.mjs', 'scripts/ci/evidence/coverage-inputs.mjs',
+    '.github/workflows/verify.yml', '.github/workflows/verify-profile.yml'];
   const workspaceDirectories = await discoverWorkspacePaths(root);
   const manifestPaths = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts/ci/evidence/package.json',
     ...workspaceDirectories.map(directory => `${directory}/package.json`)];
