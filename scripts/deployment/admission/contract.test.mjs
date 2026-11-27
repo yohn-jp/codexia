@@ -375,7 +375,7 @@ test('first activation checks the real transaction window at readiness and rolls
     'trace="$FIXTURE/trace"',
     'had_unit=false; tunnel_present=true; tunnel_was_active=false; release_present=false; recovery_tunnel_masked=false',
     'api_link_created=true; tunnel_link_created=true',
-    'candidate_image=fixture-image; first_activation="{}"; recovery_activation=null; approved_not_before=1000; approved_not_after=2000',
+    'candidate_image=fixture-image; first_activation="{}"; recovery_activation=null; adoption_activation=null; approved_not_before=1000; approved_not_after=2000',
     'clock=1500; backup_control=control_fixture; backup_run_id=; backup_pending_id=',
     'if [[ "$SCENARIO" == recovery-* ]]; then first_activation=null; recovery_activation="{}"; fi',
     'check_recovery_record() { [[ "$clock" == 1500 ]]; }',
@@ -433,7 +433,7 @@ test('first activation checks the real transaction window at readiness and rolls
   for (const [evidence, current, expected] of [['null', 'invalid', 0], ['{}', '999', 1],
     ['{}', '1000', 0], ['{}', '2000', 0], ['{}', '2001', 1], ['{}', 'invalid', 1]]) {
     const result = spawnSync('bash', ['-c', 'set -eu\napproved_not_before=1000; approved_not_after=2000\ndate(){ printf "%s\\n" "$CLOCK"; }\n' + clock + '\nfirst_activation_window_current'], {
-      encoding: 'utf8', env: { ...process.env, first_activation: evidence, CLOCK: current },
+      encoding: 'utf8', env: { ...process.env, first_activation: evidence, adoption_activation: 'null', CLOCK: current },
     });
     assert.ifError(result.error);
     assert.equal(result.status, expected, evidence + ': ' + current);
