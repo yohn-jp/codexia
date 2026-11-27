@@ -129,10 +129,11 @@ type wifApprovalOperator struct {
 	approve bool
 	notices []string
 }
-func (o *wifApprovalOperator) Confirm(string) (bool, error) { return o.approve, nil }
-func (o *wifApprovalOperator) Ask(string) (string, error) { return "", nil }
+
+func (o *wifApprovalOperator) Confirm(string) (bool, error)  { return o.approve, nil }
+func (o *wifApprovalOperator) Ask(string) (string, error)    { return "", nil }
 func (o *wifApprovalOperator) Secret(string) ([]byte, error) { return nil, nil }
-func (o *wifApprovalOperator) Notice(message string) { o.notices = append(o.notices, message) }
+func (o *wifApprovalOperator) Notice(message string)         { o.notices = append(o.notices, message) }
 
 func TestTailnetCreatesOnlySeparatelyApprovedScopedOIDCTrust(t *testing.T) {
 	const network = "tnOwner"
@@ -153,11 +154,11 @@ func TestTailnetCreatesOnlySeparatelyApprovedScopedOIDCTrust(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(legacy)
 		case r.URL.Path == "/api/v2/tailnet/"+network+"/keys" && r.Method == http.MethodPost:
 			var request struct {
-				KeyType string `json:"keyType"`
-				Subject string `json:"subject"`
-				Issuer string `json:"issuer"`
-				Scopes []string `json:"scopes"`
-				Tags []string `json:"tags"`
+				KeyType          string            `json:"keyType"`
+				Subject          string            `json:"subject"`
+				Issuer           string            `json:"issuer"`
+				Scopes           []string          `json:"scopes"`
+				Tags             []string          `json:"tags"`
 				CustomClaimRules map[string]string `json:"customClaimRules"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil ||
@@ -182,11 +183,13 @@ func TestTailnetCreatesOnlySeparatelyApprovedScopedOIDCTrust(t *testing.T) {
 	}))
 	defer server.Close()
 	base, err := url.Parse(server.URL)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	client := &ts.Client{BaseURL: base, Tailnet: network}
 	local := localTailnet{BackendState: "Running",
 		CurrentTailnet: &localTailnetIdentity{Name: "example", StableID: network},
-		Self: &localTailnetNode{ID: "nVM", PublicKey: "nodekey:"+strings.Repeat("a", 64),
+		Self: &localTailnetNode{ID: "nVM", PublicKey: "nodekey:" + strings.Repeat("a", 64),
 			DNSName: "codexia.example.ts.net.", TailscaleIPs: []string{address}}}
 	if _, err := inspectTailnet(context.Background(), client, local); err == nil {
 		t.Fatal("read-only inspection accepted broad legacy WIF")
@@ -200,7 +203,9 @@ func TestTailnetCreatesOnlySeparatelyApprovedScopedOIDCTrust(t *testing.T) {
 	}
 	approved := &wifApprovalOperator{approve: true}
 	got, err := inspectTailnetWithApproval(context.Background(), client, local, approved, true)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.ClientID != "new-scoped-key" || created.Load() != 1 {
 		t.Fatalf("unexpected WIF creation outcome: %+v, count %d", got, created.Load())
 	}
@@ -266,7 +271,9 @@ func TestEveryProtectedTailnetWorkflowUsesTheApprovedCredentialAudience(t *testi
 	} {
 		t.Run(name, func(t *testing.T) {
 			contents, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", name))
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+		t.Fatal(err)
+	}
 			text := string(contents)
 			count := strings.Count(text, "uses: tailscale/github-action@")
 			if count == 0 || strings.Count(text,
