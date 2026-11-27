@@ -4,7 +4,8 @@ on:
     workflows: ['Verify Codexia']
     types: [completed]
 permissions:
-  contents: read
+  contents: write
+  actions: write
 concurrency:
   group: codexiactl-auto-release
   cancel-in-progress: false
@@ -17,20 +18,19 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: write
     steps:
       - name: Publish next immutable v0.1.x tag for changed CLI
         uses: actions/github-script@v8
         env:
-          RELEASE_TAG_TOKEN: ${{ secrets.CODEXIA_RELEASE_TAG_TOKEN }}
           VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
         with:
-          github-token: ${{ secrets.CODEXIA_RELEASE_TAG_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
             const {owner, repo} = context.repo;
             const sha = process.env.VERIFIED_SHA;
-            if (!process.env.RELEASE_TAG_TOKEN) {
-              throw new Error('CODEXIA_RELEASE_TAG_TOKEN is required (scoped Contents: write; workflow-triggering credential)');
-            }
             if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Invalid verified SHA');
             const main = await github.rest.repos.getBranch({owner, repo, branch: 'main'});
             if (main.data.commit.sha !== sha) {
@@ -64,4 +64,9 @@ jobs:
             if (!Number.isSafeInteger(next)) throw new Error('Invalid release sequence');
             const tag = `v0.1.${next}`;
             await github.rest.git.createRef({owner, repo, ref: `refs/tags/${tag}`, sha});
-            core.notice(`Created ${tag} at verified ${sha}; tag push triggers Publish Codexia OCI`);
+            // GITHUB_TOKEN-created tag pushes do not start workflows. Dispatch the
+            // publisher explicitly against the immutable tag instead.
+            await github.rest.actions.createWorkflowDispatch({
+              owner, repo, workflow_id: 'publish-codexiactl.yml', ref: tag
+            });
+            core.notice(`Dispatched Publish CodexiaCTL at ${tag} (${sha})`);
