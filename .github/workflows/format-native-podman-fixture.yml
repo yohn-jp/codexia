@@ -1,7 +1,7 @@
 name: Format native Podman contract fixture
 on:
-  push:
-    branches: [verify/native-podman-biome-format]
+  pull_request:
+    paths: ['.github/workflows/format-native-podman-fixture.yml']
 permissions:
   contents: read
 jobs:
