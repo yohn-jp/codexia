@@ -247,7 +247,7 @@ op postStandaloneMcp(@query projectId?: string, @body body: JsonObject | JsonObj
 @route("/mcp") @delete @operationId("mcp_root_delete")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-runtime-response-deviation", "After admission, the MCP SDK returns HTTP 405 with Allow: POST and JSON-RPC error -32000, id null. The approved API epoch baseline keeps its ApiError response schema pending a compatibility correction.")
-op deleteStandaloneMcp(@query projectId?: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string): McpMethodDenied | McpAdmissionBadRequest | McpAdmissionForbidden | { @statusCode _: 401; @body body: ApiError; } | McpAdmissionNotFound | McpAdmissionUnavailable;
+op deleteStandaloneMcp(@query projectId?: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string): McpMethodDenied | McpAdmissionBadRequest | McpAdmissionForbidden | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; } | McpAdmissionNotFound | McpAdmissionUnavailable;
 
 @tag("mcp") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT with effect scope")
 @route("/api/projects/{projectId}/modules/mcp/streamable") @get @operationId("project_mcp_stream_get")
@@ -263,7 +263,7 @@ op postProjectMcpStream(@path projectId: string, @body body: JsonObject | JsonOb
 @route("/api/projects/{projectId}/modules/mcp/streamable") @delete @operationId("project_mcp_stream_delete")
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-runtime-response-deviation", "After admission, the MCP SDK returns HTTP 405 with Allow: POST and JSON-RPC error -32000, id null. The approved API epoch baseline keeps its ApiError response schema pending a compatibility correction.")
-op deleteProjectMcpStream(@path projectId: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string): McpMethodDenied | McpAdmissionBadRequest | McpAdmissionForbidden | { @statusCode _: 401; @body body: ApiError; } | McpAdmissionNotFound | McpAdmissionUnavailable;
+op deleteProjectMcpStream(@path projectId: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string): McpMethodDenied | McpAdmissionBadRequest | McpAdmissionForbidden | { @statusCode _: 401; @header("WWW-Authenticate") challenge?: string; @body body: ApiError; } | McpAdmissionNotFound | McpAdmissionUnavailable;
 
 @tag("public-reader") @useAuth(NoAuth) @extension("x-codexia-principal", "SHARE-READER capability")
 @extension("x-codexia-contract-status", "incomplete")

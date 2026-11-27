@@ -268,6 +268,7 @@ test('generated request and response schemas preserve null, oneOf, closed object
           `${method.toUpperCase()} ${path} must describe its ${status} admission failure`,
         );
       }
+      assert.equal(responses['401'].headers?.['WWW-Authenticate']?.schema?.type, 'string');
     }
   }
   assert.equal(

@@ -378,6 +378,10 @@ try {
     for (const { name, url, deniedUrl } of routes) {
       for (const method of ['GET', 'DELETE']) {
         const headers = { Authorization: `Bearer ${liveHost.tokens.full}` };
+        const anonymous = await fetch(url, { method, signal: AbortSignal.timeout(5_000) });
+        assert.equal(anonymous.status, 401);
+        assert.match(anonymous.headers.get('www-authenticate') ?? '', /^Bearer\b/u);
+        assert.equal((await anonymous.json()).code, 'UNAUTHORIZED');
         const denied = await fetch(deniedUrl, { method, headers, signal: AbortSignal.timeout(5_000) });
         assert.equal(denied.status, 404);
         assert.equal((await denied.json()).code, 'PROJECT_NOT_FOUND');
@@ -388,7 +392,9 @@ try {
         assert.equal(body.jsonrpc, '2.0');
         assert.equal(body.id, null);
         assert.equal(body.error?.code, -32000);
-        results.push({ route: name, method, unassignedStatus: denied.status, admittedStatus: admitted.status, body });
+        results.push({
+          route: name, method, anonymousStatus: anonymous.status, unassignedStatus: denied.status, admittedStatus: admitted.status, body,
+        });
       }
     }
     evidence.transportErrors.unsupportedMethods = { status: 'PASS', results };
