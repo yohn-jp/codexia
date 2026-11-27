@@ -69,6 +69,29 @@ test('only unselected matrix placeholders may be skipped; executed extras fail',
   assert.throws(() => assertPlanEvidence(plan, jobs, reports));
 });
 
+test('certification maps profile-prefixed jobs to logical evidence names and accepts only skipped empty-profile placeholders', () => {
+  const { plan, jobs, reports } = fixture('push');
+  const prefixed = jobs.map(job => {
+    if (job.name === 'build-core' || job.name.startsWith('browser-core-')) {
+      return { ...job, name: 'profile-core / ' + job.name };
+    }
+    if (job.name === 'build-full' || job.name.startsWith('browser-full-')) {
+      return { ...job, name: 'profile-full / ' + job.name };
+    }
+    return job;
+  });
+  assert.doesNotThrow(() => assertPlanEvidence(plan, prefixed, reports));
+  assert.doesNotThrow(() => assertPlanEvidence(plan, [...prefixed,
+    { name: 'profile-core / browser', head_sha: sha, status: 'completed', conclusion: 'skipped' },
+  ], reports));
+  assert.throws(() => assertPlanEvidence(plan, [...prefixed,
+    { name: 'profile-core / browser', head_sha: sha, status: 'completed', conclusion: 'success' },
+  ], reports), /cross-profile/u);
+  assert.throws(() => assertPlanEvidence(plan, [...prefixed,
+    { name: 'profile-core / build-full', head_sha: sha, status: 'completed', conclusion: 'skipped' },
+  ], reports), /cross-profile/u);
+});
+
 test('Swift Linux evidence is required only for a selected task in the shared unit group', () => {
   for (const event of ['pull_request', 'push']) {
     const source = ['docs/architecture/SYSTEM-DESIGN.md'];

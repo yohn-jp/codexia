@@ -39,6 +39,21 @@ test('release gate requires the exact successful job set including every matrix 
   assert.throws(() => assertVerificationJobs([...jobs, { name: 'unexpected', status: 'completed', conclusion: 'cancelled' }]), /Unexpected release verification job/);
 });
 
+test('release gate normalizes reusable profile jobs but rejects cross-profile aliases', () => {
+  const jobs = REQUIRED_VERIFICATION_JOBS.map(name => {
+    if (name === 'build-core' || name.startsWith('browser-core-')) return { name: 'profile-core / ' + name, status: 'completed', conclusion: 'success' };
+    if (name === 'build-full' || name.startsWith('browser-full-')) return { name: 'profile-full / ' + name, status: 'completed', conclusion: 'success' };
+    return { name, status: 'completed', conclusion: 'success' };
+  });
+  assert.doesNotThrow(() => assertVerificationJobs(jobs));
+  assert.throws(() => assertVerificationJobs([...jobs,
+    { name: 'profile-core / build-full', status: 'completed', conclusion: 'success' },
+  ]), /cross-profile/u);
+  assert.throws(() => assertVerificationJobs([...jobs,
+    { name: 'profile-core / browser', status: 'completed', conclusion: 'success' },
+  ]), /cross-profile/u);
+});
+
 test('main release verification permits only a skipped supplemental Full-model OCI caller job', () => {
   const jobs = REQUIRED_VERIFICATION_JOBS.map(name => ({ name, status: 'completed', conclusion: 'success' }));
   assert.doesNotThrow(() => assertVerificationJobs([...jobs, { name: 'full-model-oci', status: 'completed', conclusion: 'skipped' }]));
@@ -104,4 +119,20 @@ test('compact main release requires positive reuse certification and the exact s
   assert.throws(() => assertVerificationJobs(jobs.map(job => job.name === 'certification' ? { ...job, steps: job.steps.map(step => ({ ...step, conclusion: 'success' })) } : job)));
   assert.throws(() => assertVerificationJobs([...jobs, { name: 'unknown', status: 'completed', conclusion: 'skipped' }]));
   assert.throws(() => assertVerificationJobs(jobs.map(job => job.name === 'certification' ? { ...job, conclusion: 'failure' } : job)));
+});
+
+test('compact release reader retains the historical matrix-placeholder inventory', async () => {
+  const { LEGACY_REUSED_MAIN_SKIPPED_JOBS, REUSED_MAIN_CERT_STEP } = await import('./policy.mjs');
+  const jobs = [
+    { name: 'plan', status: 'completed', conclusion: 'success' },
+    ...LEGACY_REUSED_MAIN_SKIPPED_JOBS.map(name => ({ name, status: 'completed', conclusion: 'skipped' })),
+    { name: 'certification', status: 'completed', conclusion: 'success', steps: [
+      { name: REUSED_MAIN_CERT_STEP, status: 'completed', conclusion: 'success' },
+      { name: 'Certify every required exact-source matrix element', status: 'completed', conclusion: 'skipped' },
+    ] },
+  ];
+  assert.doesNotThrow(() => assertVerificationJobs(jobs));
+  const mixed = jobs.map(job => job.name === 'build-${{ matrix.profile }}'
+    ? { ...job, name: 'profile-core' } : job);
+  assert.throws(() => assertVerificationJobs(mixed));
 });
