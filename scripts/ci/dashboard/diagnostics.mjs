@@ -45,7 +45,7 @@ function jobReport(job, run, graph, leafFinish) {
   const graphMatches = graph.filter(spec => nameMatches(spec.template, job.name));
   const spec = graphMatches.length === 1 ? graphMatches[0] : null;
   const dependencies = spec?.needs.map(family => {
-    const parent = graph.find(item => item.id === family);
+    const parent = graph.find(item => item.id === family || item.family === family);
     return { family, jobs: parent ? run.jobs.filter(entry =>
       nameMatches(parent.template, entry.name)).map(entry => entry.name) : [] };
   }) ?? [];

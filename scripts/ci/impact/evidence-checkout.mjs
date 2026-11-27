@@ -12,6 +12,7 @@ const testFile = /\.(?:test|spec)\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx)$/u;
 const workspaces = /^(?:packages|modules)\/[^/]+\/package\.json$/u;
 const exactPaths = new Set([
   '.github/workflows/verify.yml',
+  '.github/workflows/verify-profile.yml',
   'app/package.json',
   'packages/persistence-postgres/src/migration-set.ts',
   'packages/persistence-postgres/tests/db-contract/toolchain.json',
