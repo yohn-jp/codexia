@@ -1759,7 +1759,7 @@ INP p75、CLS p75の品質目安に加え、原稿入力・保存・復旧の別
 **MID**: 0966fc7db2c488c5abd936cd7db8556f
 **UID**: OBL-REQ-TRACE-001-O02
 **Design reference**: docs/requirements/STRICTDOC-TRACEABILITY.md
-**Implementation identifiers**: scripts/strictdoc/verify.mjs
+**Implementation identifiers**: scripts/strictdoc/verify.mjs: compareExports
 **Test IDs**: TEST-TRC-02-001; TEST-TRC-02-002
 **Exact-run reference**: NOT_RUN
 **Comment**: Explicit criterion; source and test references are candidates only; no independent certification is implied.
@@ -1773,7 +1773,7 @@ StrictDoc Markdown parsing and same-input HTML/JSON export are repeatable within
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
-  **Lines**: 684, 744
+  **Lines**: 632, 692
 
 ## OBL-REQ-TRACE-001-O03
 
@@ -1795,7 +1795,7 @@ A requirement-to-source relation must use a repository file path and any declare
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
-  **Lines**: 83, 147
+  **Lines**: 84, 148
 
 ## OBL-REQ-TRACE-001-O04
 
@@ -1803,7 +1803,7 @@ A requirement-to-source relation must use a repository file path and any declare
 **MID**: 6a8582691c1bc79a39f22ad3e99ee2b0
 **UID**: OBL-REQ-TRACE-001-O04
 **Design reference**: docs/requirements/STRICTDOC-TRACEABILITY.md
-**Implementation identifiers**: scripts/strictdoc/verify.mjs
+**Implementation identifiers**: scripts/strictdoc/verify.mjs: verifySourceInventory; scripts/strictdoc/reverse-trace.mjs: discoverReverseSurfaces
 **Test IDs**: TEST-TRC-04-001; TEST-TRC-04-002, TEST-TRC-04-003
 **Exact-run reference**: NOT_RUN
 **Comment**: Explicit criterion; source and test references are candidates only; no independent certification is implied.
@@ -1817,7 +1817,9 @@ Reverse inventory keeps discovered HTTP routes, MCP tools, database objects, Des
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
-  **Lines**: 475, 480
+  **Lines**: 423, 427
+- **Type**: File
+  **Path**: scripts/strictdoc/reverse-trace.mjs
 
 ## OBL-REQ-TRACE-001-O05
 
@@ -1825,7 +1827,7 @@ Reverse inventory keeps discovered HTTP routes, MCP tools, database objects, Des
 **MID**: f108acf33cf12b70e9072e7828390202
 **UID**: OBL-REQ-TRACE-001-O05
 **Design reference**: docs/requirements/STRICTDOC-TRACEABILITY.md
-**Implementation identifiers**: scripts/strictdoc/verify.mjs
+**Implementation identifiers**: scripts/strictdoc/verify.mjs: resolveRunIdentity
 **Test IDs**: TEST-TRC-05-001; TEST-TRC-05-002; TEST-TRC-05-003, TEST-TRC-05-004
 **Exact-run reference**: NOT_RUN
 **Comment**: Explicit criterion; source and test references are candidates only; no independent certification is implied.
@@ -1839,7 +1841,7 @@ Execution references retain exact repository, source SHA, run, attempt, job, tas
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
-  **Lines**: 481, 499
+  **Lines**: 429, 455
 
 ## OBL-REQ-TRACE-001-O06
 
