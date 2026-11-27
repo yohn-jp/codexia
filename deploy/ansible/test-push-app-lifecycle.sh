@@ -732,6 +732,8 @@ mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexi
 activate_fixture_backup_destination
 run_deploy "$update_key" false
 observe_runtime compatible-update "$update_key"
+[[ "$(rootless readlink -e "$fixture_home/.local/share/codexia-backup/current")" == "$fixture_home/.local/share/codexia-backup/releases/${update_image##*:}" ]]
+rootless_systemctl is-active --quiet codexia-backup-executor.service
 set_state compatible_update PASS "$initial_key to $update_key activated the verified digest as the sole healthy API writer"
 
 mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)

@@ -1,5 +1,26 @@
 ---
-# This is a post-ACTIVE maintenance action in the existing base play.
+# Operator-owned public inputs stay on the VM. Test inventories may supply the same inputs.
+- name: Read the protected destination policy on the VM
+  when: codexia_backup_policy is not defined
+  block:
+    - ansible.builtin.slurp:
+        src: "{{ backup_config }}/policy.json"
+      register: backup_vm_policy
+      no_log: true
+    - ansible.builtin.set_fact:
+        codexia_backup_policy: "{{ backup_vm_policy.content | b64decode | from_json }}"
+      no_log: true
+
+- name: Read only an age public recipient from the protected VM
+  when: codexia_backup_age_recipient is not defined
+  block:
+    - ansible.builtin.command:
+        argv: [grep, -xE, 'age1[0-9a-z]+', "{{ backup_config }}/age-recipient.txt"]
+      register: backup_vm_recipient
+      changed_when: false
+    - ansible.builtin.set_fact:
+        codexia_backup_age_recipient: "{{ backup_vm_recipient.stdout }}"
+
 - name: Require the approved provider boundaries and public recovery recipient
   ansible.builtin.assert:
     that:
@@ -63,8 +84,14 @@
 
 - name: Confirm the installed SDK imports before marking the environment usable
   ansible.builtin.command:
-    argv: ["{{ backup_venv }}/bin/python", -c, "import boto3, botocore; from pathlib import Path; Path('{{ backup_venv }}/.installed').touch()"]
-    creates: "{{ backup_venv }}/.installed"
+    argv: ["{{ backup_venv }}/bin/python", -c, "import boto3, botocore; from pathlib import Path; p = Path('{{ backup_venv }}/.installed'); p.exists() or p.touch()"]
+  changed_when: false
+
+- name: Select the verified SDK behind the stable executor interpreter path
+  ansible.builtin.file:
+    path: "{{ backup_root }}/sdk"
+    src: "{{ backup_venv }}"
+    state: link
 
 - name: Check operator-provided staging before constructing service settings
   ansible.builtin.assert:
@@ -134,6 +161,31 @@
     force: false
     content: "{{ {'privateKeyFiles': [backup_config + '/sealing-private.pem']} | to_json }}\n"
 
+- name: Match the executor decryption key to the API's public sealing key
+  ansible.builtin.command:
+    argv:
+      - "{{ backup_root }}/current/bin/node"
+      - --input-type=module
+      - -e
+      - |
+        import { createPublicKey } from 'node:crypto';
+        import { readFileSync } from 'node:fs';
+        import { backupCredentialKeyId } from './node_modules/@codexia/api/dist/backup-credential-envelope.js';
+        import { backupExecutorConfigSchema, readPrivateBackupFile } from './node_modules/@codexia/api/dist/backup-console-executor.js';
+        const [directory] = process.argv.slice(1);
+        const config = backupExecutorConfigSchema.parse(JSON.parse(await readPrivateBackupFile(directory + '/executor.json')));
+        const expected = backupCredentialKeyId(readFileSync(directory + '/sealing-public.pem', 'utf8'));
+        for (const path of config.privateKeyFiles) {
+          const pem = await readPrivateBackupFile(path);
+          const pub = createPublicKey(pem).export({type:'spki', format:'pem'});
+          if (backupCredentialKeyId(pub) === expected) { console.log(expected); process.exit(0); }
+        }
+        process.exit(1);
+      - "{{ backup_config }}"
+    chdir: "{{ backup_root }}/current/app"
+  changed_when: false
+  register: backup_key_id
+
 - name: Apply the private PostgreSQL socket under the existing host lock
   ansible.builtin.command:
     argv: [bash, -s]
@@ -149,7 +201,7 @@
     backup_managed_env: |
       CODEXIA_BACKUP_POLICY_FILE={{ backup_config }}/policy.json
       CODEXIA_BACKUP_EXECUTOR_CONFIG_FILE={{ backup_config }}/executor.json
-      CODEXIA_BACKUP_PYTHON={{ backup_venv }}/bin/python
+      CODEXIA_BACKUP_PYTHON={{ backup_root }}/sdk/bin/python
       CODEXIA_BACKUP_PROBE_SCRIPT={{ backup_root }}/transfer/s3_probe.py
       CODEXIA_BACKUP_TRANSFER_SCRIPT={{ backup_root }}/transfer/s3_transfer.py
       CODEXIA_BACKUP_RECEIPT_DIRECTORY={{ codexia_backup_receipt_directory | default(backup_root + '/receipts') }}
@@ -178,6 +230,13 @@
 - name: Install the canonical producer, launcher and user unit
   ansible.builtin.include_tasks: backup-helpers.yml
 
+- name: Observe the database clock before enabling the executor
+  ansible.builtin.command:
+    argv: "{{ backup_admin_command }}"
+    stdin: SELECT clock_timestamp();
+  changed_when: false
+  register: backup_start_time
+
 - name: Verify and activate the Console and worker under the deployment lock
   ansible.builtin.shell: |
     set -euo pipefail
@@ -190,7 +249,8 @@
     done
     [[ "$(jq -er .image "$state/deployed-release.json")" == "$RELEASE_IMAGE" ]]
     expected="$(podman image inspect --format '{% raw %}{{.Id}}{% endraw %}' "$RELEASE_IMAGE")"
-    [[ "$(podman inspect --format '{% raw %}{{.Image}} {{.State.Health.Status}}{% endraw %}' codexia-api)" == "$expected healthy" ]]
+    live="$(podman inspect --format '{% raw %}{{.Image}} {{.State.Health.Status}}{% endraw %}' codexia-api)"
+    [[ "${expected#sha256:}" =~ ^[0-9a-f]{64}$ && "${live#sha256:}" == "${expected#sha256:} healthy" ]]
     "$HOME/.local/bin/codexia-backup-control" deploy-check
     dropin="$HOME/.config/containers/systemd/codexia-api.container.d/10-backup-console.conf"
     install -d -m 0700 "${dropin%/*}"
@@ -211,10 +271,14 @@
       fi
       echo API_CONFIGURED
     fi
-    if jq -e '.recoveryOperationId != null' "$state/deployed-release.json" >/dev/null &&
-       ! systemctl --user is-active --quiet codexia-backup-executor.service; then
-      echo RESTORED_EXECUTOR_FENCED
-      exit 0
+    if jq -e '.recoveryOperationId != null' "$state/deployed-release.json" >/dev/null; then
+      active="$(systemctl --user show codexia-backup-executor.service -p ActiveState --value)"
+      enabled="$(systemctl --user show codexia-backup-executor.service -p UnitFileState --value)"
+      if [[ "$active" == inactive && ( "$enabled" == disabled || "$enabled" == masked ) ]]; then
+        echo RESTORED_EXECUTOR_FENCED
+        exit 0
+      fi
+      [[ "$active" == active && "$enabled" == enabled ]] || { echo 'Restored executor state requires operator reconciliation' >&2; exit 1; }
     fi
     if ! systemctl --user is-active --quiet codexia-backup-executor.service ||
        ! systemctl --user is-enabled --quiet codexia-backup-executor.service; then
@@ -233,7 +297,8 @@
   ansible.builtin.command:
     argv: "{{ backup_admin_command }}"
     stdin: |
-      SELECT run_executor_enabled AND cardinality(executor_key_ids) > 0
+      SELECT run_executor_enabled AND '{{ backup_key_id.stdout }}' = ANY(executor_key_ids)
+        AND executor_seen_at >= '{{ backup_start_time.stdout }}'::timestamptz
         AND executor_seen_at > clock_timestamp() - interval '10 seconds' FROM codexia_backup.state;
   register: backup_heartbeat
   changed_when: false

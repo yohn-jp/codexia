@@ -5,7 +5,6 @@ import { access, readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { readPreservationEvidence } from './preservation.mjs';
 import { digestEvidence } from './evidence-digest.mjs';
 import { authSchemaFingerprint, CODEXIA_AUTH_SCHEMA } from '../../../packages/api/src/auth-schema.ts';
@@ -100,6 +99,7 @@ async function hostObservation({ bootstrap = false } = {}) {
 async function mainSource() {
   const token = env.GH_TOKEN || env.GITHUB_TOKEN;
   assert.ok(token, 'Protected source check requires GitHub Actions read access');
+  const { createGitHubOctokit } = await import('../../github/octokit.mjs');
   const { data: reference } = await createGitHubOctokit({ token, timeout: 30_000 }).rest.git.getRef({
     owner: 'yohn-jp', repo: 'codexia', ref: 'heads/main',
   });
@@ -208,6 +208,7 @@ async function planObservation({ bootstrapMode } = {}) {
       preservationReceipt });
     await mainSource();
     if (bootstrapMode) {
+      const { createGitHubOctokit } = await import('../../github/octokit.mjs');
       stage = 'bootstrap-admission';
       const { admitBootstrap, ownerSetupFrontendBindings, assertInitialFrontendReady } = await import('../bootstrap/admission.mjs');
       const { plan } = result;

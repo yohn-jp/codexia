@@ -600,11 +600,3 @@
     that:
       - base_runtime_tunnel_content.content == (lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/codexia-tunnel.container', rstrip=false) | b64encode)
     fail_msg: Tunnel Quadlet differs from the reviewed source; it was not overwritten.
-- name: Provision the backup runtime on an explicitly approved ACTIVE installation
-  ansible.builtin.include_tasks: backup-runtime.yml
-  vars:
-    backup_config: "{{ home }}/.config/codexia-backup"
-    backup_root: "{{ home }}/.local/share/codexia-backup"
-    backup_staging: "{{ codexia_backup_staging_directory | default(backup_root + '/staging') }}"
-    backup_venv: "{{ backup_root }}/sdk-{{ lookup('ansible.builtin.file', repo_root + '/deploy/backup/requirements.lock', rstrip=false) | hash('sha256') }}"
-  when: codexia_stage == 'base' and codexia_backup_runtime_approved | default(false) is sameas true
