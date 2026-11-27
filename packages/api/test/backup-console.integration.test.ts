@@ -218,15 +218,34 @@ test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof,
   await worker.processNext();
   const activationRequest = randomUUID();
   const activation = { revision: 2, probeId: currentProbe, confirmed: true };
+  const statusQuery = '/status?' + new URLSearchParams({ requestId: activationRequest });
   const accepted = await post('activate', activation, activationRequest);
   assert.equal(accepted.status, 202);
-  const receipt = await accepted.json();
-  assert.deepEqual(await (await post('activate', activation, activationRequest)).json(), receipt);
+  // The server accepted the POST, but the caller loses the receipt before reading it.
+  await accepted.body?.cancel();
+  const queuedLookup = await get(statusQuery);
+  assert.equal(queuedLookup.status, 200);
+  const queuedActivation = await queuedLookup.json();
+  assert.equal(queuedActivation.activeRevision, null);
+  assert.equal(queuedActivation.operation.requestId, activationRequest);
+  assert.equal(queuedActivation.operation.status, 'QUEUED');
+  assert.equal(queuedActivation.operation.phase, 'activate');
+  const replay = await post('activate', activation, activationRequest);
+  assert.equal(replay.status, 202);
+  assert.equal((await replay.json()).operationId, queuedActivation.operation.operationId);
   assert.equal((await post('activate', activation)).status, 409);
-  assert.equal((await (await get('/status')).json()).activeRevision, null);
+  const overview = await get('/status');
+  assert.equal(overview.status, 200);
+  const overviewBody = await overview.json();
+  assert.equal(overviewBody.activeRevision, null);
+  assert.equal(overviewBody.operation, undefined);
   await worker.processNext();
-  const active = await (await get('/status?requestId=' + activationRequest)).json();
+  const appliedLookup = await get(statusQuery);
+  assert.equal(appliedLookup.status, 200);
+  const active = await appliedLookup.json();
   assert.equal(active.activeRevision, 2);
+  assert.equal(active.operation.operationId, queuedActivation.operation.operationId);
+  assert.equal(active.operation.requestId, activationRequest);
   assert.equal(active.operation.status, 'APPLIED');
   const deployRunId = randomUUID();
   assert.equal(await control.deployStart(deployRunId, sourceSha, sourceDigest, candidateSha, candidateDigest), deployRunId);
@@ -281,7 +300,14 @@ test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof,
   await worker.processNext();
   assert.equal((await (await get('/status')).json()).activeRevision, 3);
   assert.equal((await post('disable', { revision: 3, confirmed: true })).status, 409);
-  assert.equal((await get('/status?requestId=unrecognized-request-id')).status, 404);
+  const missing = await get('/status?requestId=unrecognized-request-id');
+  assert.equal(missing.status, 404);
+  assert.deepEqual(await missing.json(), { error: 'BACKUP_OPERATION_NOT_FOUND', code: 'BACKUP_OPERATION_NOT_FOUND' });
+  for (const query of ['requestId=', 'requestId=invalid-request-id%21', 'requestId=' + 'x'.repeat(129)]) {
+    const invalid = await get('/status?' + query);
+    assert.equal(invalid.status, 422);
+    assert.deepEqual(await invalid.json(), { error: 'BACKUP_INPUT_INVALID', code: 'BACKUP_INPUT_INVALID' });
+  }
   assert.equal((await put({ ...nonSecret, offVmPolicy: 'required', retentionRequest: { days: 30 } }, '"3"')).status, 200);
   const retentionProbe = await post('probes', { revision: 4 });
   assert.equal(retentionProbe.status, 202);
