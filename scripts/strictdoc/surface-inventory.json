@@ -270,8 +270,18 @@
     },
     {
       "kind": "route",
+      "id": "GET /api/auth/codexia/owner-security/identity",
+      "classification": "candidate REQ-AUTH-005; owner identity inventory via same-origin OWNER-SESSION cookie; conformance remains unverified"
+    },
+    {
+      "kind": "route",
       "id": "POST /api/auth/codexia/owner-session",
       "classification": "candidate REQ-AUTH-002 / API-OWNER-SESSION-001; read-only OWNER-SESSION cookie confirmation with exact same-origin guard; conformance remains unverified"
+    },
+    {
+      "kind": "route",
+      "id": "POST /api/auth/codexia/owner-security/revoke-consent",
+      "classification": "candidate REQ-AUTH-005; owner consent withdrawal requires exact same-origin Origin and fresh reauthentication; conformance remains unverified"
     },
     {
       "kind": "route",
