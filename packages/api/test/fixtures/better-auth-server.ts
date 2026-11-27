@@ -13,6 +13,7 @@ import { createServer as createHttpsServer, type Server as HttpsServer } from 'n
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pipeline } from 'node:stream';
 import { getCACertificates, setDefaultCACertificates } from 'node:tls';
 import { CoreStore } from '@codexia/core';
 import { createPostgresPersistence, migratePostgresDatabase } from '@codexia/persistence-postgres';
@@ -177,7 +178,8 @@ function proxyApiRequests(
     : incoming.headers;
   const upstream = nodeHttpRequest({ hostname: '127.0.0.1', port, method: incoming.method, path: incoming.url, headers }, response => {
     outgoing.writeHead(response.statusCode ?? 502, response.headers);
-    response.pipe(outgoing);
+    // Propagate interrupted backend streams so the proxy can close before its client is disposed.
+    pipeline(response, outgoing, () => {});
   });
   upstream.on('error', () => {
     if (!outgoing.headersSent) outgoing.writeHead(502);
