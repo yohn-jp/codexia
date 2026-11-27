@@ -28,6 +28,19 @@ test('coverage closure changes when a declared test input changes and is stable 
   const input = { root, runtime: { platform: 'linux', arch: 'x64', nodeVersion: 'v24.22.3', execPath: '/usr/bin/node', imageOS: 'ubuntu24', imageVersion: '20261115.1' },
     invocation: { executable: '/usr/bin/node', arguments: ['scripts/ci/execution/workspace.mjs', 'coverage'], environmentKeys: [] }, workflowJob: 'types_tests' };
   const original = await captureCoverageInputClosure(input);
+  const adjacentDirectory = path.join(root, 'packages/adjacent');
+  await mkdir(adjacentDirectory);
+  await writeFile(path.join(adjacentDirectory, 'README.md'), 'An adjunct without a package manifest\n');
+  assert.deepEqual(await captureCoverageInputClosure(input), original,
+    'manifestless directories do not change workspace coverage');
+  const adjacentManifest = path.join(adjacentDirectory, 'package.json');
+  await writeFile(adjacentManifest, '{"name":"fixture-adjacent"}\n');
+  const additionalWorkspace = await captureCoverageInputClosure(input);
+  assert.notEqual(additionalWorkspace.dependencies, original.dependencies,
+    'a new workspace manifest invalidates coverage proof');
+  assert.notEqual(additionalWorkspace.producers, original.producers,
+    'the discovered workspace inventory participates in coverage proof');
+  await rm(adjacentManifest);
   const swift = 'ios/CodexiaTransport/Sources/CodexiaAPI/';
   const outputs = [
     'app/src/generated/auth-methods/client.ts', 'app/src/generated/http/schemas/works.ts',
