@@ -209,7 +209,7 @@ def validate_profile(value: dict[str, Any]) -> dict[str, Any]:
     retention_days = value.get("retentionDays")
     if (retention_mode is None) != (retention_days is None):
         _fail("S3 retention mode and days must be configured together")
-    if retention_mode is not None and retention_mode not in ("GOVERNANCE", "COMPLIANCE"):
+    if retention_mode is not None and retention_mode not in ("GOVERNANCE", "COMPLIANCE", "BUCKET_DEFAULT"):
         _fail("Unsupported S3 retention mode")
     if retention_days is not None and (
         not isinstance(retention_days, int) or isinstance(retention_days, bool) or not 1 <= retention_days <= 3650
@@ -605,7 +605,7 @@ class S3BackupTransfer:
         self, key: str, expected: dict[str, Any], *,
         version_id: str | None, retention: dict[str, Any],
     ) -> None:
-        if retention and (not isinstance(version_id, str) or version_id in ("", "null")):
+        if self.profile.get("retentionDays") and (not isinstance(version_id, str) or version_id in ("", "null")):
             _fail("S3 object retention requires a unique version ID")
         try:
             response = self._get_object(key, version_id)
@@ -621,16 +621,23 @@ class S3BackupTransfer:
             raise TransferError("S3 object retrieval failed") from error
         if size != expected["size"] or digest != expected["sha256"]:
             _fail("S3 object SHA-256 differs from its protected digest receipt")
+        if not self.profile.get("retentionDays"):
+            return
+        mode = response.get("ObjectLockMode")
         if retention:
-            retain_until = response.get("ObjectLockRetainUntilDate")
-            if (
-                response.get("ObjectLockMode") != retention["ObjectLockMode"]
-                or not isinstance(retain_until, datetime)
-                or retain_until.utcoffset() is None
-                or retain_until < retention["ObjectLockRetainUntilDate"]
-                or retain_until <= datetime.now(timezone.utc)
-            ):
-                _fail("S3 object retention did not match the requested mode and date on the selected version")
+            required_until = retention["ObjectLockRetainUntilDate"]
+            mode_matches = mode == retention["ObjectLockMode"]
+        else:
+            # S3 default retention starts at object creation, including on an idempotent retry.
+            created = response.get("LastModified")
+            if not isinstance(created, datetime) or created.utcoffset() is None:
+                _fail("S3 object retention start could not be verified")
+            required_until = created + timedelta(days=self.profile["retentionDays"])
+            mode_matches = mode in ("GOVERNANCE", "COMPLIANCE")
+        retain_until = response.get("ObjectLockRetainUntilDate")
+        if (not mode_matches or not isinstance(retain_until, datetime) or retain_until.utcoffset() is None
+                or retain_until < required_until or retain_until <= datetime.now(timezone.utc)):
+            _fail("S3 object retention did not match the requested mode and date on the selected version")
 
     def _inspect_capabilities(self) -> dict[str, Any]:
         try:
@@ -654,11 +661,12 @@ class S3BackupTransfer:
                 lock_supported, lock_enabled, default_retention = None, None, None
         retention_mode = self.profile.get("retentionMode")
         retention_days = self.profile.get("retentionDays")
-        if retention_mode is not None and (
+        explicit_retention = retention_mode in ("GOVERNANCE", "COMPLIANCE")
+        if explicit_retention and (
             versioning_status != "Enabled" or lock_supported is not True or lock_enabled is not True
         ):
             _fail("Requested S3 retention is not enabled on the selected bucket")
-        if retention_mode is not None and isinstance(default_retention, dict):
+        if explicit_retention and isinstance(default_retention, dict):
             effective_mode = default_retention.get("Mode")
             effective_days = default_retention.get("Days")
             if effective_mode and effective_mode != retention_mode:
@@ -676,7 +684,7 @@ class S3BackupTransfer:
     def _retention_args(self, backup_id: str) -> dict[str, Any]:
         mode = self.profile.get("retentionMode")
         days = self.profile.get("retentionDays")
-        if mode is None or days is None:
+        if mode in (None, "BUCKET_DEFAULT") or days is None:
             return {}
         match = re.match(r"^(\d{8}T\d{6}Z)-", backup_id)
         if not match:

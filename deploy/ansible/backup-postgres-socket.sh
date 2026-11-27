@@ -38,11 +38,6 @@ exec 9>>"$lock"
 flock --exclusive --nonblock 9 || exit 75
 [[ ! -e "$state/backup-transaction" && ! -L "$state/backup-transaction" &&
    ! -e "$state/deploy-transaction.json" && ! -L "$state/deploy-transaction.json" ]] || fail 'Recover interrupted host work before provisioning the socket'
-worker_state="$(systemctl --user show codexia-backup-executor.service -p ActiveState --value)"
-worker_enablement="$(systemctl --user show codexia-backup-executor.service -p UnitFileState --value)"
-[[ "$worker_state" == inactive || "$worker_state" == failed ]] || fail 'Stop the backup executor before provisioning the socket'
-[[ -z "$worker_enablement" || "$worker_enablement" == disabled || "$worker_enablement" == masked ]] ||
-  fail 'Disable the backup executor before provisioning the socket'
 database_ports="$(podman port codexia-db)"
 [[ -z "$database_ports" ]] || fail 'Database port is published'
 identity_sql='SELECT system_identifier || chr(58) || oid FROM pg_control_system(), pg_database WHERE datname=current_database()'
@@ -80,6 +75,12 @@ if [[ -e "$dropin" || -L "$dropin" ]]; then
   exit 0
 fi
 
+worker_state="$(systemctl --user show codexia-backup-executor.service -p ActiveState --value)"
+worker_enablement="$(systemctl --user show codexia-backup-executor.service -p UnitFileState --value)"
+[[ "$worker_state" == inactive || "$worker_state" == failed ]] || fail 'Stop the backup executor before provisioning the socket'
+[[ -z "$worker_enablement" || "$worker_enablement" == disabled || "$worker_enablement" == masked ]] ||
+  fail 'Disable the backup executor before provisioning the socket'
+
 case "$(systemctl --user show "$api_service" -p ActiveState --value)" in
   active) api_active=true ;;
   inactive|failed) api_active=false ;;
@@ -112,10 +113,7 @@ mv -T -- "$temporary_dropin" "$dropin"
 installed=true
 systemctl --user daemon-reload
 systemctl --user restart "$db_service"
-for ((attempt=1; attempt<=30; attempt++)); do
-  if verify_database 2>/dev/null; then break; fi
-  sleep 1
-done
+timeout 30s podman wait --condition=healthy codexia-db >/dev/null
 verify_database || fail 'Replacement PostgreSQL service did not pass the private socket checks'
 if [[ "$api_active" == true ]]; then systemctl --user start "$api_service"; fi
 trap - EXIT INT TERM

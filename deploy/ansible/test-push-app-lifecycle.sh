@@ -175,9 +175,6 @@ rootless_systemctl() { rootless /usr/bin/systemctl --user "$@"; }
 run_deploy() {
   local key=$1 approvals=${2:-false} fault_path=${3:-}
   local log_name=${4:-deploy-$key-$RANDOM}
-  if rootless_podman container exists codexia-api; then
-    backup_fixture_attempt "$key" "${5:-}"
-  fi
   cat > "$tmp/deploy-vars.yml" <<YAML
 codexia_stage: deploy-lifecycle-fixture
 codexia_service_user: codexia
@@ -270,7 +267,7 @@ cleanup() {
     rootless mountpoint -q "$fixture_home/.local/state/codexia-backup-mount" && cleanup_failed "$LINENO" 'SSHFS mount remains'
   fi
   if [[ "$runtime_ready" == true ]] && getent passwd "$fixture_user" >/dev/null 2>&1; then
-    rootless_systemctl stop codexia-tunnel.service codexia-api.service codexia-db.service >/dev/null 2>&1 || true
+    rootless_systemctl stop codexia-backup-executor.service codexia-tunnel.service codexia-api.service codexia-db.service >/dev/null 2>&1 || true
     local name rc
     for name in codexia-api codexia-tunnel codexia-db codexia-lifecycle-registry codexia-backup-sshfs codexia-auth-registration codexia-lifecycle-proxy; do
       rc=0; rootless_podman container exists "$name" >/dev/null 2>&1 || rc=$?
@@ -290,7 +287,7 @@ cleanup() {
       rc=0; rootless_podman network exists "$name" >/dev/null 2>&1 || rc=$?
       (( rc == 1 )) || cleanup_failed "$LINENO" "$name network absence verification"
     done
-    for name in codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password \
+    for name in codexia-backup-api-database-url codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password \
       codexia-auth-database-url codexia-auth-secret codexia-oidc-client-secret codexia-oauth-introspection-client-secret; do
       rc=0; rootless_podman secret exists "$name" >/dev/null 2>&1 || rc=$?
       if (( rc == 0 )); then rootless_podman secret rm "$name" >/dev/null 2>&1 || cleanup_failed "$LINENO" "$name secret removal"; fi
@@ -710,7 +707,6 @@ rootless test ! -e "$fixture_home/.config/codexia-backup/executor.env"
 test "$(rootless_systemctl show codexia-backup-executor.service --property=ActiveState --value)" = inactive
 test "$(rootless_systemctl show codexia-backup-executor.service --property=UnitFileState --value)" = disabled
 set_state first_activation PASS 'fresh schema and API readiness verified without backup inputs, artifacts or prior writer'
-verify_private_backup_socket
 
 run_deploy "$initial_key" false
 observe_runtime same-digest-reapply "$initial_key"
@@ -723,8 +719,8 @@ if run_deploy "$update_key" false '' deploy-executor-missing; then
 fi
 grep -Fq 'Deployment transaction failed during off-VM backup admission' "$tmp/deploy-executor-missing.log"
 observe_runtime missing-executor "$initial_key"
-prepare_backup_console_fixture
-if run_deploy "$update_key" false '' deploy-console-unconfigured console-unconfigured; then
+verify_private_backup_socket
+if run_deploy "$update_key" false '' deploy-console-unconfigured; then
   echo 'An update reached candidate activation before Console backup configuration' >&2
   return 1
 fi
@@ -733,12 +729,16 @@ observe_runtime console-unconfigured "$initial_key"
 rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
 mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
 [[ "${#backup_artifacts[@]}" == 0 ]]
+activate_fixture_backup_destination
 run_deploy "$update_key" false
 observe_runtime compatible-update "$update_key"
 set_state compatible_update PASS "$initial_key to $update_key activated the verified digest as the sole healthy API writer"
 
 mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
 [[ "${#backup_artifacts[@]}" == 1 ]]
+admitted_run="$(rootless jq -er '.backupRunId' "$fixture_home/.local/state/codexia-deploy/deployed-release.json")"
+[[ "$(backup_fixture_query -c "SELECT state || ':' || (evidence->>'offVmMethod') || ':' || (evidence->>'s3Status')
+  FROM codexia_backup.runs WHERE id = '$admitted_run' AND revision = 1 AND kind = 'deploy'")" == FAILED:independent_mount:failed ]]
 backup_validation=$(rootless "$fixture_home/.local/bin/codexia-backup" validate-artifact "${backup_artifacts[0]}")
 backup_checksum=$(rootless sha256sum "${backup_artifacts[0]}/SHA256SUMS" | cut -d' ' -f1)
 node - "$report" "${backup_artifacts[0]}" "$backup_validation" "$backup_checksum" <<'BACKUP_EVIDENCE'

@@ -25,4 +25,6 @@ This approval also permits recovery of a missing `codexia` login only when the d
 
 The stage is safe to repeat after matching convergence. If fresh initialization is interrupted, retain the existing volume and all secrets, keep the initialization approval in the protected inventory, inspect the actual state, and rerun the stage. A schema, role, source or credential mismatch that is not the explicit empty-database recovery case requires operator diagnosis; do not delete or recreate resources to force convergence.
 
+After ACTIVE, the protected base operation can also provision the [VM backup runtime](../backup/CONSOLE.md). This requires the separate backup opt-in. It configures the private authenticated socket and backup journal, then attaches the Console and starts its restricted worker.
+
 CI exercises fresh and repeated convergence, existing-volume adoption, migration-ledger drift, role recovery, major-version rejection and the guarded Tunnel dependency switch on a disposable Ubuntu 26.04 rootless Podman/systemd VM. Those synthetic tests are not proof of production adoption, backup or restore.
