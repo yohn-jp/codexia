@@ -789,9 +789,6 @@ test('Better Auth 1.7.26 accepts only one operator-granted first owner and prese
 
   authorApiUsageDirectory = await mkdtemp(join(tmpdir(), 'codexia-passkey-owner-api-'));
   const testStore = {
-    async listProjects() {
-      return [];
-    },
     async createProject({ title }: { title: string }) {
       return { id: 'fixture-project', title, version: 1 };
     },

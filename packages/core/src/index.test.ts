@@ -190,7 +190,7 @@ test("native hierarchy reorder rejects stale membership and row versions atomica
   }
 });
 
-test("PostgreSQL is sole project authority, hierarchy creation preserves canonical scene bodies",async()=>{const p=await hierarchy();assert.equal((await core.listProjects()).some(x=>x.id===p.id),true);const tree=await core.tree(p.id);assert.equal(tree.volumes[0]?.chapters[0]?.scenes[0]?.id,"s1");assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");const docs=await persistence.read(r=>r.listDocuments(p.id));assert.equal(docs.length,3);assert.equal((await persistence.read(r=>r.getRevision(p.id,docs.find(d=>d.kind==="scene")!.id,docs.find(d=>d.kind==="scene")!.headRevisionId!)))?.markdown,"Text 😀\n");});
+test("PostgreSQL is sole project authority, hierarchy creation preserves canonical scene bodies",async()=>{const p=await hierarchy();assert.equal((await core.listProjectsPage()).projects.some(x=>x.id===p.id),true);const tree=await core.tree(p.id);assert.equal(tree.volumes[0]?.chapters[0]?.scenes[0]?.id,"s1");assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");const docs=await persistence.read(r=>r.listDocuments(p.id));assert.equal(docs.length,3);assert.equal((await persistence.read(r=>r.getRevision(p.id,docs.find(d=>d.kind==="scene")!.id,docs.find(d=>d.kind==="scene")!.headRevisionId!)))?.markdown,"Text 😀\n");});
 test("Core scene snapshots preserve horizontal-rule Markdown and strip explicit YAML frontmatter", async () => {
   const p = await hierarchy();
   const path = "manuscript/v1/c1/s1.md";

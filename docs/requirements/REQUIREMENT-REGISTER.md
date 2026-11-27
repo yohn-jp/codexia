@@ -2542,7 +2542,7 @@ Checks the selected document and revision on current and pinned snapshots.
   **ID**: REQ-CORE-003
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 3097, 3097
+  **Lines**: 3101, 3101
 
 ## TEST-DATA-001-001
 
@@ -2650,7 +2650,7 @@ Checks the API entry point rejects writes without a verified owner token for its
   **ID**: REQ-AUTH-001
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 1951, 1951
+  **Lines**: 1950, 1950
 
 ## TEST-AUTH-002-001
 
@@ -2668,7 +2668,7 @@ Checks admission ordering and refusal of unregistered methods and origins.
   **ID**: REQ-AUTH-002
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 892, 892
+  **Lines**: 891, 891
 
 ## TEST-AUTH-003-001
 
@@ -2704,7 +2704,7 @@ Checks admitted MCP scope and denies owner operations through Fastify.
   **ID**: REQ-AUTH-003
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 2178, 2178
+  **Lines**: 2177, 2177
 
 ## TEST-AUTH-004-001
 
@@ -2722,7 +2722,7 @@ Checks verified owner enrollment and closure of the isolated setup endpoint.
   **ID**: REQ-AUTH-004
 - **Type**: File
   **Path**: packages/api/test/passkey-bootstrap.acceptance.test.ts
-  **Lines**: 924, 924
+  **Lines**: 921, 921
 
 ## TEST-AUTH-005-001
 

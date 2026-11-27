@@ -351,7 +351,6 @@ export class CoreStore implements MutationCoordinator {
   private readonly storyProjectionCache = new Map<string, StoryProjectionEntry>();
   private storyProjectionBytes = 0;
   constructor(options: CoreStoreOptions) { this.persistence = options.persistence; }
-  async listProjects(): Promise<Project[]> { return [...await this.persistence.read((reader) => reader.listProjects(200))]; }
   async listProjectsPage(limit = 100, after?: ProjectPageCursor): Promise<{ projects: Project[]; nextCursor: ProjectPageCursor | null }> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new RangeError("Project page size must be between 1 and 200");
     const rows = await this.persistence.read((reader) => {

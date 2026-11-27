@@ -703,12 +703,6 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows[0] ? mapProject(result.rows[0]) : undefined;
   }
 
-  async listProjects(limit = 100): Promise<readonly Project[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError('Project page size must be between 1 and 200');
-    const result = await this.query('SELECT * FROM project ORDER BY updated_at DESC, id LIMIT $1', [limit]);
-    return result.rows.map(mapProject);
-  }
-
   async listProjectPage(limit: number, after?: ProjectPageCursor): Promise<readonly Project[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 201) throw validationError('Project page read must be between 1 and 201');
     if (
