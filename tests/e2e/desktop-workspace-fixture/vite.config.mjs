@@ -13,13 +13,12 @@ export default {
   root: fixtureRoot,
   plugins: [vanillaExtractPlugin(), react()],
   resolve: {
-    dedupe: ["react", "react-dom", "react-router", "react-router-dom"],
+    dedupe: ["react", "react-dom"],
     alias: [
       { find: /^react$/, replacement: resolve(appRoot, "node_modules/react/index.js") },
       { find: /^react\/(.*)$/, replacement: resolve(appRoot, "node_modules/react/$1") },
       { find: /^react-dom$/, replacement: resolve(appRoot, "node_modules/react-dom/index.js") },
       { find: /^react-dom\/client$/, replacement: resolve(appRoot, "node_modules/react-dom/client.js") },
-      { find: /^react-router-dom$/, replacement: resolve(appRoot, "node_modules/react-router-dom") },
     ],
   },
 };
