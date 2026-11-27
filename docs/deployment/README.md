@@ -91,7 +91,7 @@ The [backup control plane](../../deploy/backup/CONSOLE.md) supports operator-pro
 
 The `codexia-data` volume (`/data`) holds derived module caches that can be rebuilt. Retain the prior API image tag and origin UI image until rollback is rehearsed.
 
-**Review-only proposal:** [Protected recovery handoff](PROTECTED-RECOVERY-PROPOSAL.md) covers the operating procedure and evidence needed to activate a restored environment.
+[Protected recovery handoff](PROTECTED-RECOVERY.md) defines the evidence required for the approved R2 restore and R3 publication through the existing deployment path.
 
 ## Rollback and live acceptance
 

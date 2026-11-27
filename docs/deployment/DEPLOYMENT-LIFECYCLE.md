@@ -25,7 +25,7 @@
 | 新規installの判断 | 配備運用者／既存Actions Preflight | Gitの公開設定、保護された管理接続・edge読取入力、認定済みFull成果物。DBの真の不在とinstall意図、初期化承認 | R4またはR0/R2。到達不能を空と見なさない |
 | Bootstrap (R4) | 配備運用者／既存Production Bootstrap | Ansibleがhost/secrets/base/auth-runtimeを収束。VMが内部秘密を生成・保管し、配備SSHを確認 | BOOTSTRAPPED。既存秘密・DBを勝手に再生成しない。S3/復号鍵/バックアップreceipt/復元検証を入力・完了条件にしない |
 | 初回Frontend、登録キー、本人登録 (R5) | 配備運用者／既存Frontend release・Bootstrap、所有者／通常HTTPSの /console/setup | 同じ認定済みFull pair・通常Worker・setup-only API・既存の暗号化grant配送。配送用owner公開鍵はgrant発行時のみ | owner/Passkey/client確定、grant失効。期限切れはowner不在を検証し承認済み再発行。既存ownerの作成は禁止 |
-| 初回Backend (R6) | 配備運用者／既存保護Backend handoff | 認定済みFull、互換Frontend、DB/Auth/owner検証、clean API slot、既存承認、host lock、readiness・公開検証 | ACTIVE、通常 /console に到達。純新規installには事前backup/restore receipt不要。復旧・既存データ採用なら復元/保全の同一性を確認。失敗時はデータを保持しR1/R3 |
+| 初回Backend (R6) | 配備運用者／既存保護Backend handoff | 認定済みFull、互換Frontend、DB/Auth/owner検証、clean API slot、既存承認、host lock、readiness・公開検証 | ACTIVE、通常 /console に到達。純新規installには事前backup/restore receipt不要。既存データ採用は既存の保全と同一性を確認。失敗時はデータを保持しR1/R3 |
 | バックアップ機能の配備 | 配備運用者／既存Ansible・通常認定成果物 | 既存のbackup実行主体、権限分離、運用schema、保護されたVM内設定。必要なローカル公開鍵・実行秘密はVM/独立秘密保管で管理 | OWNERがConsoleで設定できる。設定未完了は未保護、R4〜R6の失敗にしない。追加の手製bundle/常設GitHub secret不要 |
 | バケット/IAM・復旧鍵の準備 | インフラ・復旧担当／外部ストレージ管理面・独立秘密保管 | バケット/prefix、最小権限writer/read-only recovery、保持設定、復号鍵・VM復旧に必要な秘密の独立保管 | ownerへ必要な保存先設定とwrite-only入力を安全に渡す。秘密管理の不備はDR未受入 |
 | バックアップ設定・変更・資格更新 | 所有者／ /console/backups | Consoleで希望S3設定を入力、probe、active revision承認。VM上の実行主体が検証し、実行資格情報を専用運用領域で管理 | active設定または明示失敗。GitHub Variables/SecretsへのS3設定転記は禁止。provider/IAM変更は外部管理者 |
@@ -36,7 +36,7 @@
 | 互換Frontend/Backend更新 (R8) | CI／認定済みmain release、配備運用者／既存保護承認 | 独立component配備。Backend変更前のみVM上の同じbackup経路で保全。CIは非秘密の結果のみ照合。Frontend単独更新・同一digest no-opはDB backup不要 | health/identity確認、失敗は既存transactionで切戻し。必要保全不成立・非互換・未知状態は停止 |
 | 監視・再起動・障害調査 (R1/R3) | 所有者／Console、配備運用者／既存Actions・VMのhealth/log、インフラ管理者／外部管理面 | systemd/Quadlet、API readiness、DB、Tunnel、Access、release identityと既存運用記録 | writer二重起動なし。既知transactionを再開/切戻し。不明はR0、必要ならR2 |
 | 認証・資格情報管理/紛失 | 所有者／ /console/security・/console/identity、配備/復旧担当／保護運用 | owner Passkey・session・OIDC/OAuthは本人UI。外部接続credentialは元の管理面。VM内秘密の変更は役割とDB/サービスの整合を明示承認 | 既存ownerを保持。端末喪失時は本人確認した既存owner回復。初回setupを流用しない。無承認の一括rotationはしない |
-| 災害復旧・VM/DB喪失 (R2) | 復旧担当／独立ホスト＋保護されたoperator手順、配備運用者／既存Ansible | 元VMなし・Console停止でも復元可能。新VM基盤収束、外部保管から選択backupと独立秘密を取得、writer停止・DB/roles/Auth復元、同一ownerと認定releaseを検証 | R6またはR3で既存ownerの通常起動、外部疎通・backup運用再確認。復元点以後の書込み喪失は明示判断。無断上書き・新owner作成禁止 |
+| 災害復旧・VM/DB喪失 (R2) | 復旧担当／独立ホスト＋保護されたoperator手順、配備運用者／既存Ansible | 元VMなし・Console停止でも復元可能。新VM基盤収束、外部保管から選択backupと独立秘密を取得、writer停止・DB/roles/Auth復元、同一ownerと認定releaseを検証 | [保護された引き渡し](PROTECTED-RECOVERY.md)をPreflightで再観測し、R3で既存ownerの通常起動、外部疎通とbackup運用を再確認。復元点以後の書込み喪失は明示判断。無断上書き・新owner作成禁止 |
 | 非互換変更・意図的初期化 | 配備運用者／別途明示的に承認された個別保守 | 通常updateは停止。既存DB削除はBootstrap外。必要な保全と具体的な移行/破棄を別承認し実行後に再観測 | 真のDB不在＋install承認ならR4。復旧意図ならR2。汎用Cutover・互換fallbackは作らない |
 | 作品持ち出し・終了 | 所有者／製品の作品エクスポート、配備/インフラ担当／個別承認 | [作品可搬性](../authoring-portable.md)の開放形式はDRと別。停止、保存/復旧点確認、データ破棄・外部資源/資格失効は各責任者が個別承認 | 既存データや独立backupを暗黙削除しない。新しい廃止controllerは設けない |
 
@@ -87,10 +87,10 @@ Preflightは環境、host pin、観測時刻、source/candidate、現在のident
 | R0 STOP / PREPARE | M未準備・異常、選択に必要な観測不明、解釈不能な操作記録、必要な承認・証明不足 | 無変更で停止。選択経路に必要なVM/SSH/edge等の前提を準備・調査し再観測 |
 | R1 RESUME / RECOVER | Tに既知の未完了操作あり | 同一操作の記録・現状態を照合して再開または切戻し。未知記録はR0 |
 | R2 RESTORE | 既存環境の復旧意図があり必要な保存状態が欠落・故障 | 独立backup・外部秘密管理から復元。必要なら先に基盤構築するが初回owner発行は禁止 |
-| R3 MAINTENANCE | H drift、A回復必要、B/F障害（既存データ・認証の非互換はR0） | 明示的な基盤修復・通常deploy復旧・owner回復のみ。非互換移行を実行しない |
+| R3 MAINTENANCE | H drift、A回復必要、B/F障害、または R2 後の検証済み復元先（既存データ・認証の非互換はR0） | 明示的な基盤修復、通常deploy復旧、既存owner回復、または[Preflightで再照合した復元先の公開](PROTECTED-RECOVERY.md) |
 | R4 BOOTSTRAP | H未構築/部分構築、D未作成/新規空またはA未構成で、新規・既存採用・復旧の意図が確定。承認済みinstallでDの欠落を確認した場合は旧B/Aの残存より優先 | 必要なhost/secrets/base/auth-runtimeを収束。新規初期化を別承認。既存identity/ledger/資格情報保持 |
 | R5 OWNER_SETUP | 承認済み新規installでA登録待ちまたはactivation未準備、あるいはB setup-only | 通常Frontendの認定済みFullアーカイブを必要時に先行配備。同じFull Backendのsetup-only APIと一回限りgrantで本人登録、client検証、保護されたactivation preparation。既存ownerを再発行しない |
-| R6 ACTIVATE | H/D/A検証済み、B clean未配備、F互換 | 既存の保護されたBackend-only初回deploy。初回・DB使用・公開承認。純新規はbackup/restoreを要求しない。既存データ採用・復旧は保全と同一性を確認 |
+| R6 ACTIVATE | H/D/A検証済み、B clean未配備、F互換、復旧意図なし | 既存の保護されたBackend-only初回deploy。初回・DB使用・公開承認。純新規はbackup/restoreを要求しない。既存データ採用は保全と同一性を確認 |
 | R7 廃止 | 選択禁止 | 旧番号を再利用しない。非互換または未配備Frontendで通常Admissionが成立しない場合はR0 |
 | R8 UPDATE / VERIFY | B通常稼働・互換、Fが正常で通常admission成立 | 変更のあるcomponentのみ通常互換更新。完全同一ならno-op＋health/identity検証 |
 
@@ -119,7 +119,10 @@ flowchart TD
     REC --> OBS
     PENDING -->|なし| LOST{"既存状態の復旧が必要?"}
     LOST -->|はい| RESTORE["R2: 復旧担当 / 独立ホスト<br/>backup・必要なSecret復元"]
-    RESTORE --> OBS
+    RESTORE --> HANDOFF["既存Preflight / 復元証拠・承認を照合"]
+    HANDOFF -->|一致| RECOVERED["R3: 共通Ansible配備処理で公開"]
+    HANDOFF -->|不成立| STOP
+    RECOVERED --> ACCEPT
     LOST -->|いいえ| EMPTYDB{"DB不在を確認・新規承認済み・基盤正常?"}
     EMPTYDB -->|はい| BOOT["R4: Actions → Tailscale → SSH → Ansible<br/>基盤・VM内部秘密・DB/Auth"]
     EMPTYDB -->|いいえ| INCOMPAT{"既存DB/Auth/Backend非互換?"}
@@ -183,6 +186,8 @@ DBが真に不在で新規installが明示承認された場合はR4を利用す
 
 Preflightは観測、候補identity、変更軸、必要な操作・承認・保全/復旧・受入条件を非秘密の計画として返す。計画は環境/host/DB/旧・候補identity/証拠/意図/有効期間に束縛しdigestで固定する。承認は別環境・別artifact・変更後のsourceに流用できない。queue/host lock取得後に対象と現状態を再照合する。drift・期限切れ・未知transactionでは停止する。
 
+R2 で復元した DB の公開は R3 に引き渡す。復元操作 ID、証拠の digest、対象 identity、候補、元 writer の遮断、承認期限を同じ計画に結び付ける。既存の保護された VM 管理経路と共通 Ansible 配備トランザクションを使う。restore 意図で R4〜R6 に進入しない。[復旧引き渡しの詳細](PROTECTED-RECOVERY.md)
+
 通常更新は既存release triggerと保護条件を使用する。承認分離、本人Passkey登録、通常deploy transaction、単一writerを維持する。純新規のR4〜R6にbackup/独立復元の前提は置かない。既存データの採用・復旧と通常更新の保全、およびACTIVE後の運用受入でbackupと独立復元の証拠を要求する。公開後に新規書込みがあり得る場合、旧backupを無条件に復元しない。
 
 ## 実行権限と保護された引き渡し
@@ -211,7 +216,7 @@ Bootstrap入力Full digestは既存release handoffの証明書・発行元・mai
 
 新規owner登録では通常の `codexia-frontend` Worker・Full Frontendアーカイブ・canonical UI/Access/Tunnel経路のみを用いる。専用setup Worker、別Environment、別Frontendビルド、登録のためのTerraform経路切替を禁止する。R4後、確認済みR5（新規install、owner登録待ち、通常writer不在）に限り、`codexia-production` の保護されたFrontend workflowは認定済み候補を通常Workerへ配備できる。通常更新のlive Backend互換性Admissionは変更せず、初回配備は認定済み候補pair、fresh plan、Accessとcanonical route、version単調性でAdmissionする。既存writer/ownerを保持する必要がある場合は新規登録を行わない。通常業務/OAuth/MCP APIはsetup-only Backendが拒否し、public protocol bypassは通常runtime受入まで無効とする。setup-only API、Access/TLS/RP ID、登録キー追加認可、拒否経路を実測して本人へ引き渡す。登録後は既存の `--prepare-activation` 相当でowner/client検証、setup-only API/Tunnel停止、通常認証設定確定、clean API slotへの復帰を行う。FrontendとUI経路は維持しR6で同じ認定Full Backendを通常起動する。
 
-初回Backendの起動は既存の保護されたBackend deployment handoffとAnsible deploy transactionだけで行う。既存host lock下でledger/Auth検証・単一writer・readiness・Tunnel公開を確認する。既存データ採用・復旧では必要な保全・復元の同一性を確認するが、純新規では初回backupを発動しない。失敗時は通常deployの安全停止・復旧を利用し、登録済みownerとデータを保持する。
+初回Backendの起動は既存の保護されたBackend deployment handoffとAnsible deploy transactionだけで行う。既存host lock下でledger/Auth検証・単一writer・readiness・Tunnel公開を確認する。既存データ採用では必要な保全と同一性を確認する。純新規では初回backupを発動しない。失敗時は通常deployの安全停止・復旧を利用し、登録済みownerとデータを保持する。
 
 ### 旧Cutover機構の撤去境界
 
