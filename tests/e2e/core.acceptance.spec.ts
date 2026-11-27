@@ -651,10 +651,12 @@ test("browser recovery is author-scoped and foreign records remain untouched", a
 test("one malformed legacy key does not hide later recoverable PostgreSQL drafts", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
   try {
-    await editor(page).fill("Valid protected draft after malformed entry.");
-    await expect.poll(async () => (await drafts(page)).some((d) => d.markdown === "Valid protected draft after malformed entry.")).toBe(true);
+    const markdown = "Valid protected draft after malformed entry.";
+    await replaceEditor(page, markdown);
+    await expectEditor(page, markdown);
+    await expect.poll(async () => (await drafts(page)).some((draft) => draft.markdown === markdown)).toBe(true);
     await writeRecords(page, [{ key: "malformed-legacy-key", version: 0, markdown: "Untrusted legacy content" }]);
-    await reopen(page, f); await expectEditor(page, "Valid protected draft after malformed entry.");
+    await reopen(page, f); await expectEditor(page, markdown);
     expect((await drafts(page)).some((d) => d.key === "malformed-legacy-key")).toBe(true);
   } finally { gate.release(); }
 });
