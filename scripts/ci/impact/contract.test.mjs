@@ -472,7 +472,7 @@ test('browser lanes cover each profile and use compatible browser images', () =>
     const ui = VERIFICATION_GROUPS[prefix + 'ui-v1'];
     const tasks = [...writing, ...reference, ...ui];
     assert.deepEqual(tasks.toSorted(), BROWSER_SHARDS.map(shard => prefix + shard.id).toSorted());
-    assert.deepEqual(ui, [prefix + 'ui-v1']);
+    assert.deepEqual(ui.slice(0, 2), [prefix + 'ui-v1', prefix + 'modular-workspace']);
     assert.equal(reference.at(-1), prefix + 'redesign-visual', 'Keep visual measurements after the parallel shards');
   }
 });

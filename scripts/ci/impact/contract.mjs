@@ -51,9 +51,8 @@ export const VERIFICATION_TASKS = [
   'coverage', 'biome-ci', 'architecture-g5', 'requirements-trace', 'swift-linux', 'codexiactl-linux',
 ];
 // Execution groups batch work without removing any validation obligation.
-// All three browser lanes use Chromium; UI acceptance keeps its dedicated lane.
-// Group measured longer specs across the three existing lanes, never share mutable fixtures.
-// Start the two long-running specs together in each browser lane; fill shorter lanes before adding a tail.
+// Distribute the longest Chromium specs across the three existing lanes. Each
+// task owns a separate fixture; the visual measurement runs without any sibling.
 export const VERIFICATION_GROUPS = {
   biome: ['biome-ci'],
   'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'http-contract', 'root'].map(id => `unit-${id}`),
@@ -72,10 +71,8 @@ export const VERIFICATION_GROUPS = {
   'oci-full': ['oci-full'],
   ...Object.fromEntries(PROFILES.flatMap(profile => [
     [`browser-${profile}-writing`, ['core', 'persistence-database'].map(id => `browser-${profile}-${id}`)],
-    // Run the performance-sensitive visual shard only after the shorter
-    // reference tasks, avoiding an exclusive tail on the critical writing lane.
-    [`browser-${profile}-reference`, ['modular-workspace', 'recent-activity', 'auth-recovery', 'backup-console', 'native-review', 'oauth-web', 'outline-headings', 'passkey-bootstrap', 'review-contributions', 'job-inbox', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
-    [`browser-${profile}-ui-v1`, ['ui-v1'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-reference`, ['recent-activity', 'oauth-web', 'auth-recovery', 'backup-console', 'passkey-bootstrap', 'review-contributions', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-ui-v1`, ['ui-v1', 'modular-workspace', 'native-review', 'outline-headings', 'job-inbox'].map(id => `browser-${profile}-${id}`)],
   ])),
 };
 // A single dependency authority for profile artifact consumers and certification.
