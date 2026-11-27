@@ -94,15 +94,31 @@ func TestTailscaleWIFRejectsBroadOrIncompleteClaims(t *testing.T) {
 
 func validWIFKey(id string) ts.Key {
 	return ts.Key{
-		ID: id, KeyType: "federated", Audience: wifAudience,
-		Issuer:  "https://token.actions.githubusercontent.com",
-		Subject: "repo:yohn-jp/codexia:environment:codexia-*",
+		ID: id, KeyType: "federated", Audience: "api.tailscale.com/" + id,
+		Issuer:  wifIssuer,
+		Subject: wifSubject,
 		Scopes:  []string{"auth_keys"}, Tags: []string{"tag:ci"},
 		CustomClaimRules: map[string]string{
 			"ref":          "refs/heads/main",
 			"repository":   "yohn-jp/codexia",
 			"workflow_ref": "yohn-jp/codexia/.github/workflows/*@refs/heads/main",
 		},
+	}
+}
+
+func TestTailscaleWIFReportsExactReconciliationActions(t *testing.T) {
+	key := validWIFKey("legacy-id")
+	key.Subject = "repo:yohn-jp@299811358/codexia@1450072993:environment:codexia-production"
+	key.Scopes = []string{"all"}
+	key.CustomClaimRules = nil
+	problems := strings.Join(wifProblems(key), "\n")
+	for _, expected := range []string{"subject must be", "immutable owner/repository", "scopes must contain only auth_keys", "custom claim ref", "custom claim workflow_ref"} {
+		if !strings.Contains(problems, expected) {
+			t.Errorf("missing actionable WIF mismatch %q in %q", expected, problems)
+		}
+	}
+	if matchesWIF(key) {
+		t.Fatal("legacy broad OIDC credential bypassed scoped trust")
 	}
 }
 
