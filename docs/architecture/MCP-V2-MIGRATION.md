@@ -28,6 +28,8 @@ stdio の新規プロセスも同じ期限まで SDK が提供する旧世代の
 互換期間中も、接続元の認可と対象作品の選択は各リクエストでやり直す。
 MCP のセッション ID の発行、イベントストリームの再開、セッション削除は廃止する。
 API epoch 3 以降の MCP エンドポイントは GET と DELETE の成功応答を提供しない。epoch 4 では認可済み MCP POST の不正 JSON に JSON-RPC parse error（HTTP 400、id: null、code: -32700）を返す。認可等の ApiError は維持する。
+承認済みの API epoch 5 是正では、`/mcp` および作品別 streamable 入口に対する認可済み GET と DELETE の HTTP 405 を、公式 SDK の JSON-RPC 本文と必須の `Allow: POST` で定義する。
+Fastify 側の認証、認可および作品割当の拒否は既存の ApiError に従う。 [HTTP API 契約](API-CONTRACT.md#操作の追加変更廃止)
 
 ## 移行後のリクエスト境界
 
