@@ -2039,7 +2039,7 @@ A recovery draft is durably journaled before remote write, and an unknown respon
 
 - **Type**: File
   **Path**: app/src/editor/postgresEvidenceAdapter.ts
-  **Lines**: 73, 80
+  **Lines**: 96, 108
 
 ## TEST-TRC-01-001
 

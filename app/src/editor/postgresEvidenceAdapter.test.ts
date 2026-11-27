@@ -1,115 +1,258 @@
-import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import test from "node:test";
-import { createPostgresEditorEvidenceAdapter } from "./postgresEvidenceAdapter";
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import test from 'node:test';
+import { createPostgresEditorEvidenceAdapter } from './postgresEvidenceAdapter';
 
-const projectId = "00000000-0000-4000-8000-000000000001";
-const documentId = "00000000-0000-4000-8000-000000000002";
-const revisionId = "00000000-0000-4000-8000-000000000003";
-const confirmedNodeId = "00000000-0000-4000-8000-000000000004";
-const proposedNodeId = "00000000-0000-4000-8000-000000000005";
-const manuscript = "🙂東京へ行く。";
+const projectId = '00000000-0000-4000-8000-000000000001';
+const documentId = '00000000-0000-4000-8000-000000000002';
+const revisionId = '00000000-0000-4000-8000-000000000003';
+const confirmedNodeId = '00000000-0000-4000-8000-000000000004';
+const proposedNodeId = '00000000-0000-4000-8000-000000000005';
+const manuscript = '🙂東京へ行く。';
 
-function node(id: string, status: "confirmed" | "proposed", name: string) {
+function node(id: string, status: 'confirmed' | 'proposed', name: string) {
   return {
-    id, projectId, type: "place", name, attributes: {}, status, version: 1,
-    deletedAt: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+    id,
+    projectId,
+    type: 'place',
+    name,
+    attributes: {},
+    status,
+    version: 1,
+    deletedAt: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
   };
 }
 
-function anchor(id: string, fromUtf16: number, toUtf16: number, status: "confirmed" | "proposed") {
+function anchor(id: string, fromUtf16: number, toUtf16: number, status: 'confirmed' | 'proposed') {
   return {
-    id, projectId, documentId, revisionId, fromUtf16, toUtf16,
-    quoteSha256: "a".repeat(64), status, version: 1,
-    createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+    id,
+    projectId,
+    documentId,
+    revisionId,
+    fromUtf16,
+    toUtf16,
+    quoteSha256: 'a'.repeat(64),
+    status,
+    version: 1,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
   };
 }
 
-test("PostgreSQL editor reads keep raw mentions, candidates, and confirmed Knowledge separate", async (t) => {
+test('PostgreSQL editor reads keep raw mentions, candidates, and confirmed Knowledge separate', async t => {
   const requests: Array<{ url: string; init?: RequestInit }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const url = String(input);
     requests.push({ url, init });
-    if (url.includes("/anchors?")) {
+    if (url.includes('/anchors?')) {
       return Response.json({
         revisionId,
         anchors: [
-          { anchor: anchor("raw", 0, 2, "proposed"), quote: "🙂", mentions: [], assertions: [{
-            link: { projectId, assertionId: "assertion-1", evidenceId: "raw", role: "supports", createdAt: "2026-01-01T00:00:00.000Z" },
-            assertion: { id: "assertion-1", projectId, proposition: { statement: "未承認の主張" }, modality: "fact", perspective: "narrator", narrativeTime: {}, confidence: null, status: "proposed", version: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
-          }] },
-          { anchor: anchor("candidate", 2, 4, "confirmed"), quote: "東京", mentions: [{
-            link: { projectId, evidenceId: "candidate", nodeId: proposedNodeId, status: "proposed", source: "author", confidence: null, extractorVersion: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
-            node: node(proposedNodeId, "proposed", "東京（候補）"),
-          }], assertions: [] },
-          { anchor: anchor("confirmed", 2, 4, "confirmed"), quote: "東京", mentions: [{
-            link: { projectId, evidenceId: "confirmed", nodeId: confirmedNodeId, status: "confirmed", source: "author", confidence: 1, extractorVersion: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
-            node: node(confirmedNodeId, "confirmed", "東京"),
-          }, {
-            link: { projectId, evidenceId: "confirmed", nodeId: proposedNodeId, status: "confirmed", source: "author", confidence: 1, extractorVersion: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
-            node: node(proposedNodeId, "confirmed", "日本"),
-          }], assertions: [] },
+          {
+            anchor: anchor('raw', 0, 2, 'proposed'),
+            quote: '🙂',
+            mentions: [],
+            assertions: [
+              {
+                link: { projectId, assertionId: 'assertion-1', evidenceId: 'raw', role: 'supports', createdAt: '2026-01-01T00:00:00.000Z' },
+                assertion: {
+                  id: 'assertion-1',
+                  projectId,
+                  proposition: { statement: '未承認の主張' },
+                  modality: 'fact',
+                  perspective: 'narrator',
+                  narrativeTime: {},
+                  confidence: null,
+                  status: 'proposed',
+                  version: 1,
+                  createdAt: '2026-01-01T00:00:00.000Z',
+                  updatedAt: '2026-01-01T00:00:00.000Z',
+                },
+              },
+            ],
+          },
+          {
+            anchor: anchor('candidate', 2, 4, 'confirmed'),
+            quote: '東京',
+            mentions: [
+              {
+                link: {
+                  projectId,
+                  evidenceId: 'candidate',
+                  nodeId: proposedNodeId,
+                  status: 'proposed',
+                  source: 'author',
+                  confidence: null,
+                  extractorVersion: null,
+                  createdAt: '2026-01-01T00:00:00.000Z',
+                  updatedAt: '2026-01-01T00:00:00.000Z',
+                },
+                node: node(proposedNodeId, 'proposed', '東京（候補）'),
+              },
+            ],
+            assertions: [],
+          },
+          {
+            anchor: anchor('confirmed', 2, 4, 'confirmed'),
+            quote: '東京',
+            mentions: [
+              {
+                link: {
+                  projectId,
+                  evidenceId: 'confirmed',
+                  nodeId: confirmedNodeId,
+                  status: 'confirmed',
+                  source: 'author',
+                  confidence: 1,
+                  extractorVersion: null,
+                  createdAt: '2026-01-01T00:00:00.000Z',
+                  updatedAt: '2026-01-01T00:00:00.000Z',
+                },
+                node: node(confirmedNodeId, 'confirmed', '東京'),
+              },
+              {
+                link: {
+                  projectId,
+                  evidenceId: 'confirmed',
+                  nodeId: proposedNodeId,
+                  status: 'confirmed',
+                  source: 'author',
+                  confidence: 1,
+                  extractorVersion: null,
+                  createdAt: '2026-01-01T00:00:00.000Z',
+                  updatedAt: '2026-01-01T00:00:00.000Z',
+                },
+                node: node(proposedNodeId, 'confirmed', '日本'),
+              },
+            ],
+            assertions: [],
+          },
         ],
       });
     }
     return Response.json({
-      document: { id: documentId, projectId, parentId: null, kind: "scene", title: "Scene", orderKey: "0001", headRevisionId: revisionId, version: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
-      revision: { id: revisionId, projectId, documentId, parentRevisionId: null, markdown: manuscript, sha256: "b".repeat(64), authorId: "author", createdAt: "2026-01-01T00:00:00.000Z" },
+      document: {
+        id: documentId,
+        projectId,
+        parentId: null,
+        kind: 'scene',
+        title: 'Scene',
+        orderKey: '0001',
+        headRevisionId: revisionId,
+        version: 1,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      revision: {
+        id: revisionId,
+        projectId,
+        documentId,
+        parentRevisionId: null,
+        markdown: manuscript,
+        sha256: 'b'.repeat(64),
+        authorId: 'author',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
     });
   };
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
 
   const adapter = createPostgresEditorEvidenceAdapter();
   const snapshot = await adapter.read({ projectId, documentId, revisionId, markdown: manuscript }, new AbortController().signal);
   assert.equal(snapshot.revisionId, revisionId);
   assert.equal(snapshot.markdown, manuscript);
-  assert.equal(snapshot.anchors.find((item) => item.id === "raw")?.target, undefined);
-  assert.equal(snapshot.anchors.find((item) => item.id === "raw")?.candidates, undefined);
-  assert.equal(snapshot.anchors.find((item) => item.id === "candidate")?.target, undefined);
-  assert.deepEqual(snapshot.anchors.find((item) => item.id === "candidate")?.candidates, [{ id: proposedNodeId, label: "東京（候補）" }]);
-  assert.equal(snapshot.anchors.find((item) => item.id === "confirmed")?.target, undefined);
-  assert.deepEqual(snapshot.anchors.find((item) => item.id === "confirmed")?.targets, [{ id: confirmedNodeId, label: "東京" }, { id: proposedNodeId, label: "日本" }]);
-  assert.equal(snapshot.anchors.find((item) => item.id === "raw")?.assertions?.[0]?.status, "proposed");
-  assert.match(snapshot.anchors.find((item) => item.id === "raw")?.assertions?.[0]?.label ?? "", /^fact:/u);
-  const documentRequest = new URL(requests[0]!.url, "http://localhost");
-  const anchorRequest = new URL(requests[1]!.url, "http://localhost");
+  assert.equal(snapshot.anchors.find(item => item.id === 'raw')?.target, undefined);
+  assert.equal(snapshot.anchors.find(item => item.id === 'raw')?.candidates, undefined);
+  assert.equal(snapshot.anchors.find(item => item.id === 'candidate')?.target, undefined);
+  assert.deepEqual(snapshot.anchors.find(item => item.id === 'candidate')?.candidates, [{ id: proposedNodeId, label: '東京（候補）' }]);
+  assert.equal(snapshot.anchors.find(item => item.id === 'confirmed')?.target, undefined);
+  assert.deepEqual(snapshot.anchors.find(item => item.id === 'confirmed')?.targets, [
+    { id: confirmedNodeId, label: '東京' },
+    { id: proposedNodeId, label: '日本' },
+  ]);
+  assert.equal(snapshot.anchors.find(item => item.id === 'raw')?.assertions?.[0]?.status, 'proposed');
+  assert.match(snapshot.anchors.find(item => item.id === 'raw')?.assertions?.[0]?.label ?? '', /^fact:/u);
+  const [readDocument, readAnchors] = requests;
+  assert.ok(readDocument && readAnchors);
+  const documentRequest = new URL(readDocument.url, 'http://localhost');
+  const anchorRequest = new URL(readAnchors.url, 'http://localhost');
   const documentPath = `/api/v1/persistence/projects/${projectId}/documents/${documentId}`;
   assert.equal(documentRequest.pathname, documentPath);
-  assert.equal(documentRequest.searchParams.get("revision"), revisionId);
+  assert.equal(documentRequest.searchParams.get('revision'), revisionId);
   assert.equal(anchorRequest.pathname, `${documentPath}/anchors`);
-  assert.equal(anchorRequest.searchParams.get("revision"), revisionId);
+  assert.equal(anchorRequest.searchParams.get('revision'), revisionId);
 });
 
-test("PostgreSQL editor sends the exact composed ChangeSet with an idempotency key", async (t) => {
+test('PostgreSQL editor sends the exact composed ChangeSet with an idempotency key', async t => {
   let savedRequest: { url: string; init?: RequestInit } | undefined;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     savedRequest = { url: String(input), init };
-    const body = JSON.parse(String(init?.body)) as { baseRevisionId: string; changes: Array<{ fromUtf16: number; toUtf16: number; insert: string }>; resultingSha256: string };
+    const body = JSON.parse(String(init?.body)) as {
+      baseRevisionId: string;
+      changes: Array<{ fromUtf16: number; toUtf16: number; insert: string }>;
+      resultingSha256: string;
+    };
     assert.equal(body.baseRevisionId, revisionId);
-    assert.deepEqual(body.changes, [{ fromUtf16: 2, toUtf16: 2, insert: "追" }, { fromUtf16: 4, toUtf16: 6, insert: "大阪" }]);
-    assert.equal(body.resultingSha256, createHash("sha256").update("🙂追猫は大阪。", "utf8").digest("hex"));
+    assert.deepEqual(body.changes, [
+      { fromUtf16: 2, toUtf16: 2, insert: '追' },
+      { fromUtf16: 4, toUtf16: 6, insert: '大阪' },
+    ]);
+    assert.equal(body.resultingSha256, createHash('sha256').update('🙂追猫は大阪。', 'utf8').digest('hex'));
     return Response.json({
-      document: { id: documentId, projectId, parentId: null, kind: "scene", title: "Scene", orderKey: "0001", headRevisionId: revisionId, version: 2, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
-      revision: { id: revisionId, projectId, documentId, parentRevisionId: null, markdown: "🙂追猫は大阪。", sha256: "c".repeat(64), authorId: "author", createdAt: "2026-01-01T00:00:00.000Z" },
+      document: {
+        id: documentId,
+        projectId,
+        parentId: null,
+        kind: 'scene',
+        title: 'Scene',
+        orderKey: '0001',
+        headRevisionId: revisionId,
+        version: 2,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      revision: {
+        id: revisionId,
+        projectId,
+        documentId,
+        parentRevisionId: null,
+        markdown: '🙂追猫は大阪。',
+        sha256: 'c'.repeat(64),
+        authorId: 'author',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
       replayed: false,
     });
   };
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
 
   const adapter = createPostgresEditorEvidenceAdapter();
-  const result = await adapter.save({ projectId, documentId, revisionId }, {
-    baseMarkdown: "🙂猫は東京。",
-    markdown: "🙂追猫は大阪。",
-    changes: [{ from: 2, to: 2, insert: "追" }, { from: 4, to: 6, insert: "大阪" }],
-    idempotencyKey: "edit-once",
-    clientId: "browser-one",
-  }, new AbortController().signal);
-  assert.equal(result.markdown, "🙂追猫は大阪。");
+  const result = await adapter.save(
+    { projectId, documentId, revisionId },
+    {
+      baseMarkdown: '🙂猫は東京。',
+      markdown: '🙂追猫は大阪。',
+      changes: [
+        { from: 2, to: 2, insert: '追' },
+        { from: 4, to: 6, insert: '大阪' },
+      ],
+      idempotencyKey: 'edit-once',
+      clientId: 'browser-one',
+    },
+    new AbortController().signal,
+  );
+  assert.equal(result.markdown, '🙂追猫は大阪。');
   assert.ok(savedRequest);
   assert.ok(savedRequest.url.endsWith(`/projects/${projectId}/documents/${documentId}`));
-  assert.equal(savedRequest?.init?.method, "PATCH");
-  assert.equal(new Headers(savedRequest?.init?.headers).get("Idempotency-Key"), "edit-once");
-  assert.equal(new Headers(savedRequest?.init?.headers).get("X-Client-Id"), "browser-one");
+  assert.equal(savedRequest?.init?.method, 'PATCH');
+  assert.equal(new Headers(savedRequest?.init?.headers).get('Idempotency-Key'), 'edit-once');
+  assert.equal(new Headers(savedRequest?.init?.headers).get('X-Client-Id'), 'browser-one');
 });
