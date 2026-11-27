@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createActor } from 'xstate';
 import { createOwnerPasskeyReauthMachine } from './owner-passkey-reauth-machine.js';
 
-test('a cancelled WebAuthn ceremony cannot report reauthentication success', async () => {
+test('[TEST-UI-006-005] a cancelled WebAuthn ceremony cannot report reauthentication success', async () => {
   let calls = 0;
   const actor = createActor(
     createOwnerPasskeyReauthMachine(async () => {

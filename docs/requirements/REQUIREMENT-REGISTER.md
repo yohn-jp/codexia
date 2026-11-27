@@ -1073,8 +1073,8 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 **Applicability**: CURRENT
 **Design owner**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
 **Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx; app/src/persistence/native-review-machine.ts; app/src/settings/owner-passkey-reauth-machine.ts; app/src/settings/owner-grant-revocation-machine.ts
-**Verification identifiers**: app/src/persistence/native-review-machine.test.ts; app/src/settings/owner-passkey-reauth-machine.test.ts; app/src/settings/owner-grant-revocation-machine.test.ts; tests/e2e/native-review.acceptance.spec.ts; tests/e2e/oauth-web.acceptance.spec.ts
-**Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+**Verification identifiers**: tests/e2e/core.acceptance.spec.ts; app/src/persistence/native-review-machine.test.ts; tests/e2e/native-review.acceptance.spec.ts; app/src/settings/owner-passkey-reauth-machine.test.ts; app/src/settings/owner-grant-revocation-machine.test.ts
+**Test IDs**: TEST-UI-006-002; TEST-UI-006-003; TEST-UI-006-004; TEST-UI-006-005; TEST-UI-006-006
 **Exact-run reference**: NOT_RUN
 **Comment**: ACCEPTED／XState v5 はWRT-01/REC-01、Native ChangeSetレビュー、Passkey再認証、OAuth同意撤回で部分導入済み。バックアップは未実装; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
@@ -1093,12 +1093,12 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 **MID**: 0c54e429ce48db0abde06145b4640017
 **UID**: OBL-REQ-UI-006-O01
 **Design reference**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx; app/src/persistence/native-review-machine.ts; app/src/settings/owner-passkey-reauth-machine.ts; app/src/settings/owner-grant-revocation-machine.ts
-**Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+**Implementation identifiers**: app/src/application/persistence-save-machine.ts: createPersistenceSaveMachine; app/src/persistence/PersistenceWorkspace.tsx: PersistenceWorkspace
+**Test IDs**: TEST-UI-006-002
 **Exact-run reference**: NOT_RUN
-**Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+**Comment**: Selected existing tests cover described scenarios. Remaining transitions and exact-source evidence are pending.
 
-原稿保存・復旧、ChangeSet、認証、バックアップの複雑な状態と失敗・競合・接続断を決定的な遷移と独立テストで検証し、未確認の副作用を成功表示にしない
+WRT-01/REC-01の保存・復旧で応答不明時に同じ保存操作を再照合し、確認済みreceiptを受け取るまでDB確定を表示しない。競合、接続断、再起動、別文書・別作者、ブラウザー保護失敗でも未確定原稿を保護する。
 
 **Relations**:
 
@@ -1108,12 +1108,66 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
   **Path**: app/src/application/persistence-save-machine.ts
 - **Type**: File
   **Path**: app/src/persistence/PersistenceWorkspace.tsx
+
+## OBL-REQ-UI-006-O02
+
+**Type**: OBLIGATION
+**MID**: 005dd3deb0796799ee2165c4779cd238
+**UID**: OBL-REQ-UI-006-O02
+**Design reference**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
+**Implementation identifiers**: app/src/persistence/native-review-machine.ts: createNativeReviewMachine
+**Test IDs**: TEST-UI-006-003; TEST-UI-006-004
+**Exact-run reference**: NOT_RUN
+**Comment**: Selected existing tests cover described scenarios. Remaining transitions and exact-source evidence are pending.
+
+REV-01/REV-02のChangeSet reviewで承認と適用を別操作にし、競合時は現行状態を取り直す。適用結果が不明なら元の操作を再照合し、確定済みの適用を重複させない。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
 - **Type**: File
   **Path**: app/src/persistence/native-review-machine.ts
+
+## OBL-REQ-UI-006-O03
+
+**Type**: OBLIGATION
+**MID**: 8d0f98b6e493ce99986244c669003b75
+**UID**: OBL-REQ-UI-006-O03
+**Design reference**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
+**Implementation identifiers**: app/src/settings/owner-passkey-reauth-machine.ts: createOwnerPasskeyReauthMachine; app/src/settings/owner-grant-revocation-machine.ts: createOwnerGrantRevocationMachine
+**Test IDs**: TEST-UI-006-005; TEST-UI-006-006
+**Exact-run reference**: NOT_RUN
+**Comment**: Selected existing tests cover described scenarios. Remaining transitions and exact-source evidence are pending.
+
+CON-10/CON-20の本人認証管理でWebAuthn中断を成功と扱わず、結果不明のOAuth同意撤回は対象grantをサーバーのidentityから再照合する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
 - **Type**: File
   **Path**: app/src/settings/owner-passkey-reauth-machine.ts
 - **Type**: File
   **Path**: app/src/settings/owner-grant-revocation-machine.ts
+
+## OBL-REQ-UI-006-O04
+
+**Type**: OBLIGATION
+**MID**: 71c18268fd062de0776b8fbe66a766a8
+**UID**: OBL-REQ-UI-006-O04
+**Design reference**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
+**Implementation identifiers**: UNMAPPED
+**Test IDs**: NOT_ASSIGNED
+**Exact-run reference**: NOT_RUN
+**Comment**: Separate Backup Console workstream; machine implementation and verification pending.
+
+CON-30〜34のバックアップ状態管理で、受付・検証・実行結果を区別し、接続断後は同じrun IDを再照合する。確認済みreceiptを受け取るまで成功を表示しない。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
 
 ## REQ-EXT-001
 
@@ -2769,6 +2823,81 @@ Checks keyboard focus order and panel associations for the Desktop tab stack.
 
 - **Type**: Parent
   **ID**: REQ-UI-005
+
+## TEST-UI-006-002
+
+**Type**: TEST
+**MID**: 7b626d7bf92e75476f19fb6c9ab25cbc
+**UID**: TEST-UI-006-002
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks Chromium recovery retains newer edits after a lost response and rebases after acknowledgement.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
+
+## TEST-UI-006-003
+
+**Type**: TEST
+**MID**: 37274f1e217be18c48a9b7e642f42af7
+**UID**: TEST-UI-006-003
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks the machine blocks another ChangeSet mutation until fresh details resolve a version conflict.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
+
+## TEST-UI-006-004
+
+**Type**: TEST
+**MID**: 88330daf9ec769ec9fa7e29b370a2650
+**UID**: TEST-UI-006-004
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks Chromium reconciles a lost ChangeSet apply response after the database commits.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
+
+## TEST-UI-006-005
+
+**Type**: TEST
+**MID**: 1e347c42545fb1287dd77f5d6389e66c
+**UID**: TEST-UI-006-005
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks cancellation cannot report successful owner reauthentication.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
+
+## TEST-UI-006-006
+
+**Type**: TEST
+**MID**: 24724101b874344eae1cced50374bd28
+**UID**: TEST-UI-006-006
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks the machine reconciles an uncertain revocation against freshly fetched identity.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
 
 ## TEST-EXT-001-001
 

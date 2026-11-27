@@ -179,7 +179,7 @@ test("native rejection leaves canonical Knowledge unchanged and stale applicatio
   await expect(page.getByRole("button", { name: "承認済み提案を適用" })).toBeEnabled();
 });
 
-test("native apply reconciles a response lost after the database committed", async ({ page, authorizeAuthor }) => {
+test("[TEST-UI-006-004] native apply reconciles a response lost after the database committed", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 900 });
   const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Committed apply with lost response", originalMarkdown);

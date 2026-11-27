@@ -18,17 +18,17 @@ function harness(overrides: Partial<NativeReviewServices> = {}, initialChangeSet
     async load() {
       return { changeSets: [currentChangeSet], coreReviews: [] };
     },
-    async approve(projectId, id, version) {
+    async approve(_projectId, _id, version) {
       calls.push({ action: 'approve', version });
       currentChangeSet = { ...currentChangeSet, status: 'approved' };
       return { changeSet: currentChangeSet };
     },
-    async reject(projectId, id, version) {
+    async reject(_projectId, _id, version) {
       calls.push({ action: 'reject', version });
       currentChangeSet = { ...currentChangeSet, status: 'rejected' };
       return { changeSet: currentChangeSet };
     },
-    async apply(projectId, id, version) {
+    async apply(_projectId, _id, version) {
       calls.push({ action: 'apply', version });
       currentChangeSet = { ...currentChangeSet, status: 'applied' };
       return { changeSet: currentChangeSet, results: [], replayed: false };
@@ -70,7 +70,7 @@ test('apply is rejected unless the observed ChangeSet is approved', async () => 
 test('a lost apply response remains unknown and retries the same version', async () => {
   let attempts = 0;
   const { actor, calls, load } = harness({
-    async apply(projectId, id, version) {
+    async apply(_projectId, _id, version) {
       calls.push({ action: 'apply', version });
       if (++attempts === 1) throw new Error('response lost');
       throw new Error('response lost again');
@@ -147,10 +147,10 @@ test('a detail read failure keeps the newly fetched list available', async () =>
   actor.stop();
 });
 
-test('a version conflict blocks another mutation until a fresh detail is loaded', async () => {
+test('[TEST-UI-006-003] a version conflict blocks another mutation until a fresh detail is loaded', async () => {
   const conflict = Object.assign(new Error('stale version'), { status: 412 });
   const { actor, calls, load } = harness({
-    async apply(projectId, id, version) {
+    async apply(_projectId, _id, version) {
       calls.push({ action: 'apply', version });
       throw conflict;
     },
@@ -173,7 +173,7 @@ test('a forbidden mutation is not confirmed by a concurrent applied status', asy
     receipt: { changeSet: { ...changeSet, status: 'applied' }, results: [], replayed: false },
   } as unknown as NativeReviewDetail;
   const { actor, calls, load } = harness({
-    async apply(projectId, id, version) {
+    async apply(_projectId, _id, version) {
       calls.push({ action: 'apply', version });
       throw denied;
     },
