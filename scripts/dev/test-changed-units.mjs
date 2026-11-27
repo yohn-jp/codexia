@@ -30,9 +30,13 @@ if (tasks.length && !values.list) {
     execFileSync(process.execPath, [runner, 'prepare', 'selected-group', report], {
       stdio: 'inherit', env: { ...process.env, CODEXIA_CI_GROUP_TASKS: JSON.stringify(tasks) },
     });
-    for (const { task, error } of JSON.parse(readFileSync(report, 'utf8'))) {
-      if (error) throw new Error(task + ': ' + error);
-      execFileSync(process.execPath, [runner, 'unit', task.slice('unit-'.length)], { stdio: 'inherit' });
+    const prepared = new Map(JSON.parse(readFileSync(report, 'utf8')).map(entry => [entry.task, entry]));
+    for (const task of tasks) {
+      const entry = prepared.get(task);
+      if (!entry || entry.error) throw new Error(task + ': ' + (entry?.error ?? 'missing preparation result'));
+      execFileSync(process.execPath, [runner, 'unit', task.slice('unit-'.length)], {
+        stdio: 'inherit', env: { ...process.env, CODEXIA_OASDIFF_BASE_REF: base },
+      });
     }
   } finally {
     rmSync(reportDir, { recursive: true, force: true });

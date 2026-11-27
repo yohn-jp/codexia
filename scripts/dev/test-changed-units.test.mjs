@@ -39,3 +39,33 @@ test('local unit selection includes both sides of renames, untracked files and c
   assert.match(select('HEAD'), /unit-contracts, .*unit-root\s*$/u);
   assert.notEqual(spawnSync(process.execPath, [cli, '--list', 'missing-base'], { cwd }).status, 0);
 });
+
+test('the selected contract suite receives the resolved local baseline and cannot pass with a missing prerequisite', t => {
+  const cwd = mkdtempSync(path.join(tmpdir(), 'codexia-local-base-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  mkdirSync(path.join(cwd, 'scripts/ci/execution'), { recursive: true });
+  writeFileSync(path.join(cwd, 'scripts/ci/execution/workspace.mjs'), `
+    import { writeFileSync } from 'node:fs';
+    const [command, target, report] = process.argv.slice(2);
+    if (command === 'prepare') {
+      writeFileSync(report, JSON.stringify(process.env.OMIT_RESULT ? [] :
+        JSON.parse(process.env.CODEXIA_CI_GROUP_TASKS).map(task => ({ task }))));
+    } else {
+      console.log(target + ' base ' + process.env.CODEXIA_OASDIFF_BASE_REF);
+    }
+  `);
+  git('add', '.');
+  git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'base');
+  const base = git('rev-parse', 'HEAD');
+  mkdirSync(path.join(cwd, 'packages/http-contract/test'), { recursive: true });
+  writeFileSync(path.join(cwd, 'packages/http-contract/test/example.test.mjs'), '');
+  const output = execFileSync(process.execPath, [cli, 'HEAD'], { cwd, encoding: 'utf8' });
+  assert.ok(output.includes('http-contract base ' + base));
+  const missing = spawnSync(process.execPath, [cli, 'HEAD'], {
+    cwd, encoding: 'utf8', env: { ...process.env, OMIT_RESULT: '1' },
+  });
+  assert.notEqual(missing.status, 0);
+  assert.match(missing.stderr, /unit-http-contract: missing preparation result/u);
+});
