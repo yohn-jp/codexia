@@ -264,3 +264,5 @@ export const browserModule: BrowserModuleDefinition = {
   },
 };
 
+
+// Exercise Full-only selection in a temporary CI verification pull request.
