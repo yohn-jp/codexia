@@ -306,6 +306,17 @@ func inspectTailnetWithApproval(ctx context.Context, client *ts.Client, local lo
 		return identity, err
 	}
 
+	// Establish CI ingress authorization before any WIF creation. Creating a
+	// credential for a Tailnet whose existing policy blocks this VM would leave
+	// an unnecessary trust principal behind after an otherwise avoidable failure.
+	if _, err := client.PolicyFile().Get(ctx); err != nil {
+		return identity, tailnetAPIError("read the Tailnet access policy", err)
+	}
+	destination := net.JoinHostPort(identity.Address, "22")
+	if err := client.PolicyFile().Validate(ctx, []ts.ACLTest{{Source: "tag:ci", Accept: []string{destination}}}); err != nil {
+		return identity, tailnetAPIError("validate CI policy for tag:ci to this VM on TCP/22; use the authorized Tailnet policy owner to reconcile", err)
+	}
+
 	keyID, mismatches, err := discoverTailnetWIF(ctx, client)
 	if err != nil {
 		return identity, err
@@ -349,18 +360,6 @@ func inspectTailnetWithApproval(ctx context.Context, client *ts.Client, local lo
 		o.Notice("Created and reverified scoped Tailscale OIDC credential "+keyID+". Its audience is api.tailscale.com/"+keyID+".")
 	}
 	identity.ClientID = keyID
-
-	// Read the policy first for explicit read-permission evidence, and evaluate
-	// the source and destination with the provider's validator. A local parser
-	// cannot evaluate all Tailscale policy selectors and posture conditions.
-	if _, err := client.PolicyFile().Get(ctx); err != nil {
-		return identity, tailnetAPIError("read the Tailnet access policy", err)
-	}
-	destination := net.JoinHostPort(identity.Address, "22")
-	err = client.PolicyFile().Validate(ctx, []ts.ACLTest{{Source: "tag:ci", Accept: []string{destination}}})
-	if err != nil {
-		return identity, tailnetAPIError("validate CI policy for tag:ci to this VM on TCP/22; use the authorized Tailnet policy owner to reconcile", err)
-	}
 	return identity, nil
 }
 
