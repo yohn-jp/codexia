@@ -25,7 +25,7 @@ const readme =
   '# Codexia open work export\n\n' +
   'Extract this ZIP with a standard ZIP utility. All Markdown and JSON are UTF-8.\n' +
   'manifest.json describes paths and integrity. schema.json defines the JSON files.\n' +
-  'metadata/project.json records document hierarchy and order. history/revisions.json lists every retained revision.\n' +
+  'manifest.json records document hierarchy, order and head paths. metadata/project.json provides full document metadata. history/revisions.json lists every retained revision.\n' +
   'Deleted documents are listed separately from the current manuscript in the metadata.\n' +
   'Knowledge Markdown is a reading view of knowledge/graph.json.\n';
 
@@ -46,7 +46,10 @@ function readablePathSegment(title: string, id: string): string {
     .normalize('NFC')
     .replace(/[<>:"/\\|?*\p{Cc}\p{Cf}]/gu, '_')
     .replace(/^[ .]+|[ .]+$/gu, '');
-  return (Array.from(clean).slice(0, 20).join('') || 'document') + '-' + id;
+  const label = Array.from(clean).slice(0, 20).join('') || 'document';
+  const segment = label + '-' + id;
+  // Windows reserves device names even when followed by an extension.
+  return /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³]) *\./iu.test(segment) ? '_' + segment : segment;
 }
 
 function manuscriptPath(document: Document, documents: ReadonlyMap<DocumentId, Document>): string {
@@ -161,17 +164,17 @@ export async function generateOpenWorkZip(
             documents.set(document.id, document);
           }
           const revisions: Revision[] = [];
-          const heads = new Set<DocumentId>();
+          const headPaths = new Map<DocumentId, string>();
           const retainedRevisionIds = new Set<string>();
           let excludedAuthorAttribution = 0;
           for await (const revision of scan('revisions')) {
             const document = documents.get(revision.documentId);
             if (!document) incomplete();
             const current = document.deletedAt === null && document.headRevisionId === revision.id;
-            if (document.headRevisionId === revision.id) heads.add(document.id);
             const path = current
               ? manuscriptPath(document, documents)
               : 'history/documents/' + (document.deletedAt ? 'deleted/' : '') + document.id + '/' + revision.id + '.md';
+            if (document.headRevisionId === revision.id) headPaths.set(document.id, path);
             const proof = await add(path, [revision.markdown]);
             if (proof.sha256 !== revision.sha256) incomplete();
             retainedRevisionIds.add(revision.documentId + '/' + revision.id);
@@ -186,7 +189,7 @@ export async function generateOpenWorkZip(
               path,
             });
           }
-          for (const document of documents.values()) if (!heads.has(document.id)) incomplete();
+          for (const document of documents.values()) if (!headPaths.has(document.id)) incomplete();
 
           const omittedSettings: string[] = [];
           const projectFields = JSON.stringify({ ...project, settings: safeSettings(project.settings, omittedSettings) });
@@ -271,6 +274,11 @@ export async function generateOpenWorkZip(
                 format: ZIP_FORMAT,
                 projectId,
                 snapshotVersion: project.version,
+                documents: [...documents.values()].map(({ id, parentId, kind, orderKey, headRevisionId, deletedAt }) => {
+                  const path = headPaths.get(id);
+                  if (!path || !headRevisionId) incomplete();
+                  return { id, parentId, kind, orderKey, headRevisionId, deletedAt, path };
+                }),
                 excludedCounts: {
                   settings: omittedSettings.length,
                   moduleRecords: excludedModules,

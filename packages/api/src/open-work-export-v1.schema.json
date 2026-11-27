@@ -9,6 +9,7 @@
         "format",
         "projectId",
         "snapshotVersion",
+        "documents",
         "excludedCounts",
         "files"
       ],
@@ -23,6 +24,44 @@
         "snapshotVersion": {
           "type": "integer",
           "minimum": 0
+        },
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "parentId",
+              "kind",
+              "orderKey",
+              "headRevisionId",
+              "deletedAt",
+              "path"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/project/properties/documents/items/properties/id"
+              },
+              "parentId": {
+                "$ref": "#/$defs/project/properties/documents/items/properties/parentId"
+              },
+              "kind": {
+                "$ref": "#/$defs/project/properties/documents/items/properties/kind"
+              },
+              "orderKey": {
+                "$ref": "#/$defs/project/properties/documents/items/properties/orderKey"
+              },
+              "headRevisionId": {
+                "$ref": "#/$defs/project/properties/documents/items/properties/id"
+              },
+              "deletedAt": {
+                "$ref": "#/$defs/project/properties/documents/items/properties/deletedAt"
+              },
+              "path": {
+                "type": "string"
+              }
+            }
+          }
         },
         "excludedCounts": {
           "type": "object",
