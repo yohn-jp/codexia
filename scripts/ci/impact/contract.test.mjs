@@ -86,7 +86,7 @@ test('Biome selects shipped JS/TS changes and config, but not unrelated CI or na
   assert.equal(biomeJob.steps.find(step => step.name === 'Run exact-source Biome CI and emit Lint-only SARIF').run, 'node scripts/ci/execution/group.mjs biome');
 });
 
-test('the certified graph covers every declared obligation within the twenty-two-job cap', () => {
+test('the certified graph covers every declared obligation and admits trace-owned tests within the twenty-two-job cap', () => {
   assert.ok(REQUIRED_VERIFICATION_JOBS.length + 1 <= 22, 'CI-CD.md caps certification at twenty-two jobs');
   assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'biome', 'unit', 'types', 'profile_core', 'profile_full', 'oci', 'certification']);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
@@ -137,7 +137,7 @@ test('the certified graph covers every declared obligation within the twenty-two
   for (const [files, expected] of [
     [['docs/verification/CI-CD.md'], true],
     [['docs/design/DEVELOPMENT-PAGES-UX.md'], false],
-    [['packages/persistence-postgres/tests/db-contract/runner.test.mjs'], false],
+    [['packages/persistence-postgres/tests/db-contract/runner.test.mjs'], true],
     [['docs/requirements/STRICTDOC-TRACEABILITY.md'], true],
     [['scripts/strictdoc/verify.mjs'], true],
   ]) {

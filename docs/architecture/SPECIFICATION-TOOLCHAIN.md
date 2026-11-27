@@ -20,7 +20,7 @@ HTTP契約ではTypeSpec、変換スクリプト、設定、依存ロック、�
 
 | 領域 | 選択する目標 | 二択の相手 | 具体的な選択理由・不採用理由 |
 | --- | --- | --- | --- |
-| 要求/追跡 | **StrictDoc** | Sphinx-Needs | 機能の中心が要求、source relation、trace matrix、coverage。Sphinx-NeedsはSphinx基盤とextension群を構成する必要がある。StrictDocのMarkdown・TS symbol・Nodeテスト実績は別gate |
+| 要求/追跡 | **StrictDoc** | Sphinx-Needs | 機能の中心が要求、source relation、trace matrix、coverage。Sphinx-NeedsはSphinx基盤とextension群を構成する必要がある。StrictDocのMarkdown機能はexperimentalである。TypeScript symbol解析とNode test ID discoveryはStrictDocの機能とみなさず、repository側のAST discoveryを独立gateで検証する |
 | HTTP wire仕様 | **TypeSpec + OpenAPI 3.1.0 emitter** | OpenAPI YAML直接編集 | model/operationの一意の宣言と再利用、OpenAPI生成が可能。YAML手編集は型・共通DTO更新に重複を生みやすい |
 | HTTP runtime | **Fastify（Node.js、継続採用）** | Hono | Schema/response serialization、plugin encapsulation、hook/close lifecycleとNodeのストリーム境界を維持。HonoのWeb標準APIとOrval Hono generatorは魅力だが、VM上のAPIで置換する合理性は不足。現行catch-allの廃止はFastify標準routeへ移行して実施 |
 | server/client生成 | **Orval（client/Zod生成に限定）** | Hey API | TypeSpec由来OpenAPIからclient/Schema生成を行う。Orval Hono server generatorは採用しない。Fastifyのroute schemaはOpenAPI/JSON Schemaから生成・照合し、二重の手書きDTOを作らない |

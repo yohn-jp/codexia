@@ -918,7 +918,7 @@ test('Better Auth 1.7.26 accepts only one operator-granted first owner and prese
 });
 
 if (process.env.CODEXIA_PASSKEY_ACCEPTANCE === '1')
-  test('same-origin setup-only Fastify commits one verified owner and closes setup before OAuth activation', {
+  test('[TEST-AUTH-004-001] same-origin setup-only Fastify commits one verified owner and closes setup before OAuth activation', {
     timeout: 120_000,
   }, async t => {
     const sourceDatabaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL!;

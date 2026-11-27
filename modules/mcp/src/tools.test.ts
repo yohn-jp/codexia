@@ -270,7 +270,7 @@ test('native Knowledge and Evidence tools expose typed names and delegate exact 
   ]);
 });
 
-test('native MCP schemas bound UUID reads and accept only the seven ordinary native ChangeSet operations', async () => {
+test('[TEST-MCPV-001-001] native MCP schemas bound UUID reads and accept only the seven ordinary native ChangeSet operations', async () => {
   const { tools, calls } = setup([descriptor('core.knowledge.propose', 'core', 'propose')], () => ({ ok: true, snapshot, data: {} }));
   const node = '22222222-2222-4222-8222-222222222222';
   const readSchema = tools.get('knowledge.node.get')!.schema;

@@ -67,7 +67,7 @@ async function serveStaticOutput(root) {
   return { server, baseUrl: `http://127.0.0.1:${address.port}` };
 }
 
-test('renders every requirement UID from the staged StrictDoc HTML page', async () => {
+test('[TEST-TRC-07-001] renders every requirement UID from the staged StrictDoc HTML page', async () => {
   const outputDir = process.env.CODEXIA_STRICTDOC_OUTPUT_DIR;
   assert.ok(outputDir, 'CODEXIA_STRICTDOC_OUTPUT_DIR must point to generated StrictDoc artifacts');
   const htmlPath = '/html/requirements/REQUIREMENT-REGISTER.md.html';

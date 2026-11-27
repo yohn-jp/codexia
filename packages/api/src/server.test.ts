@@ -888,7 +888,7 @@ afterEach(async () => {
 });
 
 describe('Codexia HTTP boundary', () => {
-  it('runs admission before payload validation and rejects unregistered methods and origins', async t => {
+  it('[TEST-AUTH-002-001] runs admission before payload validation and rejects unregistered methods and origins', async t => {
     const staticDir = await mkdtemp(resolve(tmpdir(), 'codexia-fastify-admission-'));
     tempDirs.push(staticDir);
     const store = makeStore();
@@ -1947,7 +1947,7 @@ describe('Codexia HTTP boundary', () => {
     assert.equal((await fetch(api.base + '/api/session', { headers: signedRequests.ownerHeaders() })).status, 200);
   });
 
-  it('authorizes standalone owner writes only with a verified API-audience OAuth access token', async t => {
+  it('[TEST-AUTH-001-001] authorizes standalone owner writes only with a verified API-audience OAuth access token', async t => {
     const staticDir = await mkdtemp(resolve(tmpdir(), 'codexia-oauth-owner-'));
     tempDirs.push(staticDir);
     const issuer = 'https://identity.example.test/';
@@ -2174,7 +2174,7 @@ describe('Codexia HTTP boundary', () => {
     );
   });
 
-  it('admits registered MCP OAuth clients by exact operation scope without owner rights', async t => {
+  it('[TEST-MCPV-004-002] [TEST-AUTH-003-002] admits registered MCP OAuth clients by exact operation scope without owner rights', async t => {
     const staticDir = await mkdtemp(resolve(tmpdir(), 'codexia-oauth-mcp-'));
     tempDirs.push(staticDir);
     const issuer = 'https://api.codexia.example/api/auth';
@@ -3102,7 +3102,7 @@ describe('Codexia HTTP boundary', () => {
     assert.equal((await fetch(`${apiServer.base}/api/projects/missing`, { headers: auth })).status, 404);
   });
 
-  it('serves only the selected editor document revision from the current or pinned snapshot', async t => {
+  it('[TEST-CORE-003-001] serves only the selected editor document revision from the current or pinned snapshot', async t => {
     const staticDir = await mkdtemp(resolve(tmpdir(), 'codexia-api-editor-snapshot-'));
     tempDirs.push(staticDir);
     const { persistence, store, project } = await nativeProject(t, 'Editor snapshot');
@@ -5028,7 +5028,7 @@ it('restores a manuscript revision only through an approved native ChangeSet and
   });
 });
 
-it('does not activate the MCP module for a request cancelled during admission', { timeout: 30_000 }, async t => {
+it('[TEST-MCPV-006-005] does not activate the MCP module for a request cancelled during admission', { timeout: 30_000 }, async t => {
   const staticDir = await mkdtemp(resolve(tmpdir(), 'codexia-cancel-mcp-admission-'));
   t.after(() => rm(staticDir, { recursive: true, force: true }));
   const client = createSignedRequestFixture();

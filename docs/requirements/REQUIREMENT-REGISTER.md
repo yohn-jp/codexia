@@ -49,7 +49,6 @@ Optional module停止・未導入でも作品作成、執筆、保存、履歴�
   **ID**: REQ-CORE-001
 - **Type**: File
   **Path**: packages/api/src/persistence-routes.ts
-  **Lines**: 222, 237
 - **Type**: File
   **Path**: app/src/persistence/PersistenceWorkspace.tsx
 
@@ -293,7 +292,6 @@ project境界をすべての関連オブジェクト・階層・根拠・提案�
   **ID**: REQ-DATA-003
 - **Type**: File
   **Path**: packages/persistence-postgres/migrations/0001-initial.sql
-  **Lines**: 130, 135
 
 ## REQ-DATA-004
 
@@ -731,10 +729,8 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **Path**: modules/mcp/src/http.ts
 - **Type**: File
   **Path**: tests/integration/mcp-acceptance.test.mjs
-  **Lines**: 408, 780
 - **Type**: File
   **Path**: docs/architecture/MCP-V2-MIGRATION.md
-  **Lines**: 78, 85
 
 ## OBL-REQ-MCP-001-O01
 
@@ -760,10 +756,8 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **Path**: modules/mcp/src/stdio.ts
 - **Type**: File
   **Path**: modules/mcp/src/tools.ts
-  **Lines**: 1, 25
 - **Type**: File
   **Path**: docs/architecture/MCP-V2-MIGRATION.md
-  **Lines**: 78, 85
 
 ## REQ-MCP-002
 
@@ -789,10 +783,8 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **Path**: modules/mcp/src/tools.ts
 - **Type**: File
   **Path**: tests/integration/mcp-acceptance.test.mjs
-  **Lines**: 888, 966
 - **Type**: File
   **Path**: docs/architecture/MCP-V2-MIGRATION.md
-  **Lines**: 78, 85
 
 ## OBL-REQ-MCP-002-O01
 
@@ -816,13 +808,10 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **Path**: modules/mcp/src/tools.ts
 - **Type**: File
   **Path**: modules/mcp/src/tools/shared.ts
-  **Lines**: 12, 80
 - **Type**: File
   **Path**: tests/integration/mcp-acceptance.test.mjs
-  **Lines**: 888, 966
 - **Type**: File
   **Path**: docs/architecture/MCP-V2-MIGRATION.md
-  **Lines**: 78, 85
 
 ## REQ-UI-001
 
@@ -1074,7 +1063,6 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
   **ID**: REQ-UI-005
 - **Type**: File
   **Path**: app/src/workspace/Workspace.tsx
-  **Lines**: 426, 447
 
 ## REQ-UI-006
 
@@ -1118,10 +1106,8 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
   **ID**: REQ-UI-006
 - **Type**: File
   **Path**: app/src/application/persistence-save-machine.ts
-  **Lines**: 88, 89
 - **Type**: File
   **Path**: app/src/persistence/PersistenceWorkspace.tsx
-  **Lines**: 439, 445
 - **Type**: File
   **Path**: app/src/persistence/native-review-machine.ts
 - **Type**: File
@@ -1773,7 +1759,6 @@ StrictDoc Markdown parsing and same-input HTML/JSON export are repeatable within
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
-  **Lines**: 632, 692
 
 ## OBL-REQ-TRACE-001-O03
 
@@ -1786,7 +1771,7 @@ StrictDoc Markdown parsing and same-input HTML/JSON export are repeatable within
 **Exact-run reference**: NOT_RUN
 **Comment**: Explicit criterion; source and test references are candidates only; no independent certification is implied.
 
-A requirement-to-source relation must use a repository file path and any declared line range must remain within the source file.
+A requirement-to-source relation must resolve to a repository file. The verifier rejects authored line ranges and derives test locations from native test registrations.
 
 **Relations**:
 
@@ -1795,7 +1780,6 @@ A requirement-to-source relation must use a repository file path and any declare
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
-  **Lines**: 84, 148
 
 ## OBL-REQ-TRACE-001-O04
 
@@ -1817,7 +1801,6 @@ Reverse inventory keeps discovered HTTP routes, MCP tools, database objects, Des
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
-  **Lines**: 423, 427
 - **Type**: File
   **Path**: scripts/strictdoc/reverse-trace.mjs
 
@@ -1841,7 +1824,6 @@ Execution references retain exact repository, source SHA, run, attempt, job, tas
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
-  **Lines**: 429, 455
 
 ## OBL-REQ-TRACE-001-O06
 
@@ -1854,7 +1836,7 @@ Execution references retain exact repository, source SHA, run, attempt, job, tas
 **Exact-run reference**: NOT_RUN
 **Comment**: Explicit criterion; source and test references are candidates only; no independent certification is implied.
 
-Fault injection rejects duplicate requirement IDs, missing or out-of-range file references, and unclassified reverse inventory entries.
+Fault injection rejects duplicate requirement IDs, missing source files or authored line ranges, and unclassified reverse inventory entries.
 
 **Relations**:
 
@@ -1884,7 +1866,6 @@ The staged static StrictDoc page renders every requirement UID in the browser ch
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.browser.mjs
-  **Lines**: 70, 90
 
 ## OBL-REQ-TRACE-001-O08
 
@@ -1964,7 +1945,6 @@ The document save operation binds author request identity, base revision precond
 
 - **Type**: File
   **Path**: packages/api/src/persistence-routes.ts
-  **Lines**: 368, 403
 
 ## OBL-REQ-DATA-002-O02
 
@@ -1987,7 +1967,6 @@ A persisted document revision rejects mutation and deletion.
 
 - **Type**: File
   **Path**: packages/persistence-postgres/migrations/0001-initial.sql
-  **Lines**: 60, 62
 
 ## OBL-REQ-DATA-002-O03
 
@@ -2010,11 +1989,9 @@ A save or restore creates a new immutable revision and a database receipt for th
 
 - **Type**: File
   **Path**: packages/api/src/persistence-routes.ts
-  **Lines**: 368, 403
 
 - **Type**: File
   **Path**: packages/persistence-postgres/migrations/0001-initial.sql
-  **Lines**: 64, 82
 
 ## OBL-REQ-UI-002-O02
 
@@ -2037,18 +2014,16 @@ A recovery draft is durably journaled before remote write, and an unknown respon
 
 - **Type**: File
   **Path**: app/src/storage/journal.ts
-  **Lines**: 314, 330
 
 - **Type**: File
   **Path**: app/src/editor/postgresEvidenceAdapter.ts
-  **Lines**: 96, 108
 
 ## TEST-TRC-01-001
 
 **Type**: TEST
 **MID**: e3482a445ad89e23de0934b7060fb831
 **UID**: TEST-TRC-01-001
-**Case name**: rejects duplicate requirement UIDs and unstable MIDs
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Reject a duplicate REQ UID and a non-deterministic MID before any trace result can be accepted.
@@ -2057,15 +2032,13 @@ Reject a duplicate REQ UID and a non-deterministic MID before any trace result c
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/verify.test.mjs
 
 ## TEST-TRC-02-001
 
 **Type**: TEST
 **MID**: 142f8d11bd7808018d86a61ae7ad234b
 **UID**: TEST-TRC-02-001
-**Case name**: normalizes only the observed StrictDoc HTML volatility
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Normalize the observed search index timestamp and volatile shell MID while preserving requirement MIDs and ordinary source text.
@@ -2074,32 +2047,28 @@ Normalize the observed search index timestamp and volatile shell MID while prese
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/verify.test.mjs
 
 ## TEST-TRC-03-001
 
 **Type**: TEST
 **MID**: 0b50405ac994547b312f8858a5c6373c
 **UID**: TEST-TRC-03-001
-**Case name**: rejects missing files and ranges beyond the referenced source
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
-Reject a deleted File relation and a line range outside the referenced source file.
+Reject missing source files and authored line ranges.
 
 **Relations**:
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/verify.test.mjs
 
 ## TEST-TRC-04-001
 
 **Type**: TEST
 **MID**: f0fa01e090c0dd89617942f1bf473c0d
 **UID**: TEST-TRC-04-001
-**Case name**: reports discovered runtime surfaces that lack an explicit classification
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Keep discovered HTTP routes, MCP tools, database objects, Desktop UI controls, Native iOS views, Terraform resources, and Ansible sources visible as unclassified until each has a reasoned requirement or non-requirement classification.
@@ -2108,15 +2077,13 @@ Keep discovered HTTP routes, MCP tools, database objects, Desktop UI controls, N
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/verify.test.mjs
 
 ## TEST-TRC-04-002
 
 **Type**: TEST
 **MID**: 08934503ff235c4aeddbf3cfbefc600f
 **UID**: TEST-TRC-04-002
-**Case name**: discovers an unclassified SQL object from source instead of trusting cached inventory data
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Derive bounded inventory entries from current source files so an unclassified SQL table or route fixture cannot be hidden by an unchanged cached discovered list.
@@ -2125,15 +2092,13 @@ Derive bounded inventory entries from current source files so an unclassified SQ
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/verify.test.mjs
 
 ## TEST-TRC-05-001
 
 **Type**: TEST
 **MID**: 140994365cbcd7dbb64e9fb7c5684b96
 **UID**: TEST-TRC-05-001
-**Case name**: requires complete exact GitHub run identity when running in Actions
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Require the repository, SHA, run ID, attempt, job, and task before recording a GitHub Actions run reference.
@@ -2142,15 +2107,13 @@ Require the repository, SHA, run ID, attempt, job, and task before recording a G
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/verify.test.mjs
 
 ## TEST-TRC-05-002
 
 **Type**: TEST
 **MID**: 8f0c942ae1d8c4ada43721d71cc2c230
 **UID**: TEST-TRC-05-002
-**Case name**: keeps local execution as NOT_RUN instead of inventing a CI link
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Record local verification as NOT_RUN with no synthesized workflow URL.
@@ -2159,15 +2122,13 @@ Record local verification as NOT_RUN with no synthesized workflow URL.
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/verify.test.mjs
 
 ## TEST-TRC-05-003
 
 **Type**: TEST
 **MID**: 579c4dfa47305f4a4ba796d297302a2d
 **UID**: TEST-TRC-05-003
-**Case name**: requires each TEST-ID to resolve to a declared requirement and a real test case
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Reject test IDs with an absent parent requirement, missing case name, or source-file text that does not contain the declared case name.
@@ -2176,15 +2137,13 @@ Reject test IDs with an absent parent requirement, missing case name, or source-
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/verify.test.mjs
 
 ## TEST-TRC-07-001
 
 **Type**: TEST
 **MID**: 3771602c3129d2aeeb52306a21e8013b
 **UID**: TEST-TRC-07-001
-**Case name**: renders every requirement UID from the staged StrictDoc HTML page
+**Execution scope**: TRACE_BROWSER
 **Exact-run reference**: NOT_RUN
 
 Use Playwright to open the generated static page and verify that every UID in the generated JSON is visible in the browser.
@@ -2193,15 +2152,13 @@ Use Playwright to open the generated static page and verify that every UID in th
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/verify.browser.mjs
 
 ## TEST-TRC-08-001
 
 **Type**: TEST
 **MID**: 7554b5f2d31df6dadb5d2307590bf5a5
 **UID**: TEST-TRC-08-001
-**Case name**: projects obligations, reverse surfaces, and evidence links without conformance promotion
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Verify the public Requirements projection preserves explicit obligation links, candidate-only classifications, declared test sources, source SHA links, and existing conformance states.
@@ -2210,15 +2167,13 @@ Verify the public Requirements projection preserves explicit obligation links, c
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/audit/specifications.test.mjs
 
 ## TEST-TRC-02-002
 
 **Type**: TEST
 **MID**: e1f17904a09691d2dd5d777e2639577e
 **UID**: TEST-TRC-02-002
-**Case name**: canonicalizes only StrictDoc search index object keys and set membership order
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Canonicalize StrictDoc search-index keys and unordered set membership while preserving all other generated JavaScript text.
@@ -2227,15 +2182,13 @@ Canonicalize StrictDoc search-index keys and unordered set membership while pres
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/verify.test.mjs
 
 ## TEST-MCPV-001-001
 
 **Type**: TEST
 **MID**: 553a90f344c0743e6be1b613946071da
 **UID**: TEST-MCPV-001-001
-**Case name**: native MCP schemas bound UUID reads and accept only the seven ordinary native ChangeSet operations
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Verify the registered native Knowledge schemas reject invalid UUIDs and out-of-contract operations. This is a runtime-schema test candidate; it does not establish full SDK protocol conformance or a hosted exact-source result.
@@ -2244,16 +2197,13 @@ Verify the registered native Knowledge schemas reject invalid UUIDs and out-of-c
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: modules/mcp/src/tools.test.ts
-  **Lines**: 273, 273
 
 ## TEST-MCP-CORE-001-001
 
 **Type**: TEST
 **MID**: b304ab460592f7f49cbda0cd9d4c39ac
 **UID**: TEST-MCP-CORE-001-001
-**Case name**: stdio and Streamable HTTP enforce external Assistant admission with a configured provider
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Verify the configured external Assistant admission boundary and that MCP dispatch does not call the configured model provider. This is an REQ-MCP-002 scenario, not the MCP SDK protocol conformance CLI run required by MCPV-002.
@@ -2262,16 +2212,13 @@ Verify the configured external Assistant admission boundary and that MCP dispatc
 
 - **Type**: Parent
   **ID**: REQ-MCP-002
-- **Type**: File
-  **Path**: tests/integration/mcp-acceptance.test.mjs
-  **Lines**: 888, 966
 
 ## TEST-MCPV-004-001
 
 **Type**: TEST
 **MID**: 9d036a15f7de684bfe7ee1f6093eb235
 **UID**: TEST-MCPV-004-001
-**Case name**: native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, review and receipt over both transports
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Exercise selected-project scope, proposal-only MCP writes, replay handling, author review, receipt, and both stdio and Streamable HTTP transports against PostgreSQL. It is a candidate for MCPV-004 and MCPV-005; each protocol authorization dimension remains separately unverified until its specific case evidence exists.
@@ -2280,16 +2227,13 @@ Exercise selected-project scope, proposal-only MCP writes, replay handling, auth
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: tests/integration/mcp-acceptance.test.mjs
-  **Lines**: 438, 779
 
 ## TEST-MCPV-006-001
 
 **Type**: TEST
 **MID**: 4a482103850c55bc7b177207fc5182d8
 **UID**: TEST-MCPV-006-001
-**Case name**: MCP cancellation stops real NLP worker jobs through stdio and Streamable HTTP
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Exercise cancellation of real NLP jobs over both transports. HTTP shutdown and drain are exercised by the same test through `verifyHttpDrain`; protocol header limits and cross-request isolation still need separate evidence.
@@ -2298,16 +2242,13 @@ Exercise cancellation of real NLP jobs over both transports. HTTP shutdown and d
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: tests/integration/mcp-acceptance.test.mjs
-  **Lines**: 859, 886
 
 ## TEST-MCPV-004-002
 
 **Type**: TEST
 **MID**: 9a4e2608082648f649f3e4d15808ce37
 **UID**: TEST-MCPV-004-002
-**Case name**: admits registered MCP OAuth clients by exact operation scope without owner rights
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Exercise signed MCP bearer admission for exact client, scope, assigned-project, owner-rights, and effect boundaries. This server fixture uses manually constructed tokens; it does not establish OAuth PKCE issuance or external client interop.
@@ -2316,16 +2257,13 @@ Exercise signed MCP bearer admission for exact client, scope, assigned-project, 
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: packages/api/src/server.test.ts
-  **Lines**: 2109, 2456
 
 ## TEST-MCPV-001-002
 
 **Type**: TEST
 **MID**: e8177bf3a4aebd82fd6d5542fc959d82
 **UID**: TEST-MCPV-001-002
-**Case name**: MCP tools/list publishes the compatible tool names and object input schemas
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Check the SDK tools/list catalog against the 53 public tool names and ensure every advertised input schema is an object with valid required fields and expected defaults. This is catalog coverage, not a protocol conformance result.
@@ -2334,16 +2272,13 @@ Check the SDK tools/list catalog against the 53 public tool names and ensure eve
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: modules/mcp/src/tool-catalog.test.ts
-  **Lines**: 96, 120
 
 ## TEST-MCPV-006-002
 
 **Type**: TEST
 **MID**: 648436169a722ca028a296e5a785b465
 **UID**: TEST-MCPV-006-002
-**Case name**: aborting the host Web Request closes the modern SDK exchange
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Check that aborting the host Web Request cancels the SDK exchange, propagates the abort signal, closes the exchange with 499, and releases the pending action. It complements the real worker cancellation and shutdown drain integration case.
@@ -2352,16 +2287,13 @@ Check that aborting the host Web Request cancels the SDK exchange, propagates th
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: modules/mcp/src/http.test.ts
-  **Lines**: 953, 1009
 
 ## TEST-MCPV-007-001
 
 **Type**: TEST
 **MID**: bc85b804bdf4f21c36706b3fd4b4b81f
 **UID**: TEST-MCPV-007-001
-**Case name**: MCP HTTP serves modern per-request envelopes through the official v2 client
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Exercise the official v2 client against the modern pinned protocol version and confirm per-request Streamable HTTP tool listing.
@@ -2370,16 +2302,13 @@ Exercise the official v2 client against the modern pinned protocol version and c
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: modules/mcp/src/http.test.ts
-  **Lines**: 227, 240
 
 ## TEST-MCPV-007-002
 
 **Type**: TEST
 **MID**: 184f741818cfa72a7be4d7de0603bf08
 **UID**: TEST-MCPV-007-002
-**Case name**: MCP HTTP accepts the temporary stateless 2025 fallback
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Exercise the temporary legacy stateless JSON-RPC tools/list fallback while that compatibility window remains open.
@@ -2388,16 +2317,13 @@ Exercise the temporary legacy stateless JSON-RPC tools/list fallback while that 
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: modules/mcp/src/http.test.ts
-  **Lines**: 242, 249
 
 ## TEST-MCPV-007-003
 
 **Type**: TEST
 **MID**: 1169579fc2155d97d587f1edeb82d3ee
 **UID**: TEST-MCPV-007-003
-**Case name**: strict MCP HTTP rejects legacy traffic and delegates invalid methods
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Check strict mode rejects legacy stateless traffic and delegates unsupported GET/DELETE methods with 405.
@@ -2406,16 +2332,13 @@ Check strict mode rejects legacy stateless traffic and delegates unsupported GET
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: modules/mcp/src/http.test.ts
-  **Lines**: 251, 259
 
 ## TEST-MCPV-007-004
 
 **Type**: TEST
 **MID**: 01551c49fc512cac6bef9515c2d86fef
 **UID**: TEST-MCPV-007-004
-**Case name**: 2025 protocol compatibility ends at the six-month cutoff
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Check the compatibility predicate immediately before, at, and after the six-month protocol cutoff.
@@ -2424,16 +2347,13 @@ Check the compatibility predicate immediately before, at, and after the six-mont
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: modules/mcp/src/protocol-version.test.ts
-  **Lines**: 5, 9
 
 ## TEST-MCPV-006-003
 
 **Type**: TEST
 **MID**: 7e194994663116ff2e6509e25a9b37b4
 **UID**: TEST-MCPV-006-003
-**Case name**: modern Mcp-Method and Mcp-Name mismatches are rejected before tool dispatch
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Check mismatched modern MCP method/name headers are rejected before any tool dispatch.
@@ -2442,16 +2362,13 @@ Check mismatched modern MCP method/name headers are rejected before any tool dis
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: modules/mcp/src/http.test.ts
-  **Lines**: 261, 309
 
 ## TEST-MCPV-006-004
 
 **Type**: TEST
 **MID**: cb127df399b9b085e9ffc9c5f05af3dd
 **UID**: TEST-MCPV-006-004
-**Case name**: oversized MCP request body is refused before creating the SDK action context
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Check an oversized request body receives 413 before the SDK action context is accessed.
@@ -2460,16 +2377,13 @@ Check an oversized request body receives 413 before the SDK action context is ac
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: modules/mcp/src/http.test.ts
-  **Lines**: 311, 330
 
 ## TEST-MCPV-006-005
 
 **Type**: TEST
 **MID**: 79d00c3ff35b508520399c674c4976ab
 **UID**: TEST-MCPV-006-005
-**Case name**: does not activate the MCP module for a request cancelled during admission
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Close an MCP connection during OAuth admission and confirm that only the connected control request reaches module activation.
@@ -2478,16 +2392,13 @@ Close an MCP connection during OAuth admission and confirm that only the connect
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: packages/api/src/server.test.ts
-  **Lines**: 5031, 5078
 
 ## TEST-MCPV-004-003
 
 **Type**: TEST
 **MID**: 290cc979d9a509fd13d2b4d6ce86b894
 **UID**: TEST-MCPV-004-003
-**Case name**: Better Auth PKCE MCP client lists and invokes tools through central OAuth admission
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Exercise Better Auth public-client registration, authorization code with PKCE, registered resource, refresh, token revocation, project scope, and 2026 HTTP tool calls through the existing Fastify boundary and PostgreSQL.
@@ -2496,16 +2407,13 @@ Exercise Better Auth public-client registration, authorization code with PKCE, r
 
 - **Type**: Parent
   **ID**: REQ-MCP-001
-- **Type**: File
-  **Path**: packages/api/test/better-auth.integration.test.ts
-  **Lines**: 54, 644
 
 ## TEST-CORE-001-001
 
 **Type**: TEST
 **MID**: 185414049c5eb1d2e04f77a167bb140c
 **UID**: TEST-CORE-001-001
-**Case name**: Core-only workspace keeps authoring available without search or terminology panels
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks the core-only author workspace without the optional search and terminology panels.
@@ -2514,16 +2422,13 @@ Checks the core-only author workspace without the optional search and terminolog
 
 - **Type**: Parent
   **ID**: REQ-CORE-001
-- **Type**: File
-  **Path**: tests/e2e/modular-workspace.acceptance.spec.ts
-  **Lines**: 854, 854
 
 ## TEST-CORE-002-001
 
 **Type**: TEST
 **MID**: 0f608e16790fef30a5afe8e68441c1cf
 **UID**: TEST-CORE-002-001
-**Case name**: desktop native author review keeps approval separate from apply and preserves the manuscript
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks that Desktop approval and application stay separate for a native proposal.
@@ -2532,16 +2437,13 @@ Checks that Desktop approval and application stay separate for a native proposal
 
 - **Type**: Parent
   **ID**: REQ-CORE-002
-- **Type**: File
-  **Path**: tests/e2e/native-review.acceptance.spec.ts
-  **Lines**: 97, 97
 
 ## TEST-CORE-003-001
 
 **Type**: TEST
 **MID**: 015192e462e2cbc0c84cdd9c822aa529
 **UID**: TEST-CORE-003-001
-**Case name**: serves only the selected editor document revision from the current or pinned snapshot
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks the selected document and revision on current and pinned snapshots.
@@ -2550,16 +2452,13 @@ Checks the selected document and revision on current and pinned snapshots.
 
 - **Type**: Parent
   **ID**: REQ-CORE-003
-- **Type**: File
-  **Path**: packages/api/src/server.test.ts
-  **Lines**: 3105, 3105
 
 ## TEST-DATA-001-001
 
 **Type**: TEST
 **MID**: 485a1595569c9f6e4a98dbc89167fd58
 **UID**: TEST-DATA-001-001
-**Case name**: Git store selector cannot bypass PostgreSQL-only authoring
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks that the retired Git selector cannot change the manuscript authority.
@@ -2568,16 +2467,13 @@ Checks that the retired Git selector cannot change the manuscript authority.
 
 - **Type**: Parent
   **ID**: REQ-DATA-001
-- **Type**: File
-  **Path**: tests/e2e/persistence-database.acceptance.spec.ts
-  **Lines**: 1646, 1646
 
 ## TEST-DATA-002-001
 
 **Type**: TEST
 **MID**: a89e6eb9e61f92d81a1c5fbb62ea4d41
 **UID**: TEST-DATA-002-001
-**Case name**: migrations are repeatable and document revisions stay immutable
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks update rejection for an existing PostgreSQL document revision. Delete rejection still requires a matching case.
@@ -2586,16 +2482,13 @@ Checks update rejection for an existing PostgreSQL document revision. Delete rej
 
 - **Type**: Parent
   **ID**: REQ-DATA-002
-- **Type**: File
-  **Path**: packages/persistence-postgres/src/postgres-store.test.ts
-  **Lines**: 182, 182
 
 ## TEST-DATA-002-002
 
 **Type**: TEST
 **MID**: 86d4bd4e81bcd5668ee52a26857715d5
 **UID**: TEST-DATA-002-002
-**Case name**: UTF-16 edits, idempotency, revision restoration and stale-head conflicts
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks revision creation, exact retry, restore and stale-head conflict in PostgreSQL.
@@ -2604,16 +2497,13 @@ Checks revision creation, exact retry, restore and stale-head conflict in Postgr
 
 - **Type**: Parent
   **ID**: REQ-DATA-002
-- **Type**: File
-  **Path**: packages/persistence-postgres/src/postgres-store.test.ts
-  **Lines**: 509, 509
 
 ## TEST-DATA-003-001
 
 **Type**: TEST
 **MID**: e50ce01b5b362ae6d85710d64c90c4d1
 **UID**: TEST-DATA-003-001
-**Case name**: database foreign keys prevent Knowledge relations from crossing projects
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks the PostgreSQL project boundary for Knowledge relations.
@@ -2622,16 +2512,13 @@ Checks the PostgreSQL project boundary for Knowledge relations.
 
 - **Type**: Parent
   **ID**: REQ-DATA-003
-- **Type**: File
-  **Path**: packages/persistence-postgres/src/postgres-store.test.ts
-  **Lines**: 473, 473
 
 ## TEST-DATA-004-001
 
 **Type**: TEST
 **MID**: 48f3286bb2251c83e9d8cda25588c56b
 **UID**: TEST-DATA-004-001
-**Case name**: read-only schema verification rejects missing, altered and newer migration ledgers
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks rejection of missing, changed and unknown applied migrations.
@@ -2640,16 +2527,13 @@ Checks rejection of missing, changed and unknown applied migrations.
 
 - **Type**: Parent
   **ID**: REQ-DATA-004
-- **Type**: File
-  **Path**: packages/persistence-postgres/src/postgres-store.test.ts
-  **Lines**: 148, 148
 
 ## TEST-AUTH-001-001
 
 **Type**: TEST
 **MID**: f1568451c92530e0fd44403408b56497
 **UID**: TEST-AUTH-001-001
-**Case name**: authorizes standalone owner writes only with a verified API-audience OAuth access token
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks the API entry point rejects writes without a verified owner token for its audience.
@@ -2658,16 +2542,13 @@ Checks the API entry point rejects writes without a verified owner token for its
 
 - **Type**: Parent
   **ID**: REQ-AUTH-001
-- **Type**: File
-  **Path**: packages/api/src/server.test.ts
-  **Lines**: 1950, 1950
 
 ## TEST-AUTH-002-001
 
 **Type**: TEST
 **MID**: 4ca46d58f11ffa03396df371ecd52a05
 **UID**: TEST-AUTH-002-001
-**Case name**: runs admission before payload validation and rejects unregistered methods and origins
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks admission ordering and refusal of unregistered methods and origins.
@@ -2676,16 +2557,13 @@ Checks admission ordering and refusal of unregistered methods and origins.
 
 - **Type**: Parent
   **ID**: REQ-AUTH-002
-- **Type**: File
-  **Path**: packages/api/src/server.test.ts
-  **Lines**: 891, 891
 
 ## TEST-AUTH-003-001
 
 **Type**: TEST
 **MID**: f8859594d441465515ed94af70b93c74
 **UID**: TEST-AUTH-003-001
-**Case name**: MCP project assignments are required, exact, and reject malformed or duplicate mappings
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks exact MCP project assignment and rejection of malformed configuration.
@@ -2694,16 +2572,13 @@ Checks exact MCP project assignment and rejection of malformed configuration.
 
 - **Type**: Parent
   **ID**: REQ-AUTH-003
-- **Type**: File
-  **Path**: packages/api/src/oauth-mcp.test.ts
-  **Lines**: 81, 81
 
 ## TEST-AUTH-003-002
 
 **Type**: TEST
 **MID**: a208fcd03e8a4f2427dc2c62e2da8f6a
 **UID**: TEST-AUTH-003-002
-**Case name**: admits registered MCP OAuth clients by exact operation scope without owner rights
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks admitted MCP scope and denies owner operations through Fastify.
@@ -2712,16 +2587,13 @@ Checks admitted MCP scope and denies owner operations through Fastify.
 
 - **Type**: Parent
   **ID**: REQ-AUTH-003
-- **Type**: File
-  **Path**: packages/api/src/server.test.ts
-  **Lines**: 2177, 2177
 
 ## TEST-AUTH-004-001
 
 **Type**: TEST
 **MID**: 87c4eb8d847862e609ba67aa845da0ce
 **UID**: TEST-AUTH-004-001
-**Case name**: same-origin setup-only Fastify commits one verified owner and closes setup before OAuth activation
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks verified owner enrollment and closure of the isolated setup endpoint.
@@ -2730,16 +2602,13 @@ Checks verified owner enrollment and closure of the isolated setup endpoint.
 
 - **Type**: Parent
   **ID**: REQ-AUTH-004
-- **Type**: File
-  **Path**: packages/api/test/passkey-bootstrap.acceptance.test.ts
-  **Lines**: 921, 921
 
 ## TEST-AUTH-005-001
 
 **Type**: TEST
 **MID**: 5e061d5d151d5d83d821f24f76deac62
 **UID**: TEST-AUTH-005-001
-**Case name**: passkey management requires the fresh owner and rejects deletion of their last passkey
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks fresh-owner authorization and preservation of the final passkey.
@@ -2748,16 +2617,13 @@ Checks fresh-owner authorization and preservation of the final passkey.
 
 - **Type**: Parent
   **ID**: REQ-AUTH-005
-- **Type**: File
-  **Path**: packages/api/src/owner-security.test.ts
-  **Lines**: 108, 108
 
 ## TEST-API-001-001
 
 **Type**: TEST
 **MID**: 445b67648bfb9ff548d962c23e7d3a2e
 **UID**: TEST-API-001-001
-**Case name**: Knowledge browse returns a filter-bound page cursor and rejects stale project snapshots
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks one HTTP operation's cursor contract and rejection of stale snapshots.
@@ -2766,16 +2632,13 @@ Checks one HTTP operation's cursor contract and rejection of stale snapshots.
 
 - **Type**: Parent
   **ID**: REQ-API-001
-- **Type**: File
-  **Path**: packages/api/src/persistence-routes.test.ts
-  **Lines**: 56, 56
 
 ## TEST-API-002-001
 
 **Type**: TEST
 **MID**: 0a2034eae039ef847c3980b32816f7f6
 **UID**: TEST-API-002-001
-**Case name**: a committed save with a lost response is reconciled after reload with the same operation identity
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks recovery after a lost response to a committed save with the original operation identity.
@@ -2784,16 +2647,13 @@ Checks recovery after a lost response to a committed save with the original oper
 
 - **Type**: Parent
   **ID**: REQ-API-002
-- **Type**: File
-  **Path**: tests/e2e/core.acceptance.spec.ts
-  **Lines**: 325, 325
 
 ## TEST-UI-001-001
 
 **Type**: TEST
 **MID**: 1d581794ed7e9c7e03333bec48c25c24
 **UID**: TEST-UI-001-001
-**Case name**: the launcher opens Desktop for new and legacy choices and rejects retired Mobile routes
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks the Desktop launcher and retired Mobile routes. The scenario covers the Web branch.
@@ -2802,16 +2662,13 @@ Checks the Desktop launcher and retired Mobile routes. The scenario covers the W
 
 - **Type**: Parent
   **ID**: REQ-UI-001
-- **Type**: File
-  **Path**: tests/e2e/ui-v1.acceptance.spec.ts
-  **Lines**: 238, 238
 
 ## TEST-UI-002-001
 
 **Type**: TEST
 **MID**: e64f90cfa8b1f2db8d6556c95d239d10
 **UID**: TEST-UI-002-001
-**Case name**: a lost save response survives newer input, reloads, and rebases the newer draft after acknowledgement
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks preservation and reconciliation of the newer draft after an uncertain save.
@@ -2820,16 +2677,13 @@ Checks preservation and reconciliation of the newer draft after an uncertain sav
 
 - **Type**: Parent
   **ID**: REQ-UI-002
-- **Type**: File
-  **Path**: tests/e2e/core.acceptance.spec.ts
-  **Lines**: 398, 398
 
 ## TEST-UI-003-001
 
 **Type**: TEST
 **MID**: 83cb8a7fd19a88e76412f8a9eeb9ac61
 **UID**: TEST-UI-003-001
-**Case name**: desktop tab guard denial retains selection and a delayed transition cannot focus an obsolete tab
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks a guarded Desktop tab transition and rejects obsolete focus.
@@ -2838,16 +2692,13 @@ Checks a guarded Desktop tab transition and rejects obsolete focus.
 
 - **Type**: Parent
   **ID**: REQ-UI-003
-- **Type**: File
-  **Path**: tests/e2e/modular-workspace.acceptance.spec.ts
-  **Lines**: 108, 108
 
 ## TEST-UI-004-001
 
 **Type**: TEST
 **MID**: 5355b19a94521a4d5cc5d0cf3aa64557
 **UID**: TEST-UI-004-001
-**Case name**: legacy draft composition cannot write old scene text into a newly selected scene
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks composition during scene navigation preserves the correct document boundary.
@@ -2856,16 +2707,13 @@ Checks composition during scene navigation preserves the correct document bounda
 
 - **Type**: Parent
   **ID**: REQ-UI-004
-- **Type**: File
-  **Path**: tests/e2e/ui-v1.acceptance.spec.ts
-  **Lines**: 229, 229
 
 ## TEST-UI-005-001
 
 **Type**: TEST
 **MID**: 4d4f7499e20ad11e32e329fe726434b6
 **UID**: TEST-UI-005-001
-**Case name**: desktop stack tabs use roving focus and keep the rendered panel association valid
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks keyboard focus order and panel associations for the Desktop tab stack.
@@ -2874,16 +2722,13 @@ Checks keyboard focus order and panel associations for the Desktop tab stack.
 
 - **Type**: Parent
   **ID**: REQ-UI-005
-- **Type**: File
-  **Path**: tests/e2e/modular-workspace.acceptance.spec.ts
-  **Lines**: 70, 70
 
 ## TEST-EXT-001-001
 
 **Type**: TEST
 **MID**: fbb0da7847cde11b3166cfbba9899e28
 **UID**: TEST-EXT-001-001
-**Case name**: public OAuth edge probe checks protocol metadata, MCP challenge, API denial and retained UI Access
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks the probe's expected routing and denial observations with fixtures. Live Edge verification requires its own execution.
@@ -2892,16 +2737,13 @@ Checks the probe's expected routing and denial observations with fixtures. Live 
 
 - **Type**: Parent
   **ID**: REQ-EXT-001
-- **Type**: File
-  **Path**: scripts/verification/infrastructure/public-oauth-edge.test.mjs
-  **Lines**: 67, 67
 
 ## TEST-EXT-002-001
 
 **Type**: TEST
 **MID**: a267862223d54a509a5b93726ebb3505
 **UID**: TEST-EXT-002-001
-**Case name**: public metadata publishes only the standalone MCP scope ceiling
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks the externally published MCP scope ceiling in OAuth metadata.
@@ -2910,16 +2752,13 @@ Checks the externally published MCP scope ceiling in OAuth metadata.
 
 - **Type**: Parent
   **ID**: REQ-EXT-002
-- **Type**: File
-  **Path**: packages/contracts/src/oauth-metadata.test.ts
-  **Lines**: 20, 20
 
 ## TEST-OPS-001-001
 
 **Type**: TEST
 **MID**: 71abc3d8ea0b266e760e25a8b5f0666e
 **UID**: TEST-OPS-001-001
-**Case name**: R5 separates enrollment start from preparation, and rejects existing owner reissuance
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks separation of the bootstrap admission states and refusal to reissue an existing owner grant.
@@ -2928,16 +2767,13 @@ Checks separation of the bootstrap admission states and refusal to reissue an ex
 
 - **Type**: Parent
   **ID**: REQ-OPS-001
-- **Type**: File
-  **Path**: scripts/deployment/bootstrap/admission.test.mjs
-  **Lines**: 67, 67
 
 ## TEST-OPS-002-001
 
 **Type**: TEST
 **MID**: 81d87f39e0e51220bdedf453db454bec
 **UID**: TEST-OPS-002-001
-**Case name**: rejects unsuccessful, foreign, non-main, stale, or wrong-workflow Verify evidence
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks source certification rejection in the update handoff with fixtures.
@@ -2946,16 +2782,13 @@ Checks source certification rejection in the update handoff with fixtures.
 
 - **Type**: Parent
   **ID**: REQ-OPS-002
-- **Type**: File
-  **Path**: scripts/deployment/admission/certificate.test.mjs
-  **Lines**: 30, 30
 
 ## TEST-OPS-003-001
 
 **Type**: TEST
 **MID**: 39af32e2e1ba0c9596ca11da0ccb83a7
 **UID**: TEST-OPS-003-001
-**Case name**: restore drill verifies fingerprints before success evidence or candidate-ledger proof
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks restore proof and candidate-ledger verification with fixtures. Live S3 transfer and independent restore execution still require evidence.
@@ -2964,16 +2797,13 @@ Checks restore proof and candidate-ledger verification with fixtures. Live S3 tr
 
 - **Type**: Parent
   **ID**: REQ-OPS-003
-- **Type**: File
-  **Path**: scripts/deployment/recovery/backup.test.mjs
-  **Lines**: 434, 434
 
 ## TEST-QUAL-001-001
 
 **Type**: TEST
 **MID**: 95e1f928a883a2ff425e74ce6cb7034e
 **UID**: TEST-QUAL-001-001
-**Case name**: disposable app lifecycle is not admitted by isolated workspace tests
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks that workspace tests cannot substitute for the isolated lifecycle proof.
@@ -2982,16 +2812,13 @@ Checks that workspace tests cannot substitute for the isolated lifecycle proof.
 
 - **Type**: Parent
   **ID**: REQ-QUAL-001
-- **Type**: File
-  **Path**: scripts/ci/impact/plan.test.mjs
-  **Lines**: 125, 125
 
 ## TEST-QUAL-002-001
 
 **Type**: TEST
 **MID**: caaf25963c3500c09149e168699bf6d0
 **UID**: TEST-QUAL-002-001
-**Case name**: missing, stale, failed, skipped and duplicate evidence cannot certify selected work
+**Execution scope**: PRODUCT
 **Exact-run reference**: NOT_RUN
 
 Checks rejection of insufficient selected-task evidence.
@@ -3000,16 +2827,13 @@ Checks rejection of insufficient selected-task evidence.
 
 - **Type**: Parent
   **ID**: REQ-QUAL-002
-- **Type**: File
-  **Path**: scripts/ci/evidence/validation.test.mjs
-  **Lines**: 42, 42
 
 ## TEST-TRC-04-003
 
 **Type**: TEST
 **MID**: 77afb3792554e354b69dc58fdb3008a5
 **UID**: TEST-TRC-04-003
-**Case name**: fault injection rejects stale route, tool, and database classifications removed from source inventory
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Checks rejection when documented route, tool and database identities are no longer discovered.
@@ -3018,15 +2842,13 @@ Checks rejection when documented route, tool and database identities are no long
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/verify.test.mjs
 
 ## TEST-TRC-05-004
 
 **Type**: TEST
 **MID**: 2e92518dec80e9ba9e72d53b18016a52
 **UID**: TEST-TRC-05-004
-**Case name**: rejects foreign artifacts, stale source, skipped certification, mismatched attempts and skipped required cases
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Checks artifact provenance, producer attempts and refusal to promote a skipped case.
@@ -3035,15 +2857,13 @@ Checks artifact provenance, producer attempts and refusal to promote a skipped c
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/ci/evidence/trace-receipt.test.mjs
 
 ## TEST-TRC-06-001
 
 **Type**: TEST
 **MID**: c777c4e74536f31f6b3d79106743d409
 **UID**: TEST-TRC-06-001
-**Case name**: passing observed UI case cannot promote an explicitly unimplemented requirement
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Checks that an observed passing case cannot promote an unimplemented UI obligation.
@@ -3052,15 +2872,13 @@ Checks that an observed passing case cannot promote an unimplemented UI obligati
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/obligation-trace.test.mjs
 
 ## TEST-TRC-06-002
 
 **Type**: TEST
 **MID**: 6961c6ddf4daccf12a2e8963c1e83c0a
 **UID**: TEST-TRC-06-002
-**Case name**: missing S3 receipt remains a blocked trace limitation and G5 remains NOT_RUN
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Checks that the trace retains a missing S3 receipt as a limitation.
@@ -3069,15 +2887,13 @@ Checks that the trace retains a missing S3 receipt as a limitation.
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/strictdoc/verify.test.mjs
 
 ## TEST-TRC-07-002
 
 **Type**: TEST
 **MID**: 3694489c139146c11b7ff49148e69fc9
 **UID**: TEST-TRC-07-002
-**Case name**: live Pages proof checks public response revision, route and snapshot bytes
+**Execution scope**: TRACE_NODE
 **Exact-run reference**: NOT_RUN
 
 Checks public route identity and exact-source output bytes with controlled responses.
@@ -3086,8 +2902,6 @@ Checks public route identity and exact-source output bytes with controlled respo
 
 - **Type**: Parent
   **ID**: REQ-TRACE-001
-- **Type**: File
-  **Path**: scripts/verification/artifacts/pages-live-ux.test.mjs
 
 ## REQ-DATA-005
 

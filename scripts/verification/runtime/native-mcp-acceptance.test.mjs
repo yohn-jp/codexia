@@ -11,14 +11,19 @@ test("native MCP acceptance exercises real PostgreSQL over both transports", { t
   // Node disables nested test discovery when this parent runner context is inherited.
   const env = { ...process.env, CODEXIA_MCP_ACCEPTANCE_MODULES: "story,nlp,mcp" };
   delete env.NODE_TEST_CONTEXT;
+  const expectedCases = [
+    "direct-root Story scenes keep PostgreSQL positions and context through Actions and MCP",
+    "[TEST-MCPV-004-001]",
+    "[TEST-MCPV-006-001]",
+  ].map(prefix => RegExp.escape(prefix));
   const output = execFileSync(process.execPath, [
-    "--test", "--test-reporter=tap", "--test-name-pattern=^(direct-root Story scenes keep PostgreSQL positions and context through Actions and MCP|native Knowledge MCP tools preserve PostgreSQL scope|MCP cancellation stops real NLP worker jobs through stdio and Streamable HTTP)",
+    "--test", "--test-reporter=tap", `--test-name-pattern=^(?:${expectedCases.join("|")})(?:\\s|$)`,
     "tests/integration/mcp-acceptance.test.mjs",
   ], { cwd: root, stdio: ["ignore", "pipe", "inherit"], encoding: "utf8", env });
   console.log(output);
-  assert.match(output, /^ok 1 - direct-root Story scenes keep PostgreSQL positions and context through Actions and MCP[^\r\n]*$/m);
-  assert.match(output, /^ok 2 - native Knowledge MCP tools preserve PostgreSQL scope[^\r\n]*$/m);
-  assert.match(output, /^ok 3 - MCP cancellation stops real NLP worker jobs through stdio and Streamable HTTP[^\r\n]*$/m);
+  for (const prefix of expectedCases) {
+    assert.match(output, new RegExp(`^ok \\d+ - ${prefix}[^\\r\\n]*$`, "m"));
+  }
   assert.match(output, /^# pass 3$/m);
   assert.match(output, /^# fail 0$/m);
   assert.match(output, /^# skipped 0$/m);

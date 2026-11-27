@@ -19,126 +19,6 @@
   },
   "classifications": [
     {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/auth-runtime.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/base-runtime.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/base-secrets.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/bootstrap-secret-escrow.yml",
-      "classification": "REQ-OPS-001 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/deploy-lifecycle-fixture.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/deploy-prepare.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/deploy-ssh-key.yml",
-      "classification": "REQ-OPS-001 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/deploy-transaction.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/deploy.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/host-validate.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/host.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/inspect.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/inventory.example.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/managed-bootstrap-secrets.yml",
-      "classification": "REQ-OPS-001 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/owner-setup.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/preflight-observe.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/prepare-owner-activation.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/recreate-missing-app-database.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/restore-drill.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/site.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/verify-base-db-container.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/verify-base-tunnel-container.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/verify-bootstrap-escrow.yml",
-      "classification": "REQ-OPS-001 candidate; host execution remains unverified"
-    },
-    {
-      "kind": "ansibleSource",
-      "id": "deploy/ansible/verify-deploy-base-runtime.yml",
-      "classification": "REQ-OPS-001 / REQ-OPS-002 candidate; host execution remains unverified"
-    },
-    {
       "kind": "databaseObject",
       "id": "public.anchor_history",
       "classification": "UNMAPPED: source-declared object found by bounded SQL scan; detailed obligation mapping remains unassigned in this bounded source inventory"
@@ -964,5 +844,57 @@
     "Tool discovery covers literal server.tool names in the listed MCP module. Other registration modules, enabled-action expansion, and runtime-composed tools remain outside the current bounded scan and are reported as discovery limitations; dynamic names in this scope fail closed.",
     "SQL discovery covers named top-level tables, functions, triggers, indexes, and ALTER TABLE ADD CONSTRAINT declarations in the listed initial migration. Other migrations, inline table constraints, and runtime-generated objects remain outside the current bounded scan and are reported as discovery limitations; unsupported DDL fails closed.",
     "Candidate requirement links are navigation aids and do not establish implementation coverage or conformance."
+  ],
+  "ansibleGroups": [
+    {
+      "id": "entry-preflight-observe",
+      "entrypoint": "deploy/ansible/preflight-observe.yml",
+      "mappingBasis": "derivable",
+      "classification": "Candidate REQ-OPS-001 / REQ-OPS-002; source membership follows literal playbook includes; host execution remains unverified."
+    },
+    {
+      "id": "entry-prepare-owner-activation",
+      "entrypoint": "deploy/ansible/prepare-owner-activation.yml",
+      "mappingBasis": "derivable",
+      "classification": "Candidate REQ-OPS-001 / REQ-OPS-002; source membership follows literal playbook includes; host execution remains unverified."
+    },
+    {
+      "id": "entry-site",
+      "entrypoint": "deploy/ansible/site.yml",
+      "mappingBasis": "derivable",
+      "classification": "Candidate REQ-OPS-001 / REQ-OPS-002; source membership follows literal playbook includes; host execution remains unverified."
+    },
+    {
+      "id": "entry-verify-bootstrap-escrow",
+      "entrypoint": "deploy/ansible/verify-bootstrap-escrow.yml",
+      "mappingBasis": "derivable",
+      "classification": "Candidate REQ-OPS-001; source membership follows literal playbook includes; host execution remains unverified."
+    }
+  ],
+  "ansibleOverrides": [
+    {
+      "id": "source-bootstrap-secret-escrow",
+      "path": "deploy/ansible/bootstrap-secret-escrow.yml",
+      "mappingBasis": "semantic",
+      "classification": "Candidate REQ-OPS-001; escrow source role remains unverified."
+    },
+    {
+      "id": "source-deploy-ssh-key",
+      "path": "deploy/ansible/deploy-ssh-key.yml",
+      "mappingBasis": "semantic",
+      "classification": "Candidate REQ-OPS-001; access-key source role remains unverified."
+    },
+    {
+      "id": "source-example-inventory",
+      "path": "deploy/ansible/inventory.example.yml",
+      "mappingBasis": "semantic",
+      "classification": "Candidate REQ-OPS-001 / REQ-OPS-002; example inventory only, not evidence of a production target or host execution."
+    },
+    {
+      "id": "source-managed-bootstrap-secrets",
+      "path": "deploy/ansible/managed-bootstrap-secrets.yml",
+      "mappingBasis": "semantic",
+      "classification": "Candidate REQ-OPS-001; managed bootstrap secret source role remains unverified."
+    }
   ]
 }

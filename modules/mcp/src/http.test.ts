@@ -224,7 +224,7 @@ async function responseBodyAsJson(response: Response): Promise<unknown> {
   return JSON.parse(dataLine ? dataLine.slice(6) : text);
 }
 
-test('MCP HTTP serves modern per-request envelopes through the official v2 client', async () => {
+test('[TEST-MCPV-007-001] MCP HTTP serves modern per-request envelopes through the official v2 client', async () => {
   const host = actionContext([]);
   const contribution = createMcpHttpContribution();
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
@@ -239,7 +239,7 @@ test('MCP HTTP serves modern per-request envelopes through the official v2 clien
   }
 });
 
-test('MCP HTTP accepts the temporary stateless 2025 fallback', async () => {
+test('[TEST-MCPV-007-002] MCP HTTP accepts the temporary stateless 2025 fallback', async () => {
   const response = await createMcpHttpContribution().handle(
     request({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
     actionContext([]),
@@ -248,7 +248,7 @@ test('MCP HTTP accepts the temporary stateless 2025 fallback', async () => {
   assert.ok(((await responseBodyAsJson(response)) as { result?: { tools?: unknown[] } }).result?.tools);
 });
 
-test('strict MCP HTTP rejects legacy traffic and delegates invalid methods', async () => {
+test('[TEST-MCPV-007-003] strict MCP HTTP rejects legacy traffic and delegates invalid methods', async () => {
   const contribution = createMcpHttpContribution({ strict: true });
   const legacy = await contribution.handle(request({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }), actionContext([]));
   assert.equal(legacy.status, 400);
@@ -258,7 +258,7 @@ test('strict MCP HTTP rejects legacy traffic and delegates invalid methods', asy
   assert.equal(deleteResponse.status, 405);
 });
 
-test('modern Mcp-Method and Mcp-Name mismatches are rejected before tool dispatch', async () => {
+test('[TEST-MCPV-006-003] modern Mcp-Method and Mcp-Name mismatches are rejected before tool dispatch', async () => {
   const cases = [
     { header: 'mcp-method', value: 'tools/list' },
     { header: 'mcp-name', value: 'different_tool' },
@@ -308,7 +308,7 @@ test('modern Mcp-Method and Mcp-Name mismatches are rejected before tool dispatc
   }
 });
 
-test('oversized MCP request body is refused before creating the SDK action context', async () => {
+test('[TEST-MCPV-006-004] oversized MCP request body is refused before creating the SDK action context', async () => {
   const contribution = createMcpHttpContribution({ strict: true });
   let contextAccesses = 0;
   const host = new Proxy(actionContext([]), {
@@ -950,7 +950,7 @@ test('per-request project scope rejects cross-project tool calls with a machine 
   }
 });
 
-test('aborting the host Web Request closes the modern SDK exchange', async () => {
+test('[TEST-MCPV-006-002] aborting the host Web Request closes the modern SDK exchange', async () => {
   const contribution = createMcpHttpContribution();
   let capturedBody: Record<string, unknown> | undefined;
   let capturedHeaders: Headers | undefined;

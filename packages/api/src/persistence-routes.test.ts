@@ -53,7 +53,7 @@ test('persistence status reports database health and knowledge lists are bounded
   assert.equal(overLimit?.status, 400);
 });
 
-test('Knowledge browse returns a filter-bound page cursor and rejects stale project snapshots', async () => {
+test('[TEST-API-001-001] Knowledge browse returns a filter-bound page cursor and rejects stale project snapshots', async () => {
   const projectId = randomUUID() as ProjectId;
   const ids = [randomUUID(), randomUUID(), randomUUID()];
   let projectVersion = 7;

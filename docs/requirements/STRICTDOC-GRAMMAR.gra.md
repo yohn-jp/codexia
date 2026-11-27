@@ -127,8 +127,8 @@
 **Type**: String
 **Required**: True
 
-### Field: Case name
-**Type**: String
+### Field: Execution scope
+**Type**: SingleChoice(TRACE_NODE, TRACE_BROWSER, PRODUCT)
 **Required**: True
 
 ### Field: Exact-run reference
@@ -142,5 +142,3 @@
 ### Relations
 
 #### Relation: Parent
-
-#### Relation: File

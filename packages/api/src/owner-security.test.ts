@@ -105,7 +105,7 @@ test('the maintained session endpoints preserve the current session and enforce 
   assert.ok(await context.internalAdapter.findSession(foreign.token));
 });
 
-test('passkey management requires the fresh owner and rejects deletion of their last passkey', async () => {
+test('[TEST-AUTH-005-001] passkey management requires the fresh owner and rejects deletion of their last passkey', async () => {
   const { request, current, foreign, context } = await fixture();
   const createPasskey = (name: string, credentialID: string) =>
     context.adapter.create({

@@ -30,6 +30,8 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@types/react` | `^19.3.0` | root/app・React型 | **連動**: React 19の型とランタイムを一緒に検証 |
 | `@types/react-dom` | `^19.3.0` | root/app・React DOM型 | **連動**: React DOM 19と合わせる |
 | `typescript` | `7.0.2` | root・native型検査、宣言emit、HTTPルートのAST検査 | ambient型の自動取り込みに依存せず、共通tsconfigで`types: ["node"]`を明示する。HTTPルート検査が使うnative AST APIはunstableのため、compilerを厳密指定し、更新時はルート契約テストも検証する |
+| `@babel/parser` | `7.29.15` | root devDependency・StrictDocのJS/TSテスト登録のAST解析 | **検証専用**: traverseと同じ版を固定。更新時はTEST-IDと登録位置の解決、コメント・重複の拒否を検証 |
+| `@babel/traverse` | `7.29.15` | root devDependency・StrictDocのAST走査とテストランナーのbinding解決 | **検証専用**: parserと同じ版を固定。更新時はNode.js・Playwrightの登録検出と実行結果の照合を検証 |
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
 | `@redocly/cli` | `2.82.0` | `packages/http-contract`・OpenAPI lint | **既存採用**: CLI 2のcustom rulesで生成OpenAPI 3.1を検査。実API適合は別途検証 |

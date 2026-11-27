@@ -3,17 +3,13 @@ import path from 'node:path';
 
 const OBLIGATION_ID = /^OBL-(REQ-[A-Z]+-\d{3})-O(\d{2})$/u;
 const REQUIREMENT_ID = /^REQ-[A-Z]+-\d{3}$/u;
-const TEST_ID = /^TEST-(?:[A-Z0-9]+-)+\d{3}$/u;
+export const TEST_ID = /^TEST-(?:[A-Z0-9]+-)+\d{3}$/u;
 const SHA = /^[0-9a-f]{40}$/u;
 const RUN_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/\d+$/u;
 
-function relationValues(node, type) {
-  return (node.RELATIONS ?? []).filter((item) => item.TYPE === type)
-    .map((item) => ({ path: item.VALUE ?? item.PATH, range: item.LINE_RANGE ?? item.LINES ?? item.line_range }));
-}
-
-function declaredTestIds(requirement) {
-  return String(requirement['Test IDs'] ?? '').split(/[\s,;]+/u).filter((value) => TEST_ID.test(value));
+export function testIdReferences(node) {
+  return String(node['Test IDs'] ?? '').split(/[\s,;]+/u)
+    .filter(value => value.startsWith('TEST-') && value !== 'TEST-ID');
 }
 
 function deterministicMid(uid) {
@@ -79,7 +75,10 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
     const parents = (obligation.RELATIONS ?? []).filter((item) => item.TYPE === 'Parent').map((item) => item.VALUE);
     if (parents.length !== 1 || parents[0] !== requirementId) violations.push(`${obligation.UID} must have exactly one Parent relation to ${requirementId}`);
     const designRefs = String(obligation['Design reference'] ?? '').split(/\s*;\s*/u).filter(Boolean);
-    const sourceRefs = relationValues(obligation, 'File').map((ref) => ({ ...ref, identifier: ref.path }));
+    const sourceRefs = (obligation.RELATIONS ?? []).filter(item => item.TYPE === 'File').map(item => {
+      const sourcePath = item.VALUE ?? item.PATH;
+      return { path: sourcePath, identifier: sourcePath };
+    });
     const requirementImplementationIdentifiers = String(requirement?.['Implementation identifiers'] ?? '').split(/\s*;\s*/u).filter(Boolean);
     const requirementComment = String(requirement?.Comment ?? '').trim();
     const surfaceIdentifiers = String(obligation['Surface identifiers'] ?? '').split(/\s*;\s*/u).filter(Boolean).map((item) => {
@@ -92,8 +91,7 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
       }
       return { kind, id };
     }).filter(Boolean);
-    const rawTestIds = String(obligation['Test IDs'] ?? '').split(/[\s,;]+/u)
-      .filter((value) => value.startsWith('TEST-') && value !== 'TEST-ID');
+    const rawTestIds = testIdReferences(obligation);
     const testIds = rawTestIds.filter((value) => TEST_ID.test(value));
     for (const id of rawTestIds.filter((value) => !TEST_ID.test(value))) violations.push(`${obligation.UID} has invalid TEST-ID ${id}`);
     for (const id of testIds) {
@@ -104,7 +102,7 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
       }
       const scenarioParents = (scenario.RELATIONS ?? []).filter((item) => item.TYPE === 'Parent').map((item) => item.VALUE);
       if (!scenarioParents.includes(requirementId)) violations.push(`${obligation.UID} TEST-ID ${id} is not parented by ${requirementId}`);
-      if (requirement && !declaredTestIds(requirement).includes(id)) violations.push(`${obligation.UID} TEST-ID ${id} is not declared by ${requirementId}`);
+      if (requirement && !testIdReferences(requirement).includes(id)) violations.push(`${obligation.UID} TEST-ID ${id} is not declared by ${requirementId}`);
     }
     if (new Set(testIds).size !== testIds.length) violations.push(`${obligation.UID} contains duplicate TEST-ID references`);
     const exactRuns = runEvidence.filter((evidence) => testIds.includes(evidence.testId) && exactRunIsSourceBound(evidence, evidence.testId, { expectedRepository, expectedSourceSha }));
@@ -115,7 +113,7 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
     if (designRefs.length === 0 || sourceRefs.length === 0 || testIds.length === 0) status = 'PARTIAL';
     if (testIds.some((id) => !scenarioById.has(id))) status = 'BLOCKED';
     if (designRefs.length === 0) gaps.push(`${obligation.UID}: no design reference`);
-    if (sourceRefs.length === 0) gaps.push(`${obligation.UID}: no source/file/range reference`);
+    if (sourceRefs.length === 0) gaps.push(`${obligation.UID}: no source file reference`);
     if (testIds.length === 0) gaps.push(`${obligation.UID}: no TEST-ID`);
     for (const id of testIds) if (!exactRuns.some(evidence => evidence.testId === id)) gaps.push(`${obligation.UID}: no exact-source run evidence for ${id}`);
     for (const source of sourceRefs) {
@@ -137,7 +135,7 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
   for (const requirement of requirements) {
     const mapped = rows.filter((row) => row.requirementId === requirement.UID);
     if (mapped.length === 0) gaps.push(`${requirement.UID}: no individual obligation mapping`);
-    for (const testId of declaredTestIds(requirement)) {
+    for (const testId of testIdReferences(requirement)) {
       if (!scenarioById.has(testId)) violations.push(`${requirement.UID} declares missing TEST-ID ${testId}`);
     }
   }

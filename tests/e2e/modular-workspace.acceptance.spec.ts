@@ -67,7 +67,7 @@ async function desktopTabsGuardCalls(page: Page): Promise<number> {
   return page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.guardCalls ?? -1);
 }
 
-test("desktop stack tabs use roving focus and keep the rendered panel association valid", async ({ page, transitionURL }) => {
+test("[TEST-UI-005-001] desktop stack tabs use roving focus and keep the rendered panel association valid", async ({ page, transitionURL }) => {
   const { tabs } = await openDesktopTabsFixture(page, transitionURL);
   const inspector = tabs.getByRole("tab", { name: "Inspector", exact: true });
   const outline = tabs.getByRole("tab", { name: "Outline", exact: true });
@@ -105,7 +105,7 @@ test("desktop stack tabs use roving focus and keep the rendered panel associatio
   await expect(outline).toBeFocused();
 });
 
-test("desktop tab guard denial retains selection and a delayed transition cannot focus an obsolete tab", async ({ page, transitionURL }) => {
+test("[TEST-UI-003-001] desktop tab guard denial retains selection and a delayed transition cannot focus an obsolete tab", async ({ page, transitionURL }) => {
   const { tabs } = await openDesktopTabsFixture(page, transitionURL);
   const inspector = tabs.getByRole("tab", { name: "Inspector", exact: true });
   const outline = tabs.getByRole("tab", { name: "Outline", exact: true });
@@ -851,7 +851,7 @@ test("PostgreSQL API restart preserves canonical content and replays the exact b
   expect((await readJournal(page)).some((entry) => entry.documentId === fixture.scene.document.id)).toBe(false);
 });
 
-test("Core-only workspace keeps authoring available without search or terminology panels", async ({ page, authorizeAuthor }) => {
+test("[TEST-CORE-001-001] Core-only workspace keeps authoring available without search or terminology panels", async ({ page, authorizeAuthor }) => {
   test.skip(profile !== "core", "Run this acceptance with CODEXIA_PROFILE=core.");
   const fixture = await openFixtureScene(page, authorizeAuthor);
 
