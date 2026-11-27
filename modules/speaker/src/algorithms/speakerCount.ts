@@ -1,7 +1,6 @@
 import type { ClusterAssignmentTrail } from "./clusterAssignmentTrail.js";
 import { buildMentionDictionary, findMentions } from "./mentionIndex.js";
-import type { ResolveSpeakerCountInput, SpeakerAttribution } from "./speakerAttribution.js";
-import type { PartitionContext } from "./speakerClustering.js";
+import type { SpeakerAttribution } from "./speakerAttribution.js";
 import { removeDialogueBrackets } from "./styleFingerprint.js";
 import { isDialogue, splitIntoSentences } from "./textAnalysis.js";
 import type { Entity } from "./types.js";
@@ -20,10 +19,7 @@ const SELF_INTRO_RE = /(?:と申します|といいます|と名乗|私の名は
 const TIME_PLACE_BREAK_RE =
   /(名も知らない|名前も知らない|見覚えのない|見知らぬ|扉が.{0,8}(?:叩かれ|開い|開かれ)|場面が変わ|翌朝|その夜|数日後|翌日|翌晩|しばらくして|その頃|一方その頃|別の場所|別室)/;
 
-/**
- * 話者数 N の推定結果。
- * `resolveSpeakerCount` より appears キャラ数ベースの推定と、根拠を返す。
- */
+/** 話者数 N の推定結果と根拠。 */
 export interface SpeakerCountEstimate {
   /** パイプラインが実際に使うクラスタ数 N */
   n: number;
@@ -35,8 +31,6 @@ export interface SpeakerCountEstimate {
   evidence: {
     knownFloor: number;
     vocativeCensus: number;
-    /** @deprecated G1 以降は N 推定に使わず、常に未設定 */
-    clusterQualityN?: number;
   };
 }
 
@@ -95,16 +89,15 @@ export function confirmMobAttribution(attribution: SpeakerAttribution): SpeakerA
   };
 }
 
-export type EstimateSpeakerCountInput = ResolveSpeakerCountInput & {
-  /**
-   * 互換のため受け付けるが、G1 の自動 N では未使用（クラスタ品質探索は行わない）。
-   */
-  partitionContext?: PartitionContext;
-  /**
-   * 互換のため受け付けるが、G1 の自動 N では未使用。
-   */
-  attributions?: SpeakerAttribution[];
-};
+export interface EstimateSpeakerCountInput {
+  /** シーンに指定された話者数。未設定なら自動推定。 */
+  speakerCount?: unknown;
+  dialogueCount: number;
+  appearsEntities?: Entity[];
+  text?: string;
+  /** 手動確定または確度 high の話者数。推定・手動指定の下限とする。 */
+  knownSpeakerCount?: number;
+}
 
 function clampSpeakerCount(value: number, dialogueCount: number): number {
   if (dialogueCount <= 0) return 0;
@@ -248,7 +241,6 @@ export function detectSceneBreakHints(text: string): SceneBreakHint[] {
  * - `appearsCharacterCount` = appears のうち `type === "character"` の件数
  * - `appearsBased = clamp(max(knownFloor, appearsCharacterCount, dialogueCount>=2 ? 2 : 1), dialogueCount)`
  *
- * strongHintU / vocativeCensus / clusterQualityN は N 選択に使わない。
  * vocativeCensus は UI 用に evidence へ残す。クラスタ品質探索は呼ばない。
  * 手動 speakerCount があるときは n に採用し、estimatedN は自動推定を返す。
  */

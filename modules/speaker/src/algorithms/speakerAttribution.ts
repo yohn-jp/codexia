@@ -6,8 +6,6 @@ import { isDialogue, splitIntoSentences } from "./textAnalysis.js";
 import { hashDialogueText } from "./textHash.js";
 import type { Entity } from "./types.js";
 
-export type { ResolvedSpeakerCount, ResolveSpeakerCountInput } from "./speakerCountEstimate.js";
-export { resolveSpeakerCount } from "./speakerCountEstimate.js";
 export type { SpeakerCorrectionInput, SpeakerOverride } from "./speakerOverrides.js";
 export {
   alignOverrideClusters,

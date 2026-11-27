@@ -104,8 +104,6 @@ export function runSpeakerPipeline(input: SpeakerPipelineInput): SpeakerPipeline
     appearsEntities: input.candidates,
     text: input.text,
     knownSpeakerCount: countKnownSpeakers(anchored),
-    attributions: anchored,
-    partitionContext,
   });
   const { n, estimatedN, fromManual, evidence } = estimate;
   const clustered = partitionDialoguesIntoN(anchored, n, partitionContext);

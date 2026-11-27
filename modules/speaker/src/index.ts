@@ -36,7 +36,6 @@ import { SPEAKER_ENGINE_ID, SPEAKER_ENGINE_VERSION, SPEAKER_MODULE_VERSION, type
 export * from "./algorithms/speakerAttribution.js";
 export * from "./algorithms/speakerClustering.js";
 export * from "./algorithms/speakerCount.js";
-export * from "./algorithms/speakerCountEstimate.js";
 export * from "./algorithms/speakerEval.js";
 export * from "./algorithms/speakerGroupLabeling.js";
 export * from "./algorithms/speakerOverrides.js";

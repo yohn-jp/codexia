@@ -1,63 +1,9 @@
 import type { ClusterTrailCollector } from "../clusterAssignmentTrail.js";
 import type { SpeakerAttribution } from "../speakerAttribution.js";
 import { removeDialogueBrackets } from "../styleFingerprint.js";
-import { splitIntoSentences } from "../textAnalysis.js";
 import type { Entity } from "../types.js";
-import { narrationBetween, nextDialogueIndex, previousDialogueIndex } from "./features.js";
 import type { DialogueRecord } from "./types.js";
-import { ATTRIBUTION_VERB_RE, BACK_REFERENCE_RE, STRICT_DIALOGUE_RE } from "./types.js";
-
-/**
- * 強ヒント（名前＋発話動詞）で本文に現れる appears 内 entity のユニーク数 U。
- * `partitionDialoguesIntoN` / `clusterUnattributedDialogues` と同じ findStrongEntity 判定を使う。
- */
-export function countUniqueStrongHintEntities(
-  text: string,
-  appearsEntities: readonly Entity[],
-): number {
-  const candidates = appearsEntities.filter((entity) => entity.type === "character");
-  if (candidates.length === 0 || text.length === 0) return 0;
-
-  const sentences = splitIntoSentences(text);
-  const dialogueIndexes: number[] = [];
-  for (let i = 0; i < sentences.length; i++) {
-    if (STRICT_DIALOGUE_RE.test(sentences[i])) dialogueIndexes.push(i);
-  }
-  if (dialogueIndexes.length === 0) {
-    // セリフが無くても地の文の強ヒントを拾う（推定の下限用）
-    const ids = new Set<string>();
-    const joined = sentences.join("");
-    for (const backwardOnly of [false, true]) {
-      const id = findStrongEntity(joined, candidates, backwardOnly);
-      if (id) ids.add(id);
-    }
-    return ids.size;
-  }
-
-  const ids = new Set<string>();
-  for (let d = 0; d < dialogueIndexes.length; d++) {
-    const sentenceIndex = dialogueIndexes[d];
-    const prevDialogue =
-      d > 0 ? dialogueIndexes[d - 1] : previousDialogueIndex(sentences, sentenceIndex);
-    const nextDialogue =
-      d + 1 < dialogueIndexes.length
-        ? dialogueIndexes[d + 1]
-        : nextDialogueIndex(sentences, sentenceIndex);
-    const narrationBefore = narrationBetween(sentences, prevDialogue, sentenceIndex);
-    const narrationAfter = narrationBetween(sentences, sentenceIndex, nextDialogue);
-    for (const backwardOnly of [false, true]) {
-      const before = findStrongEntity(narrationBefore, candidates, backwardOnly);
-      if (before) ids.add(before);
-    }
-    if (d === dialogueIndexes.length - 1) {
-      for (const backwardOnly of [false, true]) {
-        const after = findStrongEntity(narrationAfter, candidates, backwardOnly);
-        if (after) ids.add(after);
-      }
-    }
-  }
-  return ids.size;
-}
+import { ATTRIBUTION_VERB_RE, BACK_REFERENCE_RE } from "./types.js";
 
 /**
  * パーティションの硬い entity アンカーにするか。
