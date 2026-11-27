@@ -1,3 +1,7 @@
+## CodexiaCTL automatic publication boundary
+
+[CodexiaCTL canonical specification](../deployment/CODEXIACTL.md#21-cli-自身のリリース更新ライフサイクル正本) owns the release/version/update lifecycle. The `codexiactl-auto-release.yml` workflow observes a successful exact-source `Verify Codexia` main run, checks changed CLI inputs, and creates the next immutable `v0.1.x` tag with a separate narrowly scoped GitHub credential. GitHub's default `GITHUB_TOKEN` tag pushes cannot trigger a second push workflow. The existing `publish-oci.yml` tag workflow retains all source admission, OCI, CLI build, attestation, checksum, immutable release and verification gates. A created tag is not evidence of successful publication. Release failures must not silently skip checks or reuse a tag. Production deployment is not triggered by the CLI version alone.
+
 # CI/CD architecture and certification contract
 
 ## Incompatible deployment admission and impact
