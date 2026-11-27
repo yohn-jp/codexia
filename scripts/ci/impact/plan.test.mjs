@@ -275,6 +275,8 @@ test('selects requirements trace for test-only source changes', async () => {
     'tests/integration/mcp-acceptance.test.mjs',
     'scripts/verification/artifacts/pages-live-ux.test.mjs',
     'scripts/strictdoc/verify.browser.mjs',
+    'scripts/ux-simulator/compare/browser.mjs',
+    'tests/conformance/http/discovery.test.mjs',
   ]) {
     assert.ok((await plan([file])).tasks.includes('requirements-trace'), file);
   }
