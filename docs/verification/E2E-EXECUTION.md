@@ -17,7 +17,7 @@ Routine browser CI is Chromium-only for both Core and Full, including public/aut
 
 ## 2. Single execution authority and intended graph
 
-Use six Chromium-only lanes (Core/Full × writing/reference/ui-v1), retaining the existing runner budget and at most two independent validations per runner, one worker per spec. All lanes use the same digest-pinned Git-capable Chromium runtime. Repartition by measured cost and dependency/fixture affinity before proposing a runner increase.
+Use six Chromium-only lanes (Core/Full × writing/reference/ui-v1), retaining the existing runner budget and at most two independent validations per runner, one worker per spec. All lanes use the same digest-pinned Git-capable Chromium runtime. The UI-v1 lane pairs the UI suite with modular workspace, native review, outline headings and the job inbox. The reference lane runs the visual performance measurement after its other selected tasks complete. Repartition by measured cost and dependency/fixture affinity before proposing a runner increase.
 
 ```mermaid
 flowchart TD

@@ -213,7 +213,9 @@ function taskEnvironment(task, group, runtime) {
     CODEXIA_AUTH_TEST_DISPOSABLE: '1',
   });
   if (task === 'biome-ci') env.CODEXIA_CI_REPORT_DIR = '<task-report-dir>';
-  if (task === 'db-contract') env.CODEXIA_CI_REPORT_DIR = '<task-report-dir>';
+  if (task === 'db-contract') Object.assign(env, {
+    CODEXIA_CI_REPORT_DIR: '<task-report-dir>', CODEXIA_CI_DB_CONTRACT_IMAGE: 'success',
+  });
   if (Object.hasOwn(CONFORMANCE_TASKS, task)) {
     env.CODEXIA_CI_REPORT_DIR = '<task-report-dir>';
     if (task === 'http-conformance') {

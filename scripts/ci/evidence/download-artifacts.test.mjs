@@ -90,6 +90,8 @@ test('certification materializes only the selected plan and reports for one or m
   await assert.rejects(readBrowserArtifact(archives.get(7), browserGroup.group), /missing required json entry/iu);
   await assert.rejects(readBrowserArtifact(archives.get(6), 'browser-full-writing'), /browser evidence group mismatch/iu);
   const requestedIds = [];
+  let pending = 0;
+  let peak = 0;
   const options = {
     inventory: { identity, artifacts: [selectedPlan, selectedReport, olderReport, retainedReport, selectedTrace, missingTrace] },
     identity, repository: 'yohn-jp/codexia', token: 'fixture-token',
@@ -98,6 +100,10 @@ test('certification materializes only the selected plan and reports for one or m
       if (hostname === 'api.github.com') {
         const id = Number(pathname.split('/').at(-2));
         requestedIds.push(id);
+        pending++;
+        peak = Math.max(peak, pending);
+        await new Promise(resolve => setImmediate(resolve));
+        pending--;
         return new Response(null, { status: 302, headers: { location: `https://storage.example/${id}` } });
       }
       return new Response(archives.get(Number(pathname.slice(1))));
@@ -122,11 +128,16 @@ test('certification materializes only the selected plan and reports for one or m
     }
   }
   const traceDirectory = path.join(root, 'evidence-trace');
-  await downloadSelectedArtifacts({ ...options, ids: [4], kind: 'evidence', directory: traceDirectory });
+  await downloadSelectedArtifacts({ ...options, ids: [2, 3, 4], kind: 'evidence', directory: traceDirectory });
+  assert.equal(peak, 2, 'Selected archives overlap within the two-download bound');
   assert.deepEqual(await readdir(path.join(traceDirectory, selectedTrace.name)), ['report.json']);
-  await assert.rejects(downloadSelectedArtifacts({ ...options, ids: [5], kind: 'evidence', directory: traceDirectory }),
+  const partial = path.join(root, 'invalid-batch');
+  await assert.rejects(downloadSelectedArtifacts({ ...options, ids: [5, 2, 3], kind: 'evidence', directory: partial }),
     /Missing required JSON entry/);
-  assert.deepEqual(requestedIds, [1, 2, 2, 3, 4, 5]);
+  assert.deepEqual(await readdir(partial), [selectedReport.name], 'Only the valid sibling finished before rejection');
+  assert.deepEqual(requestedIds, [1, 2, 2, 3, 2, 3, 4, 5, 2], 'The next batch was not started');
+  await assert.rejects(downloadSelectedArtifacts({ ...options, ids: [2], kind: 'evidence', directory: partial }),
+    { code: 'EEXIST' }, 'A second writer cannot overwrite existing evidence');
 });
 
 test('trace proof rejects stale, foreign or skipped nested evidence in the selected artifact', () => {

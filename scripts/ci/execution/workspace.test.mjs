@@ -269,6 +269,24 @@ test('pre-profile builds cover the pnpm workspaces needed before building API an
   } finally { await rm(fixture.projectRoot, { recursive: true, force: true }); }
 });
 
+test('local module test typecheck builds its workspace declarations before invoking the scoped checker', async t => {
+  const fixture = await makeWorkspaceFixture('pnpm run test:scripts');
+  t.after(() => rm(fixture.projectRoot, { recursive: true, force: true }));
+  await writeFile(path.join(fixture.projectRoot, 'scripts/ci/execution/typecheck-tests.mjs'), `
+    import assert from 'node:assert/strict';
+    import { readFileSync } from 'node:fs';
+    assert.deepEqual(process.argv.slice(2), ['modules']);
+    const build = JSON.parse(readFileSync(process.env.CODEXIA_CI_PNPM_RECORD, 'utf8'));
+    assert.equal(build.at(-1), 'build');
+    assert.ok(build.includes('@codexia/module-nlp'));
+    assert.ok(!build.includes('@codexia/api'));
+  `);
+  const result = spawnSync(process.execPath, ['--run', 'typecheck:tests', '--', 'modules'], {
+    cwd: fixture.projectRoot, env: fixture.env, encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test('root typecheck shares completed compiler builds and runs distinct checks', async t => {
   const fixture = await makeWorkspaceFixture('pnpm run test:scripts');
   t.after(() => rm(fixture.projectRoot, { recursive: true, force: true }));

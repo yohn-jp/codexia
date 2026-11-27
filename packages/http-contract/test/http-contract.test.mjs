@@ -69,6 +69,12 @@ function assertAdmittedRouteInventory(openapi) {
   return actual;
 }
 
+// The package's check-generated prerequisite materializes this contract. The
+// determinism test independently compiles twice and compares these same bytes.
+function readMaterializedContract() {
+  return parse(readFileSync(path.join(packageRoot, 'openapi', 'codexia.openapi.yaml'), 'utf8'));
+}
+
 function compile(outputDirectory) {
   execFileSync(
     compiler,
@@ -162,10 +168,8 @@ test('TypeSpec emits deterministic OpenAPI 3.1 and explicit operation IDs', t =>
   }
 });
 
-test('the generated contract exactly matches the independent admitted route inventory', t => {
-  const outputDirectory = mkdtempSync(path.join(tmpdir(), 'codexia-http-contract-inventory-'));
-  t.after(() => rmSync(outputDirectory, { recursive: true, force: true }));
-  const openapi = parse(readFileSync(compile(outputDirectory), 'utf8'));
+test('the generated contract exactly matches the independent admitted route inventory', () => {
+  const openapi = readMaterializedContract();
   const inventory = assertAdmittedRouteInventory(openapi);
   assert.equal(inventory.length, 118);
   assert.ok(!openapi.paths['/api/projects/{projectId}/modules/assistant/rewrite/stream']);
@@ -184,7 +188,7 @@ test('the generated contract exactly matches the independent admitted route inve
 });
 
 test('the admitted inventory gate rejects omission of a live persistence revision route', () => {
-  const candidate = parse(readFileSync(path.join(packageRoot, 'openapi', 'codexia.openapi.yaml'), 'utf8'));
+  const candidate = readMaterializedContract();
   const revisionsPath = '/api/v1/persistence/projects/{projectId}/documents/{documentId}/revisions';
   if (candidate.paths[revisionsPath]) delete candidate.paths[revisionsPath].get;
   assert.throws(
@@ -193,10 +197,8 @@ test('the admitted inventory gate rejects omission of a live persistence revisio
   );
 });
 
-test('document read and write responses use the PostgreSQL persistence DTOs', t => {
-  const outputDirectory = mkdtempSync(path.join(tmpdir(), 'codexia-http-contract-document-responses-'));
-  t.after(() => rmSync(outputDirectory, { recursive: true, force: true }));
-  const openapi = parse(readFileSync(compile(outputDirectory), 'utf8'));
+test('document read and write responses use the PostgreSQL persistence DTOs', () => {
+  const openapi = readMaterializedContract();
   const responseSchema = (method, route, status = '200') =>
     openapi.paths[route][method].responses[status].content['application/json'].schema;
   const expected = [
@@ -231,10 +233,8 @@ test('document read and write responses use the PostgreSQL persistence DTOs', t 
   assert.deepEqual(conflictCurrent.additionalProperties, {});
 });
 
-test('generated request and response schemas preserve null, oneOf, closed objects, and formats', t => {
-  const outputDirectory = mkdtempSync(path.join(tmpdir(), 'codexia-http-contract-schema-'));
-  t.after(() => rmSync(outputDirectory, { recursive: true, force: true }));
-  const openapi = parse(readFileSync(compile(outputDirectory), 'utf8'));
+test('generated request and response schemas preserve null, oneOf, closed objects, and formats', () => {
+  const openapi = readMaterializedContract();
   const schemas = openapi.components.schemas;
   const schemaNodes = [];
   const visitSchema = value => {
@@ -297,9 +297,7 @@ test('generated request and response schemas preserve null, oneOf, closed object
 });
 
 test('generated same-path GET and HEAD routes preserve headers and HEAD has no body', async t => {
-  const outputDirectory = mkdtempSync(path.join(tmpdir(), 'codexia-http-contract-head-'));
-  t.after(() => rmSync(outputDirectory, { recursive: true, force: true }));
-  const openapi = parse(readFileSync(compile(outputDirectory), 'utf8'));
+  const openapi = readMaterializedContract();
   const { routes, schemas } = toFastifyRoutes(openapi);
   const getRoute = routes.find(({ method, url }) => method === 'GET' && url === '/api/health');
   const headRoute = routes.find(({ method, url }) => method === 'HEAD' && url === '/api/health');

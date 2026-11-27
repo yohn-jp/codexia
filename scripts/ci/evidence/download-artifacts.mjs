@@ -358,7 +358,7 @@ export function assertTraceArtifact(trace, group, identity, repository) {
 export async function downloadSelectedArtifacts({ inventory, ids, identity, kind, directory, repository, token, request }) {
   const selected = selectedArtifacts(inventory, ids, identity, kind);
   const filename = kind === 'plan' ? 'ci-plan.json' : 'report.json';
-  for (const artifact of selected) {
+  async function materialize(artifact) {
     const bytes = await downloadArtifact(artifact, repository, token, request);
     const hasTrace = kind === 'evidence' && artifact.name === 'ci-evidence-types-trace';
     const [json, trace] = await extractJsonEntries(bytes, hasTrace ? [filename, TRACE_REPORT_ENTRY] : [filename]);
@@ -367,6 +367,15 @@ export async function downloadSelectedArtifacts({ inventory, ids, identity, kind
     await mkdir(destination, { recursive: true });
     await writeFile(path.join(destination, filename), json, { flag: 'wx', mode: 0o600 });
     console.log(`Downloaded and verified artifact ${artifact.id} (${artifact.name})`);
+  }
+  // Names and IDs are unique across the validated selection. Bound archive
+  // memory and wait for both writes before propagating a download or ZIP error.
+  const batchSize = 2;
+  for (let start = 0; start < selected.length; start += batchSize) {
+    const batch = selected.slice(start, start + batchSize);
+    const results = await Promise.allSettled(batch.map(materialize));
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
   }
 }
 

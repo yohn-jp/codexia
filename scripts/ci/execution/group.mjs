@@ -84,6 +84,9 @@ async function executeTaskInContext(task, index, scope) {
   if (conformanceSetup.has(task) && process.env.GITHUB_ACTIONS === 'true' && conformanceSetup.get(task) !== 'success') {
     error ??= 'Official tool or disposable database setup did not complete';
   }
+  if (task === 'db-contract' && process.env.GITHUB_ACTIONS === 'true' && process.env.CODEXIA_CI_DB_CONTRACT_IMAGE !== 'success') {
+    error ??= 'Pinned DB contract restore image did not materialize';
+  }
   if (task === 'codexiactl-linux' && process.env.GITHUB_ACTIONS === 'true' && process.env.CODEXIA_CI_CODEXIACTL_SETUP !== 'success') {
     error ??= 'Pinned Go toolchain setup did not complete';
   }

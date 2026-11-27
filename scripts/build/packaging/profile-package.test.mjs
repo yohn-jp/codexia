@@ -31,6 +31,7 @@ test('Core package depends on the API and builds no optional module package', ()
   const frontendCommands = createBuildCommands('core', profile, { includeApi: false });
   assert.equal(frontendCommands.some(({ args }) => args.some((argument) => argument.includes('@codexia/api'))), false);
   assert.equal(frontendCommands.some(({ args }) => args.includes('@codexia/app')), true);
+  assert.equal(frontendCommands.some(({ args }) => args.includes('@codexia/persistence-postgres')), false);
 });
 
 test('Full package waits for selected module producers and exact package dependencies', () => {
@@ -90,7 +91,9 @@ test('profile packaging requests one topological workspace build before generati
     assert.equal(producers.length, 1);
     assert.equal(commands[0], producers[0]);
     assert.ok(producers[0].args.includes('--sort'));
-    assert.ok(producers[0].args.includes('@codexia/api...'));
+    const apiFilter = producers[0].args.indexOf('@codexia/api...');
+    assert.ok(apiFilter > 0);
+    assert.equal(producers[0].args[apiFilter - 1], '--filter-prod');
     assert.ok(commands[1].args.some(arg => arg.endsWith('profile-build.mjs')));
     assert.equal(commands[2].env.CODEXIA_PROFILE, profileName);
   }

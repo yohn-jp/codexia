@@ -140,8 +140,8 @@ test('the certified graph covers every declared obligation and admits trace-owne
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
-  assert.deepEqual(VERIFICATION_GROUPS['unit-db'], ['db-contract']);
-  assert.deepEqual(VERIFICATION_GROUPS['unit-api'], ['unit-api', 'http-conformance', 'mcp-conformance']);
+  assert.deepEqual(VERIFICATION_GROUPS['unit-db'], ['db-contract', 'http-conformance', 'mcp-conformance']);
+  assert.deepEqual(VERIFICATION_GROUPS['unit-api'], ['unit-api']);
   assert.equal(requiresWorkspacePreparation(['http-conformance']), true);
   assert.equal(requiresWorkspacePreparation(['mcp-conformance']), true);
   assert.equal(requiresWorkspacePreparation(['db-contract']), true);
@@ -214,7 +214,15 @@ test('the certified graph covers every declared obligation and admits trace-owne
     'postgres://codexia:codexia@127.0.0.1:5432/codexia_auth_test');
   assert.equal(apiUnitJob.env.CODEXIA_AUTH_TEST_DISPOSABLE, '1');
   const dbImage = apiUnitJob.steps.find(step => step.name === 'Materialize pinned DB contract restore image');
-  assert.equal(dbImage.if, "matrix.group == 'db'");
+  assert.equal(dbImage.if, "matrix.group == 'db' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'db-contract')");
+  assert.equal(dbImage['continue-on-error'], true);
+  const validations = apiUnitJob.steps.find(step => step.name === 'Run selected validations');
+  assert.equal(validations.env.CODEXIA_CI_DB_CONTRACT_IMAGE, '${{ steps.db_contract_image.outcome }}');
+  assert.match(groupRunner, /task === 'db-contract'.*CODEXIA_CI_DB_CONTRACT_IMAGE !== 'success'/u);
+  for (const [id, task] of [['conformance_python', 'http-conformance'], ['mcp_conformance_setup', 'mcp-conformance']]) {
+    assert.equal(apiUnitJob.steps.find(step => step.id === id).if,
+      `matrix.group == 'db' && contains(fromJSON(needs.plan.outputs.plan).tasks, '${task}')`);
+  }
   assert.match(dbImage.run, /toolchain\.json/);
   assert.match(dbImage.run, /docker pull "\$image"/);
   assert.ok(apiUnitJob.steps.indexOf(dbImage) < apiUnitJob.steps.findIndex(step => step.name === 'Run selected validations'));
@@ -479,7 +487,7 @@ test('browser lanes cover each profile and use compatible browser images', () =>
     const ui = VERIFICATION_GROUPS[prefix + 'ui-v1'];
     const tasks = [...writing, ...reference, ...ui];
     assert.deepEqual(tasks.toSorted(), BROWSER_SHARDS.map(shard => prefix + shard.id).toSorted());
-    assert.deepEqual(ui, [prefix + 'ui-v1']);
+    assert.deepEqual(ui.slice(0, 2), [prefix + 'ui-v1', prefix + 'modular-workspace']);
     assert.equal(reference.at(-1), prefix + 'redesign-visual', 'Keep visual measurements after the parallel shards');
   }
 });

@@ -22,7 +22,9 @@ pnpm build
 pnpm audit:core
 ```
 
-`pnpm test` runs workspace suites and root script tests. `typecheck:tests` includes test sources, and `typecheck:safety` applies stricter scoped compiler checks. Core dependency auditing requires a Core build; use `CODEXIA_PROFILE=core pnpm build` if a Full build replaced the outputs.
+`pnpm test` runs workspace suites and root script tests. `pnpm typecheck:tests` builds prerequisites for all test-source scopes. To check one scope, run `pnpm typecheck:tests modules`, `pnpm typecheck:tests packages`, or `pnpm typecheck:tests app-e2e`. `typecheck:safety` applies stricter scoped compiler checks. Core dependency auditing requires a Core build; use `CODEXIA_PROFILE=core pnpm build` if a Full build replaced the outputs.
+
+For feedback before pushing, run `pnpm test:unit:changed` from the repository root after installing dependencies. It compares the working tree, including untracked non-ignored files, with the merge base of HEAD and your local `origin/main` ref. Refresh that ref with `git fetch origin main` when needed. Use `pnpm test:unit:changed --list` to preview the selection, or pass a different base, e.g. `pnpm test:unit:changed HEAD` for uncommitted edits. The command uses the PR impact rules, prepares the selected unit suites' workspace dependencies once, and runs those suites. Unknown paths select all unit suites. Database-backed suites require their normal disposable databases. CI owns the broader verification and certification.
 
 The PostgreSQL persistence suite is part of `pnpm test` and requires a disposable PostgreSQL database in `CODEXIA_TEST_DATABASE_URL`. It runs the migrations and exercises persistence transactions; it does not clean the database after the run. The fresh-schema regression creates and removes a separate random disposable database, so use a disposable PostgreSQL server with a test role allowed to create databases. For example, start a disposable local server, then run `CODEXIA_TEST_DATABASE_URL=postgres://codexia:codexia@127.0.0.1:55440/codexia_test pnpm test`. The verification workflow supplies its own PostgreSQL service.
 
