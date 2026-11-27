@@ -13,6 +13,7 @@ test('evidence checkout retains the complete test and workspace manifest invento
     'profiles/core/package.json', 'profiles/core.json',
     'scripts/ci/impact/plan.mjs', 'scripts/ci/evidence/package.json',
     'deploy/quadlet/codexia-api.container', '.github/workflows/verify.yml',
+    '.github/workflows/verify-profile.yml',
     'ios/Sources/App.swift', 'docs/overview.md', '.agents/example.md',
   ];
   const selected = evidenceCheckoutInputs(files);

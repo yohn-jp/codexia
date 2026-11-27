@@ -40,6 +40,17 @@ test('partial reruns exclude carried execution even when GitHub relabels its att
   assert.equal(report.criticalPath, null);
 });
 
+test('a reusable profile browser can be the last certification predecessor', () => {
+  const report = summarizeCiTiming(run, [
+    job('plan', 0, 1, 3),
+    job('profile-core / build-core', 3, 4, 8),
+    job('profile-core / browser-core-writing', 8, 10, 18),
+    job('certification', 18, 19, 21),
+  ]);
+  assert.equal(report.criticalPath, 'profile-core / browser-core-writing -> certification');
+  assert.equal(report.runnerSeconds, 16);
+});
+
 test('unknown timestamps and in-progress work do not become complete timing evidence', () => {
   const report = summarizeCiTiming({...run, status: 'in_progress'}, [
     {...job('unit-core', 0, 2, 5), completed_at: null, conclusion: null},

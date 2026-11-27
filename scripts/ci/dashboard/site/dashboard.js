@@ -5,6 +5,7 @@ import { buildDiagnosticExport } from './dashboard/diagnostics.mjs';
 const REPOSITORY = 'yohn-jp/codexia';
 const API = 'https://api.github.com/repos/' + REPOSITORY + '/';
 const WORKFLOW_SOURCE = './verify.yml';
+const PROFILE_WORKFLOW_SOURCE = './verify-profile.yml';
 
 const el = id => document.getElementById(id);
 const date = input => { const d = Date.parse(input ?? ''); return Number.isFinite(d) ? d : null; };
@@ -56,7 +57,7 @@ function quantile(numbers, p) {
   const sorted = [...numbers].sort((a,b) => a - b);
   return sorted[Math.ceil(p * sorted.length) - 1];
 }
-let all = [], selected = null, coverage = {}, verifySource = '';
+let all = [], selected = null, coverage = {}, verifySource = { verify: '', profile: '' };
 let inventoryRuns = [], groups = [], inventoryPage = 0, hasMore = true, reportedTotal = null;
 let windowPage = 0, windowBefore = null, inventoryLimitReason = null;
 let observed = new Map(), selectionVersion = 0;
@@ -520,12 +521,15 @@ async function loadDashboard() {
   hasMore = true; reportedTotal = null; observed = new Map();
   resetPanels('データを読み込んでいます。');
   try {
-    const workflowResponse = await fetch(WORKFLOW_SOURCE, {
-      signal: AbortSignal.timeout(20_000),
-      redirect: 'error',
-    });
+    const [workflowResponse, profileWorkflowResponse] = await Promise.all([
+      fetch(WORKFLOW_SOURCE, { signal: AbortSignal.timeout(20_000), redirect: 'error' }),
+      fetch(PROFILE_WORKFLOW_SOURCE, { signal: AbortSignal.timeout(20_000), redirect: 'error' }),
+    ]);
     if (!workflowResponse.ok) throw new Error('Verify workflow source unavailable (HTTP ' + workflowResponse.status + ')');
-    verifySource = await workflowResponse.text();
+    if (!profileWorkflowResponse.ok) throw new Error('Verify profile workflow source unavailable (HTTP ' + profileWorkflowResponse.status + ')');
+    [verifySource.verify, verifySource.profile] = await Promise.all([
+      workflowResponse.text(), profileWorkflowResponse.text(),
+    ]);
     await appendInventoryPage();
     const url = new URL(window.location.href);
     const requestedPR = Number(url.searchParams.get('pr'));
