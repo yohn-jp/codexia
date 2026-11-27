@@ -13,6 +13,8 @@ import { ZipWriter } from '@zip.js/zip.js';
 import schema from './open-work-export-v1.schema.json' with { type: 'json' };
 import { omitPortableModuleRecord, safeSettings, unresolvedSchema, WorkArchiveError } from './work-archive.js';
 
+export { WorkArchiveError };
+
 export const OPEN_WORK_EXPORT_BYTES = 128 * 1024 * 1024;
 export const OPEN_WORK_EXPORT_GENERATE_MS = 60_000;
 export const OPEN_WORK_EXPORT_SEND_MS = 300_000;

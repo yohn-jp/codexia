@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
 import { createReadStream, readFileSync } from 'node:fs';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -91,11 +92,10 @@ import {
 } from '@codexia/module-runtime';
 import { assertCurrentJobHistory, type JobEvent, JobHistoryError, JobHistoryStore } from './job-history-store.js';
 import { createNativeKnowledgeActions } from './native-knowledge-actions.js';
-import { generateOpenWorkZip, OPEN_WORK_EXPORT_GENERATE_MS, OPEN_WORK_EXPORT_SEND_MS } from './open-work-export.js';
+import { generateOpenWorkZip, OPEN_WORK_EXPORT_GENERATE_MS, OPEN_WORK_EXPORT_SEND_MS, WorkArchiveError } from './open-work-export.js';
 import { handlePersistenceOperation } from './persistence-routes.js';
 import { compareProjectPageKeys, decodeProjectPageCursor, encodeProjectPageCursor } from './project-pagination.js';
 import { RecentActivityStore } from './recent-activity-store.js';
-import { WorkArchiveError } from './work-archive.js';
 
 // The installed protocol handler owns these endpoints and their wire schemas.
 const BETTER_AUTH_HTTP_ROUTES = [
@@ -670,10 +670,15 @@ export function createServer(options: ApiServerOptions): Server {
       throw httpFailure(404, 'PROJECT_NOT_FOUND', 'Project was not found');
     }
   };
-  const findAuthorizedProject = async (projectId: string, allowedProjectIds?: readonly string[]): Promise<Project | undefined> => {
+  const findAuthorizedProject = async (
+    projectId: string,
+    allowedProjectIds?: readonly string[],
+    readSignal?: AbortSignal,
+  ): Promise<Project | undefined> => {
     assertAssignedProject(projectId, allowedProjectIds);
-    const project = await options.persistence.read(reader =>
-      reader.getProject(projectId as import('@codexia/persistence-contracts').ProjectId),
+    const project = await options.persistence.read(
+      reader => reader.getProject(projectId as import('@codexia/persistence-contracts').ProjectId),
+      readSignal ? { signal: readSignal, statementTimeoutMs: OPEN_WORK_EXPORT_GENERATE_MS } : undefined,
     );
     return project?.id === projectId ? project : undefined;
   };
@@ -1832,6 +1837,7 @@ export function createServer(options: ApiServerOptions): Server {
     params: Record<string, string>,
     query: URLSearchParams,
     policy: AdmissionPolicy,
+    deadline?: AbortSignal,
   ) => {
     const standaloneMcpRoute = policy === 'mcp';
     const mcpStreamableRoute = standaloneMcpRoute || policy === 'mcp-module';
@@ -1908,6 +1914,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (admittedMcpClient && policy === 'persistence') {
       throw httpFailure(403, 'OAUTH_MCP_PERSISTENCE_DENIED', 'Standalone MCP clients cannot use the direct persistence API');
     }
+    deadline?.throwIfAborted();
     const isAuthor = Boolean(oauthPrincipal);
     const isBearer = Boolean(admittedMcpClient);
     const canReviewPrivateChangeSets = isAuthor;
@@ -2927,9 +2934,19 @@ export function createServer(options: ApiServerOptions): Server {
     let archive: Awaited<ReturnType<typeof generateOpenWorkZip>> | undefined;
     try {
       archive = await generateOpenWorkZip(persistence, projectId, generateSignal);
-      const fresh = await admit(context.request, context.response, context.params, context.query, 'persistence');
-      await fresh.requireAuthorSession();
-      if (!(await findAuthorizedProject(projectId))) return context.reject(404, 'WORK_NOT_FOUND', 'Work was not found');
+      generateSignal.throwIfAborted();
+      const completed = new AbortController();
+      try {
+        const reauthorize = (async () => {
+          const fresh = await admit(context.request, context.response, context.params, context.query, 'persistence', generateSignal);
+          await fresh.requireAuthorSession();
+          return findAuthorizedProject(projectId, undefined, generateSignal);
+        })();
+        const timeout = once(generateSignal, 'abort', { signal: completed.signal }).then(() => generateSignal.throwIfAborted());
+        if (!(await Promise.race([reauthorize, timeout]))) return context.reject(404, 'WORK_NOT_FOUND', 'Work was not found');
+      } finally {
+        completed.abort();
+      }
       generateSignal.throwIfAborted();
       context.response.statusCode = 200;
       context.response.setHeader('Content-Type', 'application/zip');

@@ -3342,8 +3342,8 @@ Knowledge、Evidence、Assertion、未解決参照、許可された作者所有
 **UID**: OBL-REQ-DATA-006-O04
 **Design reference**: [Portable works](../authoring-portable.md)
 **Implementation identifiers**: packages/api/src/server.ts: openWorkExport; packages/api/src/work-archive.ts: omitPortableModuleRecord
-**Test IDs**: TEST-DATA-006-001, TEST-DATA-006-003
 **Surface identifiers**: httpOperation=GET /api/v1/persistence/projects/{projectId}/open-export; controlId=LIB-01.E
+**Test IDs**: TEST-DATA-006-001, TEST-DATA-006-003
 **Exact-run reference**: NOT_RUN
 **Comment**: 実 API の認可と機密除外を検証する。再認可失敗と外部経路での試験が残る。
 
