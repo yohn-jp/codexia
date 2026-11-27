@@ -23,7 +23,7 @@ CLI を常駐 agent、self-hosted runner、独自 scheduler、pull updater、Ans
 ```mermaid
 flowchart TD
     U["運用者端末: SSH + ブラウザー"] --> C["対象 VM: codexiactl init"]
-    C --> G["GitHub: 認証・既存 Environment 設定"]
+    C --> G["公式 GitHub App: 認証・対象 codexia 発見・Environment 設定"]
     C --> T["Tailscale: node と CI OIDC 信頼"]
     C --> F["Cloudflare: 既存 edge と資格情報"]
     F --> I["既存 Terraform 管理面: 必要時のみ承認・適用"]
@@ -43,7 +43,7 @@ flowchart TD
 
 対象は現行 IaC のサポート OS/CPU（Ubuntu 26.04 x86-64）である。署名または認定された provenance と SHA-256 を検証できる immutable な GitHub Release 成果物として Linux 用 Go バイナリを配布する。配布先とバージョンを明示し、未認定 HEAD の実行や curl | shell を通常手順にしない。CLI のリリースは既存 CI の exact-source 契約に従い、初回利用者に Go、Node、Ansible、Terraform のインストールを要求しない。OS の OpenSSH、sudo、Tailscale はそれぞれ公式コンポーネントを利用する。必要な Tailscale の導入はサポート対象 OS の公式署名済みパッケージを用い、導入前に承認する。既存の公式 CLI を補助利用する場合も権限・バージョン・一時設定ディレクトリ・終了時の消去を明記し、未導入なら対応する公式 API または認証ガイドを使う。未確認の OAuth client ID、埋込み client secret、非公開 API は採用しない。
 
-運用者が信頼済みの手段で対象 VM へ SSH し、通常ユーザーとして以下を実行する。CLI は別のリポジトリに対して任意の配備権限を行使しない。初期対象は `yohn-jp/codexia` の `main` と、同一認定 source の [production.json](../../deploy/production.json) である。リポジトリ ID・origin・対象 VM を表示し、名前だけで同一性を判定しない。
+運用者が信頼済みの手段で対象 VM へ SSH し、通常ユーザーとして以下を実行する。CLI の公式配布元は `yohn-jp/codexia` であるが、配備対象は公式 GitHub App の認証後に §4.1 に従って発見する。公式リポジトリと利用者の Fork は同じ経路で扱い、配備先の owner・repository ID・OIDC identity を公式配布元に固定しない。対象は選択された `codexia` リポジトリの保護された `main` と、その exact source の [production.json](../../deploy/production.json) である。利用者に repository 名・ID・任意 URL・設定ファイル・`--repo` 等の追加指定を要求しない。
 
 | コマンド | 入力・動作 | 終了条件 |
 | --- | --- | --- |
@@ -57,17 +57,17 @@ flowchart TD
 
 ## 2.1 CLI 自身のリリース・更新ライフサイクル（正本）
 
-CLI の**配布**は本節が所有し、CLI を使う初回 VM 導入・R0–R8 は本書 §3 と [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) が所有する。CLI のバージョンと Backend/Frontend の配備バージョンを混同しない。Backend は既存 `backend-release.yml` → `backend-deployment-handoff.yml` の自動認定・公開・互換更新経路、Frontend は `frontend-release.yml` を利用する。CTL のタグでは OCI や本番配備を起動しない。CLI は常駐更新器ではなく、既存 VM の自動更新・再起動を行わない。
+公式 CLI の**配布**は本節が所有し、CLI を使う初回 VM 導入・R0–R8 は本書 §3 と [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) が所有する。公式 CLI の配布元、公開 GitHub App、公式 Release の認定主体は `yohn-jp/codexia` に固定する。Fork は同じ公式 CLI を取得して使用し、Fork に公式 CLI の自動採番・再公開や別の App の登録を要求しない。公式 CLI 発行専用 Workflow は公式配布元でのみ発行処理を行う。Backend/Frontend の認定・公開・配備は選択された配備リポジトリ自身の既存 Workflow が所有する。CLI のバージョンと Backend/Frontend の配備バージョンを混同しない。Backend は既存 `backend-release.yml` → `backend-deployment-handoff.yml` の自動認定・公開・互換更新経路、Frontend は `frontend-release.yml` を利用する。CTL のタグでは OCI や本番配備を起動しない。CLI は常駐更新器ではなく、既存 VM の自動更新・再起動を行わない。
 
 1. 開発者が `cmd/codexiactl/**`、`scripts/ci/execution/verify-codexiactl.sh`、CLI release component、または `.github/workflows/publish-codexiactl.yml` を変更して PR を main に統合する。対象変更の定義は自動タグ付け Workflow と一致させる。ドキュメントだけの変更はリリースを要求しない。
 2. `Verify Codexia` の main push 実行が成功した後、`.github/workflows/codexiactl-auto-release.yml` が成功 run の exact SHA と現行 main HEAD を照合する。失敗した認定、追い越された SHA は発行しない。初回の認定成功では、直前のコミットの変更範囲によらず CLI を一度公開する。比較不能・API 応答不完全なら安全停止する。
 3. 既存の `v0.1.x` の最大 patch とそのソース SHA を取得する。以前のタグと現在の認定済み `main` の全差分（第一親の直近1コミットではない）に CLI 関連入力の実変更がある場合のみ `v0.1.(x+1)` を発行する。同一 SHA が既存タグを持つ場合は新しい番号を発行しない。公開完了済みなら no-op、タグ作成後の dispatch 失敗や結果不明なら、後続の無関係な main 更新後も公開未完了の既存タグを再 dispatch して再開する。異なるソースに既存番号を転用しない。タグの再割当て・削除・上書きは禁止。取得したタグの祖先性、競合する書込み、対象範囲が検証できなければ安全停止する。
 4. `GITHUB_TOKEN` でタグを作成した後、同じトークンの `workflow_dispatch` でタグ ref を指定し、独立した `Publish CodexiaCTL`（`.github/workflows/publish-codexiactl.yml`）が起動する。exact-source Verify 証明、Linux amd64 CLI ビルド、provenance/attestation、SHA-256 manifest、Release asset の照合を**すべて**維持する。OCI core/full の公開・本番配備は実行しない。自動タグ作成の成功は公開成功を意味しない。
-5. 正式公開後に運用者は immutable GitHub Release から `codexiactl-linux-amd64` と `codexiactl-linux-amd64.sha256` を取得し、SHA-256 と GitHub attestation/provenance を照合して通常ユーザーで配置する。初回導入は `version`、`doctor`、`init --plan`、`init` の順。更新時も認定済みバイナリに置き換えるだけで、既存 owner/DB/鍵を再初期化しない。
+5. 正式公開後に運用者は immutable GitHub Release から `codexiactl-linux-amd64` と `codexiactl-linux-amd64.sha256` を取得し、SHA-256 と GitHub attestation/provenance を照合して通常ユーザーで配置する。初回導入は `version`、`doctor`、`init --plan`、`init` の順。公開元の attestation は `publish-codexiactl.yml` と公式配布元の正しい tag/source を確認する。配備先の認定証跡を公式 CLI の provenance として代用しない。更新時も認定済みバイナリに置き換えるだけで、既存 owner/DB/鍵を再初期化しない。
 
 ### 発行用認証と保護
 
-自動タグ作成と後続公開 Workflow の起動には標準 `GITHUB_TOKEN` の `contents: write` と `actions: write` を利用する。GitHub Actions で `GITHUB_TOKEN` により作成されたタグの push は別 Workflow の push trigger を起動しないため、タグ ref を指定した `workflow_dispatch` を明示的に発行する。`CODEXIA_RELEASE_TAG_TOKEN`、専用 GitHub App、PAT は不要であり、登録してはならない。公開 Workflow は tag ref、remote tag の exact SHA、成功した main Verify を再検証する。
+自動タグ作成と後続公開 Workflow の起動には標準 `GITHUB_TOKEN` の `contents: write` と `actions: write` を利用する。GitHub Actions で `GITHUB_TOKEN` により作成されたタグの push は別 Workflow の push trigger を起動しないため、タグ ref を指定した `workflow_dispatch` を明示的に発行する。`CODEXIA_RELEASE_TAG_TOKEN`、発行用の専用 GitHub App、PAT は不要であり、登録してはならない。利用者認証用の公式 Codexia GitHub App はこの発行権限を持つ主体ではない。公開 Workflow は tag ref、remote tag の exact SHA、成功した main Verify を再検証する。
 
 `CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN` は要求しない。公開結果の Release API 応答で `immutable=true` と asset digest/size を検証し、設定が無効な場合は公開失敗として扱う。管理権限の読み取り専用トークンを新設しない。
 
@@ -80,7 +80,7 @@ CLI の**配布**は本節が所有し、CLI を使う初回 VM 導入・R0–R8
 | 順番 | 操作と入力 | 成功・次への条件 |
 | --- | --- | --- |
 | 01 VM | 現在の SSH ユーザー、OS、CPU、時刻、sudo、既存 sshd の有効設定・公開 host key、既存 Tailscale 状態、既存 Codexia 資源の非破壊観測 | 対象 VM の同一性が確認でき、独立に認証した管理経路が残る。root・service account を bootstrap 管理者にしない |
-| 02 GitHub | §4.1 の認証、利用者と app/repo 権限、repo ID、main SHA、既存 Environment と protection、既存 Variables/Secrets の名前、workflow の存在を取得 | 配備対象一致。必要な権限が有効。main と現行 CLI 対応契約を確認 |
+| 02 GitHub | §4.1 の Device Flow、公式 App installation とユーザーの権限の共通部分から `codexia` を発見し確認、owner/repo ID、main SHA、既存 Environment/protection、Variables/Secrets の名前、workflow と正本を取得 | 一意に承認された対象に固定。必要な権限・保護・現行 CLI 対応契約が成立。他の repo の入力・証跡を利用しない |
 | 03 Tailscale | §4.2 の node 接続、Tailnet 管理認証、既存 node ID、対象アドレス、WIF client ID/audience、CI tag、policy の検査 | 期待する Tailnet と node、CI の到達許可、既存 OIDC 信頼を確認。不足だけ承認して準備 |
 | 04 Cloudflare | §4.3 の認証、production origin に対応する account/zone、Tunnel、Access apps/policies、Worker/routes の読取り。既存設定に対応する資格情報を確認・準備 | origin/route/identity の唯一の一致、正常な setup-only 経路の前提。変更は既存 Terraform の承認済み適用後の再観測 |
 | 05 制御面登録 | §5 の差分を提示。bootstrap 管理鍵と runtime 鍵を分離し、必要な公開鍵・pin・外部資格情報・Environment 入力を登録 | GitHub の登録結果、公開鍵の対応、protection、既存設定の非破壊を確認。Secrets の存在は実接続の代用にしない |
@@ -110,19 +110,40 @@ ssh -N -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=yes \
 
 最初の SSH が独立に host key pin を検証済みであることを要求し、別セッションも同じ pin/SSH config を使う。remote CLI が端末側の SSH forwarding を勝手に設定できるとは仮定しない。事前確保されたポート競合、転送禁止、接続失敗、callback 不一致は診断して安全停止または公式 Device Flow へ切り替える。PKCE/state/redirect URI の一致、コードの一回性、期限、callback の送信元・path を検証する。0.0.0.0 での待受け、公開 Cloudflare Tunnel/Funnel、SSH agent forwarding、SSH の host verification 無効化、URL からのコード手動抽出は通常手段としない。認証完了/失敗/中断で callback listener を閉じ、CLI が開いたものだけ閉じる。端末で利用者が起動した転送は終了コマンドを案内する。ブラウザー認証後の Owner 登録は本番 HTTPS origin で実施し、OAuth 用 SSH 転送を使わない。
 
-### 4.1 GitHub（最初の外部サービス認証）
+### 4.1 GitHub（公式 App による認証・配備対象の発見）
 
-配布元が事前登録した device flow 有効の GitHub App の公開 client ID を CLI の対応リリースに束縛する。App は対象 repository にのみインストールする。対話では必要時に GitHub の公式 App インストール/認証ページへ誘導し、権限一覧と実対象を確認する。App private key/client secret をバイナリに含めない。公式 Device Flow で得た短命な user access token を使用する。GitHub App が未準備の場合は明示的な保守前提の不足として案内し、任意の OAuth client を流用しない。対応する期限付き repository 限定 fine-grained PAT を運用者が選ぶ場合のみ、TTY の非表示入力で受け付ける。
+配布元が事前登録した **一つの公開 Codexia GitHub App** を公式の利用者認証入口とする。第三者の個人アカウント・Organization にインストールできる Public App とし、Device Flow と有効期限付き user access token を有効にする。利用者は GitHub の公式 App インストール画面で `Only select repositories` を選び、自身の `codexia`（公式リポジトリまたは Fork 等）に委任する。App の公開 Client ID は公式配布元の Repository Variable `CODEXIACTL_GITHUB_APP_CLIENT_ID` から既存の公式 Release ビルドに束縛して埋め込む。これは秘密ではない。App private key/client secret、installation access token、PAT を CLI・Git・GitHub Actions の Secret に配布しない。公式 CLI は Device Flow の user access token を当該対話セッション内だけで使う。App が未準備、Client ID が未設定、認証が拒否・失効した場合は設定者・公式画面・不足条件を示して安全停止する。この対象発見契約では旧 fine-grained PAT 経路を廃止し、PAT・任意の OAuth App・手入力した repository で App の委任を迂回しない。公式 App の登録と権限付与は公式配布元の管理者が行い、利用者ごとに App を作成させない。
 
-必要権限は repository の Metadata/Contents read、Actions read/write（dispatch・run 照合）、Environments read/write（環境 Variables/Secrets）、必要な場合のみ Administration write（Environment の新規作成・保護設定）。公開候補の証拠の読取りに必要な追加 read 権限は公式 endpoint 要件に従って明示する。user の権限と App の権限の積を実 API で検査する。Environment の保護ルールを書き換えて承認を迂回しない。既存同等の保護設定が不足する場合は別の明示承認が必要であり、設定不能な plan では停止する。
+#### 対象発見と確認
 
-GitHub REST API から repository ID、default/main、Environment と保護、branch restriction、Variables、Secret の名前と更新時刻を列挙する。Secret の値は取得できない。GitHub の Environment public key で Libsodium 互換 sealed box を使い値を暗号化して登録する。GitHub token の権限不足や App 未承認を private credential のログ出力で解決しない。GitHub の管理 token は VM サービスや Actions の Secret に格納しない。Workflow は公式 dispatch API の run ID 応答を利用し、その ID の job/attempt/artifact を照合する。既存版 API が ID を返さない場合は同じ操作の run を一意に同定できるまで読取りのみとし、時刻の近い別 run を採用しない。
+ローカルの VM 観測後、同じ公式 Device Flow で `init`、`init --plan`、`doctor`、`status` の対象を発見する。GitHub の認証済みユーザーと公式 App の user token を確認し、`GET /user/installations` と `GET /user/installations/{installation_id}/repositories` の全ページを取得する。App がアクセスできる全 repo ではなく、認証済みユーザーと App の両方がアクセスできる repo だけが対象である。停止中の installation、対象の委任・権限を実証できない repo、archived/disabled repo、名前が `codexia` でない repo は配備対象にしない。App のインストールは対象 repo に限定する方針を維持し、all-repositories の一括委任は対象選択の代わりとしない。候補の判定に公式 owner 名・既知の repository ID・`fork` フラグ・親 repo の固定値は使わない。リポジトリ名は候補のフィルターであって、配備の認可・契約適合を証明するものではない。
+
+| 候補 | 対話と次への条件 |
+| --- | --- |
+| 0 件 | 公式 App を対象 `codexia` にインストールし、認証したユーザーへ必要な権限を付与する手順・URLを示す。再観測するまで配備を開始しない。公式 repo に暗黙でフォールバックしない |
+| 1 件 | `owner/codexia`、owner/repository の数値 ID、installation、ユーザー、`main`、公開 origin、対象 VM を確認できる順に表示し、対象を明示確認する。無条件で書き込まない |
+| 複数件 | 重複を repository ID で排除し、完全修飾名と ID による一覧から対象を選択させる。入力は観測済み候補の選択に限定する。選択取消・一覧不完全・不明確な ID は安全停止 |
+| 再実行 | 同じ VM の既存 checkpoint の repository ID を再観測した候補と照合する。対象が消失、権限剥奪、所有者移転、改名、別 ID、候補の曖昧さがある場合は安全停止。既存 DB/設定/秘密/未解決 run を別 repo に自動移管しない |
+
+選択された一つの配備対象を、GitHub API が返す canonical owner/name、owner ID、repository ID、installation ID と保護された default branch `main` の組として扱う。認証・対象確認後に一つの不変の対象コンテキストとして CLI の全制御面に渡す。公式配布元自身を選んだ場合も例外分岐を設けない。名前だけで同一性を判定せず、変更直前の再観測で repo/owner/installation・権限・main SHA・protection を照合する。再開には既存の非秘密 checkpoint を利用し、read-only command はその保存・変更を行わない。別 repo の URL、Environment、run、artifact、secret、OIDC credential を同じ名前であることを理由に採用しない。
+
+#### 権限・配備契約と認定の分離
+
+必要権限は repository の Metadata/Contents read、Actions read/write（dispatch・run 照合）、Environments read/write（環境 Variables/Secrets）、必要な場合のみ Administration write（Environment の新規作成・保護設定）。公開候補の証拠の読取りに必要な追加 read 権限は公式 endpoint 要件に従って明示する。user の権限と App の権限の積を実 API で検査し、対象 repo の必要操作が認可されなければ安全停止する。Environment の保護ルールを書き換えて承認を迂回しない。既存同等の保護設定が不足する場合は別の明示承認が必要であり、設定不能な plan では停止する。
+
+公式 CLI の release source と配備対象の main source は別の識別子である。公式バイナリは公式配布元の immutable Release と attestation により検証する。配備対象については、選択した repo の保護 main の exact SHA で、CLI が呼ぶ既存 Workflow・dispatch inputs・保護条件・証跡/構成 schema・route/identity/protocol の契約が公式 CLI Release の対応契約と一致することを検証する。従来の source/契約照合を維持し、契約上許容された配備固有の公開値（選択 repo の `deploy/production.json` 等）だけを区別して扱う。公式 repo と Fork の main SHA が同一である必要はない。Fork が自ら出す Verify 成功だけで未知・非互換の CLI 制御契約を受理しない。契約比較不能・不適合の場合は対応する公式 CLI Release または対応契約へ更新するよう案内し、書込み前に停止する。
+
+公開 origin 等の配備固有値は選択 repo の認定 source の既存公開設定から取得して検証し、同じ値を build・配備・probes・Terraform 管理資源・Owner 認証に結合する。公式 origin や Cloudflare account/zone、Tailscale client ID を他の repo に引き継がない。対象固有値を CLI の別設定に複製しない。
+
+対象の repo/owner ID と exact SHA は既存の認定・公開・配備全体の共通境界とする。Workflow の同一 repo/main 判定、API URL、run/job/attempt/artifact/attestation、GHCR namespace/digest、release、certificate、Ansible に渡す証拠、復旧・再開の binding には、選択 repo または実行時に検証した同じ GitHub repository context を使用する。公式リポジトリの固定 owner/ID、公式の product image、公式 origin、他 repo の成功 run を Fork の認定・配備対象に代用しない。公式の CLI 配布・開発者向け公開物など本来 upstream が所有する入口は配備入口と分離する。既存の exact-source certification、Environment/main 保護、OIDC/SSH pin、独立承認、host lock、R0–R8 の経路判定を弱めず、公式と Fork の二重実装、別 Workflow、別配備 controller、認定機構の追加を行わない。
+
+GitHub REST API から選択 repo の identity、default/main、Environment と保護、branch restriction、Variables、Secret の名前と更新時刻を列挙する。Secret の値は取得できない。GitHub の Environment public key で Libsodium 互換 sealed box を使い値を暗号化して登録する。GitHub token の権限不足や App 未承認を private credential のログ出力で解決しない。GitHub の管理 token は VM サービスや Actions の Secret に格納しない。Workflow は公式 dispatch API の run ID 応答を利用し、その ID の job/attempt/artifact を選択 repo に結びつけて照合する。既存版 API が ID を返さない場合は同じ操作の run を一意に同定できるまで読取りのみとし、時刻の近い別 run を採用しない。
 
 ### 4.2 Tailscale（node 認証と管理 API 認証は別）
 
 `tailscale status --json` と公式 CLI で既存 node の状態、Tailnet、node ID、アドレス、承認状態を確認する。すでに正しい Tailnet に接続していれば再ログイン・タグ付替えを行わない。未接続時は公式 `tailscale up` のブラウザー認証 URL を運用者に提示し、必要な device approval を待つ。既存 SSH 接続を失う変更、DNS/route/exit node のリセット、Tailscale SSH への変更を暗黙に行わない。Codexia は従来の OpenSSH over Tailscale を使用する。node のログインは Tailnet 管理 API の認証ではない。
 
-管理 API は既存の scoped trust credential または運用者が公式 admin console で取得した期限付き API access token を非表示入力で受け取る。管理 API 用の汎用 CLI Device Flow が使えるとは仮定しない。CLI は管理 API 認証と対象 VM の Tailscale node 認証を区別し、目的と権限を入力前に表示する。read-only の `doctor` と `init --plan` は node/keys/policy を読み取り、既存の federated identity の issuer（GitHub Actions）、audience、immutable repository subject、workflow/main/Environment claims、`auth_keys` だけの scope、`tag:ci` を個別に照合し、不一致の設定名と必要な値を表示する。GitHub immutable OIDC subject は `repo:yohn-jp@299811358/codexia@1450072993:environment:codexia-*` を許可し、`ref=refs/heads/main` と `workflow_ref=yohn-jp/codexia/.github/workflows/*@refs/heads/main` で限定する。現行の `codexia-production` だけに限定した既存 Credential や `all` scope は自動許可せず、既存 Credential の変更・削除もしない。
+管理 API は既存の scoped trust credential または運用者が公式 admin console で取得した期限付き API access token を非表示入力で受け取る。管理 API 用の汎用 CLI Device Flow が使えるとは仮定しない。CLI は管理 API 認証と対象 VM の Tailscale node 認証を区別し、目的と権限を入力前に表示する。read-only の `doctor` と `init --plan` は node/keys/policy を読み取り、既存の federated identity の issuer（GitHub Actions）、audience、immutable repository subject、workflow/main/Environment claims、`auth_keys` だけの scope、`tag:ci` を個別に照合し、不一致の設定名と必要な値を表示する。GitHub immutable OIDC subject は §4.1 の実際の対象 identity から `repo:OWNER@OWNER-ID/codexia@REPOSITORY-ID:environment:codexia-*` を導出し、`ref=refs/heads/main` と `workflow_ref=OWNER/codexia/.github/workflows/*@refs/heads/main` で限定する。`OWNER` 等は GitHub API により確認された値であり手入力・公式 owner/ID 固定ではない。対象 repo の immutable subject 形式が有効であることを照合し、旧形式・非互換のカスタム subject では GitHub の公式 OIDC 設定で対応形式を有効化する案内を出して停止する。異なる repo/owner ID に対する WIF は許可しない。現行の `codexia-production` だけに限定した既存 Credential や `all` scope は自動許可せず、既存 Credential の変更・削除もしない。
 
 既存の適合 WIF がない場合、`init` のみが設定内容を表示して別承認を求め、`federated_keys (write)` のある一時管理 API token を使って最小権限の新規 Federated Identity を作成し、再取得して完全一致を検証できる。書込み失敗または API 応答喪失時は再観測してから判断し、既存設定を修正・削除・無断再作成しない。通常 CI は WIF の短命な ephemeral node を使用し、管理 API token や長命 auth key を Actions に渡さない。Workflow の audience は同じ保護 Environment の公開 `vars.TS_OAUTH_CLIENT_ID` から `api.tailscale.com/<client-id>` を導出し、固定IDにはしない。新しい導入ではCLIがこの公開Client IDを両EnvironmentのVariableとして登録する。既存の `secrets.TS_OAUTH_CLIENT_ID` は、移行前の本番Workflowを壊さないためにVariable未登録の場合だけフォールバックとして利用し、CLIは読み取れないSecretの既存値を推測・上書きしない。新VariableとOIDC信頼が実動作で検証できた後に、既存Secretの廃止を別途明示承認する。policy の変更は既存 policy 管理権限に従い、必要な node/tag への TCP/22 のみ許可する。共有 Tailnet の ACL 全体の置換、既存タグへの広範な権限追加、SSH の公開はしない。GitHub の保護 runner から実接続して初めて CI 到達性を確認する。
 
@@ -144,7 +165,7 @@ R5 の既存 owner-setup grant と age 暗号化 handoff を利用し、CLI は 
 
 ## 5. 入力の整備と GitHub Environment
 
-既存 `codexia-bootstrap` と `codexia-production` を使う。以下は現行 Workflow の入力名を保つ登録契約である。共通値は同一の検証済み source から CLI が必要な保護 Environment に投影し、利用者による重複転記を廃止する。登録済み値を一律上書きしない。Secrets を repo-wide に昇格して権限を広げない。将来 Workflow が共通入力を一つの保護面で消費できるように変更するなら、不要になった入力は同じ変更で撤去する。設定同期スクリプトを新設しない。
+選択した repo の既存 `codexia-bootstrap` と `codexia-production` を使う。他 repo の Environment は参照・変更しない。以下は現行 Workflow の入力名を保つ登録契約である。共通値は同一の検証済み source から CLI が必要な保護 Environment に投影し、利用者による重複転記を廃止する。登録済み値を一律上書きしない。Secrets を repo-wide に昇格して権限を広げない。将来 Workflow が共通入力を一つの保護面で消費できるように変更するなら、不要になった入力は同じ変更で撤去する。設定同期スクリプトを新設しない。
 
 | 正本・取得方法 | 既存 Variable / Secret 名 | 登録先・注意 |
 | --- | --- | --- |
@@ -168,7 +189,7 @@ SSH host pin は既に独立認証された SSH 接続または provider console
 
 ## 6. Workflow dispatch・承認・再開契約
 
-初回はすべて `ref=main`。起動前に現行 main と承認対象 SHA が一致することを検査し、返った run の head_sha、event、workflow path、attempt、必要な job/receipt/certified pair を確認する。動的な Run ID は CLI が扱い、ユーザーにはレビュー用のリンクと要約を表示する。新たな状態変更または main の変化・rerun の後は新しい lifecycle preflight を生成し、古い証拠を流用しない。
+初回はすべて選択 repo の `ref=main`。起動前に選択済み repository identity・App/user 権限・現行 main と承認対象 SHA が一致することを検査し、返った run の repository/head repository ID、head_sha、event、workflow path、attempt、必要な job/receipt/certified pair を同じ対象に照合する。動的な Run ID は CLI が扱い、ユーザーにはレビュー用のリンクと要約を表示する。新たな状態変更または main の変化・rerun の後は新しい lifecycle preflight を生成し、古い証拠を流用しない。
 
 | operation | dispatch workflow file | inputs（固定名） |
 | --- | --- | --- |
@@ -208,11 +229,13 @@ Go の標準 crypto/net/http、維持されている GitHub/Tailscale/Cloudflare
 | CLI-06 | CLI 終了後に管理 token/一時鍵が残らず、通常配備が CLI 非依存。保全未受入で R8 が停止し、独立受入後は既存の compatible update が実際に成功 |
 | CLI-07 | plan/status/doctor は構成を変更せず、JSON/log に秘密がない。失敗した実ステップ・不足する権限・対象 run を表示し、不明状態を成功としない |
 | CLI-08 | リポジトリと運用入口を照合し、CLI と重複する設定同期・手作業だけの通常経路を除去。Ansible/Terraform/Actions/認定/復旧の正本が二重化されていない |
+| CLI-09 | 同じ公式バイナリと公式 App で公式 repo および他の個人/Organization の `codexia` を検出し、対象を選択して初回導入を完走する。0/1/複数候補、全ページ取得、取消・停止中 installation・非対象名・権限不足・未設定 App・別 repo checkpoint・別 repo からの証跡を検証。PAT や任意 URL での迂回は不可 |
+| CLI-10 | 配備対象ごとに owner/repo ID、OIDC Subject/claims、Environment、公開 origin、証跡と product image を一貫して分離。異なる SHA でも対応契約の Fork を許可し、不適合契約・旧 OIDC 形式・古い証拠・改名/移転・別 repo への書込みは拒否する。公式 CLI の配布主体と対象 repo の product publication を分離し、Fork で公式 CLI の自動発行を行わない。実 GitHub App/隔離 Fork/VM での受入と既存公式 repo の回帰確認は模擬 API/CI と区別する |
 
-この設計 PR では CLI の実装や配備、外部アカウント設定の変更を行わない。実装の受入は上記証拠をもって判定する。
+本書は規範的な設計・受入契約であり、CLI の実装、公式 App の設定、配備が完了したことを示すものではない。実装の受入は上記証拠をもって判定する。
 
 ## 公式仕様（設計根拠）
 
-- GitHub: [CLI with a GitHub App / device flow](https://docs.github.com/en/apps/creating-github-apps/writing-code-for-a-github-app/building-a-cli-with-a-github-app), [user access token](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app), [Environments](https://docs.github.com/en/rest/deployments/environments), [Variables](https://docs.github.com/en/rest/actions/variables), [Secrets](https://docs.github.com/en/rest/actions/secrets), [Workflow dispatch](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event).
+- GitHub: [CLI with a GitHub App / device flow](https://docs.github.com/en/apps/creating-github-apps/writing-code-for-a-github-app/building-a-cli-with-a-github-app), [user access token](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app), [App installations and accessible repositories](https://docs.github.com/en/rest/apps/installations), [OIDC immutable subject claims](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims), [Environments](https://docs.github.com/en/rest/deployments/environments), [Variables](https://docs.github.com/en/rest/actions/variables), [Secrets](https://docs.github.com/en/rest/actions/secrets), [Workflow dispatch](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event).
 - Tailscale: [tailscale up](https://tailscale.com/docs/reference/tailscale-cli/up), [Workload identity federation](https://tailscale.com/docs/features/workload-identity-federation), [Trust credentials and scopes](https://tailscale.com/docs/reference/trust-credentials).
 - Cloudflare: [Wrangler device flow](https://developers.cloudflare.com/changelog/post/2026-08-04-wrangler-login-device-flow/), [Wrangler auth commands](https://developers.cloudflare.com/workers/wrangler/commands/general/), [Tunnel token](https://developers.cloudflare.com/api/resources/zero_trust/subresources/tunnels/), [Service token creation](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/service_tokens/methods/create/), [User token creation](https://developers.cloudflare.com/api/resources/user/subresources/tokens/methods/create/), [Account token creation](https://developers.cloudflare.com/api/resources/accounts/subresources/tokens/methods/create/).
