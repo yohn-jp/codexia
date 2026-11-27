@@ -419,4 +419,4 @@ jobs:
           compression-level: 9
           path: ${{ runner.temp }}/backend-deployment-certificates
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14

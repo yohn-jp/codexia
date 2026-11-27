@@ -261,6 +261,7 @@
   when:
     - codexia_current_container_exists.rc == 1
     - codexia_expected_recovery_activation is not defined
+    - codexia_expected_adopt_activation is not defined
 
 - name: Require a clean restored slot with separate R3 evidence
   when: codexia_expected_recovery_activation is defined
@@ -272,6 +273,19 @@
       - not (codexia_initial_install_approved | default(false) | bool)
       - not (codexia_database_initialization_approved | default(false) | bool)
     fail_msg: Restored Backend recovery requires the R3 evidence, an isolated clean API slot and no new database initialization approval.
+
+- name: Require an existing-owner R6 adoption without new installation or database initialization
+  when: codexia_expected_adopt_activation is defined
+  ansible.builtin.assert:
+    that:
+      - codexia_expected_adopt_activation is mapping
+      - codexia_current_container_exists.rc == 1
+      - codexia_expected_first_activation is not defined
+      - codexia_expected_recovery_activation is not defined
+      - codexia_database_adoption_approved | default(false) | bool
+      - not (codexia_initial_install_approved | default(false) | bool)
+      - not (codexia_database_initialization_approved | default(false) | bool)
+    fail_msg: Existing-owner adoption requires a reviewed R6 plan and separately verified preservation without database initialization.
 
 - name: Inspect staged Better Auth runtime settings without following links
   ansible.builtin.stat:
@@ -391,6 +405,7 @@
       auth_settings_digest={{ codexia_auth_settings_sha256 | quote }}
       first_activation={{ (codexia_expected_first_activation | default(none)) | to_json | quote }}
       recovery_activation={{ (codexia_expected_recovery_activation | default(none)) | to_json | quote }}
+      adoption_activation={{ (codexia_expected_adopt_activation | default(none)) | to_json | quote }}
       admitted_container={{ (codexia_current_api_observation.stdout if codexia_current_container_exists.rc == 0 else '') | quote }}
       admitted_unit_sha256={{ (codexia_admitted_api_unit_sha256 if codexia_current_container_exists.rc == 0 else '') | quote }}
       admitted_unit_image={{ (codexia_current_api_unit_images[0] if codexia_current_container_exists.rc == 0 else '') | quote }}
@@ -465,11 +480,11 @@
           stale_admission 'first activation requires a clean API target'
       fi
       # A clean production slot requires an explicitly admitted R6 or R3.
-      if [[ "$had_unit" == false && "$require_tunnel" == true && "$first_activation" == null && "$recovery_activation" == null ]]; then
+      if [[ "$had_unit" == false && "$require_tunnel" == true && "$first_activation" == null && "$recovery_activation" == null && "$adoption_activation" == null ]]; then
         stale_admission 'first activation requires an approved R6 plan or restored R3 plan'
       fi
       first_activation_window_current(){
-        [[ "$first_activation" != null ]] || return 0
+        [[ "$first_activation" != null || "$adoption_activation" != null ]] || return 0
         local now
         now="$(date +%s%3N)" || return 1
         [[ "$now" =~ ^[1-9][0-9]{0,15}$ ]] || return 1
@@ -533,6 +548,57 @@
         "$HOME/.local/bin/codexia-preflight-observe" verify-secret-identities "$secret_set" ||
           stale_admission 'the prepared Podman credential identities changed'
       fi
+      if [[ "$adoption_activation" != null ]]; then
+        [[ "$had_unit" == false && "$first_activation" == null && "$recovery_activation" == null ]] ||
+          stale_admission 'existing-owner adoption requires a clean isolated API slot'
+        adoption_binding="$(node - "$adoption_activation" <<'NODE'
+      const {hostId, clusterId, databaseOid, ownerBindingSha256, settingsSha256,
+        secretSetSha256, preservationSha256, notBeforeMs, notAfterMs} = JSON.parse(process.argv[2]);
+      const hash = /^[a-f0-9]{64}$/u;
+      if (!hash.test(hostId) || !hash.test(settingsSha256) || !hash.test(secretSetSha256) ||
+          !hash.test(preservationSha256) || !/^sha256:[a-f0-9]{64}$/u.test(ownerBindingSha256) ||
+          !/^[1-9][0-9]{0,19}$/u.test(clusterId) || !/^[1-9][0-9]{0,9}$/u.test(databaseOid) ||
+          !Number.isSafeInteger(notBeforeMs) || !Number.isSafeInteger(notAfterMs) ||
+          notBeforeMs <= 0 || notAfterMs <= notBeforeMs) process.exit(2);
+      process.stdout.write([hostId, settingsSha256, clusterId, databaseOid,
+        ownerBindingSha256, notBeforeMs, notAfterMs, secretSetSha256, preservationSha256].join(' '));
+      NODE
+        )" || stale_admission 'existing-owner adoption evidence is invalid'
+        read -r approved_host approved_settings approved_cluster approved_database approved_owner \
+          approved_not_before approved_not_after approved_secrets approved_preservation <<< "$adoption_binding"
+        first_activation_window_current || stale_admission 'existing-owner adoption window expired'
+        machine_id="$(cat /etc/machine-id)" || stale_admission 'adoption host identity unavailable'
+        [[ "$(printf '%s' "$machine_id" | sha256sum)" == "$approved_host  -" ]] ||
+          stale_admission 'existing-owner adoption target changed'
+        live_runtime={{ (home + '/.config/codexia-auth/runtime.env') | quote }}
+        [[ "$auth_settings_digest" == "$approved_settings" && -f "$live_runtime" && ! -L "$live_runtime" &&
+           -O "$live_runtime" && "$(stat -c %a -- "$live_runtime")" == 600 &&
+           "$(sha256sum < "$live_runtime")" == "$approved_settings  -" ]] ||
+          stale_admission 'existing-owner authentication configuration changed'
+        adoption_database="$(podman exec -i codexia-db sh -ec '
+          export PGPASSWORD="$(cat /run/secrets/admin-password)"
+          export PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=10000"
+          exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia
+        ' <<'SQL'
+      SELECT system_identifier || ' ' || (SELECT oid FROM pg_database WHERE datname=current_database()) ||
+        ' sha256:' || encode(sha256(convert_to(setup.owner_id::text,'UTF8')),'hex')
+      FROM pg_control_system() CROSS JOIN codexia_auth.owner_setup setup
+      WHERE setup.id='first-owner' AND setup.consumed_at IS NOT NULL
+        AND (SELECT count(*) FROM codexia_auth."user") = 1
+        AND EXISTS (SELECT FROM codexia_auth."user" u JOIN codexia_auth."passkey" p ON p."userId"=u.id
+          WHERE u.id=setup.owner_id);
+      SQL
+        )" || stale_admission 'existing-owner database identity could not be verified'
+        [[ "$adoption_database" == "$approved_cluster $approved_database $approved_owner" ]] ||
+          stale_admission 'the existing database or owner differs from the approved adoption'
+        "$HOME/.local/bin/codexia-preflight-observe" verify-secret-identities "$approved_secrets" ||
+          stale_admission 'adopted deployment secrets changed'
+        # The protected plan already binds the authenticated independent backup
+        # receipt. A missing receipt is rejected by plan verification before
+        # this host lock is acquired. Never initialize or rewrite this database.
+        [[ "$approved_preservation" =~ ^[a-f0-9]{64}$ ]] ||
+          stale_admission 'existing-owner preservation evidence is missing'
+      fi
       recovery_operation_id=''
       recovery_evidence_sha256=''
       check_recovery_record(){
@@ -565,15 +631,20 @@
         [[ -f "$release_state" && ! -L "$release_state" ]] || { echo 'Previous deployment record is not a regular file' >&2; exit 1; }
         release_present=true
         if [[ "$had_unit" == true ]]; then
-          if ! recorded_image="$(node - "$release_state" "$active_unit" <<'NODE'
+          if ! recorded_image="$(node - "$release_state" "$active_unit" "$rollback_image" "$(podman exec codexia-api cat /app/update-identity.json)" <<'NODE'
       const fs = require('node:fs');
-      const [releasePath, unitPath] = process.argv.slice(2);
+      const { isDeepStrictEqual } = require('node:util');
+      const [releasePath, unitPath, expectedImage, liveIdentityJson] = process.argv.slice(2);
       const value = JSON.parse(fs.readFileSync(releasePath, 'utf8'));
+      const liveIdentity = JSON.parse(liveIdentityJson);
       const unit = fs.readFileSync(unitPath, 'utf8');
       const digests = [...unit.matchAll(/^Environment=CODEXIA_AUTH_SETTINGS_SHA256=([^\r\n]*)$/gm)].map(match => match[1]);
-      if (value.authMode !== 'better-auth' || digests.length !== 1 ||
-          !/^[a-f0-9]{64}$/.test(digests[0]) || value.authSettingsSha256 !== digests[0]) process.exit(2);
-      process.stdout.write(typeof value.image === 'string' ? value.image : '');
+      if (value.format !== 'codexia-push-deployment/v1' ||
+          value.authMode !== 'better-auth' || digests.length !== 1 ||
+          !/^[a-f0-9]{64}$/.test(digests[0]) || value.authSettingsSha256 !== digests[0] ||
+          value.image !== expectedImage || !isDeepStrictEqual(value.identity, liveIdentity) ||
+          value.identity?.format !== 'codexia-backend-identity/v1' || value.identity.profile !== 'full') process.exit(2);
+      process.stdout.write(value.image);
       NODE
           )" || [[ "$recorded_image" != "$rollback_image" ]]; then
             echo 'Prior deployment record does not match its Quadlet image or authentication settings' >&2
@@ -662,7 +733,7 @@
       fi
       tunnel_was_active=false
       if systemctl --user is-active --quiet codexia-tunnel.service; then tunnel_was_active=true; fi
-      if [[ "$recovery_activation" != null && "$tunnel_was_active" == true ]]; then
+      if [[ ( "$recovery_activation" != null || "$first_activation" != null || "$adoption_activation" != null ) && "$tunnel_was_active" == true ]]; then
         stale_admission 'the restored target Tunnel started before publication'
       fi
       if [[ "$release_present" == true ]]; then
@@ -673,10 +744,12 @@
       if [[ "$had_unit" == true ]]; then
         backup_pending_id="$(cat /proc/sys/kernel/random/uuid)"
       fi
-      if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" "$backup_pending_id" "$recovery_operation_id" "$recovery_evidence_sha256" <<'NODE'
+      activation_tunnel_hold=false
+      if [[ "$first_activation" != null || "$recovery_activation" != null || "$adoption_activation" != null ]]; then activation_tunnel_hold=true; fi
+      if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" "$backup_pending_id" "$recovery_operation_id" "$recovery_evidence_sha256" "$activation_tunnel_hold" <<'NODE'
       const fs = require('node:fs');
       const [target, hadUnit, tunnelWasActive, apiLinkCreated, tunnelLinkCreated, releasePresent, backupRunId,
-        recoveryOperationId, recoveryEvidenceSha256] = process.argv.slice(2);
+        recoveryOperationId, recoveryEvidenceSha256, tunnelHeldForActivation] = process.argv.slice(2);
       const asBoolean = value => {
         if (value === 'true') return true;
         if (value === 'false') return false;
@@ -685,6 +758,7 @@
       fs.writeFileSync(target, JSON.stringify({format: 'codexia-deploy-transaction/v1', phase: 'pending',
         hadUnit: asBoolean(hadUnit), tunnelWasActive: asBoolean(tunnelWasActive),
         apiLinkCreated: asBoolean(apiLinkCreated), tunnelLinkCreated: asBoolean(tunnelLinkCreated),
+        tunnelHeldForActivation: asBoolean(tunnelHeldForActivation),
         releasePresent: asBoolean(releasePresent), ...(backupRunId && {backupRunId}),
         ...(recoveryOperationId && {recoveryOperationId, recoveryEvidenceSha256})}) + '\n',
         {mode: 0o600, flag: 'wx', flush: true});
@@ -727,7 +801,7 @@
           if [[ "$api_link_created" == true ]]; then rm -f -- "$api_wants_link"; fi
           if [[ "$tunnel_link_created" == true ]]; then rm -f -- "$tunnel_wants_link"; fi
           systemctl --user daemon-reload || restore_status=1
-          if [[ "$recovery_activation" != null && "$restore_status" == 0 ]]; then
+          if [[ ( "$recovery_activation" != null || "$first_activation" != null || "$adoption_activation" != null ) && "$restore_status" == 0 ]]; then
             systemctl --user unmask codexia-tunnel.service || restore_status=1
           fi
         fi
@@ -772,9 +846,9 @@
           exit 1
         fi
       fi
-      # Both Quadlets have generated boot activation links. Keep the Tunnel
-      # masked across restarts until the protected R3 publication check passes.
-      if [[ "$recovery_activation" != null ]]; then
+      # Keep the Tunnel masked across a VM reboot for both R3 and R6. A
+      # recorded first-activation window must be checked again before unmask.
+      if [[ "$recovery_activation" != null || "$first_activation" != null || "$adoption_activation" != null ]]; then
         if ! systemctl --user mask --now codexia-tunnel.service; then
           echo 'Could not hold the application Tunnel inactive for recovery; deployment remains pending' >&2
           exit 1

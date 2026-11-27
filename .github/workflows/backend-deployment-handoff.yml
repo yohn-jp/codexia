@@ -7,7 +7,7 @@ on:
         type: string
         required: true
       approval_phrase:
-        description: Enter ACTIVATE_CODEXIA_BACKEND for R6 or PUBLISH_RESTORED_CODEXIA_BACKEND for R3
+        description: ACTIVATE_CODEXIA_BACKEND (fresh R6), ADOPT_EXISTING_CODEXIA_BACKEND (existing-owner R6) or PUBLISH_RESTORED_CODEXIA_BACKEND (R3)
         type: string
         required: true
   workflow_run:
@@ -26,7 +26,7 @@ jobs:
     if: >-
       (github.event_name == 'workflow_dispatch' && github.repository == 'yohn-jp/codexia' &&
        github.ref == 'refs/heads/main' &&
-       (inputs.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND' || inputs.approval_phrase == 'PUBLISH_RESTORED_CODEXIA_BACKEND')) ||
+       (inputs.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND' || inputs.approval_phrase == 'ADOPT_EXISTING_CODEXIA_BACKEND' || inputs.approval_phrase == 'PUBLISH_RESTORED_CODEXIA_BACKEND')) ||
       (github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'workflow_run' &&
       github.event.workflow_run.head_branch == 'main' &&
@@ -88,7 +88,7 @@ jobs:
     if: >-
       ((github.event_name == 'workflow_dispatch' && github.repository == 'yohn-jp/codexia' &&
         github.ref == 'refs/heads/main' &&
-        (inputs.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND' || inputs.approval_phrase == 'PUBLISH_RESTORED_CODEXIA_BACKEND')) ||
+        (inputs.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND' || inputs.approval_phrase == 'ADOPT_EXISTING_CODEXIA_BACKEND' || inputs.approval_phrase == 'PUBLISH_RESTORED_CODEXIA_BACKEND')) ||
       (github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'workflow_run' &&
       github.event.workflow_run.head_branch == 'main' &&
@@ -122,13 +122,23 @@ jobs:
           CODEXIA_FIRST_ACTIVATION_APPROVAL: ${{ inputs.approval_phrase }}
           CODEXIA_INITIAL_INSTALL_APPROVED: ${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED }}
           CODEXIA_DATABASE_INITIALIZATION_APPROVED: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED }}
+          CODEXIA_DATABASE_ADOPTION_APPROVED: ${{ vars.CODEXIA_DATABASE_ADOPTION_APPROVED }}
         run: |
           set -euo pipefail
 
           if [[ "${CODEXIA_MANUAL_ACTIVATION:-false}" == true &&
                 "${CODEXIA_FIRST_ACTIVATION_APPROVAL:-}" != 'PUBLISH_RESTORED_CODEXIA_BACKEND' &&
+                "${CODEXIA_FIRST_ACTIVATION_APPROVAL:-}" != 'ADOPT_EXISTING_CODEXIA_BACKEND' &&
                 ( "${CODEXIA_INITIAL_INSTALL_APPROVED:-}" != true || "${CODEXIA_DATABASE_INITIALIZATION_APPROVED:-}" != true ) ]]; then
             echo 'Protected first Backend activation requires first-install and database-use approvals.' >&2
+            exit 1
+          fi
+          if [[ "${CODEXIA_MANUAL_ACTIVATION:-false}" == true &&
+                "${CODEXIA_FIRST_ACTIVATION_APPROVAL:-}" == 'ADOPT_EXISTING_CODEXIA_BACKEND' &&
+                ( "${CODEXIA_DATABASE_ADOPTION_APPROVED:-}" != true ||
+                  "${CODEXIA_INITIAL_INSTALL_APPROVED:-}" == true ||
+                  "${CODEXIA_DATABASE_INITIALIZATION_APPROVED:-}" == true ) ]]; then
+            echo 'Existing-owner adoption requires its own approval, without fresh installation or initialization authorization.' >&2
             exit 1
           fi
           if [[ "${CODEXIA_PUSH_DEPLOYMENT_ENABLED:-}" == 'true' ]]; then
@@ -173,6 +183,13 @@ jobs:
           else
             node scripts/release/components/source-gate.mjs backend-deployment
           fi
+      - name: Revalidate exact Backend Verify after entering the production queue
+        if: github.event_name == 'workflow_run' && steps.freshness.outputs.current == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_DEPLOYMENT_CERTIFICATE_B64: ${{ needs.verify-handoff.outputs.deployment-certificate }}
+          CODEXIA_VERIFIED_MAIN_SHA: ${{ needs.verify-handoff.outputs.verified-main-sha }}
+        run: node scripts/deployment/handoff/recheck-verify.mjs
       - name: Load the public production origin and OAuth configuration
         if: steps.freshness.outputs.current == 'true'
         run: node scripts/deployment/bootstrap/public-env.mjs
@@ -236,6 +253,7 @@ jobs:
           CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN }}
           CODEXIA_INITIAL_INSTALL_APPROVED: ${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED }}
           CODEXIA_DATABASE_INITIALIZATION_APPROVED: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED }}
+          CODEXIA_DATABASE_ADOPTION_APPROVED: ${{ vars.CODEXIA_DATABASE_ADOPTION_APPROVED }}
         run: |
           set -euo pipefail
           umask 077
@@ -265,6 +283,7 @@ jobs:
           CODEXIA_DEPLOYED_UI_EPOCH: ${{ steps.live-ui.outputs.frontendApiEpoch }}
           CODEXIA_INITIAL_INSTALL_APPROVED: ${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED || 'false' }}
           CODEXIA_DATABASE_INITIALIZATION_APPROVED: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED || 'false' }}
+          CODEXIA_DATABASE_ADOPTION_APPROVED: ${{ vars.CODEXIA_DATABASE_ADOPTION_APPROVED || 'false' }}
         run: |
           set -euo pipefail
           [[ "$CODEXIA_CERTIFIED_FULL_IMAGE" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]]
@@ -274,6 +293,7 @@ jobs:
           [[ "$CODEXIA_DEPLOYED_UI_EPOCH" =~ ^[1-9][0-9]*$ ]]
           [[ "$CODEXIA_INITIAL_INSTALL_APPROVED" == true || "$CODEXIA_INITIAL_INSTALL_APPROVED" == false ]]
           [[ "$CODEXIA_DATABASE_INITIALIZATION_APPROVED" == true || "$CODEXIA_DATABASE_INITIALIZATION_APPROVED" == false ]]
+          [[ "$CODEXIA_DATABASE_ADOPTION_APPROVED" == true || "$CODEXIA_DATABASE_ADOPTION_APPROVED" == false ]]
           if [[ "${CODEXIA_MANUAL_ACTIVATION:-false}" == true ]]; then
             current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
             [[ "$current" == "$GITHUB_SHA" ]] || { echo 'Main changed after manual activation admission.' >&2; exit 1; }
@@ -300,6 +320,7 @@ jobs:
           const env = process.env;
           const manual = env.CODEXIA_MANUAL_ACTIVATION === 'true';
           const recovery = manual && env.CODEXIA_FIRST_ACTIVATION_APPROVAL === 'PUBLISH_RESTORED_CODEXIA_BACKEND';
+          const adoption = manual && env.CODEXIA_FIRST_ACTIVATION_APPROVAL === 'ADOPT_EXISTING_CODEXIA_BACKEND';
           const vars = {
             codexia_image: env.CODEXIA_CERTIFIED_FULL_IMAGE,
             codexia_source_sha: env.CODEXIA_SOURCE_SHA,
@@ -308,10 +329,13 @@ jobs:
             codexia_deployed_ui_epoch: Number(env.CODEXIA_DEPLOYED_UI_EPOCH),
             codexia_deployment_certificate_file: env.CODEXIA_DEPLOYMENT_CERTIFICATE_FILE,
             codexia_initial_install_approved: manual && !recovery && env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
-            codexia_database_initialization_approved: manual && !recovery && env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
+            codexia_database_initialization_approved: manual && !recovery && !adoption && env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
+            codexia_database_adoption_approved: adoption && env.CODEXIA_DATABASE_ADOPTION_APPROVED === 'true',
           };
           if (recovery) {
             vars.codexia_expected_recovery_activation = JSON.parse(readFileSync(join(env.RUNNER_TEMP, 'codexia-recovery-activation.json'), 'utf8'));
+          } else if (adoption) {
+            vars.codexia_expected_adopt_activation = JSON.parse(readFileSync(join(env.RUNNER_TEMP, 'codexia-adopt-activation.json'), 'utf8'));
           } else if (manual) {
             vars.codexia_expected_first_activation = JSON.parse(readFileSync(join(env.RUNNER_TEMP, 'codexia-first-activation.json'), 'utf8'));
           }

@@ -92,7 +92,7 @@ Preflightは環境、host pin、観測時刻、source/candidate、現在のident
 | R3 MAINTENANCE | H drift、A回復必要、B/F障害、または R2 後の検証済み復元先（既存データ・認証の非互換はR0） | 明示的な基盤修復、通常deploy復旧、既存owner回復、または[Preflightで再照合した復元先の公開](PROTECTED-RECOVERY.md) |
 | R4 BOOTSTRAP | H未構築/部分構築、D未作成/新規空またはA未構成で、新規・既存採用・復旧の意図が確定。承認済みinstallでDの欠落を確認した場合は旧B/Aの残存より優先 | 必要なhost/secrets/base/auth-runtimeを収束。新規初期化を別承認。既存identity/ledger/資格情報保持 |
 | R5 OWNER_SETUP | 承認済み新規installでA登録待ちまたはactivation未準備、あるいはB setup-only | 通常Frontendの認定済みFullアーカイブを必要時に先行配備。同じFull Backendのsetup-only APIと一回限りgrantで本人登録、client検証、保護されたactivation preparation。既存ownerを再発行しない |
-| R6 ACTIVATE | H/D/A検証済み、B clean未配備、F互換、復旧意図なし | 既存の保護されたBackend-only初回deploy。初回・DB使用・公開承認。純新規はbackup/restoreを要求しない。既存データ採用は保全と同一性を確認 |
+| R6 ACTIVATE | H/D/A検証済み、B clean未配備、F互換、復旧意図なし | 既存の保護されたBackend-only初回deploy。初回・DB使用・公開承認。純新規はbackup/restoreを要求しない。既存データ採用は `intent=adopt` と独立保全証拠・`database-adoption`/`publication` 承認、`ADOPT_EXISTING_CODEXIA_BACKEND` で同一性を確認し、DB初期化を禁止 |
 | R7 廃止 | 選択禁止 | 旧番号を再利用しない。非互換または未配備Frontendで通常Admissionが成立しない場合はR0 |
 | R8 UPDATE / VERIFY | B通常稼働・互換、Fが正常で通常admission成立 | 変更のあるcomponentのみ通常互換更新。完全同一ならno-op＋health/identity検証 |
 

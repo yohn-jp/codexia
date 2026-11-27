@@ -11,14 +11,15 @@ const positive = value => Number.isSafeInteger(value) && value > 0;
 // An artifact is only a locator. readLifecycleCandidate independently verifies
 // both producers, the archive, the Verify source, OCI contents and compatibility.
 export async function discoverPublication(component, { main, history, currentSource, runs, artifacts, jobs, verify }) {
-  for (const source of history) {
-    if (!currentSource(component, source, main)) break;
-    const matches = await runs(component, source);
-    // Multiple workflow_run events can share a dispatch head. Only an archive
-    // with the requested source and the latest producing job attempt qualifies.
+  for (const [dispatchIndex, workflowSha] of history.entries()) {
+    if (!currentSource(component, workflowSha, main)) break;
+    const matches = await runs(component, workflowSha);
+    // The release workflow's main dispatch SHA is distinct from a frontend
+    // archive's certified component source. Unrelated later main merges may
+    // retain the same tested frontend bytes.
     const candidates = [];
     for (const run of matches) {
-      assert.equal(run.head_sha, source);
+      assert.equal(run.head_sha, workflowSha);
       assert.equal(run.path, '.github/workflows/' + component + '-release.yml');
       assert.equal(run.event, 'workflow_run');
       assert.equal(run.head_branch, 'main');
@@ -28,7 +29,7 @@ export async function discoverPublication(component, { main, history, currentSou
       if (run.status !== 'completed') throw new Error('Release producer is still running');
       const inventory = await artifacts(run.id);
       if (component === 'backend') {
-        const name = 'codexia-backend-deployment-certificate-' + source + '-run-' + run.id + '-attempt-' + run.run_attempt;
+        const name = 'codexia-backend-deployment-certificate-' + workflowSha + '-run-' + run.id + '-attempt-' + run.run_attempt;
         if (inventory.some(item => item.name === name)) {
           assert.equal(run.conclusion, 'success');
           candidates.push(run.id);
@@ -40,18 +41,28 @@ export async function discoverPublication(component, { main, history, currentSou
         const producer = producers[0];
         assert.equal(producer.conclusion, 'success');
         assert.ok(positive(producer.run_attempt));
-        const name = 'codexia-frontend-' + source + '-attempt-' + producer.run_attempt;
-        const archives = inventory.filter(item => item.name === name);
+        const archives = inventory.flatMap(item => {
+          const match = /^codexia-frontend-([a-f0-9]{40})-attempt-([1-9][0-9]*)$/u.exec(item.name ?? '');
+          if (!match || Number(match[2]) !== producer.run_attempt) return [];
+          // Both revisions must be on the trusted main first-parent chain,
+          // with no intervening component change or conflicting producer.
+          const sourceIndex = history.indexOf(match[1]);
+          if (sourceIndex < dispatchIndex || !currentSource(component, match[1], main)) return [];
+          return [{ archive: item, sourceSha: match[1] }];
+        });
         assert.equal(archives.length, 1, 'Missing or ambiguous certified UI archive');
-        const [archive] = archives;
+        const { archive, sourceSha } = archives[0];
         assert.equal(archive.expired, false);
+        assert.ok(positive(archive.id));
         assert.match(archive.digest, /^sha256:[a-f0-9]{64}$/u);
-        candidates.push({ runId: run.id, artifactId: archive.id, artifactDigest: archive.digest.slice(7) });
+        candidates.push({ runId: run.id, artifactId: archive.id, artifactDigest: archive.digest.slice(7), sourceSha });
       }
     }
     assert.ok(candidates.length <= 1, 'Ambiguous certified ' + component + ' producers');
     if (candidates.length) {
-      return component === 'backend' ? candidates[0] : { ...candidates[0], verifyRunId: await verify(source) };
+      if (component === 'backend') return candidates[0];
+      const { sourceSha, ...selected } = candidates[0];
+      return { ...selected, verifyRunId: await verify(sourceSha) };
     }
   }
   throw new Error('No certified ' + component + ' artifact matches current production source');

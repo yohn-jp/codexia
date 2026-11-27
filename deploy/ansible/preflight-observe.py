@@ -442,7 +442,14 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
     marker_info = metadata(marker)
     has_marker = marker_info is not None
     if intent is None and not has_marker:
-        return result  # Existing schema alone is not a fresh-install authorization.
+        # Never infer a usable owner from a schema alone. On the explicitly
+        # requested adoption path, prove the same persisted owner, passkey and
+        # runtime-settings binding required by isolated R3 restore.
+        if (writer is None and os.environ.get("CODEXIA_OBSERVE_ADOPTION") == "true"
+                and sql("codexia", "SELECT to_regclass('codexia_auth.owner_setup') IS NOT NULL;") == "t"):
+            result.update(restored_owner_settings(auth_dir))
+            result["authState"] = "ready"
+        return result
     if has_marker:
         require(stat.S_IMODE(marker_info.st_mode) == 0o600 and private_text(marker).strip() == cluster["clusterId"])
     if intent is not None:
@@ -639,10 +646,14 @@ def observe():
                 backend = {"state": "absent"}
         recovery = None
         observe_restore = transaction is None and os.environ.get("CODEXIA_OBSERVE_RECOVERY") == "true"
+        observe_adoption = transaction is None and os.environ.get("CODEXIA_OBSERVE_ADOPTION") == "true"
         clean_restore = bool(lock_handle is not None and backend["state"] == "absent" and not residue and
                              not containers["codexia-api"] and not containers["codexia-tunnel"])
         if observe_restore:
             recovery = read_recovery_handoff(state_dir)
+        if observe_adoption:
+            require(clean_restore and not observe_restore)
+            require_tunnel_inactive()
         if recovery is not None:
             require(clean_restore)
             require_recovery_worker_stopped()

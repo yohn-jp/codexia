@@ -30,7 +30,7 @@ test('lifecycle route table preserves absence, recovery and ordinary admission',
     [{ B: 'absent', F: 'absent' }, 'install', 'not-applicable', 'R0'],
     [{ B: 'absent', F: 'incompatible' }, 'install', 'denied', 'R0'],
     [{ B: 'absent' }, 'install', 'allowed', 'R6'],
-    [{ B: 'absent' }, 'adopt', 'allowed', 'R0'],
+    [{ B: 'absent' }, 'adopt', 'allowed', 'R6'],
     [{ B: 'absent' }, 'update', 'allowed', 'R0'],
     [{ B: 'incompatible' }, 'update', 'denied', 'R0'],
     [{ F: 'absent' }, 'update', 'not-applicable', 'R0'],
@@ -64,7 +64,8 @@ test('every combination of observation axes has exactly one route or safe stop',
         else if (state.T !== 'none') assert.equal(result, 'R1');
         else if (state.D === 'lost') assert.equal(result, intent === 'restore' ? 'R2' : 'R0');
         else if (Object.values(state).includes('unknown')) assert.equal(result, 'R0');
-        if (result === 'R5' || result === 'R6') assert.equal(intent, 'install');
+        if (result === 'R5') assert.equal(intent, 'install');
+        if (result === 'R6') assert.ok(['install', 'adopt'].includes(intent));
         if (result === 'R8') {
           assert.equal(state.B, 'compatible');
           assert.equal(admission, 'allowed');
@@ -89,6 +90,21 @@ const baseline = () => ({
   target: { backendCertificateSha256: h('5'), frontendArtifactSha256: h('6'), identitySha256: h('7') },
   intent: 'install', window: { id: 'window-1', notBefore: now.toISOString(),
     notAfter: '2026-11-24T05:00:00.000Z' }, now,
+});
+
+test('adoption of an existing Better Auth owner demands independent preservation evidence', () => {
+  const input = { ...baseline(), intent: 'adopt', observation: {
+    ...baseline().observation, binding: { ...baseline().observation.binding, backupSha256: null },
+  } };
+  const withoutProof = createDeploymentPlan(input);
+  assert.equal(withoutProof.plan.candidateRoute, 'R6');
+  assert.ok(withoutProof.plan.blockers.includes('missing-preservation-evidence'));
+  const withProof = createDeploymentPlan({ ...input, observation: {
+    ...input.observation, binding: { ...input.observation.binding, backupSha256: h('9') },
+  } });
+  assert.equal(withProof.plan.candidateRoute, 'R6');
+  assert.deepEqual(withProof.plan.requiredApprovals, ['database-adoption', 'publication']);
+  assert.ok(withProof.plan.requiresPreservation);
 });
 
 test('incompatible installed states and missing frontend stop without mutation admission', () => {

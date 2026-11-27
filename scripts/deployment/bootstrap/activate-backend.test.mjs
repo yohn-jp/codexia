@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { digestEvidence } from '../preflight/evidence-digest.mjs';
 import { createDeploymentPlan } from '../preflight/plan.mjs';
-import { admitBackendActivation, admitBackendRecovery, assertManualActivationSource } from './activate-backend.mjs';
+import { admitBackendActivation, admitBackendAdoption, admitBackendRecovery, assertManualActivationSource } from './activate-backend.mjs';
 
 const hash = 'a'.repeat(64);
 const now = new Date('2026-11-24T06:00:00.000Z');
@@ -79,6 +79,26 @@ test('R6 rejects missing approvals, stale binding and mismatched source', () => 
   } }), /Approval/);
   assert.throws(() => admitBackendActivation({ ...input, current: fixture({}, { frontendSha256: 'b'.repeat(64) }).current }), /changed after approval/);
   assert.throws(() => admitBackendActivation({ ...input, now: new Date(Date.parse(window.notAfter) + 1) }), /window/);
+});
+
+test('R6 adoption requires distinct protected approval, preserved data and existing owner', () => {
+  const input = fixture({}, { backupSha256: 'b'.repeat(64) }, 'adopt');
+  input.deployment.approval.grants = ['database-adoption', 'publication'];
+  const approved = { databaseAdoption: true, initialInstall: false, databaseInitialization: false };
+  const result = admitBackendAdoption({ ...input, flags: approved });
+  assert.equal(result.clusterId, '123');
+  assert.equal(result.ownerBindingSha256, 'sha256:' + hash);
+  assert.equal(result.preservationSha256, 'b'.repeat(64));
+  for (const flags of [
+    { ...approved, databaseAdoption: false },
+    { ...approved, initialInstall: true },
+    { ...approved, databaseInitialization: true },
+  ]) assert.throws(() => admitBackendAdoption({ ...input, flags }), /distinct protected approval/);
+  assert.throws(() => admitBackendAdoption({ ...input,
+    current: fixture({}, { frontendSha256: 'c'.repeat(64) }, 'adopt').current,
+    flags: approved }), /changed after approval/);
+  assert.throws(() => admitBackendAdoption({ ...fixture({}, {}, 'adopt'), flags: approved }),
+    /preservation evidence/);
 });
 
 test('R3 binds manual publication to the same observed restore operation and evidence', () => {

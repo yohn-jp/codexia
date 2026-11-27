@@ -172,7 +172,9 @@ func (r lifecycleReceipt) initialOperation() (installOperation, error) {
 	case "R5":
 		if slices.Equal(approvals, []string{"owner-enrollment"}) && s.H == "ready" &&
 			s.D == "compatible" && s.A == "pending" && (s.B == "absent" || s.B == "setup") &&
-			(s.F == "absent" || s.F == "compatible") {
+			(s.F == "absent" || s.F == "compatible" ||
+				(s.F == "incompatible" && r.Evidence.Edge.FrontendState == "running" &&
+					r.Evidence.Edge.Frontend != nil && r.Evidence.Edge.Backend == nil)) {
 			return publishFrontend, nil
 		}
 	}

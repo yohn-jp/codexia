@@ -461,20 +461,24 @@ export async function verifyLifecycleFrontendArtifact(input, { env = process.env
   assert.equal(verifyRun.repository?.id, currentRepositoryId(env), 'Frontend Verify repository mismatch');
   assert.equal(verifyRun.head_repository?.id, currentRepositoryId(env), 'Frontend Verify source repository mismatch');
   assert.equal(verifyRun.id, verifyRunId, 'Frontend Verify run ID mismatch');
-  const sourceSha = run.head_sha;
-  assert.match(sourceSha ?? '', shaPattern, 'Frontend producer source SHA is invalid');
+  const workflowSha = run.head_sha;
+  assert.match(workflowSha ?? '', shaPattern, 'Frontend producer workflow SHA is invalid');
+  const sourceMatch = /^codexia-frontend-([a-f0-9]{40})-attempt-([1-9][0-9]*)$/u.exec(artifact.name ?? '');
+  assert.ok(sourceMatch, 'Frontend archive has no certified component source');
+  const sourceSha = sourceMatch[1];
   verifiedSourceRun([verifyRun], sourceSha);
   assertVerificationJobs(verifyJobs);
-  execFileSync('git', ['merge-base', '--is-ancestor', sourceSha, 'HEAD'], { stdio: 'ignore' });
+  execFileSync('git', ['merge-base', '--is-ancestor', sourceSha, workflowSha], { stdio: 'ignore' });
+  execFileSync('git', ['merge-base', '--is-ancestor', workflowSha, 'HEAD'], { stdio: 'ignore' });
   const producerJobs = jobs.filter(job => job?.name === 'Build and verify UI assets');
   assert.equal(producerJobs.length, 1, 'Frontend producer job is ambiguous');
   const attempt = positiveInteger(producerJobs[0].run_attempt, 'Frontend producer attempt');
   const producerAttemptJobs = await apiPages(request, 'actions/runs/' + runId + '/attempts/' + attempt + '/jobs', 'jobs');
   assert.equal(artifact.expired, false, 'Frontend archive is expired');
   assert.equal(artifact.workflow_run?.id, runId, 'Frontend archive belongs to another run');
-  assert.equal(artifact.workflow_run?.head_sha, sourceSha, 'Frontend archive belongs to another source');
+  assert.equal(artifact.workflow_run?.head_sha, workflowSha, 'Frontend archive belongs to another workflow');
   assertFrontendArtifactEvidence(run, artifact, jobs, {
-    sourceSha, workflowSha: sourceSha, artifactId: id, runId, producerAttempt: attempt,
+    sourceSha, workflowSha, artifactId: id, runId, producerAttempt: attempt,
     currentAttempt: run.run_attempt, event: 'workflow_run', artifactDigest: input.artifactDigest,
     artifactName: 'codexia-frontend-' + sourceSha + '-attempt-' + attempt,
   }, producerAttemptJobs);

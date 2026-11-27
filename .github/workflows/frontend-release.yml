@@ -286,7 +286,7 @@ jobs:
           name: ${{ steps.producer.outputs.artifact-name }}
           path: app/dist
           if-no-files-found: error
-          retention-days: ${{ github.event_name == 'pull_request' && 14 || 2 }}
+          retention-days: 14
   # Independent source certification still gates deployment after build selection.
   deploy:
     name: Deploy UI Static Assets
@@ -358,13 +358,21 @@ jobs:
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
         run: node scripts/release/frontend/verify-compatibility.mjs
-      - name: Deploy static assets only
-        id: deploy-assets
+      - name: Pin active Worker deployment before the publication attempt
+        id: before-deploy
         if: steps.compatibility.outputs.deploy == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: edge/frontend/node_modules/.bin/wrangler deploy --config edge/frontend/wrangler.jsonc
+          CODEXIA_FRONTEND_ROLLBACK_STATE: ${{ runner.temp }}/codexia-frontend-before-deploy.json
+        run: node scripts/release/frontend/deployment-rollback.mjs capture
+      - name: Deploy static assets only
+        id: deploy-assets
+        if: steps.before-deploy.outcome == 'success'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: edge/frontend/node_modules/.bin/wrangler deploy --config edge/frontend/wrangler.jsonc --tag "frontend-$CODEXIA_FRONTEND_ARTIFACT_DIGEST"
       - name: Verify deployed frontend identity
         id: verify-deployed
         if: always() && steps.compatibility.outcome == 'success'
@@ -372,6 +380,15 @@ jobs:
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
         run: node scripts/release/frontend/verify-compatibility.mjs deployed
+      - name: Recover the prior Worker on publication or identity verification failure
+        if: >-
+          always() && steps.before-deploy.outcome == 'success' &&
+          (steps.deploy-assets.outcome == 'failure' || steps.verify-deployed.outcome == 'failure')
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CODEXIA_FRONTEND_ROLLBACK_STATE: ${{ runner.temp }}/codexia-frontend-before-deploy.json
+        run: node scripts/release/frontend/deployment-rollback.mjs restore
       - name: Record independent frontend release
         if: always() && steps.compatibility.outcome == 'success' && steps.verify-deployed.outcome == 'success' && (steps.deploy-assets.outcome == 'success' || steps.compatibility.outputs.deploy == 'false')
         env:

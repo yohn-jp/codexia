@@ -58,6 +58,7 @@ test('production deployment consumes the verified Full digest and provenance cer
   assert.equal(ansible.env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, '${{ needs.verify-handoff.outputs.deployment-certificate }}');
   assert.equal(ansible.env.CODEXIA_INITIAL_INSTALL_APPROVED, "${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED || 'false' }}");
   assert.equal(ansible.env.CODEXIA_DATABASE_INITIALIZATION_APPROVED, "${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED || 'false' }}");
+  assert.equal(ansible.env.CODEXIA_DATABASE_ADOPTION_APPROVED, "${{ vars.CODEXIA_DATABASE_ADOPTION_APPROVED || 'false' }}");
 });
 
 test('the convergence step forwards the certified identity, private certificate and typed approvals to Ansible', t => {
@@ -92,6 +93,7 @@ test('the convergence step forwards the certified identity, private certificate 
     CODEXIA_DEPLOYED_UI_EPOCH: '17',
     CODEXIA_INITIAL_INSTALL_APPROVED: 'true',
     CODEXIA_DATABASE_INITIALIZATION_APPROVED: 'false',
+    CODEXIA_DATABASE_ADOPTION_APPROVED: 'false',
   };
   for (const [key, value] of Object.entries({
     CODEXIA_CERTIFIED_FULL_IMAGE: 'ghcr.io/yohn-jp/codexia-backend:latest',
@@ -101,6 +103,7 @@ test('the convergence step forwards the certified identity, private certificate 
     CODEXIA_DEPLOYED_UI_EPOCH: '0',
     CODEXIA_INITIAL_INSTALL_APPROVED: 'yes',
     CODEXIA_DATABASE_INITIALIZATION_APPROVED: 'yes',
+    CODEXIA_DATABASE_ADOPTION_APPROVED: 'yes',
   })) {
     const result = spawnSync('/bin/bash', ['-c', converge.run], {
       cwd: directory, env: { ...admitted, [key]: value }, encoding: 'utf8',
@@ -141,6 +144,7 @@ test('the convergence step forwards the certified identity, private certificate 
       codexia_deployed_ui_epoch: 17,
       codexia_initial_install_approved: false,
       codexia_database_initialization_approved: false,
+      codexia_database_adoption_approved: false,
     });
   }
 
@@ -186,6 +190,27 @@ test('the convergence step forwards the certified identity, private certificate 
   assert.equal(recoveryVars.codexia_expected_first_activation, undefined);
   assert.equal(recoveryVars.codexia_initial_install_approved, false);
   assert.equal(recoveryVars.codexia_database_initialization_approved, false);
+
+  // An existing Better Auth owner is adopted through an independent reviewed
+  // receipt and distinct approval; the fresh-install flags must stay false.
+  rmSync(invocation);
+  const adoption = { ...manual, CODEXIA_FIRST_ACTIVATION_APPROVAL: 'ADOPT_EXISTING_CODEXIA_BACKEND',
+    CODEXIA_INITIAL_INSTALL_APPROVED: 'false', CODEXIA_DATABASE_INITIALIZATION_APPROVED: 'false',
+    CODEXIA_DATABASE_ADOPTION_APPROVED: 'true' };
+  result = spawnSync('/bin/bash', ['-c', converge.run], { cwd: directory, env: adoption, encoding: 'utf8' });
+  assert.ifError(result.error);
+  assert.notEqual(result.status, 0, 'adoption cannot consume the first-install R6 receipt');
+  assert.equal(existsSync(invocation), false);
+  const adopted = { ...binding, preservationSha256: 'd'.repeat(64), secretSetSha256: 'e'.repeat(64) };
+  writeFileSync(path.join(directory, 'codexia-adopt-activation.json'), JSON.stringify(adopted), { mode: 0o600 });
+  result = spawnSync('/bin/bash', ['-c', converge.run], { cwd: directory, env: adoption, encoding: 'utf8' });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  const adoptionVars = JSON.parse(readFileSync(path.join(directory, 'codexia-deploy-vars.json'), 'utf8'));
+  assert.deepEqual(adoptionVars.codexia_expected_adopt_activation, adopted);
+  assert.equal(adoptionVars.codexia_database_adoption_approved, true);
+  assert.equal(adoptionVars.codexia_initial_install_approved, false);
+  assert.equal(adoptionVars.codexia_database_initialization_approved, false);
 });
 
 test('Ansible routes the push stage through the codexia runtime and host lock', () => {
@@ -263,29 +288,30 @@ test('manual first Backend activation uses protected admission and the existing 
   assert.ok(lock >= 0 && binding > lock && binding < shell.indexOf('deploy-backup'));
   const prepare = parse(readFileSync(new URL('../../../deploy/ansible/deploy-prepare.yml', import.meta.url), 'utf8'));
   assert.equal(prepare.find(task => task.name === 'Recover interrupted deployment before preparing target state').when,
-    'codexia_expected_first_activation is not defined and codexia_expected_recovery_activation is not defined');
+    'codexia_expected_first_activation is not defined and codexia_expected_recovery_activation is not defined and codexia_expected_adopt_activation is not defined');
   assert.equal(prepare.find(task => task.name === 'Resume an interrupted backup before observing the installed API').when,
-    'codexia_expected_recovery_activation is not defined');
+    'codexia_expected_recovery_activation is not defined and codexia_expected_adopt_activation is not defined');
 });
 
 test('locked production admission requires separate R6 or restored R3 evidence for a clean API slot', () => {
   const shell = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'].cmd;
-  const gateStart = shell.indexOf('if [[ "$had_unit" == false && "$require_tunnel" == true && "$first_activation" == null && "$recovery_activation" == null ]]; then');
+  const gateStart = shell.indexOf('if [[ "$had_unit" == false && "$require_tunnel" == true && "$first_activation" == null && "$recovery_activation" == null && "$adoption_activation" == null ]]; then');
   const gateEnd = shell.indexOf('first_activation_window_current(){', gateStart);
   assert.ok(gateStart > shell.indexOf('flock --exclusive --nonblock 9') &&
     gateEnd > gateStart && gateEnd < shell.indexOf('deploy-backup'));
   const gate = shell.slice(gateStart, gateEnd);
   const prefix = 'set -eu\nstale_admission(){ printf "%s\\n" "$1" >&2; exit 1; }\n';
-  for (const [hadUnit, production, evidence, recovery, expected] of [
-    ['false', 'true', 'null', 'null', 1],
-    ['false', 'true', '{}', 'null', 0],
-    ['false', 'true', 'null', '{}', 0],
-    ['true', 'true', 'null', 'null', 0],
-    ['false', 'false', 'null', 'null', 0],
+  for (const [hadUnit, production, evidence, recovery, adoption, expected] of [
+    ['false', 'true', 'null', 'null', 'null', 1],
+    ['false', 'true', '{}', 'null', 'null', 0],
+    ['false', 'true', 'null', '{}', 'null', 0],
+    ['false', 'true', 'null', 'null', '{}', 0],
+    ['true', 'true', 'null', 'null', 'null', 0],
+    ['false', 'false', 'null', 'null', 'null', 0],
   ]) {
     const result = spawnSync('bash', ['-c', prefix + gate], {
       encoding: 'utf8', env: { ...process.env, had_unit: hadUnit, require_tunnel: production,
-        first_activation: evidence, recovery_activation: recovery },
+        first_activation: evidence, recovery_activation: recovery, adoption_activation: adoption },
     });
     assert.ifError(result.error);
     assert.equal(result.status, expected, result.stderr);
@@ -349,7 +375,7 @@ test('first activation checks the real transaction window at readiness and rolls
     'trace="$FIXTURE/trace"',
     'had_unit=false; tunnel_present=true; tunnel_was_active=false; release_present=false; recovery_tunnel_masked=false',
     'api_link_created=true; tunnel_link_created=true',
-    'candidate_image=fixture-image; first_activation="{}"; recovery_activation=null; approved_not_before=1000; approved_not_after=2000',
+    'candidate_image=fixture-image; first_activation="{}"; recovery_activation=null; adoption_activation=null; approved_not_before=1000; approved_not_after=2000',
     'clock=1500; backup_control=control_fixture; backup_run_id=; backup_pending_id=',
     'if [[ "$SCENARIO" == recovery-* ]]; then first_activation=null; recovery_activation="{}"; fi',
     'check_recovery_record() { [[ "$clock" == 1500 ]]; }',
@@ -387,7 +413,8 @@ test('first activation checks the real transaction window at readiness and rolls
     const startTunnel = calls.indexOf('--user start codexia-tunnel.service');
     if (scenario === 'recovery-current') assert.ok(mask >= 0 && mask < startApi && startApi < unmask && unmask < startTunnel);
     else if (scenario === 'recovery-stale') assert.ok(mask >= 0 && mask < startApi && startApi < stopApi && stopApi < unmask);
-    else assert.equal(mask, -1);
+    else assert.ok(mask >= 0 && (startApi < 0 || mask < startApi),
+      'the Tunnel must remain masked across a reboot for every first activation');
     if (!success) assert.match(result.stderr, scenario === 'recovery-stale'
       ? /restored target or approval changed before publication/u
       : /First activation approval window expired before publication/u);
@@ -406,7 +433,7 @@ test('first activation checks the real transaction window at readiness and rolls
   for (const [evidence, current, expected] of [['null', 'invalid', 0], ['{}', '999', 1],
     ['{}', '1000', 0], ['{}', '2000', 0], ['{}', '2001', 1], ['{}', 'invalid', 1]]) {
     const result = spawnSync('bash', ['-c', 'set -eu\napproved_not_before=1000; approved_not_after=2000\ndate(){ printf "%s\\n" "$CLOCK"; }\n' + clock + '\nfirst_activation_window_current'], {
-      encoding: 'utf8', env: { ...process.env, first_activation: evidence, CLOCK: current },
+      encoding: 'utf8', env: { ...process.env, first_activation: evidence, adoption_activation: 'null', CLOCK: current },
     });
     assert.ifError(result.error);
     assert.equal(result.status, expected, evidence + ': ' + current);

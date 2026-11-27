@@ -92,7 +92,7 @@ export function selectRoute(state, intent, frontendAdmission, bootstrapResume = 
       ['absent', 'setup'].includes(B) ? 'R5' : 'R0';
   }
   if (A !== 'ready' || H !== 'ready' || D !== 'compatible') return 'R0';
-  if (B === 'absent') return intent === 'install' && F === 'compatible' ? 'R6' : 'R0';
+  if (B === 'absent') return ['install', 'adopt'].includes(intent) && F === 'compatible' ? 'R6' : 'R0';
   if (F === 'absent') return 'R0';
   if (F === 'incompatible') {
     if (frontendAdmission === 'allowed') return 'R8';
@@ -180,11 +180,13 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   const migrationAxes = ['api-epoch', 'oauth-contract', 'sql-ledger', 'persistence-format', 'auth-schema', 'auth-mode'];
   if (candidateRoute === 'R8' && changeAxes.some(key => migrationAxes.includes(key))) blockers.push('incompatible-ordinary-update');
   const requiresPreservation = ['R3', 'R2'].includes(candidateRoute) ||
-    (candidateRoute === 'R4' && state.D === 'compatible' && state.A === 'ready');
+    (candidateRoute === 'R4' && state.D === 'compatible' && state.A === 'ready') ||
+    (candidateRoute === 'R6' && intent === 'adopt');
   if (requiresPreservation && !binding.backupSha256) blockers.push('missing-preservation-evidence');
   if (['R1', 'R2', 'R3', 'R6'].includes(candidateRoute) &&
       (window === null || timestamp(window.notAfter) < now.getTime())) blockers.push('missing-or-expired-window');
-  const requiredApprovals = [...mutationApprovals[candidateRoute]];
+  const requiredApprovals = candidateRoute === 'R6' && intent === 'adopt'
+    ? ['database-adoption', 'publication'] : [...mutationApprovals[candidateRoute]];
   if (candidateRoute === 'R3' && restored) requiredApprovals.push('recovery', 'publication');
   if (candidateRoute === 'R4' && (observation.bootstrapResume || ['absent', 'pristine'].includes(state.D))) {
     requiredApprovals.push('database-initialization');
