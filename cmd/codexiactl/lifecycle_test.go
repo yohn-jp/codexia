@@ -46,7 +46,7 @@ func TestInitialOperationFollowsObservedLifecycle(t *testing.T) {
 	if _, err := receipt.initialOperation(); err == nil {
 		t.Fatal("incompatible frontend cannot be replaced without positive live identity evidence")
 	}
-		receipt.Plan.Observation.State.A = "unprepared"
+	receipt.Plan.Observation.State.A = "unprepared"
 	if _, err := receipt.initialOperation(); !errors.Is(err, errExistingOwner) {
 		t.Fatalf("existing Owner must stop: %v", err)
 	}
