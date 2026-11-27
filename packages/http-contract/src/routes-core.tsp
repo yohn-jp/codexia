@@ -235,27 +235,35 @@ op getProjectReviewQueue(@path projectId: string): ProjectReviewQueueBody | { @s
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/mcp") @get @operationId("mcp_root_get")
-op getStandaloneMcp(@query projectId?: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string, @header("Accept") accept?: string): McpMethodDenied | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; };
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "After admission, the MCP SDK returns HTTP 405 with Allow: POST and JSON-RPC error -32000, id null. The approved API epoch baseline keeps its ApiError response schema pending a compatibility correction.")
+op getStandaloneMcp(@query projectId?: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string, @header("Accept") accept?: string): McpMethodDenied | McpAdmissionBadRequest | McpAdmissionForbidden | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; } | McpAdmissionNotFound | McpAdmissionUnavailable;
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/mcp") @post @operationId("mcp_root_post")
-op postStandaloneMcp(@query projectId?: string, @body body: JsonObject | JsonObject[], @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string, @header("Accept") accept?: string): McpEventStream | McpJsonResponse | McpAcceptedResponse | { @statusCode _: 400; @body body: ApiError | McpParseError; } | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 413; @body body: ApiError; } | { @statusCode _: 415; @body body: ApiError; };
+op postStandaloneMcp(@query projectId?: string, @body body: JsonObject | JsonObject[], @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string, @header("Accept") accept?: string): McpEventStream | McpJsonResponse | McpAcceptedResponse | { @statusCode _: 400; @body body: ApiError | McpParseError; } | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; } | McpAdmissionForbidden | { @statusCode _: 413; @body body: ApiError; } | { @statusCode _: 415; @body body: ApiError; } | McpAdmissionNotFound | McpAdmissionUnavailable;
 
 @tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
 @route("/mcp") @delete @operationId("mcp_root_delete")
-op deleteStandaloneMcp(@header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string): McpMethodDenied | { @statusCode _: 401; @body body: ApiError; };
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "After admission, the MCP SDK returns HTTP 405 with Allow: POST and JSON-RPC error -32000, id null. The approved API epoch baseline keeps its ApiError response schema pending a compatibility correction.")
+op deleteStandaloneMcp(@query projectId?: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string): McpMethodDenied | McpAdmissionBadRequest | McpAdmissionForbidden | { @statusCode _: 401; @body body: ApiError; } | McpAdmissionNotFound | McpAdmissionUnavailable;
 
-@tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
+@tag("mcp") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT with effect scope")
 @route("/api/projects/{projectId}/modules/mcp/streamable") @get @operationId("project_mcp_stream_get")
-op getProjectMcpStream(@path projectId: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string, @header("Accept") accept?: string): McpMethodDenied | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; };
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "After admission, the MCP SDK returns HTTP 405 with Allow: POST and JSON-RPC error -32000, id null. The approved API epoch baseline keeps its ApiError response schema pending a compatibility correction.")
+op getProjectMcpStream(@path projectId: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string, @header("Accept") accept?: string): McpMethodDenied | McpAdmissionBadRequest | McpAdmissionForbidden | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; } | McpAdmissionNotFound | McpAdmissionUnavailable;
 
-@tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
+@tag("mcp") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT with effect scope")
 @route("/api/projects/{projectId}/modules/mcp/streamable") @post @operationId("project_mcp_stream_post")
-op postProjectMcpStream(@path projectId: string, @body body: JsonObject | JsonObject[], @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string, @header("Accept") accept?: string): McpEventStream | McpJsonResponse | McpAcceptedResponse | { @statusCode _: 400; @body body: ApiError | McpParseError; } | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; } | { @statusCode _: 413; @body body: ApiError; } | { @statusCode _: 415; @body body: ApiError; };
+op postProjectMcpStream(@path projectId: string, @body body: JsonObject | JsonObject[], @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string, @header("Accept") accept?: string): McpEventStream | McpJsonResponse | McpAcceptedResponse | { @statusCode _: 400; @body body: ApiError | McpParseError; } | { @statusCode _: 401; @header("WWW-Authenticate") challenge: string; @body body: ApiError; } | McpAdmissionForbidden | { @statusCode _: 413; @body body: ApiError; } | { @statusCode _: 415; @body body: ApiError; } | McpAdmissionNotFound | McpAdmissionUnavailable;
 
-@tag("mcp") @extension("x-codexia-principal", "MCP-CLIENT + project assignment + scope")
+@tag("mcp") @extension("x-codexia-principal", "OWNER-API | assigned MCP-CLIENT with effect scope")
 @route("/api/projects/{projectId}/modules/mcp/streamable") @delete @operationId("project_mcp_stream_delete")
-op deleteProjectMcpStream(@path projectId: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string): McpMethodDenied | { @statusCode _: 401; @body body: ApiError; };
+@extension("x-codexia-contract-status", "incomplete")
+@extension("x-codexia-runtime-response-deviation", "After admission, the MCP SDK returns HTTP 405 with Allow: POST and JSON-RPC error -32000, id null. The approved API epoch baseline keeps its ApiError response schema pending a compatibility correction.")
+op deleteProjectMcpStream(@path projectId: string, @header("MCP-Protocol-Version") protocolVersion?: string, @header("Mcp-Method") method?: string, @header("Mcp-Name") name?: string): McpMethodDenied | McpAdmissionBadRequest | McpAdmissionForbidden | { @statusCode _: 401; @body body: ApiError; } | McpAdmissionNotFound | McpAdmissionUnavailable;
 
 @tag("public-reader") @useAuth(NoAuth) @extension("x-codexia-principal", "SHARE-READER capability")
 @extension("x-codexia-contract-status", "incomplete")

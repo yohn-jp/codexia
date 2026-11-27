@@ -258,6 +258,18 @@ test('generated request and response schemas preserve null, oneOf, closed object
   assert.deepEqual(projectEvents.contentTypes['200'], ['text/event-stream']);
   assert.deepEqual(mcpPost.requestContentTypes, ['application/json']);
   assert.deepEqual(mcpPost.contentTypes['200'].sort(), ['application/json', 'text/event-stream']);
+  for (const path of ['/mcp', '/api/projects/{projectId}/modules/mcp/streamable']) {
+    for (const method of ['get', 'post', 'delete']) {
+      const { responses } = openapi.paths[path][method];
+      for (const status of ['403', '404', '503', ...(method === 'post' ? [] : ['400'])]) {
+        assert.equal(
+          responses[status]?.content?.['application/json']?.schema?.$ref,
+          '#/components/schemas/ApiError',
+          `${method.toUpperCase()} ${path} must describe its ${status} admission failure`,
+        );
+      }
+    }
+  }
   assert.equal(
     openapi.paths['/api/console/backups/config/draft'].put.responses['412'].content['application/json'].schema.$ref,
     '#/components/schemas/ApiError',
