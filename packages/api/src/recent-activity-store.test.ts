@@ -80,8 +80,8 @@ describe('RecentActivityStore', () => {
     const state = JSON.parse(await readFile(statePath, 'utf8'));
     const ownerKey = state.entries[0].ownerKey;
     for (let i = 1; i < 20_000; i++) {
-      const projectId = 'limit-' + i;
-      const key = createHash('sha256').update(ownerKey + '\0postgres-project\0' + projectId).digest('hex');
+      const projectId = `limit-${i}`;
+      const key = createHash('sha256').update(`${ownerKey}\0postgres-project\0${projectId}`).digest('hex');
       state.entries.push({ key, ownerKey, projectId, items: [] });
     }
     await writeFile(statePath, JSON.stringify(state));

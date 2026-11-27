@@ -1,9 +1,34 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { execFileSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { migrationSetFingerprint } from '../../../packages/persistence-postgres/src/migration-set.ts';
 import { planFromObservations } from './observe.mjs';
 import { parsePreflightRequest } from './run.mjs';
 import { frontendOAuthConfigIdentity } from '../../build/frontend/oauth-config.mjs';
+
+test('the host observation entrypoint loads from a clean checkout without evidence-reader dependencies', () => {
+  const root = mkdtempSync(join(tmpdir(), 'codexia-preflight-import-'));
+  try {
+    for (const path of [
+      'scripts/deployment/preflight/run.mjs',
+      'scripts/deployment/preflight/preservation.mjs',
+      'scripts/deployment/preflight/evidence-digest.mjs',
+      'packages/api/src/auth-schema.ts',
+    ]) {
+      const target = join(root, path);
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(new URL('../../../' + path, import.meta.url), target);
+    }
+    execFileSync(process.execPath, ['--input-type=module', '--eval',
+      "const entry = await import('./scripts/deployment/preflight/run.mjs'); if (typeof entry.readLifecycleHost !== 'function') process.exit(1);"],
+    { cwd: root });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 const h = c => c.repeat(64);
 const now = new Date('2026-11-24T00:00:00.000Z');
