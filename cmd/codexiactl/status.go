@@ -158,7 +158,7 @@ func blockerGuidance(blocker string) string {
 	case "latest-target-lifecycle-evidence-unavailable":
 		return "No current, exact-main Preflight receipt is proven for this VM. A first installation needs init to request a fresh protected Preflight; an existing installation needs operator recovery evidence. Older successful runs do not authorize changes."
 	case "tailnet-identity-or-policy-unverified":
-		return "Review the exact OIDC subject, auth_keys-only scope, tag:ci and main-workflow claims at "+wifTrustConsole+". For a missing credential, init can offer a separate, scoped one after approval; doctor and --plan never create it."
+		return "Review the exact OIDC subject, auth_keys-only scope, tag:ci and main-workflow claims at " + wifTrustConsole + ". For a missing credential, init can offer a separate, scoped one after approval; doctor and --plan never create it."
 	case "ssh-host-pin-unverified":
 		return "Compare the VM's SSH host key fingerprint with the independent SSH client/provider console; never disable strict host-key verification."
 	case "cloudflare-edge-unverified", "edge-initial-install-unverified":
