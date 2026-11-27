@@ -41,7 +41,7 @@ export function releaseVerificationState(runs, sha) {
 /** @param {unknown} jobs @param {readonly string[]} expectedNames @param {readonly string[]} optionalSkippedNames */
 function assertNamedJobs(jobs, expectedNames, optionalSkippedNames = []) {
   if (!Array.isArray(jobs)) throw new Error('Invalid release verification jobs response');
-  jobs = normalizeVerificationJobs(jobs);
+  const normalizedJobs = normalizeVerificationJobs(jobs);
   const required = new Set(expectedNames);
   if (required.size !== expectedNames.length) throw new Error('Canonical release verification job set contains duplicates');
   const optionalSkipped = new Set(optionalSkippedNames);
@@ -49,7 +49,7 @@ function assertNamedJobs(jobs, expectedNames, optionalSkippedNames = []) {
     throw new Error('Canonical optional release verification job set is invalid');
   }
   const seen = new Set();
-  for (const job of jobs) {
+  for (const job of normalizedJobs) {
     if (!record(job) || typeof job.name !== 'string' || job.name.length === 0) {
       throw new Error('Invalid release verification job');
     }
