@@ -7,6 +7,7 @@ here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 state="${CODEXIA_CLOUD_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/codexia-cloud}"
 mkdir -p -- "$state"
 chmod 700 -- "$state"
+state="$(cd -- "$state" && pwd)"
 runtime="$state/runtime.env"
 
 if [[ ! -s "$runtime" ]]; then
@@ -28,9 +29,17 @@ EOF
   trap - EXIT
 fi
 
+# The entrypoint reads this bind mount as postgres. Cloud checkouts can leave
+# tracked files readable only by the host user.
+init_copy="$(mktemp "$state/init.XXXXXX")"
+trap 'rm -f -- "$init_copy"' EXIT
+install -m 0444 -- "$here/init.sql" "$init_copy"
+mv -- "$init_copy" "$state/init.sql"
+trap - EXIT
+
 # Use the saved password and port, not an ambient override. Compose provides
 # startup, health-based waiting, and container/volume lifecycle management.
 env -u CODEXIA_CLOUD_DB_PASSWORD -u CODEXIA_CLOUD_DB_PORT \
   docker compose --project-name codexia-cloud-test \
-  --env-file "$runtime" -f "$here/compose.yaml" up -d --wait --wait-timeout 60
+  --project-directory "$state" --env-file "$runtime" -f "$here/compose.yaml" up -d --wait --wait-timeout 60
 printf 'Disposable PostgreSQL ready. Source %s for database-backed checks.\n' "$runtime"
