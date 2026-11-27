@@ -94,6 +94,8 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 		}
 	}
 	switch snapshot.Production.Variables["CODEXIA_PUSH_DEPLOYMENT_ENABLED"] {
+	case "true":
+		report.OrdinaryUpdate = "enabled-unverified"
 	case "", "false":
 		if snapshot.Production.Variables != nil {
 			report.OrdinaryUpdate = "disabled"
@@ -191,7 +193,7 @@ func observeExistingReceipt(ctx context.Context, gh *githubControl, host string,
 		}
 		r, err := readReceipt(ctx, gh, run.ID)
 		if err != nil || (r.Management != "runtime" && r.Management != "bootstrap") ||
-			r.validate(report.MainSHA, run.ID, r.Management, host, report.PublicOrigin, time.Now()) != nil {
+			r.validateObservation(report.MainSHA, run.ID, r.Management, host, report.PublicOrigin, time.Now()) != nil {
 			continue
 		}
 		report.Evidence = append(report.Evidence, runLink(run.ID))
@@ -206,6 +208,9 @@ func observeExistingReceipt(ctx context.Context, gh *githubControl, host string,
 		case s.A == "ready" && s.B == "compatible" && s.F == "compatible" && r.Evidence.Edge.Backend != nil &&
 			r.Evidence.Edge.Backend.StandaloneOAuth && s.T == "none":
 			report.Phase, report.Active = "ACTIVE", "true"
+			if report.OrdinaryUpdate == "enabled-unverified" && r.Plan.Route == "R8" && len(r.Plan.Blockers) == 0 {
+				report.OrdinaryUpdate = "r8-admitted-recovery-unverified"
+			}
 			// Actual independent recovery evidence is owned by the recovery operator.
 			report.Blockers = append(report.Blockers, "independent-restore-acceptance-unverified")
 		case s.A == "ready" && s.B == "absent":

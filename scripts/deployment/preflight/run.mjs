@@ -219,6 +219,8 @@ async function planObservation({ bootstrapMode } = {}) {
       assert.equal(reviewed.runId, Number(env.CODEXIA_BOOTSTRAP_PREFLIGHT_RUN_ID));
       assert.equal(reviewed.attempt, Number(env.CODEXIA_BOOTSTRAP_PREFLIGHT_ATTEMPT));
       assert.equal(reviewed.planSha256, env.CODEXIA_BOOTSTRAP_PLAN_SHA256);
+      const authContinuation = env.CODEXIA_BOOTSTRAP_AUTH_CONTINUATION_APPROVED === 'true' &&
+        reviewed.plan.observation.bootstrapResume !== undefined;
       const admission = admitBootstrap({
         mode: bootstrapMode,
         plan: reviewed.plan,
@@ -226,8 +228,7 @@ async function planObservation({ bootstrapMode } = {}) {
         current: plan,
         topology: host.topology,
         initializeDatabase: env.CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED === 'true',
-        resumeAuthOnly: env.CODEXIA_BOOTSTRAP_AUTH_CONTINUATION_APPROVED === 'true' &&
-          reviewed.plan.observation.bootstrapResume !== undefined,
+        resumeAuthOnly: authContinuation,
       });
       if (bootstrapMode === 'bootstrap' && !host.topology?.secrets?.['codexia-tunnel-token']) {
         await access(join(env.RUNNER_TEMP, 'codexia-bootstrap/control/tunnel-token'));
@@ -268,6 +269,7 @@ async function planObservation({ bootstrapMode } = {}) {
         ...(plan.observation.bootstrapResume ? {
           codexia_expected_bootstrap_resume: plan.observation.bootstrapResume,
         } : {}),
+        ...(authContinuation ? { codexia_auth_continuation_approved: true } : {}),
       } : {
         codexia_owner_setup_operation: bootstrapMode,
         codexia_expected_owner_secret_set_sha256: digestEvidence(host.topology.secretHashes),

@@ -9,7 +9,9 @@
     that:
       - codexia_owner_setup_install_intent is sameas true
       - not (codexia_owner_setup_approved | default(false))
-      - codexia_database_initialization_approved | default(false) is sameas true
+      - >-
+        (codexia_database_initialization_approved | default(false) is sameas true) or
+        (codexia_auth_continuation_approved | default(false) is sameas true)
       - codexia_expected_bootstrap_resume is mapping
       - codexia_expected_bootstrap_resume.image == codexia_auth_bootstrap_image
       - codexia_expected_bootstrap_resume.clusterId is match('^[1-9][0-9]{0,19}$')
@@ -67,7 +69,10 @@
   ansible.builtin.assert:
     that:
       - not (codexia_owner_setup_approved | default(false)) or codexia_owner_setup_edge_approved | default(false) is sameas true
-      - codexia_database_initialization_approved | default(false) is sameas true
+      - >-
+        (codexia_database_initialization_approved | default(false) is sameas true) or
+        (codexia_expected_bootstrap_resume is defined and
+         codexia_auth_continuation_approved | default(false) is sameas true)
       - not (codexia_auth_registration_pending | default(false))
       - codexia_auth_passkey_bootstrap_owner_id is not defined
       - codexia_oauth_owner_subject is not defined
@@ -79,7 +84,7 @@
       - codexia_owner_setup_web_redirect_uris is sequence and codexia_owner_setup_web_redirect_uris is not string
       - codexia_owner_setup_web_redirect_uris | length > 0
       - codexia_owner_setup_web_redirect_uris | reject('match', '^' + (codexia_public_origin | regex_escape) + '/[a-zA-Z0-9._/-]*$') | list | length == 0
-    fail_msg: Staging owner setup requires approved database initialization, a reviewed immutable Full image and exact Web redirects. Issuing the grant and opening browser setup also require a protected recipient and independent Cloudflare path approval.
+    fail_msg: Staging owner setup requires approved database initialization or verified Auth continuation, a reviewed immutable Full image and exact Web redirects. Issuing the grant and opening browser setup also require a protected recipient and independent Cloudflare path approval.
 
 - name: Observe completed browser setup before rewriting the protected runtime settings
   when: owner_setup_requested

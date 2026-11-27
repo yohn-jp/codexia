@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -90,13 +91,25 @@ type lifecycleReceipt struct {
 const evidenceMaxAge = 5 * time.Minute
 
 func (r lifecycleReceipt) validate(sha string, id int64, management, hostID, origin string, now time.Time) error {
+	if r.Request.Intent != "install" || r.Request.Window != nil {
+		return refused("Expected a window-free initial-install Preflight")
+	}
+	return r.validateObservation(sha, id, management, hostID, origin, now)
+}
+
+func (r lifecycleReceipt) validateObservation(sha string, id int64, management, hostID, origin string, now time.Time) error {
 	if r.SourceSHA != sha || r.RunID != id || r.Attempt != 1 || r.Management != management ||
 		r.Plan.Observation.Binding.HostID != hostID || r.Evidence.Edge.Origin != origin {
 		return refused("Preflight evidence does not match the approved source, attempt, VM, or origin")
 	}
 	f := r.Request.Frontend
-	if r.Plan.Format != "codexia-deployment-plan/v1" || r.Request.Intent != "install" || r.Plan.Intent != "install" ||
-		r.Request.Window != nil || r.Plan.Window != nil || !digestHash.MatchString(r.PlanSHA) ||
+	switch r.Request.Intent {
+	case "install", "adopt", "update", "maintenance", "restore":
+	default:
+		return refused("Preflight has an unrecognized lifecycle intent")
+	}
+	if r.Plan.Format != "codexia-deployment-plan/v1" || r.Plan.Intent != r.Request.Intent ||
+		!matchingReceiptWindow(r.Request.Window, r.Plan.Window) || !digestHash.MatchString(r.PlanSHA) ||
 		r.Request.BackendPublisherRunID < 1 || f.RunID < 1 || f.ArtifactID < 1 || f.VerifyRunID < 1 ||
 		f.ArtifactDigest != r.Plan.Target.FrontendArtifactSHA || !digestHash.MatchString(f.ArtifactDigest) ||
 		!digestHash.MatchString(r.Plan.Target.BackendCertificateSHA) || !digestHash.MatchString(r.Plan.Target.IdentitySHA) {
@@ -106,6 +119,13 @@ func (r lifecycleReceipt) validate(sha string, id int64, management, hostID, ori
 		return needsAction("The lifecycle observation expired. Start a fresh protected Preflight")
 	}
 	return nil
+}
+
+func matchingReceiptWindow(request, plan *json.RawMessage) bool {
+	if request == nil || plan == nil {
+		return request == nil && plan == nil
+	}
+	return bytes.Equal(*request, *plan)
 }
 
 func (r lifecycleReceipt) fresh(now time.Time) bool {

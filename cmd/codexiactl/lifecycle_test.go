@@ -160,6 +160,13 @@ func TestValidateReceiptBoundToTargetAndTime(t *testing.T) {
 	if err := r.validate(sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now.Add(6*time.Minute)); err == nil {
 		t.Fatal("stale approval evidence was reused")
 	}
+	r.Request.Intent, r.Plan.Intent = "update", "update"
+	if err := r.validateObservation(sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now); err != nil {
+		t.Fatalf("read-only status must accept update evidence: %v", err)
+	}
+	if err := r.validate(sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now); err == nil {
+		t.Fatal("update evidence was accepted as a first-install approval")
+	}
 }
 
 func TestCorrelateLostResponseByExactReviewedPreflight(t *testing.T) {
@@ -239,5 +246,29 @@ func TestReadOnlyJSONWithUnverifiedVM(t *testing.T) {
 	}
 	if strings.Contains(stdout.String()+stderr.String(), "fixture-never-report-this") {
 		t.Fatal("credential leaked to logs or JSON")
+	}
+}
+
+func TestInterruptedFirstHostUsesAdministratorPreflight(t *testing.T) {
+	valid := func(names []string, sshSecret string) githubEnvironment {
+		env := githubEnvironment{Variables: map[string]string{edgeTarget: "{}"}, Secrets: map[string]bool{sshSecret: true}}
+		for _, name := range names {
+			env.Variables[name] = "fixture"
+		}
+		for _, name := range commonSecrets {
+			env.Secrets[name] = true
+		}
+		return env
+	}
+	snapshot := githubSnapshot{
+		Bootstrap:  valid([]string{"CODEXIA_BOOTSTRAP_HOST", "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS", "CODEXIA_BOOTSTRAP_SSH_USER"}, bootstrapSSHSecret),
+		Production: valid([]string{"CODEXIA_DEPLOY_HOST", "CODEXIA_DEPLOY_SSH_KNOWN_HOSTS"}, runtimeSSHSecret),
+	}
+	if found := existingManagement(snapshot); found != "bootstrap" {
+		t.Fatalf("partially configured runtime would block recovery: %s", found)
+	}
+	snapshot.Bootstrap = githubEnvironment{}
+	if found := existingManagement(snapshot); found != "runtime" {
+		t.Fatalf("existing runtime should retain its independent observation path: %s", found)
 	}
 }

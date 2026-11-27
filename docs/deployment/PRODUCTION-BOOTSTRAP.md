@@ -30,7 +30,7 @@ chmod 0700 codexiactl-linux-amd64
 ./codexiactl-linux-amd64 init
 ```
 
-The release identifies its source and version. The repository maintainer provisions the repository-only GitHub App with Device Flow enabled and sets its public client ID in `CODEXIACTL_GITHUB_APP_CLIENT_ID` before building the tag. The CLI can guide an operator who explicitly selects the supported fine-grained PAT route. Use `doctor` for prerequisite and permission failures and `status` to inspect the latest observed state. Run `init` again to reconcile an interrupted invocation. Resolve reported state conflicts through the owning protected workflow or recovery runbook before retrying.
+The release identifies its source and version. The repository maintainer provisions the repository-only GitHub App with Device Flow enabled and sets its public client ID in `CODEXIACTL_GITHUB_APP_CLIENT_ID` before building the tag. The CLI can guide an operator who explicitly selects the supported fine-grained PAT route. Use `doctor` for prerequisite and permission failures and `status` to inspect the latest verified lifecycle observation. The recovery operator and Backup Console own the independent restore evidence required for ACCEPTED. Run `init` again to reconcile an interrupted invocation. Resolve reported state conflicts through the owning protected workflow or recovery runbook before retrying.
 
 After the CLI confirms the normal frontend and the registration-only API and hands off the Owner Setup Grant, the owner opens the normal `/console/setup` page. Use the existing protected procedures below after owner registration.
 

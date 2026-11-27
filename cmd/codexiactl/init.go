@@ -77,10 +77,11 @@ func runInit(ctx context.Context) error {
 	// Inspect the existing runtime through its owning lifecycle path first.
 	// This prevents changing protected inputs on an enrolled installation.
 	if vm.CodexiaPresent {
-		if !runtimeInputsExist(snapshot.Production) {
-			return needsAction("Existing Codexia resources were detected. The protected runtime inputs are incomplete. Verify the installation through the recovery runbook")
+		management := existingManagement(snapshot)
+		if management == "" {
+			return needsAction("Existing Codexia resources were detected and neither protected SSH configuration is complete. Verify the installation through the recovery runbook")
 		}
-		receipt, _, err := c.preflight(ctx, "runtime")
+		receipt, _, err := c.preflight(ctx, management)
 		if err != nil {
 			return err
 		}
@@ -100,13 +101,30 @@ func closeGitHub(ctx context.Context, gh *githubControl) {
 	gh.Close(cleanup)
 }
 
-func runtimeInputsExist(env githubEnvironment) bool {
-	for _, name := range []string{"CODEXIA_DEPLOY_HOST", "CODEXIA_DEPLOY_SSH_KNOWN_HOSTS", edgeTarget} {
+func existingManagement(snapshot githubSnapshot) string {
+	// R4 can leave the administrator reachable while the rootless account
+	// is still missing its runtime public key.
+	if managementInputsExist(snapshot.Bootstrap,
+		[]string{"CODEXIA_BOOTSTRAP_HOST", "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS", "CODEXIA_BOOTSTRAP_SSH_USER"}, bootstrapSSHSecret) {
+		return "bootstrap"
+	}
+	if managementInputsExist(snapshot.Production,
+		[]string{"CODEXIA_DEPLOY_HOST", "CODEXIA_DEPLOY_SSH_KNOWN_HOSTS"}, runtimeSSHSecret) {
+		return "runtime"
+	}
+	return ""
+}
+
+func managementInputsExist(env githubEnvironment, names []string, sshSecret string) bool {
+	if env.Variables[edgeTarget] == "" || !env.Secrets[sshSecret] {
+		return false
+	}
+	for _, name := range names {
 		if env.Variables[name] == "" {
 			return false
 		}
 	}
-	for _, name := range append([]string{runtimeSSHSecret}, commonSecrets...) {
+	for _, name := range commonSecrets {
 		if !env.Secrets[name] {
 			return false
 		}
