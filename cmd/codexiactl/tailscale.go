@@ -124,7 +124,7 @@ func prepareTailnet(ctx context.Context, o operator, vm vmObservation, plan bool
 		return identity, err
 	}
 	o.Notice("Tailscale administration is needed to verify this VM, the CI SSH policy and GitHub Actions OIDC trust. This is NOT an auth key or the GitHub token; it is used only during this CLI session.")
-	o.Notice("Create a short-lived API access token at https://login.tailscale.com/admin/settings/keys. Inspection requires devices:core:read, devices:posture_attributes:read, policy_file:read and federated_keys:read. If no correctly scoped OIDC trust exists, init can offer to create one after separate approval; that operation additionally requires federated_keys:write.")
+	o.Notice("Use a short-lived Tailscale API access token from https://login.tailscale.com/admin/settings/keys (an API access token is fully privileged), or an existing scoped management credential. Scoped read access needs devices:core:read, devices:posture_attributes:read, policy_file:read and federated_keys:read; approved OIDC credential creation additionally requires federated_keys (write). Never provide a device Auth Key.")
 	token, err := o.Secret("Tailscale administration access token")
 	if err != nil {
 		return identity, err
@@ -344,7 +344,7 @@ func inspectTailnetWithApproval(ctx context.Context, client *ts.Client, local lo
 			},
 		})
 		if createErr != nil {
-			return identity, tailnetAPIError("create approved scoped GitHub OIDC trust (requires federated_keys:write)", createErr)
+			return identity, tailnetAPIError("create approved scoped GitHub OIDC trust (requires federated_keys (write))", createErr)
 		}
 		if created == nil || !tailnetNodeID.MatchString(created.ID) {
 			return identity, refused("Tailscale returned no valid identity for the created OIDC credential; inspect " + wifTrustConsole + " before retrying")
