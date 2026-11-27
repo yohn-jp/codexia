@@ -29,13 +29,14 @@ flowchart TD
     CLIENT -->|不整合| STOP3["停止: 本番公開しない<br/>登録結果の再検証"]
     CLIENT -->|準備完了| PREP["保護されたactivation preparation<br/>setup-only停止・初回本番配備承認待ち"]
     RESTORED --> PREP
-    PREP --> CERT{"認証済みmain Full digest/証明書<br/>互換Frontend・DB/認証/バックアップ/公開承認OK?"}
+    PREP --> CERT{"認証済みmain Full digest/証明書<br/>互換Frontend・DB/認証/公開承認OK?"}
     CERT -->|いいえ| STOP4["停止: セットアップ以外の業務APIは公開しない"]
-    CERT -->|はい| DEPLOY["保護された初回activation・暗号化backup<br/>互換UIを再確認してBackend deploy"]
+    CERT -->|はい| DEPLOY["保護された初回activation<br/>互換UIを再確認してBackend deploy"]
     DEPLOY --> HEALTH{"API・認証・Tunnel・UI正常?"}
     HEALTH -->|いいえ| STOP5["停止/切戻し・transaction復旧<br/>owner DBは初期化しない"]
     HEALTH -->|はい| ACT["setup APIの登録権限を無効化<br/>通常のownerログイン・/consoleへ"]
-    ACT --> ACCEPT{"VM reboot / 公開経路 / 独立restoreを実測?"}
+    ACT --> CONFIG["所有者が通常Consoleで保全設定・実行<br/>復旧担当が独立復元試験"]
+    CONFIG --> ACCEPT{"VM reboot / 公開経路 / 独立restoreを実測?"}
     ACCEPT -->|いいえ| PARTIAL["稼働と本番受入を区別して記録"]
     ACCEPT -->|はい| DONE["初期導入受入完了・初回承認解除"]
 ```
@@ -71,7 +72,7 @@ flowchart TD
 | 3B | 既存DBの復旧の場合: 復旧担当 | DB/原稿履歴、owner ID、Passkey/OAuth client、PostgreSQL role、Podman secretを独立バックアップ・秘密管理から復旧・検証 | ownerへ既存資格情報によるログイン確認。**新しい登録キーは発行しない** |
 | 4 | 初回owner本人 | Workersで配信される`/console/setup`からキー検証・Passkey登録 | Better Auth上の唯一のownerと登録消費の確定結果 |
 | 5 | 構築担当/保護されたAPI | Web/iOS/内省クライアントの登録とresource/redirectをAPI側で照合。OIDCは任意で、認証後に`/console/identity`から設定 | 保護された初回deployの入力条件と確認状態 |
-| 6 | 保護されたGitHub Actions | 配備承認、証明済みdigest、DB schema/backup、Cloudflare/Tunnel、health確認 | 本番owner login可能な`/console`。setup側の登録権限を閉じる |
+| 6 | 保護されたGitHub Actions | 配備承認、証明済みdigest、DB schema/Auth、Cloudflare/Tunnel、health確認 | 本番owner login可能な`/console`。setup側の登録権限を閉じる |
 
 ### 初回入力と秘密の管理
 
@@ -80,8 +81,8 @@ flowchart TD
 | Git | サービスの UID/GID、公開 origin、Web・iOS・内省 client ID、callback、scope | Frontend のビルド・検証と Ansible の登録設定が同じ [本番設定](../../deploy/production.json) を読む。 |
 | インフラ管理者・保護環境 | VM の管理先、独立に確認した SSH host key、管理者と配備用の別々の SSH 鍵、Tailscale OIDC、Access・Tunnel の資格情報 | 管理者は sudo、配備用アカウントは rootless。R4 は配備用公開鍵を導出して VM に登録し、別ジョブから実際に接続を確認する。 |
 | VM 上の R4 | PostgreSQL 管理・アプリ・認証ロールのパスワード、Better Auth secret、内省 secret | 生成を許すのは承認済みの新規状態に限る。PostgreSQL と Podman が同じ値を使い、再実行時は既存値を採用する。部分欠損や所有権の不一致は復旧へ戻す。 |
-| 復旧担当 | 初回から書き込める S3 保存先と制限付き資格情報、age の受取公開鍵、独立環境に保持した復号鍵 | R4 で資格情報を暗号化して転送・読み戻しし、別環境から復号する。R5 完了後に DB・履歴を別の v2 バックアップとして保存・復元する。owner のログイン前に両方の保管先を用意する。 |
-| owner 本人 | 登録キー配送用の公開鍵、ブラウザーで作成する Passkey | 登録キーは R5 で一回発行する。登録完了後の R6 は既存の owner と client を検証する。 |
+| 復旧担当（ACTIVE後の運用受入、または既存環境の復旧） | 独立保管先・復旧権限・復号鍵・復元に必要なVM秘密 | 純新規R4〜R6の入力ではない。通常Consoleでバックアップを設定・実行し、復旧担当が独立ホストで復元試験を行う。既存環境の復旧ではR2で先に必要な情報を取得する。 |
+| owner 本人（R5のみ） | 登録キー配送用の公開鍵、ブラウザーで作成する Passkey | 登録キーは R5 で一回発行する。登録完了後の R6 は既存の owner と client を検証する。 |
 
 運用者は導入意図・対象の計画・必要な変更を承認する。CI は認定済みの成果物、source、run、digest を解決し、同じ main からの観測と照合する。VM ごとの inventory は実行時に作成する。設定項目と各 Environment の権限は [本番 Bootstrap 手順](PRODUCTION-BOOTSTRAP.md) に従う。
 
@@ -122,17 +123,17 @@ stateDiagram-v2
     SetupExposed --> Blocked : キー失効・不正な状態
     OwnerReady --> ActivationPending : client照合・setup停止・認証設定確定
     ActivationPending --> Active : 保護された初回activation・既存互換Frontendを確認
-    Active --> Accepted : 公開経路・再起動・独立restore実測
+    Active --> Accepted : Console設定・保全 / 公開経路・再起動・独立restore実測
     SSHReady --> Blocked : 接続・ホスト証明失敗
     DataReady --> Blocked : 不明なDB・migration不一致
-    ActivationPending --> Blocked : 証明・バックアップ・承認不足
+    ActivationPending --> Blocked : 証明・承認不足 / 既存データ復旧不整合
     Blocked --> RestorePending : 既存データなら復旧専用
     Blocked --> SetupPending : 新規と空DBを再確認・承認
 ```
 
 - **DB/認証不一致:** 既存データ・role・Secret を勝手に削除・変更しない。公開 API は開始せず、承認済み復旧/移行へ送る。
 - **公開の失敗:** Tunnel/Access 経路の受入を API 起動成功と区別する。管理用 Tailscale/SSH を公開経路に依存させない。
-- **バックアップ:** ローカルの暗号化 archive は同一 VM の消失には耐えない。独立保管と `restore-drill` の別ホスト実行を本番の復旧能力の受入に含める。
+- **バックアップ:** 純新規R4〜R6では不要。ACTIVE後に所有者がConsoleで設定・実行し、復旧担当が独立保管・別ホスト復元を実証して運用を受け入れる。ローカル暗号化archiveだけではVM消失に耐えない。既存データの復旧はR2で先行し、通常更新は事前保全を維持する。
 
 **受入証拠:** 使い捨て Ubuntu VM で空状態・再適用・既存データの採用/拒否・secret drift・schema 不一致・owner 登録・Full 初回起動を検証する。実 VM では reboot、Cloudflare 公開 routing、Web 認証、独立バックアップ復元を別途観測する。検証未実施を PASS として報告しない。
 

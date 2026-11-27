@@ -1,6 +1,6 @@
 # Encrypted push-deployment backups
 
-The [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) owns when backup, independent recovery evidence and restore are required for route admission and coordinated activation. Backup is a prerequisite in the [compatible update state machine](UPDATE-FLOW.md), and recovery acceptance is required by the [initial deployment state machine](INITIAL-DEPLOYMENT-FLOW.md). A verified ciphertext file alone is not proof of independent-host recoverability.
+The [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) owns when backup, independent recovery evidence and restore are required for route admission and operation acceptance. Fresh R4–R6 does not require backup or restore evidence; adoption/recovery and subsequent updates protect existing data. Backup is a prerequisite in the [compatible update state machine](UPDATE-FLOW.md), and recovery acceptance is required by the [initial deployment state machine](INITIAL-DEPLOYMENT-FLOW.md). A verified ciphertext file alone is not proof of independent-host recoverability.
 
 [`deploy/backup/backup.sh`](../../deploy/backup/backup.sh) is the canonical producer. The protected Ansible push transaction and the operator-provisioned backup executor invoke it under the same host lock. The executor can request backups in operator-approved maintenance windows.
 
@@ -10,7 +10,7 @@ An independent `restore-drill` stage decrypts a **v2** artifact on an isolated r
 
 An operator can extend the isolated drill with `--candidate-full-image` and `--candidate-ledger` for the exact reviewed Full image. The `--candidate-api-ready` check also takes `--candidate-runtime-settings` and `--candidate-introspection-secret-file`, both protected recovery inputs for the restored Better Auth catalog. It verifies API readiness against the restored PostgreSQL and history during the drill.
 
-Use an approved protected Ansible inventory and independently supplied recipient/recovery identity. Only the holder of the external backup encryption private key can perform the restore drill.
+Use the approved protected operator procedure and an independently supplied recipient/recovery identity on a recovery host. Only the holder of the external backup encryption private key can perform the restore drill. Production recovery keys, backup credentials and recovery material are not supplied to GitHub Actions.
 
 The deployment backup is a pre-rollout recovery point for the database and history resources. PostgreSQL roles and Podman secrets require separate recovery. Current push deployment admission rejects migration-fingerprint, API-epoch, and persistence-format changes. These changes require a separately reviewed operation with its own approval, encrypted pre-change backup, migration verification, and tested restore procedure.
 
@@ -36,7 +36,7 @@ After verifying the restored database and history fingerprints, the drill checks
 [バックアップ制御の運用手順](../../deploy/backup/CONSOLE.md)に従い、オペレーターがS3保存先を扱うAPIとexecutorを有効化する。
 OWNER-SESSIONで保存先とwrite-only資格情報を扱う画面の設計は[バックアップ管理コンソール](../architecture/BACKUP-CONSOLE-CONTRACT.md)に従う。
 暗号化アーティファクトの生成とwriter停止の確認には`backup.sh`と共通host lockを使う。
-ローカルの保管先とage受取公開鍵の管理、本番の復元、VMやIAMの変更は、保護されたオペレーターの手順で行う。
+ローカルstagingとage受取公開鍵はVM上の保護された実行設定で管理する。本番復元、VMやIAM変更は保護されたオペレーター手順で行う。通常のS3保存先・実行資格情報はConsoleからのみ設定する。Actionsに保全設定・復号鍵を登録しない。
 
 ローカルまたは独立mount先で生成したv2 artifactは、S3 API互換ストレージへ転送できる。保護されたexecutorとAnsibleのデプロイ受入は、同じ`backup.sh`と転送アダプターを使う。クラウドベンダー、バケット名、リージョン、保持期間、RPO/RTOは配備先の運用方針で決める。
 
@@ -97,7 +97,7 @@ It starts the pinned Silo S3-compatible service on loopback with a temporary CA,
 | 項目 | 要件 |
 | --- | --- |
 | Endpoint | AWS S3およびS3 API互換サービスを対象。HTTPS必須、TLS検証を無効化しない。endpoint/region/virtual-hosted vs path-styleはprovider仕様に従う明示設定 |
-| 認証 | 短命credential/ロール連携が可能なら優先。固定access keyが必要なproviderではAnsible protected secretsで供給し、repo/CI artifact/logへ出さない。公開API・owner UI・MCPにbucket credentialを渡さない |
+| 認証 | 短命credential/ロール連携が可能なら優先。固定access keyが必要なproviderではConsoleのwrite-only入力から専用運用schemaに封印し、実行主体だけが利用する。operator-roleの場合は外部管理面とVMで事前構成する。repo/Actions Secrets/CI artifact/logに出さず、API応答・UI読戻し・MCPへ資格情報を返さない |
 | 権限 | 書込・参照・復元・削除の主体を分離。通常のバックアップwriterにbucket-wide deleteや管理権限を与えない。別prefix/別環境への誤配送を拒否 |
 | 暗号化 | **S3転送前にageでクライアント側暗号化**。SSE-S3/SSE-KMS等は追加防御でありageの代替ではない。秘密鍵はオフVMの独立した保護・復旧手順で管理 |
 | 保持・削除 | versioning、Object Lock/WORM、retention、lifecycleはproviderが対応する範囲で明示設定。未対応の場合は「保護済み」と誤表示せず、削除権限分離・独立コピー等の補完策を受入条件にする |
@@ -107,8 +107,8 @@ It starts the pinned Silo S3-compatible service on loopback with a temporary CA,
 
 ### 運用ポリシーと失敗時
 
-- **デプロイ前バックアップ**は既存のhost lock・停止・暗号化・復元可能性の契約を維持する。S3を必須の保管先に指定した環境では、S3アップロードと検証が成功するまでcandidate activationを禁止する。S3が任意の二次保管先である環境では、既存の承認済み独立バックアップが成立した場合に限りS3失敗を別の運用障害として記録できる。失敗を黙って無視しない。
-- **定期的な保全**の頻度、RPO/RTO、retention、世代数は運用要件として別途承認する。新しいVM polling updaterや第二のデプロイ制御器を作らない。定期バックアップを導入する場合はwriterの整合性、実行主体、host lock、バックアップ中の可用性を別設計で承認する。
+- **通常Backend更新前バックアップ**は既存のhost lock・停止・暗号化・復元可能性の契約を維持する。S3を必須の保管先に指定した環境では、S3アップロードと検証が成功するまでcandidate activationを禁止する。S3が任意の二次保管先である環境では、既存の承認済み独立バックアップが成立した場合に限りS3失敗を別の運用障害として記録できる。失敗を黙って無視しない。
+- **定期的な保全**の頻度、RPO/RTO、retention、世代数は運用要件として別途承認する。新しいVM polling updaterや第二のデプロイ制御器を作らない。定期実行はConsoleの既存schedule契約と同じVM内実行主体で受入するまで無効。新しいschedulerを追加する許可ではない。writer整合性・host lock・可用性を検証する。
 - S3 provider障害、credential失効、quota不足、TLS失敗、誤bucket、アップロード中断、object改ざん、削除/retention違反、age鍵紛失を想定する。暗号文がアップロードされた事実だけで災害復旧成功とみなさない。
 - **Restore drill**は本番データを公開CIへ送らず、隔離した復旧ホスト・合成データでS3→download→decrypt→PostgreSQL/history→API readinessまで実証する。productionでの復旧には別途明示承認が必要。
 
@@ -128,43 +128,13 @@ It starts the pinned Silo S3-compatible service on loopback with a temporary CA,
 
 ## Initial recovery before activation
 
-Provision both recovery paths before starting a fresh install. The owner first reaches the normal backup console after activation. The operator controls the initial destinations and identities through protected Environments.
+This heading is retained as an existing link target; the former initial-recovery gate is retired by the target design. No initial backup, credential escrow, S3 profile, recovery Environment, independent restore receipt, or backup encryption recipient is required to bootstrap and activate a genuinely new installation. R4 generates internal credentials on the VM; R5 enrolls the owner; R6 starts the normal Backend. These steps do not establish disaster-recovery acceptance.
 
-| Material | Writer and recovery reader | Admission proof |
-| --- | --- | --- |
-| Rootless Podman secrets including the PostgreSQL role credentials | On R4 the VM encrypts the exact installed values to the public age recipient. Bootstrap puts the envelope in S3 and reads it back. A fresh runner in `codexia-bootstrap-recovery` reads and decrypts the envelope and validates its actual contents. | The recovery principal records proof for the host, recipient and credential generation. R5 and the initial data capture verify the current generation and corresponding S3 ciphertext. |
-| Enrolled DB and history | After R5 preparation, the runtime operator captures the stopped source with the existing `backup.sh backup-locked` producer. The pinned S3 adapter uploads and reads back its v2 artifact. A fresh recovery runner downloads the artifact and runs `backup.sh drill` against isolated PostgreSQL and history volumes. | Only the successful drill publishes the redacted source-bound receipt. R6 authenticates the producing workflow, run and successful attempt on the reviewed main and verifies the host, DB, secret identities and both restored content fingerprints before publication. |
+## 通常運用のバックアップと災害復旧
 
-Use a dedicated escrow prefix and the standard S3 transfer profile JSON for `CODEXIA_BOOTSTRAP_ESCROW_PROFILE` (Variable). Set `CODEXIA_BOOTSTRAP_ESCROW_RECIPIENT` to the verified recovery public key. Supply `CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL` as a Secret containing `accessKeyId`, `secretAccessKey` and optional `sessionToken`. Grant the bootstrap principal conditional upload and read access to `envelopes/` and only read access to `verified/`. The runtime observer reads both prefixes. Grant the independent recovery principal read access to envelopes and conditional write/read access to the proof prefix. Include versioned reads for a versioned bucket. When the profile requests Object Lock, scope the required retention permissions to each principal’s authorized keys. The recovery Environment alone receives the Secret `CODEXIA_BOOTSTRAP_ESCROW_AGE_IDENTITY`. Keep an independent offline recovery copy.
+1. ACTIVE後、インフラ管理者は実バケット・prefix・IAM/retentionを準備する。復旧担当は独立秘密管理に復号鍵、復旧reader資格情報、復旧に不可欠なVM秘密（Podman secrets、DB role資格、Better Auth/内省、backup executorの封印解除鍵等の現行利用対象）を保全する。外部Tunnel/OIDC等は元の管理面から再取得または再発行できることを確認する。保全・取得は既存の保護されたoperator手順で行い、手製復旧bundle、独自の資格情報エスクロー、新規Workflowを要求しない。鍵/秘密を紛失したらDR未受入とする。
+2. 所有者は `/console/backups` で保存先、実行資格、保護方針を設定し、接続試験、有効化、通常バックアップを実行する。VMの共通実行主体が現行v2を生成し、転送・readbackを行う。GitHubへの保管先・age鍵・S3 credentialの転記は不要。手動・定期・通常Backend更新前のバックアップは同じ保管設定と実行経路を使う。既存host lock、整合性、暗号化・検証の条件を維持する。
+3. 復旧担当は別ホストで、独立保全したreceiptを用いて選択backupを取得・照合・復号し、隔離DB/historyに復元してowner/Auth/role/ledgerとAPI readinessを照合する。VM・Console・GitHubが失われても独立秘密・保管先から取り出せることを確認する。保護された運用記録に結果を保持し、既存のConsole記録経路で参照できるようにする。通常データ投入と継続的な自動配備を受け入れる前に実環境で確認する。未受入を新たな初回配備gateや実装上の画面ロックに置き換えない。
+4. 本番復元はR2として明示承認する。既存writer/Tunnelを停止し、復元先が隔離されていることを確認し、必要な新VMを既存Ansibleで収束する。復元対象DBに新規ownerを作らず、必要なruntime秘密/roleと選択したDB/historyを復元し、同一owner・Passkey・client・DB内容と認定済み候補を照合する。復元点以後の更新の扱いを承認し、readiness・公開経路・backup運用の再確認後に復帰する。完全なDB集約受入後は旧historyなしの復元を要求する。復元失敗・鍵欠落・未知状態は停止。
 
-To rehydrate credentials on an approved isolated host, retrieve the original redacted R4 receipt, use the configured recovery profile and recovery credential, and invoke the [escrow helper](../../deploy/backup/bootstrap_escrow.py) in the pinned S3 Python environment. Set `CODEXIA_BOOTSTRAP_ESCROW_PROFILE` and `CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL` for the recovery destination. The helper derives the recipient from the private identity.
-
-```sh
-python deploy/backup/bootstrap_escrow.py recover \
-  --receipt /private/escrow-receipt.json --identity /private/recovery.agekey \
-  --output-dir /private/restored-secrets
-```
-
-When the Actions receipt has expired, use `restore --host-id HOST_ID --generation GENERATION --identity /private/recovery.agekey --output-dir /private/restored-secrets`. The host ID and generation identify the independently verified receipt in the protected S3 prefix. This path needs read access only.
-
-The output directory must be new. Apply the recovered values under the canonical Podman secret names and provision the original PostgreSQL roles using the recovered passwords through the approved recovery operation. Restore the v2 DB and history, then verify the original owner, Passkey and client bindings before allowing runtime use.
-
-For initial **data** preservation, configure `CODEXIA_INITIAL_BACKUP_PROFILE` (Variable) in both `codexia-production` and `codexia-bootstrap-recovery` with the same v2 destination. In each Environment supply its own `CODEXIA_INITIAL_BACKUP_CREDENTIAL` Secret. The production principal needs the [v2 upload permissions](#採用済み目標-s3互換オブジェクトストレージへの暗号化バックアップ) and the recovery principal needs read access. Production supplies the public `CODEXIA_BACKUP_AGE_RECIPIENT`; the recovery Environment supplies the matching `CODEXIA_INITIAL_BACKUP_IDENTITY` Secret. The initial workflow passes the private transfer receipt between jobs encrypted to that recipient. After the isolated drill succeeds, the recovery runner conditionally writes the exact age-encrypted transfer receipt to `<escrow-prefix>/verified/v2-backups/<source-host-id>/<backup-id>.age` and reads it back byte for byte. A different existing object, failed write or failed readback stops publication of the activation receipt. The recovery Environment uses its existing write/read access to `verified/`. Set object retention to cover the v2 backup's recovery lifetime.
-
-To retrieve an initial backup after the Actions artifacts expire, fetch that object from the escrow destination using the protected recovery reader. On the isolated recovery host, decrypt it with the initial **data** backup identity. Verify `sourceHostId` and `backupId` against the selected backup before exporting its `transfer` record. The pinned S3 transfer helper consumes this private record with the initial data profile and its read credential. Given a private directory, the encrypted receipt, and the selected identifiers:
-
-```sh
-umask 077
-set -euo pipefail
-age -d -i "$DATA_AGE_IDENTITY" "$PRIVATE_DIR/transfer.age" |
-  jq -e --arg host "$SOURCE_HOST_ID" --arg id "$BACKUP_ID" \
-    'select(.sourceHostId == $host and .backupId == $id and .transfer.backupId == $id) | .transfer' \
-    > "$PRIVATE_DIR/transfer.json"
-mkdir -m 0700 "$PRIVATE_DIR/download"
-python deploy/backup/s3_transfer.py download --profile "$INITIAL_DATA_PROFILE" \
-  --backup-id "$BACKUP_ID" --receipt "$PRIVATE_DIR/transfer.json" --output-dir "$PRIVATE_DIR/download" \
-  --credential-stdin < "$INITIAL_DATA_READ_CREDENTIAL"
-bash deploy/backup/backup.sh drill "$PRIVATE_DIR/download/codexia-$BACKUP_ID" "$DATA_AGE_IDENTITY" --approved
-```
-
-A new verification dispatch on current main can refresh an expired activation receipt while the Backend remains stopped.
+廃止対象は初回専用のcredential escrow、initial-preservation/credential-recovery workflowと対応gate/設定/receipt形式であり、現行の通常backup producer・S3 transfer・独立restore-drill・既存保護済みデータではない。現行の実体と廃止対象の証拠/receiptを調査し、必要な復旧資料は復旧担当へ安全に引き渡した後に依存を除去する。代替backup製品は未選定。GitHub Environmentの廃止も既存資料の保全・承認なしに実環境を変更する指示ではない。
