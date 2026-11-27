@@ -491,13 +491,26 @@ test('[TEST-MCPV-004-003] Better Auth PKCE MCP client lists and invokes tools th
       ).status,
       403,
     );
+    assert.ok(
+      listedSessions.some(({ token }) => token !== currentSession.token),
+      'the fixture has another session that could be revoked',
+    );
     const missingWriteOrigin = await apiRequest(`${baseAuth}/revoke-other-sessions`, {
       method: 'POST',
       headers: { cookie: cookieHeader(), 'content-type': 'application/json' },
       body: '{}',
     });
     assert.equal(missingWriteOrigin.status, 403);
-    assert.equal((await missingWriteOrigin.json()).code, 'OWNER_SECURITY_ORIGIN_DENIED');
+    // Better Auth and the owner policy both reject a missing Origin before revocation.
+    assert.match((await missingWriteOrigin.json()).code, /^(?:MISSING_OR_NULL_ORIGIN|OWNER_SECURITY_ORIGIN_DENIED)$/u);
+    const sessionsAfterRefusal = await apiRequest(`${baseAuth}/list-sessions`, { headers: ownerHeaders });
+    assert.equal(sessionsAfterRefusal.status, 200);
+    const unrevokedSessions = (await sessionsAfterRefusal.json()) as Array<{ token: string }>;
+    assert.deepEqual(
+      unrevokedSessions.map(({ token }) => token).sort(),
+      listedSessions.map(({ token }) => token).sort(),
+      'a denied request preserves all owner sessions',
+    );
     const revokeCurrent = await apiRequest(`${baseAuth}/revoke-session`, {
       method: 'POST',
       headers: { ...ownerHeaders, 'content-type': 'application/json' },
