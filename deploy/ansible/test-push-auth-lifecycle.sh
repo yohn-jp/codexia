@@ -316,6 +316,10 @@ YAML
   verify_private_backup_socket
   observe_runtime private-backup-socket-restart auth-primary
   activate_fixture_backup_destination
+  # Provisioning can outlive a bearer. Refresh the original grant once, then
+  # present that exact bearer before the update, after it, and after rollback.
+  token=$(auth_fixture refresh "$web" "$owner" <"$tmp/auth-session.json" | jq -er '.accessToken')
+  [[ "$(observe_auth "$primary_image")" == "$proof" ]]
   run_deploy auth-update false '' auth-compatible-update
   [[ "$(observe_auth "$update_image")" == "$proof" ]]
   observe_runtime better-auth-compatible-update auth-update
