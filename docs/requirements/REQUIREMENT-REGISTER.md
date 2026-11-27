@@ -739,7 +739,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **UID**: OBL-REQ-MCP-001-O01
 **Design reference**: [MCP-first](../architecture/MCP-FIRST.md)、[Modules](../architecture/MODULES.md)
 **Implementation identifiers**: modules/mcp/src/http.ts; modules/mcp/src/stdio.ts; modules/mcp/src/tools.ts
-**Test IDs**: TEST-MCPV-004-001; TEST-MCPV-004-002; TEST-MCPV-006-001; TEST-MCPV-006-002; TEST-MCPV-006-003; TEST-MCPV-006-004; TEST-MCPV-006-005, TEST-MCPV-004-003
+**Test IDs**: TEST-MCPV-004-001; TEST-MCPV-004-002; TEST-MCPV-004-003
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
 
@@ -758,6 +758,76 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **Path**: modules/mcp/src/tools.ts
 - **Type**: File
   **Path**: docs/architecture/MCP-V2-MIGRATION.md
+
+## OBL-REQ-MCP-001-O02
+
+**Type**: OBLIGATION
+**MID**: 48ec31f4c3b8aa919dbb427ef88fb358
+**UID**: OBL-REQ-MCP-001-O02
+**Design reference**: [MCP v2 migration](../architecture/MCP-V2-MIGRATION.md#tool-schemaと追跡)
+**Implementation identifiers**: modules/mcp/src/tools.ts: registerMcpTools; modules/mcp/src/tools/knowledge.ts: registerKnowledgeTools
+**Test IDs**: TEST-MCPV-001-001; TEST-MCPV-001-002
+**Exact-run reference**: NOT_RUN
+**Comment**: Selected registered scenarios cover parts of this obligation. Exact-source execution evidence and full product conformance remain pending.
+
+公式SDK v2のtool登録と公開catalogを一致させ、登録したSchemaで引数を検証する。公開名、入力Schema、native KnowledgeのUUID・操作範囲を含む。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/tools.ts
+- **Type**: File
+  **Path**: modules/mcp/src/tools/knowledge.ts
+
+## OBL-REQ-MCP-001-O03
+
+**Type**: OBLIGATION
+**MID**: a421ecc15ad1918d430f31479b15accc
+**UID**: OBL-REQ-MCP-001-O03
+**Design reference**: [MCP v2 migration](../architecture/MCP-V2-MIGRATION.md#プロトコルの互換期間)
+**Implementation identifiers**: modules/mcp/src/http.ts: createMcpHttpContribution; modules/mcp/src/protocol-version.ts: isMcpStrict; modules/mcp/src/stdio.ts: serveStdio
+**Test IDs**: TEST-MCPV-007-001; TEST-MCPV-007-002; TEST-MCPV-007-003; TEST-MCPV-007-004
+**Exact-run reference**: NOT_RUN
+**Comment**: Selected registered scenarios cover parts of this obligation. Exact-source execution evidence and full product conformance remain pending.
+
+2026世代のHTTP交換をリクエスト単位で扱い、旧世代のstateless fallbackを承認済みの期限までに制限する。旧session操作を提供せず、期限以降は新規stdio接続と各HTTPリクエストで旧世代を拒否する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/http.ts
+- **Type**: File
+  **Path**: modules/mcp/src/protocol-version.ts
+- **Type**: File
+  **Path**: modules/mcp/src/stdio.ts
+
+## OBL-REQ-MCP-001-O04
+
+**Type**: OBLIGATION
+**MID**: f34fab5cb281e94ef96f4e5b8304e2c0
+**UID**: OBL-REQ-MCP-001-O04
+**Design reference**: [MCP v2 migration](../architecture/MCP-V2-MIGRATION.md#検証計画)
+**Implementation identifiers**: modules/mcp/src/http.ts: createMcpHttpContribution; modules/mcp/src/stdio.ts: serveStdio; packages/api/src/server.ts: createServer
+**Test IDs**: TEST-MCPV-006-001; TEST-MCPV-006-002; TEST-MCPV-006-003; TEST-MCPV-006-004; TEST-MCPV-006-005
+**Exact-run reference**: NOT_RUN
+**Comment**: Selected registered scenarios cover parts of this obligation. Exact-source execution evidence and full product conformance remain pending.
+
+HTTPとstdioの要求境界でキャンセルを処理し、処理中のactionを解放する。HTTPでは不正header・過大入力をtool dispatch前に拒否し、停止時に進行中の処理を終結させる。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/http.ts
+- **Type**: File
+  **Path**: modules/mcp/src/stdio.ts
+- **Type**: File
+  **Path**: packages/api/src/server.ts
 
 ## REQ-MCP-002
 
