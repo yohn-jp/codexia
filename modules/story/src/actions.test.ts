@@ -1051,7 +1051,6 @@ test("NarrativeChangeSet preserves all nine source operation kinds in one identi
     resultPaths: Record<string, string[]>;
     resultRevisions: Record<string, string>;
     affectedEntities: Record<string, Array<{ id: string; revision: string }>>;
-    sourceFingerprint: string;
   };
   assert.equal(Object.keys(data.operationMap).length, 9);
   assert.deepEqual(data.dependencies["create-scene"], ["create-location"], "a later create depends on earlier Story writes represented by its virtual scope revision");
@@ -1059,9 +1058,8 @@ test("NarrativeChangeSet preserves all nine source operation kinds in one identi
   assert.equal(data.resultIds["link-reference"], JSON.stringify(["loc-cafe", "loc-new", "related"]));
   const coreProposal = result.proposals![0]!;
   const sourceEvidence = coreProposal.evidence!.find((item) => item.kind === "source.narrative-change-set.v1")!;
-  const details = sourceEvidence.details as { sourceChangeSet: unknown; sourceFingerprint: string; operationMap: Record<string, string> };
+  const details = sourceEvidence.details as { sourceChangeSet: unknown; operationMap: Record<string, string> };
   assert.deepEqual(details.sourceChangeSet, changeSet);
-  assert.equal(details.sourceFingerprint.length, 64);
   assert.deepEqual(details.operationMap, data.operationMap);
   const rangeOperation = coreProposal.operations.find((operation) => operation.message.includes("replace-manuscript"));
   assert.deepEqual(rangeOperation?.writes[0]?.textChanges, [{
@@ -1070,7 +1068,6 @@ test("NarrativeChangeSet preserves all nine source operation kinds in one identi
     insert: "She",
   }]);
   const persisted = details as unknown as Record<string, unknown>;
-  assert.equal(persisted.sourceFingerprint, data.sourceFingerprint);
   assert.deepEqual(persisted.resultPaths, data.resultPaths);
   assert.deepEqual(persisted.resultRevisions, data.resultRevisions);
   assert.deepEqual(persisted.affectedEntities, data.affectedEntities);
@@ -1210,10 +1207,24 @@ test("NarrativeChangeSet retries return the stored proposal and reject changed s
   assert.equal(first.ok, true);
   if (!first.ok) return;
   stored = first.proposals![0];
-  const retry = await actionById("story.changes.propose").invoke(changeSet, context);
-  assert.equal(retry.ok, true);
-  if (retry.ok) { assert.equal(retry.proposals?.[0]?.id, changeSet.id); assert.equal((retry.data as { replayed: boolean }).replayed, true); }
-  const changed = await actionById("story.changes.propose").invoke({ ...changeSet, goal: "Changed meaning under same ID" }, context);
+  const { schemaVersion, assessment, ...remaining } = changeSet;
+  const reordered = {
+    ...remaining,
+    schemaVersion,
+    assessment: { risk: assessment.risk, confidence: assessment.confidence },
+  };
+  assert.notEqual(JSON.stringify(reordered), JSON.stringify(changeSet), "the retry represents the same source with different JSON member order");
+  const retry = await actionById("story.changes.propose").invoke(reordered, context);
+  assert.equal(retry.ok, true, retry.ok ? undefined : retry.error.message);
+  if (retry.ok) {
+    assert.equal(retry.proposals?.[0]?.id, changeSet.id);
+    assert.equal((retry.data as { replayed: boolean }).replayed, true);
+  }
+
+  const changed = await actionById("story.changes.propose").invoke({
+    ...changeSet,
+    operations: [{ ...changeSet.operations[0], changes: { name: "A different name" } }],
+  }, context);
   assert.equal(changed.ok, false);
   if (!changed.ok) assert.equal(changed.error.code, "change_set_identity_conflict");
   assert.equal(proposals.length, 1, "an exact retry does not reset Core approvals by proposing again");
