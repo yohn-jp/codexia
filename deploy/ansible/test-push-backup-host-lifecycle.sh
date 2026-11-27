@@ -11,9 +11,10 @@ verify_private_backup_socket() (
     bash -s < "$repo_root/deploy/ansible/backup-postgres-socket.sh" || status=$?
   test "$status" = 75
   rootless install -d -m 0700 "$settings"
-  rootless sh -c 'umask 077; cat > "$1/executor.json"' sh "$settings" <<JSON
+  rootless install -m 0600 /dev/stdin "$settings/executor.json" <<JSON
 {"privateKeyFiles":["$settings/sealing-private.pem"],"operatorCredential":{"origin":"https://backup.fixture.invalid","accessKeyId":"synthetic","secretAccessKey":"synthetic"}}
 JSON
+  test "$(rootless stat -c '%u:%a' "$settings/executor.json")" = "$fixture_uid:600"
   printf '%s\n' "$backup_recipient" | rootless tee "$settings/age-recipient.txt" >/dev/null
   rootless tee "$settings/policy.json" >/dev/null <<JSON
 {"destinations":[{"provider":"s3-compatible","region":"us-east-1","endpoint":"https://backup.fixture.invalid","bucket":"codexia-fixture","prefix":"fixture","credentialModes":["operator-role"]}],

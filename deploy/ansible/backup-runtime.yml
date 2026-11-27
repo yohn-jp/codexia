@@ -151,14 +151,22 @@
       - -e
       - |
         import { createPublicKey } from 'node:crypto';
-        import { readFileSync } from 'node:fs';
+        import { lstatSync, readFileSync } from 'node:fs';
         import { backupCredentialKeyId } from './node_modules/@codexia/api/dist/backup-credential-envelope.js';
         import { backupExecutorConfigSchema, readPrivateBackupFile } from './node_modules/@codexia/api/dist/backup-console-executor.js';
         const [directory] = process.argv.slice(1);
-        const config = backupExecutorConfigSchema.parse(JSON.parse(await readPrivateBackupFile(directory + '/executor.json')));
+        async function protectedFile(path, label) {
+          try { return await readPrivateBackupFile(path); } catch (error) {
+            const stat = lstatSync(path, {throwIfNoEntry:false});
+            const mode = stat ? (stat.mode & 0o777).toString(8) : 'missing';
+            console.error(`${label}: fileUid=${stat?.uid}, mode=${mode}, regular=${stat?.isFile()}, realUid=${process.getuid()}, effectiveUid=${process.geteuid()}`);
+            throw error;
+          }
+        }
+        const config = backupExecutorConfigSchema.parse(JSON.parse(await protectedFile(directory + '/executor.json', 'executor configuration')));
         const expected = backupCredentialKeyId(readFileSync(directory + '/sealing-public.pem', 'utf8'));
         for (const path of config.privateKeyFiles) {
-          const pem = await readPrivateBackupFile(path);
+          const pem = await protectedFile(path, 'executor key');
           const pub = createPublicKey(pem).export({type:'spki', format:'pem'});
           if (backupCredentialKeyId(pub) === expected) { console.log(expected); process.exit(0); }
         }
