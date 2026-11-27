@@ -954,10 +954,8 @@
         get_checksum: false
       register: codexia_backup_selected
 
-    - name: Converge an older selected release on the opted-in VM
-      when:
-        - codexia_backup_selected.stat.islnk | default(false)
-        - codexia_backup_selected.stat.lnk_source != home + '/.local/share/codexia-backup/releases/' + codexia_image.split(':')[-1]
+    - name: Converge an opted-in executor after the API transaction
+      when: codexia_backup_selected.stat.islnk | default(false)
       block:
         - name: Check the operator's existing executor enablement
           ansible.builtin.command:
@@ -966,6 +964,19 @@
           changed_when: false
           failed_when: codexia_backup_unit_enabled.stdout not in ['enabled', 'disabled', 'masked']
 
-        - name: Select the committed image through the shared host release installer
-          ansible.builtin.include_tasks: backup-release.yml
+        - name: Observe whether the enabled executor is still running
+          ansible.builtin.command:
+            argv: [systemctl, --user, show, codexia-backup-executor.service, --property=ActiveState, --value]
+          register: codexia_backup_worker_state
+          changed_when: false
           when: codexia_backup_unit_enabled.stdout == 'enabled'
+
+        - name: Select or resume the committed image through the shared host release installer
+          ansible.builtin.include_tasks: backup-release.yml
+          vars:
+            codexia_backup_release_resume_enabled: true
+          when:
+            - codexia_backup_unit_enabled.stdout == 'enabled'
+            - >-
+              codexia_backup_selected.stat.lnk_source != home + '/.local/share/codexia-backup/releases/' + codexia_image.split(':')[-1] or
+              codexia_backup_worker_state.stdout != 'active'

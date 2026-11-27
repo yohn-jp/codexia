@@ -47,6 +47,31 @@
     [[ "$running" == "true healthy $running_id" && "${image_id#sha256:}" =~ ^[a-f0-9]{64}$ &&
        "${running_id#sha256:}" == "${image_id#sha256:}" ]]
 
+    unit=codexia-backup-executor.service
+    resume_worker=false
+    if [[ "$BACKUP_RESUME_ENABLED" == true ]]; then
+      case "$(systemctl --user show "$unit" --property=UnitFileState --value)" in
+        enabled) resume_worker=true ;;
+        disabled|masked) exit 0 ;;
+        *) echo 'Unrecognized backup executor enablement' >&2; exit 1 ;;
+      esac
+    fi
+    backup_query() {
+      podman exec codexia-db sh -ec '
+        export PGPASSWORD="$(cat /run/secrets/admin-password)"
+        exec psql -X -qAtw -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "$1"
+      ' sh "$1"
+    }
+    ensure_restore_reconciled() {
+      [[ "$(backup_query "SELECT NOT EXISTS (SELECT 1 FROM codexia_backup.runs
+              WHERE state = 'UNKNOWN' AND reason_code = 'restored_outcome_unknown')")" == t ]] ||
+        { echo 'Backup executor requires operator reconciliation before resuming' >&2; return 1; }
+    }
+    start_worker() {
+      ensure_restore_reconciled &&
+        "$HOME/.local/bin/codexia-backup-control" recover &&
+        systemctl --user start "$unit" && systemctl --user is-active --quiet "$unit"
+    }
     verify_release() {
       (cd "$1" && ./bin/node --input-type=module -e '
         import { readFileSync } from "node:fs";
@@ -60,6 +85,13 @@
 
     if [[ -L "$root/current" && "$(realpath -e -- "$root/current")" == "$release" ]]; then
       verify_release "$release"
+      if [[ "$resume_worker" == true ]]; then
+        case "$(systemctl --user show "$unit" --property=ActiveState --value)" in
+          active) ;;
+          inactive|failed) start_worker; echo BACKUP_EXECUTOR_RESUMED ;;
+          *) echo 'Backup executor is transitioning; retry after it settles' >&2; exit 1 ;;
+        esac
+      fi
       exit 0
     fi
     [[ ! -e "$root/current" || -L "$root/current" ]]
@@ -76,34 +108,29 @@
       [[ -d "$release" && ! -L "$release" ]]
       verify_release "$release"
     fi
-    unit=codexia-backup-executor.service
     worker="$(systemctl --user show "$unit" --property=ActiveState --value)"
     [[ "$worker" == active || "$worker" == inactive || "$worker" == failed ]]
     ln -s -- "$release" "$stage/current"
-    if [[ "$worker" == active ]]; then
+    if [[ "$worker" == active || "$resume_worker" == true ]]; then
+      ensure_restore_reconciled
       [[ -L "$root/current" ]]
       ln -s -- "$(readlink -e -- "$root/current")" "$stage/previous"
-      # Allow the old worker to finish a probe before replacing its code.
-      systemctl --user stop "$unit"
       rollback() {
         systemctl --user stop "$unit" &&
-          mv -Tf -- "$stage/previous" "$root/current" && systemctl --user start "$unit"
+          mv -Tf -- "$stage/previous" "$root/current" && start_worker
       }
       # If any following admission or activation step fails, resume the previously selected release.
       trap 'result=$?; if (( result != 0 )); then rollback || echo "Prior backup executor needs operator recovery" >&2; fi; rm -rf -- "$stage"; exit "$result"' EXIT
-      idle="$(podman exec codexia-db sh -ec '
-        export PGPASSWORD="$(cat /run/secrets/admin-password)"
-        exec psql -X -qAtw -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "$1"
-      ' sh "SELECT NOT EXISTS (SELECT 1 FROM codexia_backup.operations WHERE state IN ('QUEUED', 'RUNNING'))
+      # Allow the old worker to finish a probe before replacing its code.
+      if [[ "$worker" == active ]]; then systemctl --user stop "$unit"; fi
+      idle="$(backup_query "SELECT NOT EXISTS (SELECT 1 FROM codexia_backup.operations WHERE state IN ('QUEUED', 'RUNNING'))
                AND NOT EXISTS (SELECT 1 FROM codexia_backup.runs WHERE state IN ('QUEUED', 'RUNNING')
                                 OR (state = 'UNKNOWN' AND reason_code = 'restored_outcome_unknown'))")"
       [[ "$idle" == t ]]
     fi
     mv -Tf -- "$stage/current" "$root/current"
-    if [[ "$worker" == active ]]; then
-      systemctl --user start "$unit"
-      "$HOME/.local/bin/codexia-backup-control" recover
-      systemctl --user is-active --quiet "$unit"
+    if [[ "$worker" == active || "$resume_worker" == true ]]; then
+      start_worker
     fi
     echo BACKUP_RELEASE_SELECTED
   args:
@@ -111,5 +138,8 @@
   environment:
     BACKUP_IMAGE: "{{ codexia_backup_release_image }}"
     BACKUP_RECORD_SHA: "{{ codexia_backup_deployed_release.content | b64decode | hash('sha256') }}"
+    BACKUP_RESUME_ENABLED: "{{ (codexia_backup_release_resume_enabled | default(false)) | ternary('true', 'false') }}"
   register: codexia_backup_release_install
-  changed_when: "'BACKUP_RELEASE_SELECTED' in codexia_backup_release_install.stdout_lines"
+  changed_when: >-
+    'BACKUP_RELEASE_SELECTED' in codexia_backup_release_install.stdout_lines or
+    'BACKUP_EXECUTOR_RESUMED' in codexia_backup_release_install.stdout_lines
