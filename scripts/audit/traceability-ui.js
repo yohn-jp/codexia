@@ -63,12 +63,12 @@
   const liveStatus = live?.querySelector('[data-live-status]');
   const expectedSha = live?.dataset.sourceSha;
   const digest = async value => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))].map(byte => byte.toString(16).padStart(2, '0')).join('');
-  const readJson = async path => {
+  const read = async path => {
     const url = new URL(path, location.href);
     url.searchParams.set('live-check', expectedSha);
     const response = await fetch(url, { cache: 'no-store', credentials: 'omit' });
     if (!response.ok) throw new Error('public Pages metadata is unavailable');
-    return response.json();
+    return response.text();
   };
   const verifyLivePublication = async () => {
     if (!live || !liveStatus || !/^[a-f0-9]{40}$/u.test(expectedSha ?? '')) return;
@@ -78,20 +78,18 @@
       return;
     }
     try {
-      const [site, trace, requirements, htmlResponse, jsonResponse] = await Promise.all([
-        readJson('../../site-manifest.json'), readJson('./traceability.json'), readJson('../manifest.json'),
-        fetch(new URL('./index.html?live-check=' + expectedSha, location.href), { cache: 'no-store', credentials: 'omit' }),
-        fetch(new URL('./traceability.json?live-check=' + expectedSha, location.href), { cache: 'no-store', credentials: 'omit' }),
+      const [siteBytes, traceBytes, manifestBytes, html] = await Promise.all([
+        read('../../site-manifest.json'), read('./traceability.json'), read('../manifest.json'), read('./index.html'),
       ]);
-      if (!htmlResponse.ok || !jsonResponse.ok) throw new Error('public traceability outputs are unavailable');
-      const html = await htmlResponse.text();
-      const jsonText = await jsonResponse.text();
+      const site = JSON.parse(siteBytes);
+      const trace = JSON.parse(traceBytes);
+      const requirements = JSON.parse(manifestBytes);
       if (site.sourceSha !== expectedSha || trace.sourceSha !== expectedSha || requirements.sourceSha !== expectedSha) throw new Error('served source SHA does not match this page');
       const route = site.routes?.find(item => item.route === '/requirements/traceability/');
       if (route?.generationStatus !== 'ready' || route.sourceSha !== expectedSha) throw new Error('published route identity does not match this page');
       if (trace.pagesQualification?.status !== 'PENDING_PAGES_PUBLISH' || trace.pagesQualification.publicUrlConfirmation !== 'PENDING') throw new Error('build qualification is invalid');
       const outputByName = new Map(requirements.outputs?.map(item => [item.name, item]) ?? []);
-      for (const [name, value] of [['traceability/index.html', html], ['traceability/traceability.json', jsonText]]) {
+      for (const [name, value] of [['traceability/index.html', html], ['traceability/traceability.json', traceBytes]]) {
         const output = outputByName.get(name);
         if (!output || output.bytes !== new TextEncoder().encode(value).length || output.sha256 !== await digest(value)) throw new Error('published traceability digest mismatch');
       }
@@ -100,16 +98,21 @@
       const runResponse = await fetch(`https://api.github.com/repos/yohn-jp/codexia/actions/runs/${publisher.runId}`, { cache: 'no-store', credentials: 'omit', headers: { Accept: 'application/vnd.github+json' } });
       if (!runResponse.ok) throw new Error('exact publisher run evidence is unavailable');
       const run = await runResponse.json();
-      if (run.id !== Number(publisher.runId) || run.path !== '.github/workflows/repository-audit.yml' || run.head_sha !== expectedSha || run.head_branch !== 'main' || !['push', 'workflow_dispatch'].includes(run.event) || run.status !== 'completed' || run.conclusion !== 'success' || run.run_attempt !== publisher.attempt || run.html_url !== publisher.runUrl || run.repository?.full_name !== publisher.repository || run.head_repository?.full_name !== publisher.repository) throw new Error('exact publisher run is stale, foreign, or incomplete');
+      if (run.id !== Number(publisher.runId) || run.path !== '.github/workflows/repository-audit.yml' || run.head_sha !== expectedSha || run.head_branch !== 'main' || !['push', 'workflow_dispatch'].includes(run.event) || run.status !== 'completed' || run.conclusion !== 'success' || !Number.isSafeInteger(run.run_attempt) || run.run_attempt < publisher.attempt || run.html_url !== publisher.runUrl || run.repository?.full_name !== publisher.repository || run.head_repository?.full_name !== publisher.repository) throw new Error('exact publisher run is stale, foreign, or incomplete');
       const jobsUrl = new URL(`https://api.github.com/repos/yohn-jp/codexia/actions/runs/${publisher.runId}/jobs`);
       jobsUrl.searchParams.set('filter', 'latest');
       jobsUrl.searchParams.set('per_page', '100');
       const jobsResponse = await fetch(jobsUrl, { cache: 'no-store', credentials: 'omit', headers: { Accept: 'application/vnd.github+json' } });
       if (!jobsResponse.ok) throw new Error('exact publisher job evidence is unavailable');
       const jobs = await jobsResponse.json();
-      const deploy = (jobs.jobs ?? []).find(job => job.name === 'deploy' && job.run_id === run.id && job.run_attempt === publisher.attempt && job.head_sha === expectedSha && job.status === 'completed' && job.conclusion === 'success');
-      const step = deploy?.steps?.find(item => item.name === 'Verify the published Pages projection' && item.status === 'completed' && item.conclusion === 'success');
-      if (!step) throw new Error('exact publisher run has no successful public URL and SHA confirmation');
+      if (jobs.jobs?.length !== jobs.total_count) throw new Error('exact publisher job inventory is incomplete');
+      const deploys = jobs.jobs.filter(job => job.name === 'deploy');
+      const [deploy] = deploys;
+      if (deploys.length !== 1 || deploy.run_id !== run.id || deploy.run_attempt !== run.run_attempt || deploy.head_sha !== expectedSha || deploy.status !== 'completed' || deploy.conclusion !== 'success') throw new Error('latest deploy job did not succeed');
+      // The deploy step verifies bytes against this digest from the trusted pack job.
+      const proofName = `Verify published Pages (${await digest(manifestBytes)})`;
+      const proofs = deploy.steps?.filter(step => step.name === proofName);
+      if (proofs?.length !== 1 || proofs[0].status !== 'completed' || proofs[0].conclusion !== 'success') throw new Error('exact publisher run has no successful confirmation for this manifest');
       liveStatus.textContent = '';
       const label = document.createElement('strong');
       label.textContent = 'Confirmed';
