@@ -144,7 +144,7 @@ jobs:
         uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          audience: api.tailscale.com/Ts4P9VFjmJ11CNTRL-khX5P9DgL421CNTRL
+          audience: ${{ format('api.tailscale.com/{0}', secrets.TS_OAUTH_CLIENT_ID) }}
           tags: tag:ci
           ping: ${{ steps.runtime.outputs.host || steps.bootstrap.outputs.host }}
       - name: Verify independent bootstrap identity and noninteractive sudo
