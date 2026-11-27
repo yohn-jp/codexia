@@ -7,7 +7,7 @@ import { preparedAuthorTest } from "./prepared-author-session";
 import { createHash, randomUUID } from "node:crypto";
 import { text as readStreamText } from "node:stream/consumers";
 import { CoreStore } from "../../packages/core/src/index.js";
-import { expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaved, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
+import { confirmRevisionRestore, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaved, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
 
 // Share the same worker build for opted-in and ordinary author scenarios.
 test.use({ preparedAuthorEntries: true });
@@ -15,7 +15,7 @@ preparedAuthorTest.use({ preparedAuthorEntries: true });
 
 const rootPath = "/api/v1/persistence/projects";
 interface Draft { key: string; projectId: string; documentId: string; authorScope: string; markdown: string; generation: number; baseRevisionId: string; baseMarkdown: string; pendingSave?: { markdown: string }; version: number; updatedAt: number }
-interface Read { document: { id: string; title: string; headRevisionId: string }; revision: { id: string; markdown: string } }
+interface Read { document: { id: string; title: string; headRevisionId: string; version: number }; revision: { id: string; markdown: string } }
 interface Fixture { projectId: string; one: Read; two: Read; fetch: AuthorApiFetch; authorizeAuthor: AuthorizeAuthor }
 const documentPath = (fixture: Fixture, documentId = fixture.one.document.id) => `${rootPath}/${fixture.projectId}/documents/${documentId}`;
 async function editorMarkdown(page: Page): Promise<string> {
@@ -37,7 +37,7 @@ async function replaceEditor(page: Page, markdown: string): Promise<void> {
   await page.keyboard.insertText(markdown);
 }
 
-async function fixture(page: Page, authorizeAuthor: AuthorizeAuthor): Promise<Fixture> {
+async function fixture(page: Page, authorizeAuthor: AuthorizeAuthor, openProjectOnly = false): Promise<Fixture> {
   const author = await authorizeAuthor("desktop", undefined, { apiSetupOnly: true });
   const projectResponse = await author.fetch(rootPath, { method: "POST", data: { title: `Core acceptance ${randomUUID()}` } });
   expect(projectResponse.status()).toBe(201);
@@ -49,7 +49,8 @@ async function fixture(page: Page, authorizeAuthor: AuthorizeAuthor): Promise<Fi
   };
   const one = await createDocument("Scene One", "a");
   const two = await createDocument("Scene Two", "b");
-  await authorizeAuthor("desktop", page, { path: `/desktop/projects/${project.id}/scenes/${one.document.id}` });
+  const projectPath = `/desktop/projects/${project.id}`;
+  await authorizeAuthor("desktop", page, { path: openProjectOnly ? projectPath : `${projectPath}/scenes/${one.document.id}` });
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/desktop/projects/${project.id}/scenes/${one.document.id}`));
   await expectEditor(page, one.revision.markdown);
@@ -240,6 +241,24 @@ preparedAuthorTest("a confirmed external revision keeps its single ellipsis in t
   await openRevisionHistory(page);
   const revision = page.getByRole("region", { name: "Revision履歴" }).locator(`article[data-revision-id="${external.revision.id}"]`);
   await revision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元" }).click();
+  const confirmation = page.getByRole("dialog", { name: "Revisionの復元" });
+  await expect(confirmation.getByRole("button", { name: "キャンセル" })).toBeFocused();
+  await confirmation.getByRole("button", { name: "キャンセル" }).click();
+  expect((await read(f)).revision.id).toBe(latest.revision.id);
+  const restoreKeys: Array<string | undefined> = [];
+  await page.route(`**${documentPath(f)}/restore`, async route => {
+    restoreKeys.push(route.request().headers()["idempotency-key"]);
+    if (restoreKeys.length > 1) return route.continue();
+    const receipt = await route.fetch();
+    expect(receipt.ok()).toBe(true);
+    await route.abort("connectionclosed");
+  });
+  await revision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元" }).click();
+  await confirmRevisionRestore(page);
+  await expect(page.getByText("選んだRevisionを新しいPostgreSQL Revisionとして復元しました。", { exact: true })).toBeVisible();
+  expect(restoreKeys).toHaveLength(2);
+  expect(restoreKeys[0]).toBeTruthy();
+  expect(restoreKeys[1]).toBe(restoreKeys[0]);
   await expectEditor(page, confirmed);
   await expectNoUnsavedDeviceChanges(page);
   const restored = (await read(f)).revision;
@@ -636,9 +655,70 @@ test("new typing survives recovery against a newer PostgreSQL base revision", as
     await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
     await expectEditor(page, "Newest input before conflict arrives.");
     expect(writes).toHaveLength(writesBeforeReload);
+    await page.clock.install();
     await page.getByRole("button", { name: "比較後、この回復Draftを最新版へ適用" }).click();
+    await expectDeviceDraft(page);
+    await page.clock.fastForward(1_100);
+    expect((await read(f)).revision.markdown).toBe("Competing PostgreSQL revision.");
+    expect(writes).toHaveLength(writesBeforeReload);
+    await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true });
+    await expectEditor(page, "Newest input before conflict arrives.");
+    await expectDeviceDraft(page);
+    await page.clock.fastForward(1_100);
+    expect((await read(f)).revision.markdown).toBe("Competing PostgreSQL revision.");
+    expect(writes).toHaveLength(writesBeforeReload);
+    await page.getByRole("button", { name: "今すぐ保存" }).click();
     await saved(page, f, "Newest input before conflict arrives.");
   } finally { gate.release(); }
+});
+
+test("discarding a conflicting recovery draft requires separate confirmation", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
+  try {
+    await editor(page).fill("Local recovery draft."); await gate.seen;
+    await replace(f, "Current PostgreSQL revision."); gate.release();
+    const conflict = page.getByRole("heading", { name: "Revision競合" });
+    const discard = page.getByRole("button", { name: "回復Draftを破棄してPostgreSQL最新版を開く" });
+    await expect(conflict).toBeVisible();
+    await discard.click();
+    const confirmation = page.getByRole("dialog", { name: "回復Draftの破棄" });
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation.getByRole("button", { name: "キャンセル" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(conflict).toBeVisible();
+    await expectEditor(page, "Local recovery draft.");
+    expect((await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.markdown).toBe("Local recovery draft.");
+    await discard.click();
+    await confirmation.getByRole("button", { name: "回復Draftを破棄" }).click();
+    await expect(conflict).toBeHidden();
+    await expectEditor(page, "Current PostgreSQL revision.");
+    expect((await drafts(page)).find((draft) => draft.documentId === f.one.document.id)).toBeUndefined();
+  } finally { gate.release(); }
+});
+
+test("refreshing the outline keeps open input when its document is removed elsewhere", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor, true);
+  const second = page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true });
+  await second.click();
+  await expectEditor(page, f.two.revision.markdown);
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args) {
+      if (this.name === "persistenceDrafts") throw new DOMException("Injected quota failure", "QuotaExceededError");
+      return put.apply(this, args);
+    };
+  });
+  const manuscript = "Unprotected input in the removed document.";
+  await editor(page).fill(manuscript);
+  await expect(page.getByText("この入力はまだ保護されていません", { exact: true })).toBeVisible();
+  const removed = await f.fetch(documentPath(f, f.two.document.id), { method: "DELETE", data: { expectedVersion: f.two.document.version } });
+  expect(removed.ok()).toBe(true);
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+  await expect(second).toHaveCount(0);
+  await expect(page.getByText("開いている文書が目次からなくなりました", { exact: true })).toBeVisible();
+  await expectEditor(page, manuscript);
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene One シーン", exact: true }).click();
+  await expectEditor(page, manuscript);
 });
 
 test("browser recovery is author-scoped and foreign records remain untouched", async ({ page, authorizeAuthor }) => {

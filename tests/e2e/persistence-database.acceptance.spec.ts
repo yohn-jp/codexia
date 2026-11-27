@@ -4,7 +4,7 @@ import { expect, test, type AuthorApiFetch } from "./author-oauth-fixture";
 import { preparedAuthorTest } from "./prepared-author-session";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
-import { appendManuscript, createOAuthWritingFixture, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaveFailure, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
+import { appendManuscript, confirmRevisionRestore, createOAuthWritingFixture, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaveFailure, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
 
 // Build the extra entry once for this spec, not once per test or worker transition.
 test.use({ preparedAuthorEntries: true });
@@ -1431,6 +1431,7 @@ for (const forceAppendFallback of [false, true]) {
       expect(originalRevisionIndex).toBeGreaterThanOrEqual(0);
       const originalRevision = page.locator(".pg-revisions article").nth(originalRevisionIndex);
       await originalRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元" }).click();
+      await confirmRevisionRestore(page);
       await expect(page.locator(".pg-notice")).toContainText("新しいPostgreSQL Revisionとして復元しました");
       const restoredRevision = await storedDocumentMarkdown(author.fetch, project.id, scene.id);
       expect(restoredRevision.markdown).toBe(original);
@@ -1765,6 +1766,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   const initialRevision = page.locator(".pg-revisions article").filter({ hasText: "（空の原稿）" });
   await expect(initialRevision).toBeVisible();
   await initialRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元" }).click();
+  await confirmRevisionRestore(page);
   await expect(page.locator(".pg-notice")).toContainText("新しいPostgreSQL Revisionとして復元しました");
   await expect.poll(readEditor).not.toContain(firstDraft);
   await openResearchInspector(page);
@@ -1800,6 +1802,8 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await expect(otherPage.locator(".pg-conflict")).toContainText(winningDraft);
   await expect(otherPage.locator(".pg-conflict")).toContainText(recoveredDraft);
   await otherPage.getByRole("button", { name: "比較後、この回復Draftを最新版へ適用" }).click();
+  await expectDeviceDraft(otherPage);
+  await otherPage.getByRole("button", { name: "今すぐ保存" }).click();
   await expectServerSaved(otherPage);
   await expect(otherEditor).toContainText(recoveredDraft);
 

@@ -3,7 +3,7 @@ import { expect, test, type AuthorSession } from "./author-oauth-fixture";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
-import { appendManuscript, createOAuthWritingFixture, expectDeviceDraft, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, readPersistenceDrafts, replaceManuscript, manuscriptEditor as editor, readManuscriptMarkdown as markdown, writingFixturePath } from "./postgres-fixture";
+import { appendManuscript, confirmRevisionRestore, createOAuthWritingFixture, expectDeviceDraft, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, readPersistenceDrafts, replaceManuscript, manuscriptEditor as editor, readManuscriptMarkdown as markdown, writingFixturePath } from "./postgres-fixture";
 
 const requirePersistence = createRequire(new URL("../../packages/persistence-postgres/package.json", import.meta.url));
 type TestPostgresClient = {
@@ -534,6 +534,7 @@ test("revision history pages tied PostgreSQL revisions through retry, navigation
   const originalRevision = narrowHistory.locator(`article[data-revision-id="${initialRevision.id}"]`);
   await expect(originalRevision).toContainText("最初の本文。");
   await originalRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元", exact: true }).click();
+  await confirmRevisionRestore(page);
   await expect(editor(page)).toContainText("最初の本文。");
   await expect(page.getByRole("region", { name: "Revision履歴", exact: true })).toHaveCount(0);
   const restoredResponse = await author.fetch(documentPath);
