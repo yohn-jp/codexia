@@ -254,7 +254,7 @@ func (g *githubControl) listSecrets(ctx context.Context, name string, env github
 	return nil
 }
 
-var githubCommonVariables = map[string]bool{"CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET": true}
+var githubCommonVariables = map[string]bool{"CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET": true, wifClientIDInput: true}
 var githubBootstrapVariables = map[string]bool{
 	"CODEXIA_BOOTSTRAP_HOST": true, "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS": true,
 	"CODEXIA_BOOTSTRAP_SSH_USER": true, "CODEXIA_OWNER_SETUP_AGE_RECIPIENT": true,
