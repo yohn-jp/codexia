@@ -33,6 +33,35 @@ test('backup console declares its admission errors and configuration revision he
   }
 });
 
+test('generated backup status query accepts an omitted or valid request ID and rejects malformed IDs', async t => {
+  const url = '/api/console/backups/status';
+  const queries: unknown[] = [];
+  const app = registerBackupFixture(t, 'GET', url, async (request, reply) => {
+    queries.push({ ...(request.query as object) });
+    return reply.code(404).send({ error: 'BACKUP_OPERATION_NOT_FOUND', code: 'BACKUP_OPERATION_NOT_FOUND' });
+  });
+  assert.equal((await app.inject({ method: 'GET', url })).statusCode, 404);
+  const validIds = ['Abcdefghijklm_-1', 'x'.repeat(128)];
+  for (const requestId of validIds) {
+    const response = await app.inject({ method: 'GET', url: url + '?requestId=' + requestId });
+    assert.equal(response.statusCode, 404, response.payload);
+    assert.equal(response.json().code, 'BACKUP_OPERATION_NOT_FOUND');
+  }
+  assert.deepEqual(queries, [{}, ...validIds.map(requestId => ({ requestId }))]);
+  for (const query of [
+    'requestId=',
+    'requestId=' + 'x'.repeat(15),
+    'requestId=' + 'x'.repeat(129),
+    'requestId=invalid-request-id%21',
+    'requestId=valid-request-id&requestId=second-request-id',
+    'unknown=valid-request-id',
+  ]) {
+    const response = await app.inject({ method: 'GET', url: url + '?' + query });
+    assert.equal(response.statusCode, 400, response.payload);
+    assert.equal(response.json().code, 'FST_ERR_VALIDATION');
+  }
+});
+
 test('generated backup status schema serializes unset recovery observations without dropping operation details', async t => {
   const url = '/api/console/backups/status';
   const status = {
