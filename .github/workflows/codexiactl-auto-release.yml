@@ -42,8 +42,6 @@ jobs:
               throw new Error('Unexpected commit parent count; review manually');
             }
             const parent = commit.data.parents[0].sha;
-            // Compare responses are not a simple paginated array in Octokit; inspect the
-            // complete compare response and reject truncated changes.
             const diff = await github.rest.repos.compareCommitsWithBasehead({
               owner, repo, basehead: `${parent}...${sha}`, per_page: 100
             });
@@ -59,7 +57,7 @@ jobs:
               return;
             }
             const tags = await github.paginate(github.rest.repos.listTags, {owner, repo, per_page: 100});
-            const versions = tags.map(t => /^v0\\.1\\.(\\d+)$/.exec(t.name))
+            const versions = tags.map(t => /^v0\.1\.(\d+)$/.exec(t.name))
               .filter(Boolean).map(m => Number(m[1]));
             const next = Math.max(0, ...versions) + 1;
             if (!Number.isSafeInteger(next)) throw new Error('Invalid release sequence');
