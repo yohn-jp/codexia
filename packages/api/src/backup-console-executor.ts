@@ -45,7 +45,8 @@ interface ExecutorOptions {
   scheduleWindowId?: string;
 }
 
-const executorLock = 66502;
+export const backupExecutorLock = 66502;
+export const restoredBackupUnknownReason = 'restored_outcome_unknown';
 
 export class BackupConsoleExecutor {
   constructor(private readonly options: ExecutorOptions) {}
@@ -55,9 +56,13 @@ export class BackupConsoleExecutor {
     const client = await pool.connect();
     let locked = false;
     try {
-      const { rows } = await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock($1) AS locked', [executorLock]);
+      const { rows } = await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock($1) AS locked', [backupExecutorLock]);
       locked = rows[0]?.locked ?? false;
       if (!locked) return false;
+      const unresolved = await client.query("SELECT 1 FROM codexia_backup.runs WHERE state = 'UNKNOWN' AND reason_code = $1 LIMIT 1", [
+        restoredBackupUnknownReason,
+      ]);
+      if (unresolved.rowCount) return false;
       const operation = await backupTransaction(client, async () => {
         const { active_revision } = await readBackupState(client);
         const active = await readBackupRevision(client, active_revision);
@@ -222,7 +227,7 @@ export class BackupConsoleExecutor {
       let discard = false;
       if (locked) {
         try {
-          await client.query('SELECT pg_advisory_unlock($1)', [executorLock]);
+          await client.query('SELECT pg_advisory_unlock($1)', [backupExecutorLock]);
         } catch {
           discard = true;
         }

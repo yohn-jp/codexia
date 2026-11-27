@@ -58,6 +58,7 @@ class FakeS3Client:
         self.fail_head_code: str | None = None
         self.fail_put_for: str | None = None
         self.fail_get_for: str | None = None
+        self.wrong_version_for: str | None = None
 
     @staticmethod
     def _body(value: object) -> bytes:
@@ -83,7 +84,8 @@ class FakeS3Client:
         body = bytes(item["Body"])
         if Key == self.corrupt_readback_for:
             body += b"tampered"
-        return {"Body": io.BytesIO(body), "ContentLength": len(body), "VersionId": item.get("VersionId"), "ETag": '"etag-is-not-sha256"'}
+        version = "wrong-version" if Key == self.wrong_version_for else item.get("VersionId")
+        return {"Body": io.BytesIO(body), "ContentLength": len(body), "VersionId": version, "ETag": '"etag-is-not-sha256"'}
 
     def put_object(self, *, Bucket: str, Key: str, Body: object, IfNoneMatch: str | None = None, **kwargs: object) -> dict[str, object]:
         self.events.append(("put", Key))
@@ -403,6 +405,29 @@ class S3TransferTests(unittest.TestCase):
         self.assertNotIn("delete", [operation for operation, _ in client.events])
         self.assertEqual((self.receipts / "backup.json").stat().st_mode & 0o777, 0o600)
 
+    def test_identical_bytes_from_a_different_object_version_are_refused(self) -> None:
+        self.write_artifact()
+        client = FakeS3Client()
+        transfer = self.make_transfer(client)
+        backup_id = "20261123T120000Z-12345678-1234-4234-9234-1234567890ab"
+        source_identity = "a" * 40
+        receipt_path = self.receipts / "backup.json"
+        prefix = f"codexia/backups/{source_identity}/{backup_id}/"
+        args = dict(backup_id=backup_id, source_identity=source_identity, receipt_path=receipt_path)
+
+        client.wrong_version_for = prefix + "database.dump.age"
+        with self.assertRaisesRegex(s3_transfer.TransferError, "version"):
+            transfer.upload_artifact(self.artifact, **args)
+        self.assertFalse(receipt_path.exists())
+
+        client.wrong_version_for = None
+        receipt = transfer.upload_artifact(self.artifact, **args)
+        for key in (receipt["markerKey"], receipt["objects"]["database.dump.age"]["key"]):
+            client.wrong_version_for = key
+            with self.subTest(key=key), self.assertRaisesRegex(s3_transfer.TransferError, "version"):
+                transfer.download_artifact(backup_id=backup_id, receipt_path=receipt_path, output_dir=self.output)
+            self.assertEqual(list(self.output.iterdir()), [])
+
     def test_conditional_create_wins_race_after_missing_object_probe(self) -> None:
         files = self.write_artifact()
         client = FakeS3Client()
@@ -599,7 +624,7 @@ class S3TransferTests(unittest.TestCase):
         transfer = self.make_transfer(client)
         receipt_path = self.receipts / "backup.json"
         backup_id = "20261123T120000Z-12345678-1234-4234-9234-1234567890ab"
-        transfer.upload_artifact(
+        receipt = transfer.upload_artifact(
             self.artifact,
             backup_id=backup_id,
             source_identity="a" * 40,
@@ -621,7 +646,7 @@ class S3TransferTests(unittest.TestCase):
         for content_length in (s3_transfer.MAX_COMMIT_MARKER_BYTES + 1, 1, None):
             with self.subTest(content_length=content_length):
                 body = TrackingBody(b"x" * (s3_transfer.MAX_COMMIT_MARKER_BYTES + 1))
-                response = {"Body": body}
+                response = {"Body": body, "VersionId": receipt["markerVersionId"]}
                 if content_length is not None:
                     response["ContentLength"] = content_length
                 with patch.object(client, "get_object", return_value=response):

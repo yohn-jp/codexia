@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -101,12 +101,13 @@ test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof,
   const restoreDirectory = await mkdtemp(join(tmpdir(), 'codexia-restore-receipt-'));
   t.after(() => rm(restoreDirectory, { recursive: true, force: true }));
   const privateKey = join(restoreDirectory, 'worker.pem');
+  const transferScript = join(restoreDirectory, 'transfer.py');
   const control = new BackupConsoleControl({
     pool: workerPool,
     policy,
     config: backupExecutorConfigSchema.parse({ privateKeyFiles: [privateKey] }),
     python: '/usr/bin/python3',
-    transferScript: '/unused',
+    transferScript,
     receiptDirectory: restoreDirectory,
     backupScript: '/unused',
   });
@@ -323,6 +324,24 @@ test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof,
   ]);
   assert.equal((await post('activate', { revision: 4, probeId: retentionProbeId, confirmed: true })).status, 409);
 
+  await writeFile(privateKey, rotated.privateKey);
+  await writeFile(transferScript, 'print(\'{"status":"UNKNOWN","reasonCode":"s3_unavailable"}\')\nraise SystemExit(75)\n');
+  const checksumManifest = 'backup manifest for an interrupted transfer';
+  await writeFile(join(restoreDirectory, 'SHA256SUMS'), checksumManifest);
+  const manifestSha = createHash('sha256').update(checksumManifest).digest('hex');
+  const interruptedRun = randomUUID();
+  await control.deployStart(interruptedRun, sourceSha, sourceDigest, candidateSha, candidateDigest);
+  await assert.rejects(control.finish(interruptedRun, restoreDirectory, manifestSha, 'deploy'), {
+    code: 75,
+    reasonCode: 's3_unavailable',
+  });
+  const {
+    rows: [interrupted],
+  } = await workerPool.query('SELECT state, phase, reason_code, evidence FROM codexia_backup.runs WHERE id = $1', [interruptedRun]);
+  assert.deepEqual(interrupted, { state: 'UNKNOWN', phase: 'recovery_required', reason_code: 's3_unavailable', evidence: null });
+  // Other assertions below expect an independent run history.
+  await admin.query('DELETE FROM codexia_backup.runs WHERE id = $1', [interruptedRun]);
+
   const runRequestId = randomUUID();
   const runBody = { maintenanceWindowId: 'fixture-window', confirmed: true };
   const runResponse = await fetch(base + '/runs', {
@@ -416,4 +435,46 @@ test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof,
     ).status,
     403,
   );
+
+  const selectedRun = randomUUID();
+  const unknownRun = randomUUID();
+  const queuedOperation = randomUUID();
+  await control.deployStart(selectedRun, sourceSha, sourceDigest, candidateSha, candidateDigest);
+  await admin.query(
+    `INSERT INTO codexia_backup.runs (id, request_id, kind, maintenance_window_id, state)
+     VALUES ($1, $1::uuid::text, 'manual', 'fixture-window', 'UNKNOWN')`,
+    [unknownRun],
+  );
+  await admin.query("INSERT INTO codexia_backup.operations (id, request_id, kind, revision) VALUES ($1, $1::uuid::text, 'probe', 2)", [
+    queuedOperation,
+  ]);
+  const selectedTransferReceipt = join(restoreDirectory, 'transfer-receipt.json');
+  const selectedTransferBytes = JSON.stringify({
+    format: 'codexia-backup-receipt/v1',
+    backupId: selectedRun,
+    sourceIdentity: sourceSha,
+    sha256sumsSha256: manifestSha,
+    markerSha256: 'e'.repeat(64),
+    verifiedAt: new Date().toISOString(),
+  });
+  await writeFile(selectedTransferReceipt, selectedTransferBytes, { mode: 0o600 });
+  const selectedTransferSha = createHash('sha256').update(selectedTransferBytes).digest('hex');
+  const executorFenceSha = 'f'.repeat(64);
+  await assert.rejects(control.reconcileRestoredJournal(selectedTransferReceipt, '0'.repeat(64), executorFenceSha), /receipt digest/u);
+  await control.reconcileRestoredJournal(selectedTransferReceipt, selectedTransferSha, executorFenceSha);
+  const readRun = async (id: string) =>
+    (await workerPool.query('SELECT state, reason_code, manifest_sha256 FROM codexia_backup.runs WHERE id = $1', [id])).rows[0];
+  assert.deepEqual(await readRun(selectedRun), { state: 'REMOTE_VERIFIED', reason_code: null, manifest_sha256: manifestSha });
+  assert.deepEqual(await readRun(unknownRun), { state: 'UNKNOWN', reason_code: 'restored_outcome_unknown', manifest_sha256: null });
+  const operation = await workerPool.query('SELECT state FROM codexia_backup.operations WHERE id = $1', [queuedOperation]);
+  assert.equal(operation.rows[0].state, 'BLOCKED');
+  const newProbe = randomUUID();
+  await admin.query("INSERT INTO codexia_backup.operations (id, request_id, kind, revision) VALUES ($1, $1::uuid::text, 'probe', 3)", [
+    newProbe,
+  ]);
+  await control.reconcileRestoredJournal(selectedTransferReceipt, selectedTransferSha, executorFenceSha);
+  assert.equal(await worker.processNext(), false);
+  assert.equal((await workerPool.query('SELECT state FROM codexia_backup.operations WHERE id = $1', [newProbe])).rows[0].state, 'QUEUED');
+  await control.manualFail(unknownRun, 'operator_reconciled');
+  assert.equal(await worker.processNext(), true);
 });

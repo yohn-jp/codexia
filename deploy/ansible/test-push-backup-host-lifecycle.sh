@@ -1,5 +1,81 @@
 #!/usr/bin/env bash
 # Sourced by the disposable app lifecycle. No external Tunnel or S3 credentials.
+verify_private_backup_socket() (
+  set -e
+  local path="$fixture_home/.local/state/codexia-private-socket-fixture"
+  local database=codexia-private-socket-fixture
+  local image app_image
+  image="$(sed -n "s/^readonly PG_IMAGE='\(.*\)'$/\1/p" "$repo_root/deploy/backup/backup.sh")"
+  app_image="$(rootless_podman inspect --format '{{.ImageName}}' codexia-api)"
+  rootless test ! -e "$path"
+  rootless test ! -L "$path"
+  if rootless_podman container exists "$database"; then return 1; fi
+  trap 'rootless_podman rm -fv "$database" >/dev/null 2>&1 || :
+        rootless_podman unshare rm -rf -- "$path"' EXIT
+  rootless install -d -m 0700 "$path"
+  rootless install -d -m 0755 "$path/socket"
+  rootless_podman unshare chown 999:999 "$path/socket"
+  if sudo -u nobody test -x "$path"; then
+    echo 'An unrelated host UID can reach the private PostgreSQL socket' >&2
+    exit 1
+  fi
+  rootless_podman run -d --name "$database" --network none --pull=never \
+    -v "$path/socket:/run/postgresql:rw,z" \
+    -e POSTGRES_DB=codexia -e POSTGRES_PASSWORD=disposable-private-socket-admin \
+    -e POSTGRES_INITDB_ARGS='--auth-local=scram-sha-256 --auth-host=scram-sha-256' "$image" >/dev/null
+
+  socket_fixture_admin(){
+    rootless_podman exec -i -e PGPASSWORD=disposable-private-socket-admin "$database" \
+      psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d codexia "$@"
+  }
+  await_socket_fixture(){
+    local attempt
+    for ((attempt=1; attempt<=30; attempt++)); do
+      if socket_fixture_admin -h 127.0.0.1 -c 'SELECT 1' >/dev/null 2>&1; then return; fi
+      sleep 1
+    done
+    return 1
+  }
+  await_socket_fixture
+  socket_fixture_admin < "$repo_root/deploy/backup/operational-schema.sql"
+  socket_fixture_admin <<'SOCKET_ROLES'
+CREATE ROLE backup_api_fixture LOGIN PASSWORD 'disposable-private-socket-api';
+CREATE ROLE backup_executor_fixture LOGIN PASSWORD 'disposable-private-socket-executor';
+GRANT codexia_backup_api TO backup_api_fixture;
+GRANT codexia_backup_executor TO backup_executor_fixture;
+SOCKET_ROLES
+  socket_fixture_admin -v backup_api_login=backup_api_fixture -v backup_executor_login=backup_executor_fixture \
+    < "$repo_root/deploy/backup/verify-console-roles.sql"
+
+  verify_socket_client(){
+    rootless test -S "$path/socket/.s.PGSQL.5432"
+    rootless_podman run --rm --pull=never --network none --user 0:0 \
+      -v "$path/socket:/fixture-socket:ro,z" --entrypoint node "$app_image" --input-type=module -e '
+        import assert from "node:assert/strict";
+        import { createRequire } from "node:module";
+        const { Pool } = createRequire("/app/node_modules/@codexia/api/package.json")("pg");
+        async function query(password, sql) {
+          const pool = new Pool({
+            host: "/fixture-socket", database: "codexia", user: "backup_executor_fixture", password,
+            connectionTimeoutMillis: 4000,
+          });
+          try { return await pool.query(sql); } finally { await pool.end(); }
+        }
+        await assert.rejects(query("wrong-password", "SELECT 1"), { code: "28P01" });
+        const verified = await query("disposable-private-socket-executor",
+          "SELECT current_user AS login, inet_client_addr() IS NULL AS socket, count(*)::integer AS runs FROM codexia_backup.runs");
+        assert.deepEqual(verified.rows, [{ login: "backup_executor_fixture", socket: true, runs: 0 }]);
+        await assert.rejects(query("disposable-private-socket-executor",
+          "CREATE TABLE codexia_backup.ungranted (id integer)"), { code: "42501" });
+      '
+  }
+  verify_socket_client
+  rootless_podman restart "$database" >/dev/null
+  await_socket_fixture
+  verify_socket_client
+  printf '%s\n' 'Private backup socket verified on rootless Podman with dedicated PostgreSQL logins, SCRAM and restart'
+)
+
 prepare_backup_console_fixture(){
   local settings="$fixture_home/.config/codexia-backup"
   local destination="$fixture_home/.local/state/codexia-backup-mount"

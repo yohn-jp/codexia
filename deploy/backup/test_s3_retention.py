@@ -106,7 +106,8 @@ class S3RetentionTests(unittest.TestCase):
             with self.subTest(observed=observed):
                 self.client = ObjectLockClient()
                 self.client.retention[self.key("database.dump.age")] = observed
-                with self.assertRaisesRegex(s3_transfer.TransferError, "retention"):
+                expected_error = "different version" if "VersionId" in observed else "retention"
+                with self.assertRaisesRegex(s3_transfer.TransferError, expected_error):
                     self.upload()
                 self.assertFalse(any(key.endswith("/COMMIT.json") for _, key in self.client.objects))
                 self.assertFalse(self.receipt.exists())

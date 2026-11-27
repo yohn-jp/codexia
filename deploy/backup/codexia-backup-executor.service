@@ -1,0 +1,13 @@
+[Unit]
+Description=Codexia Backup Console executor
+Requires=codexia-db.service
+After=codexia-db.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/codexia-backup-control
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=default.target

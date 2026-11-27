@@ -7,8 +7,14 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { backupExecutorConfigSchema, readPrivateBackupFile } from './backup-console-executor.js';
+import {
+  backupExecutorConfigSchema,
+  backupExecutorLock,
+  readPrivateBackupFile,
+  restoredBackupUnknownReason,
+} from './backup-console-executor.js';
 import { allowedBackupDestination, allowedBackupMaintenanceWindow, backupPolicySchema } from './backup-console-routes.js';
+import { backupTransaction } from './backup-console-store.js';
 import {
   type BackupCredential,
   backupCredentialBinding,
@@ -23,6 +29,14 @@ const uuid = z.uuid();
 const sourceShaSchema = z.string().regex(/^[a-f0-9]{40}$/u);
 const imageDigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 const manifestSchema = z.string().regex(/^[a-f0-9]{64}$/u);
+const transferReceiptSchema = z.object({
+  format: z.literal('codexia-backup-receipt/v1'),
+  backupId: uuid,
+  sourceIdentity: sourceShaSchema,
+  sha256sumsSha256: manifestSchema,
+  markerSha256: manifestSchema,
+  verifiedAt: z.string().datetime({ offset: true }),
+});
 class RetryableControlError extends Error {
   readonly code = 75;
   constructor(readonly reasonCode: string) {
@@ -118,7 +132,10 @@ export class BackupConsoleControl {
         "SELECT 1 FROM codexia_backup.operations WHERE state IN ('QUEUED', 'RUNNING')",
       );
       if (operationCount) throw new Error('Backup configuration operation is in progress');
-      const { rowCount } = await client.query("SELECT 1 FROM codexia_backup.runs WHERE state IN ('QUEUED', 'RUNNING')");
+      const { rowCount } = await client.query(
+        "SELECT 1 FROM codexia_backup.runs WHERE state IN ('QUEUED', 'RUNNING') OR (state = 'UNKNOWN' AND reason_code = $1)",
+        [restoredBackupUnknownReason],
+      );
       if (rowCount) throw new Error('Another backup run requires recovery');
       await client.query(
         `INSERT INTO codexia_backup.runs (id, request_id, kind, revision, source_sha, image_digest, candidate_source_sha, candidate_image_digest, state, phase)
@@ -239,51 +256,23 @@ export class BackupConsoleControl {
         };
       } catch (error) {
         const s3Failure = error instanceof S3TransferFailure ? error : new S3TransferFailure('transfer_failed', true);
-        if (revision.destination.offVmPolicy === 'required') {
+        const secondaryMount = revision.destination.offVmPolicy === 'secondary' ? this.options.independentMount : undefined;
+        const independentVerified = secondaryMount && (await this.verifyIndependentArtifact(secondaryMount, artifactDirectory, sumsSha));
+        if (!independentVerified) {
           const failedState = s3Failure.retryable ? 'UNKNOWN' : 'FAILED';
-          const phase = s3Failure.retryable ? 'recovery_required' : 'failed';
+          const reason = secondaryMount && !s3Failure.retryable ? 'independent_artifact_invalid' : s3Failure.reasonCode;
           await client.query(
             "UPDATE codexia_backup.runs SET state = $2, phase = $3, reason_code = $4, observed_at = clock_timestamp() WHERE id = $1 AND state IN ('RUNNING', 'UNKNOWN')",
-            [runId, failedState, phase, s3Failure.reasonCode],
+            [runId, failedState, s3Failure.retryable ? 'recovery_required' : 'failed', reason],
           );
-          if (s3Failure.retryable) throw new RetryableControlError(s3Failure.reasonCode);
-          throw new Error('Required S3 ciphertext readback failed');
-        }
-        if (!this.options.independentMount) {
-          const failedState = s3Failure.retryable ? 'UNKNOWN' : 'FAILED';
-          await client.query(
-            "UPDATE codexia_backup.runs SET state = $2, phase = $3, reason_code = $4, observed_at = clock_timestamp() WHERE id = $1 AND state IN ('RUNNING', 'UNKNOWN')",
-            [runId, failedState, s3Failure.retryable ? 'recovery_required' : 'failed', s3Failure.reasonCode],
+          if (s3Failure.retryable) throw new RetryableControlError(reason);
+          throw new Error(
+            secondaryMount
+              ? 'S3 and independent artifact verification failed'
+              : revision.destination.offVmPolicy === 'required'
+                ? 'Required S3 ciphertext readback failed'
+                : 'S3 backup failed and no secondary protection is configured',
           );
-          if (s3Failure.retryable) throw new RetryableControlError(s3Failure.reasonCode);
-          throw new Error('S3 backup failed and no secondary protection is configured');
-        }
-        try {
-          const mount = await realpath(this.options.independentMount);
-          const artifact = await realpath(artifactDirectory);
-          if (!isAbsolute(mount) || dirname(artifact) !== mount)
-            throw new Error('Artifact is outside the operator-approved independent mount');
-          const { stdout } = await execute(this.options.backupScript, ['validate-independent-artifact', mount, artifact], {
-            timeout: 15_000,
-            maxBuffer: 1024,
-            killSignal: 'SIGKILL',
-            env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
-          });
-          if (!/^[a-f0-9]{64}\n?$/u.test(stdout) || stdout.trim() !== sumsSha)
-            throw new Error('Independent artifact receipt does not match the encrypted manifest');
-        } catch {
-          const failedState = s3Failure.retryable ? 'UNKNOWN' : 'FAILED';
-          await client.query(
-            "UPDATE codexia_backup.runs SET state = $2, phase = $3, reason_code = $4, observed_at = clock_timestamp() WHERE id = $1 AND state IN ('RUNNING', 'UNKNOWN')",
-            [
-              runId,
-              failedState,
-              s3Failure.retryable ? 'recovery_required' : 'failed',
-              s3Failure.retryable ? s3Failure.reasonCode : 'independent_artifact_invalid',
-            ],
-          );
-          if (s3Failure.retryable) throw new RetryableControlError(s3Failure.reasonCode);
-          throw new Error('S3 and independent artifact verification failed');
         }
         finalState = 'FAILED';
         reasonCode = s3Failure.reasonCode;
@@ -307,6 +296,23 @@ export class BackupConsoleControl {
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  private async verifyIndependentArtifact(mountPath: string, artifactDirectory: string, manifestSha: string): Promise<boolean> {
+    try {
+      const mount = await realpath(mountPath);
+      const artifact = await realpath(artifactDirectory);
+      if (dirname(artifact) !== mount) return false;
+      const { stdout } = await execute(this.options.backupScript, ['validate-independent-artifact', mount, artifact], {
+        timeout: 15_000,
+        maxBuffer: 1024,
+        killSignal: 'SIGKILL',
+        env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+      });
+      return stdout === manifestSha || stdout === manifestSha + '\n';
+    } catch {
+      return false;
     }
   }
 
@@ -373,6 +379,82 @@ export class BackupConsoleControl {
        VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (run_id, receipt_sha256) DO NOTHING`,
       [randomUUID(), runId, run.source_sha, receipt.checksumManifestSha256, receiptSha, Boolean(receipt.readyImageDigest)],
     );
+  }
+
+  async reconcileRestoredJournal(receiptPath: string, approvedReceiptSha: string, executorFenceSha: string): Promise<void> {
+    if (!isAbsolute(receiptPath)) throw new Error('Restore transfer receipt path must be absolute');
+    manifestSchema.parse(approvedReceiptSha);
+    manifestSchema.parse(executorFenceSha);
+    const bytes = await readPrivateBackupFile(receiptPath);
+    if (createHash('sha256').update(bytes).digest('hex') !== approvedReceiptSha) {
+      throw new Error('Restore transfer receipt digest does not match the approved evidence');
+    }
+    const receipt = transferReceiptSchema.parse(JSON.parse(bytes));
+    const client = await this.options.pool.connect();
+    try {
+      await backupTransaction(client, async () => {
+        const {
+          rows: [lock],
+        } = await client.query<{ locked: boolean }>('SELECT pg_try_advisory_xact_lock($1) AS locked', [backupExecutorLock]);
+        if (!lock?.locked) throw new Error('Backup executor must stop before restoring the journal');
+        const {
+          rows: [selected],
+        } = await client.query<{
+          state: string;
+          source_sha: string | null;
+          manifest_sha256: string | null;
+          evidence: Record<string, unknown> | null;
+        }>('SELECT state, source_sha, manifest_sha256, evidence FROM codexia_backup.runs WHERE id = $1 FOR UPDATE', [receipt.backupId]);
+        if (
+          !selected ||
+          selected.source_sha !== receipt.sourceIdentity ||
+          (selected.manifest_sha256 !== null && selected.manifest_sha256 !== receipt.sha256sumsSha256)
+        ) {
+          throw new Error('Restore transfer receipt does not match the selected journal run');
+        }
+        if (selected.state === 'REMOTE_VERIFIED') {
+          if (selected.evidence?.receiptSha256 !== approvedReceiptSha || selected.evidence?.executorFenceSha256 !== executorFenceSha) {
+            throw new Error('Restored journal was reconciled against different evidence');
+          }
+          return;
+        }
+        if (selected.state !== 'RUNNING' && selected.state !== 'UNKNOWN') throw new Error('Restored journal run cannot be reconciled');
+        await client.query(
+          `UPDATE codexia_backup.runs SET state = 'REMOTE_VERIFIED', phase = 'complete', reason_code = NULL,
+             manifest_sha256 = $2, evidence = $3, observed_at = clock_timestamp() WHERE id = $1`,
+          [
+            receipt.backupId,
+            receipt.sha256sumsSha256,
+            {
+              offVmMethod: 's3',
+              backupId: receipt.backupId,
+              markerSha256: receipt.markerSha256,
+              manifestSha256: receipt.sha256sumsSha256,
+              receiptSha256: approvedReceiptSha,
+              verifiedAt: receipt.verifiedAt,
+              executorFenceSha256: executorFenceSha,
+            },
+          ],
+        );
+        await client.query(
+          `UPDATE codexia_backup.runs SET state = 'BLOCKED', phase = 'blocked',
+             reason_code = 'restored_request_not_replayed', observed_at = clock_timestamp() WHERE state = 'QUEUED'`,
+        );
+        await client.query(
+          `UPDATE codexia_backup.runs SET state = 'UNKNOWN', phase = 'recovery_required', reason_code = $1,
+             evidence = COALESCE(evidence, '{}'::jsonb) || jsonb_build_object('restoredReasonCode', reason_code),
+             observed_at = clock_timestamp() WHERE state IN ('RUNNING', 'UNKNOWN')`,
+          [restoredBackupUnknownReason],
+        );
+        await client.query(
+          `UPDATE codexia_backup.operations SET state = 'BLOCKED', reason_code = 'restored_request_not_replayed',
+             observed_at = clock_timestamp() WHERE state IN ('QUEUED', 'RUNNING')`,
+        );
+        await client.query('UPDATE codexia_backup.state SET active_usable = false, run_executor_enabled = false, executor_seen_at = NULL');
+      });
+    } finally {
+      client.release();
+    }
   }
 
   private validateStart(runId: string, sourceSha: string, imageDigest: string, candidateSha: string, candidateDigest: string) {
@@ -491,25 +573,15 @@ export class BackupConsoleControl {
                     })
                     .safeParse(JSON.parse(stdout || '{}'));
                   if (outcome.success) {
-                    if (outcome.data.status === 'UNKNOWN') throw new RetryableControlError(outcome.data.reasonCode);
-                    throw new S3TransferFailure(outcome.data.reasonCode, false);
+                    throw new S3TransferFailure(outcome.data.reasonCode, outcome.data.status === 'UNKNOWN');
                   }
-                  throw new RetryableControlError('s3_unavailable');
+                  throw new S3TransferFailure('s3_unavailable', true);
                 }
                 const output = JSON.parse(stdout) as { status?: string; markerSha256?: string };
                 if (output.status !== 'VERIFIED' || typeof output.markerSha256 !== 'string')
                   throw new Error('S3 verification receipt is missing');
                 const bytes = await readPrivateBackupFile(receiptPath);
-                const receipt = z
-                  .object({
-                    format: z.literal('codexia-backup-receipt/v1'),
-                    backupId: uuid,
-                    sourceIdentity: sourceShaSchema,
-                    sha256sumsSha256: manifestSchema,
-                    markerSha256: manifestSchema,
-                    verifiedAt: z.string().datetime({ offset: true }),
-                  })
-                  .parse(JSON.parse(bytes));
+                const receipt = transferReceiptSchema.parse(JSON.parse(bytes));
                 if (
                   receipt.backupId !== runId ||
                   receipt.sourceIdentity !== sourceSha ||
@@ -585,21 +657,8 @@ async function main(argv: string[]) {
     else if (command === 'deploy-fail' && args.length === 2) await control.deployFail(args[0]!, args[1]!);
     else if (command === 'manual-start' && args.length === 3) await control.manualStart(args[0]!, args[1]!, args[2]!);
     else if (command === 'manual-finish' && args.length === 3) {
-      let run: { kind: 'manual' | 'scheduled' } | undefined;
       try {
-        const {
-          rows: [row],
-        } = await pool.query<{ kind: 'manual' | 'scheduled' }>(
-          "SELECT kind FROM codexia_backup.runs WHERE id = $1 AND kind IN ('manual', 'scheduled')",
-          [args[0]],
-        );
-        run = row;
-      } catch {
-        throw new RetryableControlError('manual_finish_unresolved');
-      }
-      if (!run) throw new RetryableControlError('manual_finish_unresolved');
-      try {
-        await control.finish(args[0]!, args[1]!, args[2]!, run.kind);
+        await control.finish(args[0]!, args[1]!, args[2]!, 'manual');
       } catch (error) {
         if (error instanceof RetryableControlError) throw error;
         let current: { state: string; manifest_sha256: string | null; evidence: Record<string, unknown> | null } | undefined;
@@ -607,7 +666,7 @@ async function main(argv: string[]) {
           const {
             rows: [row],
           } = await pool.query<{ state: string; manifest_sha256: string | null; evidence: Record<string, unknown> | null }>(
-            'SELECT state, manifest_sha256, evidence FROM codexia_backup.runs WHERE id = $1',
+            "SELECT state, manifest_sha256, evidence FROM codexia_backup.runs WHERE id = $1 AND kind IN ('manual', 'scheduled')",
             [args[0]],
           );
           current = row;
@@ -623,7 +682,9 @@ async function main(argv: string[]) {
     } else if (command === 'manual-interrupted' && args.length === 1) await control.manualInterrupted(args[0]!);
     else if (command === 'manual-fail' && args.length === 2) await control.manualFail(args[0]!, args[1]!);
     else if (command === 'record-restore' && args.length === 2) await control.recordRestore(args[0]!, args[1]!);
-    else if (command === 'recover' && args.length === 0) {
+    else if (command === 'reconcile-restored-journal' && args.length === 3) {
+      await control.reconcileRestoredJournal(args[0]!, args[1]!, args[2]!);
+    } else if (command === 'recover' && args.length === 0) {
       // The host runner owns durable intent replay and service restoration. Unknown rows are
       // not rewritten here: recovery must attach a validated receipt or remain visibly unknown.
       await pool.query("SELECT 1 FROM codexia_backup.runs WHERE state = 'UNKNOWN' LIMIT 1");

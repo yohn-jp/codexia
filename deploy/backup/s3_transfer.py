@@ -589,17 +589,26 @@ class S3BackupTransfer:
                 return None
             raise TransferError("S3 object inspection failed") from error
 
+    def _get_object(self, key: str, version_id: str | None) -> dict[str, Any]:
+        request: dict[str, Any] = {"Bucket": self.profile["bucket"], "Key": key}
+        if version_id:
+            request["VersionId"] = version_id
+        response = self.client.get_object(**request)
+        if version_id and response.get("VersionId") != version_id:
+            body = response.get("Body")
+            if body is not None:
+                body.close()
+            _fail("S3 returned a different version than the protected record")
+        return response
+
     def _get_verified(
         self, key: str, expected: dict[str, Any], *,
         version_id: str | None, retention: dict[str, Any],
     ) -> None:
         if retention and (not isinstance(version_id, str) or version_id in ("", "null")):
             _fail("S3 object retention requires a unique version ID")
-        request: dict[str, Any] = {"Bucket": self.profile["bucket"], "Key": key}
-        if version_id:
-            request["VersionId"] = version_id
         try:
-            response = self.client.get_object(**request)
+            response = self._get_object(key, version_id)
             if response.get("ContentLength") != expected["size"]:
                 body = response.get("Body")
                 if body is not None:
@@ -615,8 +624,7 @@ class S3BackupTransfer:
         if retention:
             retain_until = response.get("ObjectLockRetainUntilDate")
             if (
-                response.get("VersionId") != version_id
-                or response.get("ObjectLockMode") != retention["ObjectLockMode"]
+                response.get("ObjectLockMode") != retention["ObjectLockMode"]
                 or not isinstance(retain_until, datetime)
                 or retain_until.utcoffset() is None
                 or retain_until < retention["ObjectLockRetainUntilDate"]
@@ -712,12 +720,9 @@ class S3BackupTransfer:
             except Exception as error:
                 if _error_code(error) not in ("PreconditionFailed", "412", "ConditionalRequestConflict"):
                     raise TransferError("S3 object upload failed") from error
-                current = self._head(key)
-                if current is None:
+                result = self._head(key)
+                if result is None:
                     raise TransferError("S3 object upload conflict could not be inspected") from error
-                version_id = current.get("VersionId")
-                self._get_verified(key, expected, version_id=version_id, retention=retention)
-                return {"key": key, **expected, "versionId": version_id}
             version_id = result.get("VersionId")
         else:
             self._abort_pending_upload(journal_path, backup_id, source_identity, key)
@@ -759,7 +764,6 @@ class S3BackupTransfer:
                 )
                 upload_id = None
                 self._clear_pending_upload(journal_path, backup_id, source_identity, key)
-                version_id = completed.get("VersionId")
             except Exception as error:
                 if upload_id is not None:
                     try:
@@ -773,15 +777,14 @@ class S3BackupTransfer:
                             raise TransferError("S3 multipart upload failed and cleanup could not be confirmed") from cleanup_error
                     else:
                         self._clear_pending_upload(journal_path, backup_id, source_identity, key)
-                if _error_code(error) in ("PreconditionFailed", "412", "ConditionalRequestConflict"):
-                    current = self._head(key)
-                    if current is not None:
-                        current_version = current.get("VersionId")
-                        self._get_verified(key, expected, version_id=current_version, retention=retention)
-                        return {"key": key, **expected, "versionId": current_version}
-                if isinstance(error, TransferError):
-                    raise
-                raise TransferError("S3 multipart upload failed") from error
+                if _error_code(error) not in ("PreconditionFailed", "412", "ConditionalRequestConflict"):
+                    if isinstance(error, TransferError):
+                        raise
+                    raise TransferError("S3 multipart upload failed") from error
+                completed = self._head(key)
+                if completed is None:
+                    raise TransferError("S3 multipart upload conflict could not be inspected") from error
+            version_id = completed.get("VersionId")
         self._get_verified(key, expected, version_id=version_id, retention=retention)
         return {"key": key, **expected, "versionId": version_id}
 
@@ -907,10 +910,7 @@ class S3BackupTransfer:
         source_identity = receipt["sourceIdentity"]
         marker_key = receipt["markerKey"]
         try:
-            marker_response = self.client.get_object(
-                Bucket=self.profile["bucket"], Key=marker_key,
-                **({"VersionId": receipt["markerVersionId"]} if receipt.get("markerVersionId") else {}),
-            )
+            marker_response = self._get_object(marker_key, receipt.get("markerVersionId"))
             marker_bytes = _read_commit_marker(marker_response)
         except TransferError:
             raise
@@ -941,14 +941,11 @@ class S3BackupTransfer:
         try:
             for name in OBJECT_FILES:
                 record = receipt["objects"][name]
-                request: dict[str, Any] = {"Bucket": self.profile["bucket"], "Key": record["key"]}
-                if record.get("versionId"):
-                    request["VersionId"] = record["versionId"]
                 try:
-                    response = self.client.get_object(**request)
                     destination = staging_path / name
                     fd = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
                     with os.fdopen(fd, "wb") as stream:
+                        response = self._get_object(record["key"], record.get("versionId"))
                         digest, size = _read_stream(response["Body"], output=stream)
                         stream.flush()
                         os.fsync(stream.fileno())

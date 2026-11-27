@@ -707,7 +707,10 @@ observe_runtime first-activation "$initial_key"
 mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
 [[ "${#backup_artifacts[@]}" == 0 ]]
 rootless test ! -e "$fixture_home/.config/codexia-backup/executor.env"
+test "$(rootless_systemctl show codexia-backup-executor.service --property=ActiveState --value)" = inactive
+test "$(rootless_systemctl show codexia-backup-executor.service --property=UnitFileState --value)" = disabled
 set_state first_activation PASS 'fresh schema and API readiness verified without backup inputs, artifacts or prior writer'
+verify_private_backup_socket
 
 run_deploy "$initial_key" false
 observe_runtime same-digest-reapply "$initial_key"
