@@ -2,7 +2,7 @@
 
 **種別: 正本・規範的設計。** PostgreSQL schema を変更せず、特別なデータ統合を必要としない範囲の API/Core/module 機能を、承認済み main の検証・配布から自動的に本番へ適用する経路を定める。「自動」は **検証済み互換 digest だけを保護されたデプロイ制御が適用すること**であり、未知の migration や認証・保存形式の破壊を無条件で取り込むことではない。
 
-[本番Deploymentライフサイクル](DEPLOYMENT-LIFECYCLE.md) が通常更新と初回activation・非互換停止・復旧の経路選択、共通排他、保守状態を所有する。本書は通常の互換更新に限定する。
+[本番Deploymentライフサイクル](DEPLOYMENT-LIFECYCLE.md) が通常更新と初回activation・非互換停止・復旧の経路選択、共通排他、保守状態を所有する。本書は通常の互換更新に限定する。純新規のR4〜R6には事前バックアップを要求しない。ACTIVE後の運用受入を済ませ、R8のBackend更新時はConsoleで確定した通常バックアップ設定と同じVM内実行主体を使用する。GitHubへバックアップ設定・復号鍵を渡さない。
 
 [CI/CD 規範](../verification/CI-CD.md)、[Push deployment](PUSH-DEPLOYMENT.md)、[IaC](IAC.md)、[Backup](BACKUP.md)、[システム基本設計](../architecture/SYSTEM-DESIGN.md) を補完し、独立した release authority を追加しない。
 

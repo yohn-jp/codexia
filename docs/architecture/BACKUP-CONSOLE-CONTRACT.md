@@ -8,6 +8,8 @@
 
 ## 配備との一意の責務分担
 
+純新規R4〜R6ではバックアップ先、保存資格、復号鍵、復元証拠を要求しない。R6が通常Consoleを利用可能にする。配備運用者は必要な既存backup実行主体と運用schemaを既存Ansible/認定成果物で配備する（独自の手製bundleや新Environmentは作らない）。所有者はACTIVE後に本画面で保存先・資格・scheduleを設定し、手動保全を実行する。復旧担当は別ホストで復元を実証して運用受入に進む。詳細の時点・責務は [Deployment lifecycle](../deployment/DEPLOYMENT-LIFECYCLE.md) に従う。
+
 | 対象 | 正本・実行主体 | Webからの許可 |
 | --- | --- | --- |
 | ローカル暗号化バックアップ生成・writer quiesce・host lock・rollback | 現行 `deploy/backup/backup.sh` とAnsible push運用 | 表示／限定ジョブ要求のみ。公開WebでVMを操作しない |
@@ -17,7 +19,7 @@
 | AWS S3／互換storeの実bucket/IAM/versioning/Object Lock/retention | operator/provisioned provider policy | 読取・検査した能力を表示。providerの管理権限や削除権限をWebへ渡さない |
 | 災害復旧・本番DB復元 | 独立復旧hostと別途承認済みOPERATOR手順 | 説明・復元確認証拠の表示のみ。本番restore実行ボタンなし |
 
-**競合解決:** `CODEXIA_BACKUP_DESTINATION`は引き続き**保護されたローカルstagingパス**。WebのS3設定でこの環境変数/Ansible inventoryを上書きしない。既存の暗号化v2アーティファクトを一度だけ生成し、executorが**active revisionとして確定したS3設定**をバックアップ開始時に読み取って暗号文を遠隔保管する。設定変更は進行中のジョブに遡及適用せず、各run receiptに採用revisionを固定する。S3必須指定の場合はアップロード・再取得照合が完了するまで既存deployment admissionを成功としない。S3接続失敗時に別の保存先へ暗黙フォールバックしない。
+**競合解決:** ローカルstagingパスはVMの保護設定とし、GitHub Environmentのbackup入力にはしない。WebのS3設定でローカルパス/Ansible inventoryを上書きしない。既存の暗号化v2アーティファクトを一度だけ生成し、executorが**active revisionとして確定したS3設定**をバックアップ開始時に読み取って暗号文を遠隔保管する。設定変更は進行中のジョブに遡及適用せず、各run receiptに採用revisionを固定する。通常Backend更新時は、S3必須指定の場合、アップロード・再取得照合が完了するまでadmissionを成功としない。純新規の初回activationとは別である。S3接続失敗時に別の保存先へ暗黙フォールバックしない。
 
 ## 受理するS3設定の契約
 

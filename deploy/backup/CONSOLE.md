@@ -4,6 +4,8 @@ BKC-001 through BKC-010 are enabled by an operator on a single-owner installatio
 
 ## Provisioning
 
+Target operation after conformance: use existing Ansible and certified deployment artifacts to provision the backup runtime and operational schema/roles idempotently, not a second manual bootstrap bundle. The owner enters S3 settings and write credentials only in the ordinary Console. The VM-local protected settings below are not GitHub Actions Environment inputs. Fresh activation must not depend on any backup configuration or recovery proof. The recovery operator keeps necessary secrets independently and validates recovery after Console configuration. Until implementation conforms, this provisioning section describes existing component interfaces, not additional required manual steps for R4–R6.
+
 Apply [operational-schema.sql](operational-schema.sql) once to the selected database as its migration administrator with `psql -v ON_ERROR_STOP=1`. Provision two separate login roles through the installation's protected database credential workflow. Grant the API login only `codexia_backup_api` and the executor login only `codexia_backup_executor`. Verify the two logins with [verify-console-roles.sql](verify-console-roles.sql), supplying the psql variables `backup_api_login` and `backup_executor_login`. The ordinary API database, Auth and manuscript roles do not receive either grant.
 
 Supply both processes a read-only operator-owned JSON policy file. Each entry binds the endpoint, region, bucket, prefix boundary and permitted credential mode. An AWS entry omits `endpoint` and uses the regional AWS endpoint. Compatible entries require exact canonical HTTPS origins. For example:

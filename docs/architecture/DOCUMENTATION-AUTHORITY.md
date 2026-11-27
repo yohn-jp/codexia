@@ -43,7 +43,7 @@
 | Module と外部 AI | [Modules](MODULES.md)・[MCP-first](MCP-FIRST.md)・[Modular workspace](MODULAR-WORKSPACE.md) |
 | UI/UX と利用者操作 | [UX contract](../design/UX-CONTRACT.md)・[利用画面遷移](../design/USER-SCREEN-FLOW.md) |
 | 所有者の管理 UI | [管理画面遷移](../design/ADMIN-SCREEN-FLOW.md)・[API authentication](API-AUTHN-AUTHZ.md)・[バックアップ管理・S3制御](BACKUP-CONSOLE-CONTRACT.md)（運用設定/ワイヤ/責務。具体画面遷移はScreen State Atlas） |
-| 本番Deploymentの状態分類・経路選択・初回協調配備・非互換切替・排他/再開 | [Deployment lifecycle](../deployment/DEPLOYMENT-LIFECYCLE.md)（横断契約。個別stage・認証・CI・backupの正本を置換しない） |
+| 本番運用サイクル・実行者/実行面・入力/秘密の正本・経路選択・初回配備・更新・復旧・排他/再開 | [Deployment lifecycle](../deployment/DEPLOYMENT-LIFECYCLE.md)（横断契約。個別stage・認証・CI・backupの正本を置換しない） |
 | 初期導入・VM の収束 | [初期導入遷移](../deployment/INITIAL-DEPLOYMENT-FLOW.md)・[IaC](../deployment/IAC.md) |
 | 自動更新・復旧 | [更新遷移](../deployment/UPDATE-FLOW.md)・[Push deployment](../deployment/PUSH-DEPLOYMENT.md) |
 | 設計と正規コードから派生する画面・操作・遷移の抽象表示・探索・差分 | [UX Simulator契約](../design/UX-SIMULATOR-CONTRACT.md)（二重実装禁止。製品の設計正本と実装観測を区別し、実製品受入を置換しない） |
