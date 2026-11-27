@@ -256,6 +256,39 @@ test("author review shows durable Core status once when IndexedDB journal is una
   expect(await page.locator(".proposal-card").filter({ hasText: coreProposalId }).count()).toBe(1);
 });
 
+test("interrupted review refresh keeps an approved ChangeSet read-only until a successful refresh", async ({ page, authorizeAuthor }) => {
+  expect(databaseUrl).toBeTruthy();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { project, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Interrupted ChangeSet refresh", originalMarkdown);
+  const proposal = await proposeNode(author, project.id, "再読込まで適用できない候補");
+  await openReview(page);
+  await page.locator(".native-changeset-select").filter({ hasText: proposal.changeSetId }).click();
+  await page.getByRole("button", { name: "承認する" }).click();
+
+  const review = page.getByRole("region", { name: "変更提案" });
+  const apply = review.getByRole("button", { name: "承認済み提案を適用" });
+  const refresh = review.getByRole("button", { name: "最新状態を再確認" });
+  await expect(apply).toBeEnabled();
+
+  const feed = `**/api/v1/persistence/projects/${project.id}/review-feed**`;
+  await page.route(feed, route => route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({ error: "Review feed unavailable", code: "SERVICE_UNAVAILABLE" }),
+  }), { times: 1 });
+  await refresh.click();
+  await expect(review.getByRole("alert")).toHaveText("Review feed unavailable");
+  await expect(review.locator(".native-changeset-card")).toContainText("承認済み・未適用");
+  await expect(apply).toBeDisabled();
+
+  await refresh.click();
+  await expect(apply).toBeEnabled();
+  const detail = await author.fetch(`/api/v1/persistence/projects/${project.id}/changesets/${proposal.changeSetId}`);
+  const current = await detail.json() as { changeSet: { status: string }; receipt?: unknown };
+  expect(current.changeSet.status).toBe("approved");
+  expect(current.receipt).toBeUndefined();
+});
+
 test("author review surfaces a missing feed without requesting the native ChangeSet list", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 900 });
