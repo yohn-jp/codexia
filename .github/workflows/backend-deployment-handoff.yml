@@ -293,6 +293,7 @@ jobs:
           [[ "$CODEXIA_DEPLOYED_UI_EPOCH" =~ ^[1-9][0-9]*$ ]]
           [[ "$CODEXIA_INITIAL_INSTALL_APPROVED" == true || "$CODEXIA_INITIAL_INSTALL_APPROVED" == false ]]
           [[ "$CODEXIA_DATABASE_INITIALIZATION_APPROVED" == true || "$CODEXIA_DATABASE_INITIALIZATION_APPROVED" == false ]]
+          [[ "$CODEXIA_DATABASE_ADOPTION_APPROVED" == true || "$CODEXIA_DATABASE_ADOPTION_APPROVED" == false ]]
           if [[ "${CODEXIA_MANUAL_ACTIVATION:-false}" == true ]]; then
             current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
             [[ "$current" == "$GITHUB_SHA" ]] || { echo 'Main changed after manual activation admission.' >&2; exit 1; }
