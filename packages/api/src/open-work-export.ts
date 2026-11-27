@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, open, rm } from 'node:fs/promises';
+import type { ReadStream } from 'node:fs';
+import { type FileHandle, mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -19,12 +20,14 @@ export const OPEN_WORK_EXPORT_BYTES = 128 * 1024 * 1024;
 export const OPEN_WORK_EXPORT_GENERATE_MS = 60_000;
 export const OPEN_WORK_EXPORT_SEND_MS = 300_000;
 const MAX_ENTRIES = 32_000;
+const ORDINAL_WIDTH = String(MAX_ENTRIES).length;
 const ZIP_FORMAT = 'codexia-open-work/v1';
 const encoding = new TextEncoder();
 const readme =
   '# Codexia open work export\n\n' +
   'Extract this ZIP with a standard ZIP utility. All Markdown and JSON are UTF-8.\n' +
   'manifest.json describes paths and integrity. schema.json defines the JSON files.\n' +
+  'Numbered manuscript folders follow the outline order among siblings. Long paths may be flattened, with full hierarchy in manifest.json.\n' +
   'manifest.json records document hierarchy, order and head paths. metadata/project.json provides full document metadata. history/revisions.json lists every retained revision.\n' +
   'Deleted documents are listed separately from the current manuscript in the metadata.\n' +
   'Knowledge Markdown is a reading view of knowledge/graph.json.\n';
@@ -52,20 +55,27 @@ function readablePathSegment(title: string, id: string): string {
   return /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³]) *\./iu.test(segment) ? '_' + segment : segment;
 }
 
-function manuscriptPath(document: Document, documents: ReadonlyMap<DocumentId, Document>): string {
+function manuscriptPath(
+  document: Document,
+  documents: ReadonlyMap<DocumentId, Document>,
+  segments: ReadonlyMap<DocumentId, string>,
+): string {
   const seen = new Set<DocumentId>();
   const parts: string[] = [];
   let current: Document | undefined = document;
   while (current) {
     if (seen.has(current.id)) incomplete();
     seen.add(current.id);
-    parts.push(readablePathSegment(current.title, current.id));
+    const segment = segments.get(current.id);
+    if (!segment) incomplete();
+    parts.push(segment);
     if (current.parentId === null) break;
     current = documents.get(current.parentId);
     if (!current) incomplete();
   }
+  const leaf = parts[0]!;
   const full = parts.reverse().join('/');
-  return 'manuscript/' + (Buffer.byteLength(full) <= 170 ? full : readablePathSegment(document.title, document.id)) + '/index.md';
+  return 'manuscript/' + (Buffer.byteLength(full) <= 170 ? full : leaf) + '/index.md';
 }
 
 async function* jsonArray(values: Iterable<unknown> | AsyncIterable<unknown>): AsyncIterable<string> {
@@ -89,18 +99,41 @@ async function* jsonFields(fields: Record<string, Iterable<unknown> | AsyncItera
   yield '}\n';
 }
 
+async function createScratchZip() {
+  const directory = await mkdtemp(join(tmpdir(), 'codexia-work-export-'));
+  let file: FileHandle | undefined;
+  let linked = true;
+  const removeDirectory = () => rm(directory, { recursive: true, force: true });
+  const dispose = async () => {
+    try {
+      await file?.close();
+    } finally {
+      if (linked) await removeDirectory();
+    }
+  };
+  try {
+    file = await open(join(directory, 'work.zip'), 'wx+', 0o600);
+    if (process.platform !== 'win32') {
+      // Unlink before writing manuscript bytes. If the process stops, the OS reclaims the file with its descriptor.
+      await removeDirectory();
+      linked = false;
+    }
+    return { file, dispose };
+  } catch (error) {
+    await dispose();
+    throw error;
+  }
+}
+
 export async function generateOpenWorkZip(
   persistence: Persistence,
   projectId: ProjectId,
   signal: AbortSignal,
   maxBytes = OPEN_WORK_EXPORT_BYTES,
-): Promise<{ path: string; bytes: number; dispose: () => Promise<void> }> {
+): Promise<{ bytes: number; createReadStream: () => ReadStream; dispose: () => Promise<void> }> {
   signal.throwIfAborted();
-  const directory = await mkdtemp(join(tmpdir(), 'codexia-work-export-'));
-  const dispose = () => rm(directory, { recursive: true, force: true });
-  const path = join(directory, 'work.zip');
   try {
-    const handle = await open(path, 'wx', 0o600);
+    const { file, dispose } = await createScratchZip();
     let zipBytes = 0;
     try {
       let totalBytes = 0;
@@ -111,7 +144,7 @@ export async function generateOpenWorkZip(
           signal.throwIfAborted();
           zipBytes += chunk.byteLength;
           if (zipBytes > maxBytes) limit();
-          await handle.writeFile(chunk);
+          await file.writeFile(chunk);
         },
       });
       const zip = new ZipWriter(output, { zip64: false, bufferedWrite: false, useWebWorkers: false });
@@ -157,11 +190,19 @@ export async function generateOpenWorkZip(
           if (!project) throw new WorkArchiveError(404, 'WORK_NOT_FOUND', 'Work was not found');
 
           const documents = new Map<DocumentId, Document>();
+          const manuscriptSegments = new Map<DocumentId, string>();
+          const siblingCounts = new Map<DocumentId | null, number>();
           let documentMetadataBytes = 0;
           for await (const document of scan('documents')) {
             documentMetadataBytes += Buffer.byteLength(JSON.stringify(document));
             if (documents.size >= MAX_ENTRIES || documentMetadataBytes > maxBytes) limit();
             documents.set(document.id, document);
+            if (document.deletedAt === null) {
+              const ordinal = (siblingCounts.get(document.parentId) ?? 0) + 1;
+              siblingCounts.set(document.parentId, ordinal);
+              const prefix = String(ordinal).padStart(ORDINAL_WIDTH, '0');
+              manuscriptSegments.set(document.id, prefix + '-' + readablePathSegment(document.title, document.id));
+            }
           }
           const revisions: Revision[] = [];
           const headPaths = new Map<DocumentId, string>();
@@ -172,7 +213,7 @@ export async function generateOpenWorkZip(
             if (!document) incomplete();
             const current = document.deletedAt === null && document.headRevisionId === revision.id;
             const path = current
-              ? manuscriptPath(document, documents)
+              ? manuscriptPath(document, documents, manuscriptSegments)
               : 'history/documents/' + (document.deletedAt ? 'deleted/' : '') + document.id + '/' + revision.id + '.md';
             if (document.headRevisionId === revision.id) headPaths.set(document.id, path);
             const proof = await add(path, [revision.markdown]);
@@ -295,12 +336,12 @@ export async function generateOpenWorkZip(
       );
       await zip.close();
       signal.throwIfAborted();
-      return { path, bytes: zipBytes, dispose };
-    } finally {
-      await handle.close();
+      return { bytes: zipBytes, createReadStream: () => file.createReadStream({ autoClose: false, start: 0 }), dispose };
+    } catch (error) {
+      await dispose();
+      throw error;
     }
   } catch (error) {
-    await dispose();
     if (error instanceof PersistenceError && error.code === 'export_limit') limit();
     if (error instanceof PersistenceError && error.code === 'unavailable')
       throw new WorkArchiveError(503, 'PERSISTENCE_UNAVAILABLE', 'PostgreSQL persistence is not ready');

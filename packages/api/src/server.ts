@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { createReadStream, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
@@ -2955,7 +2955,7 @@ export function createServer(options: ApiServerOptions): Server {
       context.response.setHeader('Cache-Control', 'private, no-store, no-transform');
       const sendSignal = AbortSignal.any([context.signal, AbortSignal.timeout(OPEN_WORK_EXPORT_SEND_MS)]);
       context.reply.hijack();
-      await pipeline(createReadStream(archive.path), context.response, { signal: sendSignal });
+      await pipeline(archive.createReadStream(), context.response, { signal: sendSignal });
     } catch (error) {
       if (context.signal.aborted) return;
       if (generationDeadline.aborted && !context.reply.sent)

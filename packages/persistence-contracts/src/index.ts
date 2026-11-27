@@ -574,6 +574,7 @@ export interface OpenWorkExportRows {
 }
 
 export interface PersistenceReader {
+  /** Iterate one export section in stable order. Each sibling group follows listDocuments order. */
   scanOpenWorkExport?<K extends keyof OpenWorkExportRows>(
     projectId: ProjectId,
     section: K,

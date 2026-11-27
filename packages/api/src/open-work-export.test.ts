@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buffer } from 'node:stream/consumers';
 import { after, before, test } from 'node:test';
-import type { OpenWorkExportRows, Persistence, ProjectId } from '@codexia/persistence-contracts';
+import type { DocumentId, OpenWorkExportRows, Persistence, ProjectId } from '@codexia/persistence-contracts';
 import { createPostgresPersistence, migratePostgresDatabase } from '@codexia/persistence-postgres';
 import { Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from '@zip.js/zip.js';
 import { generateOpenWorkZip } from './open-work-export.js';
@@ -55,7 +58,7 @@ test('[TEST-DATA-006-001] open work ZIP preserves historical and deleted revisio
   );
   const zip = await generateOpenWorkZip(database, beforeDelete.project.id, new AbortController().signal);
   try {
-    const bytes = await readFile(zip.path);
+    const bytes = await buffer(zip.createReadStream());
     assert.equal(bytes.byteLength, zip.bytes);
     const reader = new ZipReader(new Uint8ArrayReader(bytes));
     try {
@@ -155,14 +158,14 @@ test('[TEST-DATA-006-002] export uses one PostgreSQL snapshot and rejects an inc
   const zip = await generateOpenWorkZip(concurrentWrite, project.id, controller.signal);
   try {
     assert.equal(editCommitted, true);
-    const reader = new ZipReader(new Uint8ArrayReader(await readFile(zip.path)));
+    const reader = new ZipReader(new Uint8ArrayReader(await buffer(zip.createReadStream())));
     try {
       const entries = await reader.getEntries();
       const manuscripts = entries.filter(entry => !entry.directory && entry.filename.startsWith('manuscript/'));
       assert.equal(manuscripts.length, 1);
       const [first] = manuscripts;
       assert.ok(first && !first.directory);
-      assert.match(first.filename, /^manuscript\/_CON\.txt-[0-9a-f-]+\/index\.md$/u);
+      assert.match(first.filename, /^manuscript\/\d+-_CON\.txt-[0-9a-f-]+\/index\.md$/u);
       const manifestEntry = entries.find(entry => entry.filename === 'manifest.json');
       assert.ok(manifestEntry && !manifestEntry.directory);
       const manifest = JSON.parse(Buffer.from(await manifestEntry.getData(new Uint8ArrayWriter())).toString('utf8'));
@@ -194,4 +197,88 @@ test('[TEST-DATA-006-002] export uses one PostgreSQL snapshot and rejects an inc
   }
   const recovered = await generateOpenWorkZip(database, project.id, controller.signal);
   await recovered.dispose();
+});
+
+test('name-sorted manuscript folders follow the author outline across document pages', async () => {
+  const { project, first, second } = await database.transaction(async tx => {
+    const project = await tx.createProject({ title: 'Outline order fixture', settings: {} });
+    const create = async (title: string, orderKey: string, parentId?: DocumentId, documentId?: DocumentId) => {
+      const { document } = await tx.createDocument({
+        projectId: project.id,
+        ...(documentId === undefined ? {} : { documentId }),
+        ...(parentId === undefined ? {} : { parentId }),
+        kind: parentId ? 'scene' : 'chapter',
+        title,
+        orderKey,
+        markdown: title,
+        authorId: 'owner',
+        idempotencyKey: title,
+      });
+      return document;
+    };
+    await create('Alpha chapter', '0002');
+    const first = await create('Zulu chapter', '0001');
+    const second = await create('Zulu scene', '0001', first.id);
+    await create('Alpha scene', '0002', first.id);
+    for (let index = 0; index < 64; index++) {
+      const id = ('10000000-0000-4000-8000-' + index.toString(16).padStart(12, '0')) as DocumentId;
+      await create(`Tied chapter ${63 - index}`, '0003', undefined, id);
+    }
+    return { project, first, second };
+  });
+  const zip = await generateOpenWorkZip(database, project.id, new AbortController().signal);
+  try {
+    const reader = new ZipReader(new Uint8ArrayReader(await buffer(zip.createReadStream())));
+    try {
+      const entries = (await reader.getEntries()).filter(entry => !entry.directory);
+      const byPath = new Map(entries.map(entry => [entry.filename, entry]));
+      const paths = [...byPath.keys()].filter(path => path.startsWith('manuscript/')).sort();
+      const read = (paths: string[]) =>
+        Promise.all(paths.map(async path => Buffer.from(await byPath.get(path)!.getData(new Uint8ArrayWriter())).toString('utf8')));
+      const root = paths.filter(path => path.split('/').length === 3);
+      const nested = paths.filter(path => path.split('/').length === 4);
+      assert.deepEqual(await read(root), [
+        'Zulu chapter',
+        'Alpha chapter',
+        ...Array.from({ length: 64 }, (_, index) => `Tied chapter ${63 - index}`),
+      ]);
+      assert.deepEqual(await read(nested), ['Zulu scene', 'Alpha scene']);
+      assert.ok(nested[0]!.includes(`Zulu chapter-${first.id}/`));
+      assert.ok(nested[0]!.endsWith(`Zulu scene-${second.id}/index.md`));
+    } finally {
+      await reader.close();
+    }
+  } finally {
+    await zip.dispose();
+  }
+});
+
+test('completed ZIP has no temporary pathname on the backend filesystem', { skip: process.platform === 'win32' }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codexia-export-scratch-test-'));
+  const oldTemp = process.env.TMPDIR;
+  process.env.TMPDIR = directory;
+  try {
+    const project = await database.transaction(tx => tx.createProject({ title: 'Export scratch fixture', settings: {} }));
+    const privateScratch: Persistence = {
+      read: (work, options) =>
+        database.read(async reader => {
+          assert.deepEqual(await readdir(directory), []);
+          return work(reader);
+        }, options),
+      transaction: database.transaction.bind(database),
+      close: database.close.bind(database),
+    };
+    const zip = await generateOpenWorkZip(privateScratch, project.id, new AbortController().signal);
+    try {
+      assert.deepEqual(await readdir(directory), []);
+      assert.ok(zip.bytes > 0);
+      assert.equal((await buffer(zip.createReadStream())).byteLength, zip.bytes);
+    } finally {
+      await zip.dispose();
+    }
+  } finally {
+    if (oldTemp === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = oldTemp;
+    await rm(directory, { recursive: true, force: true });
+  }
 });
