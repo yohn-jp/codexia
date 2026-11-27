@@ -43,7 +43,8 @@ on:
       - 'packages/persistence-contracts/src/**'
       - 'packages/module-runtime/src/**'
       # Exact-source image selection and the production transaction.
-      - 'scripts/build/packaging/profile-*.mjs'
+      - 'scripts/build/packaging/profile-build.mjs'
+      - 'scripts/build/packaging/profile-package.mjs'
       - 'scripts/verification/dependencies/runtime-package-closure.mjs'
       - 'scripts/verification/runtime/backend-image.sh'
       - 'scripts/verification/runtime/better-auth-fixture.sh'
