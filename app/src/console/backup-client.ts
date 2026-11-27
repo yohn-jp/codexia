@@ -26,6 +26,14 @@ const operation = z.object({
   status: z.enum(['QUEUED', 'RUNNING', 'PASSED', 'FAILED', 'BLOCKED', 'APPLIED']),
   phase: z.enum(['probe', 'activate', 'disable']),
   reasonCode: z.string().nullable(),
+  evidence: z
+    .object({
+      bucketVersioning: z.enum(['enabled', 'disabled', 'suspended', 'unknown']).optional(),
+      objectLock: z.enum(['enabled', 'disabled', 'unknown']).optional(),
+      defaultRetentionDays: z.number().int().nonnegative().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
   observedAt,
 });
 

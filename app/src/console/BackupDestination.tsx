@@ -321,6 +321,10 @@ function DestinationForm({ config, href, onReauthenticate }: Props & { config: B
   );
 }
 
+const protectionLabel = (value: string | undefined) =>
+  value === 'enabled' ? '有効' : value === 'disabled' ? '無効' : value === 'suspended' ? '一時停止' : '未観測';
+const retentionLabel = (value: unknown, unit: string, absent: string) => (typeof value === 'number' ? value + unit : absent);
+
 const pending = (status: string) => status === 'QUEUED' || status === 'RUNNING';
 
 export function BackupVerification({ href, onReauthenticate }: Props) {
@@ -405,17 +409,27 @@ export function BackupVerification({ href, onReauthenticate }: Props) {
                   : []),
                 ...(probe?.reasonCode ? ([['検証の理由コード', backupValue(probe.reasonCode)]] as const) : []),
                 [
-                  '有効化',
-                  current
-                    ? 'この設定を適用済み'
-                    : operation
-                      ? backupStateLabel(operation.status)
-                      : data.activate.action?.resultId
-                        ? '受付済み・結果未確認'
-                        : applying
-                          ? '受付結果未確認'
-                          : '未適用',
+                  '保持の要求値',
+                  retentionLabel(draft.retentionRequest?.days, ' 日', '日数の指定なし') +
+                    ' / ' +
+                    retentionLabel(draft.retentionRequest?.generations, ' 世代', '世代数の指定なし'),
                 ],
+                ['バケットのバージョン管理（検証時）', protectionLabel(probe?.evidence?.bucketVersioning)],
+                ['Object Lock（検証時）', protectionLabel(probe?.evidence?.objectLock)],
+                ['既定の保持日数（検証時）', retentionLabel(probe?.evidence?.defaultRetentionDays, ' 日', '未観測')],
+                ['現在の適用状態', current ? 'この設定を適用済み' : '現在は未適用'],
+                ...(data.activate.action
+                  ? ([
+                      [
+                        '前回の有効化要求',
+                        operation
+                          ? backupStateLabel(operation.status)
+                          : data.activate.action.resultId
+                            ? '受付済み・結果未確認'
+                            : '受付結果未確認',
+                      ],
+                    ] as const)
+                  : []),
                 ...(operation ? ([['有効化の操作 ID', backupValue(operation.operationId)]] as const) : []),
                 ...(operation?.reasonCode ? ([['有効化の理由コード', backupValue(operation.reasonCode)]] as const) : []),
               ]}

@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { ApiError } from '../api-error';
 import { authClient } from '../auth-client';
 import { type BackupOperation, backupConsoleClient, backupId } from './backup-client';
-import { checkOwnerSession } from './console-session';
+import { checkOwnerSession, type OwnerSessionState } from './console-session';
 
 const requestIdentity = z.object({
   requestId: backupId,
@@ -51,17 +51,31 @@ export class BackupPasskeyError extends Error {
   }
 }
 
-export async function requireFreshBackupOwner() {
+interface OwnerPasskeyProof {
+  readToken(): Promise<string | null>;
+  signIn(): Promise<void>;
+  confirm(): Promise<OwnerSessionState>;
+}
+
+const browserPasskeyProof: OwnerPasskeyProof = {
+  async readToken() {
+    const result = await authClient.getSession();
+    if (result.error) throw new BackupPasskeyError();
+    return result.data?.session.token ?? null;
+  },
+  async signIn() {
+    const result = await authClient.signIn.passkey();
+    if (result.error) throw new BackupPasskeyError();
+  },
+  confirm: checkOwnerSession,
+};
+
+export async function requireFreshBackupOwner(proof = browserPasskeyProof) {
   try {
-    const previous = await authClient.getSession();
-    const previousToken = previous.data?.session.token;
-    if (!previousToken || previous.error) throw new BackupPasskeyError();
-    const signedIn = await authClient.signIn.passkey();
-    const current = await authClient.getSession();
-    const token = current.data?.session.token;
-    if (signedIn.error || current.error || !token || token === previousToken || (await checkOwnerSession()) !== 'owner') {
-      throw new BackupPasskeyError();
-    }
+    const previous = await proof.readToken();
+    await proof.signIn();
+    const current = await proof.readToken();
+    if (!current || current === previous || (await proof.confirm()) !== 'owner') throw new BackupPasskeyError();
   } catch {
     throw new BackupPasskeyError();
   }
@@ -81,6 +95,11 @@ export async function readConfigOperation(action: PendingBackupAction, signal?: 
     operation.phase !== action.kind
   ) {
     throw new ApiError('Invalid backup operation receipt', 502, 'INVALID_RESPONSE');
+  }
+  if (action.kind === 'probe' && !action.resultId) {
+    const recovered = { ...action, resultId: operation.operationId };
+    writeBackupAction(recovered);
+    return readConfigOperation(recovered, signal);
   }
   return operation;
 }
