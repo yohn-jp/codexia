@@ -224,102 +224,200 @@ test("Backup Console displays fixture-backed evidence and recovers a lost probe 
   }
 });
 
+type BackupDatabase = ConstructorParameters<typeof BackupConsoleStore>[0];
 
-test("Backup Console recovers a dropped probe receipt from real Fastify, Better Auth and PostgreSQL", async ({ page }) => {
-  const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
-  if (!databaseUrl) throw new Error("The Backup Console browser test requires a disposable PostgreSQL database");
-  assertDisposableAuthFixtureDatabaseUrl(databaseUrl);
-  const requireApi = createRequire(new URL("../../packages/api/package.json", import.meta.url));
-  const { Pool } = requireApi("pg") as {
-    Pool: new (options: { connectionString: string; options?: string }) => ConstructorParameters<typeof BackupConsoleStore>[0];
-  };
-  const admin = new Pool({ connectionString: databaseUrl });
-  const apiPool = new Pool({ connectionString: databaseUrl, options: "-c role=codexia_backup_api" });
-  const executorPool = new Pool({ connectionString: databaseUrl, options: "-c role=codexia_backup_executor" });
-  const destination = {
-    provider: "s3-compatible",
-    endpoint: "https://backups.fixture.test",
-    region: "us-east-1",
-    bucket: "codexia-fixture",
-    prefix: "install/backup",
-  } as const;
-  const policy: BackupPolicy = { destinations: [{ ...destination, credentialModes: ["operator-role"] }], maintenanceWindows: [] };
-  const executor = new BackupConsoleExecutor({
-    pool: executorPool,
-    policy,
-    privateKeys: new Map(),
-    operatorCredential: { origin: destination.endpoint, credential: { accessKeyId: "fixture-key-id", secretAccessKey: "fixture-key" } },
-    async probe() { return { state: "PASSED", reason: null }; },
-  });
-  let fixture: BetterAuthFixture | undefined;
-  try {
-    await admin.query(await readFile(new URL("../../deploy/backup/operational-schema.sql", import.meta.url), "utf8"));
-    await executor.processNext();
-    const store = new BackupConsoleStore(apiPool);
-    fixture = await startBetterAuthFixture({
-      databaseUrl,
-      usePostgresPersistence: true,
-      staticDirectory: resolve("app/dist"),
-      createApiServer: options => createApiServer({ ...options, backupConsole: { store, policy } }),
+const realBackupTest = test.extend<{ backup: { origin: string; scope: string; admin: BackupDatabase; executor: BackupConsoleExecutor } }>({
+  backup: async ({ page }, use) => {
+    const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
+    if (!databaseUrl) throw new Error("The Backup Console browser test requires a disposable PostgreSQL database");
+    assertDisposableAuthFixtureDatabaseUrl(databaseUrl);
+    const requireApi = createRequire(new URL("../../packages/api/package.json", import.meta.url));
+    const { Pool } = requireApi("pg") as {
+      Pool: new (options: { connectionString: string; options?: string }) => ConstructorParameters<typeof BackupConsoleStore>[0];
+    };
+    const admin = new Pool({ connectionString: databaseUrl });
+    const apiPool = new Pool({ connectionString: databaseUrl, options: "-c role=codexia_backup_api" });
+    const executorPool = new Pool({ connectionString: databaseUrl, options: "-c role=codexia_backup_executor" });
+    const destination = {
+      provider: "s3-compatible",
+      endpoint: "https://backups.fixture.test",
+      region: "us-east-1",
+      bucket: "codexia-fixture",
+      prefix: "install/backup",
+    } as const;
+    const policy: BackupPolicy = { destinations: [{ ...destination, credentialModes: ["operator-role"] }], maintenanceWindows: [] };
+    const executor = new BackupConsoleExecutor({
+      pool: executorPool,
+      policy,
+      privateKeys: new Map(),
+      operatorCredential: { origin: destination.endpoint, credential: { accessKeyId: "fixture-key-id", secretAccessKey: "fixture-key" } },
+      async probe() { return { state: "PASSED", reason: null }; },
     });
-    const origin = fixture.apiOrigin;
-    const scope = "/api/console/backups";
-    const verification = origin + "/console/backups/verification";
-    // Production serves the Console through its edge rewrite to the Desktop shell.
-    await page.route(verification, async route => route.fulfill({ response: await route.fetch({ url: origin + "/desktop/" }) }));
-    expect((await page.request.get(origin + scope + "/status")).status()).toBe(401);
-    await page.context().addCookies(fixture.ownerSessionCookie().split("; ").map(cookie => {
-      const equals = cookie.indexOf("=");
-      return { name: cookie.slice(0, equals), value: cookie.slice(equals + 1), url: origin };
-    }));
-    const draft = await page.request.put(origin + scope + "/config/draft", {
-      headers: { Origin: origin, "If-Match": '"0"', "X-Codexia-CSRF": "1" },
-      data: { ...destination, credentialMode: "operator-role", offVmPolicy: "secondary" },
-    });
-    expect(draft.status(), await draft.text()).toBe(200);
+    let fixture: BetterAuthFixture | undefined;
+    try {
+      await admin.query(await readFile(new URL("../../deploy/backup/operational-schema.sql", import.meta.url), "utf8"));
+      await executor.processNext();
+      const store = new BackupConsoleStore(apiPool);
+      fixture = await startBetterAuthFixture({
+        databaseUrl,
+        usePostgresPersistence: true,
+        staticDirectory: resolve("app/dist"),
+        createApiServer: options => createApiServer({ ...options, backupConsole: { store, policy } }),
+        observeApiServer: server => {
+          // Model the Workers Static Assets rewrite for direct and redirected Console navigation.
+          server.prependListener("request", request => {
+            const pathname = request.url?.split("?", 1)[0];
+            if (request.method === "GET" && (pathname === "/console/backups" || pathname?.startsWith("/console/backups/"))) {
+              request.url = "/desktop/";
+            }
+          });
+        },
+      });
+      const origin = fixture.apiOrigin;
+      const scope = "/api/console/backups";
+      expect((await page.request.get(origin + scope + "/status")).status()).toBe(401);
+      await page.context().addCookies(fixture.ownerSessionCookie().split("; ").map(cookie => {
+        const equals = cookie.indexOf("=");
+        return { name: cookie.slice(0, equals), value: cookie.slice(equals + 1), url: origin };
+      }));
+      const draft = await page.request.put(origin + scope + "/config/draft", {
+        headers: { Origin: origin, "If-Match": '"0"', "X-Codexia-CSRF": "1" },
+        data: { ...destination, credentialMode: "operator-role", offVmPolicy: "secondary" },
+      });
+      expect(draft.status(), await draft.text()).toBe(200);
 
-    const posted: { requestId: string; probeId: string }[] = [];
-    await page.route(origin + scope + "/config/probes", async route => {
-      const requestId = route.request().headers()["idempotency-key"];
-      const response = await route.fetch();
-      expect(response.status(), await response.text()).toBe(202);
-      posted.push({ requestId, probeId: (await response.json()).probeId });
-      await route.abort("failed");
-    });
-    const receiptLookup = (url: URL) => url.origin === origin && url.pathname === scope + "/status" && url.searchParams.has("requestId");
-    await page.route(receiptLookup, route => route.abort("failed"));
-    await page.goto(verification);
-    await page.getByRole("button", { name: "接続検証を要求" }).focus();
-    await page.keyboard.press("Enter");
-    await expect(page.getByText("受付結果未確認", { exact: true })).toBeVisible();
-    expect(posted).toHaveLength(1);
-    const [receipt] = posted;
-
-    await page.unroute(receiptLookup);
-    const lookup = page.waitForResponse(response => receiptLookup(new URL(response.url())));
-    await page.reload();
-    const recovered = await lookup;
-    expect(recovered.status()).toBe(200);
-    expect(new URL(recovered.url()).searchParams.get("requestId")).toBe(receipt.requestId);
-    expect(await recovered.json()).toMatchObject({ activeRevision: null, operation: {
-      operationId: receipt.probeId, requestId: receipt.requestId, phase: "probe", status: "QUEUED",
-    } });
-    await expect(page.getByText("受付済み", { exact: true })).toBeVisible();
-    await expect(page.getByText("現在は未適用", { exact: true })).toBeVisible();
-    expect(await executor.processNext()).toBe(true);
-    await page.getByRole("button", { name: "状態を更新" }).click();
-    await expect(page.getByText("接続検証に合格", { exact: true })).toBeVisible();
-    expect(posted).toHaveLength(1);
-    const { rows } = await admin.query("SELECT id, request_id, state FROM codexia_backup.operations");
-    expect(rows).toEqual([{ id: receipt.probeId, request_id: receipt.requestId, state: "PASSED" }]);
-  } finally {
-    try { await fixture?.close(); }
-    finally {
-      try { await Promise.all([apiPool.end(), executorPool.end()]); }
+      await use({ origin, scope, admin, executor });
+    } finally {
+      try { await fixture?.close(); }
       finally {
-        try { await admin.query("DROP SCHEMA IF EXISTS codexia_backup CASCADE"); }
-        finally { await admin.end(); }
+        try { await Promise.all([apiPool.end(), executorPool.end()]); }
+        finally {
+          try { await admin.query("DROP SCHEMA IF EXISTS codexia_backup CASCADE"); }
+          finally { await admin.end(); }
+        }
       }
     }
+  },
+});
+
+realBackupTest("[TEST-UI-006-007] Backup Console recovers a dropped probe receipt from real Fastify, Better Auth and PostgreSQL", async ({ page, backup }) => {
+  const { origin, scope, admin, executor } = backup;
+  const verification = origin + "/console/backups/verification";
+  const posted: { requestId: string; probeId: string }[] = [];
+  await page.route(origin + scope + "/config/probes", async route => {
+    const requestId = route.request().headers()["idempotency-key"];
+    const response = await route.fetch();
+    expect(response.status(), await response.text()).toBe(202);
+    posted.push({ requestId, probeId: (await response.json()).probeId });
+    await route.abort("failed");
+  });
+  const receiptLookup = (url: URL) => url.origin === origin && url.pathname === scope + "/status" && url.searchParams.has("requestId");
+  await page.route(receiptLookup, route => route.abort("failed"));
+  await page.goto(verification);
+  await page.getByRole("button", { name: "接続検証を要求" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("受付結果未確認", { exact: true })).toBeVisible();
+  expect(posted).toHaveLength(1);
+  const [receipt] = posted;
+
+  await page.unroute(receiptLookup);
+  const lookup = page.waitForResponse(response => receiptLookup(new URL(response.url())));
+  await page.reload();
+  const recovered = await lookup;
+  expect(recovered.status()).toBe(200);
+  expect(new URL(recovered.url()).searchParams.get("requestId")).toBe(receipt.requestId);
+  expect(await recovered.json()).toMatchObject({ activeRevision: null, operation: {
+    operationId: receipt.probeId, requestId: receipt.requestId, phase: "probe", status: "QUEUED",
+  } });
+  await expect(page.getByText("受付済み", { exact: true })).toBeVisible();
+  await expect(page.getByText("現在は未適用", { exact: true })).toBeVisible();
+  expect(await executor.processNext()).toBe(true);
+  await page.getByRole("button", { name: "状態を更新" }).click();
+  await expect(page.getByText("接続検証に合格", { exact: true })).toBeVisible();
+  expect(posted).toHaveLength(1);
+  const { rows } = await admin.query("SELECT id, request_id, state FROM codexia_backup.operations");
+  expect(rows).toEqual([{ id: receipt.probeId, request_id: receipt.requestId, state: "PASSED" }]);
+});
+
+realBackupTest("[TEST-UI-006-008] Backup Console reflows at 320 CSS pixels, keeps its keyboard route and recovers from an expired owner session", async ({ page, backup }) => {
+  const { origin, scope, admin } = backup;
+  const root = "/console/backups";
+  const routes = [
+    [root + "/destination", "保存先設定", "/config"],
+    [root + "/verification", "接続検証", "/config"],
+    [root + "/history", "保全履歴", "/runs"],
+    [root + "/recovery", "復旧の証拠", "/recovery"],
+    [root, "保全状況", "/status"],
+  ] as const;
+  await page.setViewportSize({ width: 320, height: 760 });
+  const nav = page.getByRole("navigation", { name: "バックアップ管理" });
+  for (const [url, name, read] of routes) {
+    const loaded = page.waitForResponse(response => new URL(response.url()).pathname === scope + read);
+    await page.goto(origin + url);
+    expect((await loaded).status()).toBe(200);
+    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+    await expect(nav.getByRole("link", { name, exact: true })).toHaveAttribute("aria-current", "page");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
   }
+
+  await nav.getByRole("link", { name: "保全状況", exact: true }).focus();
+  await page.keyboard.press("Tab");
+  const destination = nav.getByRole("link", { name: "保存先設定", exact: true });
+  await expect(destination).toBeFocused();
+  await expect(destination).toBeInViewport();
+  const keyboardTarget = await destination.evaluate(link => {
+    const style = getComputedStyle(link);
+    const box = link.getBoundingClientRect();
+    const canvas = document.createElement("canvas").getContext("2d");
+    const surface = link.closest("main");
+    if (!canvas || !surface) throw new Error("Backup navigation contrast surface is missing");
+    const sample = (color: string) => {
+      canvas.fillStyle = color;
+      canvas.fillRect(0, 0, 1, 1);
+      return Array.from(canvas.getImageData(0, 0, 1, 1).data.slice(0, 3), channel => {
+        const normalized = channel / 255;
+        return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+      });
+    };
+    const luminance = ([red, green, blue]: number[]) => 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    const background = luminance(sample(getComputedStyle(surface).backgroundColor));
+    const foreground = luminance(sample(style.color));
+    return {
+      focusVisible: link.matches(":focus-visible") && style.outlineStyle !== "none" && parseFloat(style.outlineWidth) >= 2,
+      targetSize: Math.min(box.width, box.height),
+      textContrast: (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05),
+    };
+  });
+  expect(keyboardTarget.focusVisible).toBe(true);
+  expect(keyboardTarget.targetSize).toBeGreaterThanOrEqual(24);
+  expect(keyboardTarget.textContrast).toBeGreaterThanOrEqual(4.5);
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(origin + root + "/destination");
+  await expect(page.getByRole("form", { name: "S3 設定案" }).getByLabel("バケット（必須）")).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(origin + root);
+  await expect(nav.getByRole("link", { name: "保全状況", exact: true })).toHaveAttribute("aria-current", "page");
+
+  const sessionResponse = await page.request.get(origin + "/api/auth/get-session");
+  expect(sessionResponse.status()).toBe(200);
+  const { session } = await sessionResponse.json() as { session: { id: string } };
+  expect(session.id).toBeTruthy();
+  const expired = await admin.query(
+    'UPDATE codexia_auth.session SET "expiresAt" = $2 WHERE id = $1 RETURNING id',
+    [session.id, new Date(Date.now() - 60_000)],
+  );
+  expect(expired.rows).toEqual([{ id: session.id }]);
+
+  const denied = page.waitForResponse(response => new URL(response.url()).pathname === scope + "/status");
+  await page.getByRole("button", { name: "状態を更新", exact: true }).click();
+  expect((await denied).status()).toBe(401);
+  await expect(page.getByRole("alert")).toContainText("所有者セッションが失効しました");
+  await page.getByRole("button", { name: "所有者セッションを再確認", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "所有者としてサインイン", exact: true })).toBeVisible();
+  await expect(nav).toHaveCount(0);
+  const resumed = page.waitForResponse(response => new URL(response.url()).pathname === scope + "/status" && response.status() === 200);
+  await page.getByRole("button", { name: "IDプロバイダーでサインイン", exact: true }).click();
+  await resumed;
+  await expect(page.getByRole("heading", { name: "保全状況", exact: true })).toBeVisible();
+  expect((await admin.query("SELECT id FROM codexia_backup.operations")).rows).toEqual([]);
 });
