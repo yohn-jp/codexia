@@ -2,6 +2,9 @@ import { control, gap, records, sourceAt, sourceRef, transition } from './owner-
 
 const entry = 'app/src/console/ConsoleEntry.tsx';
 const setup = 'app/src/console/ConsoleSetup.tsx';
+const backup = 'app/src/console/BackupConsole.tsx';
+const backupOverview = 'app/src/console/BackupOverview.tsx';
+const backupDestination = 'app/src/console/BackupDestination.tsx';
 const identity = 'app/src/settings/IdentityManagementPanel.tsx';
 const identityView = 'app/src/settings/OwnerIdentityPanel.tsx';
 const session = 'app/src/console/console-session.ts';
@@ -106,7 +109,33 @@ export function projectConsole(source) {
   const setupRoute = routeLocation('/console/setup');
   const securityRoute = routeLocation('/console/security');
   const identityRoute = routeLocation('/console/identity');
-  const backupRoute = routeLocation('/console/backups');
+  const backupRoutes = [
+    ['CON-30', '', 'BackupOverview', backupOverview, '保全状況'],
+    ['CON-31', '/destination', 'BackupDestination', backupDestination, '保存先設定'],
+    ['CON-32', '/verification', 'BackupVerification', backupDestination, '接続検証'],
+    ['CON-33', '/history', 'BackupHistory', backup, '保全履歴'],
+    ['CON-34', '/recovery', 'BackupRecovery', backup, '復旧の証拠'],
+  ];
+  const backupEntry = sourceAt(source, entry, '<BackupConsole href={consoleHref}');
+  const backupRegion = (id) => 'backup-' + id.slice(4);
+  const backupScreens = records(backupRoutes.map(([id, suffix, component, path, label]) => {
+    const branch = suffix ? sourceAt(source, backup, "pathname === root + '" + suffix + "'") : backupEntry;
+    if (!backupEntry || !branch || !sourceAt(source, backup, '<' + component + ' ')) return null;
+    const heading = '<h2>' + label + '</h2>';
+    return screen(source, routes, id, path, heading, [
+      { id: backupRegion(id), role: 'section', label, source: sourceRef(sourceAt(source, path, heading)) },
+    ], '/console/backups' + suffix);
+  }));
+  const backupControlDefinitions = [
+    ['CON-30.A', backupOverview, '状態を更新', '<BackupRefresh refresh={refresh}', 'button'],
+    ['CON-30.B', backupOverview, 'パスキーで再認証してバックアップを要求', 'onSubmit={requestRun}', 'submit'],
+    ['CON-30.C', backupOverview, 'パスキーで再認証して無効化を要求', 'onSubmit={requestDisable}', 'submit'],
+    ['CON-31.A', backupDestination, 'パスキーで再認証して設定案を保存', 'onSubmit={submit}', 'submit'],
+    ['CON-32.A', backupDestination, '接続検証を要求', "onClick={() => request('probe')}", 'button'],
+    ['CON-32.B', backupDestination, 'パスキーで再認証して有効化を要求', "request('activate');", 'submit'],
+    ['CON-33.A', backup, '保全履歴', "href={backupQuery(href, 'history', { run: run.runId, cursor })}", 'link'],
+    ['CON-34.A', backup, '復旧の証拠', 'useBackupRead(backupConsoleClient.recovery)', 'status'],
+  ];
   const setupAuthor = sourceAt(source, catalog, '| CON-01 |');
   const screens = records(
     screen(source, routes, 'CON-00', entry, /\bif\s*\(\s*route\s*===\s*(['"])home\1\s*\)/u, [
@@ -147,10 +176,7 @@ export function projectConsole(source) {
     screen(source, routes, 'CON-21', identityView, '>アプリに保存した同意</Heading>', [
       { id: 'oauth-consent-list', role: 'list', label: '保存済みOAuth同意', source: sourceRef(sourceAt(source, identityView, 'fetchOwnerConsents(fetch, signal)')) },
     ], '/console/identity'),
-    backupRoute && sourceAt(source, entry, 'バックアップの設定と履歴は、バックアップ実装後に確認できます。') && {
-      id: 'CON-30', platform: 'console', route: '/console/backups', source: sourceRef(sourceAt(source, entry, 'バックアップの設定と履歴は、バックアップ実装後に確認できます。')),
-      regions: [{ id: 'backup-unavailable', role: 'status', label: 'バックアップ機能未実装の案内', source: sourceRef(sourceAt(source, entry, 'ここからVM操作や復元は実行できません。')) }],
-    },
+    backupScreens,
   );
 
   const controls = records(
@@ -161,6 +187,17 @@ export function projectConsole(source) {
     control(source, { id: 'CON-03.A', platform: 'console', path: setup, label: '登録状況を更新', handler: 'await refresh();', region: 'setup-refresh' }),
     combinedControl(source, { id: 'CON-10.A', label: 'パスキーを追加', region: 'passkey-management', handlers: ['onSubmit={event => void addPasskey(event)}', 'onRename={renamePasskey}', 'onDelete={deletePasskey}'] }),
     combinedControl(source, { id: 'CON-11.A', label: '他のすべてのセッションを終了', region: 'session-management', handlers: ['onRevoke={revokeSession}', 'onClick={() => void revokeOtherSessions()}'] }),
+    ...backupControlDefinitions.map(([id, path, label, handler, role]) => {
+      const screenId = id.split('.')[0];
+      if (!backupScreens.some(item => item.id === screenId)) return null;
+      if (id === 'CON-30.A') {
+        const labelSource = sourceAt(source, 'app/src/console/backup-view.tsx', label);
+        const event = sourceAt(source, path, handler);
+        if (!labelSource || !event) return null;
+        return { id, platform: 'console', source: sourceRef(event), label, role, handler, region: backupRegion(screenId) };
+      }
+      return control(source, { id, platform: 'console', path, label, handler, role, region: backupRegion(screenId) });
+    }),
   );
 
   const transitions = records(
@@ -181,19 +218,16 @@ export function projectConsole(source) {
     ].map(([route, screenId, id]) => transition({ id, platform: 'console', from: screenId + '/ready', to: 'CON-00/ready', event: 'navigate /console', screen: screenId, condition: 'href={consoleHref("/console")}', location: sourceAt(source, entry, 'href={consoleHref("/console")}') })),
   );
 
-  const backupRoutes = [
-    ['CON-31', '/console/backups/destination'], ['CON-32', '/console/backups/verification'],
-    ['CON-33', '/console/backups/history'], ['CON-34', '/console/backups/recovery'],
-  ];
   const gaps = records(
-    ...['CON-00', 'CON-01', 'CON-02', 'CON-03', 'CON-10', 'CON-11', 'CON-20', 'CON-21', 'CON-30']
+    ...['CON-00', 'CON-01', 'CON-02', 'CON-03', 'CON-10', 'CON-11', 'CON-20', 'CON-21', ...backupRoutes.map(([id]) => id)]
       .filter((id) => !screens.some((item) => item.id === id))
       .map((id) => gap({ id, platform: 'console', status: 'unextracted', reason: 'The canonical route or source view for ' + id + ' could not be located; no implementation behavior is inferred.', location: sourceAt(source, catalog, '| ' + id + ' |') })),
     gap({ id: 'CON-20.A', platform: 'console', reason: 'OIDC registration, validation, owner-link and activation controls are not implemented in the current owner view.', location: sourceAt(source, catalog, '| CON-20.A |') }),
     gap({ id: 'CON-21.A', platform: 'console', reason: 'The current view lists stored consent only; grant revocation control is not implemented.', location: sourceAt(source, catalog, '| CON-21.A |') }),
-    ...backupRoutes.map(([id, route]) => gap({ id, platform: 'console', reason: route + ' is currently routed to the generic backup placeholder; no distinct configuration, probe, history, or recovery screen is implemented.', location: routeLocation(route) ?? sourceAt(source, catalog, '| ' + id + ' |') })),
-    gap({ id: 'CON-30.B', platform: 'console', reason: 'Manual backup request and durable run-receipt lookup are not implemented; the screen says backup is unavailable.', location: sourceAt(source, entry, 'バックアップの設定と履歴は、バックアップ実装後に確認できます。') }),
-    gap({ id: 'CON-30.A', platform: 'console', reason: 'No backup status/configuration request is issued by the current console page.', location: sourceAt(source, entry, 'バックアップの設定と履歴は、バックアップ実装後に確認できます。') }),
+    ...backupControlDefinitions.filter(([id]) => !controls.some(item => item.id === id))
+      .map(([id]) => gap({ id, platform: 'console', status: 'unextracted',
+        reason: 'The backup view or control binding for ' + id + ' could not be located.',
+        location: sourceAt(source, catalog, '| ' + id + ' |') })),
   );
   return { screens, controls, transitions, gaps };
 }

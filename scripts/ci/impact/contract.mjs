@@ -35,6 +35,7 @@ export const CONFORMANCE_TASKS = Object.freeze({
 });
 export const BROWSER_SHARDS = [
   { id: 'auth-recovery', project: 'chromium', file: 'auth-recovery.acceptance.spec.ts' },
+  { id: 'backup-console', project: 'chromium', file: 'backup-console.acceptance.spec.ts' },
   { id: 'oauth-web', project: 'chromium', file: 'oauth-web.acceptance.spec.ts' },
   { id: 'passkey-bootstrap', project: 'chromium', file: 'passkey-bootstrap.acceptance.spec.ts' },
   ...['core', 'outline-headings', 'job-inbox', 'modular-workspace', 'native-review', 'persistence-database', 'recent-activity', 'redesign-visual', 'review-contributions', 'ui-v1'].map(id => ({ id, project: 'chromium', file: `${id}.acceptance.spec.ts` })),
@@ -73,7 +74,7 @@ export const VERIFICATION_GROUPS = {
     [`browser-${profile}-writing`, ['core', 'persistence-database'].map(id => `browser-${profile}-${id}`)],
     // Run the performance-sensitive visual shard only after the shorter
     // reference tasks, avoiding an exclusive tail on the critical writing lane.
-    [`browser-${profile}-reference`, ['modular-workspace', 'recent-activity', 'auth-recovery', 'native-review', 'oauth-web', 'outline-headings', 'passkey-bootstrap', 'review-contributions', 'job-inbox', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-reference`, ['modular-workspace', 'recent-activity', 'auth-recovery', 'backup-console', 'native-review', 'oauth-web', 'outline-headings', 'passkey-bootstrap', 'review-contributions', 'job-inbox', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
     [`browser-${profile}-ui-v1`, ['ui-v1'].map(id => `browser-${profile}-${id}`)],
   ])),
 };

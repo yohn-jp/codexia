@@ -3,6 +3,7 @@ import { authClient } from '../auth-client';
 import { type AuthMethodAvailability, fetchAuthMethodAvailability } from '../oauth-login';
 import { IdentityManagementPanel } from '../settings/IdentityManagementPanel';
 import { OwnerIdentityPanel } from '../settings/OwnerIdentityPanel';
+import { BackupConsole } from './BackupConsole';
 import { ConsoleSetup } from './ConsoleSetup';
 import { consumeConsoleReturnLocation, resolveConsoleReturnLocation } from './console-return';
 import { checkOwnerSession, type OwnerSessionState } from './console-session';
@@ -379,12 +380,7 @@ export function ConsoleEntry() {
                 )}
               </div>
             ) : (
-              <div className="codexia-console__notice">
-                <p role="status">バックアップの設定と履歴は、バックアップ実装後に確認できます。ここからVM操作や復元は実行できません。</p>
-                <a className="codexia-console__link" href={consoleHref('/console')}>
-                  ホームへ戻る
-                </a>
-              </div>
+              <BackupConsole href={consoleHref} onReauthenticate={() => void inspect()} />
             )}
             <div className="codexia-console__auth-actions">
               <button type="button" disabled={busy} onClick={() => void inspect()}>

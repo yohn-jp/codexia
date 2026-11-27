@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { matchesGlob } from 'node:path';
 import { test } from 'node:test';
 import { componentReleaseAffected } from '../../release/components/impact.mjs';
-import { VERIFICATION_TASKS } from './contract.mjs';
+import { PROFILES, VERIFICATION_TASKS } from './contract.mjs';
 import { UX_PROJECTION_DOCUMENTS } from '../evidence/task-inputs.mjs';
 import { isTraceTestSource } from '../../strictdoc/test-source-path.mjs';
 const { parse } = createRequire(new URL('../../../packages/core/package.json', import.meta.url))('yaml');
@@ -796,6 +796,16 @@ test('the Passkey browser acceptance source selects its owner proofs and trace e
   assert.ok(browserSpec.tasks.includes('browser-core-passkey-bootstrap'));
   assert.ok(browserSpec.tasks.includes('browser-full-passkey-bootstrap'));
   assert.ok(browserSpec.tasks.includes('test-types-app-e2e'));
+});
+
+test('Backup Console browser coverage selects its existing profile reference lanes', async () => {
+  const selected = await plan(['tests/e2e/backup-console.acceptance.spec.ts']);
+  assert.equal(selected.mode, 'affected');
+  assert.ok(selected.tasks.includes('test-types-app-e2e'));
+  for (const profile of PROFILES) {
+    assert.ok(selected.tasks.includes(`browser-${profile}-backup-console`));
+    assert.ok(selected.groups.includes(`browser-${profile}-reference`));
+  }
 });
 
 test('native Swift-only PR inputs select owner contract without unrelated Desktop or OCI jobs', async () => {

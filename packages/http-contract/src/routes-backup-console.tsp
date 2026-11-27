@@ -8,7 +8,7 @@ namespace Codexia.Http;
 @tag("backup-console") @useAuth(BearerAuth) @extension("x-codexia-contract-status", "incomplete") @extension("x-codexia-principal", "OWNER-SESSION") @extension("x-codexia-security-deviation", "The approved baseline encodes BearerAuth. The runtime requires OWNER-SESSION cookie only. The public security declaration needs an approved compatibility baseline correction.")
 @route("/api/console/backups/status") @get @operationId("backup_console_status_get")
 op getBackupConsoleStatus(
-  @doc("Original Idempotency-Key of a configuration operation. When supplied, include its current receipt or return 404 if it is unknown. Omit it for the overall backup status.")
+  @doc("Original Idempotency-Key of a configuration operation or manual backup run. When supplied, include current matching results or return 404 if the ID is unknown. Omit it for the overall backup status.")
   @query @minLength(16) @maxLength(128) @pattern("^[A-Za-z0-9_-]+$") requestId?: string,
 ):
   | BackupStatusView

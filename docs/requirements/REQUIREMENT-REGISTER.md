@@ -1142,11 +1142,11 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 **Conformance status**: PARTIAL
 **Applicability**: CURRENT
 **Design owner**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx; app/src/persistence/native-review-machine.ts; app/src/settings/owner-passkey-reauth-machine.ts; app/src/settings/owner-grant-revocation-machine.ts
-**Verification identifiers**: tests/e2e/core.acceptance.spec.ts; app/src/persistence/native-review-machine.test.ts; tests/e2e/native-review.acceptance.spec.ts; app/src/settings/owner-passkey-reauth-machine.test.ts; app/src/settings/owner-grant-revocation-machine.test.ts
-**Test IDs**: TEST-UI-006-002; TEST-UI-006-003; TEST-UI-006-004; TEST-UI-006-005; TEST-UI-006-006
+**Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx; app/src/persistence/native-review-machine.ts; app/src/settings/owner-passkey-reauth-machine.ts; app/src/settings/owner-grant-revocation-machine.ts; app/src/console/backup-workflow.ts
+**Verification identifiers**: tests/e2e/core.acceptance.spec.ts; app/src/persistence/native-review-machine.test.ts; tests/e2e/native-review.acceptance.spec.ts; app/src/settings/owner-passkey-reauth-machine.test.ts; app/src/settings/owner-grant-revocation-machine.test.ts; app/src/console/backup-workflow.test.ts; tests/e2e/backup-console.acceptance.spec.ts
+**Test IDs**: TEST-UI-006-002; TEST-UI-006-003; TEST-UI-006-004; TEST-UI-006-005; TEST-UI-006-006; TEST-UI-006-007; TEST-UI-006-008; TEST-UI-006-009
 **Exact-run reference**: NOT_RUN
-**Comment**: ACCEPTED／XState v5 はWRT-01/REC-01、Native ChangeSetレビュー、Passkey再認証、OAuth同意撤回で部分導入済み。バックアップは未実装; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+**Comment**: ACCEPTED／XState v5 はWRT-01/REC-01、Native ChangeSetレビュー、Passkey再認証、OAuth同意撤回とバックアップの受付・再照合に導入済み; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
 原稿保存・復旧、ChangeSet、認証、バックアップの複雑な状態と失敗・競合・接続断を決定的な遷移と独立テストで検証し、未確認の副作用を成功表示にしない
 
@@ -1227,10 +1227,10 @@ CON-10/CON-20の本人認証管理でWebAuthn中断を成功と扱わず、結�
 **MID**: 71c18268fd062de0776b8fbe66a766a8
 **UID**: OBL-REQ-UI-006-O04
 **Design reference**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: UNMAPPED
-**Test IDs**: NOT_ASSIGNED
+**Implementation identifiers**: app/src/console/backup-workflow.ts: backupWorkflowMachine; app/src/console/backup-actions.ts: useBackupWorkflow
+**Test IDs**: TEST-UI-006-007; TEST-UI-006-008; TEST-UI-006-009
 **Exact-run reference**: NOT_RUN
-**Comment**: Separate Backup Console workstream; machine implementation and verification pending.
+**Comment**: Scoped browser and machine observations cover acknowledgement, exact-ID recovery, session expiry and recovery. Real provider, VM and independent restore evidence belong to the operational acceptance.
 
 CON-30〜34のバックアップ状態管理で、受付・検証・実行結果を区別し、接続断後は同じrun IDを再照合する。確認済みreceiptを受け取るまで成功を表示しない。
 
@@ -1238,6 +1238,10 @@ CON-30〜34のバックアップ状態管理で、受付・検証・実行結果
 
 - **Type**: Parent
   **ID**: REQ-UI-006
+- **Type**: File
+  **Path**: app/src/console/backup-workflow.ts
+- **Type**: File
+  **Path**: app/src/console/backup-actions.ts
 
 ## REQ-EXT-001
 
@@ -2963,6 +2967,51 @@ Checks cancellation cannot report successful owner reauthentication.
 **Exact-run reference**: NOT_RUN
 
 Checks the machine reconciles an uncertain revocation against freshly fetched identity.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
+
+## TEST-UI-006-007
+
+**Type**: TEST
+**MID**: 3dad75dbf9890e7bc22319e42ac33574
+**UID**: TEST-UI-006-007
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks that losing an accepted probe response in Chromium and reloading reuses the original request identity in the real owner API.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
+
+## TEST-UI-006-008
+
+**Type**: TEST
+**MID**: 843800c9068da8d9284eff01b69a5ead
+**UID**: TEST-UI-006-008
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks direct Backup Console navigation, keyboard focus, narrow reflow, browser Back, and owner session recovery with real PostgreSQL and Better Auth.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
+
+## TEST-UI-006-009
+
+**Type**: TEST
+**MID**: 51871b45feaac23db1571e1d99a63b57
+**UID**: TEST-UI-006-009
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks that an unknown manual backup outcome keeps its identity through disconnection and advances on the matching authoritative recheck.
 
 **Relations**:
 

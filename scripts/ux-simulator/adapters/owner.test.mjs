@@ -71,7 +71,17 @@ test('owner projection points to canonical screens, controls, and static source 
   assert.ok(screenIds.has('AUTH-01') && screenIds.has('AUTH-02'));
   assert.ok(screenIds.has('CON-00') && screenIds.has('CON-01') && screenIds.has('CON-03'));
   assert.ok(screenIds.has('CON-10') && screenIds.has('CON-11') && screenIds.has('CON-20') && screenIds.has('CON-21'));
-  assert.ok(screenIds.has('CON-30') && screenIds.has('PUB-01'));
+  assert.ok(screenIds.has('PUB-01'));
+  assert.deepEqual(projection.screens.filter(({ id }) => /^CON-3[0-4]$/u.test(id)).map(({ id, route }) => [id, route]), [
+    ['CON-30', '/console/backups'],
+    ['CON-31', '/console/backups/destination'],
+    ['CON-32', '/console/backups/verification'],
+    ['CON-33', '/console/backups/history'],
+    ['CON-34', '/console/backups/recovery'],
+  ]);
+  assert.deepEqual(controlIds.filter(id => /^CON-3[0-4]\./u.test(id)), [
+    'CON-30.A', 'CON-30.B', 'CON-30.C', 'CON-31.A', 'CON-32.A', 'CON-32.B', 'CON-33.A', 'CON-34.A',
+  ]);
   assert.equal(controlIds.filter((id) => id === 'CON-00.A').length, 1);
   assert.ok(controlIds.includes('AUTH-01.A') && controlIds.includes('AUTH-02.A'));
   assert.ok(controlIds.includes('CON-00.B') && controlIds.includes('CON-10.A') && controlIds.includes('CON-11.A'));
@@ -87,9 +97,7 @@ test('owner projection points to canonical screens, controls, and static source 
   assert.ok(controlIds.includes('PUB-01.A'));
   assert.ok(projection.transitions.length > 0);
   assert.ok(projection.transitions.every(({ method, source }) => method === 'static' && source.line > 0 && source.path));
-  assert.ok(!screenIds.has('CON-31') && !screenIds.has('CON-32') && !screenIds.has('CON-33') && !screenIds.has('CON-34'));
-  assert.deepEqual(projection.gaps.filter(({ id }) => ['CON-31', 'CON-32', 'CON-33', 'CON-34'].includes(id)).map(({ status }) => status),
-    ['unimplemented', 'unimplemented', 'unimplemented', 'unimplemented']);
+  assert.ok(!projection.gaps.some(({ id }) => /^CON-3[0-4](?:\.|$)/u.test(id)));
 });
 
 test('removing the canonical OAuth route changes regenerated projection and records the missing route', () => {
@@ -164,6 +172,15 @@ test('deleting the canonical route entry removes its route transition even while
   const projection = project(changed);
   assert.ok(project(sourceWith()).transitions.some(({ id }) => id === 'console-route-console-to-console-backups'));
   assert.ok(!projection.transitions.some(({ id }) => id === 'console-route-console-to-console-backups'));
+});
+
+test('a backup route with its component branch removed is reported as unextracted', () => {
+  const path = 'app/src/console/BackupConsole.tsx';
+  const changed = withFileEdit(path, text => text.replace('<BackupDestination href=', '<OtherDestination href='));
+  const projection = project(changed);
+  assert.ok(!projection.screens.some(({ id }) => id === 'CON-31'));
+  assert.ok(!projection.controls.some(({ id }) => id === 'CON-31.A'));
+  assert.ok(projection.gaps.some(({ id, status }) => id === 'CON-31' && status === 'unextracted'));
 });
 
 test('detaching the canonical reader theme callback removes its control and transition', () => {

@@ -324,6 +324,7 @@ test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof,
   assert.equal((await post('activate', { revision: 4, probeId: retentionProbeId, confirmed: true })).status, 409);
 
   const runRequestId = randomUUID();
+  const runStatusQuery = '/status?' + new URLSearchParams({ requestId: runRequestId });
   const runBody = { maintenanceWindowId: 'fixture-window', confirmed: true };
   const runResponse = await fetch(base + '/runs', {
     method: 'POST',
@@ -331,23 +332,37 @@ test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof,
     body: JSON.stringify(runBody),
   });
   assert.equal(runResponse.status, 202);
-  const runReceipt = (await runResponse.json()) as { runId: string; state: string };
+  // Lose the accepted response before reading its run ID.
+  await runResponse.body?.cancel();
+  const runLookup = await get(runStatusQuery);
+  assert.equal(runLookup.status, 200);
+  const queuedRun = await runLookup.json();
+  assert.equal(queuedRun.operation, undefined);
+  assert.equal(queuedRun.run.requestId, runRequestId);
+  assert.equal(queuedRun.run.status, 'QUEUED');
+  const runReplay = await fetch(base + '/runs', {
+    method: 'POST',
+    headers: { ...writeHeaders, 'idempotency-key': runRequestId },
+    body: JSON.stringify(runBody),
+  });
+  assert.equal(runReplay.status, 202);
+  const runReceipt = (await runReplay.json()) as { runId: string; state: string };
+  assert.equal(runReceipt.runId, queuedRun.run.runId);
   assert.equal(runReceipt.state, 'queued');
-  assert.deepEqual(
-    await (
-      await fetch(base + '/runs', {
-        method: 'POST',
-        headers: { ...writeHeaders, 'idempotency-key': runRequestId },
-        body: JSON.stringify(runBody),
-      })
-    ).json(),
-    runReceipt,
-  );
-  assert.equal((await get('/runs/' + runReceipt.runId)).status, 200);
+  const queuedRunDetail = await get('/runs/' + runReceipt.runId);
+  assert.equal(queuedRunDetail.status, 200);
+  assert.deepEqual(queuedRun.run, await queuedRunDetail.json());
   const runHistory = (await (await get('/runs')).json()) as { runs: Array<{ runId: string; status: string }> };
   assert.ok(runHistory.runs.some(run => run.runId === runReceipt.runId && run.status === 'QUEUED'));
   assert.equal(await worker.processNext(), true);
-  assert.equal((await (await get('/runs/' + runReceipt.runId)).json()).status, 'REMOTE_VERIFIED');
+  const finalRunLookup = await get(runStatusQuery);
+  assert.equal(finalRunLookup.status, 200);
+  const finalRun = (await finalRunLookup.json()).run;
+  const finalRunDetail = await get('/runs/' + runReceipt.runId);
+  assert.equal(finalRunDetail.status, 200);
+  assert.equal(finalRun.status, 'REMOTE_VERIFIED');
+  assert.deepEqual(finalRun, await finalRunDetail.json());
+  assert.equal((await (await get('/status')).json()).run, undefined);
   const historyIds = [
     '00000000-0000-4000-8000-000000000003',
     '00000000-0000-4000-8000-000000000002',
