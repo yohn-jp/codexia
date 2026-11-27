@@ -1015,7 +1015,8 @@ preparedAuthorTest("leaving the work panel cancels an unfinished open ZIP downlo
   }
 });
 
-preparedAuthorTest("keeps the manuscript near its scene title with one concise protection status", async ({ page, authorizeAuthor }) => {
+// The measured opening position includes the focus and scroll effects of ordinary sign-in.
+test("keeps the manuscript near its scene title with one concise protection status", async ({ page, authorizeAuthor }) => {
   const { project, scene } = await createOAuthWritingFixture(authorizeAuthor, page);
   const measured: Array<{ mode: string; width: number; height: number; top: number; protectionCount: number; pageWidth: number }> = [];
   for (const sample of [
