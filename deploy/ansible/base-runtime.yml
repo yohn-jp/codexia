@@ -397,31 +397,34 @@
   changed_when: false
   failed_when: base_runtime_admin_login.rc != 0 or base_runtime_admin_login.stdout != 'codexia_admin'
   check_mode: false
+- name: Use the installed administrator secret for local PostgreSQL management
+  ansible.builtin.set_fact:
+    base_runtime_admin_psql:
+      - podman
+      - exec
+      - -i
+      - codexia-db
+      - sh
+      - -ec
+      - 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -v ON_ERROR_STOP=1 "$@"'
+      - sh
+      - -U
+      - codexia_admin
 - name: Inspect the application role before handling a retryable empty-cluster initialization
   ansible.builtin.command:
-    argv: [podman, exec, codexia-db, psql, -X, -qAt, -U, codexia_admin, -d, postgres, -c, "SELECT count(*) FROM pg_roles WHERE rolname='codexia'"]
+    argv: "{{ base_runtime_admin_psql + ['-qAt', '-d', 'postgres', '-c', \"SELECT count(*) FROM pg_roles WHERE rolname='codexia'\"] }}"
   register: base_runtime_app_role_count
   changed_when: false
 - name: Inspect the existing application database owner
   ansible.builtin.command:
-    argv: [podman, exec, codexia-db, psql, -X, -qAt, -U, codexia_admin, -d, postgres, -c, "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='codexia'"]
+    argv: "{{ base_runtime_admin_psql + ['-qAt', '-d', 'postgres', '-c', \"SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='codexia'\"] }}"
   register: base_runtime_app_database_owner
   changed_when: false
 - name: Count application objects before any missing-role repair
   ansible.builtin.command:
-    argv:
-      - podman
-      - exec
-      - codexia-db
-      - psql
-      - -X
-      - -qAt
-      - -U
-      - codexia_admin
-      - -d
-      - codexia
-      - -c
-      - >-
+    argv: "{{ base_runtime_admin_psql + ['-qAt', '-d', 'codexia', '-c', base_runtime_object_count_sql] }}"
+  vars:
+    base_runtime_object_count_sql: >-
         SELECT count(*) FROM (
           SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
           WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
@@ -454,7 +457,9 @@
       - codexia-db
       - sh
       - -ec
-      - 'export PG_APP_PASSWORD="$(cat /run/secrets/app-password)"; exec psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d postgres'
+      - >-
+        export PGPASSWORD="$(cat /run/secrets/admin-password)" PG_APP_PASSWORD="$(cat /run/secrets/app-password)";
+        exec psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d postgres
     expand_argument_vars: false
     stdin: |-
       \getenv app_password PG_APP_PASSWORD
@@ -521,36 +526,14 @@
       ) }}
 - name: Observe whether the application schema ledger exists without creating it
   ansible.builtin.command:
-    argv:
-      - podman
-      - exec
-      - codexia-db
-      - psql
-      - -X
-      - -qAt
-      - -U
-      - codexia_admin
-      - -d
-      - codexia
-      - -c
-      - "SELECT to_regclass('public.codexia_schema_migrations') IS NOT NULL"
+    argv: "{{ base_runtime_admin_psql + ['-qAt', '-d', 'codexia', '-c', \"SELECT to_regclass('public.codexia_schema_migrations') IS NOT NULL\"] }}"
   register: base_runtime_schema_present
   changed_when: false
 - name: Count untracked user schema objects when no migration ledger exists
   ansible.builtin.command:
-    argv:
-      - podman
-      - exec
-      - codexia-db
-      - psql
-      - -X
-      - -qAt
-      - -U
-      - codexia_admin
-      - -d
-      - codexia
-      - -c
-      - >-
+    argv: "{{ base_runtime_admin_psql + ['-qAt', '-d', 'codexia', '-c', base_runtime_untracked_objects_sql] }}"
+  vars:
+    base_runtime_untracked_objects_sql: >-
         SELECT count(*) FROM (
           SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
           WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
@@ -574,19 +557,9 @@
   when: base_runtime_schema_present.stdout == 'f'
 - name: Read the existing migration ledger without changing the database
   ansible.builtin.command:
-    argv:
-      - podman
-      - exec
-      - codexia-db
-      - psql
-      - -X
-      - -qAt
-      - -U
-      - codexia_admin
-      - -d
-      - codexia
-      - -c
-      - >-
+    argv: "{{ base_runtime_admin_psql + ['-qAt', '-d', 'codexia', '-c', base_runtime_migration_ledger_sql] }}"
+  vars:
+    base_runtime_migration_ledger_sql: >-
         SELECT coalesce(
           json_agg(json_build_object('version', version, 'checksum', btrim(checksum)) ORDER BY version),
           '[]'::json
@@ -627,3 +600,10 @@
     that:
       - base_runtime_tunnel_content.content == (lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/codexia-tunnel.container', rstrip=false) | b64encode)
     fail_msg: Tunnel Quadlet differs from the reviewed source; it was not overwritten.
+- name: Converge the approved private backup socket on the initialized cluster
+  ansible.builtin.command:
+    argv: [bash, -s]
+    stdin: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/ansible/backup-postgres-socket.sh', rstrip=false) }}"
+  register: base_runtime_backup_socket
+  changed_when: "'PRIVATE_BACKUP_SOCKET_CONFIGURED' in base_runtime_backup_socket.stdout"
+  when: codexia_backup_socket_approved | default(false) is sameas true
