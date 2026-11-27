@@ -10,6 +10,7 @@ import { planDigest, validateVerificationPlan } from '../impact/plan.mjs';
 import { selectLatestJobArtifact } from './artifact-selection.mjs';
 import { extractJsonEntry } from './download-artifacts.mjs';
 import { fetchLatestProducerArtifact } from './producer-artifact.mjs';
+import { normalizeVerificationJobs } from './job-name.mjs';
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const MAX_FILES = 20_000;
@@ -135,6 +136,7 @@ export function assertProfileReceipt(receipt,plan,profile,runId) {
 }
 
 export function assertProfileArtifactEvidence(plan,jobs,reports,artifacts,runId) {
+  jobs=normalizeVerificationJobs(jobs);
   for(const group of plan.groups.filter(name=>requiredBuildProfile(name))){
     const profile=requiredBuildProfile(group);
     const receipt=reports.find(report=>report.group===group)?.profileArtifact;
@@ -175,7 +177,7 @@ async function main(){
   }
   const {selected,job,bytes}=await fetchLatestProducerArtifact({plan,runId:GITHUB_RUN_ID,repository:GITHUB_REPOSITORY,
     token:GH_TOKEN,producerJob:identity.producerJob,artifactName:'ci-profile-build-'+profile,maxArchive:MAX_BYTES,
-    waitForProducerMs:90_000,expectedAttempt:Number(GITHUB_RUN_ATTEMPT)});
+    expectedRunAttempt:Number(GITHUB_RUN_ATTEMPT)});
   assert.ok(job.run_attempt<=Number(GITHUB_RUN_ATTEMPT),'Invalid producer attempt');
   identity.producerAttempt=job.run_attempt;
   const bundle=JSON.parse(await extractJsonEntry(bytes,'profile-build.json'));
