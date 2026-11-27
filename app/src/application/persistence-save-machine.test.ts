@@ -88,7 +88,7 @@ test("a newer edit cancels stale journal work and protects only its generation",
   actor.stop();
 });
 
-test("[TEST-UI-006-001] an unknown response retries the same operation and waits for its receipt", async () => {
+test("an unknown response retries the same operation and waits for its receipt", async () => {
   const calls: string[] = [];
   let attempts = 0;
   const { actor } = harness({

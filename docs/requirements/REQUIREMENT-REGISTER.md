@@ -1073,8 +1073,8 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 **Applicability**: CURRENT
 **Design owner**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
 **Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx; app/src/persistence/native-review-machine.ts; app/src/settings/owner-passkey-reauth-machine.ts; app/src/settings/owner-grant-revocation-machine.ts
-**Verification identifiers**: app/src/application/persistence-save-machine.test.ts; tests/e2e/core.acceptance.spec.ts; app/src/persistence/native-review-machine.test.ts; tests/e2e/native-review.acceptance.spec.ts; app/src/settings/owner-passkey-reauth-machine.test.ts; app/src/settings/owner-grant-revocation-machine.test.ts
-**Test IDs**: TEST-UI-006-001; TEST-UI-006-002; TEST-UI-006-003; TEST-UI-006-004; TEST-UI-006-005; TEST-UI-006-006
+**Verification identifiers**: tests/e2e/core.acceptance.spec.ts; app/src/persistence/native-review-machine.test.ts; tests/e2e/native-review.acceptance.spec.ts; app/src/settings/owner-passkey-reauth-machine.test.ts; app/src/settings/owner-grant-revocation-machine.test.ts
+**Test IDs**: TEST-UI-006-002; TEST-UI-006-003; TEST-UI-006-004; TEST-UI-006-005; TEST-UI-006-006
 **Exact-run reference**: NOT_RUN
 **Comment**: ACCEPTED／XState v5 はWRT-01/REC-01、Native ChangeSetレビュー、Passkey再認証、OAuth同意撤回で部分導入済み。バックアップは未実装; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
@@ -1094,7 +1094,7 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 **UID**: OBL-REQ-UI-006-O01
 **Design reference**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
 **Implementation identifiers**: app/src/application/persistence-save-machine.ts: createPersistenceSaveMachine; app/src/persistence/PersistenceWorkspace.tsx: PersistenceWorkspace
-**Test IDs**: TEST-UI-006-001; TEST-UI-006-002
+**Test IDs**: TEST-UI-006-002
 **Exact-run reference**: NOT_RUN
 **Comment**: Selected existing tests cover described scenarios. Remaining transitions and exact-source evidence are pending.
 
@@ -2776,21 +2776,6 @@ Checks keyboard focus order and panel associations for the Desktop tab stack.
 
 - **Type**: Parent
   **ID**: REQ-UI-005
-
-## TEST-UI-006-001
-
-**Type**: TEST
-**MID**: 88aaff66152d0fefcfa1def3f462f8cf
-**UID**: TEST-UI-006-001
-**Execution scope**: PRODUCT
-**Exact-run reference**: NOT_RUN
-
-Checks an uncertain save retries the original operation and waits for its receipt.
-
-**Relations**:
-
-- **Type**: Parent
-  **ID**: REQ-UI-006
 
 ## TEST-UI-006-002
 
