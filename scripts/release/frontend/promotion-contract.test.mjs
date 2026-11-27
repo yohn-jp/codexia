@@ -37,7 +37,7 @@ test('frontend PR producer remains read-only and main promotion requires exact s
   const upload=build.steps.find(step=>step.id==='upload');
   assert.ok(upload);
   assert.equal(upload.if,undefined);
-  assert.equal(upload.with['retention-days'],"${{ github.event_name == 'pull_request' && 14 || 2 }}");
+  assert.equal(upload.with['retention-days'],14);
   const fallback=build.steps.find(step=>step.run?.includes('pnpm run build:frontend'));
   assert.equal(fallback.if,undefined);
 });
@@ -73,6 +73,18 @@ test('frontend deploy rechecks producer artifact, exact main source and deployed
   assert.ok(verifyArtifact&&compatibility&&deployed&&record);
   assert.ok(deploy.steps.indexOf(verifyArtifact)<deploy.steps.indexOf(compatibility));
   assert.ok(deploy.steps.indexOf(deployed)<deploy.steps.indexOf(record));
+  const pin = deploy.steps.find(step=>step.run==='node scripts/release/frontend/deployment-rollback.mjs capture');
+  const rollback = deploy.steps.find(step=>step.run==='node scripts/release/frontend/deployment-rollback.mjs restore');
+  const mutation = deploy.steps.find(step=>step.id==='deploy-assets');
+  assert.ok(pin && rollback && mutation && deploy.steps.indexOf(compatibility)<deploy.steps.indexOf(pin) &&
+    deploy.steps.indexOf(pin)<deploy.steps.indexOf(mutation) &&
+    deploy.steps.indexOf(mutation)<deploy.steps.indexOf(deployed) &&
+    deploy.steps.indexOf(deployed)<deploy.steps.indexOf(rollback) &&
+    deploy.steps.indexOf(rollback)<deploy.steps.indexOf(record),
+    'the version must be pinned before publication and conditionally restored before recording success');
+  assert.match(mutation.run,/--tag "frontend-\$CODEXIA_FRONTEND_ARTIFACT_DIGEST"/u);
+  assert.match(rollback.if,/steps.deploy-assets.outcome == 'failure'/u);
+  assert.match(rollback.if,/steps.verify-deployed.outcome == 'failure'/u);
   assert.equal(deploy.env.CODEXIA_FRONTEND_PRODUCER_SHA,'${{ needs.preflight.outputs.producer-sha || needs.build.outputs.producer-sha }}');
   assert.equal(deploy.env.CODEXIA_FRONTEND_ARTIFACT_DIGEST,'${{ needs.preflight.outputs.artifact-digest || needs.build.outputs.artifact-digest }}');
   for(const step of [verifyArtifact,compatibility,deployed,record]) assert.equal(step.env.CODEXIA_FRONTEND_PRODUCER_SHA,undefined);
