@@ -17,6 +17,8 @@ import sys
 from datetime import datetime, timezone
 
 FULL_IMAGE = r"ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}"
+RAW_HASH = r"[a-f0-9]{64}"
+RECORD_ID = r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}"
 
 
 def require(ok):
@@ -53,13 +55,17 @@ def secret_identities():
     return hashes
 
 
-def verify_secret_identities(expected, lock_fd):
-    require(re.fullmatch(r"[a-f0-9]{64}", expected))
-    lock = Path.home() / ".local/state/codexia-deploy/host.lock"
+def verify_host_lock(state_dir, lock_fd):
+    lock = state_dir / "host.lock"
     actual = os.fstat(lock_fd)
     require(stat.S_ISREG(actual.st_mode) and actual.st_uid == os.getuid() and
             os.path.samestat(actual, lock.stat(follow_symlinks=False)))
     fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def verify_secret_identities(expected, lock_fd):
+    require(re.fullmatch(RAW_HASH, expected))
+    verify_host_lock(Path.home() / ".local/state/codexia-deploy", lock_fd)
     hashes = secret_identities()
     require(set(BASE_SECRETS + AUTH_SECRETS).issubset(hashes) and digest(hashes) == expected)
 
@@ -80,6 +86,79 @@ def private_text(path):
     return path.read_text(encoding="utf-8")
 
 
+def no_duplicate_keys(pairs):
+    result = dict(pairs)
+    require(len(result) == len(pairs))
+    return result
+
+
+def require_fields(value, fields):
+    require(isinstance(value, dict) and value.keys() == fields.keys())
+    require(all(isinstance(value[key], str) and re.fullmatch(pattern, value[key])
+                for key, pattern in fields.items()))
+
+
+def read_recovery_handoff(state_dir):
+    path = state_dir / "recovery-handoff.json"
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        parent = path.parent.stat(follow_symlinks=False)
+        require(stat.S_ISDIR(parent.st_mode) and parent.st_uid == os.getuid() and
+                stat.S_IMODE(parent.st_mode) == 0o700 and stat.S_ISREG(info.st_mode) and
+                info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o600 and
+                info.st_nlink == 1 and 0 < info.st_size <= 16 * 1024)
+        raw = stream.read(16 * 1024 + 1)
+        require(len(raw) == info.st_size and
+                os.path.samestat(info, path.stat(follow_symlinks=False)) and
+                os.path.samestat(parent, path.parent.stat(follow_symlinks=False)))
+    value = json.loads(raw, object_pairs_hook=no_duplicate_keys)
+    require(isinstance(value, dict) and set(value) == {
+        "format", "operationId", "environment", "backup", "target", "release",
+        "window", "writerFence", "executorFenceSha256", "credentialsRecordSha256",
+        "postBackupWritesRecordSha256",
+    })
+    require_fields({key: value[key] for key in
+                    ("format", "operationId", "environment", "executorFenceSha256", "credentialsRecordSha256",
+                     "postBackupWritesRecordSha256")}, {
+        "format": r"codexia-recovery-handoff/v1", "operationId": RECORD_ID,
+        "environment": "codexia-production", "executorFenceSha256": RAW_HASH,
+        "credentialsRecordSha256": RAW_HASH, "postBackupWritesRecordSha256": RAW_HASH,
+    })
+    point = {
+        "id": r"codexia-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}",
+        "sourceHostId": RAW_HASH, "manifestSha256": RAW_HASH, "transferReceiptSha256": RAW_HASH,
+        "restoreReceiptSha256": RAW_HASH, "databaseFingerprint": RAW_HASH, "historyFingerprint": RAW_HASH,
+    }
+    if isinstance(value["backup"], dict) and ("sourceClusterId" in value["backup"] or "sourceDatabaseOid" in value["backup"]):
+        point.update({"sourceClusterId": r"[1-9][0-9]{0,19}", "sourceDatabaseOid": r"[1-9][0-9]{0,9}"})
+    require_fields(value["backup"], point)
+    require_fields(value["target"], {
+        "hostId": RAW_HASH, "clusterId": r"[1-9][0-9]{0,19}", "databaseOid": r"[1-9][0-9]{0,9}",
+        "ledgerSha256": RAW_HASH, "authSchemaSha256": "sha256:" + RAW_HASH,
+        "ownerBindingSha256": "sha256:" + RAW_HASH, "settingsSha256": RAW_HASH, "secretSetSha256": RAW_HASH,
+    })
+    source, target = value["backup"], value["target"]
+    require(not (source["sourceHostId"] == target["hostId"] and
+                 source.get("sourceClusterId") == target["clusterId"] and
+                 source.get("sourceDatabaseOid") == target["databaseOid"]))
+    require_fields(value["release"], {
+        "image": FULL_IMAGE, "sourceSha": r"[a-f0-9]{40}", "frontendArtifactSha256": RAW_HASH,
+    })
+    timestamp = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z"
+    require_fields(value["window"], {"id": RECORD_ID, "notBefore": timestamp, "notAfter": timestamp})
+    start, end = (datetime.fromisoformat(value["window"][key]) for key in ("notBefore", "notAfter"))
+    backup_time = datetime.strptime(source["id"].split("-")[1], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    require(backup_time <= start < end)
+    require_fields(value["writerFence"], {
+        "kind": r"(?:decommissioned|write-access-revoked)", "recordSha256": RAW_HASH,
+    })
+    return value, hashlib.sha256(raw).hexdigest()
+
+
 def sql(database, query):
     # SQL is reviewed controller code, never a dispatch input. The existing
     # administrator password stays in the DB container; stdout is not logged.
@@ -93,6 +172,92 @@ def sql(database, query):
 
 def json_sql(database, query):
     return json.loads(sql(database, query))
+
+
+def read_migration_ledger():
+    ledger = json_sql("codexia", """SELECT coalesce(json_agg(json_build_object(
+        'version', version, 'checksum', btrim(checksum)) ORDER BY version COLLATE "C"), '[]'::json)
+        FROM public.codexia_schema_migrations;""")
+    require(isinstance(ledger, list) and 0 < len(ledger) <= 1000)
+    return ledger
+
+
+def read_auth_schema_fingerprint(auth_query):
+    definitions = sql("codexia", "BEGIN READ ONLY; SET LOCAL search_path TO codexia_auth; " + auth_query + "; COMMIT;").splitlines()
+    return "sha256:" + hashlib.sha256(json.dumps(definitions, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def restored_owner_settings(auth_dir):
+    owner = sql("codexia", """SELECT 'sha256:' || encode(sha256(convert_to(setup.owner_id::text,'UTF8')),'hex')
+        FROM codexia_auth.owner_setup setup
+        WHERE setup.id='first-owner' AND setup.consumed_at IS NOT NULL
+          AND (SELECT count(*) FROM codexia_auth."user") = 1
+          AND EXISTS (SELECT FROM codexia_auth."user" u JOIN codexia_auth."passkey" p ON p."userId"=u.id
+            WHERE u.id=setup.owner_id);""")
+    require(re.fullmatch("sha256:" + RAW_HASH, owner))
+    runtime_path = auth_dir / "runtime.env"
+    runtime_info = metadata(runtime_path)
+    require(runtime_info is not None and stat.S_IMODE(runtime_info.st_mode) == 0o600)
+    runtime = private_text(runtime_path)
+    subjects = [line.split("=", 1)[1] for line in runtime.splitlines()
+                if line.startswith("CODEXIA_OAUTH_OWNER_SUBJECT=")]
+    require(len(subjects) == 1 and "sha256:" + hashlib.sha256(subjects[0].encode()).hexdigest() == owner)
+    return {"ownerBindingSha256": owner, "settingsSha256": hashlib.sha256(runtime.encode()).hexdigest()}
+
+
+def machine_identity():
+    machine = Path("/etc/machine-id").read_text().strip()
+    require(re.fullmatch(r"[a-f0-9]{32}", machine))
+    return hashlib.sha256(machine.encode()).hexdigest()
+
+
+def assert_restored_target(record, database, host_id):
+    target = record["target"]
+    require(target["hostId"] == host_id and target["ledgerSha256"] == digest(database["ledger"]))
+    require(all(target[key] == database[key]
+                for key in ("clusterId", "databaseOid", "ownerBindingSha256", "settingsSha256")))
+    require(target["authSchemaSha256"] == database["authSchemaSha256"])
+
+
+def require_recovery_worker_stopped():
+    _, status = command(["systemctl", "--user", "show", "--property=LoadState",
+                         "--property=UnitFileState", "--property=ActiveState",
+                         "codexia-backup-executor.service"], (0, 4))
+    fields = dict(line.split("=", 1) for line in status.splitlines() if "=" in line)
+    require(fields.get("ActiveState") == "inactive" and
+            (fields.get("LoadState") == "not-found" or fields.get("UnitFileState") in ("disabled", "masked")))
+
+
+def require_tunnel_inactive():
+    _, state = command(["systemctl", "--user", "show", "--property=ActiveState", "--value",
+                        "codexia-tunnel.service"])
+    require(state == "inactive" and command(["podman", "container", "exists", "codexia-tunnel"], (0, 1))[0] == 1)
+
+
+def verify_recovery_handoff(expected_digest, operation_id, image, source_sha, lock_fd):
+    home = Path.home()
+    state_dir = home / ".local/state/codexia-deploy"
+    verify_host_lock(state_dir, lock_fd)
+    evidence = read_recovery_handoff(state_dir)
+    require(evidence is not None)
+    record, evidence_digest = evidence
+    require(evidence_digest == expected_digest and record["operationId"] == operation_id and
+            record["release"]["image"] == image and record["release"]["sourceSha"] == source_sha)
+    now = datetime.now(timezone.utc)
+    require(datetime.fromisoformat(record["window"]["notBefore"]) <= now <=
+            datetime.fromisoformat(record["window"]["notAfter"]))
+    require_recovery_worker_stopped()
+    require_tunnel_inactive()
+    verify_secret_identities(record["target"]["secretSetSha256"], lock_fd)
+    database = json_sql("codexia", """SELECT json_build_object('clusterId', system_identifier::text,
+        'databaseOid', (SELECT oid::text FROM pg_database WHERE datname=current_database()))
+        FROM pg_control_system();""")
+    database["ledger"] = read_migration_ledger()
+    database["authSchemaSha256"] = read_auth_schema_fingerprint(os.environ["CODEXIA_AUTH_SCHEMA_QUERY"])
+    database.update(restored_owner_settings(home / ".config/codexia-auth"))
+    assert_restored_target(record, database, machine_identity())
+    return {key: record["backup"][key] for key in ("databaseFingerprint", "historyFingerprint")}
+
 
 def read_owner_installation_intent(path, cluster):
     info = metadata(path)
@@ -133,7 +298,7 @@ def observe_transaction(state_dir):
 
 
 def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_query, volume_layout,
-                     resume_clean=False):
+                     resume_clean=False, inspect_restored=False):
     if not volumes["codexia-postgres"]:
         require(not containers["codexia-db"])
         return {"state": "absent", "authState": "absent"}
@@ -163,10 +328,7 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
     if not db["ledgerExists"]:
         require(not db["authExists"] and db["appRelations"] == 0)
         return {"state": "pristine", "authState": "absent", "clusterId": cluster["clusterId"]}
-    ledger = json_sql("codexia", """SELECT coalesce(json_agg(json_build_object(
-        'version', version, 'checksum', btrim(checksum)) ORDER BY version COLLATE "C"), '[]'::json)
-        FROM public.codexia_schema_migrations;""")
-    require(isinstance(ledger, list) and len(ledger) > 0 and len(ledger) <= 1000)
+    ledger = read_migration_ledger()
     require(re.fullmatch(r"[1-9][0-9]{0,9}", cluster["databaseOid"]))
     result = {"state": "initialized", "clusterId": cluster["clusterId"], "databaseOid": cluster["databaseOid"], "ledger": ledger,
               "authState": "unknown", "authSchemaSha256": None, "ownerBindingSha256": None}
@@ -205,10 +367,13 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
                            "bootstrapIntent": intent})
     # Use the owning auth-schema catalog query supplied by the checked-out source.
     # Hash its ordered text definitions locally; never emit them.
-    definitions = sql("codexia", "BEGIN READ ONLY; SET LOCAL search_path TO codexia_auth; " + auth_query + "; COMMIT;").splitlines()
-    result["authSchemaSha256"] = "sha256:" + hashlib.sha256(
-        json.dumps(definitions, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    result["authSchemaSha256"] = read_auth_schema_fingerprint(auth_query)
     if result.get("emptyAuthSchema") is True:
+        return result
+    if inspect_restored:
+        require(writer is None)
+        result.update(restored_owner_settings(auth_dir))
+        result["authState"] = "ready"
         return result
     if writer and writer.get("authMode") == "better-auth":
         result["ownerBindingSha256"] = writer["ownerBindingSha256"]
@@ -305,9 +470,7 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
 def observe():
     facts = json.loads(os.environ["CODEXIA_INSPECT_FACTS"])
     writer = json.loads(os.environ["CODEXIA_WRITER_OBSERVATION"])
-    machine = Path("/etc/machine-id").read_text().strip()
-    require(re.fullmatch(r"[a-f0-9]{32}", machine))
-    host_id = hashlib.sha256(machine.encode()).hexdigest()
+    host_id = machine_identity()
     base = {"format": "codexia-lifecycle-host/v1", "hostId": host_id, "M": "ready"}
     if not facts["accountPresent"]:
         # Account absence alone cannot establish an empty installation.
@@ -420,11 +583,24 @@ def observe():
                 "--property=LoadState,ActiveState", "codexia-api.service"], (0, 4))
             if set(unit_state.splitlines()) == {"LoadState=not-found", "ActiveState=inactive"}:
                 backend = {"state": "absent"}
+        recovery = None
+        observe_restore = transaction is None and os.environ.get("CODEXIA_OBSERVE_RECOVERY") == "true"
+        clean_restore = bool(lock_handle is not None and backend["state"] == "absent" and not residue and
+                             not containers["codexia-api"] and not containers["codexia-tunnel"])
+        if observe_restore:
+            recovery = read_recovery_handoff(state_dir)
+        if recovery is not None:
+            require(clean_restore)
+            require_recovery_worker_stopped()
+            require_tunnel_inactive()
+            require(set(BASE_SECRETS + AUTH_SECRETS).issubset(secret_hashes) and
+                    digest(secret_hashes) == recovery[0]["target"]["secretSetSha256"])
         database = observe_database(volumes, containers, state_dir, auth_dir, full,
                                     os.environ["CODEXIA_AUTH_SCHEMA_QUERY"], facts["volumeLayout"],
-                                    resume_clean=lock_handle is not None and transaction is None and
+                                    resume_clean=not observe_restore and lock_handle is not None and transaction is None and
                                     backend.get("state") == "absent" and not residue and
-                                    not containers["codexia-api"])
+                                    not containers["codexia-api"],
+                                    inspect_restored=observe_restore and clean_restore)
         if database["state"] in ("missing", "absent"):
             # Verify the canonical residual slot independently of old DB health.
             if containers["codexia-api"]:
@@ -444,8 +620,16 @@ def observe():
         h = "drift" if drift else "unknown" if base_unknown else "ready" if facts["hostReady"] and all(networks.values()) and all(volumes.values()) \
             and all(secrets.values()) and containers["codexia-db"] and facts["baseEvidence"]["database"] \
             and set(unit_hashes) == set(facts["quadlets"]) else "partial"
-        return {**base, "H": h, "database": database, "backend": backend,
-                "transaction": transaction, "topology": topology}
+        result = {**base, "H": h, "database": database, "backend": backend,
+                  "transaction": transaction, "topology": topology}
+        if recovery is not None:
+            record, evidence_digest = recovery
+            require(h == "ready" and database["state"] == "initialized" and database["authState"] == "ready" and
+                    datetime.now(timezone.utc) <= datetime.fromisoformat(record["window"]["notAfter"]))
+            assert_restored_target(record, database, host_id)
+            result["recovery"] = {"operationId": record["operationId"], "evidenceSha256": evidence_digest,
+                                  "release": record["release"], "window": record["window"]}
+        return result
     finally:
         if lock_handle is not None:
             lock_handle.close()
@@ -456,6 +640,10 @@ if __name__ == "__main__":
         if sys.argv[1:2] == ["verify-secret-identities"]:
             require(len(sys.argv) == 3)
             verify_secret_identities(sys.argv[2], 9)
+            sys.exit(0)
+        if sys.argv[1:2] == ["verify-recovery-handoff"]:
+            require(len(sys.argv) == 6)
+            print(json.dumps(verify_recovery_handoff(*sys.argv[2:], lock_fd=9), separators=(",", ":")))
             sys.exit(0)
         require(len(sys.argv) == 1)
         result = observe()

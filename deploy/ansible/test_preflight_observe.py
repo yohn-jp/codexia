@@ -12,12 +12,125 @@ observer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(observer)
 
 
+def recovery_record():
+    sha = "a" * 64
+    return {
+        "format": "codexia-recovery-handoff/v1",
+        "operationId": "restore-20261124-01",
+        "environment": "codexia-production",
+        "backup": {
+            "id": "codexia-20261123T220000Z-00000000-0000-4000-8000-000000000001",
+            "sourceHostId": "b" * 64,
+            "manifestSha256": sha, "transferReceiptSha256": sha, "restoreReceiptSha256": sha,
+            "databaseFingerprint": sha, "historyFingerprint": sha,
+        },
+        "target": {
+            "hostId": "c" * 64, "clusterId": "123", "databaseOid": "456",
+            "ledgerSha256": sha, "authSchemaSha256": f"sha256:{sha}",
+            "ownerBindingSha256": f"sha256:{sha}", "settingsSha256": sha, "secretSetSha256": sha,
+        },
+        "release": {
+            "image": f"ghcr.io/yohn-jp/codexia-backend@sha256:{sha}", "sourceSha": "a" * 40,
+            "frontendArtifactSha256": sha,
+        },
+        "window": {"id": "recovery", "notBefore": "2026-11-23T23:00:00.000Z", "notAfter": "2026-11-24T01:00:00.000Z"},
+        "writerFence": {"kind": "write-access-revoked", "recordSha256": sha},
+        "executorFenceSha256": sha,
+        "credentialsRecordSha256": sha,
+        "postBackupWritesRecordSha256": sha,
+    }
+
+
+class ProtectedRecoveryTests(unittest.TestCase):
+    def test_recovery_source_and_disposition_match_the_operation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            path = directory / "recovery-handoff.json"
+            record = recovery_record()
+            record["backup"].update({"sourceHostId": record["target"]["hostId"],
+                                     "sourceClusterId": "123", "sourceDatabaseOid": "456"})
+            path.write_text(json.dumps(record))
+            path.chmod(0o600)
+            with self.assertRaises(ValueError):
+                observer.read_recovery_handoff(directory)
+            record["backup"]["sourceClusterId"] = "222"
+            path.write_text(json.dumps(record))
+            self.assertEqual(observer.read_recovery_handoff(directory)[0], record)
+            del record["postBackupWritesRecordSha256"]
+            path.write_text(json.dumps(record))
+            with self.assertRaises(ValueError):
+                observer.read_recovery_handoff(directory)
+
+    def test_worker_requires_inactive_state_and_no_enabled_restart(self):
+        with patch.object(observer, "command") as command:
+            for state in (
+                "LoadState=loaded\nUnitFileState=disabled\nActiveState=inactive",
+                "LoadState=not-found\nActiveState=inactive",
+            ):
+                command.return_value = (0, state)
+                observer.require_recovery_worker_stopped()
+            for state in (
+                "LoadState=loaded\nUnitFileState=disabled\nActiveState=active",
+                "LoadState=loaded\nUnitFileState=enabled\nActiveState=inactive",
+                "LoadState=error",
+            ):
+                command.return_value = (0, state)
+                with self.assertRaises(ValueError):
+                    observer.require_recovery_worker_stopped()
+
+    def test_protected_record_rejects_unsafe_file_and_unknown_fields(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            path = directory / "recovery-handoff.json"
+            record = recovery_record()
+            self.assertIsNone(observer.read_recovery_handoff(directory))
+            raw = json.dumps(record).encode()
+            path.write_bytes(raw)
+            path.chmod(0o600)
+            self.assertEqual(observer.read_recovery_handoff(directory),
+                             (record, hashlib.sha256(raw).hexdigest()))
+            path.chmod(0o644)
+            with self.assertRaises(ValueError):
+                observer.read_recovery_handoff(directory)
+            path.chmod(0o600)
+            path.write_text(json.dumps({**record, "dsn": "must-not-leave-vm"}))
+            with self.assertRaises(ValueError):
+                observer.read_recovery_handoff(directory)
+            path.write_text('{"format": "unused", ' + raw.decode()[1:])
+            with self.assertRaises(ValueError):
+                observer.read_recovery_handoff(directory)
+            path.unlink()
+            (directory / "other").write_bytes(raw)
+            path.symlink_to(directory / "other")
+            with self.assertRaises(OSError):
+                observer.read_recovery_handoff(directory)
+
+
 class ObserveDatabaseTests(unittest.TestCase):
     def observe(self, *, volume=True, container=True, layout="ready", writer=None,
-                directory=Path("/unused"), resume_clean=False):
+                directory=Path("/unused"), resume_clean=False, inspect_restored=False):
         return observer.observe_database(
             {"codexia-postgres": volume}, {"codexia-db": container},
-            directory, directory, writer, "", layout, resume_clean=resume_clean)
+            directory, directory, writer, "", layout, resume_clean=resume_clean, inspect_restored=inspect_restored)
+
+    def test_restore_observation_reads_owner_without_fresh_installation_markers(self):
+        owner = "sha256:" + "a" * 64
+        settings = "b" * 64
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(observer, "command", return_value=(0, "true")), \
+                    patch.object(observer, "sql", return_value="auth catalog"), \
+                    patch.object(observer, "restored_owner_settings", return_value={
+                        "ownerBindingSha256": owner, "settingsSha256": settings}), \
+                    patch.object(observer, "json_sql", side_effect=[
+                        {"clusterId": "123", "databaseOid": "456", "appExists": True, "rolesValid": True},
+                        {"ledgerExists": True, "authExists": True, "appRelations": 5},
+                        [{"version": "0001-initial.sql", "checksum": "a" * 64}], {"empty": False},
+                    ]):
+                result = self.observe(directory=Path(folder), inspect_restored=True)
+            self.assertEqual(result["authState"], "ready")
+            self.assertEqual(result["ownerBindingSha256"], owner)
+            self.assertEqual(result["settingsSha256"], settings)
+            self.assertNotIn("bootstrapIntent", result)
 
     def test_positive_absence_and_empty_volume_need_no_sql_or_container_start(self):
         with patch.object(observer, "command") as command:

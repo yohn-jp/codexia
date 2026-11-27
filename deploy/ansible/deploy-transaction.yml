@@ -254,7 +254,20 @@
       - codexia_database_initialization_approved | default(false) | bool
       - (codexia_lifecycle_fixture | default(false) | bool) or (codexia_expected_first_activation | default(none)) is mapping
     fail_msg: A fresh production activation requires the approved R6 plan and a separately initialized and verified database plus explicit approval.
-  when: codexia_current_container_exists.rc == 1
+  when:
+    - codexia_current_container_exists.rc == 1
+    - codexia_expected_recovery_activation is not defined
+
+- name: Require a clean restored slot with separate R3 evidence
+  when: codexia_expected_recovery_activation is defined
+  ansible.builtin.assert:
+    that:
+      - codexia_expected_recovery_activation is mapping
+      - codexia_current_container_exists.rc == 1
+      - codexia_expected_first_activation is not defined
+      - not (codexia_initial_install_approved | default(false) | bool)
+      - not (codexia_database_initialization_approved | default(false) | bool)
+    fail_msg: Restored Backend recovery requires the R3 evidence, an isolated clean API slot and no new database initialization approval.
 
 - name: Inspect staged Better Auth runtime settings without following links
   ansible.builtin.stat:
@@ -373,6 +386,7 @@
       auth_settings_file={{ (home + '/.config/codexia-auth/runtime-' + codexia_auth_settings_sha256 + '.env') | quote }}
       auth_settings_digest={{ codexia_auth_settings_sha256 | quote }}
       first_activation={{ (codexia_expected_first_activation | default(none)) | to_json | quote }}
+      recovery_activation={{ (codexia_expected_recovery_activation | default(none)) | to_json | quote }}
       admitted_container={{ (codexia_current_api_observation.stdout if codexia_current_container_exists.rc == 0 else '') | quote }}
       admitted_unit_sha256={{ (codexia_admitted_api_unit_sha256 if codexia_current_container_exists.rc == 0 else '') | quote }}
       admitted_unit_image={{ (codexia_current_api_unit_images[0] if codexia_current_container_exists.rc == 0 else '') | quote }}
@@ -446,9 +460,9 @@
         bash -c {{ lookup('ansible.builtin.file', repo_root + '/deploy/ansible/require-clean-api-target.sh') | quote }} ||
           stale_admission 'first activation requires a clean API target'
       fi
-      # Only the isolated, run-bound lifecycle fixture can omit an R6 plan.
-      if [[ "$had_unit" == false && "$require_tunnel" == true && "$first_activation" == null ]]; then
-        stale_admission 'first activation requires an approved R6 plan'
+      # A clean production slot requires an explicitly admitted R6 or R3.
+      if [[ "$had_unit" == false && "$require_tunnel" == true && "$first_activation" == null && "$recovery_activation" == null ]]; then
+        stale_admission 'first activation requires an approved R6 plan or restored R3 plan'
       fi
       first_activation_window_current(){
         [[ "$first_activation" != null ]] || return 0
@@ -514,6 +528,33 @@
           stale_admission 'approved Podman credential identities are missing'
         "$HOME/.local/bin/codexia-preflight-observe" verify-secret-identities "$secret_set" ||
           stale_admission 'the prepared Podman credential identities changed'
+      fi
+      recovery_operation_id=''
+      recovery_evidence_sha256=''
+      check_recovery_record(){
+        CODEXIA_AUTH_SCHEMA_QUERY="$recovery_auth_schema_query" \
+          "$HOME/.local/bin/codexia-preflight-observe" verify-recovery-handoff \
+          "$recovery_evidence_sha256" "$recovery_operation_id" "$candidate_image" "$candidate_source_sha"
+      }
+      if [[ "$recovery_activation" != null ]]; then
+        [[ "$had_unit" == false && "$first_activation" == null ]] ||
+          stale_admission 'restored R3 publication requires a clean isolated slot'
+        recovery_operation_id="$(jq -er '.operationId | select(test("^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"))' <<< "$recovery_activation")" ||
+          stale_admission 'invalid recovery operation identity'
+        recovery_evidence_sha256="$(jq -er '.evidenceSha256 | select(test("^[a-f0-9]{64}$"))' <<< "$recovery_activation")" ||
+          stale_admission 'invalid recovery evidence digest'
+        recovery_auth_schema_query="$(jq -er '.authSchemaQuery | select(type == "string" and length > 0)' <<< "$recovery_activation")" ||
+          stale_admission 'missing certified Auth catalog observer'
+        approved_settings="$(jq -er '.settingsSha256 | select(test("^[a-f0-9]{64}$"))' <<< "$recovery_activation")" ||
+          stale_admission 'invalid recovery runtime settings digest'
+        [[ "$auth_settings_digest" == "$approved_settings" ]] ||
+          stale_admission 'the recovered runtime settings changed'
+        expected_fingerprints="$(check_recovery_record)" ||
+          stale_admission 'restored target identity, fence or approval has changed'
+        actual_fingerprints="$("$HOME/.local/bin/codexia-backup" fingerprint-restored-target --lock-file "$lock_file" --lock-fd 9)" ||
+          stale_admission 'the restored database and history fingerprint could not be verified'
+        [[ "$actual_fingerprints" == "$expected_fingerprints" ]] ||
+          stale_admission 'the restored database or history no longer matches the recovery point'
       fi
       release_present=false
       if [[ -e "$release_state" || -L "$release_state" ]]; then
@@ -617,6 +658,9 @@
       fi
       tunnel_was_active=false
       if systemctl --user is-active --quiet codexia-tunnel.service; then tunnel_was_active=true; fi
+      if [[ "$recovery_activation" != null && "$tunnel_was_active" == true ]]; then
+        stale_admission 'the restored target Tunnel started before publication'
+      fi
       if [[ "$release_present" == true ]]; then
         cp --preserve=mode,ownership "$release_state" "$state_dir/rollback-release.json"
       fi
@@ -625,9 +669,10 @@
       if [[ "$had_unit" == true ]]; then
         backup_pending_id="$(cat /proc/sys/kernel/random/uuid)"
       fi
-      if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" "$backup_pending_id" <<'NODE'
+      if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" "$backup_pending_id" "$recovery_operation_id" "$recovery_evidence_sha256" <<'NODE'
       const fs = require('node:fs');
-      const [target, hadUnit, tunnelWasActive, apiLinkCreated, tunnelLinkCreated, releasePresent, backupRunId] = process.argv.slice(2);
+      const [target, hadUnit, tunnelWasActive, apiLinkCreated, tunnelLinkCreated, releasePresent, backupRunId,
+        recoveryOperationId, recoveryEvidenceSha256] = process.argv.slice(2);
       const asBoolean = value => {
         if (value === 'true') return true;
         if (value === 'false') return false;
@@ -636,7 +681,8 @@
       fs.writeFileSync(target, JSON.stringify({format: 'codexia-deploy-transaction/v1', phase: 'pending',
         hadUnit: asBoolean(hadUnit), tunnelWasActive: asBoolean(tunnelWasActive),
         apiLinkCreated: asBoolean(apiLinkCreated), tunnelLinkCreated: asBoolean(tunnelLinkCreated),
-        releasePresent: asBoolean(releasePresent), ...(backupRunId && {backupRunId})}) + '\n',
+        releasePresent: asBoolean(releasePresent), ...(backupRunId && {backupRunId}),
+        ...(recoveryOperationId && {recoveryOperationId, recoveryEvidenceSha256})}) + '\n',
         {mode: 0o600, flag: 'wx', flush: true});
       NODE
       then
@@ -644,9 +690,12 @@
         exit 1
       fi
       sync -f "$state_dir"
+      recovery_tunnel_masked=false
       restore_previous(){
         local restore_status=0
-        if [[ "$tunnel_present" == true ]]; then systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || restore_status=1; fi
+        if [[ "$tunnel_present" == true && "$recovery_tunnel_masked" == false ]]; then
+          systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || restore_status=1
+        fi
         # Before first activation there may be no generated API service to stop.
         # Do not turn a failed pristine-schema check into an unrecoverable pending
         # transaction merely because systemctl cannot find that absent unit.
@@ -674,6 +723,9 @@
           if [[ "$api_link_created" == true ]]; then rm -f -- "$api_wants_link"; fi
           if [[ "$tunnel_link_created" == true ]]; then rm -f -- "$tunnel_wants_link"; fi
           systemctl --user daemon-reload || restore_status=1
+          if [[ "$recovery_activation" != null && "$restore_status" == 0 ]]; then
+            systemctl --user unmask codexia-tunnel.service || restore_status=1
+          fi
         fi
         if [[ "$restore_status" == 0 ]]; then
           if [[ "$release_present" == true ]]; then
@@ -693,6 +745,11 @@
         return "$restore_status"
       }
       require_activation_window_or_restore(){
+        if [[ "$recovery_activation" != null ]]; then
+          if check_recovery_record >/dev/null; then return 0; fi
+          restore_previous || echo 'Restored Backend rollback failed after recovery evidence changed' >&2
+          stale_admission 'restored target or approval changed before publication'
+        fi
         if first_activation_window_current; then return 0; fi
         restore_previous || echo 'First activation rollback failed after window expiry' >&2
         echo 'First activation approval window expired before publication; deployment stopped' >&2
@@ -711,9 +768,18 @@
           exit 1
         fi
       fi
+      # Both Quadlets have generated boot activation links. Keep the Tunnel
+      # masked across restarts until the protected R3 publication check passes.
+      if [[ "$recovery_activation" != null ]]; then
+        if ! systemctl --user mask --now codexia-tunnel.service; then
+          echo 'Could not hold the application Tunnel inactive for recovery; deployment remains pending' >&2
+          exit 1
+        fi
+        recovery_tunnel_masked=true
+      fi
       # Record which links recovery owns before creating either one.
       install_wants_links
-      if { [[ "$tunnel_present" == true ]] && ! systemctl --user stop codexia-tunnel.service >/dev/null 2>&1; } ||
+      if { [[ "$tunnel_present" == true && "$recovery_tunnel_masked" == false ]] && ! systemctl --user stop codexia-tunnel.service >/dev/null 2>&1; } ||
          { [[ "$had_unit" == true ]] && ! systemctl --user stop codexia-api.service >/dev/null 2>&1; }; then
         echo 'Could not stop the active API and Tunnel; deployment transaction remains pending for recovery' >&2
         exit 1
@@ -778,18 +844,25 @@
       fi
       if [[ "$tunnel_present" == true ]]; then
         require_activation_window_or_restore
+        if [[ "$recovery_tunnel_masked" == true ]] && ! systemctl --user unmask codexia-tunnel.service; then
+          restore_previous || echo 'Restored Backend rollback failed after Tunnel unmask failure' >&2
+          exit 1
+        fi
+        recovery_tunnel_masked=false
         if ! systemctl --user start codexia-tunnel.service; then
           restore_previous || echo 'Previous API recovery failed after Tunnel start failure' >&2
           echo 'Application Tunnel did not start; deployment transaction remains pending if rollback is unverified' >&2
           exit 1
         fi
       fi
-      if ! node - "$candidate_image" "$current_image" "$candidate_identity" "$auth_settings_digest" "$backup_run_id" > "$release_state.tmp" <<'NODE'
-      const [image, previousImage, identity, authSettingsSha256, backupRunId] = process.argv.slice(2);
+      if ! node - "$candidate_image" "$current_image" "$candidate_identity" "$auth_settings_digest" "$backup_run_id" "$recovery_operation_id" "$recovery_evidence_sha256" > "$release_state.tmp" <<'NODE'
+      const [image, previousImage, identity, authSettingsSha256, backupRunId,
+        recoveryOperationId, recoveryEvidenceSha256] = process.argv.slice(2);
       if (!/^[a-f0-9]{64}$/.test(authSettingsSha256)) process.exit(2);
       process.stdout.write(JSON.stringify({format: 'codexia-push-deployment/v1', image, previousImage,
         identity: JSON.parse(identity), authMode: "better-auth", authSettingsSha256,
-        ...(backupRunId && {backupRunId})}) + '\n');
+        ...(backupRunId && {backupRunId}),
+        ...(recoveryOperationId && {recoveryOperationId, recoveryEvidenceSha256})}) + '\n');
       NODE
       then
         restore_previous || echo 'Previous API recovery failed after release record failure' >&2

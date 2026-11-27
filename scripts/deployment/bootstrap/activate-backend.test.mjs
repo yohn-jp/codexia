@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { digestEvidence } from '../preflight/evidence-digest.mjs';
 import { createDeploymentPlan } from '../preflight/plan.mjs';
-import { admitBackendActivation, assertManualActivationSource } from './activate-backend.mjs';
+import { admitBackendActivation, admitBackendRecovery, assertManualActivationSource } from './activate-backend.mjs';
 
 const hash = 'a'.repeat(64);
 const now = new Date('2026-11-24T06:00:00.000Z');
@@ -79,4 +79,28 @@ test('R6 rejects missing approvals, stale binding and mismatched source', () => 
   } }), /Approval/);
   assert.throws(() => admitBackendActivation({ ...input, current: fixture({}, { frontendSha256: 'b'.repeat(64) }).current }), /changed after approval/);
   assert.throws(() => admitBackendActivation({ ...input, now: new Date(Date.parse(window.notAfter) + 1) }), /window/);
+});
+
+test('R3 binds manual publication to the same observed restore operation and evidence', () => {
+  const input = fixture();
+  const operationId = 'recovery-one', evidenceSha256 = 'b'.repeat(64);
+  const { plan, planSha256 } = createDeploymentPlan({
+    ...input.current, intent: 'restore', now,
+    observation: { ...input.current.observation, recoveryOperationId: operationId,
+      binding: { ...input.current.observation.binding, backupSha256: evidenceSha256 } },
+  });
+  const host = { ...input.host, recovery: { operationId, evidenceSha256 } };
+  const deployment = { plan, planSha256, approval: {
+    planSha256, grants: ['maintenance', 'recovery', 'publication'],
+  } };
+  const args = { ...input, current: plan, host, deployment };
+  const admission = admitBackendRecovery(args);
+  assert.equal(admission.operationId, operationId);
+  assert.equal(admission.evidenceSha256, evidenceSha256);
+  assert.equal(admission.databaseOid, '456');
+  assert.throws(() => admitBackendRecovery({ ...args, host: {
+    ...host, recovery: { ...host.recovery, evidenceSha256: hash },
+  } }), /protected recovery evidence/u);
+  assert.throws(() => admitBackendRecovery(input), /approved R3/u);
+  assert.throws(() => admitBackendActivation(args), /first activation/u);
 });

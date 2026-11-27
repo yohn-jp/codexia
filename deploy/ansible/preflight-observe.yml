@@ -139,6 +139,7 @@
           'quadlets': codexia_preflight_quadlets,
           'baseEvidence': {'database': lifecycle_database_verified, 'tunnel': lifecycle_tunnel_verified}} | to_json,
         'CODEXIA_WRITER_OBSERVATION': lifecycle_writer | to_json,
+        'CODEXIA_OBSERVE_RECOVERY': (codexia_preflight_recovery | default(false) | bool) | ternary('true', 'false'),
         'CODEXIA_AUTH_SCHEMA_QUERY': codexia_preflight_auth_schema_query
         }) }}"
       register: lifecycle_host

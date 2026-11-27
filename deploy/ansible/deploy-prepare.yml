@@ -1,6 +1,6 @@
 ---
 - name: Recover interrupted deployment before preparing target state
-  when: codexia_expected_first_activation is not defined
+  when: codexia_expected_first_activation is not defined and codexia_expected_recovery_activation is not defined
   ansible.builtin.command:
     argv: [bash, -s]
     stdin: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/ansible/push-deployment-recover.sh') }}"
@@ -11,6 +11,7 @@
   changed_when: "'RECOVERED_PREVIOUS_RELEASE' in codexia_deploy_recovery.stdout or 'CLEANED_COMMITTED_TRANSACTION' in codexia_deploy_recovery.stdout"
 
 - name: Resume an interrupted backup before observing the installed API
+  when: codexia_expected_recovery_activation is not defined
   ansible.builtin.command:
     argv: [bash, -s, --, recover]
     stdin: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/backup/backup-runner.sh') }}"
@@ -30,8 +31,8 @@
     - {path: "{{ home }}/.local/state/codexia-deploy", mode: '0700'}
     - {path: "{{ home }}/.local/bin", mode: '0700'}
 
-- name: Stage the read-only observer for the locked first activation check
-  when: codexia_expected_first_activation is defined
+- name: Stage the read-only observer for locked activation checks
+  when: codexia_expected_first_activation is defined or codexia_expected_recovery_activation is defined
   ansible.builtin.copy:
     src: "{{ repo_root }}/deploy/ansible/preflight-observe.py"
     dest: "{{ home }}/.local/bin/codexia-preflight-observe"

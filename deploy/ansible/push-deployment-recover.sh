@@ -53,6 +53,10 @@ if (value.format !== 'codexia-deploy-transaction/v1' || !['pending', 'committed'
     typeof value.releasePresent !== 'boolean' ||
     (value.backupRunId !== undefined && (typeof value.backupRunId !== 'string' ||
       !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value.backupRunId)))) process.exit(2);
+if ((value.recoveryOperationId !== undefined || value.recoveryEvidenceSha256 !== undefined) &&
+    (value.hadUnit || value.tunnelWasActive || value.releasePresent || typeof value.recoveryOperationId !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value.recoveryOperationId) ||
+      typeof value.recoveryEvidenceSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.recoveryEvidenceSha256))) process.exit(2);
 function reviewedReleaseImage(unitPath, releasePath) {
   const unitInfo = fs.lstatSync(unitPath, { throwIfNoEntry: false });
   if (!unitInfo?.isFile()) process.exit(2);
@@ -78,6 +82,8 @@ function reviewedReleaseImage(unitPath, releasePath) {
   if (value.phase === 'committed' &&
       (release.format !== 'codexia-push-deployment/v1' ||
         value.candidateImage !== image || value.authSettingsSha256 !== digest ||
+        value.recoveryOperationId !== release.recoveryOperationId ||
+        value.recoveryEvidenceSha256 !== release.recoveryEvidenceSha256 ||
         [unitInfo, releaseInfo].some(info => info.uid !== process.getuid() || (info.mode & 0o777) !== 0o600))) process.exit(2);
   return image;
 }
@@ -90,7 +96,7 @@ if (value.phase === 'committed') {
 }
 process.stdout.write([value.format, value.phase, value.hadUnit, value.tunnelWasActive,
   value.apiLinkCreated, value.tunnelLinkCreated, value.releasePresent,
-  releaseImage || '-', value.backupRunId ?? '-'].join('\n'));
+  releaseImage || '-', value.backupRunId ?? '-', value.recoveryOperationId !== undefined].join('\n'));
 NODE
 )"
 then
@@ -98,7 +104,7 @@ then
   exit 1
 fi
 mapfile -t recovery_fields <<< "$recovery"
-[[ "${recovery_fields[0]:-}" == codexia-deploy-transaction/v1 && ${#recovery_fields[@]} == 9 ]] || {
+[[ "${recovery_fields[0]:-}" == codexia-deploy-transaction/v1 && ${#recovery_fields[@]} == 10 ]] || {
   echo 'Invalid deployment transaction intent' >&2
   exit 1
 }
@@ -125,6 +131,7 @@ api_link_created="${recovery_fields[4]}"
 tunnel_link_created="${recovery_fields[5]}"
 release_present="${recovery_fields[6]}"
 previous_image="${recovery_fields[7]}"
+restored_publication="${recovery_fields[9]}"
 [[ "$previous_image" == '-' ]] && previous_image=''
 stop_loaded_unit(){
   local unit="$1" load_state active_status
@@ -151,6 +158,10 @@ stop_loaded_unit(){
       ;;
     not-found)
       return 2
+      ;;
+    masked)
+      [[ "$restored_publication" == true && "$unit" == codexia-tunnel.service ]] || return 1
+      [[ "$(systemctl --user show --property=ActiveState --value "$unit")" == inactive ]]
       ;;
     *)
       echo "Unexpected systemd load state for $unit: $load_state" >&2
@@ -235,6 +246,7 @@ else
     rm -f -- "$tunnel_wants_link"
   fi
   systemctl --user daemon-reload
+  if [[ "$restored_publication" == true ]]; then systemctl --user unmask codexia-tunnel.service; fi
 fi
 
 if [[ "$release_present" == true ]]; then

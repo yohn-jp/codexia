@@ -47,6 +47,39 @@ function absentBackend(f) {
   f.edge.backend = null;
   f.priorBackend = null;
 }
+
+test('a verified R2 restoration can only continue through an explicitly approved R3 plan', () => {
+  const f = fixture();
+  absentBackend(f);
+  f.intent = 'restore';
+  Object.assign(f.host.database, { databaseOid: '456', settingsSha256: h('e') });
+  const ready = {
+    operationId: 'restore-20261124-01', evidenceSha256: h('2'),
+    release: { image: f.candidateBackend.image, sourceSha: f.candidateBackend.identity.sourceSha,
+      frontendArtifactSha256: f.candidateFrontend.artifactDigest },
+    window: f.window,
+  };
+  f.host.recovery = ready;
+  const { plan } = planFromObservations(f);
+  assert.equal(plan.candidateRoute, 'R3');
+  assert.deepEqual(plan.requiredApprovals, ['maintenance', 'recovery', 'publication']);
+  assert.deepEqual(plan.blockers, ['approval-required']);
+  assert.equal(plan.observation.binding.backupSha256, ready.evidenceSha256);
+  assert.equal(plan.observation.recoveryOperationId, ready.operationId);
+
+  for (const recovery of [
+    undefined,
+    { ...ready, release: { ...ready.release, image: image('7') } },
+    { ...ready, release: { ...ready.release, frontendArtifactSha256: h('3') } },
+    { ...ready, window: { ...f.window, id: 'different-approval' } },
+  ]) {
+    f.host.recovery = recovery;
+    assert.equal(planFromObservations(f).plan.candidateRoute, 'R0');
+  }
+  f.host.recovery = ready;
+  f.intent = 'install';
+  assert.ok(planFromObservations(f).plan.blockers.includes('unverified-fresh-installation'));
+});
 test('observed pair: exact no-op, backend-only and frontend-only updates', () => {
   const f = fixture();
   const exact = planFromObservations(f);
