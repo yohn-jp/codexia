@@ -30,7 +30,6 @@ const wifSubject = "repo:yohn-jp@299811358/codexia@1450072993:environment:codexi
 const wifIssuer = "https://token.actions.githubusercontent.com"
 const wifTrustConsole = "https://login.tailscale.com/admin/settings/trust-credentials"
 
-
 var tailnetNodeID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 var tailnetBrowserPath = regexp.MustCompile(`^/a/[A-Za-z0-9_-]+$`)
 var tailnetDNSName = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9.-]{0,251}[a-zA-Z0-9])?$`)
@@ -325,10 +324,10 @@ func inspectTailnetWithApproval(ctx context.Context, client *ts.Client, local lo
 		}
 		created, createErr := client.Keys().CreateFederatedIdentity(ctx, ts.CreateFederatedIdentityRequest{
 			Description: "Codexia protected GitHub Actions",
-			Issuer: wifIssuer, Subject: wifSubject,
+			Issuer:      wifIssuer, Subject: wifSubject,
 			Scopes: []string{"auth_keys"}, Tags: []string{"tag:ci"},
 			CustomClaimRules: map[string]string{
-				"ref": "refs/heads/main",
+				"ref":          "refs/heads/main",
 				"workflow_ref": "yohn-jp/codexia/.github/workflows/*@refs/heads/main",
 			},
 		})
