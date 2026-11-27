@@ -247,8 +247,10 @@ if(apiHealth!=='healthy'||apiUnit!=='active'||Number(apiCount)!==1)throw new Err
 if(!expectedImageId||apiImage!==expectedImageId)throw new Error(`${key}: API writer image ID differs from the run-bound ${role} candidate`);
 if(sentinel!==(['first-activation','same-digest-reapply'].includes(key)?'not-created':'preserved'))throw new Error(`${key}: PostgreSQL sentinel data was absent or changed`);
 report.observations ||= {}; const observations=report.observations.continuity ||= []; const previous=observations.at(-1);
+const explicitSocketRestart=key==='private-backup-socket-restart';
+if(explicitSocketRestart&&(!previous||apiImage!==previous.apiImage||quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Private socket provisioning changed the deployed API image, Quadlet or release record');
 if(previous){
-  if(dbContainer!==previous.dbContainer)throw new Error(`${key}: PostgreSQL container identity changed`);
+  if(!explicitSocketRestart&&dbContainer!==previous.dbContainer)throw new Error(`${key}: PostgreSQL container identity changed`);
   if(JSON.stringify({postgres:{name:pgVolume,mountpoint:pgMount,createdAt:pgCreated},data:{name:dataVolume,mountpoint:dataMount,createdAt:dataCreated},history:{name:historyVolume,mountpoint:historyMount,createdAt:historyCreated}})!==JSON.stringify(previous.volumes))throw new Error(`${key}: persistent volume identity changed`);
 }
 if(['same-digest-reapply','better-auth-same-digest'].includes(key)&&(apiContainer!==previous.apiContainer||quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Same-digest application recreated the API container or changed the Quadlet or release record');
@@ -710,8 +712,6 @@ rootless test ! -e "$fixture_home/.config/codexia-backup/executor.env"
 test "$(rootless_systemctl show codexia-backup-executor.service --property=ActiveState --value)" = inactive
 test "$(rootless_systemctl show codexia-backup-executor.service --property=UnitFileState --value)" = disabled
 set_state first_activation PASS 'fresh schema and API readiness verified without backup inputs, artifacts or prior writer'
-verify_private_backup_socket
-
 run_deploy "$initial_key" false
 observe_runtime same-digest-reapply "$initial_key"
 set_state same_digest_reapply PASS 'same immutable digest remained healthy with stable Quadlet and release record'
@@ -723,6 +723,10 @@ if run_deploy "$update_key" false '' deploy-executor-missing; then
 fi
 grep -Fq 'Deployment transaction failed during off-VM backup admission' "$tmp/deploy-executor-missing.log"
 observe_runtime missing-executor "$initial_key"
+# The private socket fixture deliberately restarts PostgreSQL and the API.
+# Observe its new container identities separately before any later deployment.
+verify_private_backup_socket
+observe_runtime private-backup-socket-restart "$initial_key"
 prepare_backup_console_fixture
 if run_deploy "$update_key" false '' deploy-console-unconfigured console-unconfigured; then
   echo 'An update reached candidate activation before Console backup configuration' >&2
