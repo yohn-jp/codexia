@@ -147,6 +147,29 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 	if err := requireApproval(o, "Register only the missing inputs shown above, including any new SSH keys?"); err != nil {
 		return err
 	}
+	if err := c.requireSettingsWindow(ctx, control); err != nil {
+		return err
+	}
+	snapshot, err = control.Observe(ctx)
+	if err != nil {
+		return err
+	}
+	if snapshot.MainSHA != c.sha {
+		return refused("GitHub main advanced before protected Settings registration")
+	}
+	desired, err = observedProtectedVariables(snapshot, vm, tailnet, pin, edge.Target)
+	if err != nil {
+		return err
+	}
+	freshVariables, err := missingVariables(snapshot, desired)
+	if err != nil {
+		return err
+	}
+	freshSecrets := missingSecrets(snapshot)
+	if !settingsApprovalMatches(variables, freshVariables) || !settingsApprovalMatches(secrets, freshSecrets) {
+		return refused("The protected input inventory changed before the exclusive writer window. Review the new plan before writing")
+	}
+	variables, secrets = freshVariables, freshSecrets
 	for _, input := range variables {
 		if err := c.currentMain(ctx); err != nil {
 			return err
@@ -155,39 +178,8 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 			return err
 		}
 	}
-	if !snapshot.Bootstrap.Secrets[bootstrapSSHSecret] {
-		if c.state.BootstrapPublicKey != "" {
-			return needsAction("A prior bootstrap key upload is unresolved. Verify the protected Secret before generating another identity")
-		}
-		if err := c.currentMain(ctx); err != nil {
-			return err
-		}
-		private, public, err := newSSHIdentity()
-		if err != nil {
-			return err
-		}
-		c.state.BootstrapPublicKey = public
-		if err := c.store.Save(c.state); err != nil {
-			clear(private)
-			return err
-		}
-		err = control.PutSecret(ctx, bootstrapEnvironment, bootstrapSSHSecret, private)
-		clear(private)
-		if err != nil {
-			return err
-		}
-	}
-	if c.state.BootstrapPublicKey != "" {
-		if err := c.currentMain(ctx); err != nil {
-			return err
-		}
-		if err := vm.InstallBootstrapKey(ctx, c.state.BootstrapPublicKey); err != nil {
-			return err
-		}
-		c.state.BootstrapPublicKey = ""
-		if err := c.store.Save(c.state); err != nil {
-			return err
-		}
+	if err := c.registerBootstrapKey(ctx, control, vm, snapshot.Bootstrap.Secrets[bootstrapSSHSecret]); err != nil {
+		return err
 	}
 	credentials := make(map[string][]byte)
 	defer func() {
@@ -249,6 +241,15 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 	return nil
 }
 
+func settingsApprovalMatches(approved, current []environmentInput) bool {
+	for _, input := range current {
+		if !slices.Contains(approved, input) {
+			return false
+		}
+	}
+	return true
+}
+
 func putMissingSecret(ctx context.Context, c *workflowController, control *githubControl, input environmentInput, value []byte) error {
 	if len(value) == 0 {
 		return needsAction("Required protected input is unavailable: " + input.name)
@@ -294,6 +295,9 @@ func (c *workflowController) restoreGates(ctx context.Context, control *githubCo
 	}
 	if c.state.Pending {
 		return needsAction("Temporary bootstrap gates remain tied to an unresolved run. Resume init to reconcile them")
+	}
+	if err := c.requireSettingsWindow(ctx, control); err != nil {
+		return err
 	}
 	current, err := control.Observe(ctx)
 	if err != nil {

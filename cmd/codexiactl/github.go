@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/go-github/v93/github"
@@ -38,6 +39,8 @@ type githubControl struct {
 	actor             string
 	appSession        bool
 	appAdministration bool
+	settingsMu        sync.Mutex
+	settingsWriter    *githubSecretWriteWindow
 }
 
 type githubEnvironment struct {
@@ -274,6 +277,12 @@ func (g *githubControl) PutVariable(ctx context.Context, environment, name, valu
 	if err := g.requireWriteTarget(ctx, environment); err != nil {
 		return err
 	}
+	g.settingsMu.Lock()
+	defer g.settingsMu.Unlock()
+	window := g.settingsWriter
+	if window == nil {
+		return errGitHubSettingsWriterUnavailable
+	}
 	current, resp, err := g.client.Actions.GetEnvVariable(ctx, githubOwner, githubRepo, environment, name)
 	if expected == nil {
 		if githubStatus(resp) != http.StatusNotFound {
@@ -282,7 +291,6 @@ func (g *githubControl) PutVariable(ctx context.Context, environment, name, valu
 			}
 			return githubFailure("check Environment variable absence for "+name, resp, err)
 		}
-		resp, err = g.client.Actions.CreateEnvVariable(ctx, githubOwner, githubRepo, environment, github.ActionsCreateVariableRequest{Name: name, Value: value})
 	} else {
 		if err != nil {
 			return githubFailure("check the existing Environment variable "+name, resp, err)
@@ -293,6 +301,13 @@ func (g *githubControl) PutVariable(ctx context.Context, environment, name, valu
 		if current.Value == value {
 			return nil
 		}
+	}
+	if err := window.verify(ctx); err != nil {
+		return err
+	}
+	if expected == nil {
+		resp, err = g.client.Actions.CreateEnvVariable(ctx, githubOwner, githubRepo, environment, github.ActionsCreateVariableRequest{Name: name, Value: value})
+	} else {
 		resp, err = g.client.Actions.UpdateEnvVariable(ctx, githubOwner, githubRepo, environment, name, github.ActionsUpdateVariableRequest{Value: &value})
 	}
 	if err != nil {
@@ -315,6 +330,12 @@ func (g *githubControl) DeleteVariable(ctx context.Context, environment, name, e
 	if err := g.requireWriteTarget(ctx, environment); err != nil {
 		return err
 	}
+	g.settingsMu.Lock()
+	defer g.settingsMu.Unlock()
+	window := g.settingsWriter
+	if window == nil {
+		return errGitHubSettingsWriterUnavailable
+	}
 	current, resp, err := g.client.Actions.GetEnvVariable(ctx, githubOwner, githubRepo, environment, name)
 	if githubStatus(resp) == http.StatusNotFound {
 		return nil
@@ -324,6 +345,9 @@ func (g *githubControl) DeleteVariable(ctx context.Context, environment, name, e
 	}
 	if current.Name != name || current.Value != expected {
 		return fmt.Errorf("GitHub Environment variable %s changed since the approved observation", name)
+	}
+	if err := window.verify(ctx); err != nil {
+		return err
 	}
 	resp, err = g.client.Actions.DeleteEnvVariable(ctx, githubOwner, githubRepo, environment, name)
 	if err != nil {
@@ -340,6 +364,12 @@ func (g *githubControl) PutSecret(ctx context.Context, environment, name string,
 	if !githubInputAllowed(environment, name, githubCommonSecrets, githubBootstrapSecrets, githubProductionSecrets) || len(value) == 0 {
 		return errors.New("GitHub Environment secret is outside the initial-install contract or empty")
 	}
+	g.settingsMu.Lock()
+	defer g.settingsMu.Unlock()
+	window := g.settingsWriter
+	if window == nil {
+		return errGitHubSettingsWriterUnavailable
+	}
 	if err := g.requireWriteTarget(ctx, environment); err != nil {
 		return err
 	}
@@ -355,8 +385,8 @@ func (g *githubControl) PutSecret(ctx context.Context, environment, name string,
 	if err != nil {
 		return errors.New("seal the GitHub Environment secret")
 	}
-	// GitHub provides an upsert rather than a conditional secret write.
-	// Only the VM's serialized installer may prepare missing inputs. Recheck right before the PUT.
+	// The approved exclusive Settings window covers cooperating GitHub writers.
+	// GitHub's unconditional PUT does not protect against administrators outside that scope.
 	_, resp, err = g.client.Actions.GetEnvSecret(ctx, githubOwner, githubRepo, environment, name)
 	if githubStatus(resp) != http.StatusNotFound {
 		if err == nil {
@@ -364,23 +394,44 @@ func (g *githubControl) PutSecret(ctx context.Context, environment, name string,
 		}
 		return githubFailure("check Environment secret absence for "+name, resp, err)
 	}
+	if err := window.verify(ctx); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	resp, err = g.client.Actions.CreateOrUpdateEnvSecret(ctx, githubOwner, githubRepo, environment, name, github.SecretRequest{
 		KeyID: key.GetKeyID(), EncryptedValue: base64.StdEncoding.EncodeToString(ciphertext),
 	})
 	if err != nil {
-		return githubFailure("register Environment secret "+name+" (reobserve its metadata before retrying)", resp, err)
+		failure := githubFailure("register Environment secret "+name, resp, err)
+		if githubDefiniteSecretRejection(resp) {
+			return failure
+		}
+		return errors.Join(errGitHubSecretWriteUnknown, failure)
 	}
 	if githubStatus(resp) != http.StatusCreated {
-		return fmt.Errorf("GitHub reported a concurrent change for Environment secret %s; reconcile its identity", name)
+		return fmt.Errorf("%w: GitHub did not confirm creation of %s as a new Environment secret", errGitHubSecretWriteUnknown, name)
 	}
 	secret, resp, err := g.client.Actions.GetEnvSecret(ctx, githubOwner, githubRepo, environment, name)
 	if err != nil {
-		return githubFailure("verify Environment secret metadata for "+name, resp, err)
+		return errors.Join(errGitHubSecretWriteUnknown, githubFailure("verify Environment secret metadata for "+name, resp, err))
 	}
 	if secret.GetName() != name || secret.UpdatedAt.IsZero() {
-		return fmt.Errorf("GitHub could not verify Environment secret metadata for %s", name)
+		return fmt.Errorf("%w: GitHub could not verify Environment secret metadata for %s", errGitHubSecretWriteUnknown, name)
 	}
 	return nil
+}
+
+func githubDefiniteSecretRejection(resp *github.Response) bool {
+	switch githubStatus(resp) {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound,
+		http.StatusMethodNotAllowed, http.StatusConflict, http.StatusRequestEntityTooLarge,
+		http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity, http.StatusTooManyRequests:
+		return true
+	default:
+		return false
+	}
 }
 
 func (g *githubControl) requireWriteTarget(ctx context.Context, environment string) error {

@@ -25,6 +25,7 @@ var (
 	errCheckpointUnsafe = errors.New("local checkpoint could not be verified; reobserve the target before continuing")
 	checkpointHost      = regexp.MustCompile(`^[a-f0-9]{64}$`)
 	checkpointSource    = regexp.MustCompile(`^[a-f0-9]{40}$`)
+	settingsWriterID    = regexp.MustCompile(`^[a-f0-9]{32}$`)
 	checkpointOperation = regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`)
 )
 
@@ -39,6 +40,8 @@ type checkpoint struct {
 	Pending            bool               `json:"pending,omitzero"`
 	GateOriginal       map[string]*string `json:"gateOriginal,omitempty"`
 	BootstrapPublicKey string             `json:"bootstrapPublicKey,omitempty"`
+	BootstrapKeyWrite  string             `json:"bootstrapKeyWrite,omitempty"`
+	SettingsWriterID   string             `json:"settingsWriterId,omitempty"`
 	FrontendRunID      int64              `json:"frontendRunId,omitzero"`
 	FrontendTarget     string             `json:"frontendTarget,omitempty"`
 	OwnerSetupRunID    int64              `json:"ownerSetupRunId,omitzero"`
@@ -216,6 +219,14 @@ func (c checkpoint) validFor(hostID string) bool {
 		return false
 	}
 	if c.EphemeralRecipient != "" && !validAgeRecipient(c.EphemeralRecipient) {
+		return false
+	}
+	if c.SettingsWriterID != "" && !settingsWriterID.MatchString(c.SettingsWriterID) {
+		return false
+	}
+	switch c.BootstrapKeyWrite {
+	case "", "prepared", "unresolved", "registered":
+	default:
 		return false
 	}
 	if c.BootstrapPublicKey != "" {

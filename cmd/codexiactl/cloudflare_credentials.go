@@ -17,6 +17,7 @@ import (
 	"github.com/cloudflare/cloudflare-go/v7/option"
 	"github.com/cloudflare/cloudflare-go/v7/packages/pagination"
 	"github.com/cloudflare/cloudflare-go/v7/shared"
+	"github.com/cloudflare/cloudflare-go/v7/user"
 	"github.com/cloudflare/cloudflare-go/v7/workers"
 	"github.com/cloudflare/cloudflare-go/v7/zero_trust"
 )
@@ -24,7 +25,7 @@ import (
 const (
 	cloudflareAccountScope = "com.cloudflare.api.account"
 	cloudflareZoneScope    = "com.cloudflare.api.account.zone"
-	cloudflareReadRole     = "CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN"
+	cloudflareReadRole     = "CODEXIA_DEPLOYMENT_" + "CLOUDFLARE_READ_TOKEN"
 	cloudflareWorkerRole   = "CLOUDFLARE_API_TOKEN"
 )
 
@@ -131,6 +132,11 @@ type cloudflarePermissionPlan struct {
 	permissions       map[string][]string
 }
 
+type cloudflarePermissionGroup struct {
+	id, name                            string
+	accountScope, zoneScope, selectable bool
+}
+
 func (o *cloudflareObservation) permissionPlan(role string) cloudflarePermissionPlan {
 	if role == cloudflareReadRole {
 		return cloudflarePermissionPlan{
@@ -163,7 +169,7 @@ func (o *cloudflareObservation) apiCredential(ctx context.Context, role string, 
 		if existing {
 			o.operator.Notice("This credential is already registered in another protected Environment. Retrieve it from its authorized custody.")
 		} else {
-			o.operator.Notice("Cloudflare could not authorize automatic scoped token issuance. Use an existing valid token or create one at " + cloudflareTokensPage + ". Choose a finite expiry.")
+			o.operator.Notice("Cloudflare could not authorize automatic scoped token issuance. Use a scoped token whose policies the management credential can inspect. The official token dashboard is " + cloudflareTokensPage + ". Choose a finite expiry.")
 		}
 		o.operator.Notice(fmt.Sprintf("Cloudflare credential scope for %s: %s. Account %s, zone %s.", role, plan.description, o.target.AccountID, o.target.ZoneID))
 		if err := requireApproval(o.operator, "Provide the separately scoped Cloudflare credential for this role?"); err != nil {
@@ -215,17 +221,14 @@ func (o *cloudflareObservation) mintCloudflareToken(ctx context.Context, plan cl
 	if currentMetadata.ID != current.ID || !hasCloudflareTokenWrite(currentMetadata, o.target.AccountID) {
 		return nil, errCloudflareMintUnavailable
 	}
-	groups, err := api.PermissionGroups.List(ctx, accounts.TokenPermissionGroupListParams{AccountID: account})
+	groups, err := o.api.permissionGroups(ctx, o.target.AccountID, true)
 	if err != nil {
 		if cloudflareAuthorizationDenied(err) {
 			return nil, errCloudflareMintUnavailable
 		}
 		return nil, cloudflareError("account token permission groups", err)
 	}
-	if groups.JSON.Result.IsNull() || groups.JSON.Result.IsInvalid() {
-		return nil, errors.New("Cloudflare account token permission inventory was not verified")
-	}
-	policies, expected, err := o.exactTokenPolicies(groups.Result, plan)
+	policies, expected, err := o.exactTokenPolicies(groups, plan, true)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +286,39 @@ func hasCloudflareTokenWrite(token *shared.Token, account string) bool {
 	return false
 }
 
-func (o *cloudflareObservation) exactTokenPolicies(groups []accounts.TokenPermissionGroupListResponse, plan cloudflarePermissionPlan) (
+func (api cloudflareAPI) permissionGroups(ctx context.Context, accountID string, accountOwned bool) ([]cloudflarePermissionGroup, error) {
+	var groups []cloudflarePermissionGroup
+	if accountOwned {
+		catalog, err := api.accountTokens.PermissionGroups.List(ctx, accounts.TokenPermissionGroupListParams{AccountID: cloudflare.F(accountID)})
+		if err != nil {
+			return nil, err
+		}
+		if catalog.JSON.Result.IsNull() || catalog.JSON.Result.IsInvalid() {
+			return nil, errors.New("Cloudflare account token permission catalog is invalid")
+		}
+		for _, group := range catalog.Result {
+			groups = append(groups, cloudflarePermissionGroup{id: group.ID, name: group.Name, selectable: group.IsSelectable,
+				accountScope: slices.Contains(group.Scopes, accounts.TokenPermissionGroupListResponseScopeComCloudflareAPIAccount),
+				zoneScope:    slices.Contains(group.Scopes, accounts.TokenPermissionGroupListResponseScopeComCloudflareAPIAccountZone)})
+		}
+		return groups, nil
+	}
+	catalog, err := api.userTokens.PermissionGroups.List(ctx, user.TokenPermissionGroupListParams{})
+	if err != nil {
+		return nil, err
+	}
+	if catalog.JSON.Result.IsNull() || catalog.JSON.Result.IsInvalid() {
+		return nil, errors.New("Cloudflare user token permission catalog is invalid")
+	}
+	for _, group := range catalog.Result {
+		groups = append(groups, cloudflarePermissionGroup{id: group.ID, name: group.Name, selectable: group.IsSelectable,
+			accountScope: slices.Contains(group.Scopes, user.TokenPermissionGroupListResponseScopeComCloudflareAPIAccount),
+			zoneScope:    slices.Contains(group.Scopes, user.TokenPermissionGroupListResponseScopeComCloudflareAPIAccountZone)})
+	}
+	return groups, nil
+}
+
+func (o *cloudflareObservation) exactTokenPolicies(groups []cloudflarePermissionGroup, plan cloudflarePermissionPlan, requireSelectable bool) (
 	[]shared.TokenPolicyParam, map[string][]string, error,
 ) {
 	var policies []shared.TokenPolicyParam
@@ -298,9 +333,9 @@ func (o *cloudflareObservation) exactTokenPolicies(groups []accounts.TokenPermis
 		for _, name := range plan.permissions[scope] {
 			var matches []string
 			for _, group := range groups {
-				if group.Name == name && group.IsSelectable && cloudflareID.MatchString(group.ID) &&
-					slices.Contains(group.Scopes, accounts.TokenPermissionGroupListResponseScope(scope)) {
-					matches = append(matches, group.ID)
+				scopeMatches := (scope == cloudflareAccountScope && group.accountScope) || (scope == cloudflareZoneScope && group.zoneScope)
+				if group.name == name && scopeMatches && cloudflareID.MatchString(group.id) && (!requireSelectable || group.selectable) {
+					matches = append(matches, group.id)
 				}
 			}
 			if len(matches) != 1 || slices.Contains(expected[resource], matches[0]) {
@@ -348,22 +383,8 @@ func matchesCloudflareTokenPolicies(policies []shared.TokenPolicy, expected map[
 func (o *cloudflareObservation) verifyCloudflareCredential(ctx context.Context, value []byte, role string) error {
 	api := newCloudflareAPI(value, o.api.baseURL)
 	account := cloudflare.F(o.target.AccountID)
-	accountToken, accountErr := api.accountTokens.Verify(ctx, accounts.TokenVerifyParams{AccountID: account})
-	if accountErr == nil {
-		if accountToken.Status != "active" || !cloudflareID.MatchString(accountToken.ID) || !accountToken.ExpiresOn.After(time.Now()) {
-			return errors.New("Cloudflare deployment token must be active and have a future expiry")
-		}
-	} else {
-		if !cloudflareAuthorizationDenied(accountErr) {
-			return cloudflareError("deployment token verification", accountErr)
-		}
-		userToken, err := api.userTokens.Verify(ctx)
-		if err != nil {
-			return cloudflareError("deployment token verification", err)
-		}
-		if userToken.Status != "active" || !cloudflareID.MatchString(userToken.ID) || !userToken.ExpiresOn.After(time.Now()) {
-			return errors.New("Cloudflare deployment token must be active and have a future expiry")
-		}
+	if err := o.verifyCloudflareTokenPolicy(ctx, api, o.permissionPlan(role)); err != nil {
+		return err
 	}
 	workers, err := api.workers.Beta.Workers.List(ctx, workers.BetaWorkerListParams{AccountID: account, PerPage: cloudflare.F(int64(1))})
 	if err != nil {
@@ -385,6 +406,60 @@ func (o *cloudflareObservation) verifyCloudflareCredential(ctx context.Context, 
 	}
 	readTarget := o.target
 	return api.verifyCloudflareReadScopes(ctx, o.host, &readTarget)
+}
+
+func (o *cloudflareObservation) verifyCloudflareTokenPolicy(ctx context.Context, candidate cloudflareAPI, plan cloudflarePermissionPlan) error {
+	account := cloudflare.F(o.target.AccountID)
+	accountToken, accountErr := candidate.accountTokens.Verify(ctx, accounts.TokenVerifyParams{AccountID: account})
+	accountOwned := accountErr == nil
+	var id, status string
+	var notBefore, expiry time.Time
+	if accountOwned {
+		id, status, notBefore, expiry = accountToken.ID, string(accountToken.Status), accountToken.NotBefore, accountToken.ExpiresOn
+	} else {
+		if !cloudflareAuthorizationDenied(accountErr) {
+			return cloudflareError("deployment token verification", accountErr)
+		}
+		userToken, err := candidate.userTokens.Verify(ctx)
+		if err != nil {
+			return cloudflareError("deployment token verification", err)
+		}
+		id, status, notBefore, expiry = userToken.ID, string(userToken.Status), userToken.NotBefore, userToken.ExpiresOn
+	}
+	now := time.Now()
+	if status != "active" || !cloudflareID.MatchString(id) || notBefore.After(now) || !expiry.After(now) {
+		return errors.New("Cloudflare deployment token must be active and have a future expiry")
+	}
+	// Verify binds the opaque candidate to its ID. Token Details and Permission
+	// Groups are read with the management credential, so the deployment token
+	// never needs permission to inspect or manage other credentials.
+	var metadata *shared.Token
+	var err error
+	authority := "API Tokens Read from the same Cloudflare user"
+	if accountOwned {
+		authority = "Account API Tokens Read on the selected Cloudflare account"
+		metadata, err = o.api.accountTokens.Get(ctx, id, accounts.TokenGetParams{AccountID: account})
+	} else {
+		metadata, err = o.api.userTokens.Get(ctx, id)
+	}
+	if err != nil {
+		return cloudflareError("deployment token metadata with "+authority, err)
+	}
+	if metadata.ID != id || metadata.Status != "active" || !metadata.ExpiresOn.Equal(expiry) || metadata.NotBefore.After(now) {
+		return errors.New("Cloudflare deployment token metadata does not match the verified token identity, validity or expiry")
+	}
+	groups, err := o.api.permissionGroups(ctx, o.target.AccountID, accountOwned)
+	if err != nil {
+		return cloudflareError("deployment token permission catalog with "+authority, err)
+	}
+	_, expected, err := o.exactTokenPolicies(groups, plan, false)
+	if err != nil {
+		return errors.New("Cloudflare permission catalog did not establish the deployment role's exact permission IDs and scope")
+	}
+	if !matchesCloudflareTokenPolicies(metadata.Policies, expected) {
+		return refused("Cloudflare deployment token policy differs from the required permissions for the selected account and zone: " + plan.description)
+	}
+	return nil
 }
 
 func (api cloudflareAPI) verifyCloudflareReadScopes(ctx context.Context, host string, target *cloudflareTarget) error {

@@ -165,3 +165,86 @@ func TestExistingKnownHostsRecordsRetainTheirFormatting(t *testing.T) {
 		t.Fatal("a revoked pin was accepted")
 	}
 }
+
+func TestBootstrapKeyInstalledOnlyReadsAuthorizedKeys(t *testing.T) {
+	home := t.TempDir()
+	vm := vmObservation{home: home, uid: os.Getuid(), authorizedFile: ".ssh/authorized_keys"}
+	private, public, err := newSSHIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear(private)
+	sshDir := filepath.Join(home, ".ssh")
+	pin := filepath.Join(sshDir, "authorized_keys")
+	if found, err := vm.BootstrapKeyInstalled(public); found || err != nil {
+		t.Fatalf("missing .ssh = %v, %v", found, err)
+	}
+	if _, err := os.Lstat(sshDir); !os.IsNotExist(err) {
+		t.Fatalf("bootstrap lookup created .ssh: %v", err)
+	}
+	if err := os.Mkdir(sshDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := vm.BootstrapKeyInstalled(public); found || err != nil {
+		t.Fatalf("missing authorized_keys = %v, %v", found, err)
+	}
+	if _, err := os.Lstat(pin); !os.IsNotExist(err) {
+		t.Fatalf("bootstrap lookup created authorized_keys: %v", err)
+	}
+
+	otherPrivate, otherPublic, err := newSSHIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear(otherPrivate)
+	original := []byte("# existing entry\nrestrict " + otherPublic + "\n")
+	if err := os.WriteFile(pin, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := vm.BootstrapKeyInstalled(public); found || err != nil {
+		t.Fatalf("unrelated key = %v, %v", found, err)
+	}
+	if err := installAuthorizedKey(context.Background(), home, vm.authorizedFile, public, vm.uid); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := vm.BootstrapKeyInstalled(public); !found || err != nil {
+		t.Fatalf("exact appended key = %v, %v", found, err)
+	}
+	actual, err := os.ReadFile(pin)
+	if err != nil || string(actual) != string(original)+"restrict "+public+" codexiactl-bootstrap\n" {
+		t.Fatalf("lookup changed the existing bytes: %q, %v", actual, err)
+	}
+}
+
+func TestBootstrapKeyInstalledRefusesUntrustedLocations(t *testing.T) {
+	home := t.TempDir()
+	vm := vmObservation{home: home, uid: os.Getuid(), authorizedFile: ".ssh/authorized_keys"}
+	private, public, err := newSSHIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear(private)
+	if err := os.Mkdir(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "authorized_keys")
+	if err := os.WriteFile(outside, []byte(public), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pin := filepath.Join(home, vm.authorizedFile)
+	if err := os.Symlink(outside, pin); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := vm.BootstrapKeyInstalled(public); found || err == nil {
+		t.Fatalf("symlinked key lookup = %v, %v", found, err)
+	}
+	if err := os.Remove(pin); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(outside, pin); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := vm.BootstrapKeyInstalled(public); found || err == nil {
+		t.Fatalf("hard-linked key lookup = %v, %v", found, err)
+	}
+}

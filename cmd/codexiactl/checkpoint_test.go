@@ -36,6 +36,8 @@ func TestCheckpointRoundTripAndLock(t *testing.T) {
 		Operation: "r4", StartedAt: time.Date(2026, 11, 27, 1, 2, 3, 0, time.UTC), Pending: true, PreflightRunID: 43,
 		GateOriginal:       map[string]*string{"CODEXIA_BOOTSTRAP_ENABLED": &previous, "CODEXIA_DATABASE_INITIALIZATION_APPROVED": nil},
 		EphemeralRecipient: delivery.Recipient().String(),
+		BootstrapKeyWrite:  "unresolved",
+		SettingsWriterID:   strings.Repeat("d", 32),
 	}
 	if err := store.Save(saved); err != nil {
 		t.Fatal(err)
@@ -56,6 +58,14 @@ func TestCheckpointRoundTripAndLock(t *testing.T) {
 	saved.HostID = strings.Repeat("c", 64)
 	if err := store.Save(saved); !errors.Is(err, errCheckpointUnsafe) {
 		t.Fatalf("foreign checkpoint got %v", err)
+	}
+	saved.HostID, saved.BootstrapKeyWrite = host, "unknown"
+	if err := store.Save(saved); !errors.Is(err, errCheckpointUnsafe) {
+		t.Fatalf("invalid key-write state got %v", err)
+	}
+	saved.BootstrapKeyWrite, saved.SettingsWriterID = "registered", "short"
+	if err := store.Save(saved); !errors.Is(err, errCheckpointUnsafe) {
+		t.Fatalf("invalid protected-settings writer got %v", err)
 	}
 }
 

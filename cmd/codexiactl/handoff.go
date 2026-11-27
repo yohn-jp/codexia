@@ -26,17 +26,18 @@ const maxGrantPayloadSize = 4 * 1024
 const ownerRecoveryRunbook = "https://github.com/yohn-jp/codexia/blob/main/deploy/ansible/AUTH-RUNTIME.md#first-owner-through-the-browser"
 
 var (
-	errHandoffUnavailable  = errors.New("the live Owner Setup Grant or its encrypted handoff could not be verified. Review the existing independent reissue procedure if the grant expired or the key was lost. " + ownerRecoveryRunbook)
+	errHandoffUnavailable  = errors.New("the live Owner Setup Grant and its recipient binding could not be verified. Follow the independently approved reissue procedure if the grant or its binding is unavailable. " + ownerRecoveryRunbook)
 	errHandoffNeedsConsent = errors.New("Owner handoff requires an independently verified recipient or explicit same-Owner VM trust")
 	ownerBackendImage      = regexp.MustCompile(`^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$`)
 	ownerGrantKey          = regexp.MustCompile(`^"[A-Za-z0-9_-]{43}"$`)
 )
 
 type ownerHandoff struct {
-	Recipient    string
-	BackendImage string
-	identity     *age.X25519Identity
-	displayed    bool
+	Recipient       string
+	BackendImage    string
+	GrantBindingSHA string
+	identity        *age.X25519Identity
+	displayed       bool
 }
 
 func (h *ownerHandoff) Ephemeral() bool { return h.identity != nil || h.displayed }
@@ -99,10 +100,11 @@ func (h *ownerHandoff) Deliver(ctx context.Context, o operator, origin string, s
 		location.String() != origin {
 		return errHandoffUnavailable
 	}
-	if !ownerBackendImage.MatchString(h.BackendImage) || h.displayed {
+	if !ownerBackendImage.MatchString(h.BackendImage) || !checkpointHost.MatchString(h.GrantBindingSHA) ||
+		!validAgeRecipient(h.Recipient) || h.displayed {
 		return errHandoffUnavailable
 	}
-	envelope, err := readOwnerEnvelope(ctx, h.BackendImage, serviceUID)
+	envelope, err := readOwnerEnvelope(ctx, h.BackendImage, h.Recipient, h.GrantBindingSHA, serviceUID)
 	if err != nil {
 		return err
 	}
@@ -123,7 +125,7 @@ func (h *ownerHandoff) Deliver(ctx context.Context, o operator, origin string, s
 	return nil
 }
 
-func readOwnerEnvelope(ctx context.Context, image string, serviceUID int) ([]byte, error) {
+func readOwnerEnvelope(ctx context.Context, image, recipient, grantBinding string, serviceUID int) ([]byte, error) {
 	const serviceName = "codexia"
 	const serviceHome = "/home/codexia"
 	account, err := user.Lookup(serviceName)
@@ -136,7 +138,7 @@ func readOwnerEnvelope(ctx context.Context, image string, serviceUID int) ([]byt
 	runtime := "/run/user/" + uid
 	cmd := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "-H", "-u", serviceName, "--", "/usr/bin/env",
 		"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "XDG_RUNTIME_DIR="+runtime, "DBUS_SESSION_BUS_ADDRESS=unix:path="+runtime+"/bus",
-		serviceHome+"/.local/bin/codexia-owner-setup", "--export-handoff", image)
+		serviceHome+"/.local/bin/codexia-owner-setup", "--export-handoff", image, recipient, grantBinding)
 	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"}
 	cmd.Stderr = io.Discard
 	pipe, err := cmd.StdoutPipe()
@@ -208,8 +210,8 @@ func saveOwnerEnvelope(home string, envelope []byte) (string, error) {
 	if err != nil {
 		return "", errHandoffUnavailable
 	}
-	// The Owner keeps the private key. Here only the encrypted format, the service-owned
-	// source and the workflow's recipient binding are available for verification.
+	// The locked host exporter has already bound these bytes to the live grant and
+	// approved recipient. The age parser checks the format without the Owner's key.
 	_, err = age.Decrypt(bytes.NewReader(envelope), ownerAgeIdentity{testIdentity})
 	var noMatch *age.NoIdentityMatchError
 	if !errors.As(err, &noMatch) {

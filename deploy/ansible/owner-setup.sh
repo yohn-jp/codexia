@@ -14,6 +14,7 @@ unit_dir="$HOME/.config/containers/systemd"
 unit="$unit_dir/codexia-api.container"
 setup_unit="$config_dir/owner-setup.container"
 handoff="$state_dir/owner-setup.age"
+handoff_receipt="$state_dir/owner-setup.age.receipt.json"
 marker="$state_dir/owner-setup.installation"
 intent="$state_dir/owner-setup.intent"
 pending_handoff="$state_dir/owner-setup.age.pending"
@@ -78,6 +79,16 @@ read_database() {
   ' sh "$1"
 }
 
+# This is the same grant identity used by lifecycle Preflight. It discloses
+# neither the grant key nor its database digest.
+grant_binding_expression="encode(sha256(convert_to(json_build_array(grant_id, extract(epoch FROM expires_at))::text,'UTF8')),'hex')"
+
+live_grant_binding() {
+  read_database "SELECT $grant_binding_expression
+    FROM codexia_auth.owner_setup WHERE id='first-owner' AND grant_id IS NOT NULL
+      AND expires_at > now() AND consumed_at IS NULL AND owner_id IS NULL"
+}
+
 assert_empty_auth_resume() {
   local expected_database="$1" fingerprint="$2"
   "$HOME/.local/bin/codexia-auth-runtime-bootstrap" verify-empty-auth-resume-held \
@@ -109,9 +120,8 @@ assert_approved_checkpoint() {
   if present "$marker"; then setup_marker=true; fi
   if present "$pending_handoff"; then pending=true; fi
   if private_file "$handoff" && [[ -s "$handoff" ]]; then encrypted=true; fi
-  # Match Preflight's grant identity without reading the key or the grant digest.
   grant="$(read_database "SELECT CASE WHEN grant_id IS NOT NULL
-    THEN encode(sha256(convert_to(json_build_array(grant_id, extract(epoch FROM expires_at))::text,'UTF8')),'hex') END
+    THEN $grant_binding_expression END
     FROM (SELECT 1) seed LEFT JOIN codexia_auth.owner_setup ON id='first-owner'")"
   if grep -q '^CODEXIA_OAUTH_OWNER_SUBJECT=' "$runtime"; then
     settings="$(sha256sum -- "$runtime")"
@@ -179,7 +189,7 @@ encrypt_grant() {
   local recipient="$1"
   shift
   [[ "$recipient" =~ ^age1[0-9a-z]+$ ]] || die 'Owner setup requires a reviewed age recipient'
-  local encrypted
+  local encrypted grant_binding envelope_hash receipt
   write_marker "$pending_handoff" 'handoff-in-progress'
   encrypted="$(mktemp "$state_dir/.owner-setup.XXXXXX")"
   if ! (
@@ -189,8 +199,21 @@ encrypt_grant() {
     rm -f -- "$encrypted"
     die 'Owner grant could not be handed off. Inspect its state before independently approving reissue'
   fi
+  grant_binding="$(live_grant_binding)"
+  envelope_hash="$(sha256sum -- "$encrypted")"
+  envelope_hash="${envelope_hash%% *}"
+  if [[ ! "$grant_binding" =~ ^[a-f0-9]{64}$ || ! "$envelope_hash" =~ ^[a-f0-9]{64}$ || ! -s "$encrypted" ]]; then
+    rm -f -- "$encrypted"
+    die 'Owner grant receipt could not be established. Inspect the grant before independently approving reissue'
+  fi
+  receipt="$(jq -cn --arg recipient "$recipient" --arg grant "$grant_binding" --arg envelope "$envelope_hash" '{
+    format: "codexia-owner-handoff/v1", recipient: $recipient,
+    grantBindingSha256: $grant, envelopeSha256: $envelope
+  }')"
   mv -fT -- "$encrypted" "$handoff"
-  sync -f -- "$state_dir"
+  # The pending marker remains until both objects are persisted. An interrupted
+  # replacement cannot pair old ciphertext or metadata with a different grant.
+  write_marker "$handoff_receipt" "$receipt"
   rm -f -- "$pending_handoff"
   sync -f -- "$state_dir"
 }
@@ -231,7 +254,7 @@ case "$operation" in
     state="$(jq -er .state <<<"$description")"
     case "$state" in
       BLOCKED)
-        [[ "$3" == NEW_APPROVED ]] && ! present "$handoff" &&
+        [[ "$3" == NEW_APPROVED ]] && ! present "$handoff" && ! present "$handoff_receipt" &&
           jq -e '.grantId == null' <<<"$description" >/dev/null ||
           die 'The current database has no issued setup grant'
         assert_intent
@@ -240,10 +263,11 @@ case "$operation" in
         ;;
       SETUP_PENDING)
         assert_installation
-        [[ "$(read_database "SELECT EXISTS (SELECT FROM codexia_auth.owner_setup WHERE id='first-owner' AND expires_at > now() AND consumed_at IS NULL)")" == t ]] ||
+        grant="$(live_grant_binding)"
+        [[ "$grant" =~ ^[a-f0-9]{64}$ ]] ||
           die 'Existing owner grant is expired or unavailable. Inspect before independently approving reissue'
-        private_file "$handoff" && [[ -s "$handoff" ]] && ! present "$pending_handoff" ||
-          die 'Existing owner grant handoff is incomplete. Verify the grant before independently approving reissue'
+        "$HOME/.local/bin/codexia-preflight-observe" check-owner-handoff 9 "$4" "$grant" ||
+          die 'Existing owner grant handoff does not match the grant and reviewed recipient. Inspect before independently approving reissue'
         ;;
       OWNER_ENROLLED) die 'The owner is already enrolled. Run activation preparation' ;;
       *) die 'Owner setup returned an unrecognized state' ;;
@@ -263,14 +287,13 @@ case "$operation" in
     printf '%s\n' 'Setup-only API and Tunnel started. Check the approved browser origin before delivering the encrypted grant.'
     ;;
   --export-handoff)
-    [[ $# == 2 ]] && ! present "$promoted" || die 'The setup handoff is closed'
+    [[ $# == 4 && "$3" =~ ^age1[0-9a-z]+$ && "$4" =~ ^[a-f0-9]{64}$ ]] &&
+      ! present "$promoted" || die 'The setup handoff requires its reviewed recipient and live grant binding'
     assert_installation
     assert_setup_unit_or_clean
-    [[ "$(read_database "SELECT EXISTS (SELECT FROM codexia_auth.owner_setup WHERE id='first-owner' AND expires_at > now() AND consumed_at IS NULL AND owner_id IS NULL)")" == t ]] ||
-      die 'No outstanding unexpired Owner grant is available'
     verify_setup_api --pending || die 'The setup API did not prove readiness and required business-route denial'
     systemctl --user is-active --quiet codexia-tunnel.service &&
-      /usr/bin/python3 -c '
+      python3 -c '
 import http.client
 connection = http.client.HTTPConnection("127.0.0.1", 2000, timeout=5)
 try:
@@ -282,7 +305,10 @@ finally:
     connection.close()
 ' ||
       die 'The canonical Tunnel has no live Cloudflare connection'
-    "$HOME/.local/bin/codexia-preflight-observe" export-owner-handoff 9
+    grant="$(live_grant_binding)"
+    [[ "$grant" == "$4" ]] || die 'The outstanding Owner grant no longer matches the reviewed binding'
+    "$HOME/.local/bin/codexia-preflight-observe" export-owner-handoff 9 "$3" "$grant" ||
+      die 'Existing owner grant handoff does not match the grant and reviewed recipient. Inspect before independently approving reissue'
     ;;
   --inspect)
     [[ $# == 2 ]] && ! present "$promoted" || die 'The setup operation is closed'

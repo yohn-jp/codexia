@@ -34,6 +34,9 @@ The release identifies its source and version. The repository maintainer provisi
 
 After the CLI confirms the normal frontend and the registration-only API and hands off the Owner Setup Grant, the owner opens the normal `/console/setup` page. Use the existing protected procedures below after owner registration.
 
+Before changing protected GitHub Settings, arrange an exclusive administrative window for both Environments. Pause other administrators, integrations and automated credential writers for the window. The CLI acquires one create-only coordination marker in `codexia-bootstrap` for both Environments. GitHub's Secrets endpoint uses create-or-update semantics. Stop if exclusive administrative access cannot be established. Resume an interrupted write from the same VM and administrative account with the existing checkpoint. Reconcile an unmatched marker through the authorized GitHub maintenance operation.
+
+
 ## Establish deployment access
 
 Use protected GitHub Environments with required reviewers and deployment restricted to main. The VM must be reachable over the tailnet and the independent administrator must have noninteractive sudo. Obtain the VM's SSH host key through the provider console or an independently authenticated channel. Provision the administrator's public SSH key on that account. Provision a separate deployment identity for the rootless service. R4 derives its public half inside the runtime Environment, installs it on the target, and verifies a real runtime login against the same VM identity.

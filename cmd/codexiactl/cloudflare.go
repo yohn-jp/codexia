@@ -210,7 +210,8 @@ func observeCloudflare(ctx context.Context, o operator, publicOrigin string) (*c
 		return nil, refused("Cloudflare requires the reviewed HTTPS production origin")
 	}
 	o.Notice("Cloudflare management authentication for " + origin.Host + " uses a temporary scoped API token. Wrangler Workers login does not establish the required DNS, Tunnel and Access management permissions.")
-	o.Notice("Create a short-lived token at " + cloudflareTokensPage + ". Select Zone Read, DNS Read and Workers Routes Read for the production zone. Select Cloudflare Tunnel Read, Access: Apps and Policies Read, Access: Service Tokens Read and Workers Scripts Read for its account. Cloudflare Tunnel Edit allows retrieval of the existing connector token. Account API Tokens Write on an account-owned token permits review of automatic issuance for the two deployment token roles.")
+	o.Notice("Create a short-lived token at " + cloudflareTokensPage + ". Select Zone Read, DNS Read and Workers Routes Read for the production zone. Select Cloudflare Tunnel Read, Access: Apps and Policies Read, Access: Service Tokens Read and Workers Scripts Read for its account. Cloudflare Tunnel Edit allows retrieval of the existing connector token.")
+	o.Notice("To enroll an existing Cloudflare deployment API token, the temporary management token needs Account API Tokens Read on the selected account for account-owned credentials, or API Tokens Read from the same user for user-owned credentials. An account-owned management token with Account API Tokens Write also permits issuance of the two scoped deployment credentials.")
 	if err := requireApproval(o, "Authenticate to the official Cloudflare API for "+origin.Host+"?"); err != nil {
 		return nil, err
 	}

@@ -99,7 +99,7 @@ def require_fields(value, fields):
                 for key, pattern in fields.items()))
 
 
-def read_owner_handoff(home, lock_fd):
+def read_owner_handoff(home, lock_fd, recipient, grant_binding):
     """Read only the encrypted owner handoff under the inherited host lock."""
     current_uid = os.getuid()
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -129,14 +129,26 @@ def read_owner_handoff(home, lock_fd):
             except FileNotFoundError:
                 continue
             require(False)
-        handoff = "owner-setup.age"
-        descriptor = opened(handoff, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=state_fd)
-        info = os.fstat(descriptor)
-        require(stat.S_ISREG(info.st_mode) and info.st_uid == current_uid and info.st_nlink == 1 and
-                stat.S_IMODE(info.st_mode) == 0o600 and 0 < info.st_size <= 16 * 1024)
-        ciphertext = os.read(descriptor, 16 * 1024 + 1)
-        require(len(ciphertext) == info.st_size and
-                os.path.samestat(info, os.stat(handoff, dir_fd=state_fd, follow_symlinks=False)))
+        def protected_bytes(name, limit):
+            descriptor = opened(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=state_fd)
+            info = os.fstat(descriptor)
+            require(stat.S_ISREG(info.st_mode) and info.st_uid == current_uid and info.st_nlink == 1 and
+                    stat.S_IMODE(info.st_mode) == 0o600 and 0 < info.st_size <= limit)
+            content = os.read(descriptor, limit + 1)
+            current = os.stat(name, dir_fd=state_fd, follow_symlinks=False)
+            require(len(content) == info.st_size and info.st_ctime_ns == current.st_ctime_ns and
+                    os.path.samestat(info, current))
+            return content
+
+        receipt = json.loads(protected_bytes("owner-setup.age.receipt.json", 4096),
+                             object_pairs_hook=no_duplicate_keys)
+        require_fields(receipt, {
+            "format": r"codexia-owner-handoff/v1", "recipient": r"age1[0-9a-z]+",
+            "grantBindingSha256": RAW_HASH, "envelopeSha256": RAW_HASH,
+        })
+        require(receipt["recipient"] == recipient and receipt["grantBindingSha256"] == grant_binding)
+        ciphertext = protected_bytes("owner-setup.age", 16 * 1024)
+        require(hashlib.sha256(ciphertext).hexdigest() == receipt["envelopeSha256"])
         return ciphertext
 
 
@@ -679,10 +691,13 @@ def observe():
 
 if __name__ == "__main__":
     try:
-        if sys.argv[1:] == ["export-owner-handoff", "9"]:
+        if sys.argv[1:2] in (["check-owner-handoff"], ["export-owner-handoff"]):
+            require(len(sys.argv) == 5 and sys.argv[2] == "9")
             account = pwd.getpwnam("codexia")
             require(account.pw_uid == os.getuid() and account.pw_uid > 0 and account.pw_dir == "/home/codexia")
-            sys.stdout.buffer.write(read_owner_handoff(Path(account.pw_dir), 9))
+            ciphertext = read_owner_handoff(Path(account.pw_dir), 9, sys.argv[3], sys.argv[4])
+            if sys.argv[1] == "export-owner-handoff":
+                sys.stdout.buffer.write(ciphertext)
             sys.exit(0)
         if sys.argv[1:2] == ["verify-secret-identities"]:
             require(len(sys.argv) == 3)

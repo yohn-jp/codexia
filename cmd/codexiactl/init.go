@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func runInit(ctx context.Context) error {
+func runInit(ctx context.Context) (resultErr error) {
 	if !releaseVersion.MatchString(version) || !sourceHash.MatchString(source) {
 		return needsAction("Use the provenance-verified immutable GitHub Release binary to run init")
 	}
@@ -66,6 +66,18 @@ func runInit(ctx context.Context) error {
 	c := workflowController{github: gh, operator: tty, store: store, state: state,
 		sha: snapshot.MainSHA, hostID: vm.HostID, origin: settings.PublicOrigin}
 	c.state.HostID, c.state.RepositoryID = vm.HostID, targetRepositoryID
+	defer func() {
+		cleanupErr := c.finishSettingsWindow(ctx, resultErr)
+		if cleanupErr != nil {
+			tty.Notice(cleanupErr.Error())
+		}
+		resultErr = errors.Join(resultErr, cleanupErr)
+	}()
+	if c.state.SettingsWriterID != "" {
+		if err := c.requireSettingsWindow(ctx, gh); err != nil {
+			return err
+		}
+	}
 	err = c.reconcilePrevious(ctx, gh)
 	if err != nil {
 		return err
@@ -344,6 +356,9 @@ func (c *workflowController) install(ctx context.Context, gh *githubControl, set
 		if err := c.currentMain(ctx); err != nil {
 			return err
 		}
+		if err := c.requireSettingsWindow(ctx, gh); err != nil {
+			return err
+		}
 		var expected *string
 		if existing != "" {
 			expected = &existing
@@ -429,6 +444,9 @@ func (c *workflowController) publishInitialFrontend(ctx context.Context) error {
 }
 
 func (c *workflowController) withBootstrapGates(ctx context.Context, gh *githubControl, database bool, run func() error) (err error) {
+	if err := c.requireSettingsWindow(ctx, gh); err != nil {
+		return err
+	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
@@ -481,6 +499,7 @@ func (c *workflowController) deliver(ctx context.Context, gh *githubControl, set
 		return err
 	}
 	handoff.BackendImage = receipt.Evidence.Candidate.BackendImage
+	handoff.GrantBindingSHA = receipt.Evidence.Host.Database.OwnerSetupCheckpoint.GrantBindingSHA
 	if err := handoff.Deliver(ctx, c.operator, settings.PublicOrigin, settings.ServiceUID); err != nil {
 		return err
 	}

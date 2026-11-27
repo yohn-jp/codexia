@@ -184,12 +184,18 @@ func TestGitHubSecretsUseSealedBoxAndPreserveExisting(t *testing.T) {
 	}
 	for _, existing := range []bool{false, true} {
 		t.Run(fmt.Sprintf("existing=%v", existing), func(t *testing.T) {
-			present := existing
+			present := false
 			writes := 0
+			lock := new(githubTestSettingsVariable)
 			const name = "CODEXIA_TUNNEL_TOKEN"
 			const secret = "fixture credential must never be echoed"
 			g := newTestGitHub(t, func(w http.ResponseWriter, r *http.Request) {
-				if githubTestProtection(t, w, r) {
+				if r.URL.Path == githubTestLockPath && r.Method == http.MethodPost {
+					// Inject a write completed by the previous settings owner just
+					// before this session takes the exclusive window.
+					present = existing
+				}
+				if lock.serve(t, w, r) || githubTestProtection(t, w, r) {
 					return
 				}
 				switch {
@@ -221,9 +227,17 @@ func TestGitHubSecretsUseSealedBoxAndPreserveExisting(t *testing.T) {
 					w.WriteHeader(http.StatusNotFound)
 				}
 			})
-			err := g.PutSecret(context.Background(), "codexia-bootstrap", name, []byte(secret))
+			ctx := context.Background()
+			window, err := g.AcquireSecretWriteWindow(ctx, new(githubTestOperator), githubTestOperationA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = g.PutSecret(ctx, "codexia-bootstrap", name, []byte(secret))
 			if (err != nil) != existing || (writes == 1) == existing {
 				t.Fatalf("unexpected writes=%d error=%v", writes, err)
+			}
+			if err := window.Close(ctx); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
@@ -394,10 +408,11 @@ func (f githubTestRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) 
 
 type githubTestOperator struct {
 	notices []string
+	deny    bool
 }
 
-func (*githubTestOperator) Confirm(string) (bool, error) { return true, nil }
-func (*githubTestOperator) Ask(string) (string, error)   { return "", nil }
+func (o *githubTestOperator) Confirm(string) (bool, error) { return !o.deny, nil }
+func (*githubTestOperator) Ask(string) (string, error)     { return "", nil }
 func (*githubTestOperator) Secret(string) ([]byte, error) {
 	return nil, errors.New("unexpected secret prompt")
 }

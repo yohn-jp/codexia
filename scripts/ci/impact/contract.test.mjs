@@ -82,7 +82,19 @@ test('the codexiactl binary is tested in Verify and only published by the certif
   assert.equal(publication.jobs.codexiactl.needs, 'verify-source');
   assert.equal(publication.jobs.codexiactl.permissions.contents, 'read');
   assert.ok(publication.jobs.release.needs.includes('codexiactl'));
-  assert.ok(publication.jobs.release.steps.some(step => step.run?.includes('gh attestation verify')));
+  assert.ok(publication.jobs.codexiactl.steps.some(step => step.id === 'upload' && step.uses?.startsWith('actions/upload-artifact@')));
+  assert.equal(publication.jobs.codexiactl.outputs['artifact-id'], '${{ steps.upload.outputs.artifact-id }}');
+  const download = publication.jobs.release.steps.findIndex(step => step.uses?.startsWith('actions/download-artifact@'));
+  const checkArtifact = publication.jobs.release.steps.findIndex(step => step.env?.CODEXIACTL_ARTIFACT_ID === '${{ needs.codexiactl.outputs.artifact-id }}');
+  assert.ok(checkArtifact >= 0 && checkArtifact < download);
+  assert.equal(publication.jobs.release.steps[download].with['artifact-ids'], '${{ needs.codexiactl.outputs.artifact-id }}');
+  assert.equal(publication.jobs.release.steps[download].with.name, undefined);
+  assert.equal(publication.jobs.release.steps[download].with['digest-mismatch'], 'error');
+  assert.equal(publication.jobs.publish.needs, 'verify-source');
+  const setting = publication.jobs['verify-source'].steps.find(step => step.run === 'node scripts/release/components/codexiactl-release.mjs check-setting');
+  assert.equal(setting.env.CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN, '${{ secrets.CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN }}');
+  assert.equal(setting['continue-on-error'], undefined);
+  assert.ok(publication.jobs.release.steps.some(step => step.run === 'node scripts/release/components/codexiactl-release.mjs reconcile'));
 });
 
 test('Biome selects shipped JS/TS changes and config, but not unrelated CI or native sources', () => {

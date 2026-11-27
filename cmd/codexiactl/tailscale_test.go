@@ -18,7 +18,7 @@ func TestTailnetAuthenticatesTheObservedNodeAndScopedTrust(t *testing.T) {
 	const address = "100.64.32.5"
 	const keyID = "federated-test-key"
 	const nodeID = "nLocalVM"
-	const publicKey = "nodekey:0123456789abcdef"
+	fixtureNodeIdentity := "nodekey:" + strings.Repeat("a", 64)
 	const network = "tnExpectedStableID"
 
 	var calls atomic.Int32
@@ -27,7 +27,7 @@ func TestTailnetAuthenticatesTheObservedNodeAndScopedTrust(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/v2/tailnet/" + network + "/devices":
-			fmt.Fprintf(w, `{"devices":[{"addresses":[%q],"nodeId":%q,"authorized":true,"connectedToControl":true,"nodeKey":%q,"name":"codexia.example.ts.net","os":"linux"}]}`, address, nodeID, publicKey)
+			fmt.Fprintf(w, `{"devices":[{"addresses":[%q],"nodeId":%q,"authorized":true,"connectedToControl":true,"nodeKey":%q,"name":"codexia.example.ts.net","os":"linux"}]}`, address, nodeID, fixtureNodeIdentity)
 		case "/api/v2/tailnet/" + network + "/keys":
 			fmt.Fprintf(w, `{"keys":[{"id":%q}]}`, keyID)
 		case "/api/v2/tailnet/" + network + "/keys/" + keyID:
@@ -53,7 +53,7 @@ func TestTailnetAuthenticatesTheObservedNodeAndScopedTrust(t *testing.T) {
 	local := localTailnet{
 		BackendState:   "Running",
 		CurrentTailnet: &localTailnetIdentity{Name: "example", StableID: network},
-		Self:           &localTailnetNode{ID: nodeID, PublicKey: publicKey, DNSName: "codexia.example.ts.net.", TailscaleIPs: []string{address}},
+		Self:           &localTailnetNode{ID: nodeID, PublicKey: fixtureNodeIdentity, DNSName: "codexia.example.ts.net.", TailscaleIPs: []string{address}},
 	}
 	got, err := inspectTailnet(context.Background(), client, local)
 	if err != nil {

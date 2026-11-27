@@ -15,6 +15,9 @@ spec.loader.exec_module(observer)
 
 
 class OwnerHandoffTests(unittest.TestCase):
+    recipient = "age1recipient"
+    binding = "a" * 64
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -24,18 +27,26 @@ class OwnerHandoffTests(unittest.TestCase):
         self.handoff = self.state / "owner-setup.age"
         self.handoff.write_bytes(b"encrypted envelope")
         self.handoff.chmod(0o600)
+        self.receipt = self.state / "owner-setup.age.receipt.json"
+        self.receipt.write_text(json.dumps({
+            "format": "codexia-owner-handoff/v1",
+            "recipient": self.recipient,
+            "grantBindingSha256": self.binding,
+            "envelopeSha256": hashlib.sha256(self.handoff.read_bytes()).hexdigest(),
+        }))
+        self.receipt.chmod(0o600)
         self.lock = self.state / "host.lock"
         self.lock.touch(mode=0o600)
 
-    def read_handoff(self):
+    def read_handoff(self, recipient=recipient, binding=binding):
         with self.lock.open("rb") as lock:
-            return observer.read_owner_handoff(self.home, lock.fileno())
+            return observer.read_owner_handoff(self.home, lock.fileno(), recipient, binding)
 
     def test_export_requires_locked_complete_handoff(self):
         self.assertEqual(self.read_handoff(), b"encrypted envelope")
         with self.handoff.open("rb") as wrong_lock:
             with self.assertRaises(ValueError):
-                observer.read_owner_handoff(self.home, wrong_lock.fileno())
+                observer.read_owner_handoff(self.home, wrong_lock.fileno(), self.recipient, self.binding)
         with self.lock.open("rb") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             with self.assertRaises(BlockingIOError):
@@ -46,6 +57,24 @@ class OwnerHandoffTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.read_handoff()
             marker.unlink()
+
+    def test_receipt_binds_active_grant_recipient_and_ciphertext(self):
+        self.assertEqual(self.read_handoff(), b"encrypted envelope")
+        with self.assertRaises(ValueError):
+            self.read_handoff(recipient="age1different")
+        with self.assertRaises(ValueError):
+            self.read_handoff(binding="b" * 64)
+        self.handoff.write_bytes(b"different ciphertext")
+        with self.assertRaises(ValueError):
+            self.read_handoff()
+        self.handoff.write_bytes(b"encrypted envelope")
+        other = self.receipt.with_name("other")
+        self.receipt.rename(other)
+        with self.assertRaises(FileNotFoundError):
+            self.read_handoff()
+        self.receipt.symlink_to(other)
+        with self.assertRaises(OSError):
+            self.read_handoff()
 
     def test_export_rejects_symlinks_links_unbounded_and_nonregular_files(self):
         self.handoff.chmod(0o644)

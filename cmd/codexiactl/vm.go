@@ -325,57 +325,45 @@ func (vm vmObservation) InstallBootstrapKey(ctx context.Context, public string) 
 	return installAuthorizedKey(ctx, vm.home, path, public, vm.uid)
 }
 
-func installAuthorizedKey(ctx context.Context, home, path, public string, uid int) error {
-	key, _, options, rest, err := ssh.ParseAuthorizedKey([]byte(public))
-	normalized := ""
-	if err == nil {
-		normalized = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
-	}
-	if err != nil || key.Type() != ssh.KeyAlgoED25519 || len(options) != 0 ||
-		len(bytes.TrimSpace(rest)) != 0 || public != normalized || path != ".ssh/authorized_keys" {
-		return errors.New("bootstrap requires one OpenSSH Ed25519 public key and the administrator's authorized_keys")
-	}
-
-	homeFD, err := openOwnedDirectory(unix.AT_FDCWD, home, uid)
+// BootstrapKeyInstalled observes the exact journaled public key without creating an SSH directory or file.
+func (vm vmObservation) BootstrapKeyInstalled(public string) (bool, error) {
+	key, err := parseBootstrapKey(vm.authorizedFile, public)
 	if err != nil {
-		return errors.New("the administrator home must be owned by the administrator and have secure directory permissions")
+		return false, err
 	}
-	defer unix.Close(homeFD)
-	dirFD, err := openOwnedDirectory(homeFD, ".ssh", uid)
-	if errors.Is(err, unix.ENOENT) {
-		if err := unix.Mkdirat(homeFD, ".ssh", 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
-			return errors.New("cannot create the administrator .ssh directory")
-		}
-		dirFD, err = openOwnedDirectory(homeFD, ".ssh", uid)
+	file, err := openAuthorizedKeys(vm.home, vm.uid, false)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
 	}
 	if err != nil {
-		return errors.New("administrator .ssh must be a real, securely owned directory")
+		return false, err
 	}
-	defer unix.Close(dirFD)
-
-	fd, err := unix.Openat(dirFD, "authorized_keys", unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK|unix.O_APPEND|unix.O_RDWR|unix.O_CREAT, 0o600)
-	if err != nil {
-		return errors.New("cannot safely open the administrator's authorized_keys")
-	}
-	file := os.NewFile(uintptr(fd), "authorized_keys")
 	defer file.Close()
-	if err := lockAuthorizedKeys(ctx, fd); err != nil {
+	content, err := readAuthorizedKeys(context.Background(), file, vm.uid, unix.LOCK_SH)
+	if err != nil {
+		return false, err
+	}
+	return keyExists(content, key), nil
+}
+
+func installAuthorizedKey(ctx context.Context, home, path, public string, uid int) error {
+	key, err := parseBootstrapKey(path, public)
+	if err != nil {
 		return err
 	}
-	var info unix.Stat_t
-	if err := unix.Fstat(fd, &info); err != nil || info.Mode&unix.S_IFMT != unix.S_IFREG ||
-		int(info.Uid) != uid || info.Mode&0o022 != 0 || info.Nlink != 1 {
-		return errors.New("authorized_keys must be a securely owned regular file without additional links")
+	file, err := openAuthorizedKeys(home, uid, true)
+	if err != nil {
+		return err
 	}
-
-	original, err := io.ReadAll(io.LimitReader(file, maxAuthorizedKeys+1))
-	if err != nil || len(original) > maxAuthorizedKeys {
-		return errors.New("cannot safely inspect the existing authorized_keys")
+	defer file.Close()
+	original, err := readAuthorizedKeys(ctx, file, uid, unix.LOCK_EX)
+	if err != nil {
+		return err
 	}
 	if keyExists(original, key) {
 		return nil
 	}
-	entry := "restrict " + normalized + " codexiactl-bootstrap\n"
+	entry := "restrict " + public + " codexiactl-bootstrap\n"
 	if len(original) != 0 && original[len(original)-1] != '\n' {
 		entry = "\n" + entry
 	}
@@ -386,6 +374,68 @@ func installAuthorizedKey(ctx context.Context, home, path, public string, uid in
 		return errors.New("could not sync the public key append; inspect authorized_keys before retrying")
 	}
 	return nil
+}
+
+func parseBootstrapKey(path, public string) (ssh.PublicKey, error) {
+	key, _, options, rest, err := ssh.ParseAuthorizedKey([]byte(public))
+	if err != nil || key.Type() != ssh.KeyAlgoED25519 || len(options) != 0 ||
+		len(bytes.TrimSpace(rest)) != 0 || public != strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))) ||
+		path != ".ssh/authorized_keys" {
+		return nil, errors.New("bootstrap requires one OpenSSH Ed25519 public key and the administrator's authorized_keys")
+	}
+	return key, nil
+}
+
+func openAuthorizedKeys(home string, uid int, create bool) (*os.File, error) {
+	homeFD, err := openOwnedDirectory(unix.AT_FDCWD, home, uid)
+	if err != nil {
+		return nil, errors.New("the administrator home must be owned by the administrator and have secure directory permissions")
+	}
+	defer unix.Close(homeFD)
+	dirFD, err := openOwnedDirectory(homeFD, ".ssh", uid)
+	if errors.Is(err, unix.ENOENT) {
+		if !create {
+			return nil, os.ErrNotExist
+		}
+		if err := unix.Mkdirat(homeFD, ".ssh", 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
+			return nil, errors.New("cannot create the administrator .ssh directory")
+		}
+		dirFD, err = openOwnedDirectory(homeFD, ".ssh", uid)
+	}
+	if err != nil {
+		return nil, errors.New("administrator .ssh must be a real, securely owned directory")
+	}
+	defer unix.Close(dirFD)
+
+	flags := unix.O_NOFOLLOW | unix.O_CLOEXEC | unix.O_NONBLOCK
+	if create {
+		flags |= unix.O_APPEND | unix.O_RDWR | unix.O_CREAT
+	}
+	fd, err := unix.Openat(dirFD, "authorized_keys", flags, 0o600)
+	if !create && errors.Is(err, unix.ENOENT) {
+		return nil, os.ErrNotExist
+	}
+	if err != nil {
+		return nil, errors.New("cannot safely open the administrator's authorized_keys")
+	}
+	return os.NewFile(uintptr(fd), "authorized_keys"), nil
+}
+
+func readAuthorizedKeys(ctx context.Context, file *os.File, uid int, lock int) ([]byte, error) {
+	fd := int(file.Fd())
+	if err := lockAuthorizedKeys(ctx, fd, lock); err != nil {
+		return nil, err
+	}
+	var info unix.Stat_t
+	if err := unix.Fstat(fd, &info); err != nil || info.Mode&unix.S_IFMT != unix.S_IFREG ||
+		int(info.Uid) != uid || info.Mode&0o022 != 0 || info.Nlink != 1 {
+		return nil, errors.New("authorized_keys must be a securely owned regular file without additional links")
+	}
+	content, err := io.ReadAll(io.LimitReader(file, maxAuthorizedKeys+1))
+	if err != nil || len(content) > maxAuthorizedKeys {
+		return nil, errors.New("cannot safely inspect the existing authorized_keys")
+	}
+	return content, nil
 }
 
 func openOwnedDirectory(parent int, path string, uid int) (int, error) {
@@ -401,11 +451,11 @@ func openOwnedDirectory(parent int, path string, uid int) (int, error) {
 	return fd, nil
 }
 
-func lockAuthorizedKeys(ctx context.Context, fd int) error {
+func lockAuthorizedKeys(ctx context.Context, fd, lock int) error {
 	wait, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	for {
-		err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
+		err := unix.Flock(fd, lock|unix.LOCK_NB)
 		if err == nil {
 			return nil
 		}

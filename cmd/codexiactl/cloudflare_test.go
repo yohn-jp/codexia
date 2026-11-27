@@ -388,3 +388,129 @@ func TestCloudflareMintRequiresScopedAuthorityAndDoesNotReplay(t *testing.T) {
 		})
 	}
 }
+
+func TestCloudflareSuppliedTokenRequiresExactProviderPolicy(t *testing.T) {
+	const (
+		account     = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		zone        = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		tokenID     = "cccccccccccccccccccccccccccccccc"
+		otherID     = "dddddddddddddddddddddddddddddddd"
+		workerWrite = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+		workerRead  = "ffffffffffffffffffffffffffffffff"
+		tunnelRead  = "11111111111111111111111111111111"
+		accessRead  = "22222222222222222222222222222222"
+		dnsRead     = "33333333333333333333333333333333"
+		routesRead  = "44444444444444444444444444444444"
+	)
+	for _, tc := range []struct {
+		name, role, problem string
+		userOwned           bool
+	}{
+		{name: "Worker publication", role: cloudflareWorkerRole},
+		{name: "User-owned Worker publication", role: cloudflareWorkerRole, userOwned: true},
+		{name: "Read-only Worker token", role: cloudflareWorkerRole, problem: "policy"},
+		{name: "Overprivileged observer token", role: cloudflareReadRole, problem: "policy"},
+		{name: "Wildcard Worker account", role: cloudflareWorkerRole, problem: "policy"},
+		{name: "Permission advertised for wrong scope", role: cloudflareWorkerRole, problem: "permission catalog"},
+		{name: "Wrong metadata identity", role: cloudflareWorkerRole, problem: "metadata"},
+		{name: "Unauthorized metadata", role: cloudflareWorkerRole, problem: "metadata"},
+		{name: "Expired token", role: cloudflareWorkerRole, problem: "expiry"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const suppliedValue, managementValue = "hidden-candidate-value", "hidden-management-value"
+			accountTokens := "/accounts/" + account + "/tokens"
+			origin := accountTokens
+			if tc.userOwned {
+				origin = "/user/tokens"
+			}
+			expiry := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+			if tc.name == "Expired token" {
+				expiry = time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+			}
+			policy := func(resource string, ids ...string) map[string]any {
+				groups := make([]map[string]string, len(ids))
+				for i, id := range ids {
+					groups[i] = map[string]string{"id": id}
+				}
+				return map[string]any{"id": otherID, "effect": "allow", "resources": map[string]string{resource: "*"}, "permission_groups": groups}
+			}
+			group := func(name, id, scope string) map[string]any {
+				return map[string]any{"name": name, "id": id, "scopes": []string{scope}, "is_selectable": false}
+			}
+			var verifiedResources = []any{policy(cloudflareAccountScope+"."+account, workerWrite)}
+			switch tc.name {
+			case "Read-only Worker token":
+				verifiedResources = []any{policy(cloudflareAccountScope+"."+account, workerRead)}
+			case "Overprivileged observer token":
+				verifiedResources = []any{policy(cloudflareAccountScope+"."+account, workerRead, tunnelRead, accessRead, workerWrite),
+					policy(cloudflareZoneScope+"."+zone, dnsRead, routesRead)}
+			case "Wildcard Worker account":
+				verifiedResources = []any{policy(cloudflareAccountScope+".*", workerWrite)}
+			}
+			var workingReads atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Error("credential verification attempted a mutation")
+				}
+				var result any
+				switch r.URL.Path {
+				case origin + "/verify":
+					if r.Header.Get("Authorization") != "Bearer "+suppliedValue {
+						t.Error("Verify did not use the supplied credential")
+					}
+					result = map[string]any{"id": tokenID, "status": "active", "expires_on": expiry}
+				case accountTokens + "/verify":
+					http.Error(w, "account-token authentication denied", http.StatusUnauthorized)
+					return
+				case origin + "/" + tokenID:
+					if r.Header.Get("Authorization") != "Bearer "+managementValue {
+						t.Error("metadata read did not use the separate management credential")
+					}
+					if tc.name == "Unauthorized metadata" {
+						http.Error(w, "credential metadata denied: "+managementValue, http.StatusForbidden)
+						return
+					}
+					id := tokenID
+					if tc.name == "Wrong metadata identity" {
+						id = otherID
+					}
+					result = map[string]any{"id": id, "status": "active", "expires_on": expiry, "policies": verifiedResources}
+				case origin + "/permission_groups":
+					if r.Header.Get("Authorization") != "Bearer "+managementValue {
+						t.Error("permission catalog did not use the separate management credential")
+					}
+					workerScope := cloudflareAccountScope
+					if tc.name == "Permission advertised for wrong scope" {
+						workerScope = cloudflareZoneScope
+					}
+					result = []any{group("Workers Scripts Write", workerWrite, workerScope), group("Workers Scripts Read", workerRead, cloudflareAccountScope),
+						group("Cloudflare Tunnel Read", tunnelRead, cloudflareAccountScope), group("Access: Apps and Policies Read", accessRead, cloudflareAccountScope),
+						group("DNS Read", dnsRead, cloudflareZoneScope), group("Workers Routes Read", routesRead, cloudflareZoneScope)}
+				case "/accounts/" + account + "/workers/workers":
+					workingReads.Add(1)
+					result = []any{}
+				default:
+					http.NotFound(w, r)
+					return
+				}
+				cloudflareTestEnvelope(t, w, result)
+			}))
+			defer server.Close()
+			edge := cloudflareObservation{target: cloudflareTarget{AccountID: account, ZoneID: zone},
+				api: newCloudflareAPI([]byte(managementValue), server.URL+"/")}
+			err := edge.verifyCloudflareCredential(context.Background(), []byte(suppliedValue), tc.role)
+			if tc.problem == "" {
+				if err != nil || workingReads.Load() != 1 {
+					t.Fatalf("expected verified scoped token with a successful read. Error %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.problem) || strings.Contains(err.Error(), suppliedValue) || strings.Contains(err.Error(), managementValue) {
+				t.Fatalf("expected sanitized %s rejection, got %v", tc.problem, err)
+			}
+			if calls := workingReads.Load(); calls != 0 {
+				t.Fatalf("sent %d Worker reads before token policy was verified", calls)
+			}
+		})
+	}
+}

@@ -59,6 +59,7 @@ type workflowController struct {
 	operator            operator
 	store               checkpointWriter
 	state               checkpoint
+	settingsWindow      *githubSecretWriteWindow
 	sha, hostID, origin string
 }
 

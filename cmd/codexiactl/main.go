@@ -125,7 +125,7 @@ func reportError(ctx context.Context, stderr io.Writer, err error) int {
 	switch {
 	case errors.Is(err, errCheckpointUnsafe), errors.Is(err, errGitHubTarget), errors.Is(err, errExistingOwner):
 		return 3
-	case errors.Is(err, errCheckpointBusy), errors.Is(err, errGitHubProtection),
+	case errors.Is(err, errCheckpointBusy), errors.Is(err, errGitHubProtection), errors.Is(err, errGitHubSettingsWriterUnavailable),
 		errors.Is(err, errHandoffNeedsConsent), errors.Is(err, errHandoffUnavailable):
 		return 2
 	}
