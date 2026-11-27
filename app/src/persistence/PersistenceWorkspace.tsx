@@ -515,6 +515,9 @@ export function PersistenceWorkspace({
   const [workTransferStatus, setWorkTransferStatus] = useState('');
   const openWorkExportAbort = useRef<AbortController | null>(null);
   useEffect(() => () => openWorkExportAbort.current?.abort(), [projectId]);
+  const attachWorkTransfer = useCallback((element: HTMLDetailsElement | null) => {
+    if (element === null) openWorkExportAbort.current?.abort();
+  }, []);
   const [pageError, setPageError] = useState('');
   const [outlineError, setOutlineError] = useState('');
   const [outlineReadyProject, setOutlineReadyProject] = useState('');
@@ -3344,6 +3347,7 @@ export function PersistenceWorkspace({
           </form>
         </details>
         <details
+          ref={attachWorkTransfer}
           onToggle={event => {
             if (!event.currentTarget.open) openWorkExportAbort.current?.abort();
           }}

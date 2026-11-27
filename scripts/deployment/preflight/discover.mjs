@@ -58,6 +58,13 @@ export async function discoverPublication(component, { main, history, currentSou
 }
 
 export async function discoverRequest(env, fetchImpl = fetch) {
+  const hasWindow = Boolean(env.CODEXIA_WINDOW_ID || env.CODEXIA_WINDOW_START || env.CODEXIA_WINDOW_END);
+  if (hasWindow) {
+    assert.ok(env.CODEXIA_WINDOW_START && env.CODEXIA_WINDOW_END, 'Both approved window timestamps are required');
+    if (env.CODEXIA_PREFLIGHT_INTENT === 'restore') {
+      assert.ok(env.CODEXIA_WINDOW_ID, 'Restoration requires the existing approved window ID');
+    }
+  }
   const github = createGitHubOctokit({ token: env.GH_TOKEN, fetchImpl, timeout: 30_000 });
   const actions = github.rest.actions;
   const pages = (endpoint, parameters, key) => paginateActionsInventory(github, endpoint, { ...repo, ...parameters }, key);
@@ -82,8 +89,8 @@ export async function discoverRequest(env, fetchImpl = fetch) {
   };
   const [backendPublisherRunId, frontend] = await Promise.all(
     ['backend', 'frontend'].map(component => discoverPublication(component, readers)));
-  const window = env.CODEXIA_WINDOW_START || env.CODEXIA_WINDOW_END
-    ? { id: 'preflight-' + env.GITHUB_RUN_ID, notBefore: env.CODEXIA_WINDOW_START, notAfter: env.CODEXIA_WINDOW_END }
+  const window = hasWindow
+    ? { id: env.CODEXIA_WINDOW_ID || 'preflight-' + env.GITHUB_RUN_ID, notBefore: env.CODEXIA_WINDOW_START, notAfter: env.CODEXIA_WINDOW_END }
     : null;
   return { backendPublisherRunId, frontend, intent: env.CODEXIA_PREFLIGHT_INTENT, window,
     ...(env.CODEXIA_PRIOR_PUBLISHER ? { priorBackendPublisherRunId: Number(env.CODEXIA_PRIOR_PUBLISHER) } : {}) };

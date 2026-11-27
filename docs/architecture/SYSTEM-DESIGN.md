@@ -40,7 +40,7 @@ The accepted Desktop Web toolchain is **TypeScript 7 (native compiler/type check
 
 **C4構造・信頼境界図の正本:** [LikeC4 system model](./likec4/model.likec4)。本書とリンク先の領域設計が製品上の意味・認可・永続化の正本を維持し、LikeC4 model は承認済みのsystem context、container/component、依存方向、外部trust relationshipを構造契約として表す。Architecture Atlas は、このモデルを `system-1` の構造・信頼境界ビューと `system-3` の運用トポロジービューで表示する。下記の運用順序と承認条件は、本書とデプロイ設計を参照する。
 
-通常の執筆UIと所有者管理UI（`/console`、初回登録の`/console/setup`、`/console/security`、`/console/identity`、**バックアップ保管先管理の`/console/backups`**）は**Cloudflare Workers Static Assets**が配信する。管理者登録キー検証・Passkey・OAuth・権限状態の正本は**VMのFastify/Better AuthとPostgreSQL**であり、Workersは管理者を作成しない。新規DBは本番起動前にAPIを**setup-only**として限定公開できる目標設計とし、その他の作品・MCP APIは停止/拒否する。既存DBのVM交換では同じownerを復旧し、新規登録キーを発行しない。現行の一時SSH登録サーバー方式からの移行は未実装である。
+通常の執筆UIと所有者管理UI（`/console`、初回登録の`/console/setup`、`/console/security`、`/console/identity`、**バックアップ保管先管理の`/console/backups`**）は**Cloudflare Workers Static Assets**が配信する。管理者登録キー検証・Passkey・OAuth・権限状態の正本は**VMのFastify/Better AuthとPostgreSQL**であり、Workersは管理者を作成しない。新規DBは本番起動前にAPIを**setup-only**として限定公開し、その他の作品・MCP APIは停止/拒否する。既存DBのVM交換では同じownerを復旧し、新規登録キーを発行しない。R5 の setup-only API 起動・確認・Tunnel 開始処理は実装済みであり、本番での本人登録・起動受入は未完了である。
 
 UI 配信と API の外部認可は分離して管理する。Access の通過は Codexia の project/object 認可を代替しない。公開 reader は別の読み取り専用経路とする。HTTP MCP と stdio は同じ認可済みドメイン操作へ到達するアダプターであり、第二の writer を実装しない。
 

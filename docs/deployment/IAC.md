@@ -6,6 +6,8 @@ The sole backend delivery path is **GitHub Actions → Tailscale OIDC → pinned
 
 The canonical production tasks are in [Ansible](../../deploy/ansible/README.md) and the Quadlet definitions in [Quadlet](../../deploy/quadlet). The protected production workflow verifies a certified immutable Full GHCR digest and its provenance, serializes deployment under a rootless host lock, requires a verified encrypted backup for compatible image changes and probes readiness. Pull-request validation receives no production credentials.
 
+対象 VM の SSH セッションから実行する [codexiactl](CODEXIACTL.md) は初回の管理接続準備、外部認証、GitHub の保護入力整備と既存 operation の起動に限定する。Ansible は従来どおり Runner で実行し、CLI は Ansible の代替構成管理・常駐配備主体ではない。
+
 ## VMから管理者登録までの責務
 
 - **入力VMの基準:** AnsibleからSSH接続でき、権限付きで構成変更できること。Ubuntu 26.04 x86-64、systemd/cgroup v2、UID/GIDと既存データの同一性はAnsibleが検査する。VM提供基盤やTerraformを必須の前提としない。

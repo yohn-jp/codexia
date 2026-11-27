@@ -2,6 +2,8 @@
 
 Provision a VM, enroll its first owner through the normal frontend and activate the certified Backend. The activation ends at ACTIVE. Complete the independent restore drill after configuring backups to establish operational acceptance. [Initial deployment](INITIAL-DEPLOYMENT-FLOW.md) owns the input and recovery contract. [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) owns route selection. The management path is GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet.
 
+The normative [initial deployment CLI](CODEXIACTL.md) is the target operator entrypoint. It prepares the inputs below and invokes these existing protected workflows from one SSH-side guided session; it does not replace their checks. Until CLI conformance is proven, this runbook remains the actual manual operation reference. Independent approvals and owner enrollment remain mandatory.
+
 ## Establish deployment access
 
 Use protected GitHub Environments with required reviewers and deployment restricted to main. The VM must be reachable over the tailnet and the independent administrator must have noninteractive sudo. Obtain the VM's SSH host key through the provider console or an independently authenticated channel. Provision the administrator's public SSH key on that account. Provision a separate deployment identity for the rootless service. R4 derives its public half inside the runtime Environment, installs it on the target, and verifies a real runtime login against the same VM identity.

@@ -17,6 +17,9 @@ on:
         type: choice
         options: [install, adopt, update, maintenance, restore]
         default: install
+      window_id:
+        description: Existing approved window ID (required for restoration with a window)
+        type: string
       window_start:
         description: Approved window start in UTC ISO 8601 (when required)
         type: string
@@ -90,6 +93,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_PREFLIGHT_INTENT: ${{ inputs.intent }}
+          CODEXIA_WINDOW_ID: ${{ inputs.window_id }}
           CODEXIA_WINDOW_START: ${{ inputs.window_start }}
           CODEXIA_WINDOW_END: ${{ inputs.window_end }}
           CODEXIA_PRIOR_PUBLISHER: ${{ inputs.prior_publisher }}

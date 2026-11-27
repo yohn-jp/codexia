@@ -34,6 +34,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | User screen navigation and recovery | [User screen flows](design/USER-SCREEN-FLOW.md) — canonical state transitions |
 | Owner security management and admin boundaries | [Admin screen flows](design/ADMIN-SCREEN-FLOW.md) — canonical `/console`, `/console/setup`, `/console/security`, `/console/identity` routing and state transitions (target, not implemented) |
 | Production deployment lifecycle and route selection | [Deployment lifecycle](deployment/DEPLOYMENT-LIFECYCLE.md) — normative state classification, initial pair activation, compatible updates, maintenance/recovery and shared acceptance |
+| SSH-side initial deployment CLI | [codexiactl](deployment/CODEXIACTL.md) — normative command, provider authentication, setup/dispatch, resume and acceptance contract |
 | Pristine VM, one-time setup key, first owner and recovery | [Initial deployment flows](deployment/INITIAL-DEPLOYMENT-FLOW.md) — SSH-ready VM, Ansible, Workers setup-only/API, protected activation and existing-owner restore contract |
 | Compatible backend updates and rollback | [Update flows](deployment/UPDATE-FLOW.md) — canonical state transitions |
 | Visual design system | [App design system](../app/DESIGN.md) — canonical visual direction and owner-confirmed decisions |

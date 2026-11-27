@@ -4,6 +4,8 @@
 本書は、新規 VM の構築から PostgreSQL、本人認証、API の公開までの状態、遷移、停止条件を定める規範的設計である。[本番Deploymentライフサイクル](DEPLOYMENT-LIFECYCLE.md) が全状態の経路選択、初回Backend activation、保守・復旧・排他の横断契約を所有する。
 本番の初回登録は通常の HTTPS オリジンを使う。[システム基本設計](../architecture/SYSTEM-DESIGN.md) [IaC](IAC.md) [Push deployment](PUSH-DEPLOYMENT.md) [Ansible 運用](../../deploy/ansible/README.md) [認証初期化](../../deploy/ansible/AUTH-RUNTIME.md)
 
+初回の認証・接続準備、保護 Environment 入力の整備、各既存 operation の起動と再開は [codexiactl](CODEXIACTL.md) が所有する。以下の state machine と DB/Owner/activation の受入は変わらない。
+
 ## 初期構築・公開までの状態遷移
 
 [グラフィカルな遷移図を開く](https://yohn-jp.github.io/codexia/architecture/#first-1)

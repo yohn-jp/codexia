@@ -69,6 +69,17 @@ test('[TEST-DATA-006-001] open work ZIP preserves historical and deleted revisio
       const manifest = parse('manifest.json');
       assert.deepEqual(project.settings, { language: 'ja' });
       assert.equal(project.documents[0].deletedAt !== null, true);
+      assert.deepEqual(manifest.documents, [
+        {
+          id: beforeDelete.initial.document.id,
+          parentId: project.documents[0].parentId,
+          kind: project.documents[0].kind,
+          orderKey: project.documents[0].orderKey,
+          headRevisionId: beforeDelete.edited.revision.id,
+          deletedAt: project.documents[0].deletedAt,
+          path: revisions.find((row: { id: string }) => row.id === beforeDelete.edited.revision.id).path,
+        },
+      ]);
       assert.equal(revisions.length, 2);
       assert.ok(revisions.every((row: { path: string }) => row.path.startsWith('history/documents/deleted/')));
       assert.equal(
@@ -100,7 +111,7 @@ test('[TEST-DATA-006-002] export uses one PostgreSQL snapshot and rejects an inc
     const { document, revision } = await tx.createDocument({
       projectId: project.id,
       kind: 'scene',
-      title: 'CON',
+      title: 'CON.txt',
       orderKey: '0001',
       markdown,
       authorId: 'owner',
@@ -151,7 +162,21 @@ test('[TEST-DATA-006-002] export uses one PostgreSQL snapshot and rejects an inc
       assert.equal(manuscripts.length, 1);
       const [first] = manuscripts;
       assert.ok(first && !first.directory);
-      assert.match(first.filename, /^manuscript\/CON-[0-9a-f-]+\/index\.md$/u);
+      assert.match(first.filename, /^manuscript\/_CON\.txt-[0-9a-f-]+\/index\.md$/u);
+      const manifestEntry = entries.find(entry => entry.filename === 'manifest.json');
+      assert.ok(manifestEntry && !manifestEntry.directory);
+      const manifest = JSON.parse(Buffer.from(await manifestEntry.getData(new Uint8ArrayWriter())).toString('utf8'));
+      assert.deepEqual(manifest.documents, [
+        {
+          id: document.id,
+          parentId: document.parentId,
+          kind: document.kind,
+          orderKey: document.orderKey,
+          headRevisionId: revision.id,
+          deletedAt: null,
+          path: first.filename,
+        },
+      ]);
       assert.equal(Buffer.from(await first.getData(new Uint8ArrayWriter())).toString('utf8'), markdown);
       assert.equal(entries.filter(entry => entry.filename.startsWith('history/documents/')).length, 0);
     } finally {

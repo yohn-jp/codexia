@@ -244,8 +244,10 @@ if(apiHealth!=='healthy'||apiUnit!=='active'||Number(apiCount)!==1)throw new Err
 if(!expectedImageId||apiImage!==expectedImageId)throw new Error(`${key}: API writer image ID differs from the run-bound ${role} candidate`);
 if(sentinel!==(['first-activation','same-digest-reapply'].includes(key)?'not-created':'preserved'))throw new Error(`${key}: PostgreSQL sentinel data was absent or changed`);
 report.observations ||= {}; const observations=report.observations.continuity ||= []; const previous=observations.at(-1);
+const explicitSocketRestart=key==='private-backup-socket-restart';
+if(explicitSocketRestart&&!previous)throw new Error('Private socket provisioning requires a previous runtime observation');
 if(previous){
-  if(key==='backup-provisioned'){
+  if(explicitSocketRestart){
     // Installing the private socket and exercising its restart recreates both Quadlet containers.
     if(dbContainer===previous.dbContainer||apiContainer===previous.apiContainer)throw new Error('Backup socket maintenance did not recreate the database and API containers');
     if(!dbImage||dbImage!==previous.dbImage)throw new Error('Backup provisioning changed the PostgreSQL image');
@@ -725,7 +727,7 @@ fi
 grep -Fq 'Deployment transaction failed during off-VM backup admission' "$tmp/deploy-executor-missing.log"
 observe_runtime missing-executor "$initial_key"
 verify_private_backup_socket
-observe_runtime backup-provisioned "$initial_key"
+observe_runtime private-backup-socket-restart "$initial_key"
 if run_deploy "$update_key" false '' deploy-console-unconfigured; then
   echo 'An update reached candidate activation before Console backup configuration' >&2
   return 1

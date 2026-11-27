@@ -975,6 +975,41 @@ test("[TEST-DATA-006-004] desktop author can download a portable work and import
   expect((await original.json() as { revision: { markdown: string } }).revision.markdown).toContain("最初の本文。");
 });
 
+test("leaving the work panel cancels an unfinished open ZIP download", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
+  const { project } = await createOAuthWritingFixture(authorizeAuthor, page);
+  const transfer = page.locator("details").filter({ has: page.locator("summary", { hasText: "作品のエクスポート・インポート" }) });
+  await transfer.locator("summary").click();
+  const path = `/api/v1/persistence/projects/${project.id}/open-export`;
+  let releaseRequest!: () => void;
+  const heldRequest = new Promise<void>((resolve) => { releaseRequest = resolve; });
+  await page.route(url => url.pathname === path, async route => {
+    await heldRequest;
+    await route.continue().catch(() => undefined);
+  });
+  let downloads = 0;
+  page.on("download", () => { downloads += 1; });
+  try {
+    const started = page.waitForRequest(request => new URL(request.url()).pathname === path);
+    await transfer.getByRole("button", { name: "離脱用 ZIP をダウンロード" }).click();
+    const request = await started;
+    const cancelled = page.waitForEvent("requestfailed", candidate => candidate === request);
+    const panels = page.getByRole("toolbar", { name: "ワークスペース配置" }).locator("details");
+    await panels.locator("summary").click();
+    await panels.getByRole("button", { name: "作品と構成を隠す", exact: true }).click();
+    await expect(transfer).toHaveCount(0);
+    await cancelled;
+    releaseRequest();
+    await expect(panels.getByRole("button", { name: "作品と構成を表示", exact: true })).toBeVisible();
+    await panels.getByRole("button", { name: "作品と構成を表示", exact: true }).click();
+    await transfer.locator("summary").click();
+    await expect(transfer.getByText("ZIP の受信を中止しました。", { exact: true })).toBeVisible();
+    await expect(transfer.getByRole("button", { name: "離脱用 ZIP をダウンロード" })).toBeEnabled();
+    expect(downloads).toBe(0);
+  } finally {
+    releaseRequest();
+  }
+});
+
 test("keeps the manuscript near its scene title with one concise protection status", async ({ page, authorizeAuthor }) => {
   const { project, scene } = await createOAuthWritingFixture(authorizeAuthor, page);
   const measured: Array<{ mode: string; width: number; height: number; top: number; protectionCount: number; pageWidth: number }> = [];
