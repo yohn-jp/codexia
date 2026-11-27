@@ -149,9 +149,14 @@ function testTypecheckWorkspaceIds(scope) {
       : workspacePath.startsWith('modules/')).map(({ id }) => id);
 }
 
-async function runTestTypecheck(scope) {
-  testTypecheckWorkspaceIds(scope);
-  run(process.execPath, ['scripts/ci/execution/typecheck-tests.mjs', scope]);
+function runTestTypecheck(scope, { prepare = false } = {}) {
+  if (scope !== undefined) testTypecheckWorkspaceIds(scope);
+  if (prepare) {
+    const scopes = scope === undefined ? TEST_TYPECHECK_SCOPES : [scope];
+    const targets = new Set(scopes.flatMap(id => prerequisiteIds(`test-types-${id}`)));
+    runWorkspaceScript([...targets], 'build');
+  }
+  run(process.execPath, ['scripts/ci/execution/typecheck-tests.mjs', ...(scope === undefined ? [] : [scope])]);
 }
 
 
@@ -343,13 +348,14 @@ async function checkCoverage() {
 }
 
 const [command, targetId, scopeOrTarget, ...extra] = process.argv.slice(2);
-const usage = 'Usage: node scripts/ci/execution/workspace.mjs <build-workspace|prepare selected-group <report>|unit <target>|typecheck [target]|test-types <scope>|coverage>';
+const usage = 'Usage: node scripts/ci/execution/workspace.mjs <build-workspace|prepare selected-group <report>|unit <target>|typecheck [target]|test-types <scope>|test-types --prepare [scope]|coverage>';
 if (extra.length || !command) fail(usage);
 if (command === 'build-workspace' && !targetId) buildWorkspace();
 else if (command === 'prepare' && targetId === 'selected-group' && scopeOrTarget) await prepareSelectedGroup(scopeOrTarget);
 else if (command === 'unit' && targetId && !scopeOrTarget) await runUnit(targetId);
 else if (command === 'typecheck' && !targetId) typecheckWorkspace();
 else if (command === 'typecheck' && targetId && !scopeOrTarget) await runTypecheck(targetId);
-else if (command === 'test-types' && targetId && !scopeOrTarget) await runTestTypecheck(targetId);
+else if (command === 'test-types' && targetId === '--prepare') runTestTypecheck(scopeOrTarget, { prepare: true });
+else if (command === 'test-types' && targetId && !scopeOrTarget) runTestTypecheck(targetId);
 else if (command === 'coverage' && !targetId && !scopeOrTarget) await checkCoverage();
 else fail(usage);

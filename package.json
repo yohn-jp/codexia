@@ -13,7 +13,7 @@
     "ui:scan": "node scripts/build/frontend/scan.mjs",
     "build:workspace": "node scripts/ci/execution/workspace.mjs build-workspace && node scripts/build/packaging/profile-build.mjs --profile \"${CODEXIA_PROFILE:-core}\" && pnpm --filter @codexia/app build && pnpm --filter @codexia/api build",
     "typecheck": "node scripts/ci/execution/workspace.mjs typecheck",
-    "typecheck:tests": "pnpm --filter @codexia/api... build && node scripts/ci/execution/typecheck-tests.mjs",
+    "typecheck:tests": "node scripts/ci/execution/workspace.mjs test-types --prepare",
     "typecheck:safety": "pnpm --filter @codexia/app generate:http && tsc -p tsconfig.safety.json",
     "test:unit:changed": "node scripts/dev/test-changed-units.mjs",
     "test:http-contract": "pnpm --filter @codexia/http-contract test",
