@@ -110,7 +110,7 @@ async function main() {
   const env = process.env;
   const tag = env.GITHUB_REF_NAME;
   const sha = env.GITHUB_SHA;
-  if (env.GITHUB_REPOSITORY !== repository || env.GITHUB_EVENT_NAME !== 'push' || env.GITHUB_REF !== `refs/tags/${tag}`) {
+  if (env.GITHUB_REPOSITORY !== repository || env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || env.GITHUB_REF !== `refs/tags/${tag}`) {
     throw new Error('CLI release is limited to the canonical repository tag publisher');
   }
   assertReleaseIdentity(tag, sha, sha);
