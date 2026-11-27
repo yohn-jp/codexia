@@ -19,14 +19,18 @@
 | ファイル名 | `codexia-work-<projectId>.zip` |
 
 [経路認可](ROUTE-AUTHORIZATION-CONTRACT.md)では `OWNER-API` とし、既存の作者認証、オリジン制限および対象作品の認可を再利用する。
-公開 reader、MCP grant、OAuth アクセストークンに包括的な作品 ZIP の取得権限を与えない。
+許可する資格は、既存の API audience、登録済み owner client、owner subject および `codexia:api` を検証した Better Auth の OAuth bearer とする。
+公開 reader、MCP 用の OAuth bearer および上流 IdP のトークンは拒否する。
 資源の割り当ては認可の後に行う。
 生成終了時にも応答を書き始める前に既存の認証および作品アクセスの判定を再利用し、失効や取り消しを検出した場合には ZIP を破棄する。
 
 API epoch 4 への追加操作として扱い、既存の archive と import のワイヤ契約を維持する。
 旧クライアントは既存操作を使用できる。
-Desktop Web が旧サーバーに接続して ZIP 操作が存在しない場合、取得不可を表示する。
-互換性は OpenAPI 差分と旧クライアントの回帰試験で検証する。
+同一 epoch で許容される後方互換の追加として、既存操作の削除、入出力の変更および認可境界の変更を含めない。 [API の追加手続き](API-CONTRACT.md#操作の追加変更廃止)
+Desktop Web が旧サーバーに接続し ZIP 操作が 404 を返した場合、その操作の取得不可を表示する。
+作品へのアクセス不可を含む 404 は同じ表示にし、作品の存在やサーバーの対応状況を推測させない。
+既存の API epoch 判定はそのまま使用し、ZIP 専用の能力判定は追加しない。
+OpenAPI 差分、新サーバーと旧クライアント、旧サーバーと新クライアントの両組み合わせを検証する。
 
 ## 画面
 
