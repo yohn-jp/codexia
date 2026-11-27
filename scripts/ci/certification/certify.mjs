@@ -60,16 +60,19 @@ if (rootReports.length === 1) {
 assertPlanEvidence(plan, jobs, reports);
 const reusedCoverageReports = reports.filter(report => report.results?.some(result => result.inputProof?.reusedFrom));
 assert.ok(reusedCoverageReports.length <= 1, 'Duplicate task proof consumption reports');
-if (reusedCoverageReports.length === 1) {
-  await assertReusedCoverageProof({ plan, report: reusedCoverageReports[0], current: run,
-    repository: GITHUB_REPOSITORY, token: GH_TOKEN });
-}
 const artifacts = await paginateActionsInventory(github, github.rest.actions.listWorkflowRunArtifacts,
   { owner, repo, run_id: Number(GITHUB_RUN_ID) }, 'artifacts');
+const producerNames = ['build-core', 'build-full', 'types-trace'];
+if (reusedCoverageReports.length === 1) producerNames.push('types-tests');
 const producerJobs = await resolveProducerJobAttempts(jobs, run,
   (runId, attempt) => paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRunAttempt,
     { owner, repo, run_id: runId, attempt_number: attempt }, 'jobs'),
-  ['build-core', 'build-full', 'types-trace']);
+  producerNames);
+if (reusedCoverageReports.length === 1) {
+  const candidateJob = producerJobs.find(job => job.name === 'types-tests');
+  await assertReusedCoverageProof({ plan, report: reusedCoverageReports[0], current: run, candidateJob,
+    repository: GITHUB_REPOSITORY, token: GH_TOKEN });
+}
 if (plan.tasks.includes('requirements-trace')) {
   const traceReport = reports.find(report => report.group === 'types-trace');
   const traceJob = producerJobs.find(job => job.name === 'types-trace');

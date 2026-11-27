@@ -172,10 +172,19 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
 }
 
 /** Re-resolve the exact-base proof and recompute the candidate closure in certification. */
-export async function assertReusedCoverageProof({ plan: planValue, report, current, repository, token, request = fetch }) {
+export async function assertReusedCoverageProof({ plan: planValue, report, current, candidateJob, repository, token, request = fetch }) {
   const plan = validateVerificationPlan(planValue);
   assert.ok(report && typeof report === 'object', 'Missing task proof consumer report');
   assert.equal(report.group, COVERAGE_JOB, 'Task proof was consumed by an unexpected job');
+  assert.equal(candidateJob?.name, COVERAGE_JOB, 'Coverage producer job mismatch');
+  assert.equal(candidateJob.head_sha, plan.sha, 'Coverage producer source mismatch');
+  assert.equal(candidateJob.run_id, current.id, 'Coverage producer run mismatch');
+  assert.equal(candidateJob.status, 'completed', 'Coverage producer is unfinished');
+  assert.equal(candidateJob.conclusion, 'success', 'Coverage producer did not succeed');
+  assert.ok(positive(candidateJob.run_attempt) && candidateJob.run_attempt <= current.run_attempt, 'Invalid coverage producer attempt');
+  assert.equal(report.workflowRunId, current.id, 'Coverage report run mismatch');
+  assert.equal(report.workflowJob, COVERAGE_WORKFLOW_JOB, 'Coverage report workflow job mismatch');
+  assert.equal(report.workflowAttempt, candidateJob.run_attempt, 'Coverage producer attempt mismatch');
   assertTaskProducerInventory({ plan, report, inventory: report.producerInventory });
   const result = report.results.find(item => item.task === 'coverage');
   assert.equal(result?.status, 'passed', 'Reused coverage result did not pass');
@@ -202,7 +211,7 @@ export async function assertReusedCoverageProof({ plan: planValue, report, curre
     baselineIdentity: { sourceSha: trusted.proofSourceSha, planDigest: trusted.planDigest,
       workflowRunId: trusted.workflowRunId, workflowAttempt: trusted.workflowAttempt },
     candidateIdentity: { sourceSha: plan.sha, planDigest: planDigest(plan),
-      workflowRunId: current.id, workflowAttempt: current.run_attempt },
+      workflowRunId: current.id, workflowAttempt: candidateJob.run_attempt },
   }), ['coverage'], 'Candidate and exact-base task inputs are not equivalent');
   return true;
 }

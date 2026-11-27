@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { TextReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js';
 import { VERIFICATION_GROUPS } from '../impact/contract.mjs';
 import { createVerificationPlan, planDigest } from '../impact/plan.mjs';
-import { resolveExactMainCoverageProof } from './proof-reuse.mjs';
+import { resolveProducerJobAttempts } from './artifact-selection.mjs';
+import { captureCoverageInputClosure, coverageInvocation, coverageRuntime } from './coverage-inputs.mjs';
+import { assertReusedCoverageProof, resolveExactMainCoverageProof } from './proof-reuse.mjs';
 import { createGitHubProofClient } from './proof-client.mjs';
 import { taskInvocation, taskWorkflowJob } from './task-inputs.mjs';
 import { main as planProofReuse } from './reuse-coverage-proof.mjs';
@@ -234,4 +238,63 @@ test('coverage proof resolution never requires proof receipts from NOT_SELECTED 
   delete selected.results.find(item => item.task === 'coverage').inputProof;
   delete selected.producerInventory.taskInvocations.find(item => item.task === 'coverage').inputProof;
   await assert.rejects(resolveExactMainCoverageProof(options), /proof/i);
+});
+
+test('a partial rerun certifies reused coverage from its original successful producer attempt', async () => {
+  const evidence = mainEvidence();
+  const runtime = coverageRuntime();
+  const workflowJob = 'types';
+  const inputClosure = await captureCoverageInputClosure({ root: runtime.cwd, runtime,
+    invocation: coverageInvocation(runtime.execPath), workflowJob });
+  evidence.reports.get('ci-evidence-types-tests').results.find(item => item.task === 'coverage').inputProof.inputClosure = inputClosure;
+  const archives = new Map();
+  for (const artifact of evidence.artifacts) {
+    const isPlan = artifact.name === 'ci-plan';
+    const content = isPlan ? evidence.plan : evidence.reports.get(artifact.name);
+    const writer = new ZipWriter(new Uint8ArrayWriter(), { useWebWorkers: false });
+    await writer.add(isPlan ? 'ci-plan.json' : 'report.json', new TextReader(JSON.stringify(content)));
+    const bytes = await writer.close();
+    artifact.digest = 'sha256:' + createHash('sha256').update(bytes).digest('hex');
+    artifact.size_in_bytes = bytes.length;
+    archives.set(artifact.id, bytes);
+  }
+  const requestMetadata = mockRequest(evidence);
+  const request = async (url, options) => {
+    const { hostname, pathname } = new URL(String(url));
+    if (hostname === 'storage.example') return new Response(archives.get(Number(pathname.slice(1))));
+    const artifactId = pathname.match(/\/actions\/artifacts\/(\d+)\/zip$/u)?.[1];
+    if (artifactId) return new Response(null, { status: 302, headers: { location: 'https://storage.example/' + artifactId } });
+    return requestMetadata(url, options);
+  };
+  const current = { ...evidence.run, id: 600, event: 'pull_request', head_sha: candidateSha };
+  const options = { current, repository: 'yohn-jp/codexia', token: 'test-token', request };
+  const plan = createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: candidateSha, base: sourceSha });
+  const reusedFrom = await resolveExactMainCoverageProof({ ...options, plan });
+  plan.coverageReuse = reusedFrom;
+  const originalJob = { id: 140, name: 'types-tests', run_id: current.id, run_attempt: 1, head_sha: candidateSha,
+    status: 'completed', conclusion: 'success', started_at: '2026-11-26T00:00:00Z', completed_at: '2026-11-26T00:01:00Z' };
+  const alias = { ...originalJob, id: 141, run_attempt: current.run_attempt };
+  const [candidateJob] = await resolveProducerJobAttempts([alias], current,
+    async (_runId, attempt) => [attempt === 1 ? originalJob : alias], ['types-tests']);
+  const report = { group: 'types-tests', sha: candidateSha, planDigest: planDigest(plan), workflowRunId: current.id,
+    workflowAttempt: 1, workflowJob, workflowRef: 'yohn-jp/codexia/.github/workflows/verify.yml@refs/pull/20/merge',
+    workflowSha: candidateSha };
+  const proof = { format: 'codexia-ci-task-input-proof/v2', task: 'coverage', mode: 'static-coverage', status: 'passed',
+    sourceSha: candidateSha, planDigest: report.planDigest, workflowRunId: current.id, workflowAttempt: 1, workflowJob,
+    runtime, inputClosure, reusedFrom };
+  report.results = [{ task: 'coverage', status: 'passed', invocations: [], inputProof: proof }];
+  report.producerInventory = { format: 'codexia-ci-task-producer-inventory/v1', group: report.group, sourceSha: report.sha,
+    planDigest: report.planDigest, workflowRunId: report.workflowRunId, workflowAttempt: report.workflowAttempt,
+    workflowJob, workflowRef: report.workflowRef, workflowSha: report.workflowSha,
+    runner: { os: runtime.platform, arch: runtime.arch, nodeVersion: runtime.nodeVersion,
+      imageOS: runtime.imageOS, imageVersion: runtime.imageVersion },
+    selectedTasks: ['coverage'], groupInvocations: [], taskInvocations: report.results };
+  assert.equal(await assertReusedCoverageProof({ ...options, plan, report, candidateJob }), true);
+  for (const [change, reason] of [
+    [{ run_attempt: 2 }, /producer attempt mismatch/u],
+    [{ run_id: 601 }, /producer run mismatch/u],
+    [{ head_sha: sourceSha }, /producer source mismatch/u],
+    [{ name: 'types-trace' }, /producer job mismatch/u],
+    [{ conclusion: 'failure' }, /producer did not succeed/u],
+  ]) await assert.rejects(assertReusedCoverageProof({ ...options, plan, report, candidateJob: { ...candidateJob, ...change } }), reason);
 });
