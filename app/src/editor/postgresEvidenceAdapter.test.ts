@@ -60,8 +60,8 @@ test("PostgreSQL editor reads keep raw mentions, candidates, and confirmed Knowl
   };
   t.after(() => { globalThis.fetch = originalFetch; });
 
-  const adapter = createPostgresEditorEvidenceAdapter(() => ({ projectId, documentId, revisionId }));
-  const snapshot = await adapter.read({ projectId: "legacy-project", documentId: "legacy-scene", revisionId: "git-sha", markdown: manuscript }, new AbortController().signal);
+  const adapter = createPostgresEditorEvidenceAdapter();
+  const snapshot = await adapter.read({ projectId, documentId, revisionId, markdown: manuscript }, new AbortController().signal);
   assert.equal(snapshot.revisionId, revisionId);
   assert.equal(snapshot.markdown, manuscript);
   assert.equal(snapshot.anchors.find((item) => item.id === "raw")?.target, undefined);
@@ -72,7 +72,13 @@ test("PostgreSQL editor reads keep raw mentions, candidates, and confirmed Knowl
   assert.deepEqual(snapshot.anchors.find((item) => item.id === "confirmed")?.targets, [{ id: confirmedNodeId, label: "東京" }, { id: proposedNodeId, label: "日本" }]);
   assert.equal(snapshot.anchors.find((item) => item.id === "raw")?.assertions?.[0]?.status, "proposed");
   assert.match(snapshot.anchors.find((item) => item.id === "raw")?.assertions?.[0]?.label ?? "", /^fact:/u);
-  assert.match(requests[0]!.url, new RegExp(`revision=${revisionId}`));
+  const documentRequest = new URL(requests[0]!.url, "http://localhost");
+  const anchorRequest = new URL(requests[1]!.url, "http://localhost");
+  const documentPath = `/api/v1/persistence/projects/${projectId}/documents/${documentId}`;
+  assert.equal(documentRequest.pathname, documentPath);
+  assert.equal(documentRequest.searchParams.get("revision"), revisionId);
+  assert.equal(anchorRequest.pathname, `${documentPath}/anchors`);
+  assert.equal(anchorRequest.searchParams.get("revision"), revisionId);
 });
 
 test("PostgreSQL editor sends the exact composed ChangeSet with an idempotency key", async (t) => {
@@ -80,7 +86,8 @@ test("PostgreSQL editor sends the exact composed ChangeSet with an idempotency k
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     savedRequest = { url: String(input), init };
-    const body = JSON.parse(String(init?.body)) as { changes: Array<{ fromUtf16: number; toUtf16: number; insert: string }>; resultingSha256: string };
+    const body = JSON.parse(String(init?.body)) as { baseRevisionId: string; changes: Array<{ fromUtf16: number; toUtf16: number; insert: string }>; resultingSha256: string };
+    assert.equal(body.baseRevisionId, revisionId);
     assert.deepEqual(body.changes, [{ fromUtf16: 2, toUtf16: 2, insert: "追" }, { fromUtf16: 4, toUtf16: 6, insert: "大阪" }]);
     assert.equal(body.resultingSha256, createHash("sha256").update("🙂追猫は大阪。", "utf8").digest("hex"));
     return Response.json({
@@ -91,8 +98,8 @@ test("PostgreSQL editor sends the exact composed ChangeSet with an idempotency k
   };
   t.after(() => { globalThis.fetch = originalFetch; });
 
-  const adapter = createPostgresEditorEvidenceAdapter(() => ({ projectId, documentId }));
-  const result = await adapter.save!({ projectId, documentId, revisionId }, {
+  const adapter = createPostgresEditorEvidenceAdapter();
+  const result = await adapter.save({ projectId, documentId, revisionId }, {
     baseMarkdown: "🙂猫は東京。",
     markdown: "🙂追猫は大阪。",
     changes: [{ from: 2, to: 2, insert: "追" }, { from: 4, to: 6, insert: "大阪" }],
@@ -101,6 +108,7 @@ test("PostgreSQL editor sends the exact composed ChangeSet with an idempotency k
   }, new AbortController().signal);
   assert.equal(result.markdown, "🙂追猫は大阪。");
   assert.ok(savedRequest);
+  assert.ok(savedRequest.url.endsWith(`/projects/${projectId}/documents/${documentId}`));
   assert.equal(savedRequest?.init?.method, "PATCH");
   assert.equal(new Headers(savedRequest?.init?.headers).get("Idempotency-Key"), "edit-once");
   assert.equal(new Headers(savedRequest?.init?.headers).get("X-Client-Id"), "browser-one");

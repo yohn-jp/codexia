@@ -1,36 +1,21 @@
 import { api } from "../api";
 import type { RevisionId } from "@codexia/persistence-contracts";
-import { applyTextChanges, composeTextChanges, parseMarkdownBlocks, type EditorEvidenceAdapter, type EditorEvidenceIdentity, type EditorEvidenceSnapshot, type EditorPersistenceSaveResult, type TextAnchor } from "./evidence";
+import { applyTextChanges, composeTextChanges, parseMarkdownBlocks, type EditorEvidenceIdentity, type EditorEvidenceSnapshot, type EditorPersistenceSave, type EditorPersistenceSaveResult, type TextAnchor } from "./evidence";
 
-export interface PersistenceEditorBinding {
-  projectId: string;
-  documentId: string;
-  /** Revision mapping for imported Git-backed editors; omitted when identities already use PostgreSQL IDs. */
-  revisionId?: string;
-}
-
-/**
- * Connects the existing CodeMirror evidence contract to the authenticated PostgreSQL API.
- * Hosts may map legacy UI identities to imported PostgreSQL identities after migration.
- */
-export function createPostgresEditorEvidenceAdapter(
-  resolveBinding: (identity: EditorEvidenceIdentity) => PersistenceEditorBinding | null = (identity) => identity,
-): EditorEvidenceAdapter {
+/** Connects CodeMirror evidence and saves to the authenticated PostgreSQL API. */
+export function createPostgresEditorEvidenceAdapter() {
   const clientId = crypto.randomUUID();
   return {
-    async read(identity, signal): Promise<EditorEvidenceSnapshot> {
-      const binding = resolveBinding(identity);
-      if (!binding) throw new Error("このEditor原稿にはPostgreSQLの保存先が割り当てられていません。");
-      const requestedRevisionId = binding.revisionId ?? identity.revisionId;
-      const read = await api.persistenceDocument(binding.projectId, binding.documentId, signal, requestedRevisionId);
+    async read({ projectId, documentId, revisionId, markdown }: EditorEvidenceIdentity, signal: AbortSignal): Promise<EditorEvidenceSnapshot> {
+      const read = await api.persistenceDocument(projectId, documentId, signal, revisionId);
       if (!read.revision) throw new Error("PostgreSQL にこの原稿Revisionがありません。");
-      if (identity.markdown !== undefined && read.revision.markdown !== identity.markdown) {
+      if (markdown !== undefined && read.revision.markdown !== markdown) {
         return { revisionId: read.revision.id, markdown: read.revision.markdown, blocks: [], anchors: [] };
       }
-      const evidence = await api.persistenceDocumentAnchors(binding.projectId, binding.documentId, read.revision.id, signal);
+      const evidence = await api.persistenceDocumentAnchors(projectId, documentId, read.revision.id, signal);
       const blocks = parseMarkdownBlocks(read.revision.markdown, (() => {
         let index = 0;
-        return () => `pg-block-${binding.documentId}-${++index}`;
+        return () => `pg-block-${documentId}-${++index}`;
       })());
       const anchors = evidence.anchors.flatMap(({ anchor, quote, mentions, assertions }) => {
         const block = anchor.status === "orphaned" || !quote ? undefined : blocks.find((item) => anchor.fromUtf16 >= item.from && anchor.fromUtf16 < item.to && anchor.toUtf16 <= item.to);
@@ -63,15 +48,13 @@ export function createPostgresEditorEvidenceAdapter(
       return { revisionId: read.revision.id, markdown: read.revision.markdown, blocks, anchors };
     },
 
-    async save(identity, request, signal): Promise<EditorPersistenceSaveResult> {
-      const binding = resolveBinding(identity);
-      if (!binding) throw new Error("このEditor原稿にはPostgreSQLの保存先が割り当てられていません。");
+    async save({ projectId, documentId, revisionId }: EditorEvidenceIdentity, request: EditorPersistenceSave, signal: AbortSignal): Promise<EditorPersistenceSaveResult> {
       const changes = composeTextChanges(request.baseMarkdown, [], request.changes);
       if (applyTextChanges(request.baseMarkdown, changes) !== request.markdown) {
         throw new Error("CodeMirror ChangeSetと保存する原稿が一致しません。");
       }
-      const saved = await api.savePersistenceDocument(binding.projectId, binding.documentId, {
-        baseRevisionId: identity.revisionId as RevisionId,
+      const saved = await api.savePersistenceDocument(projectId, documentId, {
+        baseRevisionId: revisionId as RevisionId,
         changes: changes.map((change) => ({ fromUtf16: change.from, toUtf16: change.to, insert: change.insert })),
         resultingSha256: await sha256(request.markdown),
         idempotencyKey: request.idempotencyKey,

@@ -91,7 +91,7 @@ test('PR paths and completed-Verify release impact retain component build inputs
     assert.deepEqual(releases[index].on.pull_request.paths, [...releaseScope[component], ...prOnly], component + ' PR path drift');
   }
   const changes = [
-    ['Desktop authoring', ['app/src/main.tsx'], [true, false]],
+    ['Desktop authoring', ['app/src/entries/desktop.tsx'], [true, false]],
     ['TypeSpec contract', ['packages/http-contract/src/routes-persistence.tsp'], [true, true]],
     ['TypeSpec compiler config', ['packages/http-contract/tspconfig.yaml'], [true, true]],
     ['Story browser entry', ['modules/story/src/browser.tsx'], [true, false]],
@@ -273,7 +273,7 @@ test('changes to trace inputs select the existing trace task without dropping do
     ['packages/persistence-postgres/tests/db-contract/catalog-contract.json', 'db-contract'],
     ['docs/design/SCREEN-CONTROL-CATALOG.md', null],
     ['docs/design/INTERACTION-CONTRACT.md', null],
-    ['app/src/App.tsx', 'unit-app'],
+    ['app/src/entries/desktop.tsx', 'unit-app'],
     ['deploy/ansible/deploy.yml', 'unit-root'],
     ['deploy/ansible/site.yml', 'unit-root'],
     ['deploy/cloudflare/terraform/main.tf', 'unit-root'],
@@ -748,7 +748,7 @@ test('CI dashboard changes remain root-scoped, mixed source remains fully covere
     assert.deepEqual((await plan([file])).tasks, ['unit-root', 'coverage'], file);
     assert.equal((await plan([file])).full_model_oci, false);
   }
-  const mixedSource = await plan(['scripts/ci/dashboard/analysis.mjs', 'app/src/main.tsx']);
+  const mixedSource = await plan(['scripts/ci/dashboard/analysis.mjs', 'app/src/entries/desktop.tsx']);
   assert.ok(mixedSource.tasks.includes('build-full') && mixedSource.tasks.includes('browser-full-ui-v1'));
   assert.deepEqual((await plan(['scripts/ci/dashboard/analysis.mjs', 'unknown/unreviewed.txt'])).tasks, NON_SWIFT_TASKS);
   assert.deepEqual((await plan(['scripts/ci/dashboard/analysis.mjs'], 'push')).tasks, NON_SWIFT_TASKS);

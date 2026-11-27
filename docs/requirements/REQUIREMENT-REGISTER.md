@@ -939,7 +939,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **Conformance status**: PARTIAL
 **Applicability**: CURRENT
 **Design owner**: [Screen catalog](../design/SCREEN-CONTROL-CATALOG.md)、[State Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: app/src/App.tsx; app/src/components/; app/src/shells/
+**Implementation identifiers**: app/src/application/navigation.ts (parseApplicationLocation, applicationPath); app/src/persistence/PersistenceWorkspace.tsx (PersistenceWorkspace); app/src/shells/desktop/DesktopShell.tsx (DesktopShell)
 **Verification identifiers**: tests/e2e/ui-v1.acceptance.spec.ts
 **Test IDs**: TEST-UI-003-001
 **Exact-run reference**: NOT_RUN
@@ -954,7 +954,11 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 - **Type**: File
   **Path**: docs/design/SCREEN-STATE-ATLAS.md
 - **Type**: File
-  **Path**: app/src/App.tsx
+  **Path**: app/src/application/navigation.ts
+- **Type**: File
+  **Path**: app/src/persistence/PersistenceWorkspace.tsx
+- **Type**: File
+  **Path**: app/src/shells/desktop/DesktopShell.tsx
 - **Type**: File
   **Path**: tests/e2e/ui-v1.acceptance.spec.ts
 
@@ -964,7 +968,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **MID**: 6129fe71966b7841314c39b71c52cddf
 **UID**: OBL-REQ-UI-003-O01
 **Design reference**: [Screen catalog](../design/SCREEN-CONTROL-CATALOG.md)、[State Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: app/src/App.tsx
+**Implementation identifiers**: app/src/application/navigation.ts (parseApplicationLocation, applicationPath); app/src/persistence/PersistenceWorkspace.tsx (PersistenceWorkspace); app/src/shells/desktop/DesktopShell.tsx (DesktopShell)
 **Test IDs**: TEST-UI-003-001
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -977,7 +981,11 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **ID**: REQ-UI-003
 
 - **Type**: File
-  **Path**: app/src/App.tsx
+  **Path**: app/src/application/navigation.ts
+- **Type**: File
+  **Path**: app/src/persistence/PersistenceWorkspace.tsx
+- **Type**: File
+  **Path**: app/src/shells/desktop/DesktopShell.tsx
 
 ## REQ-UI-004
 

@@ -159,7 +159,7 @@ export interface EditorEvidenceIdentity {
   projectId: string;
   documentId: string;
   revisionId: string;
-  /** Exact source text lets adapters reject a stale or unmapped revision before decorating. */
+  /** Exact source text lets the editor reject stale evidence before decorating. */
   markdown?: string;
 }
 
@@ -183,13 +183,6 @@ export interface EditorPersistenceSaveResult {
   markdown: string;
   document?: PersistenceDocument;
   revision?: PersistenceRevision;
-}
-
-/** Host adapter for a revision-pinned PostgreSQL document binding used by the existing Editor. */
-export interface EditorEvidenceAdapter {
-  read(identity: EditorEvidenceIdentity, signal: AbortSignal): Promise<EditorEvidenceSnapshot>;
-  /** Optional writer for a PG-backed Editor binding; invoked only after the browser Draft Journal stores the text. */
-  save?(identity: EditorEvidenceIdentity, request: EditorPersistenceSave, signal: AbortSignal): Promise<EditorPersistenceSaveResult>;
 }
 
 /** Validates host adapter data before offsets become CodeMirror decorations. */
