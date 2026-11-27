@@ -173,9 +173,9 @@ func TestTailnetCreatesOnlySeparatelyApprovedScopedOIDCTrust(t *testing.T) {
 		case r.URL.Path == "/api/v2/tailnet/"+network+"/keys/new-scoped-key":
 			_ = json.NewEncoder(w).Encode(validWIFKey("new-scoped-key"))
 		case r.URL.Path == "/api/v2/tailnet/"+network+"/acl":
-			fmt.Fprint(w, `{"grants":[{"src":["tag:ci"],"dst":["100.64.20.10"],"ip":["tcp:22"]]}`)
+			fmt.Fprint(w, `{"grants":[{"src":["tag:ci"],"dst":["100.64.20.10"],"ip":["tcp:22"]}]}`)
 		case r.URL.Path == "/api/v2/tailnet/"+network+"/acl/validate":
-			fmt.Fprint(w, `{}`)
+			// The official API acknowledges a passing ACL test with an empty 200 OK response.
 		default:
 			http.NotFound(w, r)
 		}
