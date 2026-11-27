@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import { z } from 'zod';
 import {
   backupExecutorConfigSchema,
@@ -36,6 +36,12 @@ const transferReceiptSchema = z.object({
   sha256sumsSha256: manifestSchema,
   markerSha256: manifestSchema,
   verifiedAt: z.string().datetime({ offset: true }),
+});
+const missingTransferEvidenceSchema = z.strictObject({
+  format: z.literal('codexia-backup-run-disposition/v1'),
+  backupId: uuid,
+  executorFenceSha256: manifestSchema,
+  conclusion: z.literal('no_verified_transfer'),
 });
 class RetryableControlError extends Error {
   readonly code = 75;
@@ -210,11 +216,16 @@ export class BackupConsoleControl {
       } = await client.query<{
         revision: number | null;
         state: string;
+        reason_code: string | null;
         source_sha: string | null;
         manifest_sha256: string | null;
         evidence: Record<string, unknown> | null;
-      }>(`SELECT revision, state, source_sha, manifest_sha256, evidence FROM codexia_backup.runs WHERE id = $1 AND ${kindClause}`, [runId]);
+      }>(
+        `SELECT revision, state, reason_code, source_sha, manifest_sha256, evidence FROM codexia_backup.runs WHERE id = $1 AND ${kindClause}`,
+        [runId],
+      );
       if (!run || !run.revision || !run.source_sha) throw new Error('Backup run is not eligible to finish');
+      if (run.reason_code === restoredBackupUnknownReason) throw new Error('Restored run needs independent reconciliation');
       if (
         run.manifest_sha256 === expectedManifestSha &&
         (run.state === 'REMOTE_VERIFIED' || (run.state === 'FAILED' && run.evidence?.offVmMethod === 'independent_mount'))
@@ -321,8 +332,8 @@ export class BackupConsoleControl {
       throw new Error('Backup run termination input is invalid');
     await this.options.pool.query(
       `UPDATE codexia_backup.runs SET state = $3, phase = CASE WHEN $3 = 'UNKNOWN' THEN 'recovery_required' ELSE 'failed' END,
-       reason_code = $4, observed_at = clock_timestamp() WHERE id = $1 AND (($2 = 'deploy' AND kind = 'deploy') OR ($2 <> 'deploy' AND kind IN ('manual', 'scheduled'))) AND state IN ('QUEUED', 'RUNNING', 'UNKNOWN')`,
-      [runId, kind, state, reasonCode],
+       reason_code = $4, observed_at = clock_timestamp() WHERE id = $1 AND (($2 = 'deploy' AND kind = 'deploy') OR ($2 <> 'deploy' AND kind IN ('manual', 'scheduled'))) AND state IN ('QUEUED', 'RUNNING', 'UNKNOWN') AND reason_code IS DISTINCT FROM $5`,
+      [runId, kind, state, reasonCode, restoredBackupUnknownReason],
     );
   }
 
@@ -382,14 +393,97 @@ export class BackupConsoleControl {
   }
 
   async reconcileRestoredJournal(receiptPath: string, approvedReceiptSha: string, executorFenceSha: string): Promise<void> {
-    if (!isAbsolute(receiptPath)) throw new Error('Restore transfer receipt path must be absolute');
-    manifestSchema.parse(approvedReceiptSha);
     manifestSchema.parse(executorFenceSha);
-    const bytes = await readPrivateBackupFile(receiptPath);
-    if (createHash('sha256').update(bytes).digest('hex') !== approvedReceiptSha) {
-      throw new Error('Restore transfer receipt digest does not match the approved evidence');
-    }
-    const receipt = transferReceiptSchema.parse(JSON.parse(bytes));
+    const receipt = transferReceiptSchema.parse(await this.readApprovedRestoreEvidence(receiptPath, approvedReceiptSha));
+    await this.withRestoredJournal(async client => {
+      const {
+        rows: [selected],
+      } = await client.query<{
+        state: string;
+        reason_code: string | null;
+        source_sha: string | null;
+        manifest_sha256: string | null;
+        evidence: Record<string, unknown> | null;
+      }>('SELECT state, reason_code, source_sha, manifest_sha256, evidence FROM codexia_backup.runs WHERE id = $1 FOR UPDATE', [
+        receipt.backupId,
+      ]);
+      if (
+        !selected ||
+        selected.source_sha !== receipt.sourceIdentity ||
+        (selected.manifest_sha256 !== null && selected.manifest_sha256 !== receipt.sha256sumsSha256)
+      ) {
+        throw new Error('Restore transfer receipt does not match the selected journal run');
+      }
+      if (selected.state === 'REMOTE_VERIFIED') {
+        if (selected.evidence?.receiptSha256 !== approvedReceiptSha || selected.evidence?.executorFenceSha256 !== executorFenceSha) {
+          throw new Error('Restored journal was reconciled against different evidence');
+        }
+        return;
+      }
+      if (selected.state !== 'RUNNING' && selected.state !== 'UNKNOWN') throw new Error('Restored journal run cannot be reconciled');
+      const alreadyQuarantined = selected.reason_code === restoredBackupUnknownReason;
+      if (alreadyQuarantined && selected.evidence?.executorFenceSha256 !== executorFenceSha)
+        throw new Error('Restored journal run was fenced against different evidence');
+      await client.query(
+        `UPDATE codexia_backup.runs SET state = 'REMOTE_VERIFIED', phase = 'complete', reason_code = NULL,
+             manifest_sha256 = $2, evidence = COALESCE(evidence, '{}'::jsonb) || $3::jsonb, observed_at = clock_timestamp() WHERE id = $1`,
+        [
+          receipt.backupId,
+          receipt.sha256sumsSha256,
+          {
+            offVmMethod: 's3',
+            backupId: receipt.backupId,
+            markerSha256: receipt.markerSha256,
+            manifestSha256: receipt.sha256sumsSha256,
+            receiptSha256: approvedReceiptSha,
+            verifiedAt: receipt.verifiedAt,
+            executorFenceSha256: executorFenceSha,
+          },
+        ],
+      );
+      if (alreadyQuarantined) return;
+      const fenceEvidence = { executorFenceSha256: executorFenceSha, restoreTransferReceiptSha256: approvedReceiptSha };
+      await client.query(
+        `UPDATE codexia_backup.runs SET state = 'BLOCKED', phase = 'blocked',
+             reason_code = 'restored_request_not_replayed', evidence = COALESCE(evidence, '{}'::jsonb) || $1::jsonb,
+             observed_at = clock_timestamp() WHERE state = 'QUEUED'`,
+        [fenceEvidence],
+      );
+      await client.query(
+        `UPDATE codexia_backup.runs SET state = 'UNKNOWN', phase = 'recovery_required', reason_code = $1,
+             evidence = COALESCE(evidence, '{}'::jsonb) || $2::jsonb || jsonb_build_object('restoredReasonCode', reason_code),
+             observed_at = clock_timestamp() WHERE state IN ('RUNNING', 'UNKNOWN') AND reason_code IS DISTINCT FROM $1`,
+        [restoredBackupUnknownReason, fenceEvidence],
+      );
+      await client.query(
+        `UPDATE codexia_backup.operations SET state = 'BLOCKED', reason_code = 'restored_request_not_replayed',
+             evidence = COALESCE(evidence, '{}'::jsonb) || $1::jsonb, observed_at = clock_timestamp() WHERE state IN ('QUEUED', 'RUNNING')`,
+        [fenceEvidence],
+      );
+      await client.query('UPDATE codexia_backup.state SET active_usable = false, run_executor_enabled = false, executor_seen_at = NULL');
+    });
+  }
+
+  async reconcileRestoredAbsence(evidencePath: string, approvedEvidenceSha: string): Promise<void> {
+    const evidence = missingTransferEvidenceSchema.parse(await this.readApprovedRestoreEvidence(evidencePath, approvedEvidenceSha));
+    await this.withRestoredJournal(async client => {
+      const { rowCount } = await client.query(
+        `UPDATE codexia_backup.runs SET state = 'FAILED', phase = 'failed', reason_code = 'restored_no_verified_transfer',
+           evidence = evidence || jsonb_build_object('dispositionSha256', $3::text), observed_at = clock_timestamp()
+         WHERE id = $1 AND state = 'UNKNOWN' AND reason_code = $2 AND evidence ->> 'executorFenceSha256' = $4`,
+        [evidence.backupId, restoredBackupUnknownReason, approvedEvidenceSha, evidence.executorFenceSha256],
+      );
+      if (rowCount === 1) return;
+      const { rowCount: existing } = await client.query(
+        `SELECT 1 FROM codexia_backup.runs WHERE id = $1 AND state = 'FAILED' AND reason_code = 'restored_no_verified_transfer'
+           AND evidence ->> 'executorFenceSha256' = $2 AND evidence ->> 'dispositionSha256' = $3`,
+        [evidence.backupId, evidence.executorFenceSha256, approvedEvidenceSha],
+      );
+      if (existing !== 1) throw new Error('No matching restored journal run exists for the approved disposition');
+    });
+  }
+
+  private async withRestoredJournal(operation: (client: PoolClient) => Promise<void>): Promise<void> {
     const client = await this.options.pool.connect();
     try {
       await backupTransaction(client, async () => {
@@ -397,64 +491,20 @@ export class BackupConsoleControl {
           rows: [lock],
         } = await client.query<{ locked: boolean }>('SELECT pg_try_advisory_xact_lock($1) AS locked', [backupExecutorLock]);
         if (!lock?.locked) throw new Error('Backup executor must stop before restoring the journal');
-        const {
-          rows: [selected],
-        } = await client.query<{
-          state: string;
-          source_sha: string | null;
-          manifest_sha256: string | null;
-          evidence: Record<string, unknown> | null;
-        }>('SELECT state, source_sha, manifest_sha256, evidence FROM codexia_backup.runs WHERE id = $1 FOR UPDATE', [receipt.backupId]);
-        if (
-          !selected ||
-          selected.source_sha !== receipt.sourceIdentity ||
-          (selected.manifest_sha256 !== null && selected.manifest_sha256 !== receipt.sha256sumsSha256)
-        ) {
-          throw new Error('Restore transfer receipt does not match the selected journal run');
-        }
-        if (selected.state === 'REMOTE_VERIFIED') {
-          if (selected.evidence?.receiptSha256 !== approvedReceiptSha || selected.evidence?.executorFenceSha256 !== executorFenceSha) {
-            throw new Error('Restored journal was reconciled against different evidence');
-          }
-          return;
-        }
-        if (selected.state !== 'RUNNING' && selected.state !== 'UNKNOWN') throw new Error('Restored journal run cannot be reconciled');
-        await client.query(
-          `UPDATE codexia_backup.runs SET state = 'REMOTE_VERIFIED', phase = 'complete', reason_code = NULL,
-             manifest_sha256 = $2, evidence = $3, observed_at = clock_timestamp() WHERE id = $1`,
-          [
-            receipt.backupId,
-            receipt.sha256sumsSha256,
-            {
-              offVmMethod: 's3',
-              backupId: receipt.backupId,
-              markerSha256: receipt.markerSha256,
-              manifestSha256: receipt.sha256sumsSha256,
-              receiptSha256: approvedReceiptSha,
-              verifiedAt: receipt.verifiedAt,
-              executorFenceSha256: executorFenceSha,
-            },
-          ],
-        );
-        await client.query(
-          `UPDATE codexia_backup.runs SET state = 'BLOCKED', phase = 'blocked',
-             reason_code = 'restored_request_not_replayed', observed_at = clock_timestamp() WHERE state = 'QUEUED'`,
-        );
-        await client.query(
-          `UPDATE codexia_backup.runs SET state = 'UNKNOWN', phase = 'recovery_required', reason_code = $1,
-             evidence = COALESCE(evidence, '{}'::jsonb) || jsonb_build_object('restoredReasonCode', reason_code),
-             observed_at = clock_timestamp() WHERE state IN ('RUNNING', 'UNKNOWN')`,
-          [restoredBackupUnknownReason],
-        );
-        await client.query(
-          `UPDATE codexia_backup.operations SET state = 'BLOCKED', reason_code = 'restored_request_not_replayed',
-             observed_at = clock_timestamp() WHERE state IN ('QUEUED', 'RUNNING')`,
-        );
-        await client.query('UPDATE codexia_backup.state SET active_usable = false, run_executor_enabled = false, executor_seen_at = NULL');
+        await operation(client);
       });
     } finally {
       client.release();
     }
+  }
+
+  private async readApprovedRestoreEvidence(path: string, digest: string): Promise<unknown> {
+    if (!isAbsolute(path)) throw new Error('Restore evidence path must be absolute');
+    manifestSchema.parse(digest);
+    const bytes = await readPrivateBackupFile(path);
+    if (createHash('sha256').update(bytes).digest('hex') !== digest)
+      throw new Error('Restore receipt digest does not match the approved evidence');
+    return JSON.parse(bytes);
   }
 
   private validateStart(runId: string, sourceSha: string, imageDigest: string, candidateSha: string, candidateDigest: string) {
@@ -684,6 +734,8 @@ async function main(argv: string[]) {
     else if (command === 'record-restore' && args.length === 2) await control.recordRestore(args[0]!, args[1]!);
     else if (command === 'reconcile-restored-journal' && args.length === 3) {
       await control.reconcileRestoredJournal(args[0]!, args[1]!, args[2]!);
+    } else if (command === 'reconcile-restored-absence' && args.length === 2) {
+      await control.reconcileRestoredAbsence(args[0]!, args[1]!);
     } else if (command === 'recover' && args.length === 0) {
       // The host runner owns durable intent replay and service restoration. Unknown rows are
       // not rewritten here: recovery must attach a validated receipt or remain visibly unknown.

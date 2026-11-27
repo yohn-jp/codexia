@@ -25,7 +25,7 @@ runtime_env=(env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8
 node="$(command -v node)"
 
 case "${1:-}" in
-  reconcile-restored-journal)
+  reconcile-restored-journal|reconcile-restored-absence)
     umask 077
     state="$HOME/.local/state/codexia-deploy"
     [[ -d "$state" && ! -L "$state" && -O "$state" && "$(stat -c %a -- "$state")" == 700 ]] ||

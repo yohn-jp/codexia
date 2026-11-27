@@ -476,5 +476,19 @@ test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof,
   assert.equal(await worker.processNext(), false);
   assert.equal((await workerPool.query('SELECT state FROM codexia_backup.operations WHERE id = $1', [newProbe])).rows[0].state, 'QUEUED');
   await control.manualFail(unknownRun, 'operator_reconciled');
+  assert.deepEqual(await readRun(unknownRun), { state: 'UNKNOWN', reason_code: 'restored_outcome_unknown', manifest_sha256: null });
+  const dispositionPath = join(restoreDirectory, 'run-disposition.json');
+  const disposition = JSON.stringify({
+    format: 'codexia-backup-run-disposition/v1',
+    backupId: unknownRun,
+    executorFenceSha256: executorFenceSha,
+    conclusion: 'no_verified_transfer',
+  });
+  await writeFile(dispositionPath, disposition, { mode: 0o600 });
+  const dispositionSha = createHash('sha256').update(disposition).digest('hex');
+  await assert.rejects(control.reconcileRestoredAbsence(dispositionPath, '0'.repeat(64)), /digest/u);
+  await control.reconcileRestoredAbsence(dispositionPath, dispositionSha);
+  await control.reconcileRestoredAbsence(dispositionPath, dispositionSha);
+  assert.deepEqual(await readRun(unknownRun), { state: 'FAILED', reason_code: 'restored_no_verified_transfer', manifest_sha256: null });
   assert.equal(await worker.processNext(), true);
 });
