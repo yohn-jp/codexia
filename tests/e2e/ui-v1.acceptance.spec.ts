@@ -999,8 +999,8 @@ test("leaving the work panel cancels an unfinished open ZIP download", { tag: "@
     await expect(transfer).toHaveCount(0);
     await cancelled;
     releaseRequest();
-    await expect(panels.getByRole("button", { name: "作品と構成", exact: true })).toBeVisible();
-    await panels.getByRole("button", { name: "作品と構成", exact: true }).click();
+    await expect(panels.getByRole("button", { name: "作品と構成を表示", exact: true })).toBeVisible();
+    await panels.getByRole("button", { name: "作品と構成を表示", exact: true }).click();
     await transfer.locator("summary").click();
     await expect(transfer.getByText("ZIP の受信を中止しました。", { exact: true })).toBeVisible();
     await expect(transfer.getByRole("button", { name: "離脱用 ZIP をダウンロード" })).toBeEnabled();
