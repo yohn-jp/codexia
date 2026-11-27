@@ -271,6 +271,7 @@ test("a failed OAuth logout keeps the editor protected and lets the author retry
   await page.getByRole("button", { name: "ログアウト", exact: true }).click();
   await expect(page.getByRole("heading", { name: "認証・接続を再確認してください" })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("サーバー側セッションを終了できませんでした");
+  await expect(page.locator("body > .pg-print-document")).toHaveCount(0);
   await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
   await page.getByRole("button", { name: "ログアウトを再試行" }).click();
   await expect(page.getByRole("button", { name: "OAuthでサインイン" })).toBeVisible();
@@ -415,6 +416,35 @@ test("an interrupted initial project bootstrap resumes after persisted pageshow"
     await expect(resumed.getByRole("alert")).toHaveCount(0);
     await context.close();
   }
+});
+
+test("the library shows creation guidance only after a successful empty project list", async ({ page, authorizeAuthor }) => {
+  const author = await authorizeAuthor("desktop", undefined, { apiSetupOnly: true });
+  const { project } = await seedWritingProject(author.fetch, author.origin, "Library retry project", "A saved manuscript.");
+  let reads = 0;
+  let started!: () => void;
+  let release!: () => void;
+  const requested = new Promise<void>(resolve => { started = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route(/\/api\/v1\/persistence\/projects(?:\?|$)/u, async route => {
+    if (++reads > 1) return route.continue();
+    started();
+    await held;
+    await route.fulfill({ status: 503, json: { code: "PERSISTENCE_UNAVAILABLE", error: "Library unavailable" } });
+  });
+  const opening = authorizeAuthor("desktop", page, { path: "/desktop/" });
+  const empty = page.getByRole("heading", { name: "最初の作品を作成してください" });
+  try {
+    await requested;
+    await expect(empty).toHaveCount(0);
+  } finally { release(); }
+  await opening;
+  await expect(page.getByRole("alert").filter({ hasText: "Library unavailable" })).toBeVisible();
+  await expect(empty).toHaveCount(0);
+  await page.getByRole("button", { name: "作品一覧を読み込む", exact: true }).click();
+  await expect(page.getByLabel("作品", { exact: true })).not.toHaveValue("");
+  await expect(page.getByLabel("作品", { exact: true }).locator(`option[value="${project.id}"]`)).toHaveCount(1);
+  await expect(empty).toHaveCount(0);
 });
 
 test("direct-link, active scene, and project activation resume after persisted pageshow", async ({ page, authorizeAuthor }) => {

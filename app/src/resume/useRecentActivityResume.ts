@@ -14,6 +14,7 @@ import {
 const LOCAL_DEBOUNCE_MS = 400;
 const SERVER_DEBOUNCE_MS = 2_000;
 const REFRESH_INTERVAL_MS = 15_000;
+const deviceType: RecentActivityDeviceType = 'desktop';
 
 // One writer identity and sequence for this document, even if a shell remounts.
 let activityWriter: string | undefined;
@@ -47,10 +48,6 @@ export interface RecentActivityResumeState {
   flush: (keepalive?: boolean) => void;
 }
 
-function deviceTypeForViewport(): RecentActivityDeviceType {
-  return window.matchMedia('(max-width: 760px)').matches ? 'mobile' : 'desktop';
-}
-
 /**
  * Cross-device cursor/page sync. Local resume remains separate from the
  * IndexedDB manuscript journal and only numeric positions are sent remotely.
@@ -79,7 +76,6 @@ export function useRecentActivityResume({
     bindingRef.current = { ...binding, identityKey, projectIdentityKey };
   }
   const currentBinding = bindingRef.current;
-  const [deviceType, setDeviceType] = useState<RecentActivityDeviceType>(deviceTypeForViewport);
   const [items, setItems] = useState<RecentActivityItem[]>([]);
   const [snapshotIdentityKey, setSnapshotIdentityKey] = useState('');
   const [itemsProjectIdentityKey, setItemsProjectIdentityKey] = useState('');
@@ -241,13 +237,6 @@ export function useRecentActivityResume({
     };
   }, [currentBinding, flush]);
 
-  useEffect(() => {
-    const media = window.matchMedia('(max-width: 760px)');
-    const update = () => setDeviceType(media.matches ? 'mobile' : 'desktop');
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
-  }, []);
-
   const onWritingPosition = useCallback(
     (sceneId: string, cursorSentenceIndex: number | null, scrollTop: number) => {
       const active = bindingRef.current;
@@ -263,7 +252,7 @@ export function useRecentActivityResume({
       if (serverTimerRef.current !== null) window.clearTimeout(serverTimerRef.current);
       serverTimerRef.current = window.setTimeout(() => serverFlushRef.current(), SERVER_DEBOUNCE_MS);
     },
-    [enabled, deviceType],
+    [enabled],
   );
 
   const onReadingPage = useCallback(
@@ -298,7 +287,7 @@ export function useRecentActivityResume({
       if (serverTimerRef.current !== null) window.clearTimeout(serverTimerRef.current);
       serverTimerRef.current = window.setTimeout(() => serverFlushRef.current(), SERVER_DEBOUNCE_MS);
     },
-    [enabled, items, itemsProjectIdentityKey, deviceType],
+    [enabled, items, itemsProjectIdentityKey],
   );
 
   return { items, snapshotIdentityKey, itemsProjectIdentityKey, localWriting, error, onWritingPosition, onReadingPage, flush, deviceType };

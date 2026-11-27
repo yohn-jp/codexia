@@ -272,6 +272,9 @@ test("recent activity polling pauses while naturally hidden and resumes when vis
     const f = await longFixture(authorizeAuthor, page);
     const { author } = f; let requests = 0;
     page.on("request", (request) => { if (request.method() === "GET" && request.url().endsWith("/recent-activity")) requests += 1; });
+    const now = new Date();
+    await page.clock.install({ time: now });
+    await page.clock.pauseAt(new Date(now.getTime() + 5_000));
     await page.reload();
     await authorizeAuthor("desktop", page, { continueCurrentPage: true });
     await expect.poll(() => requests).toBeGreaterThan(0);
@@ -279,13 +282,16 @@ test("recent activity polling pauses while naturally hidden and resumes when vis
     background = await context.newPage(); await background.goto("about:blank"); await background.bringToFront();
     await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("hidden");
     const hidden = requests;
-    await page.waitForTimeout(15_500); expect(requests).toBe(hidden);
+    // Exercise the polling deadline even if Chromium throttles hidden timers.
+    await page.clock.fastForward(15_500);
+    expect(requests).toBe(hidden);
     await remotePosition(author, f.project.id, f.scene.id);
     await page.bringToFront(); await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
     await expect.poll(() => requests).toBeGreaterThan(hidden);
     await expect(panel.getByText(/スマホでたった今まで編集していました/u)).toBeVisible();
     const visible = requests;
-    await expect.poll(() => requests, { timeout: 20_000 }).toBe(visible + 1);
+    await page.clock.fastForward(15_500);
+    await expect.poll(() => requests).toBe(visible + 1);
   } finally { await background?.close(); await native.close(); }
 });
 
@@ -298,6 +304,12 @@ test("recent activity ignores a refresh response invalidated by natural hide", a
     const { author } = f;
     const path = `/api/projects/${f.project.id}/recent-activity`;
     await remotePosition(author, f.project.id, f.scene.id);
+    const panel = await openContinuePanel(page);
+    background = await context.newPage();
+    await background.goto("about:blank");
+    await background.bringToFront();
+    await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("hidden");
+
     let started!: () => void;
     const pending = new Promise<void>((resolve) => { started = resolve; });
     const held = new Promise<void>((resolve) => { release = resolve; });
@@ -310,11 +322,11 @@ test("recent activity ignores a refresh response invalidated by natural hide", a
         json: { items: [{ sceneId: f.second.id, sentenceOffset: 3, pageIndex: null, deviceType: "mobile", updatedAt: new Date().toISOString() }] },
       });
     });
-    await page.reload();
-    await authorizeAuthor("desktop", page, { continueCurrentPage: true });
+    // Start the held refresh on the established scene binding. The first GET
+    // during a reload may be aborted when the outline selects the document.
+    await page.bringToFront();
     await pending;
     await expect(manuscriptEditor(page)).toBeVisible();
-    const panel = await openContinuePanel(page);
     await expect(panel).not.toContainText(f.second.title);
     await panel.evaluate((element, staleTitle) => {
       const recordStaleEntry = () => {
@@ -325,8 +337,6 @@ test("recent activity ignores a refresh response invalidated by natural hide", a
       recordStaleEntry();
     }, f.second.title);
 
-    background = await context.newPage();
-    await background.goto("about:blank");
     await background.bringToFront();
     await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("hidden");
     const staleResponse = page.waitForResponse((response) => response.headers()["x-test-activity"] === "stale");
@@ -344,9 +354,12 @@ test("recent activity ignores a refresh response invalidated by natural hide", a
   } finally { release?.(); await background?.close(); await native.close(); }
 });
 
-test("writing in another document does not inherit the previous reference page", async ({ page, authorizeAuthor }) => {
+test("Desktop keeps its device identity across resize without inheriting another scene's reading page", async ({ page, authorizeAuthor }) => {
   await page.setViewportSize({ width: 390, height: 900 });
   const f = await longFixture(authorizeAuthor, page);
+  await remotePosition(f.author, f.project.id, f.scene.id);
+  const phonePosition = (await activity(f.author, f.project.id)).items.find((candidate) => candidate.deviceType === "mobile");
+  expect(phonePosition).toMatchObject({ sceneId: f.scene.id, pageIndex: 2 });
   await page.getByRole("button", { name: "読む", exact: true }).click();
   const pager = page.locator(".reading-pager");
   await expect(pager).toBeVisible();
@@ -357,10 +370,12 @@ test("writing in another document does not inherit the previous reference page",
     await expect(pager).toHaveAttribute("data-page-index", String(pageIndex));
   }
   await expect.poll(async () => {
-    const item = (await activity(f.author, f.project.id)).items.find((candidate) => candidate.sceneId === f.scene.id);
+    const item = (await activity(f.author, f.project.id)).items.find((candidate) =>
+      candidate.deviceType === "desktop" && candidate.sceneId === f.scene.id);
     return item?.pageIndex;
   }).toBe(7);
 
+  await page.setViewportSize({ width: 1280, height: 900 });
   const secondDocument = page.locator(`.pg-document-list .pg-outline-item[data-document-id="${f.second.id}"] > .pg-outline-row > .pg-outline-document`);
   await secondDocument.focus();
   await secondDocument.press("Enter");
@@ -368,9 +383,10 @@ test("writing in another document does not inherit the previous reference page",
   await expect(manuscriptEditor(page)).toBeVisible();
   await manuscriptEditor(page).press("Control+End");
   await expect.poll(async () => {
-    const item = (await activity(f.author, f.project.id)).items.find((candidate) => candidate.deviceType === "mobile");
+    const item = (await activity(f.author, f.project.id)).items.find((candidate) => candidate.deviceType === "desktop");
     return item?.sceneId === f.second.id ? item.pageIndex : "pending";
   }).toBeNull();
+  expect((await activity(f.author, f.project.id)).items.find((candidate) => candidate.deviceType === "mobile")).toEqual(phonePosition);
 
   const panel = await openContinuePanel(page);
   const secondCandidate = panel.locator("p").filter({ hasText: f.second.title });

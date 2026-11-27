@@ -38,11 +38,11 @@ function assertAdmittedRouteInventory(openapi) {
     throw new Error(`Admitted route inventory mismatch: missing=[${missing.join(', ')}], unexpected=[${unexpected.join(', ')}]`);
   }
   if (actual.length !== expected.length) throw new Error('Admitted route inventory contains duplicate method/path entries');
-  if (new Set(expected.map(key => key.slice(key.indexOf(' ') + 1))).size !== 91) {
-    throw new Error('Admitted route inventory must contain exactly 91 path templates');
+  if (new Set(expected.map(key => key.slice(key.indexOf(' ') + 1))).size !== 93) {
+    throw new Error('Admitted route inventory must contain exactly 93 path templates');
   }
-  if (admittedInventory.current.length !== 116 || admittedInventory.target.length !== 0) {
-    throw new Error('Admitted route inventory must contain 116 current routes and no target-only routes');
+  if (admittedInventory.current.length !== 118 || admittedInventory.target.length !== 0) {
+    throw new Error('Admitted route inventory must contain 118 current routes and no target-only routes');
   }
 
   const targetSet = new Set(admittedInventory.target);
@@ -167,7 +167,7 @@ test('the generated contract exactly matches the independent admitted route inve
   t.after(() => rmSync(outputDirectory, { recursive: true, force: true }));
   const openapi = parse(readFileSync(compile(outputDirectory), 'utf8'));
   const inventory = assertAdmittedRouteInventory(openapi);
-  assert.equal(inventory.length, 116);
+  assert.equal(inventory.length, 118);
   assert.ok(!openapi.paths['/api/projects/{projectId}/modules/assistant/rewrite/stream']);
   assert.ok(!openapi.paths['/api/projects/{projectId}/modules/assistant/qa/stream']);
   const operations = Object.values(openapi.paths).flatMap(pathItem =>

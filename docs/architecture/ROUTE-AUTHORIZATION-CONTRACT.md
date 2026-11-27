@@ -27,18 +27,21 @@
 | `/oauth/login` | 有効なsigned OAuth requestを持つ利用者の認証入口 | OWNER-SESSION、Passkeyかリンク済みOIDC | 実装済み |
 | `/oauth/consent` | 登録済みclient/scopeの許可または拒否 | OWNER-SESSION、same-origin、認可要求の検証 | 実装済み |
 | `/r/:module/:project/:slug` | 公開linkを受け取ったSHARE-READER。公開する場合のみAccess例外を明示 | share capabilityをAPIが確認し公開版のGETに限定 | 公開reader実装あり／実Edge受入は別 |
-| `/console` | ownerの管理home | OWNER-SESSION＋API側owner確認 | セットアップ実装あり。Cloudflare・VM 受入は別 |
+| `/console` | ownerの管理home | OWNER-SESSION＋API側owner確認 | Desktop Web 実装あり。Cloudflare・VM 受入は別 |
 | `/console/setup` | 初回だけの本人登録ウィザード | SETUP＋DBが新規構築承認済みかつowner未登録 | 実装済み。Cloudflare・VM 受入は別 |
 | `/console/security` | Passkey/sessionの本人管理 | OWNER-SESSION＋危険操作のfresh再認証 | Desktop Web 実装あり。実 Edge 受入は別 |
-| `/console/identity` | 連携OIDC、OAuth clients/grantsの管理 | OWNER-SESSION＋owner確認＋対象別権限 | 運用者設定状態と保存済み同意の参照を実装。管理操作は目標 |
-| `/console/backups` | S3保管先設定、remote保全・復元証拠、手動保全要求 | OWNER-SESSION、危険変更はfresh reauth | **合意済み目標・未実装** |
-| `/console/backups/destination` | S3 draftとwrite-only secretの設定 | OWNER-SESSION。credential登録と有効化はfresh | **目標・未実装** |
-| `/console/backups/verification` | 接続試験、probeとactiveの独立結果照合 | OWNER-SESSION。activationはfresh | **目標・未実装** |
-| `/console/backups/history`、`/console/backups/recovery` | 保全receipt、隔離復旧の**表示のみ** | OWNER-SESSION | **目標・未実装** |
+| `/console/identity` | 連携OIDC、OAuth clients/grantsの管理 | OWNER-SESSION＋owner確認＋対象別権限 | 運用者の OIDC 設定状態の表示と保存済み OAuth 同意の参照、取消しを実装。所有者による OIDC 設定は採用目標 |
+| `/console/backups` | S3保管先設定、remote保全・復元証拠、手動保全要求 | OWNER-SESSION、危険変更はfresh reauth | Desktop Web 実装、運用受入は別 |
+| `/console/backups/destination` | S3 draftとwrite-only secretの設定 | OWNER-SESSION。credential登録と有効化はfresh | Desktop Web 実装、運用受入は別 |
+| `/console/backups/verification` | 接続試験、probeとactiveの独立結果照合 | OWNER-SESSION。activationはfresh | Desktop Web 実装、運用受入は別 |
+| `/console/backups/history`、`/console/backups/recovery` | 保全receipt、隔離復旧の**表示のみ** | OWNER-SESSION | Desktop Web 実装、運用受入は別 |
 | その他 `/console/*` | 404。認可エラーをhomeへ誤誘導しない | なし | 目標 |
 | VM/Cloudflare設定、本番データ復元 | **専用Web画面を設けない** | OPERATORだけの管理プレーン。例外としてS3保管先/保全要求はowner consoleからtyped APIで指定可能だがVM操作権限ではない | 合意済み |
 
 Cloudflare Worker Static Assetsは画面を配信し、API、MCP、OAuth metadataをTunnel経由でFastifyへ通す。**URLごとのAccess policyとWAF除外は明示的に設計・検証する**。author画面のAccess制御を、公開share、setup、必要なOAuth protocolに機械的に継承しない。逆に公開例外は作者API全体へ広げない。静的画面が表示できても、APIから認可済みデータが返ることを意味しない。
+
+バックアップ API と executor はオペレーターが有効にする。
+S3 保全と独立復旧の受入には、それぞれの環境での証拠が必要となる。[Backup console contract](BACKUP-CONSOLE-CONTRACT.md)
 
 ## HTTP APIの認可マトリクス
 
@@ -121,7 +124,7 @@ Cloudflare Worker Static Assetsは画面を配信し、API、MCP、OAuth metadat
 | `GET /api/v1/persistence/projects/:p` | ownerのproject IDを確認 |
 | `PATCH /api/v1/persistence/projects/:p` | expectedVersionとname/settingsの検証 |
 | `GET /api/v1/persistence/projects/:p/archive` | 固定snapshotの現在状態をexport |
-| `GET /api/v1/persistence/projects/:p/open-export`（設計対象） | 実行枠の取得前に作品へのアクセスを確認し、固定スナップショットから完全な ZIP を取得する。送信前に認証と作品へのアクセスを再確認する。[離脱用 ZIP の実装契約](OPEN-WORK-EXPORT-CONTRACT.md) |
+| `GET /api/v1/persistence/projects/:p/open-export` | 実行枠の取得前に作品へのアクセスを確認し、固定スナップショットから完全な ZIP を取得する。送信前に認証と作品へのアクセスを再確認する。[離脱用 ZIP の実装契約](OPEN-WORK-EXPORT-CONTRACT.md) |
 | `GET /api/v1/persistence/projects/:p/documents` | 同じprojectの親/並びと取得上限 |
 | `POST /api/v1/persistence/projects/:p/documents` | 親とpath、idempotency、本文の新規Revision |
 | `GET /api/v1/persistence/projects/:p/documents/:d` | document/revisionが当該projectに属する |
@@ -171,7 +174,7 @@ cookie利用のmutationはCSRF/SameSite/Originを検証、cross-origin APIは明
 
 最低限、ANON/SETUP/OWNER-SESSION/OWNER-API/MCP-CLIENT/SHARE-READER/EDGE-CIを交差実行し、正常・クロス作品・expired・revoked・stale・並列・不正Origin・同時setup・DB障害を実APIで確認する。**PRのCIと実Cloudflare/実VMの受入は別**。検証しない経路をPASSとみなさない。
 
-### バックアップ専用操作の分離（合意済み目標）
+### バックアップ専用操作の分離
 
 `BKC-001`〜`BKC-010`の全method/path・入力/結果・proxy境界は [Backup console contract](BACKUP-CONSOLE-CONTRACT.md) が詳細化する。owner sessionを検証したFastify APIは、専用の運用schemaへ**設定・durable request**だけを書き、実際のS3送受信・writer停止・host lock・backup.sh・復元はoperator provisioned executorへ委任する。Web APIで秘密鍵を読取/配布したり任意のshell実行を行わせない。S3 provider egress allowlistとTLS/SSRF保護はAPI入力検証だけでなくexecutorでも独立に強制する。
 

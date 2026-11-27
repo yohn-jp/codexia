@@ -13,7 +13,7 @@ import type {
   RevisionId,
 } from '@codexia/persistence-contracts';
 import { useActorRef, useSelector } from '@xstate/react';
-import { type ChangeEvent, type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type CSSProperties, type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { api, type EditorSnapshotRead, type PersistenceAnchorView } from '../api';
 import { ApiError } from '../api-error';
@@ -294,6 +294,9 @@ function outlineAncestors(items: readonly OutlineDocument[], id: string, ancesto
 
 interface PendingSave extends PersistenceSaveRequest {}
 
+type RevisionChange = { kind: 'discard' } | { kind: 'restore'; source: DocumentRevision };
+type RevisionConfirmation = RevisionChange & { current: ActiveDocument };
+
 /** Presentation only: revision, journal and the pending save remain authoritative. */
 function saveProtectionLabel(active: ActiveDocument, pendingSave: boolean): string {
   if (active.recovery === 'failed') return 'この入力はまだ保護されていません';
@@ -454,6 +457,12 @@ export function PersistenceWorkspace({
   const draftChainsRef = useRef(new Map<string, Promise<boolean>>());
   const restoreInFlightRef = useRef(false);
   const [restoring, setRestoring] = useState(false);
+  const [revisionConfirmation, setRevisionConfirmation] = useState<RevisionConfirmation | null>(null);
+  const revisionDialogRef = useRef<HTMLDialogElement>(null);
+  const revisionDialogTitle = useId();
+  useEffect(() => {
+    if (sessionBlocked) revisionDialogRef.current?.close('cancel');
+  }, [sessionBlocked]);
   const saveControllerRef = useRef<AbortController | null>(null);
   useEffect(
     () => () => {
@@ -564,6 +573,7 @@ export function PersistenceWorkspace({
       !documents.some(candidate => candidate.id === explicitRouteDocumentId),
   );
   const missingExplicitRouteDocument = Boolean(project && explicitRouteDocumentUnavailable);
+  const openDocumentMissingFromOutline = active?.document.projectId === projectId && outlineReadyProject === projectId && !selectedDocument;
   const canCreateDocument = outlineReadyProject === projectId && !!projectId && documents.length < 999;
   const documentOutline = useMemo(() => buildDocumentOutline(documents), [documents]);
   const filteredDocumentOutline = useMemo(() => filterDocumentOutline(documentOutline, outlineQuery), [documentOutline, outlineQuery]);
@@ -798,6 +808,7 @@ export function PersistenceWorkspace({
       });
       setProjectPageReady(true);
       setProjectNextCursor(page.nextCursor);
+      setProjectId(current => current || page.projects[0]?.id || '');
       setPageError('');
     } catch (error) {
       if (sequence === projectPageSequenceRef.current) {
@@ -835,8 +846,9 @@ export function PersistenceWorkspace({
         if (controller.signal.aborted || sessionBlockedRef.current || projectIdRef.current !== projectId) return;
         setDocuments(documentResult.documents);
         setOutlineReadyProject(projectId);
+        const openDocumentId = activeRef.current?.document.projectId === projectId ? activeRef.current.document.id : null;
         setDocumentId(current => {
-          if (current && documentResult.documents.some(item => item.id === current)) return current;
+          if (current && (current === openDocumentId || documentResult.documents.some(item => item.id === current))) return current;
           if (
             explicitRouteDocumentId &&
             projectId === selectionRef.current?.projectId &&
@@ -1284,6 +1296,7 @@ export function PersistenceWorkspace({
           textChanges,
           generation,
           dirty,
+          requiresExplicitSave: dirty && draft?.requiresExplicitSave === true ? true : undefined,
           recovery: dirty ? 'pending' : 'stored',
           save: dirty ? 'idle' : 'saved',
           error: '',
@@ -1355,6 +1368,7 @@ export function PersistenceWorkspace({
               markdown: value.markdown,
               textChanges: value.textChanges,
               generation: value.generation,
+              ...(value.requiresExplicitSave && { requiresExplicitSave: value.requiresExplicitSave }),
             });
             if (stored) ownedDraftsRef.current.set(ownershipKey, ownership);
             return stored;
@@ -1820,53 +1834,56 @@ export function PersistenceWorkspace({
 
   saveMachineHandlersRef.current.saveOperation = executeSaveOperation;
 
-  const saveDocument = useCallback(async (): Promise<void> => {
-    const currentJournal = journalRef.current;
-    if (
-      !currentJournal ||
-      saveMachineActor.getSnapshot().matches({ active: { server: 'saving' } }) ||
-      restoreInFlightRef.current ||
-      sessionBlockedRef.current
-    )
-      return;
-    const current = activeRef.current;
-    if (!current || current.recovery === 'other-tab' || current.remoteConflict) return;
-    const pendingKey = JSON.stringify([current.document.projectId, current.document.id]);
-    const existingPending = pendingSaveRef.current.get(pendingKey);
-    let pending = existingPending;
-    if (!pending) {
-      if (!current.dirty || current.recovery !== 'stored') return;
-      pending = {
-        projectId: current.document.projectId,
-        documentId: current.document.id,
-        baseRevisionId: current.baseRevisionId,
-        baseMarkdown: current.baseMarkdown,
-        markdown: current.markdown,
-        changes:
-          current.textChanges && current.textChanges.afterSaveKey === undefined
-            ? current.textChanges.changes
-            : minimalTextChanges(current.baseMarkdown, current.markdown),
-        generation: current.generation,
-        idempotencyKey: crypto.randomUUID(),
-        clientId: clientIdRef.current || crypto.randomUUID(),
-      };
-      clientIdRef.current = pending.clientId;
-      pendingSaveRef.current.set(pendingKey, pending);
-    }
-    const machineSnapshot = saveMachineActor.getSnapshot();
-    if (machineSnapshot.matches({ active: { server: 'conflict' } })) return;
-    if (existingPending && machineSnapshot.matches({ active: { server: 'unknown' } })) {
-      saveMachineActor.send({ type: 'SAVE.RETRY' });
-    } else {
-      saveMachineActor.send({
-        type: 'SAVE.MANUAL',
-        identity: { projectId: current.document.projectId, documentId: current.document.id },
-        operationId: pending.idempotencyKey,
-        generation: pending.generation,
-        reconcileReplay: Boolean(existingPending),
-      });
-    }
-  }, [saveMachineActor]);
+  const saveDocument = useCallback(
+    async (trigger: 'automatic' | 'manual' = 'automatic'): Promise<void> => {
+      const currentJournal = journalRef.current;
+      if (
+        !currentJournal ||
+        saveMachineActor.getSnapshot().matches({ active: { server: 'saving' } }) ||
+        restoreInFlightRef.current ||
+        sessionBlockedRef.current
+      )
+        return;
+      const current = activeRef.current;
+      if (!current || current.recovery === 'other-tab' || current.remoteConflict) return;
+      const pendingKey = JSON.stringify([current.document.projectId, current.document.id]);
+      const existingPending = pendingSaveRef.current.get(pendingKey);
+      let pending = existingPending;
+      if (!pending) {
+        if (!current.dirty || current.recovery !== 'stored' || (current.requiresExplicitSave && trigger !== 'manual')) return;
+        pending = {
+          projectId: current.document.projectId,
+          documentId: current.document.id,
+          baseRevisionId: current.baseRevisionId,
+          baseMarkdown: current.baseMarkdown,
+          markdown: current.markdown,
+          changes:
+            current.textChanges && current.textChanges.afterSaveKey === undefined
+              ? current.textChanges.changes
+              : minimalTextChanges(current.baseMarkdown, current.markdown),
+          generation: current.generation,
+          idempotencyKey: crypto.randomUUID(),
+          clientId: clientIdRef.current || crypto.randomUUID(),
+        };
+        clientIdRef.current = pending.clientId;
+        pendingSaveRef.current.set(pendingKey, pending);
+      }
+      const machineSnapshot = saveMachineActor.getSnapshot();
+      if (machineSnapshot.matches({ active: { server: 'conflict' } })) return;
+      if (existingPending && machineSnapshot.matches({ active: { server: 'unknown' } })) {
+        saveMachineActor.send({ type: 'SAVE.RETRY' });
+      } else {
+        saveMachineActor.send({
+          type: 'SAVE.MANUAL',
+          identity: { projectId: current.document.projectId, documentId: current.document.id },
+          operationId: pending.idempotencyKey,
+          generation: pending.generation,
+          reconcileReplay: Boolean(existingPending),
+        });
+      }
+    },
+    [saveMachineActor],
+  );
 
   saveDocumentRef.current = saveDocument;
 
@@ -2932,6 +2949,33 @@ export function PersistenceWorkspace({
     void loadRevisionPage(revisionCursor, false);
   }
 
+  function confirmRevisionChange(action: RevisionChange): void {
+    const current = activeRef.current;
+    const dialog = revisionDialogRef.current;
+    if (!current || !dialog || dialog.open || sessionBlockedRef.current) return;
+    flushSync(() => setRevisionConfirmation({ ...action, current }));
+    dialog.returnValue = '';
+    dialog.showModal();
+  }
+
+  function finishRevisionConfirmation(confirmed: boolean): void {
+    const confirmation = revisionConfirmation;
+    setRevisionConfirmation(null);
+    const current = activeRef.current;
+    if (!confirmed || !confirmation || !current || sessionBlockedRef.current) return;
+    const original = confirmation.current;
+    if (
+      current.document.projectId !== original.document.projectId ||
+      current.document.id !== original.document.id ||
+      current.generation !== original.generation ||
+      current.revision.id !== original.revision.id ||
+      current.remoteConflict?.id !== original.remoteConflict?.id
+    )
+      return;
+    if (confirmation.kind === 'restore') void restoreRevision(confirmation.source);
+    else void useDatabaseRevision();
+  }
+
   async function restoreRevision(source: DocumentRevision): Promise<void> {
     const captured = activeRef.current;
     if (
@@ -2972,19 +3016,35 @@ export function PersistenceWorkspace({
     setRestoring(true);
     setPageError('');
     try {
-      const restored = await api.restorePersistenceDocument(projectId, documentId, {
+      const operation = {
         baseRevisionId: captured.revision.id as RevisionId,
         sourceRevisionId: source.id as RevisionId,
         idempotencyKey: crypto.randomUUID(),
+      };
+      const sendRestore = () => api.restorePersistenceDocument(projectId, documentId, operation);
+      const restored = await sendRestore().catch((error: unknown) => {
+        const resultUnknown = error instanceof TypeError || (error instanceof ApiError && error.status >= 500);
+        if (!resultUnknown || !unchanged() || sessionBlockedRef.current) throw error;
+        return sendRestore();
       });
       if (
         restored.document.projectId !== projectId ||
         restored.document.id !== documentId ||
         restored.revision.projectId !== projectId ||
         restored.revision.documentId !== documentId ||
+        restored.revision.parentRevisionId !== operation.baseRevisionId ||
+        restored.revision.sha256 !== source.sha256 ||
         restored.document.headRevisionId !== restored.revision.id
       )
         throw new Error('復元結果の識別子が一致しません。');
+      if (restored.replayed && unchanged()) {
+        const live = await api.persistenceDocument(projectId, documentId);
+        if (live.revision?.id !== restored.revision.id) {
+          if (stillSelected()) setNotice('復元は保存済みです。その後に更新された最新版を読み込みます。');
+          setResumeEpoch(value => value + 1);
+          return;
+        }
+      }
       if (!unchanged()) {
         if (stillSelected() && activeRef.current)
           publishEditor({
@@ -3023,6 +3083,7 @@ export function PersistenceWorkspace({
         textChanges: undefined,
         generation: latest.generation + 1,
         dirty: false,
+        requiresExplicitSave: undefined,
         recovery: 'stored',
         save: 'saved',
         error: '',
@@ -3060,7 +3121,7 @@ export function PersistenceWorkspace({
           if (stillSelected()) setPageError(cause instanceof Error ? cause.message : '競合した最新Revisionを確認できませんでした。');
         }
       } else {
-        setPageError(error instanceof Error ? error.message : 'Revisionを復元できませんでした。');
+        setPageError('Revisionの復元結果を確認できませんでした。最新の履歴を再確認してください。');
         setResumeEpoch(value => value + 1);
       }
     } finally {
@@ -3078,10 +3139,13 @@ export function PersistenceWorkspace({
     if (!project || !current || !remote || !currentJournal || sessionBlockedRef.current) return;
     const navigation = openSequenceRef.current;
     const stillCurrent = () =>
+      !sessionBlockedRef.current &&
       navigation === openSequenceRef.current &&
       activeRef.current?.document.id === current.document.id &&
       activeRef.current.document.projectId === current.document.projectId &&
       activeRef.current.generation === current.generation &&
+      activeRef.current.revision.id === current.revision.id &&
+      activeRef.current.remoteConflict?.id === remote.id &&
       activeRef.current.markdown === current.markdown;
     try {
       const read = await api.persistenceDocument(project.id, current.document.id);
@@ -3114,6 +3178,7 @@ export function PersistenceWorkspace({
         textChanges: undefined,
         generation: current.generation + 1,
         dirty: false,
+        requiresExplicitSave: undefined,
         recovery: 'stored',
         save: 'saved',
         error: '',
@@ -3142,13 +3207,14 @@ export function PersistenceWorkspace({
       textChanges: undefined,
       generation: current.generation + 1,
       dirty: current.markdown !== remote.markdown,
+      requiresExplicitSave: current.markdown !== remote.markdown ? true : undefined,
       recovery: 'pending',
       save: 'idle',
       error: '',
       remoteConflict: null,
       evidenceLoadKey: current.evidenceLoadKey + 1,
     });
-    setNotice('下書きを最新Revision全体へ適用します。IndexedDBへ再保存後、通常の競合検出を通して保存します。');
+    setNotice('最新Revisionを基準に下書きを保護します。作品へ反映するには「今すぐ保存」を選んでください。');
   }
 
   const onEditorChange = useCallback(
@@ -3157,12 +3223,14 @@ export function PersistenceWorkspace({
       if (!current || markdown === current.markdown) return;
       const pending = pendingSaveRef.current.get(JSON.stringify([current.document.projectId, current.document.id]));
       const textChanges = composeDraftChanges(current, pending, markdown, changes);
+      const dirty = markdown !== current.baseMarkdown || Boolean(pending && markdown !== pending.markdown);
       publishEditor({
         ...current,
         markdown,
         textChanges,
         generation: current.generation + 1,
-        dirty: markdown !== current.baseMarkdown || Boolean(pending && markdown !== pending.markdown),
+        dirty,
+        requiresExplicitSave: dirty ? current.requiresExplicitSave : undefined,
         recovery: current.recovery === 'other-tab' ? 'other-tab' : 'pending',
         save: current.save === 'saving' ? 'saving' : current.recovery === 'other-tab' ? 'failed' : 'idle',
         error: current.recovery === 'other-tab' ? current.error : '',
@@ -3664,6 +3732,28 @@ export function PersistenceWorkspace({
       : null;
   const editor = (
     <main className="pg-editor-column" aria-label="PostgreSQL原稿編集">
+      <dialog
+        ref={revisionDialogRef}
+        className="pg-revision-confirmation"
+        aria-labelledby={revisionDialogTitle}
+        onClose={event => finishRevisionConfirmation(event.currentTarget.returnValue === 'confirm')}
+      >
+        <h2 id={revisionDialogTitle}>{revisionConfirmation?.kind === 'discard' ? '回復Draftの破棄' : 'Revisionの復元'}</h2>
+        <p>
+          {revisionConfirmation?.kind === 'discard'
+            ? 'このブラウザーの回復Draftを破棄し、PostgreSQLの最新版を開きます。'
+            : '選んだ内容を新しいRevisionとして保存します。現在のRevisionも履歴に残ります。'}
+        </p>
+        <form method="dialog">
+          {/* biome-ignore lint/a11y/noAutofocus: Focus the safe action when the author explicitly opens the dialog. */}
+          <button type="submit" value="cancel" autoFocus>
+            キャンセル
+          </button>
+          <button type="submit" value="confirm">
+            {revisionConfirmation?.kind === 'discard' ? '回復Draftを破棄' : '新しいRevisionとして復元'}
+          </button>
+        </form>
+      </dialog>
       {pageError && (
         <p className="pg-alert" role="alert">
           {pageError}
@@ -3679,7 +3769,7 @@ export function PersistenceWorkspace({
           {journalError}
         </p>
       )}
-      {!project && (
+      {!project && !projectId && projectPageReady && !projectPageLoading && projects.length === 0 && !pageError && (
         <section className="pg-empty">
           <h2>最初の作品を作成してください</h2>
           <p>作品、原稿Revision、Knowledge、EvidenceはPostgreSQLへ保存されます。</p>
@@ -3688,13 +3778,19 @@ export function PersistenceWorkspace({
           </button>
         </section>
       )}
-      {missingExplicitRouteDocument && (
+      {openDocumentMissingFromOutline && (
+        <section className="pg-empty" role="status">
+          <h2>開いている文書が目次からなくなりました</h2>
+          <p>現在の原稿はこの画面に残しています。必要な内容を控えてから、目次で別の文書を選んでください。</p>
+        </section>
+      )}
+      {missingExplicitRouteDocument && !openDocumentMissingFromOutline && (
         <section className="pg-empty" role="status">
           <h2>指定された文書が見つかりません</h2>
           <p>この作品に指定された文書はありません。目次から開く文書を選択してください。</p>
         </section>
       )}
-      {project && !missingExplicitRouteDocument && !selectedDocument && !active && !outlineError && (
+      {project && outlineReadyProject === project.id && documents.length === 0 && !missingExplicitRouteDocument && !active && (
         <section className="pg-empty">
           <h2>{project.title}</h2>
           <p>編集を始める文書を作成してください。</p>
@@ -3777,6 +3873,9 @@ export function PersistenceWorkspace({
                   <p>このタブを閉じないでください。下書きの記録に失敗しています。空き容量などを確認し、下書きを再保護してください。</p>
                 )}
                 {active.recovery === 'stored' && active.dirty && <p>このブラウザーに記録した後続入力は、別端末からはまだ開けません。</p>}
+                {active.requiresExplicitSave && !active.remoteConflict && !pendingSaveForDisplay && (
+                  <p>復旧した下書きを作品に反映するには「今すぐ保存」を選んでください。</p>
+                )}
               </div>
             </details>
           </div>
@@ -3809,7 +3908,7 @@ export function PersistenceWorkspace({
               type="button"
               data-ux-control="WRT-01.A"
               data-ux-control-alias="REC-01.B"
-              onClick={() => void saveDocument()}
+              onClick={() => void saveDocument('manual')}
               disabled={
                 !active.dirty ||
                 active.recovery !== 'stored' ||
@@ -4059,7 +4158,7 @@ export function PersistenceWorkspace({
               <button type="button" data-ux-control="REC-01.C" onClick={adoptRecoveredDraft}>
                 比較後、この回復Draftを最新版へ適用
               </button>
-              <button type="button" onClick={() => void useDatabaseRevision()}>
+              <button type="button" onClick={() => confirmRevisionChange({ kind: 'discard' })}>
                 回復Draftを破棄してPostgreSQL最新版を開く
               </button>
             </section>
@@ -4080,7 +4179,7 @@ export function PersistenceWorkspace({
                       type="button"
                       data-ux-control="WRT-02.B"
                       disabled={loading || restoring || active.dirty}
-                      onClick={() => void restoreRevision(revision)}
+                      onClick={() => confirmRevisionChange({ kind: 'restore', source: revision })}
                     >
                       このRevisionを新しいRevisionとして復元
                     </button>
@@ -4511,6 +4610,7 @@ export function PersistenceWorkspace({
       <div className="pg-preserved-editor-parking" hidden inert aria-hidden="true" ref={attachEditorPortalParking} />
       {editorPortalContainer ? createPortal(editor, editorPortalContainer) : null}
       {active &&
+        !sessionBlocked &&
         createPortal(
           <article className="print-view pg-print-document" style={typographyStyle}>
             <h1>{active.document.title}</h1>

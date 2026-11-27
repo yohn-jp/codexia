@@ -4,7 +4,9 @@
 
 対象は**単一ownerのインストール**。BKC-001〜010のAPIとexecutorはオペレーターによる明示的な設定で有効になる。導入条件と運用手順は [Backup console provisioning](../../deploy/backup/CONSOLE.md) を参照。
 
-バックアップ先の指定、検証、有効化、保全状態と証拠の参照を行うOWNER-SESSION向けの画面は実装目標である。ownerセッション/公開HTTP APIはOPERATOR、SSH、Ansible、Podman、PG管理者、S3 bucket管理者の資格ではない。**本番DBの復元、任意コマンド実行、IAM/Object Lock変更、秘密鍵の読取、保全済みオブジェクトの削除を管理画面に提供しない。**
+Desktop Web の OWNER-SESSION 向け画面は、バックアップ先の指定、検証、有効化、保全状態と証拠の参照に対応する。
+実 S3 での保全および独立復旧の運用受入には、それぞれの環境での証拠を要する。
+ownerセッション/公開HTTP APIはOPERATOR、SSH、Ansible、Podman、PG管理者、S3 bucket管理者の資格ではない。**本番DBの復元、任意コマンド実行、IAM/Object Lock変更、秘密鍵の読取、保全済みオブジェクトの削除を管理画面に提供しない。**
 
 ## 配備との一意の責務分担
 

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { createReadStream, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
@@ -130,8 +130,6 @@ const BETTER_AUTH_HTTP_ROUTES = [
   ['GET', '/api/auth/passkey/list-user-passkeys'],
   ['POST', '/api/auth/passkey/update-passkey'],
   ['POST', '/api/auth/passkey/delete-passkey'],
-  ['GET', '/api/auth/codexia/owner-security/identity'],
-  ['POST', '/api/auth/codexia/owner-security/revoke-consent'],
 ] as const;
 
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
@@ -1559,20 +1557,20 @@ export function createServer(options: ApiServerOptions): Server {
         } catch (error) {
           const code = error instanceof JobHistoryError ? error.code : 'storage_failure';
           console.error(`Codexia domain job result was not retained (${code}).`);
+          const failed = actionFailure(
+            snapshot,
+            {
+              code: 'domain_job_result_not_retained',
+              message: 'The task finished, but its result could not be safely retained',
+            },
+            'domain_job_result_not_retained',
+          );
           try {
-            const failed = actionFailure(
-              snapshot,
-              {
-                code: 'domain_job_result_not_retained',
-                message: 'The task finished, but its result could not be safely retained',
-                retryable: true,
-              },
-              'domain_job_result_not_retained',
-            );
             publishJobEvent(await jobHistory.finishDomainJob(id, failed));
           } catch {
             /* Startup recovery will mark any still-running record as interrupted. */
           }
+          return failed;
         } finally {
           activeDomainJobIds.delete(id);
         }
@@ -1846,13 +1844,28 @@ export function createServer(options: ApiServerOptions): Server {
     let resolvedProjectId = params.projectId ?? '';
     const authHeader = request.headers.authorization;
     const bearer = typeof authHeader === 'string' && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    const challenge = (invalidToken = false) => {
+      const header =
+        mcpStreamableRoute && oauthMcpMetadataUrl
+          ? mcpChallenge(oauthMcpMetadataUrl)
+          : 'Bearer realm="codexia"' + (invalidToken ? ', error="invalid_token"' : '');
+      response.setHeader('WWW-Authenticate', header);
+    };
+    const rejectOAuth = (error: unknown): never => {
+      const failure =
+        error instanceof OAuthAuthenticationError
+          ? error
+          : new OAuthAuthenticationError(401, 'OAUTH_TOKEN_INVALID', 'OAuth access token is invalid or unverifiable');
+      if (failure.status === 401) challenge(true);
+      throw httpFailure(failure.status, failure.code, failure.message);
+    };
     let oauthPrincipal: Awaited<ReturnType<NonNullable<typeof authenticateOAuthOwner>>> | undefined;
     // Admission returns public identity and policy fields after signature and liveness checks.
     let admittedMcpClient: OAuthMcpPrincipal | undefined;
     if (standaloneMcpRoute) {
       if (!oauthMcpMetadataUrl) throw httpFailure(503, 'MCP_OAUTH_UNAVAILABLE', 'Standalone MCP OAuth is not configured');
       if (!bearer || !authenticateOAuthMcp) {
-        response.setHeader('WWW-Authenticate', mcpChallenge(oauthMcpMetadataUrl));
+        challenge();
         throw httpFailure(401, 'UNAUTHORIZED', 'MCP OAuth authentication required');
       }
     }
@@ -1864,24 +1877,10 @@ export function createServer(options: ApiServerOptions): Server {
           try {
             admittedMcpClient = await authenticateOAuthMcp(bearer);
           } catch (mcpError) {
-            const failure =
-              mcpError instanceof OAuthAuthenticationError
-                ? mcpError
-                : new OAuthAuthenticationError(401, 'OAUTH_TOKEN_INVALID', 'OAuth access token is invalid or unverifiable');
-            if (failure.status === 401 && mcpStreamableRoute && oauthMcpMetadataUrl) {
-              response.setHeader('WWW-Authenticate', mcpChallenge(oauthMcpMetadataUrl));
-            }
-            throw httpFailure(failure.status, failure.code, failure.message);
+            rejectOAuth(mcpError);
           }
         } else {
-          const failure =
-            error instanceof OAuthAuthenticationError
-              ? error
-              : new OAuthAuthenticationError(401, 'OAUTH_TOKEN_INVALID', 'OAuth access token is invalid or unverifiable');
-          if (failure.status === 401 && mcpStreamableRoute && oauthMcpMetadataUrl) {
-            response.setHeader('WWW-Authenticate', mcpChallenge(oauthMcpMetadataUrl));
-          }
-          throw httpFailure(failure.status, failure.code, failure.message);
+          rejectOAuth(error);
         }
       }
     }
@@ -1889,14 +1888,7 @@ export function createServer(options: ApiServerOptions): Server {
       try {
         admittedMcpClient = await authenticateOAuthMcp(bearer);
       } catch (error) {
-        const failure =
-          error instanceof OAuthAuthenticationError
-            ? error
-            : new OAuthAuthenticationError(401, 'OAUTH_TOKEN_INVALID', 'OAuth access token is invalid or unverifiable');
-        if (failure.status === 401 && mcpStreamableRoute && oauthMcpMetadataUrl) {
-          response.setHeader('WWW-Authenticate', mcpChallenge(oauthMcpMetadataUrl));
-        }
-        throw httpFailure(failure.status, failure.code, failure.message);
+        rejectOAuth(error);
       }
     }
     if (standaloneMcpRoute && admittedMcpClient) {
@@ -1933,10 +1925,7 @@ export function createServer(options: ApiServerOptions): Server {
       requireMcpEffect('read');
     }
     if (!hasAuth && needsBearer) {
-      response.setHeader(
-        'WWW-Authenticate',
-        mcpStreamableRoute && oauthMcpMetadataUrl ? mcpChallenge(oauthMcpMetadataUrl) : 'Bearer realm="codexia"',
-      );
+      challenge();
       throw httpFailure(401, 'UNAUTHORIZED', 'Authentication required');
     }
     const requireAuthorSession = async (): Promise<string> => {
@@ -2807,13 +2796,16 @@ export function createServer(options: ApiServerOptions): Server {
   };
 
   const ownerSetupOnly = new Set(['owner_setup_authorize_post', 'owner_setup_profile_post', 'owner_setup_complete_post']);
+  const ownerSecurityAdapters = new Set(['owner_security_identity_get', 'owner_security_revoke_consent_post']);
   const authAdapters = new Set([
+    ...ownerSecurityAdapters,
     'auth_methods_get',
     'auth_consent_context_post',
     'auth_list_consents_get',
     'owner_session_confirm_post',
     'owner_setup_status_get',
   ]);
+  for (const operationId of ownerSecurityAdapters) handlers[operationId] = handlers.betterAuthWeb!;
   handlers.auth_methods_get = handlers.betterAuthWeb!;
   handlers.api_browser_version_get = handlers.api_version_get!;
 
@@ -2955,7 +2947,7 @@ export function createServer(options: ApiServerOptions): Server {
       context.response.setHeader('Cache-Control', 'private, no-store, no-transform');
       const sendSignal = AbortSignal.any([context.signal, AbortSignal.timeout(OPEN_WORK_EXPORT_SEND_MS)]);
       context.reply.hijack();
-      await pipeline(createReadStream(archive.path), context.response, { signal: sendSignal });
+      await pipeline(archive.createReadStream(), context.response, { signal: sendSignal });
     } catch (error) {
       if (context.signal.aborted) return;
       if (generationDeadline.aborted && !context.reply.sent)
@@ -3009,7 +3001,11 @@ export function createServer(options: ApiServerOptions): Server {
     if (!options.betterAuth) return;
     auth.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_request, body, done) => done(null, body));
     for (const route of httpContract.routes) {
-      if (authAdapters.has(route.operationId)) register(auth, route.method, route.url, handlers[route.operationId]!, route);
+      if (authAdapters.has(route.operationId)) {
+        // Preserve Better Auth's request validation, session checks and error body for its owner-security plugin.
+        const contract = ownerSecurityAdapters.has(route.operationId) ? undefined : route;
+        register(auth, route.method, route.url, handlers[route.operationId]!, contract);
+      }
     }
     register(auth, 'GET', '/.well-known/oauth-authorization-server/api/auth', handlers.authorizationServerMetadata!);
     register(auth, 'GET', '/.well-known/openid-configuration/api/auth', handlers.openIdConfigMetadata!);

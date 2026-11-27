@@ -31,6 +31,7 @@ export const REQUIREMENTS_TRACE_DOCUMENTS = Object.freeze([
   'docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md',
   'docs/architecture/MCP-FIRST.md',
   'docs/architecture/MCP-OAUTH.md',
+  'docs/architecture/MCP-V2-MIGRATION.md',
   'docs/architecture/MODULES.md',
   'docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.md',
   'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md',

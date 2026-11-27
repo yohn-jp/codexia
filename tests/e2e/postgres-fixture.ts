@@ -33,6 +33,9 @@ export async function openRevisionHistory(scope: Page | Locator): Promise<void> 
   if (!await menu.evaluate((element) => (element as HTMLDetailsElement).open)) await menu.locator("summary").click();
   await scope.getByRole("button", { name: "Revision履歴", exact: true }).click();
 }
+export async function confirmRevisionRestore(page: Page): Promise<void> {
+  await page.getByRole("dialog", { name: "Revisionの復元" }).getByRole("button", { name: "新しいRevisionとして復元" }).click();
+}
 export async function readManuscriptMarkdown(page: Page): Promise<string> {
   return manuscriptEditor(page).evaluate(element => Array.from(element.querySelectorAll(".cm-line"), line => line.textContent ?? "").join("\n"));
 }

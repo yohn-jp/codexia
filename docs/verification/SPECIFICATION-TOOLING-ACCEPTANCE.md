@@ -90,7 +90,10 @@ PRでは小さな回帰チェック、長時間/高負荷は適切に隔離し�
 
 ## GitHub Pagesへの公開
 
-**現行ガバナンス:** [Pages inventory](PAGES-FUNCTION-INVENTORY.md)、[Architecture Atlas](ARCHITECTURE-ATLAS.md)、[Development Pages UX proposal](../design/DEVELOPMENT-PAGES-UX.md)。唯一の公開者は `.github/workflows/repository-audit.yml`、別のpages publisher/VM/Cloudflare secretsを追加しない。提案中の `/audit/` 移動などのURLを本書で暗黙採用しない。
+`.github/workflows/repository-audit.yml` が唯一の Pages 公開者である。
+ポータルは `/`、ソース監査の索引は `/audit/` に配置する。
+別の Pages 公開者や VM、Cloudflare のシークレットは追加しない。
+[Pages inventory](PAGES-FUNCTION-INVENTORY.md) ／ [Architecture Atlas](ARCHITECTURE-ATLAS.md) ／ [Development Pages UX design](../design/DEVELOPMENT-PAGES-UX.md)
 
 - Repository Audit PagesはStrictDoc、Scalar、LikeC4の公開用生成物を組み立てる。
 - Scalarリファレンスはサイト相対 `/api/` に置く。

@@ -6,6 +6,60 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { chromium } from '@playwright/test';
 
+test('public trace confirms a deploy retry only for its verified manifest', async (t) => {
+  const sourceSha = 'a'.repeat(40);
+  const publisher = { status: 'IN_PROGRESS', repository: 'yohn-jp/codexia', sourceSha, runId: '42', attempt: 1,
+    job: 'specification', task: 'pages-requirements-trace', runUrl: 'https://github.com/yohn-jp/codexia/actions/runs/42' };
+  const pagesQualification = { status: 'PENDING_PAGES_PUBLISH', publicUrlConfirmation: 'PENDING', publisherExecution: publisher };
+  const trace = JSON.stringify({ sourceSha, execution: publisher, pagesQualification });
+  const html = `<!doctype html><form id="trace-filter"><input name="q"><input name="area"><input name="status"><input name="kind"></form>
+    <div id="pages-live-confirmation" data-source-sha="${sourceSha}"><p data-live-status></p></div><script defer src="./traceability-ui.js"></script>`;
+  const digest = value => createHash('sha256').update(value).digest('hex');
+  const manifest = JSON.stringify({ sourceSha, pagesQualification, outputs: [
+    { name: 'traceability/index.html', bytes: Buffer.byteLength(html), sha256: digest(html) },
+    { name: 'traceability/traceability.json', bytes: Buffer.byteLength(trace), sha256: digest(trace) },
+  ] });
+  const origin = 'https://yohn-jp.github.io/codexia';
+  const script = await readFile(new URL('./traceability-ui.js', import.meta.url), 'utf8');
+  const run = { id: 42, path: '.github/workflows/repository-audit.yml', head_sha: sourceSha, head_branch: 'main',
+    event: 'push', status: 'completed', conclusion: 'success', run_attempt: 2, html_url: publisher.runUrl,
+    repository: { full_name: publisher.repository }, head_repository: { full_name: publisher.repository } };
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.CODEXIA_E2E_CHROMIUM });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const root = '/codexia/requirements/traceability/';
+  const site = { sourceSha, routes: [{ route: '/requirements/traceability/', generationStatus: 'ready', sourceSha }] };
+  await page.route(`${origin}/**`, route => {
+    switch (new URL(route.request().url()).pathname) {
+      case root:
+      case root + 'index.html': return route.fulfill({ body: html, contentType: 'text/html' });
+      case root + 'traceability-ui.js': return route.fulfill({ body: script, contentType: 'text/javascript' });
+      case root + 'traceability.json': return route.fulfill({ body: trace, contentType: 'application/json' });
+      case '/codexia/requirements/manifest.json': return route.fulfill({ body: manifest, contentType: 'application/json' });
+      case '/codexia/site-manifest.json': return route.fulfill({ json: site });
+      default: return route.abort();
+    }
+  });
+  let step = { name: `Verify published Pages (${digest(manifest)})`, status: 'completed', conclusion: 'success' };
+  let deployAttempt = 2;
+  await page.route('https://api.github.com/repos/yohn-jp/codexia/actions/runs/42**', route => {
+    const jobs = { total_count: 1, jobs: [{ name: 'deploy', run_id: run.id, run_attempt: deployAttempt,
+      head_sha: sourceSha, status: 'completed', conclusion: 'success', steps: [step] }] };
+    const response = new URL(route.request().url()).pathname.endsWith('/jobs') ? jobs : run;
+    return route.fulfill({ json: response, headers: { 'access-control-allow-origin': '*' } });
+  });
+  const verifyStatus = async status => {
+    await page.goto(`${origin}/requirements/traceability/`);
+    await page.locator(`#pages-live-confirmation[data-status="${status}"]`).waitFor({ timeout: 4000 });
+  };
+  await verifyStatus('confirmed');
+  deployAttempt = 1;
+  await verifyStatus('pending');
+  deployAttempt = 2;
+  step = { ...step, name: `Verify published Pages (${digest('prior manifest')})` };
+  await verifyStatus('pending');
+});
+
 test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', async () => {
   const root = path.resolve(process.env.CODEXIA_PAGES_SITE ?? '');
   assert.ok(process.env.CODEXIA_PAGES_SITE, 'CODEXIA_PAGES_SITE is required');

@@ -714,7 +714,12 @@ class PostgresTransaction implements PersistenceTransaction {
       };
     } = {
       project: { table: 'project', projectColumn: 'id', key: ['id'], map: mapProject },
-      documents: { table: 'document', key: ['id'], map: row => ({ ...mapDocument(row), deletedAt: asNullableString(row.deleted_at) }) },
+      // Match the sibling ordering in listDocuments, including the database collation and the ID tie-breaker.
+      documents: {
+        table: 'document',
+        key: ['order_key', 'id'],
+        map: row => ({ ...mapDocument(row), deletedAt: asNullableString(row.deleted_at) }),
+      },
       revisions: { table: 'document_revision', key: ['document_id', 'id'], size: 'octet_length(selected.markdown)', map: mapRevision },
       nodes: { table: 'knowledge_node', key: ['id'], map: mapKnowledgeNode },
       aliases: { table: 'knowledge_alias', key: ['id'], map: mapKnowledgeAlias },
@@ -742,8 +747,10 @@ class PostgresTransaction implements PersistenceTransaction {
     };
     const source = sources[section];
     const columns = source.key.join(', ');
-    const parameterType = section === 'moduleRecords' ? 'text' : 'uuid';
-    const parameters = source.key.map((_, i) => '$' + (i + 4) + '::' + parameterType);
+    const parameters = source.key.map((column, i) => {
+      const parameterType = section === 'moduleRecords' || column === 'order_key' ? 'text' : 'uuid';
+      return '$' + (i + 4) + '::' + parameterType;
+    });
     const cursor = parameters.join(', ');
     let after: readonly (string | null)[] = source.key.map(() => null);
     const pageBytes = Math.min(maximumRowBytes, 2 * 1024 * 1024);

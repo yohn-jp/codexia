@@ -72,6 +72,7 @@ export interface PersistenceDraftEntry {
   markdown: string;
   generation: number;
   textChanges?: PersistenceDraftTextChanges;
+  requiresExplicitSave?: true;
   /** Exact server operation whose response may have been lost. */
   pendingSave?: PersistenceDraftOperation;
   updatedAt: number;
@@ -434,7 +435,8 @@ export class BrowserJournal {
           existing.generation === entry.generation &&
           existing.baseRevisionId === entry.baseRevisionId &&
           existing.baseMarkdown === entry.baseMarkdown &&
-          existing.markdown === entry.markdown;
+          existing.markdown === entry.markdown &&
+          existing.requiresExplicitSave === entry.requiresExplicitSave;
         await done;
         return sameGeneration;
       }
@@ -532,6 +534,7 @@ export class BrowserJournal {
         existing.baseRevisionId === operation.baseRevisionId &&
         existing.baseMarkdown === operation.baseMarkdown;
       if (sameLineage) {
+        delete draft.requiresExplicitSave;
         draft.textChanges =
           draft.textChanges?.afterSaveKey === operation.idempotencyKey ? { changes: draft.textChanges.changes } : undefined;
       } else if (draft.textChanges?.afterSaveKey) {

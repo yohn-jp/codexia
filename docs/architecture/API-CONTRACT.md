@@ -56,6 +56,8 @@ IDは重複させず、表示名や説明を変えるときも維持する。
 | API-VERSION-001 | GET /api/version、GET /api/browser/version | ANON | packages/api/src/server.ts、deploy/*compatibility.json | INCOMPLETE |
 | API-OWNER-001 | GET /api/session | OWNER-API | packages/api/src/server.ts | INCOMPLETE |
 | API-OWNER-SESSION-001 | POST /api/auth/codexia/owner-session | OWNER-SESSION cookie only | packages/api/src/server.ts, packages/api/src/better-auth.ts | partial; read-only owner confirmation |
+| owner_security_identity_get | GET /api/auth/codexia/owner-security/identity | OWNER-SESSION cookie | [TypeSpec](../../packages/http-contract/src/routes-auth.tsp)、[owner-security](../../packages/api/src/owner-security.ts) | 保存済み OIDC 設定状態、登録済み OAuth クライアントと所有者の同意を参照 |
+| owner_security_revoke_consent_post | POST /api/auth/codexia/owner-security/revoke-consent | OWNER-SESSION cookie・同一 Origin・fresh 再認証 | [TypeSpec](../../packages/http-contract/src/routes-auth.tsp)、[owner-security](../../packages/api/src/owner-security.ts) | 指定 revision の同意と対応する OAuth grant を取消し、両方の確定を応答 |
 | API-CORE-001 | GET/POST /api/projects | OWNER-API（MCPのGETは条件付き） | packages/api/src/server.ts | INCOMPLETE |
 | API-CORE-002 | GET /api/projects/:p、/{tree,history,status,observation,snapshot,scenes/:d} | OWNER-API / project割当済みMCP-read | packages/api/src/server.ts | INCOMPLETE（path別IDを展開） |
 | API-CORE-003 | GET /api/projects/:p/{actions,modules,contributions,search,writing-stats} | effectによる | packages/api/src/server.ts、module runtime | INCOMPLETE（path別IDを展開） |

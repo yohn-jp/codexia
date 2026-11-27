@@ -53,6 +53,84 @@ op getOAuthConsentContext(@body body: OAuthConsentContextRequest): OAuthConsentC
 @route("/api/auth/oauth2/get-consents") @get @operationId("auth_list_consents_get")
 op listOAuthConsents(): JsonResponse | { @statusCode _: 401; @body body: ApiError; } | { @statusCode _: 403; @body body: ApiError; };
 
+model OwnerSecurityIdentity {
+  provider: { status: "not-configured" | "operator-configured-unverified"; };
+  clients: {
+    @minLength(1) clientId: string;
+    name: string;
+    scopes: OwnerSecurityNonEmptyString[];
+    redirectUris: OwnerSecurityNonEmptyString[];
+    disabled: boolean;
+  }[];
+  consents: {
+    @minLength(1) id: string;
+    @minLength(1) clientId: string;
+    scopes: OwnerSecurityNonEmptyString[];
+    updatedAt: utcDateTime;
+    @pattern("^[A-Za-z0-9_-]{43}$") revision: string;
+  }[];
+}
+
+model OwnerConsentWithdrawalRequest {
+  @minLength(1) id: string;
+  @minLength(1) clientId: string;
+  @minItems(1) scopes: OwnerSecurityNonEmptyString[];
+  @pattern("^[A-Za-z0-9_-]{43}$") revision: string;
+  ...Record<never>;
+}
+
+@minLength(1)
+scalar OwnerSecurityNonEmptyString extends string;
+
+model OwnerConsentWithdrawalReceipt {
+  consentRemoved: true;
+  grantRevoked: true;
+}
+
+model OwnerSecurityError {
+  code: string;
+  message: string;
+}
+
+model OwnerSecurityResponse<Status extends int32, Body> {
+  @statusCode statusCode: Status;
+  @header("Cache-Control") cacheControl: "no-store";
+  @body body: Body;
+}
+
+model OwnerSecurityRateLimited {
+  @statusCode statusCode: 429;
+  @header("Cache-Control") cacheControl: "no-store";
+  @header("X-Retry-After") retryAfter: string;
+  @body body: { message: string; };
+}
+
+alias OwnerSecurityAdmissionFailure =
+  | OwnerSecurityResponse<401, OwnerSecurityError>
+  | OwnerSecurityResponse<403, OwnerSecurityError | ApiError>
+  | OwnerSecurityRateLimited;
+
+@tag("auth-adapter") @useAuth(OwnerSessionCookie)
+@extension("x-codexia-principal", "OWNER-SESSION cookie only; same-origin request")
+@route("/api/auth/codexia/owner-security/identity") @get @operationId("owner_security_identity_get")
+op getOwnerSecurityIdentity():
+  | OwnerSecurityResponse<200, OwnerSecurityIdentity>
+  | OwnerSecurityAdmissionFailure
+  | OwnerSecurityResponse<500, OwnerSecurityError>;
+
+@tag("auth-adapter") @useAuth(OwnerSessionCookie)
+@extension("x-codexia-principal", "OWNER-SESSION cookie only; exact same-origin Origin and fresh reauthentication required")
+@route("/api/auth/codexia/owner-security/revoke-consent") @post @operationId("owner_security_revoke_consent_post")
+op revokeOwnerSecurityConsent(@header("Origin") origin: string, @body body: OwnerConsentWithdrawalRequest):
+  | OwnerSecurityResponse<200, OwnerConsentWithdrawalReceipt>
+  | OwnerSecurityAdmissionFailure
+  | OwnerSecurityResponse<400, OwnerSecurityError | ApiError>
+  | OwnerSecurityResponse<404, OwnerSecurityError>
+  | OwnerSecurityResponse<409, OwnerSecurityError>
+  | OwnerSecurityResponse<413, ApiError>
+  | OwnerSecurityResponse<415, ApiError>
+  | OwnerSecurityResponse<500, OwnerSecurityError>;
+
 model OwnerSetupKeyInput {
   @pattern("^[A-Za-z0-9_-]{43}$")
   key: string;

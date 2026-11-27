@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readlink, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -58,6 +59,171 @@ function invokeBackup(fixture, { activeUnits = '', approved = true, lockFile = f
     },
   });
 }
+
+test('a stopped enabled backup executor resumes before and after the release symlink switch', async t => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.directory, { recursive: true, force: true }));
+  const playbook = await readFile(path.join(root, 'deploy/ansible/backup-release.yml'), 'utf8');
+  // This workflow also runs from a checkout without installed workspace packages.
+  const shell = /^  ansible\.builtin\.shell: \|\n((?: {4}[^\n]*\n|\n)+)/mu.exec(playbook)?.[1];
+  assert.ok(shell, 'The backup release task must provide its Bash program');
+  const installer = shell.replace(/^ {4}/gmu, '').replaceAll('{% raw %}', '').replaceAll('{% endraw %}', '');
+  const digest = 'a'.repeat(64);
+  const identity = { format: 'codexia-backend-identity/v1', profile: 'full', sourceSha: 'b'.repeat(40) };
+  const record = JSON.stringify({ image: 'ghcr.io/yohn-jp/codexia-backend@sha256:' + digest, identity });
+  await writeFile(path.join(fixture.stateDir, 'deployed-release.json'), record, { mode: 0o600 });
+  const runtime = path.join(fixture.home, '.local/share/codexia-backup');
+  const release = path.join(runtime, 'releases', digest);
+  const previous = path.join(runtime, 'releases', 'c'.repeat(64));
+  const current = path.join(runtime, 'current');
+  const app = path.join(release, 'app');
+  const localBin = path.join(fixture.home, '.local/bin');
+  const dist = path.join(app, 'node_modules/@codexia/api/dist');
+  await Promise.all([previous, dist, localBin, path.join(release, 'bin')].map(directory => mkdir(directory, { recursive: true })));
+  await symlink(process.execPath, path.join(release, 'bin/node'));
+  await writeFile(path.join(app, 'update-identity.json'), JSON.stringify(identity));
+  for (const file of ['backup-console-control.js', 'backup-console-executor.js']) await writeFile(path.join(dist, file), 'export {};\n');
+  await writeFile(path.join(localBin, 'codexia-backup-control'), '#!/bin/sh\n[ "$1" = recover ]\n', { mode: 0o700 });
+  await writeFile(path.join(fixture.bin, 'podman'), [
+    '#!/bin/sh', 'case "$*" in',
+    '  "image inspect"*) printf "sha256:%s\\n" "$FIXTURE_DIGEST";;',
+    '  "inspect --type container"*) printf "true healthy sha256:%s\\n" "$FIXTURE_DIGEST";;',
+    '  "exec codexia-db"*) printf "%s\\n" "$FIXTURE_JOURNAL_READY";;',
+    '  *) exit 2;;', 'esac', '',
+  ].join('\n'));
+  await writeFile(path.join(fixture.bin, 'systemctl'), [
+    '#!/bin/sh', 'shift', 'case "$1:$*" in',
+    '  show:*UnitFileState*) printf "%s\\n" "$FIXTURE_WORKER_ENABLED";;',
+    '  show:*ActiveState*) cat "$FIXTURE_WORKER_STATE";;',
+    '  is-enabled:*) printf "%s\\n" "$FIXTURE_WORKER_ENABLED";;',
+    '  stop:*) echo inactive > "$FIXTURE_WORKER_STATE";;',
+    '  start:*)',
+    '    test "$(readlink "$FIXTURE_CURRENT")" != "$FIXTURE_FAIL_RELEASE" || exit 1',
+    '    echo active > "$FIXTURE_WORKER_STATE";;',
+    '  is-active:*) grep -qx active "$FIXTURE_WORKER_STATE";;',
+    '  *) exit 2;;', 'esac', '',
+  ].join('\n'));
+  const workerState = path.join(fixture.directory, 'worker-state');
+  const cases = [
+    { selected: previous, active: 'inactive', enabled: 'enabled', journalReady: 't', expected: 'active', success: true },
+    { selected: release, active: 'inactive', enabled: 'enabled', journalReady: 't', expected: 'active', success: true },
+    { selected: release, active: 'failed', enabled: 'enabled', journalReady: 't', expected: 'active', success: true },
+    { selected: release, active: 'inactive', enabled: 'disabled', journalReady: 't', expected: 'inactive', success: true },
+    { selected: release, active: 'inactive', enabled: 'masked', journalReady: 't', expected: 'inactive', success: true },
+    { selected: release, active: 'inactive', enabled: 'enabled', journalReady: 'f', expected: 'inactive', success: false },
+    { selected: previous, active: 'inactive', enabled: 'enabled', journalReady: 't', expected: 'active', success: false, failRelease: release },
+  ];
+  for (const { selected, active, enabled, journalReady, expected, success, failRelease = '' } of cases) {
+    await rm(current, { force: true });
+    await symlink(selected, current);
+    await writeFile(workerState, active + '\n');
+    const result = spawnSync('bash', ['-c', installer], { encoding: 'utf8', env: {
+      ...process.env, HOME: fixture.home, PATH: `${fixture.bin}:${process.env.PATH}`,
+      BACKUP_IMAGE: JSON.parse(record).image, BACKUP_RECORD_SHA: createHash('sha256').update(record).digest('hex'),
+      BACKUP_RESUME_ENABLED: 'true', FIXTURE_DIGEST: digest, FIXTURE_WORKER_ENABLED: enabled,
+      FIXTURE_WORKER_STATE: workerState, FIXTURE_JOURNAL_READY: journalReady,
+      FIXTURE_CURRENT: current, FIXTURE_FAIL_RELEASE: failRelease,
+    } });
+    assert.equal(result.status === 0, success, `${enabled}/${active}/${journalReady}: ${result.stderr}`);
+    assert.equal((await readFile(workerState, 'utf8')).trim(), expected, `${enabled}/${active}/${journalReady}`);
+    assert.equal(await readlink(current), failRelease ? previous : release);
+  }
+});
+
+test('protected socket provisioning recovers its recorded writer and Tunnel after an interrupted PostgreSQL restart', async t => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.directory, { recursive: true, force: true }));
+  const socketStage = path.join(root, 'deploy/ansible/backup-postgres-socket.sh');
+  const units = path.join(fixture.home, '.config/containers/systemd');
+  const socketParent = path.join(fixture.home, '.local/share/codexia-backup-postgres');
+  const socketDir = path.join(socketParent, 'socket');
+  const dropin = path.join(units, 'codexia-db.container.d/10-backup-socket.conf');
+  const transaction = path.join(fixture.stateDir, 'deploy-transaction.json');
+  const database = path.join(fixture.directory, 'database');
+  const api = path.join(fixture.directory, 'api');
+  const tunnel = path.join(fixture.directory, 'tunnel');
+  const image = 'sha256:' + 'a'.repeat(64);
+  await mkdir(units, { recursive: true });
+  await mkdir(socketParent, { recursive: true, mode: 0o700 });
+  await mkdir(socketDir, { mode: 0o755 });
+  const socket = createServer();
+  await new Promise((resolve, reject) => socket.once('error', reject).listen(path.join(socketDir, '.s.PGSQL.5432'), resolve));
+  t.after(() => socket.close());
+  for (const state of [api, tunnel]) await writeFile(state, 'active');
+  await writeFile(database, 'default');
+  for (const name of ['codexia-api.container', 'codexia-db.container', 'codexia-postgres.volume']) {
+    await writeFile(path.join(units, name), name + '\n', { mode: 0o600 });
+  }
+  const releaseFile = path.join(fixture.stateDir, 'deployed-release.json');
+  const release = JSON.stringify({ format: 'codexia-push-deployment/v1', image: 'ghcr.io/yohn-jp/codexia-backend@' + image,
+    identity: { format: 'codexia-backend-identity/v1', profile: 'full', sourceSha: 'b'.repeat(40) } });
+  await writeFile(releaseFile, release, { mode: 0o600 });
+  await writeFile(path.join(fixture.bin, 'podman'), [
+    '#!/bin/sh', 'case "$*" in',
+    '  info*) printf "true\\n";;', '  port*) ;;', '  wait*) printf "0\\n";;', '  "unshare stat"*) printf "999:999:755\\n";;',
+    '  "volume inspect"*) printf "codexia-postgres|/fixture/pg\\n";;',
+    '  "inspect"*Mounts*) printf "codexia-postgres|/fixture/pg\\n";;',
+    '  "image inspect"*) printf "%s\\n" "$FIXTURE_IMAGE";;',
+    '  "inspect"*codexia-api) printf "true healthy %s\\n" "$FIXTURE_IMAGE";;',
+    '  "exec codexia-db"*system_identifier*) printf "%s\\n" "$FIXTURE_CLUSTER";;',
+    '  "exec codexia-db"*unix_socket_directories*)',
+    '    if [ "$(cat "$FIXTURE_DATABASE")" = socket ]; then echo /var/run/postgresql,/run/codexia-backup-postgresql; else echo /var/run/postgresql; fi;;',
+    '  "exec codexia-db"*"SHOW hba_file"*)',
+    '    if [ "$(cat "$FIXTURE_DATABASE")" = socket ]; then echo /run/codexia-backup-pg_hba.conf; else echo /fixture/pg/pg_hba.conf; fi;;',
+    '  "exec codexia-db"*pg_hba_file_rules*) printf "t\\n";;', '  *) exit 2;;', 'esac', '',
+  ].join('\n'));
+  await writeFile(path.join(fixture.bin, 'systemctl'), [
+    '#!/bin/sh', 'shift', 'case "$*" in',
+    '  *codexia-api.service*) state="$FIXTURE_API";;', '  *codexia-tunnel.service*) state="$FIXTURE_TUNNEL";;', 'esac',
+    'case "$1:$*" in', '  show:*UnitFileState*) echo disabled;;', '  show:*backup-executor*) echo inactive;;',
+    '  show:*SourcePath*) echo "$HOME/.config/containers/systemd/codexia-api.container";;', '  show:*) cat "$state";;',
+    '  is-active:*) [ "$(cat "$state")" = active ] || exit 3;;',
+    '  stop:*) printf inactive > "$state";;', '  start:*) printf active > "$state";;', '  daemon-reload:*|reset-failed:*) ;;',
+    '  restart:*)', '    if [ "$FIXTURE_INTERRUPT" = true ]; then kill -KILL "$PPID"; exit 1; fi',
+    '    if [ "$FIXTURE_FAIL_CONFIGURE" = true ] && [ -f "$FIXTURE_DROPIN" ]; then exit 1; fi',
+    '    if [ -f "$FIXTURE_DROPIN" ]; then printf socket > "$FIXTURE_DATABASE"; else printf default > "$FIXTURE_DATABASE"; fi;;',
+    '  *) exit 2;;', 'esac', '',
+  ].join('\n'));
+  const run = (args, overrides = {}) => spawnSync('bash', [socketStage, ...args], { encoding: 'utf8', env: {
+    ...process.env, HOME: fixture.home, PATH: `${fixture.bin}:${process.env.PATH}`, FIXTURE_IMAGE: image,
+    FIXTURE_API: api, FIXTURE_TUNNEL: tunnel, FIXTURE_DROPIN: dropin, FIXTURE_DATABASE: database,
+    FIXTURE_CLUSTER: '123456:42', ...overrides,
+  } });
+  assert.equal(run([], { FIXTURE_INTERRUPT: 'true' }).signal, 'SIGKILL');
+  assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v1/u);
+  assert.equal(await readFile(api, 'utf8'), 'inactive');
+  assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
+  const rejected = run(['--recover-only'], { FIXTURE_CLUSTER: '54321:42' });
+  assert.notEqual(rejected.status, 0);
+  assert.equal(await readFile(api, 'utf8'), 'inactive');
+  assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
+  assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v1/u);
+  await writeFile(releaseFile, release + '\n');
+  assert.notEqual(run(['--recover-only']).status, 0, 'A replaced release record cannot authorize recovery');
+  await writeFile(releaseFile, release);
+  const recovered = run(['--recover-only']);
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.equal(await readFile(api, 'utf8'), 'active');
+  assert.equal(await readFile(tunnel, 'utf8'), 'active');
+  await assert.rejects(readFile(transaction), { code: 'ENOENT' });
+
+  await rm(dropin);
+  await writeFile(database, 'default');
+  await writeFile(tunnel, 'inactive');
+  const rolledBack = run([], { FIXTURE_FAIL_CONFIGURE: 'true' });
+  assert.notEqual(rolledBack.status, 0);
+  assert.equal(await readFile(api, 'utf8'), 'active');
+  assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
+  assert.equal(await readFile(database, 'utf8'), 'default');
+  await assert.rejects(readFile(dropin), { code: 'ENOENT' });
+  await assert.rejects(readFile(transaction), { code: 'ENOENT' });
+
+  const ordinaryTransaction = '{"format":"codexia-deploy-transaction/v1","phase":"pending"}\n';
+  await writeFile(transaction, ordinaryTransaction, { mode: 0o600 });
+  assert.notEqual(run(['--recover-only']).status, 0);
+  assert.equal(await readFile(transaction, 'utf8'), ordinaryTransaction);
+  assert.equal(await readFile(api, 'utf8'), 'active');
+});
 
 test('restored target fingerprints are read-only and require quiescence under the inherited lock', async t => {
   const fixture = await createFixture();

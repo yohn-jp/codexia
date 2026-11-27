@@ -147,7 +147,8 @@ jobs:
       contents: read
       actions: read
     outputs:
-      promoted: ${{ steps.resolve.outputs.promoted == 'true' && steps.handoff.outcome == 'success' }}
+      promoted: ${{ steps.resolve.outputs.promoted == 'true' && steps.handoff.outcome == 'success' && steps.handoff.outputs.artifact-id != '' }}
+      handoff-artifact-id: ${{ steps.handoff.outputs.artifact-id }}
       producer-sha: ${{ steps.resolve.outputs.promoted == 'true' && steps.handoff.outcome == 'success' && steps.resolve.outputs.sourceSha || '' }}
       producer-version: ${{ steps.resolve.outputs.promoted == 'true' && steps.handoff.outcome == 'success' && steps.resolve.outputs.version || '' }}
       producer-event: ${{ steps.resolve.outputs.promoted == 'true' && steps.handoff.outcome == 'success' && 'pull_request' || 'workflow_run' }}
@@ -191,9 +192,9 @@ jobs:
           path: ${{ runner.temp }}/backend-promotion/
           if-no-files-found: error
           retention-days: 2
-      - name: Fall back to the exact main build if handoff upload fails
-        if: steps.resolve.outputs.promoted == 'true' && steps.handoff.outcome != 'success'
-        run: echo 'Promotion handoff upload failed; the exact main-source backend build will run.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Fall back to the exact main build when no usable handoff was uploaded
+        if: steps.resolve.outputs.promoted == 'true' && (steps.handoff.outcome != 'success' || steps.handoff.outputs.artifact-id == '')
+        run: echo 'Promotion handoff unavailable. The exact main-source backend build will run.' >> "$GITHUB_STEP_SUMMARY"
   build-test:
     name: Build and test backend OCI image (${{ matrix.profile }})
     runs-on: ubuntu-24.04
@@ -306,7 +307,8 @@ jobs:
       - uses: actions/download-artifact@v8.0.2
         if: ${{ steps.freshness.outputs.affected == 'true' && needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' }}
         with:
-          name: codexia-backend-promotion-${{ github.event.workflow_run.head_sha }}-attempt-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.promotion.outputs.handoff-artifact-id }}
+          digest-mismatch: error
           path: ${{ runner.temp }}/backend-promotion
       - name: Recheck promoted backend producer provenance and identity
         if: ${{ steps.freshness.outputs.affected == 'true' && needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' }}

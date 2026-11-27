@@ -16,7 +16,11 @@
 
 多対多を許可するが、単なるファイル参照で完結としない。ブラウザー操作→admission→Core→PostgreSQL→receipt→UI復帰、HTTP/stdio MCP→OAuth→effect→提案→作者承認→DBのように**中間境界を通過する処理**も追跡する。運用要求の終点はAction、ホスト上の設定と実行証拠まで含む。
 
-**明示された未実装範囲:** S3互換バックアップの転送・隔離復元、XState v5 actor/state machine、owner backup console/executorの設計目標はRequirement Registerの実装記述で未実装と明記されている。これらの記述は現在の状態を利用者へ示す根拠であり、周辺の既存ファイルやテスト候補から実装済み・適合済みを推定しない。
+**部分導入の例。** REQ-UI-006 は XState v5 を Desktop Web の原稿保存と復旧、Native ChangeSet レビュー、Passkey 再認証、OAuth 同意の取消し、バックアップ要求の受付と結果照合に導入した範囲を記録する。
+REQ-OPS-003 は S3 互換ストレージへの転送と隔離復元、REQ-OPS-004 と REQ-OPS-005 はバックアップ管理 API と executor の部分導入を記録する。
+各要求の適合状態は要件台帳を参照する。
+バックアップの運用受入には、実 S3 での転送と読み戻し、および独立した復旧ホストでの復元の証拠が必要となる。
+[要件台帳](../requirements/REQUIREMENT-REGISTER.md) ／ [バックアップ管理の受入契約](../architecture/BACKUP-CONSOLE-CONTRACT.md)
 
 ## 現行 source の生成結果
 
@@ -28,8 +32,7 @@
 義務に付けたTEST-IDは、テスト登録のliteral `[TEST-ID]` prefixからAST discoveryがsource path、行、表示名を導出して解決する。
 Requirement RegisterにはobligationとTEST-IDの関係を記録し、テスト名やsource位置を複製しない。
 一つのケースが確認できる範囲は、そのケースが実際に観測する条件までである。
-XState v5 は Desktop の WRT-01/REC-01 保存・復旧で部分導入済み。ChangeSet・認証・バックアップへの展開、S3 互換バックアップの転送・隔離復元、owner backup console/executor には、実装または証拠の欠落が残る。
-正式な HTTP/MCP 適合性試験、性能検証、実機・運用証拠のうち exact-source の実行結果を取り込めていないものも未検証のままとする。
+正式な HTTP/MCP 適合性試験、性能検証、実機と運用環境での受入は、対象ソースに紐づく実行証拠に基づいて判定する。
 
 検証結果は G0〜G7 の項目ごとに、どの証拠を取得できたかで読む。
 StrictDoc の検査は G0 のうち UID・relation・出力再現性を扱う。

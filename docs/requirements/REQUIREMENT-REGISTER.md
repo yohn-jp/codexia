@@ -566,7 +566,7 @@ Passkey-firstの初回owner登録は一回限りsetup資格、owner不在、認�
 **Verification identifiers**: tests/e2e/auth-recovery.acceptance.spec.ts; packages/api/src/better-auth.test.ts; packages/api/src/owner-security.test.ts
 **Test IDs**: TEST-AUTH-005-001
 **Exact-run reference**: NOT_RUN
-**Comment**: Desktop Web の Passkey・セッション管理と連携情報の参照を実装。OIDC 設定の登録・検証・有効化と OAuth grant 失効は目標。
+**Comment**: Desktop Web は Passkey とセッションの管理、連携情報の参照、Passkey 再認証を伴う保存済み OAuth 同意と対応する grant の取消しを実装。所有者による OIDC の登録、検証、有効化は採用目標。
 
 `/console`管理、Passkey/session、OIDC設定はowner権限と再認証に拘束する
 
@@ -589,7 +589,8 @@ Passkey-firstの初回owner登録は一回限りsetup資格、owner不在、認�
 **MID**: 53a8b9037ebbb65c5e04b1b797ccf099
 **UID**: OBL-REQ-AUTH-005-O01
 **Design reference**: [Admin screen flow](../design/ADMIN-SCREEN-FLOW.md)、[Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md)
-**Implementation identifiers**: app/src/console/ConsoleEntry.tsx; packages/api/src/owner-security.ts
+**Implementation identifiers**: app/src/console/ConsoleEntry.tsx; packages/api/src/owner-security.ts; packages/http-contract/src/routes-auth.tsp
+**Surface identifiers**: httpOperation=GET /api/auth/codexia/owner-security/identity; httpOperation=POST /api/auth/codexia/owner-security/revoke-consent
 **Test IDs**: TEST-AUTH-005-001
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.

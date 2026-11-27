@@ -31,6 +31,8 @@ export const operationIds = [
   'job_events_get',
   'job_get',
   'jobs_list_get',
+  'owner_security_identity_get',
+  'owner_security_revoke_consent_post',
   'owner_session_confirm_post',
   'owner_setup_authorize_post',
   'owner_setup_complete_post',

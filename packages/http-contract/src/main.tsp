@@ -40,6 +40,8 @@ using TypeSpec.OpenAPI;
       "GET /api/auth/oauth2/get-consents",
       "POST /api/auth/codexia/owner-session",
       "GET /api/auth/codexia/auth-methods",
+      "GET /api/auth/codexia/owner-security/identity",
+      "POST /api/auth/codexia/owner-security/revoke-consent",
       "GET /api/auth/codexia/setup/status",
       "POST /api/auth/codexia/setup/authorize",
       "POST /api/auth/codexia/setup/profile",

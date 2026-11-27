@@ -815,6 +815,18 @@ globalStyle('.pg-conflict pre, .pg-revisions pre', {
   overflowWrap: 'anywhere',
 });
 globalStyle('.pg-conflict button, .pg-revisions button', { margin: '0 0.5rem 0.5rem 0' });
+globalStyle('.pg-revision-confirmation', {
+  maxInlineSize: 'min(28rem, calc(100vw - 2rem))',
+  padding: '1.25rem',
+  border: '1px solid var(--line)',
+  borderRadius: '0.8rem',
+  color: 'var(--ink)',
+  background: 'var(--paper)',
+  boxShadow: '0 12px 38px var(--focus-shadow)',
+});
+globalStyle('.pg-revision-confirmation::backdrop', { background: 'rgb(13 17 16 / 48%)' });
+globalStyle('.pg-revision-confirmation h2', { marginBlockStart: 0 });
+globalStyle('.pg-revision-confirmation form', { display: 'flex', flexWrap: 'wrap', gap: '0.5rem' });
 globalStyle('.pg-revisions', { marginTop: '0.8rem' });
 globalStyle('.pg-revisions article + article', { borderTop: '1px solid var(--line)' });
 globalStyle(':is(.pg-evidence-list, .pg-node-evidence-list) q', { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' });

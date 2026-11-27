@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { verifyLiveUx } from './pages-live-ux.mjs';
+import { preparePagesDeployment, verifyLiveUx } from './pages-live-ux.mjs';
 
 const base = 'https://yohn-jp.github.io/codexia/';
 const sourceSha = 'a'.repeat(40);
@@ -33,6 +33,11 @@ test('[TEST-TRC-07-002] live Pages proof checks public response revision, route 
     ['/codexia/requirements/traceability/traceability.json', traceBytes],
     ['/codexia/requirements/manifest.json', JSON.stringify(requirements)],
   ]);
+  const manifestBytes = urls.get('/codexia/requirements/manifest.json');
+  const expected = {
+    repository: 'yohn-jp/codexia', runId: '42', event: 'push',
+    producerAttempt: 1, deploymentAttempt: 2, manifestSha256: digest(manifestBytes),
+  };
   const get = async (url, options) => {
     assert.equal(url.origin, new URL(base).origin);
     assert.equal(url.searchParams.get('source'), sourceSha);
@@ -40,16 +45,27 @@ test('[TEST-TRC-07-002] live Pages proof checks public response revision, route 
     assert.ok(urls.has(url.pathname));
     return new Response(urls.get(url.pathname));
   };
-  await verifyLiveUx(base, sourceSha, get, { repository: 'yohn-jp/codexia', runId: '42', attempt: 1, event: 'push' });
+  assert.deepEqual(preparePagesDeployment(Buffer.from(manifestBytes), sourceSha, expected), {
+    artifactName: 'github-pages-attempt-2', producerAttempt: 1, manifestSha256: expected.manifestSha256,
+  });
+  assert.equal(preparePagesDeployment(Buffer.from(manifestBytes), sourceSha, { ...expected, deploymentAttempt: 1 }).artifactName,
+    'github-pages-attempt-1');
+  assert.throws(() => preparePagesDeployment(Buffer.from(manifestBytes), sourceSha, { ...expected, producerAttempt: 2 }), /attempt mismatch/);
+  await verifyLiveUx(base, sourceSha, get, expected);
+  await assert.rejects(verifyLiveUx(base, sourceSha, get, { ...expected, producerAttempt: 2 }), /attempt mismatch/);
+  urls.set('/codexia/requirements/manifest.json', JSON.stringify({ ...requirements, generatedAt: 'older artifact' }));
+  await assert.rejects(verifyLiveUx(base, sourceSha, get, expected), /pack manifest digest/);
+  urls.set('/codexia/requirements/manifest.json', manifestBytes);
+  await assert.rejects(verifyLiveUx(base, sourceSha, get), /pack manifest digest/);
+  await assert.rejects(verifyLiveUx(base, sourceSha, get, { ...expected, deploymentAttempt: 0 }), /deployment attempt/);
   urls.set('/codexia/ux/snapshot.json', snapshot + ' ');
-  await assert.rejects(verifyLiveUx(base, sourceSha, get), /projection digest/);
+  await assert.rejects(verifyLiveUx(base, sourceSha, get, expected), /projection digest/);
   urls.set('/codexia/ux/snapshot.json', snapshot);
   urls.set('/codexia/ux/', html + '<p>Older page</p>');
-  await assert.rejects(verifyLiveUx(base, sourceSha, get), /page digest/);
+  await assert.rejects(verifyLiveUx(base, sourceSha, get, expected), /page digest/);
   urls.set('/codexia/ux/', html);
   urls.set('/codexia/requirements/traceability/traceability.json', JSON.stringify({ ...trace, sourceSha: 'b'.repeat(40) }));
-  await assert.rejects(verifyLiveUx(base, sourceSha, get), /another revision/);
+  await assert.rejects(verifyLiveUx(base, sourceSha, get, expected), /another revision/);
   urls.set('/codexia/requirements/traceability/traceability.json', traceBytes);
-  await assert.rejects(verifyLiveUx(base, sourceSha, get, { repository: 'yohn-jp/codexia', runId: '42', attempt: 2, event: 'push' }), /attempt mismatch/);
   await assert.rejects(verifyLiveUx('https://other.example/', sourceSha, get), /Unexpected Pages deployment URL/);
 });

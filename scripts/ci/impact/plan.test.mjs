@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { matchesGlob } from 'node:path';
 import { test } from 'node:test';
 import { componentReleaseAffected } from '../../release/components/impact.mjs';
 import { PROFILES, VERIFICATION_TASKS } from './contract.mjs';
-import { UX_PROJECTION_DOCUMENTS } from '../evidence/task-inputs.mjs';
+import {
+  isRequirementsTraceInput, isTaskInputDocument, REQUIREMENTS_TRACE_DOCUMENTS, REQUIREMENTS_TRACE_SURFACE_FILES,
+  UX_PROJECTION_DOCUMENTS,
+} from '../evidence/task-inputs.mjs';
 import { isTraceTestSource } from '../../strictdoc/test-source-path.mjs';
 const { parse } = createRequire(new URL('../../../packages/core/package.json', import.meta.url))('yaml');
 
@@ -164,6 +168,76 @@ test('official conformance fixtures select their own task and share the API lane
   }
   assert.ok((await plan(['packages/http-contract/openapi/codexia.openapi.yaml'])).tasks.includes('http-conformance'));
   assert.ok((await plan(['modules/mcp/src/stdio.ts'])).tasks.includes('mcp-conformance'));
+});
+
+test('audit Pages previews run when requirements authorities or receipt inputs change', () => {
+  const repository = new URL('../../../', import.meta.url);
+  const workflow = parse(readFileSync(new URL('.github/workflows/repository-audit.yml', repository), 'utf8'));
+  const paths = workflow.on.pull_request.paths;
+  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repository, encoding: 'utf8' }).split('\0');
+  const traceInputs = new Set([
+    ...REQUIREMENTS_TRACE_DOCUMENTS,
+    ...REQUIREMENTS_TRACE_SURFACE_FILES,
+    ...tracked.filter(file => isRequirementsTraceInput(file) ||
+      /^\.github\/workflows\/.*\.ya?ml$/u.test(file) ||
+      /^packages\/persistence-postgres\/migrations\/.*\.sql$/u.test(file)),
+    '.gitignore',
+    '.graphifyignore',
+    'app/package.json',
+    'docs/architecture/MCP-V2-MIGRATION.md',
+    'scripts/ci/evidence/trace-receipt.mjs',
+    'scripts/ci/evidence/trace-receipt.test.mjs',
+    'scripts/ci/evidence/artifact-selection.mjs',
+    'scripts/ci/evidence/download-artifacts.mjs',
+    'scripts/ci/evidence/github-rest-sdk.mjs',
+    'scripts/ci/evidence/job-name.mjs',
+    'scripts/ci/browser/coverage-reporter.mjs',
+    'scripts/ci/browser/image-digests.mjs',
+    'scripts/ci/browser/shards.mjs',
+    'scripts/github/octokit.mjs',
+    'scripts/github/paginate-actions.mjs',
+    'scripts/shared/read-regular-file.mjs',
+    'packages/persistence-postgres/tests/db-contract/toolchain.json',
+    'packages/persistence-postgres/migrations/new-migration.sql',
+    '.github/workflows/new-workflow.yaml',
+    'scripts/new-domain/test.cjs',
+    'scripts/new-domain/feature-spec-contract.ts',
+    'scripts/new-domain/feature.browser.mjs',
+  ]);
+  assert.deepEqual([...traceInputs].filter(file => !matchesWorkflowPaths(paths, [file])).sort(), []);
+  assert.equal(matchesWorkflowPaths(paths, ['docs/README.md', 'docs/design/roadmap.test.md', 'scripts/performance/k6.mjs']), false);
+});
+
+test('MCP v2 migration edits select exact-source Verify trace proof', async () => {
+  const file = 'docs/architecture/MCP-V2-MIGRATION.md';
+  assert.deepEqual((await plan([file])).tasks, ['mcp-conformance', 'coverage', 'architecture-g5', 'requirements-trace']);
+  assert.equal(isTaskInputDocument(file, 'requirements-trace'), true);
+});
+
+test('Pages pack and deploy consume exact producer outputs across workflow attempts', () => {
+  const workflow = parse(readFileSync(new URL('../../../.github/workflows/repository-audit.yml', import.meta.url), 'utf8'));
+  const { audit, architecture, specification, pack, deploy } = workflow.jobs;
+  assert.deepEqual(pack.needs, ['audit', 'architecture', 'specification']);
+  const downloads = pack.steps.filter(step => step.uses?.startsWith('actions/download-artifact@'));
+  assert.equal(downloads.length, 3);
+  for (const [part, producer] of Object.entries({ audit, architecture, specification })) {
+    const upload = producer.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
+    assert.equal(upload.with.name, 'pages-' + part + '-attempt-${{ github.run_attempt }}');
+    assert.equal(producer.outputs['artifact-id'], '${{ steps.' + upload.id + '.outputs.artifact-id }}');
+    const download = downloads.find(step => step.with.path.endsWith('/pages-' + part));
+    assert.equal(download.with['artifact-ids'], '${{ needs.' + part + '.outputs.artifact-id }}');
+    assert.equal(download.with.pattern, undefined);
+  }
+  const bind = pack.steps.find(step => step.id === 'publication');
+  assert.equal(bind.env.PAGES_PRODUCER_ATTEMPT, '${{ needs.specification.outputs.producer-attempt }}');
+  const upload = pack.steps.find(step => step.uses?.startsWith('actions/upload-pages-artifact@'));
+  assert.equal(upload.with.name, '${{ steps.publication.outputs.artifact-name }}');
+  assert.equal(deploy.needs, 'pack');
+  assert.equal(deploy.steps.find(step => step.id === 'deployment').with.artifact_name, '${{ needs.pack.outputs.artifact-name }}');
+  const verify = deploy.steps.find(step => step.id === 'projection');
+  assert.equal(verify.name, 'Verify published Pages (${{ needs.pack.outputs.manifest-sha256 }})');
+  assert.equal(verify.env.PAGES_MANIFEST_SHA256, '${{ needs.pack.outputs.manifest-sha256 }}');
+  assert.equal(verify.env.PAGES_PRODUCER_ATTEMPT, '${{ needs.pack.outputs.producer-attempt }}');
 });
 
 test('UX projection source and Pages inputs select scoped canonical proofs', async () => {
