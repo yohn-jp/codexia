@@ -1,6 +1,6 @@
 # 離脱用作品エクスポートの実装契約
 
-**種別は採用済みの規範的設計。実装と実測は未完了。**
+**種別は採用済みの規範的設計。Windows と非本番 Cloudflare Tunnel での受入計測を要する。**
 本書は [REQ-DATA-006 の正本](../authoring-portable.md#離脱用オープンエクスポート契約req-data-006) に従い、離脱用 ZIP の HTTP、認可、画面、資源管理を定める。
 対象読者は API、Desktop Web、永続化の担当者。
 現行の JSON 交換と import の変更、ZIP import、運用バックアップは対象外とする。

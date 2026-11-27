@@ -69,6 +69,7 @@ export const operationIds = [
   'persistence_nodes_get',
   'persistence_project_archive_get',
   'persistence_project_get',
+  'persistence_project_open_export_get',
   'persistence_projects_get',
   'persistence_projects_post',
   'persistence_review_feed_get',

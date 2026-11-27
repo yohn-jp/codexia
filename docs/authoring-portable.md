@@ -69,14 +69,14 @@ APIは認証と作品へのアクセス権限を確認します。ブラウザ�
 
 ## 離脱用オープンエクスポート契約（REQ-DATA-006）
 
-**種別: 採用済みの規範的設計。実装と実測は未完了。** 本節は作者がCodexiaから離脱する場合の作品データ取得を所有する。対象読者は作者・開発者。上記 `codexia-work/v1` は現行のバージョン付きJSON交換（新規作品へのimportを含む）として区別する。運用DR、SQL/DB dump、ZIP import、専用viewer、EPUB/DOCX出版形式の拡張はこの決定の対象外。運用DRは [Backup](deployment/BACKUP.md)、永続データ境界は [Data model](architecture/DATA-MODEL.md) が所有する。
+**種別: 採用済みの規範的設計。Windows と非本番 Cloudflare Tunnel での受入計測を要する。** 本節は作者がCodexiaから離脱する場合の作品データ取得を所有する。対象読者は作者・開発者。上記 `codexia-work/v1` は現行のバージョン付きJSON交換（新規作品へのimportを含む）として区別する。運用DR、SQL/DB dump、ZIP import、専用viewer、EPUB/DOCX出版形式の拡張はこの決定の対象外。運用DRは [Backup](deployment/BACKUP.md)、永続データ境界は [Data model](architecture/DATA-MODEL.md) が所有する。
 
 [離脱用 ZIP の実装契約](architecture/OPEN-WORK-EXPORT-CONTRACT.md) に HTTP、認可、画面および資源管理の詳細を定める。
 
 ### 形式と内容
 
 - 作品単位で標準ZIPを一つ取得する。テキストはUTF-8 Markdown（[CommonMark](https://spec.commonmark.org/) を参照し、原文の文字・改行・構文を変換しない）、構造化データは [RFC 8259 JSON](https://www.rfc-editor.org/rfc/rfc8259) と公開 [JSON Schema](https://json-schema.org/) を使用する。Codexia独自の実行環境・プラグイン・DB・ネット接続なしで閲覧、解析、編集できること。
-- manifestはバージョン付きの公開パッケージ仕様とし、作品ID、snapshot/version、文書UUID・親子関係・種別・順序・最新Revision・各ファイルパス、収録/除外区分、ファイルごとのbyte size・SHA-256を記述する。manifest自身を循環ハッシュに含めない。Schemaと説明書を同梱し公開する。独自暗号・圧縮フォーマット、必須の専用viewerは採用しない。
+- manifestはバージョン付きの公開パッケージ仕様とし、作品ID、snapshot/version、文書UUID・親子関係・種別・順序・最新Revision・各ファイルパス、収録/除外区分、ファイルごとのbyte size・SHA-256を記述する。manifest自身を循環ハッシュに含めない。[v1 の JSON Schema](../packages/api/src/open-work-export-v1.schema.json) と説明書を同梱し、同じスキーマを公開する。独自暗号・圧縮フォーマット、必須の専用viewerは採用しない。
 - 以下の構成を採用する。順序と階層の厳密な復元はmanifestを使用し、人間には自然な名前と順序で利用できるファイルを提示する。Knowledgeの閲覧用Markdownは構造化JSONの派生表示であり、別の編集正本ではない。
 
 ```text

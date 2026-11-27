@@ -199,3 +199,25 @@ test('generated document anchor reads keep the maximum page independent of cance
   ]);
   assert.deepEqual(signals, [null, controller.signal]);
 });
+
+test('open work download uses generated bearer transport and rejects a truncated ZIP response', async t => {
+  let length = '4';
+  t.mock.method(globalThis, 'fetch', (url: string, init: RequestInit) => {
+    assert.equal(url, '/api/v1/persistence/projects/fixture/open-export');
+    const headers = new Headers(init.headers);
+    assert.equal(headers.get('Authorization'), 'Bearer export-token');
+    assert.equal(headers.get('Accept'), 'application/zip');
+    return Promise.resolve(
+      new Response(new Uint8Array([80, 75, 3, 4]), {
+        headers: { 'Content-Type': 'application/zip', 'Content-Length': length },
+      }),
+    );
+  });
+  setOAuthAccessToken('export-token');
+  t.after(() => setOAuthAccessToken(null));
+  assert.equal((await api.downloadOpenWorkExport('fixture')).size, 4);
+  length = '5';
+  await assert.rejects(api.downloadOpenWorkExport('fixture'), { code: 'OPEN_WORK_EXPORT_INCOMPLETE' });
+  length = '134217729';
+  await assert.rejects(api.downloadOpenWorkExport('fixture'), { code: 'OPEN_WORK_EXPORT_INCOMPLETE' });
+});

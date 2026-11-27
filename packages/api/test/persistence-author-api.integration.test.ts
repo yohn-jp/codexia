@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { type TestContext, test } from 'node:test';
 import type { ChangeSetId, DocumentId, ProjectId } from '@codexia/persistence-contracts';
 import { createPostgresPersistence } from '@codexia/persistence-postgres';
+import { TextWriter, Uint8ArrayReader, ZipReader } from '@zip.js/zip.js';
 import { startBetterAuthFixture } from './fixtures/better-auth-server.js';
 
 function sha256(value: string): string {
@@ -34,6 +35,7 @@ interface PublicApiAdapter {
     },
   ): Promise<{ revision: { id: string; markdown: string }; replayed: boolean }>;
   persistenceDocument(projectId: string, documentId: string): Promise<{ revision: { id: string; markdown: string } | null }>;
+  downloadOpenWorkExport(projectId: string): Promise<Blob>;
 }
 
 async function exercisePublicApiAdapter(base: string, token: string) {
@@ -115,6 +117,21 @@ async function exercisePublicApiAdapter(base: string, token: string) {
     const current = await api.persistenceDocument(project.id, created.document.id);
     assert.equal(current.revision?.id, firstSave.revision.id);
     assert.equal(current.revision?.markdown, updatedMarkdown);
+    const archive = await api.downloadOpenWorkExport(project.id);
+    assert.equal(archive.type, 'application/zip');
+    const zip = new ZipReader(new Uint8ArrayReader(new Uint8Array(await archive.arrayBuffer())));
+    try {
+      const files = await zip.getEntries();
+      const manifest = files.find(file => file.filename === 'manifest.json');
+      assert.ok(manifest && !manifest.directory);
+      assert.equal(JSON.parse(await manifest.getData(new TextWriter(), { checkCrc32: true })).projectId, project.id);
+      const original = files.find(file => file.filename.endsWith(created.revision.id + '.md'));
+      assert.ok(original && !original.directory);
+      assert.equal(await original.getData(new TextWriter(), { checkCrc32: true }), initialMarkdown);
+    } finally {
+      await zip.close();
+    }
+    await assert.rejects(api.downloadOpenWorkExport(randomUUID()), { status: 404 });
   } finally {
     setOAuthAccessToken(null);
     globalThis.fetch = originalFetch;
@@ -136,11 +153,13 @@ async function startAuthorApi(t: TestContext) {
   return { base, ownerHeaders, persistence, fixture };
 }
 
-test('authenticated PostgreSQL API saves, replays, follows Evidence, conflicts and restores', async t => {
+test('[TEST-DATA-006-003] authenticated PostgreSQL API saves, replays, follows Evidence, conflicts and restores', async t => {
   const { base, ownerHeaders, persistence, fixture } = await startAuthorApi(t);
   await exercisePublicApiAdapter(base, await fixture.issueOwnerAccessToken());
   const unauthorized = await fetch(`${base}/api/v1/persistence/projects`);
   assert.equal(unauthorized.status, 401);
+  const unauthorizedExport = await fetch(`${base}/api/v1/persistence/projects/${randomUUID()}/open-export`);
+  assert.equal(unauthorizedExport.status, 401);
   const forbiddenTitle = `forbidden-${randomUUID()}`;
   const bearerWrite = await fetch(`${base}/api/v1/persistence/projects`, {
     method: 'POST',

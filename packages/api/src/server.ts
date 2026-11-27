@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { once } from 'node:events';
+import { createReadStream, readFileSync } from 'node:fs';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
@@ -91,6 +92,7 @@ import {
 } from '@codexia/module-runtime';
 import { assertCurrentJobHistory, type JobEvent, JobHistoryError, JobHistoryStore } from './job-history-store.js';
 import { createNativeKnowledgeActions } from './native-knowledge-actions.js';
+import { generateOpenWorkZip, OPEN_WORK_EXPORT_GENERATE_MS, OPEN_WORK_EXPORT_SEND_MS, WorkArchiveError } from './open-work-export.js';
 import { handlePersistenceOperation } from './persistence-routes.js';
 import { compareProjectPageKeys, decodeProjectPageCursor, encodeProjectPageCursor } from './project-pagination.js';
 import { RecentActivityStore } from './recent-activity-store.js';
@@ -151,6 +153,8 @@ if (
   throw new Error('Invalid API release identity');
 }
 const STYLE_NONCES = new WeakMap<IncomingMessage, string>();
+
+let openWorkExportInProgress = false;
 
 function hasBase64AlphabetAndPadding(value: string): boolean {
   if (value.length % 4 !== 0) return false;
@@ -666,10 +670,15 @@ export function createServer(options: ApiServerOptions): Server {
       throw httpFailure(404, 'PROJECT_NOT_FOUND', 'Project was not found');
     }
   };
-  const findAuthorizedProject = async (projectId: string, allowedProjectIds?: readonly string[]): Promise<Project | undefined> => {
+  const findAuthorizedProject = async (
+    projectId: string,
+    allowedProjectIds?: readonly string[],
+    readSignal?: AbortSignal,
+  ): Promise<Project | undefined> => {
     assertAssignedProject(projectId, allowedProjectIds);
-    const project = await options.persistence.read(reader =>
-      reader.getProject(projectId as import('@codexia/persistence-contracts').ProjectId),
+    const project = await options.persistence.read(
+      reader => reader.getProject(projectId as import('@codexia/persistence-contracts').ProjectId),
+      readSignal ? { signal: readSignal, statementTimeoutMs: OPEN_WORK_EXPORT_GENERATE_MS } : undefined,
     );
     return project?.id === projectId ? project : undefined;
   };
@@ -1828,6 +1837,7 @@ export function createServer(options: ApiServerOptions): Server {
     params: Record<string, string>,
     query: URLSearchParams,
     policy: AdmissionPolicy,
+    deadline?: AbortSignal,
   ) => {
     const standaloneMcpRoute = policy === 'mcp';
     const mcpStreamableRoute = standaloneMcpRoute || policy === 'mcp-module';
@@ -1904,6 +1914,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (admittedMcpClient && policy === 'persistence') {
       throw httpFailure(403, 'OAUTH_MCP_PERSISTENCE_DENIED', 'Standalone MCP clients cannot use the direct persistence API');
     }
+    deadline?.throwIfAborted();
     const isAuthor = Boolean(oauthPrincipal);
     const isBearer = Boolean(admittedMcpClient);
     const canReviewPrivateChangeSets = isAuthor;
@@ -2910,6 +2921,58 @@ export function createServer(options: ApiServerOptions): Server {
       });
       context.json(result.status, result.body);
     };
+  const openWorkExport: Handler = async context => {
+    await context.requireAuthorSession();
+    const persistence = options.persistence;
+    const projectId = context.projectId as import('@codexia/persistence-contracts').ProjectId;
+    if (!persistence) return context.reject(503, 'PERSISTENCE_UNAVAILABLE', 'PostgreSQL persistence is not ready');
+    if (!(await findAuthorizedProject(projectId))) return context.reject(404, 'WORK_NOT_FOUND', 'Work was not found');
+    if (openWorkExportInProgress) return context.reject(503, 'OPEN_WORK_EXPORT_BUSY', 'An export is already in progress');
+    openWorkExportInProgress = true;
+    const generationDeadline = AbortSignal.timeout(OPEN_WORK_EXPORT_GENERATE_MS);
+    const generateSignal = AbortSignal.any([context.signal, generationDeadline]);
+    let archive: Awaited<ReturnType<typeof generateOpenWorkZip>> | undefined;
+    try {
+      archive = await generateOpenWorkZip(persistence, projectId, generateSignal);
+      generateSignal.throwIfAborted();
+      const completed = new AbortController();
+      try {
+        const reauthorize = (async () => {
+          const fresh = await admit(context.request, context.response, context.params, context.query, 'persistence', generateSignal);
+          await fresh.requireAuthorSession();
+          return findAuthorizedProject(projectId, undefined, generateSignal);
+        })();
+        const timeout = once(generateSignal, 'abort', { signal: completed.signal }).then(() => generateSignal.throwIfAborted());
+        if (!(await Promise.race([reauthorize, timeout]))) return context.reject(404, 'WORK_NOT_FOUND', 'Work was not found');
+      } finally {
+        completed.abort();
+      }
+      generateSignal.throwIfAborted();
+      context.response.statusCode = 200;
+      context.response.setHeader('Content-Type', 'application/zip');
+      context.response.setHeader('Content-Disposition', 'attachment; filename="codexia-work-' + projectId + '.zip"');
+      context.response.setHeader('Content-Length', archive.bytes);
+      context.response.setHeader('Cache-Control', 'private, no-store, no-transform');
+      const sendSignal = AbortSignal.any([context.signal, AbortSignal.timeout(OPEN_WORK_EXPORT_SEND_MS)]);
+      context.reply.hijack();
+      await pipeline(createReadStream(archive.path), context.response, { signal: sendSignal });
+    } catch (error) {
+      if (context.signal.aborted) return;
+      if (generationDeadline.aborted && !context.reply.sent)
+        return context.reject(503, 'OPEN_WORK_EXPORT_TIMEOUT', 'The export could not be completed before its generation deadline');
+      if (error instanceof WorkArchiveError && !context.reply.sent) return context.reject(error.status, error.code, error.message);
+      throw error;
+    } finally {
+      try {
+        await archive?.dispose();
+      } finally {
+        openWorkExportInProgress = false;
+      }
+    }
+  };
+  const streamingPersistenceHandlers: Partial<Record<string, Handler>> = {
+    persistence_project_open_export_get: openWorkExport,
+  };
   for (const route of httpContract.routes) {
     if (route.contractStatus === 'target' || ownerSetupOnly.has(route.operationId) || authAdapters.has(route.operationId)) continue;
     if (
@@ -2931,7 +2994,7 @@ export function createServer(options: ApiServerOptions): Server {
       policy === 'mcp'
         ? standaloneMcp
         : policy === 'persistence'
-          ? persistenceHandler(route)
+          ? (streamingPersistenceHandlers[route.operationId] ?? persistenceHandler(route))
           : (handlers[route.operationId] ?? (route.method === 'HEAD' ? handlers[route.operationId.replace(/_head$/u, '_get')] : undefined));
     if (!handler) throw new Error(`No handler registered for ${route.operationId}`);
     register(app, route.method, route.url, handler, route, policy);

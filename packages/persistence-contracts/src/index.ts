@@ -558,7 +558,27 @@ export interface ProposalReviewQueueOptions {
   excludePrivateProposals?: boolean;
 }
 
+export interface OpenWorkExportRows {
+  project: Project;
+  documents: Document & { deletedAt: string | null };
+  revisions: DocumentRevision;
+  nodes: KnowledgeNode;
+  aliases: KnowledgeAlias;
+  relations: KnowledgeRelation;
+  anchors: EvidenceAnchor;
+  mentions: MentionLink;
+  assertions: Assertion;
+  assertionEvidence: AssertionEvidence & { assertionId: AssertionId };
+  moduleRecords: ModuleRecord;
+  omittedAuthority: { count: number };
+}
+
 export interface PersistenceReader {
+  scanOpenWorkExport?<K extends keyof OpenWorkExportRows>(
+    projectId: ProjectId,
+    section: K,
+    maximumRowBytes: number,
+  ): AsyncIterable<OpenWorkExportRows[K]>;
   getModuleRecord(projectId: ProjectId, moduleId: string, key: string): Promise<ModuleRecord | undefined>;
   listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]>;
   /** Count unresolved proposals in explicit project order, or all standalone projects in recent-project order when null; return only the bounded prefix. */
@@ -679,7 +699,7 @@ export interface PersistenceTransaction extends PersistenceReader {
 
 export interface Persistence {
   /** Read callbacks run on one consistent database snapshot. */
-  read<T>(work: (reader: PersistenceReader) => Promise<T>): Promise<T>;
+  read<T>(work: (reader: PersistenceReader) => Promise<T>, options?: { signal: AbortSignal; statementTimeoutMs: number }): Promise<T>;
   /** All writes in the callback commit together or roll back together. */
   transaction<T>(work: (transaction: PersistenceTransaction) => Promise<T>): Promise<T>;
   /** Resolve only when the backing database accepts a lightweight query. */
@@ -689,6 +709,7 @@ export interface Persistence {
 
 export type PersistenceErrorCode =
   | 'unavailable'
+  | 'export_limit'
   | 'not_found'
   | 'conflict'
   | 'idempotency_conflict'

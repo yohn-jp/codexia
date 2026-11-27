@@ -85,7 +85,7 @@
 | LIB-01.B | 作品を作成 | OWNER-API、`POST /api/v1/persistence/projects` | 新作品の構成に遷移 | 結果不明は同じprojectIDで再照合 |
 | LIB-01.C | 作品JSONをインポート | OWNER-API、`POST /api/v1/persistence/import`、schema/hash検証 | 新project選択。既存projectは不変 | 無効JSON、重複、partialは元画面 |
 | LIB-01.D | 作品JSONをエクスポート | OWNER-API、`GET …/archive`、固定snapshot | 読取だけ、保存場所はブラウザー | データ不完全なら成功ファイルを装わない |
-| LIB-01.E | 離脱用 ZIP をダウンロード（設計対象） | OWNER-API、`GET …/open-export`、操作開始時の作品 ID と固定スナップショット | 全バイト受信後に保存用の ZIP をブラウザーに渡す | 中断、期限超過、容量超過、データ欠損は受信完了にしない。[離脱用 ZIP の実装契約](../architecture/OPEN-WORK-EXPORT-CONTRACT.md) |
+| LIB-01.E | 離脱用 ZIP をダウンロード | OWNER-API、`GET …/open-export`、操作開始時の作品 ID と固定スナップショット | 全バイト受信後に保存用の ZIP をブラウザーに渡す | 中断、期限超過、容量超過、データ欠損は受信完了にしない。[離脱用 ZIP の実装契約](../architecture/OPEN-WORK-EXPORT-CONTRACT.md) |
 | OUT-01.A | 構成検索・展開・ズーム | OWNER-APIで一覧取得後LOCAL | 同じprojectの構成を表示 | フィルター変更で本文を破棄しない |
 | OUT-01.B | 文書・シーンを選択 | OWNER-API、project/document scope、transition guard | WRT-01、選択位置 | guard失敗/404は元編集を保持 |
 | OUT-01.C | 巻・章・シーンを追加 | OWNER-API、`POST …/documents`、親とidempotency | 新文書を開く | concurrent parent/invalid kindはエラー |

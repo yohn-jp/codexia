@@ -934,7 +934,7 @@ test("optional terminology cancels work at pagehide and resumes at pageshow", { 
   }
 });
 
-test("desktop author can download a portable work and import it without replacing the source", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
+test("[TEST-DATA-006-004] desktop author can download a portable work and import it without replacing the source", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const transfer = page.locator("details").filter({ has: page.locator("summary", { hasText: "作品のエクスポート・インポート" }) });
   await transfer.locator("summary").click();
@@ -949,6 +949,16 @@ test("desktop author can download a portable work and import it without replacin
   const archive = JSON.parse(json) as { format: string; documents: Array<{ id: string; markdown: string }> };
   expect(archive.format).toBe("codexia-work/v1");
   expect(archive.documents.find((item) => item.id === scene.id)?.markdown).toContain("最初の本文。");
+
+  const [openExport] = await Promise.all([
+    page.waitForEvent("download"),
+    transfer.getByRole("button", { name: "離脱用 ZIP をダウンロード" }).click(),
+  ]);
+  expect(openExport.suggestedFilename()).toBe(`codexia-work-${project.id}.zip`);
+  const zipPath = await openExport.path();
+  expect(zipPath).toBeTruthy();
+  expect((await readFile(zipPath!)).subarray(0, 4).toString("hex")).toBe("504b0304");
+  await expect(transfer.getByText("ZIP の受信完了", { exact: true })).toBeVisible();
 
   await transfer.locator('input[type="file"]').setInputFiles({
     name: "portable-work.json", mimeType: "application/json", buffer: Buffer.from(json),

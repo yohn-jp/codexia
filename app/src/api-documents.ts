@@ -22,6 +22,7 @@ import {
   persistenceImportPost,
   persistenceProjectArchiveGet,
   persistenceProjectGet,
+  persistenceProjectOpenExportGet,
   persistenceProjectsGet,
   persistenceProjectsPost,
   persistenceStatusGet,
@@ -58,6 +59,54 @@ export type PersistenceRevisionPage = DocumentRevisionPage;
 
 const apiOptions = (signal?: AbortSignal): RequestInit => (signal ? { signal } : {});
 
+const MAX_OPEN_EXPORT_BYTES = 128 * 1024 * 1024;
+
+async function downloadOpenWorkExport(projectId: string, signal?: AbortSignal): Promise<Blob> {
+  const response = (await persistenceProjectOpenExportGet(projectId, {
+    ...apiOptions(signal),
+    responseMode: 'raw',
+    headers: { Accept: 'application/zip' },
+  })) as unknown as Response;
+  const contentType = response.headers.get('Content-Type')?.split(';', 1)[0]?.trim().toLowerCase();
+  const length = response.headers.get('Content-Length');
+  const bytes = Number(length);
+  const invalid = () => new ApiError('完全な離脱用 ZIP を受信できませんでした。', 502, 'OPEN_WORK_EXPORT_INCOMPLETE');
+  if (
+    response.status !== 200 ||
+    contentType !== 'application/zip' ||
+    !length ||
+    !/^[1-9]\d*$/u.test(length) ||
+    !Number.isSafeInteger(bytes) ||
+    bytes > MAX_OPEN_EXPORT_BYTES ||
+    !response.body
+  ) {
+    await response.body?.cancel();
+    throw invalid();
+  }
+  const reader = response.body.getReader();
+  const chunks: BlobPart[] = [];
+  let received = 0;
+  try {
+    while (true) {
+      signal?.throwIfAborted();
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > bytes) throw invalid();
+      // Fetch yields views backed by ordinary ArrayBuffers.
+      chunks.push(value as Uint8Array<ArrayBuffer>);
+    }
+    if (received !== bytes) throw invalid();
+    signal?.throwIfAborted();
+    return new Blob(chunks, { type: 'application/zip' });
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 /**
  * Persistence document and project operations generated from the TypeSpec
  * contract. The transport adds API auth, lifecycle handling and response
@@ -67,6 +116,7 @@ export const documentApi = {
   persistenceStatus: (signal?: AbortSignal) => persistenceStatusGet(apiOptions(signal)),
 
   exportWorkArchive: (projectId: string, signal?: AbortSignal) => persistenceProjectArchiveGet(projectId, apiOptions(signal)),
+  downloadOpenWorkExport,
 
   importWorkArchive: (archive: unknown, signal?: AbortSignal) =>
     persistenceImportPost(archive as WorkArchive, apiOptions(signal)) as unknown as Promise<PortableWorkImportResult>,

@@ -58,6 +58,7 @@
     "GET /api/v1/persistence/projects",
     "GET /api/v1/persistence/projects/{projectId}",
     "GET /api/v1/persistence/projects/{projectId}/archive",
+    "GET /api/v1/persistence/projects/{projectId}/open-export",
     "GET /api/v1/persistence/projects/{projectId}/assertions/{assertionId}",
     "GET /api/v1/persistence/projects/{projectId}/assertions/{assertionId}/evidence",
     "GET /api/v1/persistence/projects/{projectId}/changesets",

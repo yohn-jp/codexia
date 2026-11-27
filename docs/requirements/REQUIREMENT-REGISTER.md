@@ -3314,14 +3314,14 @@ Recent Activityのcursorとwriter/page順序を同一DBトランザクション�
 **MID**: d9983b4b35d1e4e841037b838c59c303
 **UID**: REQ-DATA-006
 **Decision status**: ACCEPTED
-**Conformance status**: UNMAPPED
-**Applicability**: FUTURE_TARGET
+**Conformance status**: PARTIAL
+**Applicability**: CURRENT
 **Design owner**: [Portable works](../authoring-portable.md)
-**Implementation identifiers**: packages/api/src/work-archive.ts: exportWorkArchive; PersistenceReader; existing project export entry (target, 未実装)
-**Verification identifiers**: NOT_ASSIGNED (future acceptance scenarios in owning design)
-**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Implementation identifiers**: packages/api/src/open-work-export.ts: generateOpenWorkZip; packages/api/src/server.ts: openWorkExport; app/src/persistence/PersistenceWorkspace.tsx
+**Verification identifiers**: packages/api/src/open-work-export.test.ts; packages/api/test/persistence-author-api.integration.test.ts; tests/e2e/ui-v1.acceptance.spec.ts
+**Test IDs**: TEST-DATA-006-001, TEST-DATA-006-002, TEST-DATA-006-003, TEST-DATA-006-004
 **Exact-run reference**: NOT_RUN
-**Comment**: ACCEPTED／将来目標・未実装。既存sourceは移行候補であり適合証拠ではない。
+**Comment**: ZIP と既存 JSON の実装を追跡する。Windows 標準展開と非本番 Cloudflare Tunnel での上限計測を受入までに行う。
 
 作者がCodexiaなしで作品の確定済み本文・構成・知識・根拠・保持された過去Revisionを利用できる、公開仕様のZIP/UTF-8 Markdown/JSONによる離脱用エクスポートを提供する。
 
@@ -3336,10 +3336,10 @@ Recent Activityのcursorとwriter/page順序を同一DBトランザクション�
 **MID**: f856ef5614d12e7c2de882e9e0667d07
 **UID**: OBL-REQ-DATA-006-O01
 **Design reference**: [Portable works](../authoring-portable.md)
-**Implementation identifiers**: packages/api/src/work-archive.ts (target candidate)
-**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Implementation identifiers**: packages/api/src/open-work-export.ts; packages/api/src/open-work-export-v1.schema.json
+**Test IDs**: TEST-DATA-006-001, TEST-DATA-006-004
 **Exact-run reference**: NOT_RUN
-**Comment**: Future target; no implementation or exact-source evidence claimed.
+**Comment**: Windows 標準展開と独立した JSON Schema 検証を含む受入が残る。
 
 作品をZIPで取得し、一般的な展開ツールとエディタでMarkdownを利用できる。公開version付きmanifest、JSON Schema、説明書、パス・順序・ID・hashを同梱する。
 
@@ -3354,10 +3354,10 @@ Recent Activityのcursorとwriter/page順序を同一DBトランザクション�
 **MID**: 48001e1bbab80bd75f8bdc781b211fb2
 **UID**: OBL-REQ-DATA-006-O02
 **Design reference**: [Portable works](../authoring-portable.md)
-**Implementation identifiers**: packages/persistence-contracts/src/index.ts: PersistenceReader; packages/persistence-postgres/src/postgres-store.ts (target candidate)
-**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Implementation identifiers**: packages/persistence-postgres/src/postgres-store.ts: scanOpenWorkExport; packages/api/src/open-work-export.ts
+**Test IDs**: TEST-DATA-006-001, TEST-DATA-006-002
 **Exact-run reference**: NOT_RUN
-**Comment**: Future target; no implementation or exact-source evidence claimed.
+**Comment**: 実 PostgreSQL の履歴・論理削除と並行更新を検証する。
 
 保持された過去Revisionと回復可能な論理削除文書を区別し、全本文の文字・改行・階層・順序と参照を保存する。
 
@@ -3372,10 +3372,10 @@ Recent Activityのcursorとwriter/page順序を同一DBトランザクション�
 **MID**: cb217de1704bb6bfbc287a509ef2ee3c
 **UID**: OBL-REQ-DATA-006-O03
 **Design reference**: [Portable works](../authoring-portable.md)
-**Implementation identifiers**: packages/api/src/work-archive.ts: exportWorkArchive (target candidate)
-**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Implementation identifiers**: packages/api/src/open-work-export.ts; packages/api/src/open-work-export-v1.schema.json
+**Test IDs**: NOT_ASSIGNED (独立した全種別・参照照合が未割当)
 **Exact-run reference**: NOT_RUN
-**Comment**: Future target; no implementation or exact-source evidence claimed.
+**Comment**: 構造化出力を実装した。高密度の Knowledge、Evidence、Assertion、未解決参照の独立した全件照合が残る。
 
 Knowledge、Evidence、Assertion、未解決参照、許可された作者所有module recordsを構造化出力し、参照の真正な対応を保持する。
 
@@ -3390,10 +3390,11 @@ Knowledge、Evidence、Assertion、未解決参照、許可された作者所有
 **MID**: be77b9ff6017d4687d70ed902ce5ade2
 **UID**: OBL-REQ-DATA-006-O04
 **Design reference**: [Portable works](../authoring-portable.md)
-**Implementation identifiers**: packages/api/src/persistence-routes.ts; packages/api/src/work-archive.ts (target candidate)
-**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Implementation identifiers**: packages/api/src/server.ts: openWorkExport; packages/api/src/work-archive.ts: omitPortableModuleRecord
+**Surface identifiers**: httpOperation=GET /api/v1/persistence/projects/{projectId}/open-export; controlId=LIB-01.E
+**Test IDs**: TEST-DATA-006-001, TEST-DATA-006-003
 **Exact-run reference**: NOT_RUN
-**Comment**: Future target; no implementation or exact-source evidence claimed.
+**Comment**: 実 API の認可と機密除外を検証する。再認可失敗と外部経路での試験が残る。
 
 作者認可と作品境界を強制し、非認可principal、秘密情報、内部authority、運用状態、未確定draftを排除する。安全な除外記録を返す。
 
@@ -3408,10 +3409,10 @@ Knowledge、Evidence、Assertion、未解決参照、許可された作者所有
 **MID**: 24fc9e798a49c823411b221652b104af
 **UID**: OBL-REQ-DATA-006-O05
 **Design reference**: [Portable works](../authoring-portable.md)
-**Implementation identifiers**: packages/api/src/work-archive.ts; packages/persistence-postgres/src/postgres-store.ts (target candidate)
-**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Implementation identifiers**: packages/persistence-postgres/src/postgres-store.ts: scanOpenWorkExport; packages/api/src/open-work-export.ts; app/src/api-documents.ts
+**Test IDs**: TEST-DATA-006-002, TEST-DATA-006-004
 **Exact-run reference**: NOT_RUN
-**Comment**: Future target; no implementation or exact-source evidence claimed.
+**Comment**: 同一スナップショット、上限超過と通常ダウンロードを検証する。期限と実経路の暫定上限の計測が残る。
 
 単一snapshotから大容量作品と全ページを欠落なく生成し、リソース上限、異常、キャンセルを完了と誤表示しない。
 
@@ -3426,12 +3427,72 @@ Knowledge、Evidence、Assertion、未解決参照、許可された作者所有
 **MID**: db33b8c0c008bb5ea1092fcb44e9dd9b
 **UID**: OBL-REQ-DATA-006-O06
 **Design reference**: [Portable works](../authoring-portable.md)
-**Implementation identifiers**: packages/api/src/work-archive.ts; packages/http-contract/src/routes-persistence.tsp (target candidate)
-**Test IDs**: NOT_ASSIGNED (implementation and test mapping pending)
+**Implementation identifiers**: packages/api/src/work-archive.ts; packages/api/src/open-work-export.ts; packages/http-contract/src/routes-persistence.tsp
+**Test IDs**: TEST-DATA-006-003, TEST-DATA-006-004
 **Exact-run reference**: NOT_RUN
-**Comment**: Future target; no implementation or exact-source evidence claimed.
+**Comment**: 既存の版付き JSON 交換、import と生成 API クライアントを製品経路で検証する。
 
 既存のJSON交換・import、認可と正本を維持し、保守されたZIPライブラリと既存永続化読み取り経路を利用する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-006
+
+## TEST-DATA-006-001
+
+**Type**: TEST
+**MID**: 11490505fda9967414d901afda1234aa
+**UID**: TEST-DATA-006-001
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+実 PostgreSQL から Unicode と混合改行を含む論理削除文書の全 Revision を取得し、本文、ファイルの長さと SHA-256、機密の除外を照合する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-006
+
+## TEST-DATA-006-002
+
+**Type**: TEST
+**MID**: 267f1feb540477bae639de971f98c7ae
+**UID**: TEST-DATA-006-002
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+別の PostgreSQL トランザクションで編集を確定してから読み取りを続け、開始時点の本文だけを保持した ZIP を検証する。容量超過を型付きエラーとし、以降の要求が完了することを確認する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-006
+
+## TEST-DATA-006-003
+
+**Type**: TEST
+**MID**: fffd1b8f7562416440027bf5c239bf42
+**UID**: TEST-DATA-006-003
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Fastify、Better Auth、PostgreSQL と生成 Orval クライアントを通し、作者のダウンロード、未認証と対象作品不在の拒否を確認する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-DATA-006
+
+## TEST-DATA-006-004
+
+**Type**: TEST
+**MID**: c7b30f0992b70570a7c21d4c5fffcf4a
+**UID**: TEST-DATA-006-004
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Chromium の作品画面から離脱用 ZIP と交換用 JSON を取得し、既存 import で元の作品を置き換えないことを確認する。Windows と非本番 Tunnel は別途実測する。
 
 **Relations**:
 
