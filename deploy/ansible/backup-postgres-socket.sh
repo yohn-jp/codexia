@@ -86,6 +86,13 @@ case "$(systemctl --user show "$api_service" -p ActiveState --value)" in
   inactive|failed) api_active=false ;;
   *) fail 'API service is transitioning; retry after it settles' ;;
 esac
+tunnel_status=0
+systemctl --user is-active --quiet codexia-tunnel.service || tunnel_status=$?
+case "$tunnel_status" in 0|3|4) ;; *) fail 'Cannot observe the Tunnel before socket provisioning' ;; esac
+resume_writer(){
+  if [[ "$api_active" == true ]]; then systemctl --user start "$api_service" || return 1; fi
+  if [[ "$tunnel_status" == 0 ]]; then systemctl --user start codexia-tunnel.service || return 1; fi
+}
 installed=false
 rollback(){
   local status=$?
@@ -96,9 +103,7 @@ rollback(){
         return
       fi
     fi
-    if [[ "$api_active" == true ]] && ! systemctl --user start "$api_service"; then
-      printf '%s\n' 'The API service requires operator attention after restoring the PostgreSQL configuration' >&2
-    fi
+    resume_writer || echo 'The prior API or Tunnel requires operator recovery' >&2
   fi
 }
 trap rollback EXIT
@@ -115,6 +120,6 @@ systemctl --user daemon-reload
 systemctl --user restart "$db_service"
 timeout 30s podman wait --condition=healthy codexia-db >/dev/null
 verify_database || fail 'Replacement PostgreSQL service did not pass the private socket checks'
-if [[ "$api_active" == true ]]; then systemctl --user start "$api_service"; fi
+resume_writer
 trap - EXIT INT TERM
 printf '%s\n' PRIVATE_BACKUP_SOCKET_CONFIGURED

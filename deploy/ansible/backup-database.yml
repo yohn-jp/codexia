@@ -149,6 +149,7 @@
     dest: "{{ home }}/.config/codexia-backup/api-quadlet.conf"
     mode: '0600'
     content: |
+      # Operator policy SHA-256 {{ backup_policy_file.stat.checksum }}
       [Container]
       Secret=codexia-backup-api-database-url,type=env,target=CODEXIA_BACKUP_API_DATABASE_URL
       Volume=%h/.config/codexia-backup/policy.json:/run/codexia-backup/policy.json:ro,z

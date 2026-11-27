@@ -7,7 +7,12 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
 import { BackupConsoleControl } from '../src/backup-console-control.js';
-import { BackupConsoleExecutor, backupExecutorConfigSchema, protectedBackupRunner, pythonBackupProbe } from '../src/backup-console-executor.js';
+import {
+  BackupConsoleExecutor,
+  backupExecutorConfigSchema,
+  protectedBackupRunner,
+  pythonBackupProbe,
+} from '../src/backup-console-executor.js';
 import type { BackupPolicy } from '../src/backup-console-routes.js';
 import { BackupConsoleStore } from '../src/backup-console-store.js';
 import { backupCredentialKeyId } from '../src/backup-credential-envelope.js';
@@ -400,10 +405,9 @@ raise SystemExit(75)
   );
   await assert.rejects(control.manualStart(oldScheduledId, sourceSha, sourceDigest), /not claimable/u);
   await worker.processNext();
-  assert.deepEqual(
-    (await workerPool.query("SELECT state, reason_code FROM codexia_backup.runs WHERE kind = 'scheduled'")).rows,
-    [{ state: 'BLOCKED', reason_code: 'schedule_disabled' }],
-  );
+  assert.deepEqual((await workerPool.query("SELECT state, reason_code FROM codexia_backup.runs WHERE kind = 'scheduled'")).rows, [
+    { state: 'BLOCKED', reason_code: 'schedule_disabled' },
+  ]);
   await admin.query('DELETE FROM codexia_backup.runs WHERE id = $1', [oldScheduledId]);
 
   const runRequestId = randomUUID();

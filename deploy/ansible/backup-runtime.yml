@@ -1,34 +1,25 @@
 ---
-# Operator-owned public inputs stay on the VM. Test inventories may supply the same inputs.
-- name: Read the protected destination policy on the VM
-  when: codexia_backup_policy is not defined
-  block:
-    - ansible.builtin.slurp:
-        src: "{{ backup_config }}/policy.json"
-      register: backup_vm_policy
-      no_log: true
-    - ansible.builtin.set_fact:
-        codexia_backup_policy: "{{ backup_vm_policy.content | b64decode | from_json }}"
-      no_log: true
+- name: Read the public recovery recipient from the VM
+  ansible.builtin.command:
+    argv: [grep, -xE, 'age1[0-9a-z]+', "{{ backup_config }}/age-recipient.txt"]
+  register: backup_vm_recipient
+  changed_when: false
 
-- name: Read only an age public recipient from the protected VM
-  when: codexia_backup_age_recipient is not defined
-  block:
-    - ansible.builtin.command:
-        argv: [grep, -xE, 'age1[0-9a-z]+', "{{ backup_config }}/age-recipient.txt"]
-      register: backup_vm_recipient
-      changed_when: false
-    - ansible.builtin.set_fact:
-        codexia_backup_age_recipient: "{{ backup_vm_recipient.stdout }}"
+- name: Observe the protected VM policy without transferring its contents
+  ansible.builtin.stat:
+    path: "{{ backup_config }}/policy.json"
+    checksum_algorithm: sha256
+    follow: false
+  register: backup_policy_file
 
 - name: Require the approved provider boundaries and public recovery recipient
   ansible.builtin.assert:
     that:
       - codexia_stage == 'base'
-      - codexia_backup_policy is mapping
+      - backup_policy_file.stat.isreg | default(false) and backup_policy_file.stat.pw_name == codexia_service_user
       - (codexia_backup_receipt_directory | default(backup_root + '/receipts')) is match('^/[a-zA-Z0-9._/-]+$')
       - "'..' not in (codexia_backup_receipt_directory | default(backup_root + '/receipts')).split('/')"
-      - codexia_backup_age_recipient is match('^age1[0-9a-z]+$')
+      - backup_vm_recipient.stdout is match('^age1[0-9a-z]+$')
       - not ansible_check_mode
     fail_msg: Supply the protected operator policy and the recovery operator's public age recipient after activation.
 
@@ -36,7 +27,7 @@
   ansible.builtin.shell:
     cmd: age -r "$PUBLIC_RECIPIENT" </dev/null >/dev/null
   environment:
-    PUBLIC_RECIPIENT: "{{ codexia_backup_age_recipient }}"
+    PUBLIC_RECIPIENT: "{{ backup_vm_recipient.stdout }}"
   changed_when: false
 
 - name: Select the admitted executor from the running Full image
@@ -51,9 +42,9 @@
       - |
         import { readFileSync } from 'node:fs';
         import { backupPolicySchema } from './node_modules/@codexia/api/dist/backup-console-routes.js';
-        backupPolicySchema.parse(JSON.parse(readFileSync(0)));
+        backupPolicySchema.parse(JSON.parse(readFileSync(process.argv[1])));
+      - "{{ backup_config }}/policy.json"
     chdir: "{{ backup_root }}/current/app"
-    stdin: "{{ codexia_backup_policy | to_json }}"
   changed_when: false
 
 - name: Create private settings, staging and transfer receipt directories
@@ -99,20 +90,11 @@
       - backup_staging is match('^/[a-zA-Z0-9._/-]+$') and '..' not in backup_staging.split('/')
       - codexia_backup_secondary_independent_mount is not defined or codexia_backup_secondary_independent_mount == backup_staging
 
-- name: Publish the operator policy for the API and executor
-  ansible.builtin.copy:
-    dest: "{{ backup_config }}/policy.json"
-    content: "{{ codexia_backup_policy | to_nice_json }}\n"
+- name: Let the API read the individual policy bind mount inside the private host directory
+  ansible.builtin.file:
+    path: "{{ backup_config }}/policy.json"
     mode: '0644'
-    force: false
-
-- name: Verify the installed policy and preserve existing operator configuration
-  ansible.builtin.slurp:
-    src: "{{ backup_config }}/policy.json"
-  register: backup_existing_policy
-- ansible.builtin.assert:
-    that: (backup_existing_policy.content | b64decode | from_json) == codexia_backup_policy
-    fail_msg: The existing policy differs. Reconcile the protected policy before provisioning.
+    state: file
 
 - name: Generate or verify the VM sealing key pair without rotating an existing credential
   ansible.builtin.shell: |
@@ -207,7 +189,7 @@
       CODEXIA_BACKUP_RECEIPT_DIRECTORY={{ codexia_backup_receipt_directory | default(backup_root + '/receipts') }}
       CODEXIA_BACKUP_RUNNER={{ home }}/.local/bin/codexia-backup-runner
       CODEXIA_BACKUP_DESTINATION={{ backup_staging }}
-      CODEXIA_BACKUP_AGE_RECIPIENT={{ codexia_backup_age_recipient }}
+      CODEXIA_BACKUP_AGE_RECIPIENT={{ backup_vm_recipient.stdout }}
       {% if codexia_backup_secondary_independent_mount is defined %}
       CODEXIA_BACKUP_SECONDARY_INDEPENDENT_MOUNT={{ backup_staging }}
       {% endif %}
@@ -254,21 +236,36 @@
     "$HOME/.local/bin/codexia-backup-control" deploy-check
     dropin="$HOME/.config/containers/systemd/codexia-api.container.d/10-backup-console.conf"
     install -d -m 0700 "${dropin%/*}"
+    previous_dropin=false
     if [[ -e "$dropin" || -L "$dropin" ]]; then
+      previous_dropin=true
       [[ -f "$dropin" && ! -L "$dropin" ]] && cmp "$dropin" api-quadlet.conf
     else
       install -m 0600 api-quadlet.conf "$dropin"
     fi
     attached() { podman exec codexia-api sh -ec 'test -n "$CODEXIA_BACKUP_API_DATABASE_URL" && test -r "$CODEXIA_BACKUP_PUBLIC_KEY_FILE" && test -r "$CODEXIA_BACKUP_POLICY_FILE"'; }
     if ! attached; then
+      tunnel_status=0
+      systemctl --user is-active --quiet codexia-tunnel.service || tunnel_status=$?
+      case "$tunnel_status" in 0|3|4) ;; *) exit 1 ;; esac
+      restore_tunnel() {
+        if [[ "$tunnel_status" == 0 ]]; then systemctl --user start codexia-tunnel.service; fi
+      }
       systemctl --user daemon-reload
       if ! systemctl --user restart codexia-api.service || ! attached; then
+        # Restore the previous running API. On a retry the desired drop-in may
+        # already have been on disk without ever reaching the running container.
         rm -- "$dropin"
+        if [[ "$previous_dropin" == true ]]; then
+          trap 'install -m 0600 api-quadlet.conf "$dropin"' EXIT
+        fi
         systemctl --user daemon-reload
         systemctl --user reset-failed codexia-api.service
         systemctl --user start codexia-api.service
+        restore_tunnel
         exit 1
       fi
+      restore_tunnel
       echo API_CONFIGURED
     fi
     if jq -e '.recoveryOperationId != null' "$state/deployed-release.json" >/dev/null; then

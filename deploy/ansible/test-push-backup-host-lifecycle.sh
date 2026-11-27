@@ -14,20 +14,31 @@ verify_private_backup_socket() (
   rootless sh -c 'umask 077; cat > "$1/executor.json"' sh "$settings" <<JSON
 {"privateKeyFiles":["$settings/sealing-private.pem"],"operatorCredential":{"origin":"https://backup.fixture.invalid","accessKeyId":"synthetic","secretAccessKey":"synthetic"}}
 JSON
+  printf '%s\n' "$backup_recipient" | rootless tee "$settings/age-recipient.txt" >/dev/null
+  rootless tee "$settings/policy.json" >/dev/null <<JSON
+{"destinations":[{"provider":"s3-compatible","region":"us-east-1","endpoint":"https://backup.fixture.invalid","bucket":"codexia-fixture","prefix":"fixture","credentialModes":["operator-role"]}],
+ "maintenanceWindows":[{"id":"fixture","timeZone":"UTC","daysOfWeek":[0,1,2,3,4,5,6],"start":"$(date -u +%H:%M)","durationMinutes":360}]}
+JSON
   cat > "$tmp/backup-provision.yml" <<YAML
 codexia_stage: base
-codexia_base_approved: true
 codexia_backup_runtime_approved: true
-codexia_backup_age_recipient: "$backup_recipient"
 codexia_backup_staging_directory: "$fixture_home/.local/state/codexia-backup-mount"
 codexia_backup_secondary_independent_mount: "$fixture_home/.local/state/codexia-backup-mount"
-codexia_backup_policy:
-  destinations:
-    - {provider: s3-compatible, region: us-east-1, endpoint: "https://backup.fixture.invalid", bucket: codexia-fixture, prefix: fixture, credentialModes: [operator-role]}
-  maintenanceWindows:
-    - {id: fixture, timeZone: UTC, daysOfWeek: [0,1,2,3,4,5,6], start: "$(date -u +%H:%M)", durationMinutes: 360}
 YAML
+  local tunnel="$fixture_home/.config/systemd/user/codexia-tunnel.service"
+  rootless tee "$tunnel" >/dev/null <<'UNIT'
+[Unit]
+Requires=codexia-api.service
+After=codexia-api.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+UNIT
+  rootless_systemctl daemon-reload
+  rootless_systemctl start codexia-tunnel.service
   run_playbook "$tmp/backup-provision.yml" backup-provision
+  rootless_systemctl is-active --quiet codexia-tunnel.service
   before="$(rootless sha256sum "$settings/sealing-private.pem" "$settings/database.env")"
   before+=" $(rootless_podman inspect --format '{{.Id}}' codexia-api)"
   run_playbook "$tmp/backup-provision.yml" backup-provision-reapply
@@ -59,6 +70,9 @@ await assert.rejects(query(url.href, 'SELECT 1'));
 SOCKET_NODE
   }
   verify_socket_client
+  rootless_systemctl stop codexia-tunnel.service
+  rootless rm -- "$tunnel"
+  rootless_systemctl daemon-reload
   rootless_systemctl stop codexia-backup-executor.service codexia-api.service
   rootless_systemctl restart codexia-db.service
   rootless timeout 60s podman wait --condition=healthy codexia-db >/dev/null
