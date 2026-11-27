@@ -226,6 +226,8 @@ async function planObservation({ bootstrapMode } = {}) {
         current: plan,
         topology: host.topology,
         initializeDatabase: env.CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED === 'true',
+        resumeAuthOnly: env.CODEXIA_BOOTSTRAP_AUTH_CONTINUATION_APPROVED === 'true' &&
+          reviewed.plan.observation.bootstrapResume !== undefined,
       });
       if (bootstrapMode === 'bootstrap' && !host.topology?.secrets?.['codexia-tunnel-token']) {
         await access(join(env.RUNNER_TEMP, 'codexia-bootstrap/control/tunnel-token'));

@@ -14,6 +14,7 @@ import re
 import stat
 import subprocess
 import sys
+from contextlib import ExitStack
 from datetime import datetime, timezone
 
 FULL_IMAGE = r"ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}"
@@ -96,6 +97,47 @@ def require_fields(value, fields):
     require(isinstance(value, dict) and value.keys() == fields.keys())
     require(all(isinstance(value[key], str) and re.fullmatch(pattern, value[key])
                 for key, pattern in fields.items()))
+
+
+def read_owner_handoff(home, lock_fd):
+    """Read only the encrypted owner handoff under the inherited host lock."""
+    current_uid = os.getuid()
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    with ExitStack() as descriptors:
+        def opened(path, flags, **kwargs):
+            descriptor = os.open(path, flags, **kwargs)
+            descriptors.callback(os.close, descriptor)
+            return descriptor
+
+        home_fd = opened(home, directory_flags)
+        home_info = os.fstat(home_fd)
+        require(home_info.st_uid == current_uid and not home_info.st_mode & 0o022)
+        state_fd = home_fd
+        for component in (".local", "state", "codexia-deploy"):
+            state_fd = opened(component, directory_flags, dir_fd=state_fd)
+            directory = os.fstat(state_fd)
+            require(directory.st_uid == current_uid and not directory.st_mode & 0o022)
+        require(stat.S_IMODE(directory.st_mode) == 0o700)
+        lock = os.fstat(lock_fd)
+        require(stat.S_ISREG(lock.st_mode) and lock.st_uid == current_uid and lock.st_nlink == 1 and
+                os.path.samestat(lock, os.stat("host.lock", dir_fd=state_fd, follow_symlinks=False)))
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for marker in ("owner-setup.age.pending", "owner-setup.promoted", "deployed-release.json",
+                       "deploy-transaction.json", "cutover-transaction.json"):
+            try:
+                os.stat(marker, dir_fd=state_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            require(False)
+        handoff = "owner-setup.age"
+        descriptor = opened(handoff, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=state_fd)
+        info = os.fstat(descriptor)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == current_uid and info.st_nlink == 1 and
+                stat.S_IMODE(info.st_mode) == 0o600 and 0 < info.st_size <= 16 * 1024)
+        ciphertext = os.read(descriptor, 16 * 1024 + 1)
+        require(len(ciphertext) == info.st_size and
+                os.path.samestat(info, os.stat(handoff, dir_fd=state_fd, follow_symlinks=False)))
+        return ciphertext
 
 
 def read_recovery_handoff(state_dir):
@@ -637,6 +679,11 @@ def observe():
 
 if __name__ == "__main__":
     try:
+        if sys.argv[1:] == ["export-owner-handoff", "9"]:
+            account = pwd.getpwnam("codexia")
+            require(account.pw_uid == os.getuid() and account.pw_uid > 0 and account.pw_dir == "/home/codexia")
+            sys.stdout.buffer.write(read_owner_handoff(Path(account.pw_dir), 9))
+            sys.exit(0)
         if sys.argv[1:2] == ["verify-secret-identities"]:
             require(len(sys.argv) == 3)
             verify_secret_identities(sys.argv[2], 9)

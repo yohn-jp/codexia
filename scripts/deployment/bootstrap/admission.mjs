@@ -7,7 +7,7 @@ import { assertDeploymentPlanApproval, assertFreshObservationTime } from '../pre
 const stages = ['host', 'secrets', 'base', 'auth-runtime'];
 
 export function admitBootstrap({ mode, plan, planSha256, current, topology,
-  initializeDatabase = false, now = new Date() }) {
+  initializeDatabase = false, resumeAuthOnly = false, now = new Date() }) {
   const route = { bootstrap: 'R4', 'publish-frontend': 'R5', 'owner-setup': 'R5', 'prepare-activation': 'R5' }[mode];
   assert.ok(route, 'Unsupported bootstrap admission mode');
   assertFreshObservationTime(current.observation.observedAt, { now });
@@ -15,8 +15,12 @@ export function admitBootstrap({ mode, plan, planSha256, current, topology,
     'Invalid approved observation timestamp');
   assert.equal(plan.candidateRoute, route, 'Observed deployment route does not admit this operation');
   const grants = route === 'R4' ? ['bootstrap'] : ['owner-enrollment'];
-  if (initializeDatabase) {
-    assert.equal(route, 'R4', 'Only bootstrap can initialize the database');
+  if (resumeAuthOnly) {
+    assert.ok(route === 'R4' && plan.observation.bootstrapResume && !initializeDatabase,
+      'Auth-only continuation requires the verified R4 checkpoint and no database initialization request');
+  }
+  if (initializeDatabase || resumeAuthOnly) {
+    assert.equal(route, 'R4', 'Only bootstrap can authorize database initialization or continuation');
     grants.push('database-initialization');
   }
   assertDeploymentPlanApproval({ plan, planSha256, approval: { planSha256, grants }, current, now });

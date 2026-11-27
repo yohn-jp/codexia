@@ -1,7 +1,9 @@
 """Read-only lifecycle observer contract tests (no VM or Podman required)."""
+import fcntl
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +12,68 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location("preflight_observe", Path(__file__).with_name("preflight-observe.py"))
 observer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(observer)
+
+
+class OwnerHandoffTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.home = Path(temporary.name)
+        self.state = self.home / ".local/state/codexia-deploy"
+        self.state.mkdir(mode=0o700, parents=True)
+        self.handoff = self.state / "owner-setup.age"
+        self.handoff.write_bytes(b"encrypted envelope")
+        self.handoff.chmod(0o600)
+        self.lock = self.state / "host.lock"
+        self.lock.touch(mode=0o600)
+
+    def read_handoff(self):
+        with self.lock.open("rb") as lock:
+            return observer.read_owner_handoff(self.home, lock.fileno())
+
+    def test_export_requires_locked_complete_handoff(self):
+        self.assertEqual(self.read_handoff(), b"encrypted envelope")
+        with self.handoff.open("rb") as wrong_lock:
+            with self.assertRaises(ValueError):
+                observer.read_owner_handoff(self.home, wrong_lock.fileno())
+        with self.lock.open("rb") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaises(BlockingIOError):
+                self.read_handoff()
+        for name in ("owner-setup.age.pending", "owner-setup.promoted"):
+            marker = self.state / name
+            marker.symlink_to(self.state / "missing")
+            with self.assertRaises(ValueError):
+                self.read_handoff()
+            marker.unlink()
+
+    def test_export_rejects_symlinks_links_unbounded_and_nonregular_files(self):
+        self.handoff.chmod(0o644)
+        with self.assertRaises(ValueError):
+            self.read_handoff()
+        self.handoff.chmod(0o600)
+        linked = self.state / "hardlink"
+        linked.hardlink_to(self.handoff)
+        with self.assertRaises(ValueError):
+            self.read_handoff()
+        self.handoff.unlink()
+        self.handoff.symlink_to(linked)
+        with self.assertRaises(OSError):
+            self.read_handoff()
+        self.handoff.unlink()
+        os.mkfifo(self.handoff, 0o600)
+        with self.assertRaises(ValueError):
+            self.read_handoff()
+        self.handoff.unlink()
+        self.handoff.write_bytes(b"x" * (16 * 1024 + 1))
+        self.handoff.chmod(0o600)
+        with self.assertRaises(ValueError):
+            self.read_handoff()
+        self.handoff.unlink()
+        self.state.rename(self.state.with_name("redirect"))
+        self.state.symlink_to(self.state.with_name("redirect"))
+        with self.assertRaises(OSError):
+            self.read_handoff()
 
 
 def recovery_record():

@@ -25,7 +25,7 @@ if [[ -e "$state_dir/host.lock" || -L "$state_dir/host.lock" ]]; then
   [[ -f "$state_dir/host.lock" && ! -L "$state_dir/host.lock" && -O "$state_dir/host.lock" ]] ||
     die 'The canonical deployment host lock is unsafe'
   exec 9<>"$state_dir/host.lock"
-elif [[ $# == 5 ]]; then
+elif [[ $# == 5 || "$operation" == --export-handoff ]]; then
   die 'The canonical deployment host lock is missing'
 else
   exec 9>"$state_dir/host.lock"
@@ -158,12 +158,13 @@ verify_setup_api() {
     }
     if (!ready) process.exit(1);
     const setup = await get("/api/auth/codexia/setup/status");
-    if (!setup.ok || !["setup-pending", "owner-enrolled"].includes((await setup.json()).state)) process.exit(1);
+    const allowed = process.argv[1] === "--pending" ? ["setup-pending"] : ["setup-pending", "owner-enrolled"];
+    if (!setup.ok || !allowed.includes((await setup.json()).state)) process.exit(1);
     for (const path of ["/api/session", "/api/auth/oauth2/authorize", "/mcp"]) {
       const response = await get(path);
       if (response.status !== 403 || (await response.json()).code !== "SETUP_ONLY") process.exit(1);
     }
-  ' >/dev/null 2>&1
+  ' -- "${1:-}" >/dev/null 2>&1
 }
 
 write_marker() {
@@ -260,6 +261,28 @@ case "$operation" in
     fi
     systemctl --user start codexia-tunnel.service
     printf '%s\n' 'Setup-only API and Tunnel started. Check the approved browser origin before delivering the encrypted grant.'
+    ;;
+  --export-handoff)
+    [[ $# == 2 ]] && ! present "$promoted" || die 'The setup handoff is closed'
+    assert_installation
+    assert_setup_unit_or_clean
+    [[ "$(read_database "SELECT EXISTS (SELECT FROM codexia_auth.owner_setup WHERE id='first-owner' AND expires_at > now() AND consumed_at IS NULL AND owner_id IS NULL)")" == t ]] ||
+      die 'No outstanding unexpired Owner grant is available'
+    verify_setup_api --pending || die 'The setup API did not prove readiness and required business-route denial'
+    systemctl --user is-active --quiet codexia-tunnel.service &&
+      /usr/bin/python3 -c '
+import http.client
+connection = http.client.HTTPConnection("127.0.0.1", 2000, timeout=5)
+try:
+    connection.request("GET", "/ready")
+    raise SystemExit(0 if connection.getresponse().status == 200 else 1)
+except OSError:
+    raise SystemExit(1)
+finally:
+    connection.close()
+' ||
+      die 'The canonical Tunnel has no live Cloudflare connection'
+    "$HOME/.local/bin/codexia-preflight-observe" export-owner-handoff 9
     ;;
   --inspect)
     [[ $# == 2 ]] && ! present "$promoted" || die 'The setup operation is closed'

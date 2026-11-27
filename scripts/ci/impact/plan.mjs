@@ -310,6 +310,15 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
     if (file === 'biome.json' ||
         (/^(?:app|packages|modules|edge\/frontend)\//u.test(file) && /\.(?:[cm]?js|jsx|[cm]?ts|tsx)$/u.test(file))) add('biome-ci');
     if (!isChangedPath(file)) { full = true; break; }
+    if (file.startsWith('cmd/codexiactl/') || file === 'scripts/ci/execution/verify-codexiactl.sh') {
+      add('codexiactl-linux');
+      continue;
+    }
+    if (file === 'docs/deployment/CODEXIACTL.md' || file === 'deploy/production.json' ||
+        /^deploy\/cloudflare\/[^/]+\.json$/u.test(file) ||
+        /^\.github\/workflows\/(?:production-bootstrap|production-preflight|frontend-release)\.yml$/u.test(file)) {
+      add('codexiactl-linux');
+    }
     if (isRequirementsTraceInput(file) || HTTP_CONTRACT_ROUTE_SOURCE_PATHS.has(file)) add('requirements-trace');
     const conformanceTask = Object.entries(CONFORMANCE_TASKS).find(([, entry]) => file.startsWith(`${path.dirname(entry)}/`));
     if (conformanceTask) {

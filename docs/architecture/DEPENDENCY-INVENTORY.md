@@ -1,6 +1,6 @@
 # 既存依存ライブラリ台帳・バージョン制約
 
-**種別: 維持管理する依存台帳。** [外部ライブラリ選定規約](DEPENDENCY-POLICY.md)の補助文書。実際のインストール版・integrityの機械的正本は各`package.json`、`pnpm-lock.yaml`、Nativeの`package-lock.json`、SwiftPM指定、Ansible要件、Actions参照およびOCI digestであり、本書は採用理由・例外・更新時の検証責務を管理する。設計の正本は[システム設計](SYSTEM-DESIGN.md)と[選定規約](DEPENDENCY-POLICY.md)。依存宣言が変更されるPRは本台帳も更新し、実装／設計のずれを放置しない。
+**種別: 維持管理する依存台帳。** [外部ライブラリ選定規約](DEPENDENCY-POLICY.md)の補助文書。実際のインストール版・integrityの機械的正本は各`package.json`、`pnpm-lock.yaml`、Nativeの`package-lock.json`、SwiftPM指定、`go.mod`と`go.sum`、Ansible要件、Actions参照およびOCI digestであり、本書は採用理由・例外・更新時の検証責務を管理する。設計の正本は[システム設計](SYSTEM-DESIGN.md)と[選定規約](DEPENDENCY-POLICY.md)。依存宣言が変更されるPRは本台帳も更新し、実装／設計のずれを放置しない。
 
 以下の値は**直接依存のマニフェスト指定**であり、npmレジストリの最新安定版とは限らない。`^`と`~`はSemVer範囲指定、数値のみはマニフェストの厳密指定である。いずれもlockfileは実際の依存ツリーを固定する。`workspace:*`、`file:`、推移依存は下表の外で管理する。検査対象には`edge/frontend`の独立したnpm lockfile、SwiftPM、Python、GitHub Actions、OCIも含める。
 
@@ -133,6 +133,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | 対象 | 宣言・実装の基準 | 分類／更新条件 |
 | --- | --- | --- |
 | Node.js | root `engines.node >=24`、Verifyでは`24.22.3`、Backend OCIはNode 24 digest固定 | **連動**: 実行版・型定義・CIイメージ・本番OCIを別々に更新しない。Node 26への移行を承認し実証した後で`@types/node` 26へ進む |
+| Go | `cmd/codexiactl/go.mod` の `1.27.4`。Verify とタグ配布が `actions/setup-go` `v7.1.0` で同じ宣言を使用 | **採用**: Linux amd64 の独立した初回配備用バイナリ。race test、vet、CGO 無効の build、リリース provenance を確認 |
 | Swift OpenAPI Generator | `ios/CodexiaTransport/Package.resolved`: generator `1.14.4`, runtime `1.13.4`, URLSession `1.4.0` | **連動**: TypeSpec由来のOpenAPI 3.1から全operation IDを照合し、再生成、Swift契約テスト、Simulatorを確認 |
 | Ajv | Fastify 5.12.8の推移依存 `8.20.0`、`ajv-formats` `3.0.1` | **連動**: `pnpm-lock.yaml` に従い、FastifyのDraft-07検証とserializerを隔離routeで確認 |
 | pnpm | root `pnpm@12.21.0`、CIとBackend Dockerfileで一致 | **連動**: 同期更新、lockfileの互換性・Corepack・キャッシュキーを検証 |
@@ -147,6 +148,21 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | S3互換fixture | `deploy/backup/s3-fixture.sh`でSilo `RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329`（AGPL-3.0-or-later）とMinIO Client `RELEASE.2025-08-13T08-35-41Z`（SHA-256 `01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891`）を使用 | **Test-only**: 合成データ・一時credentialでS3 API互換性を検証。production runtimeへ含めない。fixture更新時はdigest、license、conditional write・multipart・TLSの実挙動を再検証 |
 | PostgreSQL contract verification | `packages/persistence-postgres/tests/db-contract/toolchain.json`: PostgreSQL 17-bookworm OCI digest, pgTAP 1.3.4 source SHA-256, tbls 1.97.0 archive SHA-256 | **契約検証用**: disposable DB専用。migration sourceではなく`pg_catalog`とpgTAPでDDLを照合し、tblsはread-only artifactを生成 |
 | Encrypted restore drill tools | `packages/persistence-postgres/tests/db-contract/toolchain.json`: Podman stable OCI digest, age 1.3.2 archive SHA-256 | **契約検証用**: synthetic artifactをage v2形式で暗号化し、network-isolated Podman targetへ復元。production credentialは使用しない |
+
+### codexiactl の Go 直接依存
+
+`cmd/codexiactl/go.mod` と `go.sum` がモジュールの版と検証チェックサムを保持する。依存は初回配備 CLI のビルドに閉じる。
+
+| モジュール | バージョン | 用途と更新時の確認 |
+| --- | --- | --- |
+| `github.com/google/go-github/v93` | `v93.0.0` | GitHub REST の型付きクライアント。Environment 保護、run/attempt/Artifact の出所照合、リダイレクト時の認証分離を確認 |
+| `github.com/cloudflare/cloudflare-go/v7` | `v7.15.0` | Cloudflare の公式 Go SDK。Cloudflare 資源の検出、認証のスコープ分離、限定資格情報の確認 |
+| `tailscale.com/client/tailscale/v2` | `v2.12.0` | Tailscale の公式 Go SDK。ノード、policy、CI の OIDC trust を照合 |
+| `golang.org/x/oauth2` | `v0.38.0` | GitHub App Device Flow。拒否、ポーリング、失効と安全停止を確認 |
+| `golang.org/x/crypto` | `v0.59.0` | OpenSSH の Ed25519 形式と GitHub Environment Secret の Libsodium 互換 sealed box |
+| `golang.org/x/sys` | `v0.50.0` | Linux ファイル操作とローカル排他。既存ファイルの所有権、モード、symlink 拒否を確認 |
+| `golang.org/x/term` | `v0.48.0` | TTY 専用の非表示端末入力。非対話実行と機械向け出力からの分離を確認 |
+| `filippo.io/age` | `v1.3.2` | Owner Setup Grant の既存 age envelope。受取人の照合と一時鍵を確認 |
 
 ## アップデートの審査・記録
 

@@ -64,6 +64,27 @@ test('CI evidence consumers install the frozen dependency before loading evidenc
   }
 });
 
+test('the codexiactl binary is tested in Verify and only published by the certified tag workflow', () => {
+  const sha = 'a'.repeat(40);
+  const base = 'b'.repeat(40);
+  for (const event of ['pull_request', 'push']) {
+    const plan = createVerificationPlan({files: ['cmd/codexiactl/main.go'], event, sha, base});
+    assert.ok(plan.tasks.includes('codexiactl-linux'));
+    assert.ok(plan.groups.includes('unit-architecture'));
+  }
+  assert.ok(!createVerificationPlan({ files: ['docs/architecture/SYSTEM-DESIGN.md'], event: 'pull_request', sha, base }).tasks.includes('codexiactl-linux'));
+  const verify = workflow.jobs.unit.steps.find(step => step.uses?.startsWith('actions/setup-go@'));
+  assert.equal(verify.with['go-version-file'], 'cmd/codexiactl/go.mod');
+  assert.match(verify.if, /codexiactl-linux/u);
+
+  const publication = parse(readFileSync(new URL('../../../.github/workflows/publish-oci.yml', import.meta.url), 'utf8'));
+  assert.deepEqual(publication.on, { push: { tags: ['v*'] } });
+  assert.equal(publication.jobs.codexiactl.needs, 'verify-source');
+  assert.equal(publication.jobs.codexiactl.permissions.contents, 'read');
+  assert.ok(publication.jobs.release.needs.includes('codexiactl'));
+  assert.ok(publication.jobs.release.steps.some(step => step.run?.includes('gh attestation verify')));
+});
+
 test('Biome selects shipped JS/TS changes and config, but not unrelated CI or native sources', () => {
   const sha = 'a'.repeat(40);
   const base = 'b'.repeat(40);
@@ -99,8 +120,8 @@ test('the certified graph covers every declared obligation and admits trace-owne
   assert.equal(requiresWorkspacePreparation(['db-contract']), true);
   assert.ok(VERIFICATION_TASKS.includes('db-contract'));
   assert.match(readFileSync(new URL('../execution/group.mjs', import.meta.url), 'utf8'), /CODEXIA_CI_REPORT_DIR: path\.join\(reportDirectory, task\)/u);
-  assert.deepEqual(VERIFICATION_GROUPS['unit-architecture'], ['architecture-g5', 'swift-linux']);
-  assert.equal(requiresWorkspacePreparation(['architecture-g5', 'swift-linux']), false);
+  assert.deepEqual(VERIFICATION_GROUPS['unit-architecture'], ['architecture-g5', 'swift-linux', 'codexiactl-linux']);
+  assert.equal(requiresWorkspacePreparation(VERIFICATION_GROUPS['unit-architecture']), false);
   assert.equal(requiresWorkspacePreparation(['unit-root']), true);
   const runner = readFileSync(new URL('../execution/group.mjs', import.meta.url), 'utf8');
   assert.match(runner, /CODEXIA_ARCHITECTURE_EVIDENCE_DIR: path\.join\(reportDirectory, 'architecture'\)/u);

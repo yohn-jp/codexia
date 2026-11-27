@@ -626,6 +626,8 @@ test('known operational inputs retain root proof and trace evidence for register
     if (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf') && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (isTraceTestSource(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (SWIFT_LINUX_RECIPES.includes(file)) expected.push('swift-linux');
+    if (file === 'deploy/production.json' || file === '.github/workflows/production-preflight.yml' ||
+        /^deploy\/cloudflare\/[^/]+\.json$/u.test(file)) expected.push('codexiactl-linux');
     assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
   }

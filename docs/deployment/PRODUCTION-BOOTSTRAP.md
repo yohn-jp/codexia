@@ -2,7 +2,37 @@
 
 Provision a VM, enroll its first owner through the normal frontend and activate the certified Backend. The activation ends at ACTIVE. Complete the independent restore drill after configuring backups to establish operational acceptance. [Initial deployment](INITIAL-DEPLOYMENT-FLOW.md) owns the input and recovery contract. [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) owns route selection. The management path is GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet.
 
-The normative [initial deployment CLI](CODEXIACTL.md) is the target operator entrypoint. It prepares the inputs below and invokes these existing protected workflows from one SSH-side guided session; it does not replace their checks. Until CLI conformance is proven, this runbook remains the actual manual operation reference. Independent approvals and owner enrollment remain mandatory.
+## Guided initial deployment
+
+Use the [initial deployment CLI](CODEXIACTL.md) from a pinned OpenSSH session on the target Ubuntu 26.04 x86-64 VM. It prepares the inputs below and invokes the existing protected workflows. The individual steps in this runbook are available for diagnosis and independent recovery. Independent Environment approvals and owner enrollment remain mandatory.
+
+On your trusted workstation, select a published immutable version from the [Codexia releases](https://github.com/yohn-jp/codexia/releases). Replace `vX.Y.Z` with that exact tag and use an up-to-date GitHub CLI to verify the release and the binary's provenance.
+
+```sh
+tag=vX.Y.Z
+repo=yohn-jp/codexia
+gh release verify "$tag" --repo "$repo"
+gh release download "$tag" --repo "$repo" \
+  --pattern codexiactl-linux-amd64 --pattern codexiactl-linux-amd64.sha256
+sha256sum --check --strict codexiactl-linux-amd64.sha256
+gh attestation verify ./codexiactl-linux-amd64 --repo "$repo" \
+  --signer-workflow "$repo/.github/workflows/publish-oci.yml" \
+  --source-ref "refs/tags/$tag" --deny-self-hosted-runners
+```
+
+Copy the binary and checksum to the VM over the independently verified SSH connection. Run these commands from the receiving directory as the deployment administrator.
+
+```sh
+sha256sum --check --strict codexiactl-linux-amd64.sha256
+chmod 0700 codexiactl-linux-amd64
+./codexiactl-linux-amd64 version
+./codexiactl-linux-amd64 init --plan
+./codexiactl-linux-amd64 init
+```
+
+The release identifies its source and version. The repository maintainer provisions the repository-only GitHub App with Device Flow enabled and sets its public client ID in `CODEXIACTL_GITHUB_APP_CLIENT_ID` before building the tag. The CLI can guide an operator who explicitly selects the supported fine-grained PAT route. Use `doctor` for prerequisite and permission failures and `status` to inspect the latest observed state. Run `init` again to reconcile an interrupted invocation. Resolve reported state conflicts through the owning protected workflow or recovery runbook before retrying.
+
+After the CLI confirms the normal frontend and the registration-only API and hands off the Owner Setup Grant, the owner opens the normal `/console/setup` page. Use the existing protected procedures below after owner registration.
 
 ## Establish deployment access
 

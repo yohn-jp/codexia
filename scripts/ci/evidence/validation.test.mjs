@@ -97,16 +97,25 @@ test('Swift Linux evidence is required only for a selected task in the shared un
     const source = ['docs/architecture/SYSTEM-DESIGN.md'];
     const unrelated = fixture(event, source);
     const architecture = unrelated.reports.find(report => report.group === 'unit-architecture');
-    assert.deepEqual(architecture.results.map(result => result.task), ['architecture-g5']);
+    assert.deepEqual(architecture.results.map(result => result.task), event === 'push' ? ['architecture-g5', 'codexiactl-linux'] : ['architecture-g5']);
     assert.doesNotThrow(() => assertPlanEvidence(unrelated.plan, unrelated.jobs, unrelated.reports));
     architecture.results.push({ task: 'swift-linux', status: 'passed' });
     assert.throws(() => assertPlanEvidence(unrelated.plan, unrelated.jobs, unrelated.reports), /omitted or duplicated/);
 
     const selected = fixture(event, [...source, 'ios/CodexiaTransport/Package.swift']);
     const shared = selected.reports.find(report => report.group === 'unit-architecture');
-    assert.deepEqual(shared.results.map(result => result.task), ['architecture-g5', 'swift-linux']);
+    assert.deepEqual(shared.results.map(result => result.task), event === 'push' ? ['architecture-g5', 'swift-linux', 'codexiactl-linux'] : ['architecture-g5', 'swift-linux']);
     assert.doesNotThrow(() => assertPlanEvidence(selected.plan, selected.jobs, selected.reports));
-    shared.results.pop();
+    shared.results.splice(1, 1);
     assert.throws(() => assertPlanEvidence(selected.plan, selected.jobs, selected.reports), /omitted or duplicated/);
   }
+});
+
+test('the selected codexiactl verification cannot certify a skipped CLI result', () => {
+  const { plan, jobs, reports } = fixture('pull_request', ['cmd/codexiactl/main.go']);
+  const architecture = reports.find(report => report.group === 'unit-architecture');
+  assert.deepEqual(architecture.results.map(result => result.task), ['codexiactl-linux']);
+  assert.doesNotThrow(() => assertPlanEvidence(plan, jobs, reports));
+  architecture.results[0].status = 'skipped';
+  assert.throws(() => assertPlanEvidence(plan, jobs, reports), /A selected validation failed, was blocked or skipped/u);
 });
