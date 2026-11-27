@@ -1,3 +1,7 @@
+import { ApiError } from '../api-error';
+import { ownerSecurityIdentityGet, ownerSecurityRevokeConsentPost } from '../generated/http/client';
+import type { GeneratedHttpOptions } from '../generated-http-fetch';
+
 export interface OwnerOAuthClient {
   readonly clientId: string;
   readonly name: string;
@@ -36,50 +40,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function stringList(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every(item => typeof item === 'string' && item.length > 0);
-}
-
-function parseIdentity(value: unknown): OwnerIdentity {
-  if (!isRecord(value) || !isRecord(value.provider) || !Array.isArray(value.clients) || !Array.isArray(value.consents)) {
-    throw new Error('Invalid owner identity');
-  }
-  const status = value.provider.status;
-  if (status !== 'not-configured' && status !== 'operator-configured-unverified') throw new Error('Invalid owner provider status');
-  const clients = value.clients.map((row: unknown): OwnerOAuthClient => {
-    if (
-      !isRecord(row) ||
-      typeof row.clientId !== 'string' ||
-      !row.clientId ||
-      typeof row.name !== 'string' ||
-      !stringList(row.scopes) ||
-      !stringList(row.redirectUris) ||
-      typeof row.disabled !== 'boolean'
-    ) {
-      throw new Error('Invalid owner OAuth client');
-    }
-    return { clientId: row.clientId, name: row.name, scopes: row.scopes, redirectUris: row.redirectUris, disabled: row.disabled };
-  });
-  const consents = value.consents.map((row: unknown): OwnerConsent => {
-    if (
-      !isRecord(row) ||
-      typeof row.id !== 'string' ||
-      !row.id ||
-      typeof row.clientId !== 'string' ||
-      !row.clientId ||
-      !stringList(row.scopes) ||
-      typeof row.updatedAt !== 'string' ||
-      !Number.isFinite(Date.parse(row.updatedAt)) ||
-      typeof row.revision !== 'string' ||
-      !/^[A-Za-z0-9_-]{43}$/u.test(row.revision)
-    ) {
-      throw new Error('Invalid owner consent');
-    }
-    return { id: row.id, clientId: row.clientId, scopes: row.scopes, updatedAt: row.updatedAt, revision: row.revision };
-  });
-  return { provider: { status }, clients, consents };
-}
-
 async function readError(response: Response): Promise<OwnerSecurityRequestError> {
   const body: unknown = await response
     .clone()
@@ -90,41 +50,42 @@ async function readError(response: Response): Promise<OwnerSecurityRequestError>
   return new OwnerSecurityRequestError(response.status, code, message);
 }
 
-export async function fetchOwnerIdentity(fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<OwnerIdentity> {
-  let response: Response;
-  try {
-    response = await fetcher('/api/auth/codexia/owner-security/identity', {
-      method: 'GET',
-      credentials: 'same-origin',
-      cache: 'no-store',
-      redirect: 'error',
-      mode: 'same-origin',
-      headers: { accept: 'application/json' },
-      ...(signal ? { signal } : {}),
-    });
-  } catch {
-    throw new Error('Owner identity could not be loaded');
-  }
-  if (!response.ok) throw await readError(response);
-  return parseIdentity(await response.json());
-}
-
-export async function revokeOwnerConsent(consent: OwnerConsent, fetcher: typeof fetch = fetch): Promise<void> {
-  const response = await fetcher('/api/auth/codexia/owner-security/revoke-consent', {
-    method: 'POST',
-    credentials: 'same-origin',
+function ownerSecurityOptions(fetcher: typeof fetch, signal?: AbortSignal): GeneratedHttpOptions {
+  return {
+    transport: { auth: 'same-origin' },
+    async fetcher(input, init) {
+      const response = await fetcher(input, init);
+      if (!response.ok) throw await readError(response);
+      return response;
+    },
     cache: 'no-store',
     redirect: 'error',
     mode: 'same-origin',
-    headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ id: consent.id, clientId: consent.clientId, scopes: consent.scopes, revision: consent.revision }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw await readError(response);
-  const receipt: unknown = await response.json();
-  if (!isRecord(receipt) || receipt.consentRemoved !== true || receipt.grantRevoked !== true) {
-    throw new TypeError('Owner security did not confirm the grant withdrawal');
+    headers: { accept: 'application/json' },
+    ...(signal ? { signal } : {}),
+  };
+}
+
+export async function fetchOwnerIdentity(fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<OwnerIdentity> {
+  try {
+    const { provider, clients, consents } = await ownerSecurityIdentityGet(ownerSecurityOptions(fetcher, signal));
+    return {
+      provider: { status: provider.status },
+      clients: clients.map(({ clientId, name, scopes, redirectUris, disabled }) => ({ clientId, name, scopes, redirectUris, disabled })),
+      consents: consents.map(({ id, clientId, scopes, updatedAt, revision }) => ({ id, clientId, scopes, updatedAt, revision })),
+    };
+  } catch (error) {
+    if (error instanceof OwnerSecurityRequestError || error instanceof ApiError) throw error;
+    throw new Error('Owner identity could not be loaded');
   }
+}
+
+export async function revokeOwnerConsent(consent: OwnerConsent, fetcher: typeof fetch = fetch): Promise<void> {
+  const { id, clientId, scopes, revision } = consent;
+  await ownerSecurityRevokeConsentPost(
+    { id, clientId, scopes: [...scopes], revision },
+    ownerSecurityOptions(fetcher, AbortSignal.timeout(10_000)),
+  );
 }
 
 export function outcomeWasUnconfirmed(error: unknown): boolean {

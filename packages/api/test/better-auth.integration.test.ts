@@ -497,7 +497,7 @@ test('[TEST-MCPV-004-003] Better Auth PKCE MCP client lists and invokes tools th
       body: '{}',
     });
     assert.equal(missingWriteOrigin.status, 403);
-    assert.equal((await missingWriteOrigin.json()).code, 'MISSING_OR_NULL_ORIGIN');
+    assert.equal((await missingWriteOrigin.json()).code, 'OWNER_SECURITY_ORIGIN_DENIED');
     const revokeCurrent = await apiRequest(`${baseAuth}/revoke-session`, {
       method: 'POST',
       headers: { ...ownerHeaders, 'content-type': 'application/json' },
@@ -632,11 +632,9 @@ test('[TEST-MCPV-004-003] Better Auth PKCE MCP client lists and invokes tools th
       },
       'revocation is durably bound to the exact issuer, jti, client, subject and session',
     );
-    assert.equal(
-      (await apiRequest(`${origin}/api/session`, { headers: { authorization: `Bearer ${accessToken}` } })).status,
-      401,
-      'the exact revoked jti is denied by API admission',
-    );
+    const revokedAuthorSession = await apiRequest(`${origin}/api/session`, { headers: { authorization: `Bearer ${accessToken}` } });
+    assert.equal(revokedAuthorSession.status, 401, 'the exact revoked jti is denied by API admission');
+    assert.equal(revokedAuthorSession.headers.get('www-authenticate'), 'Bearer realm="codexia", error="invalid_token"');
     const revokedIntrospection = await apiRequest(`${baseAuth}/oauth2/introspect`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },

@@ -603,7 +603,7 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
     inputSchema: schema,
     outputSchema: schema,
     async invoke(rawInput, context): Promise<ActionResult> {
-      const input = rawInput as { fail?: boolean; wait?: boolean; progress?: number[] };
+      const input = rawInput as { fail?: boolean; wait?: boolean; progress?: number[]; oversizedResult?: boolean };
       if (Array.isArray(input.progress)) {
         if (!context.reportProgress) throw new Error('The host did not scope domain progress to this invocation');
         for (const progress of input.progress) await context.reportProgress(progress);
@@ -622,7 +622,9 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
       return {
         ok: true,
         snapshot: context.reader.snapshot,
-        data: { report: { examples: 3, accuracy: 0.75 }, version: 'synthetic-v1' },
+        data: input.oversizedResult
+          ? { details: 'x'.repeat(8 * 1024 * 1024) }
+          : { report: { examples: 3, accuracy: 0.75 }, version: 'synthetic-v1' },
       };
     },
   };
@@ -1693,6 +1695,38 @@ describe('Codexia HTTP boundary', () => {
     assert.equal(historyBytes.includes('must-not-be-captured'), false, 'action input is not retained as job history');
   });
 
+  it('returns the retained domain job failure when the successful action result exceeds the retention limit', async t => {
+    const root = await mkdtemp(resolve(tmpdir(), 'codexia-api-domain-job-result-limit-'));
+    tempDirs.push(root);
+    const domain = sourceDomainJobRuntime(resolve(root, 'module-cache'));
+    const api = await startCustomApi(makeSnapshotStore().store, root, {
+      runtime: domain.runtime,
+      usageDirectory: resolve(root, 'history'),
+    });
+    t.after(api.close);
+
+    const owner = signedRequests.ownerHeaders();
+    const response = await fetch(`${api.base}/api/projects/project-1/actions/speaker.evaluation.run`, {
+      method: 'POST',
+      headers: { Authorization: owner.Authorization, Origin: api.base, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: { oversizedResult: true } }),
+    });
+    assert.equal(response.status, 200);
+    const jobId = response.headers.get('x-codexia-job-id');
+    assert.ok(jobId);
+    const result = (await response.json()) as ActionResult;
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'domain_job_result_not_retained');
+    assert.equal(result.error.retryable, false);
+
+    const jobResponse = await fetch(`${api.base}/api/jobs/${jobId}`, { headers: { Authorization: owner.Authorization } });
+    assert.equal(jobResponse.status, 200);
+    const retained = (await jobResponse.json()) as { status: string; result: unknown; errorCode?: string };
+    assert.equal(retained.status, 'error');
+    assert.equal(retained.result, null);
+    assert.equal(retained.errorCode, result.error.code);
+  });
+
   it("reads retained v3 jobs and persists the owner's inbox update without losing their history", async t => {
     const root = await mkdtemp(resolve(tmpdir(), 'codexia-api-retained-jobs-'));
     tempDirs.push(root);
@@ -2169,11 +2203,9 @@ describe('Codexia HTTP boundary', () => {
       token({}, 'JWT'),
     ];
     for (const [index, invalid] of invalidTokens.entries()) {
-      assert.equal(
-        (await fetch(api.base + '/api/session', { headers: browserHeaders(invalid) })).status,
-        401,
-        `invalid OAuth token case ${index}`,
-      );
+      const denied = await fetch(api.base + '/api/session', { headers: browserHeaders(invalid) });
+      assert.equal(denied.status, 401, `invalid OAuth token case ${index}`);
+      assert.equal(denied.headers.get('www-authenticate'), 'Bearer realm="codexia", error="invalid_token"');
     }
     assert.equal(
       (await fetch(api.base + '/api/session', { headers: browserHeaders(token({}, 'at+jwt', 'unpublished-key')) })).status,

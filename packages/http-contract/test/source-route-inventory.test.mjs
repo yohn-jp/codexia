@@ -127,10 +127,10 @@ function contributionOperations(source, prefix) {
 
 test('current and target OpenAPI operations match the independent inventory', () => {
   const keys = assertAdmittedOperations(contract);
-  assert.equal(keys.length, 116);
-  assert.equal(inventory.current.length, 116);
+  assert.equal(keys.length, 118);
+  assert.equal(inventory.current.length, 118);
   assert.equal(inventory.target.length, 0);
-  assert.equal(new Set(keys.map(key => key.slice(key.indexOf(' ') + 1))).size, 91);
+  assert.equal(new Set(keys.map(key => key.slice(key.indexOf(' ') + 1))).size, 93);
 });
 
 test('inventory mismatch gate detects missing, extra, and duplicate method/path operations', () => {
@@ -224,6 +224,29 @@ test('the Codexia Better Auth plugin endpoint is admitted as an application adap
   assert.ok(inventory.current.includes(key));
   assert.ok(inventory.betterAuthAdapters.includes(key));
   assert.ok(contract.paths['/api/auth/codexia/auth-methods']?.get);
+});
+
+test('owner identity and consent withdrawal declare their existing owner-cookie wire contract', () => {
+  const identity = contract.paths['/api/auth/codexia/owner-security/identity']?.get;
+  const withdraw = contract.paths['/api/auth/codexia/owner-security/revoke-consent']?.post;
+  assert.ok(identity, 'the Codexia-owned identity route must appear in OpenAPI');
+  assert.ok(withdraw, 'the Codexia-owned consent withdrawal route must appear in OpenAPI');
+  for (const operation of [identity, withdraw]) {
+    assert.deepEqual(operation.security, [{ ApiKeyAuth: [] }]);
+    assert.equal(operation.responses['200'].headers['Cache-Control'].schema.enum[0], 'no-store');
+    assert.ok(operation.responses['401']);
+    assert.ok(operation.responses['403']);
+  }
+  assert.ok(withdraw.parameters.some(parameter => parameter.name === 'Origin' && parameter.in === 'header' && parameter.required));
+  assert.ok(withdraw.responses['409']);
+  const request = contract.components.schemas.OwnerConsentWithdrawalRequest;
+  assert.deepEqual([...request.required].sort(), ['clientId', 'id', 'revision', 'scopes']);
+  assert.deepEqual(request.unevaluatedProperties, { not: {} });
+  const generated = toFastifyRoutes(contract);
+  const requestSchema = generated.schemas.find(schema => schema.$id === 'urn:codexia:http-contract:OwnerConsentWithdrawalRequest');
+  assert.equal(requestSchema?.additionalProperties, false);
+  const receipt = contract.components.schemas.OwnerConsentWithdrawalReceipt;
+  for (const key of ['consentRemoved', 'grantRevoked']) assert.deepEqual(receipt.properties[key].enum, [true]);
 });
 
 test('MCP and publishing contribution methods and paths match OpenAPI', () => {

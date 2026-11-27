@@ -136,7 +136,7 @@ export function ownerSecurityPolicy(options: OwnerSecurityPolicyOptions) {
   };
 }
 
-/** In-process evidence for scoped consent withdrawal pending admission to the HTTP contract. */
+/** Owner-only identity lookup and scoped OAuth consent withdrawal. */
 export function ownerSecurity(options: OwnerSecurityOptions) {
   const clientIds = new Set(options.oauthClientIds);
   return {
