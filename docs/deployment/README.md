@@ -6,6 +6,8 @@
 
 This directory implements the deployable boundary specified by [System design](../architecture/SYSTEM-DESIGN.md) and [Infrastructure as code](IAC.md). The React/Vite application is released as Cloudflare Workers Static Assets. The API is a separate rootless Podman service; Cloudflare Tunnel is its only public origin path.
 
+**Normative initial installation entrypoint:** [codexiactl](CODEXIACTL.md) owns the SSH-side guided authentication, registration, protected dispatch sequence, resume and acceptance contract. Existing workflows remain the execution authority; current manual runbooks remain implementation references until CLI conformance.
+
 ## Request and release paths
 
 ```text
