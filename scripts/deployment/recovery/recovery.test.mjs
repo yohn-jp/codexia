@@ -33,13 +33,13 @@ function fixture({ phase = 'pending', health = 'healthy' } = {}) {
       `EnvironmentFile=${settingsFile}`,
       '',
     ].join('\n');
-    return { unit, settingsFile, record: { image, authMode: 'better-auth', authSettingsSha256 } };
+    return { unit, settingsFile, record: { format: 'codexia-push-deployment/v1', image, authMode: 'better-auth', authSettingsSha256 } };
   };
   const previous = releaseFixture(previousImage, 'https://codexia.example.test');
   const candidate = releaseFixture(candidateImage, 'https://candidate.example.test');
-  writeFileSync(path.join(quadletDir, 'codexia-api.container'), candidate.unit);
+  writeFileSync(path.join(quadletDir, 'codexia-api.container'), candidate.unit, { mode: 0o600 });
   writeFileSync(path.join(stateDir, 'rollback-api.container'), previous.unit);
-  writeFileSync(path.join(stateDir, 'deployed-release.json'), JSON.stringify(candidate.record) + '\n');
+  writeFileSync(path.join(stateDir, 'deployed-release.json'), JSON.stringify(candidate.record) + '\n', { mode: 0o600 });
   writeFileSync(path.join(stateDir, 'rollback-release.json'), JSON.stringify(previous.record) + '\n');
   writeFileSync(path.join(stateDir, 'host.lock'), '');
   writeFileSync(path.join(stateDir, 'deploy-transaction.json'), JSON.stringify({
@@ -51,8 +51,35 @@ function fixture({ phase = 'pending', health = 'healthy' } = {}) {
     tunnelLinkCreated: false,
     releasePresent: true,
   }));
-  writeFileSync(path.join(mockBin, 'systemctl'), '#!/bin/sh\nprintf "systemctl %s\\n" "$*" >> "$CODEXIA_TEST_LOG"\ncase "$*" in "--user show --property=LoadState --value codexia-api.service") [ "${CODEXIA_TEST_SHOW_FAIL:-false}" = false ] || exit 1; printf "%s\\n" "${CODEXIA_TEST_API_LOAD_STATE:-loaded}"; exit 0 ;; "--user show --property=LoadState --value codexia-tunnel.service") [ "${CODEXIA_TEST_SHOW_FAIL:-false}" = false ] || exit 1; printf "%s\\n" "${CODEXIA_TEST_TUNNEL_LOAD_STATE:-loaded}"; exit 0 ;; "--user is-active --quiet "*) exit 3 ;; esac\nif [ "$*" = "--user stop codexia-api.service" ] && [ "${CODEXIA_TEST_STOP_FAIL:-false}" = true ]; then exit 1; fi\nexit 0\n');
-  writeFileSync(path.join(mockBin, 'podman'), '#!/bin/sh\nprintf "podman %s\\n" "$*" >> "$CODEXIA_TEST_LOG"\ncase "$*" in "container exists codexia-api") [ "${CODEXIA_TEST_API_CONTAINER:-present}" = present ] ;; *State.Running*) printf "%s\\n" "${CODEXIA_TEST_API_RUNNING:-false}" ;; *ImageName*) printf "%s\\n" "$CODEXIA_TEST_RUNNING_IMAGE" ;; *) printf "%s\\n" "$CODEXIA_TEST_HEALTH" ;; esac\n');
+  writeFileSync(path.join(mockBin, 'systemctl'), `#!/bin/sh
+printf "systemctl %s\\n" "$*" >> "$CODEXIA_TEST_LOG"
+case "$*" in
+  "--user show --property=LoadState --value codexia-api.service")
+    [ "${'$'}{CODEXIA_TEST_SHOW_FAIL:-false}" = false ] || exit 1
+    printf "%s\\n" "$CODEXIA_TEST_API_LOAD_STATE" ;;
+  "--user show --property=LoadState --value codexia-tunnel.service")
+    [ "${'$'}{CODEXIA_TEST_SHOW_FAIL:-false}" = false ] || exit 1
+    printf "%s\\n" "$CODEXIA_TEST_TUNNEL_LOAD_STATE" ;;
+  "--user show --property=SourcePath --value codexia-api.service")
+    printf "%s\\n" "$CODEXIA_TEST_API_SOURCE_PATH" ;;
+  "--user is-active --quiet codexia-api.service")
+    [ "$CODEXIA_TEST_API_ACTIVE" = true ] || exit 3 ;;
+  "--user is-active --quiet "*)
+    exit 3 ;;
+  "--user stop codexia-api.service")
+    [ "${'$'}{CODEXIA_TEST_STOP_FAIL:-false}" = false ] || exit 1 ;;
+esac
+`);
+  writeFileSync(path.join(mockBin, 'podman'), `#!/bin/sh
+printf "podman %s\\n" "$*" >> "$CODEXIA_TEST_LOG"
+case "$*" in
+  "container exists codexia-api") [ "$CODEXIA_TEST_API_CONTAINER" = present ] ;;
+  *State.Running*ImageName*) printf "%s %s %s\\n" "$CODEXIA_TEST_API_RUNNING" "$CODEXIA_TEST_HEALTH" "$CODEXIA_TEST_RUNNING_IMAGE" ;;
+  *State.Running*) printf "%s\\n" "$CODEXIA_TEST_API_RUNNING" ;;
+  *ImageName*) printf "%s\\n" "$CODEXIA_TEST_RUNNING_IMAGE" ;;
+  *) printf "%s\\n" "$CODEXIA_TEST_HEALTH" ;;
+esac
+`);
   writeFileSync(path.join(mockBin, 'sleep'), '#!/bin/sh\nexit 0\n');
   chmodSync(path.join(mockBin, 'systemctl'), 0o755);
   chmodSync(path.join(mockBin, 'podman'), 0o755);
@@ -71,11 +98,13 @@ function fixture({ phase = 'pending', health = 'healthy' } = {}) {
       CODEXIA_PUSH_QUADLET_DIR: quadletDir,
       CODEXIA_TEST_LOG: logFile,
       CODEXIA_TEST_HEALTH: health,
-      CODEXIA_TEST_RUNNING_IMAGE: previousImage,
+      CODEXIA_TEST_RUNNING_IMAGE: phase === 'committed' ? candidateImage : previousImage,
+      CODEXIA_TEST_API_SOURCE_PATH: path.join(quadletDir, 'codexia-api.container'),
+      CODEXIA_TEST_API_ACTIVE: String(phase === 'committed'),
       CODEXIA_TEST_API_LOAD_STATE: 'loaded',
       CODEXIA_TEST_TUNNEL_LOAD_STATE: 'loaded',
       CODEXIA_TEST_API_CONTAINER: 'present',
-      CODEXIA_TEST_API_RUNNING: 'false',
+      CODEXIA_TEST_API_RUNNING: String(phase === 'committed'),
       CODEXIA_TEST_PREVIOUS_IMAGE: previousImage,
       CODEXIA_TEST_CANDIDATE_IMAGE: candidateImage,
       PATH: `${mockBin}:${process.env.PATH}`,
@@ -289,8 +318,46 @@ test('committed transaction only cleans snapshots and does not switch a healthy 
     assert.match(result.stdout, /CLEANED_COMMITTED_TRANSACTION/u);
     assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), target.candidate.unit);
     assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), target.candidate.record);
-    assert.equal(existsSync(target.logFile), false, 'a committed intent is cleanup only and must not touch systemd');
+    assert.equal(existsSync(path.join(target.stateDir, 'deploy-transaction.json')), false);
+    assert.equal(existsSync(path.join(target.stateDir, 'rollback-api.container')), false);
+    assert.equal(existsSync(path.join(target.stateDir, 'rollback-release.json')), false);
+    assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /systemctl --user (?:start|stop|reset-failed|daemon-reload)/u);
   } finally {
     rmSync(target.root, { recursive: true, force: true });
+  }
+});
+
+test('committed recovery retains its evidence when the live release cannot be reconciled', async t => {
+  const cases = {
+    'live image is the prior release': ({ env }) => { env.CODEXIA_TEST_RUNNING_IMAGE = env.CODEXIA_TEST_PREVIOUS_IMAGE; },
+    'live image is unhealthy': ({ env }) => { env.CODEXIA_TEST_HEALTH = 'unhealthy'; },
+    'API service is inactive': ({ env }) => { env.CODEXIA_TEST_API_ACTIVE = 'false'; },
+    'loaded API uses another Quadlet': ({ env, quadletDir }) => { env.CODEXIA_TEST_API_SOURCE_PATH = path.join(quadletDir, 'other.container'); },
+    'release record disagrees with the Quadlet': ({ stateDir, previous }) => {
+      writeFileSync(path.join(stateDir, 'deployed-release.json'), JSON.stringify(previous.record));
+    },
+    'runtime settings changed': ({ candidate }) => { writeFileSync(candidate.settingsFile, 'CODEXIA_PUBLIC_ORIGIN=https://other.example.test\n'); },
+  };
+  for (const [scenario, change] of Object.entries(cases)) {
+    await t.test(scenario, () => {
+      const target = fixture({ phase: 'committed' });
+      try {
+        change(target);
+        const files = [
+          'deploy-transaction.json', 'deployed-release.json', 'rollback-api.container', 'rollback-release.json',
+        ].map(name => path.join(target.stateDir, name));
+        files.push(path.join(target.quadletDir, 'codexia-api.container'), target.candidate.settingsFile);
+        const before = files.map(file => readFileSync(file));
+        const result = runRecovery(target);
+        assert.equal(result.status, 1, result.stderr);
+        assert.doesNotMatch(result.stdout, /CLEANED_COMMITTED_TRANSACTION/u);
+        assert.deepEqual(files.map(file => readFileSync(file)), before);
+        if (existsSync(target.logFile)) {
+          assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /systemctl --user (?:start|stop|reset-failed|daemon-reload)/u);
+        }
+      } finally {
+        rmSync(target.root, { recursive: true, force: true });
+      }
+    });
   }
 });
