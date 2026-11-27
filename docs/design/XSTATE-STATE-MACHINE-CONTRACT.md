@@ -48,7 +48,31 @@
 | XST-005 | ChangeSet/auth/backupへの展開はそれぞれの状態正本と比較し、重複stateや不要なglobal actorを追加しない |
 | XST-006 | 決定したXState version、API、採用範囲、追加したCI source/test identityをexact-sourceで検証 |
 
-DesktopのWRT-01/REC-01保存・復旧は [`persistence-save-machine.ts`](../../app/src/application/persistence-save-machine.ts) と [`PersistenceWorkspace.tsx`](../../app/src/persistence/PersistenceWorkspace.tsx) が担当する。次の機械は操作対象を画面単位で保持し、既存APIの結果を表示に写像する。
+DesktopのWRT-01/REC-01保存・復旧は [`persistence-save-machine.ts`](../../app/src/application/persistence-save-machine.ts) と [`PersistenceWorkspace.tsx`](../../app/src/persistence/PersistenceWorkspace.tsx) が担当する。
+
+### Desktop の保存と復旧のイベント対応
+
+この表は REQ-UI-006 と XST-001 の実装対応を示す。
+操作の意味は画面台帳、ワイヤー契約は TypeSpec が定める。
+保存処理は `persistence_document_patch`、最新 Revision の取得は `persistence_document_get` を使う。
+[画面台帳](SCREEN-CONTROL-CATALOG.md) / [TypeSpec](../../packages/http-contract/src/routes-persistence.tsp)
+
+| 画面と操作 | machine の公開イベント | ガードと遷移 | 検証する観測結果 |
+| --- | --- | --- | --- |
+| WRT-01、REC-01 の表示と復旧 | `RECOVERY.READY` | 選択した作品と文書を設定する。journal の保護済み世代、競合、再送対象を読み込み、保護待ち、競合、または保存中に進む。 | 選択を切り替えた後も旧文書の遅延結果が新文書の競合を消さず、選択先の未確認操作は元の ID で再送する。 |
+| WRT-01 の編集、REC-01.A の再保護 | `DRAFT.CHANGED` | 作品と文書が一致する編集を保護に回す。保護中に同じ文書を編集した場合は旧世代の actor を中断する。 | 旧世代の保護完了で新世代を保護済みにせず、現在の世代の保護が終わるまで送信しない。 |
+| WRT-01.B、REC-01.A の保護結果 | `DRAFT.PROTECTED`、`DRAFT.FAILED`、`DRAFT.OTHER_TAB` | 画面アダプターの書込結果、または journal actor の結果を保護済み、失敗、別タブに反映する。 | 旧原稿の取り込みは保護済み世代を保存できる。quota エラーや別タブの更新時には、未保護の世代をサーバーに送信しない。 |
+| WRT-01.A の保存 | `SAVE.MANUAL` | 文書、保護済み世代、未確定変更の存在を確認する。競合がなければ操作 ID を使い `persistence_document_patch` を実行する。 | 保護前には PATCH が発生しない。対象操作と一致する receipt を確認するまで DB 確定表示に進まない。 |
+| REC-01.B の再照合 | `SAVE.RETRY` | `unknown` で保留中の操作 ID を使い、同じ `persistence_document_patch` を再送する。 | 応答を失った操作の再送 ID が変わらず、receipt の確認でだけ確定する。再読み込みの前後で同じ操作を使用する。 |
+| REC-01.C の競合検出と比較 | `SAVE.CONFLICT.OBSERVED`、`SAVE.CONFLICT.RESOLVED` | 最新 Revision の取得で競合を観測する。比較後の解決は保存待ちに戻し、別の明示保存操作を待つ。PATCH の 409/412 も競合へ進む。 | 競合中と照合失敗時に下書きを保持する。比較後に独立した保存操作でだけ書き込む。 |
+| WRT-01.B、OUT-01.B の画面遷移 | `NAVIGATION.REQUESTED`、`NAVIGATION.BLOCKED`、`NAVIGATION.ALLOWED` | 遷移 ID が一致する journal 結果を採用する。IME を確定できない場合と、保護に失敗した場合は遷移をブロックする。 | IME 処理や保護を中断しても旧文書の原稿を保持し、新文書に書き込まない。 |
+
+machine 単体テストは保護前の保存拒否、世代変更時の actor 中断、412 の競合、保留操作の再送、遷移拒否を検証する。
+Chromium と PostgreSQL の受入テストは、別タブからの更新、作者別の journal、再読み込み後の receipt 照合、IME 中の画面遷移、IndexedDB quota を実際の操作から検証する。
+イベントとテストの対応は以下のテストソースをたどり、実行証跡は対象リビジョンの Certification で確認する。
+[machine 単体テスト](../../app/src/application/persistence-save-machine.test.ts) / [Core 受入](../../tests/e2e/core.acceptance.spec.ts) / [Desktop UI 受入](../../tests/e2e/ui-v1.acceptance.spec.ts) / [PostgreSQL 受入](../../tests/e2e/persistence-database.acceptance.spec.ts)
+
+### ChangeSet と認証管理の状態機械
 
 | 画面・操作 | Desktopでの適用範囲 | 判定と再照合の正本 |
 | --- | --- | --- |

@@ -242,11 +242,15 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
       outcomeConflict: ({ context }) => context.outcome?.kind === 'conflict',
       outcomeUnauthorized: ({ context }) => context.outcome?.kind === 'unauthorized',
       outcomeForbidden: ({ context }) => context.outcome?.kind === 'forbidden',
+      readUnauthorized: ({ event }) => 'error' in event && errorStatus(event.error) === 401,
+      readForbidden: ({ event }) => 'error' in event && errorStatus(event.error) === 403,
+      readConflict: ({ event }) => 'error' in event && conflictStatus(event.error),
       canApprove: ({ context, event }) => event.type === 'ACTION' && event.action === 'approve' && statusOf(context) === 'proposed',
       canReject: ({ context, event }) => event.type === 'ACTION' && event.action === 'reject' && statusOf(context) === 'proposed',
       canApply: ({ context, event }) => event.type === 'ACTION' && event.action === 'apply' && statusOf(context) === 'approved',
     },
     actions: {
+      recordReadError: assign(({ event }) => ({ message: 'error' in event ? errorTextForRead(event.error) : '' })),
       beginLoad: assign(({ context, event }) => ({
         message: '',
         requestedId: event.type === 'LOAD.REQUESTED' ? (event.requestedId ?? '') : '',
@@ -384,7 +388,7 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
               };
             }),
           },
-          onError: { target: 'readFailed', actions: assign(({ event }) => ({ message: errorTextForRead(event.error) })) },
+          onError: { target: 'readFailed', actions: 'recordReadError' },
         },
       },
       inspectLoaded: {
@@ -424,7 +428,7 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
               actions: assign(({ event }) => ({ detail: event.output, outcome: null, message: '' })),
             },
           ],
-          onError: { target: 'readFailed', actions: assign(({ event }) => ({ message: errorTextForRead(event.error) })) },
+          onError: { target: 'readFailed', actions: 'recordReadError' },
         },
       },
       settling: {
@@ -438,12 +442,14 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
       },
       readFailed: {
         always: [
-          { guard: 'outcomeConflict', target: 'conflict' },
-          { guard: 'outcomeUnknown', target: 'unknown' },
-          { guard: 'outcomeUnauthorized', target: 'unauthorized' },
-          { guard: 'outcomeForbidden', target: 'forbidden' },
-          { target: 'idle' },
+          { guard: 'readUnauthorized', target: 'unauthorized' },
+          { guard: 'readForbidden', target: 'forbidden' },
+          { guard: 'readConflict', target: 'conflict' },
         ],
+        on: {
+          'LOAD.REQUESTED': { target: 'loading', actions: 'beginLoad' },
+          'SELECT.REQUESTED': { target: 'inspecting', actions: 'beginInspect' },
+        },
       },
       unauthorized: {
         on: {

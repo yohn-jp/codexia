@@ -1548,6 +1548,26 @@ model McpParseError {
   ...Record<never>;
 }
 
+model McpAdmissionBadRequest {
+  @statusCode statusCode: 400;
+  @body body: ApiError;
+}
+
+model McpAdmissionForbidden {
+  @statusCode statusCode: 403;
+  @body body: ApiError;
+}
+
+model McpAdmissionNotFound {
+  @statusCode statusCode: 404;
+  @body body: ApiError;
+}
+
+model McpAdmissionUnavailable {
+  @statusCode statusCode: 503;
+  @body body: ApiError;
+}
+
 model McpMethodDenied {
   @statusCode statusCode: 405;
   @body body: ApiError;

@@ -43,7 +43,7 @@ flock --exclusive --nonblock 9 || {
   exit 1
 }
 
-if ! recovery="$(node - "$intent" "$state_dir/rollback-release.json" "$state_dir/rollback-api.container" <<'NODE'
+if ! recovery="$(node - "$intent" "$state_dir/rollback-release.json" "$state_dir/rollback-api.container" "$release_state" "$active_unit" <<'NODE'
 const fs = require('node:fs');
 const { createHash } = require('node:crypto');
 const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
@@ -53,11 +53,10 @@ if (value.format !== 'codexia-deploy-transaction/v1' || !['pending', 'committed'
     typeof value.releasePresent !== 'boolean' ||
     (value.backupRunId !== undefined && (typeof value.backupRunId !== 'string' ||
       !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value.backupRunId)))) process.exit(2);
-let previousImage = '';
-if (value.phase === 'pending' && value.hadUnit) {
-  const unitInfo = fs.lstatSync(process.argv[4]);
-  if (!unitInfo.isFile() || unitInfo.isSymbolicLink()) process.exit(2);
-  const unit = fs.readFileSync(process.argv[4], 'utf8');
+function reviewedReleaseImage(unitPath, releasePath) {
+  const unitInfo = fs.lstatSync(unitPath, { throwIfNoEntry: false });
+  if (!unitInfo?.isFile()) process.exit(2);
+  const unit = fs.readFileSync(unitPath, 'utf8');
   const images = [...unit.matchAll(/^Image=([^\r\n]*)$/gm)].map(match => match[1]);
   const modes = [...unit.matchAll(/^Environment=CODEXIA_AUTH_MODE=([^\r\n]*)$/gm)].map(match => match[1]);
   const digests = [...unit.matchAll(/^Environment=CODEXIA_AUTH_SETTINGS_SHA256=([^\r\n]*)$/gm)].map(match => match[1]);
@@ -66,25 +65,36 @@ if (value.phase === 'pending' && value.hadUnit) {
   const [digest] = digests;
   const [file] = files;
   if (images.length !== 1 || !/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/.test(image) ||
-      modes.length !== 1 || modes[0] !== 'better-auth' || !value.releasePresent ||
+      modes.length !== 1 || modes[0] !== 'better-auth' ||
       digests.length !== 1 || !/^[a-f0-9]{64}$/.test(digest) || files.length !== 1 ||
       !file.startsWith('/') || !file.endsWith('/.config/codexia-auth/runtime-' + digest + '.env')) process.exit(2);
   const settings = fs.lstatSync(file, { throwIfNoEntry: false });
   if (!settings?.isFile() || settings.uid !== process.getuid() || (settings.mode & 0o777) !== 0o600 ||
       createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== digest) process.exit(2);
-  const releasePath = process.argv[3];
-  if (!fs.lstatSync(releasePath, { throwIfNoEntry: false })?.isFile()) process.exit(2);
+  const releaseInfo = fs.lstatSync(releasePath, { throwIfNoEntry: false });
+  if (!releaseInfo?.isFile()) process.exit(2);
   const release = JSON.parse(fs.readFileSync(releasePath, 'utf8'));
   if (release.authMode !== 'better-auth' || release.authSettingsSha256 !== digest || release.image !== image) process.exit(2);
-  previousImage = image;
+  if (value.phase === 'committed' &&
+      (release.format !== 'codexia-push-deployment/v1' ||
+        value.candidateImage !== image || value.authSettingsSha256 !== digest ||
+        [unitInfo, releaseInfo].some(info => info.uid !== process.getuid() || (info.mode & 0o777) !== 0o600))) process.exit(2);
+  return image;
+}
+let releaseImage = '';
+if (value.phase === 'committed') {
+  releaseImage = reviewedReleaseImage(process.argv[6], process.argv[5]);
+} else if (value.hadUnit) {
+  if (!value.releasePresent) process.exit(2);
+  releaseImage = reviewedReleaseImage(process.argv[4], process.argv[3]);
 }
 process.stdout.write([value.format, value.phase, value.hadUnit, value.tunnelWasActive,
   value.apiLinkCreated, value.tunnelLinkCreated, value.releasePresent,
-  previousImage || '-', value.backupRunId ?? '-'].join('\n'));
+  releaseImage || '-', value.backupRunId ?? '-'].join('\n'));
 NODE
 )"
 then
-  echo 'Invalid deployment transaction or prior release snapshot. Recover older deployments using their recording release; recovery state retained.' >&2
+  echo 'Invalid deployment transaction or prior release snapshot. Verify the committed release. Recover older deployments using their recording release; recovery state retained.' >&2
   exit 1
 fi
 mapfile -t recovery_fields <<< "$recovery"
@@ -94,7 +104,17 @@ mapfile -t recovery_fields <<< "$recovery"
 }
 
 if [[ "${recovery_fields[1]}" == committed ]]; then
+  committed_image="${recovery_fields[7]}"
+  if ! source_path="$(systemctl --user show --property=SourcePath --value codexia-api.service)" ||
+     [[ "$source_path" != "$active_unit" ]] ||
+     ! systemctl --user is-active --quiet codexia-api.service ||
+     ! running="$(podman inspect --format '{{.State.Running}} {{.State.Health.Status}} {{.ImageName}}' codexia-api)" ||
+     [[ "$running" != "true healthy $committed_image" ]]; then
+    echo 'Committed deployment does not match the healthy active release; recovery state retained' >&2
+    exit 1
+  fi
   rm -f -- "$intent" "$intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json"
+  sync -f "$state_dir"
   echo 'CLEANED_COMMITTED_TRANSACTION'
   exit 0
 fi

@@ -54,6 +54,7 @@ test('production deployment consumes the verified Full digest and provenance cer
   assert.ok(ansible, 'production deployment must apply the digest through Ansible');
   assert.equal(ansible.env.CODEXIA_CERTIFIED_FULL_IMAGE, '${{ needs.verify-handoff.outputs.certified-full-image }}');
   assert.equal(ansible.env.CODEXIA_PROFILE, 'full');
+  assert.doesNotMatch(JSON.stringify(ansible), /BACKUP_(DESTINATION|AGE_RECIPIENT)|codexia_backup_/u);
   assert.equal(ansible.env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, '${{ needs.verify-handoff.outputs.deployment-certificate }}');
   assert.equal(ansible.env.CODEXIA_INITIAL_INSTALL_APPROVED, "${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED || 'false' }}");
   assert.equal(ansible.env.CODEXIA_DATABASE_INITIALIZATION_APPROVED, "${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED || 'false' }}");
@@ -89,8 +90,6 @@ test('the convergence step forwards the certified identity, private certificate 
     CODEXIA_SOURCE_SHA: producer,
     CODEXIA_PROFILE: 'full',
     CODEXIA_DEPLOYED_UI_EPOCH: '17',
-    CODEXIA_BACKUP_DESTINATION: '/fixture/backups',
-    CODEXIA_BACKUP_AGE_RECIPIENT: 'age1fixture',
     CODEXIA_INITIAL_INSTALL_APPROVED: 'true',
     CODEXIA_DATABASE_INITIALIZATION_APPROVED: 'false',
   };
@@ -100,8 +99,6 @@ test('the convergence step forwards the certified identity, private certificate 
     CODEXIA_VERIFIED_MAIN_SHA: 'main',
     CODEXIA_SOURCE_SHA: 'main',
     CODEXIA_DEPLOYED_UI_EPOCH: '0',
-    CODEXIA_BACKUP_DESTINATION: '',
-    CODEXIA_BACKUP_AGE_RECIPIENT: 'fixture',
     CODEXIA_INITIAL_INSTALL_APPROVED: 'yes',
     CODEXIA_DATABASE_INITIALIZATION_APPROVED: 'yes',
   })) {
@@ -142,8 +139,6 @@ test('the convergence step forwards the certified identity, private certificate 
       codexia_profile: 'full',
       codexia_verified_main_sha: verified,
       codexia_deployed_ui_epoch: 17,
-      codexia_backup_destination: '/fixture/backups',
-      codexia_backup_recipient: 'age1fixture',
       codexia_initial_install_approved: false,
       codexia_database_initialization_approved: false,
     });
@@ -152,6 +147,7 @@ test('the convergence step forwards the certified identity, private certificate 
   rmSync(invocation, { force: true });
   const manual = {
     ...admitted, CODEXIA_MANUAL_ACTIVATION: 'true', CODEXIA_DATABASE_INITIALIZATION_APPROVED: 'true',
+    CODEXIA_BACKUP_DESTINATION: '', CODEXIA_BACKUP_AGE_RECIPIENT: '',
     GITHUB_SHA: 'd'.repeat(40), GITHUB_REPOSITORY: 'yohn-jp/codexia',
   };
   writeFileSync(path.join(bin, 'gh'), '#!/bin/bash\nprintf "%s\\n" "$GITHUB_SHA"\n', { mode: 0o700 });
@@ -169,6 +165,8 @@ test('the convergence step forwards the certified identity, private certificate 
   assert.equal(result.status, 0, result.stderr);
   const vars = JSON.parse(readFileSync(path.join(directory, 'codexia-deploy-vars.json'), 'utf8'));
   assert.deepEqual(vars.codexia_expected_first_activation, binding);
+  assert.equal(vars.codexia_backup_destination, undefined);
+  assert.equal(vars.codexia_backup_recipient, undefined);
   assert.equal(vars.codexia_initial_install_approved, true);
   assert.equal(vars.codexia_database_initialization_approved, true);
 });
@@ -214,7 +212,7 @@ test('Ansible routes the push stage through the codexia runtime and host lock', 
   assert.doesNotMatch(safeFailure['ansible.builtin.fail'].msg, /stderr\s*\}\}/u,
     'raw transaction stderr must never be rendered into an Ansible failure message');
   assert.match(transaction['ansible.builtin.shell'].cmd, /default\.target\.wants/u, 'the API must recover after a VM reboot');
-  assert.match(transaction['ansible.builtin.shell'].cmd, /backup-locked[\s\S]*--approved[\s\S]*--lock-file[\s\S]*--lock-fd/u, 'updates must commit an encrypted off-VM backup under the same lock');
+  assert.match(transaction['ansible.builtin.shell'].cmd, /if \[\[ "\$had_unit" == true \]\]; then\n\s+if ! artifact=.*deploy-backup.*\n[\s\S]*?deploy-finish/u, 'updates must commit an encrypted off-VM backup under the same lock');
   assert.match(transaction['ansible.builtin.shell'].cmd, /restore_previous/u, 'failed candidate activation must restore the prior release');
   assert.match(transaction['ansible.builtin.shell'].cmd, /stop codexia-api\.service[\s\S]*running_image[\s\S]*candidate_image/u, 'candidate acceptance must follow successful shutdown and match the certified running digest');
   assert.match(transaction['ansible.builtin.shell'].cmd, /restored_image[\s\S]*rollback_image/u, 'rollback health must be bound to the prior digest snapshot');
@@ -245,7 +243,7 @@ test('manual first Backend activation uses protected admission and the existing 
   const shell = transaction['ansible.builtin.shell'].cmd;
   const lock = shell.indexOf('flock --exclusive --nonblock 9');
   const binding = shell.indexOf('the prepared first activation database or owner changed');
-  assert.ok(lock >= 0 && binding > lock && binding < shell.indexOf('backup-locked'));
+  assert.ok(lock >= 0 && binding > lock && binding < shell.indexOf('deploy-backup'));
   const prepare = parse(readFileSync(new URL('../../../deploy/ansible/deploy-prepare.yml', import.meta.url), 'utf8'));
   assert.equal(prepare.find(task => task.name === 'Recover interrupted deployment before preparing target state').when,
     'codexia_expected_first_activation is not defined');
@@ -256,7 +254,7 @@ test('locked production admission refuses a clean API slot without the approved 
   const gateStart = shell.indexOf('if [[ "$had_unit" == false && "$require_tunnel" == true && "$first_activation" == null ]]; then');
   const gateEnd = shell.indexOf('first_activation_window_current(){', gateStart);
   assert.ok(gateStart > shell.indexOf('flock --exclusive --nonblock 9') &&
-    gateEnd > gateStart && gateEnd < shell.indexOf('backup-locked'));
+    gateEnd > gateStart && gateEnd < shell.indexOf('deploy-backup'));
   const gate = shell.slice(gateStart, gateEnd);
   const prefix = 'set -eu\nstale_admission(){ printf "%s\\n" "$1" >&2; exit 1; }\n';
   for (const [hadUnit, production, evidence, expected] of [
@@ -274,7 +272,36 @@ test('locked production admission refuses a clean API slot without the approved 
   }
 });
 
-test('first activation checks the real transaction window after backup and readiness, and rolls back before publication', t => {
+test('locked fresh activation requires the installation marker to bind the database and candidate', t => {
+  const { cmd: shell } = transactionTasks.find(task =>
+    task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'];
+  const start = shell.indexOf('for marker in owner-setup.installation');
+  const end = shell.indexOf('live_runtime=', start);
+  assert.ok(start > shell.indexOf('flock --exclusive --nonblock 9') && end > start);
+  const gate = shell.slice(start, end)
+    .replace(/\{\{ .*owner-setup\.container.* \}\}/u, '"$FIXTURE/owner-setup.container"');
+  const fixture = mkdtempSync(path.join(tmpdir(), 'codexia-fresh-intent-'));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const image = 'ghcr.io/yohn-jp/codexia-backend@sha256:' + 'a'.repeat(64);
+  for (const [name, value] of [
+    ['owner-setup.installation', '123'],
+    ['owner-setup.promoted', 'activation-ready'],
+    ['owner-setup.container', 'Image=' + image],
+  ]) writeFileSync(path.join(fixture, name), value + '\n', { mode: 0o600 });
+  const intent = path.join(fixture, 'owner-setup.intent');
+  const verify = () => spawnSync('bash', ['-c', [
+    'set -eu', 'state_dir="$FIXTURE"; approved_cluster=123; approved_database=456; candidate_image="$IMAGE"',
+    'stale_admission(){ echo "$1" >&2; exit 1; }', gate,
+  ].join('\n')], { env: { ...process.env, FIXTURE: fixture, IMAGE: image }, encoding: 'utf8' });
+  assert.match(verify().stderr, /prepared owner markers are unavailable/u);
+  writeFileSync(intent, '123:789:' + image + '\n', { mode: 0o600 });
+  assert.match(verify().stderr, /fresh installation identity changed/u);
+  writeFileSync(intent, '123:456:' + image + '\n', { mode: 0o600 });
+  const approved = verify();
+  assert.equal(approved.status, 0, approved.stderr);
+});
+
+test('first activation checks the real transaction window at readiness and rolls back before publication', t => {
   const shell = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'].cmd;
   const clockStart = shell.indexOf('first_activation_window_current(){');
   const clockEnd = shell.indexOf('if [[ "$first_activation" != null ]]; then', clockStart);
@@ -302,20 +329,16 @@ test('first activation checks the real transaction window after backup and readi
     'had_unit=false; tunnel_present=true; tunnel_was_active=false; release_present=false',
     'api_link_created=true; tunnel_link_created=true',
     'candidate_image=fixture-image; first_activation="{}"; approved_not_before=1000; approved_not_after=2000',
-    'clock=1500; backup_program=backup_fixture; backup_destination="$FIXTURE"; backup_recipient=fixture; lock_file="$FIXTURE/lock"',
-    'backup_control=control_fixture; backup_runner=runner_fixture; backup_run_id=; backup_pending_id=',
-    'if [[ "$SCENARIO" == off-vm ]]; then backup_run_id=1485f702-eb68-4854-979d-fad9fd12d90d; fi',
-    'runner_fixture() { cat >/dev/null; printf "%s\\n" "$FIXTURE/archive" abc123; }',
-    'control_fixture() { printf "%s\\n" "$*" >> "$trace"; [[ "$1" != deploy-finish ]]; }',
+    'clock=1500; backup_control=control_fixture; backup_run_id=; backup_pending_id=',
+    'control_fixture() { printf "Unexpected Console command: %s\\n" "$*" >&2; exit 98; }',
     'date() { if [[ -f "$FIXTURE/clock" ]]; then cat "$FIXTURE/clock"; else printf "%s\\n" "$clock"; fi; }',
-    'backup_fixture() { echo backup >> "$trace"; if [[ "$SCENARIO" == backup ]]; then echo 2001 > "$FIXTURE/clock"; fi; }',
     'run_auth_cli() { echo auth >> "$trace"; }',
     'install_wants_links() { :; }',
-    'podman() { case "$*" in *State.Health.Status*) echo healthy;; *ImageName*) echo "$candidate_image";; run*) echo ledger >> "$trace";; *) return 99;; esac; }',
+    'podman() { case "$*" in *State.Health.Status*) echo healthy;; *ImageName*) echo "$candidate_image";; run*) echo ledger >> "$trace"; if [[ "$SCENARIO" == pre-start ]]; then echo 2001 > "$FIXTURE/clock"; fi;; *) return 99;; esac; }',
     'systemctl() { printf "%s\\n" "$*" >> "$trace"; if [[ "$*" == "--user start codexia-api.service" && "$SCENARIO" == startup ]]; then clock=2001; fi; if [[ "$*" == "--user start codexia-api.service" && "$SCENARIO" == stop-failure ]]; then clock=2001; fi; if [[ "$*" == "--user stop codexia-api.service" && "$SCENARIO" == stop-failure ]]; then return 1; fi; }',
     'test -f "$candidate_unit"',
   ].join('\n') + '\n';
-  for (const scenario of ['backup', 'startup', 'stop-failure', 'within-window', 'off-vm']) {
+  for (const scenario of ['pre-start', 'startup', 'stop-failure', 'within-window']) {
     const fixture = path.join(directory, scenario);
     mkdirSync(fixture);
     for (const name of ['candidate.container', 'api.service', 'tunnel.service', 'deploy-transaction.json',
@@ -328,17 +351,11 @@ test('first activation checks the real transaction window after backup and readi
     assert.ifError(result.error);
     assert.equal(result.status, scenario === 'within-window' ? 0 : 1, scenario + ': ' + result.stderr);
     const calls = readFileSync(path.join(fixture, 'trace'), 'utf8');
-    assert.match(calls, /^backup$/mu);
-    if (scenario === 'off-vm') {
-      assert.match(calls, /^deploy-finish 1485f702-eb68-4854-979d-fad9fd12d90d .+\/archive abc123$/mu);
-      assert.doesNotMatch(calls, /^ledger$/mu);
-      assert.match(result.stderr, /Off-VM backup admission failed; candidate was not applied/u);
-    } else {
-      assert.match(calls, /^ledger$/mu);
-    }
-    assert.equal(calls.includes('--user start codexia-api.service'), !['backup', 'off-vm'].includes(scenario));
+    assert.match(calls, /^ledger$/mu);
+    assert.doesNotMatch(result.stderr, /Unexpected Console command/u);
+    assert.equal(calls.includes('--user start codexia-api.service'), scenario !== 'pre-start');
     assert.equal(calls.includes('--user start codexia-tunnel.service'), scenario === 'within-window');
-    if (!['within-window', 'off-vm'].includes(scenario)) assert.match(result.stderr, /First activation approval window expired before publication/u);
+    if (scenario !== 'within-window') assert.match(result.stderr, /First activation approval window expired before publication/u);
     const retained = scenario === 'within-window' || scenario === 'stop-failure';
     assert.equal(existsSync(path.join(fixture, 'active.container')), retained);
     for (const name of ['deploy-transaction.json', 'api.service', 'tunnel.service']) {
@@ -467,7 +484,7 @@ test('production admission reuses canonical runtime validators and checks exact 
   assert.match(shell, /systemctl --user show --property=SourcePath --value codexia-tunnel\.service/u);
 });
 
-test('first activation verifies the initialized database after backup under both explicit approvals', () => {
+test('first activation verifies the initialized database under both explicit approvals without Console backup', () => {
   const deployment = transactionTasks;
   const approval = deployment.find(task => task.name === 'Refuse implicit first activation without explicit verified schema approval');
   assert.deepEqual(approval['ansible.builtin.assert'].that, [
@@ -477,15 +494,12 @@ test('first activation verifies the initialized database after backup under both
   ]);
   const transaction = deployment.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;
-  const backup = shell.indexOf('backup-locked');
   const freshMigration = shell.indexOf('verifyPostgresSchema');
   const startApi = shell.indexOf('systemctl --user start codexia-api.service', shell.indexOf('install -m 0600 "$candidate_unit" "$active_unit"'));
-  assert.ok(backup >= 0 && freshMigration > backup && startApi > freshMigration,
-    'first schema verification must follow its backup and precede API activation');
-  assert.doesNotMatch(shell, /if \[\[ -n "\$current_image" \]\]; then[\s\S]*backup-locked/u,
-    'a first activation with an existing database must still make a pre-activation backup');
-  assert.ok(shell.indexOf('stop codexia-api.service') < backup,
-    'backup admission must follow API and Tunnel quiescence');
+  assert.ok(freshMigration >= 0 && startApi > freshMigration,
+    'first schema verification must precede API activation');
+  assert.match(shell, /if \[\[ "\$had_unit" == true \]\]; then\n\s+if ! artifact=.*deploy-backup/u,
+    'the pre-update backup applies only to an installed API');
   assert.match(shell, /podman run --rm --network codexia-data[\s\S]*--secret=codexia-postgres-app-password[\s\S]*candidate_image/u);
   assert.match(shell, /verifyPostgresSchema\(connectionString\)/u);
   assert.match(shell, /if \[\[ "\$had_unit" != true \]\]; then[\s\S]*verifyPostgresSchema/u);
@@ -523,7 +537,9 @@ test('fresh auth staging initializes the application ledger before provisioning 
 test('push rollout admits backups only after canonical API and Tunnel shutdown', () => {
   const deployment = readFileSync(new URL('../../../deploy/ansible/deploy-transaction.yml', import.meta.url), 'utf8');
   const backup = readFileSync(new URL('../../../deploy/backup/backup.sh', import.meta.url), 'utf8');
-  assert.match(deployment, /backup-locked[\s\S]*--approved[\s\S]*--lock-file/u);
+  const runner = readFileSync(new URL('../../../deploy/backup/backup-runner.sh', import.meta.url), 'utf8');
+  assert.match(deployment, /systemctl --user stop codexia-api\.service[\s\S]*?deploy-backup/u);
+  assert.match(runner, /backup-locked[\s\S]*--approved[\s\S]*--lock-file[\s\S]*--lock-fd 9/u);
   assert.match(backup, /Push deployment requires inactive systemd unit/u);
   assert.doesNotMatch(backup, /codexia-updater|--push-deployment/u);
 });
@@ -618,7 +634,7 @@ test('Better Auth activation uses protected staged settings on a fresh or existi
 
   const transaction = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'].cmd;
-  const backup = shell.indexOf('backup-locked');
+  const backup = shell.indexOf('deploy-backup');
   const verifyClients = shell.indexOf('/app/node_modules/@codexia/api/dist/verify-auth-clients.js', backup);
   const installCandidate = shell.indexOf('install -m 0600 "$candidate_unit" "$active_unit"');
   assert.ok(backup >= 0 && verifyClients > backup && installCandidate > verifyClients,
@@ -665,7 +681,7 @@ test('the disposable entry point exercises the same auth transaction', () => {
   const shell = transaction['ansible.builtin.shell'].cmd;
   const noOp = shell.slice(shell.indexOf('cmp -s -- "$candidate_unit" "$active_unit"'), shell.indexOf('echo "UNCHANGED'));
   assert.match(noOp, /run_auth_cli \/app\/node_modules\/@codexia\/api\/dist\/verify-auth-clients\.js/u);
-  assert.doesNotMatch(noOp, /migrate-auth|backup-locked|systemctl --user stop/u);
+  assert.doesNotMatch(noOp, /migrate-auth|deploy-(check|start|backup)|systemctl --user stop/u);
 });
 
 test('both first-owner launchers require a clean API target under the deployment lock', t => {

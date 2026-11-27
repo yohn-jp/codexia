@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
-import { readPreservationEvidence, findPreservationEvidence } from './preservation.mjs';
+import { readPreservationEvidence } from './preservation.mjs';
 import { digestEvidence } from './evidence-digest.mjs';
 import { authSchemaFingerprint, CODEXIA_AUTH_SCHEMA } from '../../../packages/api/src/auth-schema.ts';
 
@@ -193,11 +193,18 @@ async function planObservation({ bootstrapMode } = {}) {
     } catch { /* failed or unauthorized observation is never absence */ }
     stage = 'plan';
     const { planFromObservations } = await import('./observe.mjs');
+    // The reviewed, exact-source Preflight artifact carries only redacted proof.
+    // For bootstrap adoption, bind that proof again to this live host and DB.
+    const reviewed = bootstrapMode
+      ? JSON.parse(await readFile(join(env.RUNNER_TEMP, 'reviewed-preflight/codexia-lifecycle-preflight.json'), 'utf8'))
+      : null;
+    const preservationReceipt = readPreservationEvidence(reviewed
+      ? JSON.stringify(reviewed.evidence?.preservationReceipt ?? null)
+      : env.CODEXIA_DEPLOYMENT_PRESERVATION, host);
     const result = planFromObservations({ host, edge, hostPinSha256: receipt.hostPinSha256,
       candidateBackend, candidateFrontend, authSchemas, priorBackend: candidate.priorBackend,
       intent: request.intent, window: request.window ?? null,
-      preservationReceipt: request.intent === 'install' ? await findPreservationEvidence(host) :
-        readPreservationEvidence(env.CODEXIA_DEPLOYMENT_PRESERVATION, host) });
+      preservationReceipt });
     await mainSource();
     if (bootstrapMode) {
       stage = 'bootstrap-admission';
@@ -206,7 +213,6 @@ async function planObservation({ bootstrapMode } = {}) {
       if (bootstrapMode !== 'bootstrap') {
         assert.equal(host.database.setupImage, candidateBackend.image, 'Owner setup must use the certified installation image');
       }
-      const reviewed = JSON.parse(await readFile(join(env.RUNNER_TEMP, 'reviewed-preflight/codexia-lifecycle-preflight.json'), 'utf8'));
       assert.equal(reviewed.sourceSha, binding.sourceSha);
       assert.equal(reviewed.runId, Number(env.CODEXIA_BOOTSTRAP_PREFLIGHT_RUN_ID));
       assert.equal(reviewed.attempt, Number(env.CODEXIA_BOOTSTRAP_PREFLIGHT_ATTEMPT));
@@ -260,6 +266,7 @@ async function planObservation({ bootstrapMode } = {}) {
         } : {}),
       } : {
         codexia_owner_setup_operation: bootstrapMode,
+        codexia_expected_owner_secret_set_sha256: digestEvidence(host.topology.secretHashes),
         codexia_expected_owner_setup_checkpoint: {
           ...host.database.ownerSetupCheckpoint,
           settingsSha256: host.database.settingsSha256 ?? null,
@@ -273,7 +280,9 @@ async function planObservation({ bootstrapMode } = {}) {
       console.log('Protected operation admitted for ' + admission.route);
       return;
     }
-    await writeFile(output(), JSON.stringify({ ...binding, management: env.CODEXIA_PREFLIGHT_MANAGEMENT, request, ...result }, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+    await writeFile(output(), JSON.stringify({ ...binding, management: env.CODEXIA_PREFLIGHT_MANAGEMENT, request, ...result,
+      evidence: { ...result.evidence, ...(result.plan.requiresPreservation && preservationReceipt ? { preservationReceipt } : {}) },
+    }, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
     console.log('Read-only lifecycle candidate route: ' + result.plan.candidateRoute +
       '; evidence blockers: ' + (result.plan.blockers.join(', ') || 'none') +
       '; no mutation authority granted');

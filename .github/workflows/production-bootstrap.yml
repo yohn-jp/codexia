@@ -25,15 +25,9 @@ on:
     paths:
       - scripts/shared/python-env.sh
       - .github/workflows/production-bootstrap.yml
-      - .github/workflows/initial-preservation.yml
       - .github/actions/reviewed-preflight/**
-      - .github/workflows/bootstrap-recovery.yml
       - deploy/production.json
-      - deploy/backup/bootstrap_snapshot.py
-      - deploy/backup/bootstrap_escrow*.py
-      - deploy/backup/test_bootstrap_escrow.py
       - deploy/ansible/*managed*secret*
-      - deploy/ansible/*escrow*
       - deploy/ansible/test_preflight_observe.py
       - deploy/ansible/prepare-production-bootstrap.py
       - deploy/ansible/test_production_bootstrap.py
@@ -82,14 +76,12 @@ jobs:
       - name: Verify protected controller inputs and Ansible syntax
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install --no-install-recommends -y age
-          PATH="$RUNNER_TEMP/codexia-ansible/bin:$PATH" python3 -m unittest discover -s deploy/backup -p test_bootstrap_escrow.py -v
-          node --test scripts/deployment/bootstrap/admission.test.mjs scripts/deployment/bootstrap/initial-preservation.test.mjs scripts/deployment/bootstrap/escrow-admission.test.mjs scripts/deployment/preflight/discover.test.mjs
-          for fixture in test_production_bootstrap.py test_managed_bootstrap_secrets.py test_escrow_producer.py test_owner_setup.py test_preflight_observe.py; do
+          node --test scripts/deployment/bootstrap/{activate-backend,admission}.test.mjs \
+            scripts/deployment/preflight/{discover,observe,plan}.test.mjs
+          for fixture in test_production_bootstrap.py test_managed_bootstrap_secrets.py test_owner_setup.py test_preflight_observe.py; do
             PYTHONDONTWRITEBYTECODE=1 "$RUNNER_TEMP/codexia-ansible/bin/python" -m unittest discover -s deploy/ansible -p "$fixture" -v
           done
-          for playbook in site preflight-observe prepare-owner-activation verify-bootstrap-escrow; do
+          for playbook in site preflight-observe prepare-owner-activation; do
             "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i deploy/ansible/inventory.example.yml "deploy/ansible/$playbook.yml" --syntax-check
           done
 
@@ -154,7 +146,6 @@ jobs:
       name: codexia-bootstrap
     outputs:
       host-id: ${{ steps.bound-host.outputs.host-id }}
-      receipt-attempt: ${{ steps.escrow-receipt.outputs.attempt }}
     permissions:
       contents: read
       actions: read
@@ -278,7 +269,7 @@ jobs:
           CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.control.outputs.host }}
           ANSIBLE_HOST_KEY_CHECKING: 'True'
         run: node scripts/deployment/preflight/run.mjs bootstrap-host
-      - name: Bind escrow and runtime acceptance to the observed VM
+      - name: Bind runtime SSH acceptance to the observed VM
         if: inputs.mode != 'preflight'
         id: bound-host
         run: |
@@ -300,20 +291,12 @@ jobs:
           CODEXIA_BOOTSTRAP_PREFLIGHT_ATTEMPT: ${{ steps.preflight.outputs.attempt }}
           CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED: ${{ inputs.mode == 'bootstrap' && inputs.initialize_database && vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED == 'true' }}
         run: node scripts/deployment/preflight/run.mjs bootstrap-admission
-      - name: Install pinned S3 transport for secret recovery evidence
-        if: inputs.mode != 'preflight'
-        run: bash deploy/backup/install-s3-runtime.sh "$RUNNER_TEMP/bootstrap-s3"
       - name: Execute only the admitted R4 or R5 operation through Ansible
-        id: converge
         if: inputs.mode != 'preflight'
         env:
           GH_TOKEN: ${{ github.token }}
           CONTROL: ${{ steps.control.outputs.control }}
           OPERATION: ${{ inputs.mode }}
-          CODEXIA_BOOTSTRAP_ESCROW_RECIPIENT: ${{ vars.CODEXIA_BOOTSTRAP_ESCROW_RECIPIENT }}
-          CODEXIA_BOOTSTRAP_ESCROW_PROFILE: ${{ vars.CODEXIA_BOOTSTRAP_ESCROW_PROFILE }}
-          CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL: ${{ secrets.CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL }}
-          CODEXIA_BOOTSTRAP_ESCROW_HOST_ID: ${{ steps.bound-host.outputs.host-id }}
           ANSIBLE_HOST_KEY_CHECKING: 'True'
         run: |
           set -euo pipefail
@@ -326,26 +309,6 @@ jobs:
           fi
           ansible-playbook -i "$CONTROL/inventory.yml" "deploy/ansible/$playbook.yml" \
             --limit codexia --extra-vars "@$CONTROL/runtime-vars.json" --extra-vars "@$CONTROL/admission.json"
-      - name: Locate the receipt from this R4 execution
-        id: escrow-receipt
-        if: always() && inputs.mode == 'bootstrap' && steps.converge.outcome != 'skipped'
-        env:
-          RESULT: ${{ steps.converge.outcome }}
-        run: |
-          set -euo pipefail
-          if [[ -f "$RUNNER_TEMP/codexia-bootstrap/control/escrow-receipt.json" ]]; then
-            echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-          else
-            [[ "$RESULT" != success ]]
-          fi
-      - name: Retain immutable off-VM secret escrow receipt
-        if: always() && steps.escrow-receipt.outputs.attempt != ''
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: bootstrap-escrow-receipt-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/codexia-bootstrap/control/escrow-receipt.json
-          if-no-files-found: error
-          retention-days: 30
       - name: Remove private controller inputs from the runner
         if: always()
         run: |
@@ -400,24 +363,3 @@ jobs:
       - name: Remove the temporary runtime identity
         if: always()
         run: rm -rf -- "$RUNNER_TEMP/codexia-ssh"
-
-  verify-escrow:
-    name: Check first recovery from an independent environment
-    needs: bootstrap
-    if: always() && !cancelled() && github.event_name == 'workflow_dispatch' && inputs.mode == 'bootstrap' && needs.bootstrap.outputs.receipt-attempt != ''
-    uses: ./.github/workflows/bootstrap-recovery.yml
-    with:
-      producer-attempt: ${{ needs.bootstrap.outputs.receipt-attempt }}
-    permissions:
-      contents: read
-      actions: read
-      id-token: write
-
-  initial-preservation:
-    name: Preserve the enrolled database before first publication
-    needs: bootstrap
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'prepare-activation' && needs.bootstrap.result == 'success'
-    uses: ./.github/workflows/initial-preservation.yml
-    permissions:
-      contents: read
-      id-token: write

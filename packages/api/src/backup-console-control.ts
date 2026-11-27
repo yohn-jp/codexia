@@ -71,8 +71,8 @@ export class BackupConsoleControl {
     },
   ) {}
 
-  async deployStart(runId: string, sourceSha: string, imageDigestOrDash: string, candidateSha: string, candidateDigest: string) {
-    this.validateStart(runId, sourceSha, imageDigestOrDash, candidateSha, candidateDigest);
+  async deployStart(runId: string, sourceSha: string, imageDigest: string, candidateSha: string, candidateDigest: string) {
+    this.validateStart(runId, sourceSha, imageDigest, candidateSha, candidateDigest);
     const client = await this.options.pool.connect();
     try {
       await client.query('BEGIN');
@@ -92,7 +92,7 @@ export class BackupConsoleControl {
       if (existing) {
         if (
           existing.source_sha !== sourceSha ||
-          existing.image_digest !== (imageDigestOrDash === '-' ? null : imageDigestOrDash) ||
+          existing.image_digest !== imageDigest ||
           existing.candidate_source_sha !== candidateSha ||
           existing.candidate_image_digest !== candidateDigest
         )
@@ -105,10 +105,7 @@ export class BackupConsoleControl {
       } = await client.query<{ active_revision: number | null; active_usable: boolean; active_health: string }>(
         'SELECT active_revision, active_usable, active_health FROM codexia_backup.state',
       );
-      if (!state?.active_revision) {
-        await client.query('COMMIT');
-        return 'NONE';
-      }
+      if (!state?.active_revision) throw new Error('Active off-VM backup destination is unavailable');
       const revision = await this.readRevision(client, state.active_revision);
       if (!revision || !allowedBackupDestination(revision.destination, this.options.policy))
         throw new Error('Active off-VM backup destination is unavailable');
@@ -126,15 +123,7 @@ export class BackupConsoleControl {
       await client.query(
         `INSERT INTO codexia_backup.runs (id, request_id, kind, revision, source_sha, image_digest, candidate_source_sha, candidate_image_digest, state, phase)
          VALUES ($1, $2, 'deploy', $3, $4, $5, $6, $7, 'RUNNING', 'admission')`,
-        [
-          runId,
-          'deploy:' + runId,
-          revision.revision,
-          sourceSha,
-          imageDigestOrDash === '-' ? null : imageDigestOrDash,
-          candidateSha,
-          candidateDigest,
-        ],
+        [runId, 'deploy:' + runId, revision.revision, sourceSha, imageDigest, candidateSha, candidateDigest],
       );
       await client.query('COMMIT');
       return runId;
@@ -386,16 +375,15 @@ export class BackupConsoleControl {
     );
   }
 
-  private validateStart(runId: string, sourceSha: string, imageDigestOrDash: string, candidateSha: string, candidateDigest: string) {
+  private validateStart(runId: string, sourceSha: string, imageDigest: string, candidateSha: string, candidateDigest: string) {
     if (
       !uuid.safeParse(runId).success ||
       !sourceShaSchema.safeParse(sourceSha).success ||
-      !(imageDigestOrDash === '-' || imageDigestSchema.safeParse(imageDigestOrDash).success) ||
+      !imageDigestSchema.safeParse(imageDigest).success ||
       !sourceShaSchema.safeParse(candidateSha).success ||
       !imageDigestSchema.safeParse(candidateDigest).success
     )
       throw new Error('Deployment identity is invalid');
-    if (imageDigestOrDash === '-' && sourceSha !== candidateSha) throw new Error('First activation source must identify the candidate');
   }
 
   private async readRevision(client: import('pg').PoolClient, revision: number) {

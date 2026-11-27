@@ -1,52 +1,89 @@
 #!/usr/bin/env bash
 # Sourced by the disposable app lifecycle. No external Tunnel or S3 credentials.
-verify_backup_host_lifecycle(){
-  local prior_key="$1" candidate_key="$2"
-  local state="$fixture_home/.local/state/codexia-deploy"
+prepare_backup_console_fixture(){
   local settings="$fixture_home/.config/codexia-backup"
-  local units="$fixture_home/.config/systemd/user"
-  local runner="$fixture_home/.local/bin/codexia-backup-runner"
   local destination="$fixture_home/.local/state/codexia-backup-mount"
-  local fault="$state/backup-fault-bin" before run_id code
-  before="$(rootless sha256sum "$state/deployed-release.json")"
-  run_id="$(cat /proc/sys/kernel/random/uuid)"
-  rootless install -d -m 0700 "$settings" "$units" "$fault"
+  rootless install -d -m 0700 "$settings"
   cat > "$tmp/backup-console-control.js" <<'CLI'
-const { appendFileSync } = require('node:fs');
+const { execFileSync } = require('node:child_process');
+const { appendFileSync, readFileSync } = require('node:fs');
+const path = require('node:path');
 const [mode, id, ...args] = process.argv.slice(2);
-const trace = '/home/codexia/.local/state/codexia-deploy/backup-fixture-log';
+const state = path.join(process.env.HOME, '.local/state/codexia-deploy');
+const trace = path.join(state, 'backup-fixture-log');
+const fixture = JSON.parse(readFileSync(path.join(state, 'backup-fixture-deploy.json'), 'utf8'));
 if (!/^[a-f0-9-]{36}$/.test(id)) process.exit(2);
 switch (mode) {
   case 'deploy-start':
-    if (args.join(' ') !== process.env.FIXTURE_DEPLOY_IDENTITIES) process.exit(2);
+    if (args.join(' ') !== fixture.deployIdentities) process.exit(2);
+    if (fixture.fault === 'console-unconfigured') {
+      console.log('NONE');
+      process.exit(0);
+    }
     console.log(id);
     break;
-  case 'deploy-finish':
-    if (!args[0]?.includes('/codexia-backup-mount/codexia-') || !/^[a-f0-9]{64}$/.test(args[1])) process.exit(2);
+  case 'deploy-finish': {
+    const [artifact, expected] = args;
+    const destination = process.env.CODEXIA_BACKUP_DESTINATION;
+    if (path.dirname(artifact) !== destination || !path.basename(artifact).endsWith('-' + id) ||
+        !/^[a-f0-9]{64}$/.test(expected)) process.exit(2);
+    const actual = execFileSync(path.join(process.env.HOME, '.local/bin/codexia-backup'),
+      ['validate-independent-artifact', destination, artifact], { encoding: 'utf8' }).trim();
+    if (actual !== expected) process.exit(2);
     break;
+  }
   case 'deploy-interrupted':
+  case 'deploy-fail':
   case 'manual-interrupted':
     break;
   case 'manual-start':
-    if (args.join(' ') !== process.env.FIXTURE_MANUAL_IDENTITY) process.exit(2);
+    if (args.join(' ') !== fixture.manualIdentity) process.exit(2);
     break;
   default:
     process.exit(2);
 }
 appendFileSync(trace, mode + ' ' + id + ' ' + args.join(' ') + '\n', { mode: 0o600 });
-if (mode === 'deploy-finish') process.exit(1);
+if (mode === 'deploy-finish' && fixture.fault === 'off-vm-verification') process.exit(1);
 CLI
   sudo install -o codexia -g codexia -m 0600 "$tmp/backup-console-control.js" "$settings/backup-console-control.js"
-  node - "$evidence" "$prior_key" "$candidate_key" "$settings" >"$tmp/backup-executor.env" <<'ENVFILE'
-const fs = require('node:fs');
-const [path, priorKey, candidateKey, settings] = process.argv.slice(2);
-const { candidates } = JSON.parse(fs.readFileSync(path, 'utf8'));
-const identity = key => candidates[key].identity.sourceSha + ' ' + candidates[key].image.split('@')[1];
-console.log('CODEXIA_BACKUP_EXECUTOR_ENTRYPOINT=' + settings + '/backup-console-control.js');
-console.log('FIXTURE_MANUAL_IDENTITY="' + identity(priorKey) + '"');
-console.log('FIXTURE_DEPLOY_IDENTITIES="' + identity(priorKey) + ' ' + identity(candidateKey) + '"');
+  cat > "$tmp/backup-executor.env" <<ENVFILE
+CODEXIA_BACKUP_EXECUTOR_ENTRYPOINT=$settings/backup-console-control.js
+CODEXIA_BACKUP_DESTINATION=$destination
+CODEXIA_BACKUP_AGE_RECIPIENT=$backup_recipient
 ENVFILE
   sudo install -o codexia -g codexia -m 0600 "$tmp/backup-executor.env" "$settings/executor.env"
+}
+
+backup_fixture_attempt(){
+  local candidate_key="$1" fault="${2:-}" current_release
+  local state="$fixture_home/.local/state/codexia-deploy"
+  current_release="$(rootless cat "$state/deployed-release.json")"
+  node - "$evidence" "$candidate_key" "$current_release" "$fault" >"$tmp/backup-fixture-deploy.json" <<'FIXTURE'
+const fs = require('node:fs');
+const [evidence, key, release, fault] = process.argv.slice(2);
+const { identity, image } = JSON.parse(release);
+const candidate = JSON.parse(fs.readFileSync(evidence, 'utf8')).candidates[key];
+const manualIdentity = identity.sourceSha + ' ' + image.split('@')[1];
+console.log(JSON.stringify({
+  manualIdentity,
+  deployIdentities: manualIdentity + ' ' + candidate.identity.sourceSha + ' ' + candidate.image.split('@')[1],
+  fault,
+}));
+FIXTURE
+  sudo install -o codexia -g codexia -m 0600 "$tmp/backup-fixture-deploy.json" "$state/backup-fixture-deploy.json"
+}
+
+verify_backup_host_lifecycle(){
+  local prior_key="$1" candidate_key="$2"
+  local state="$fixture_home/.local/state/codexia-deploy"
+  local units="$fixture_home/.config/systemd/user"
+  local runner="$fixture_home/.local/bin/codexia-backup-runner"
+  local destination="$fixture_home/.local/state/codexia-backup-mount"
+  local fault="$state/backup-fault-bin" before trace_before run_id code
+  before="$(rootless sha256sum "$state/deployed-release.json")"
+  run_id="$(cat /proc/sys/kernel/random/uuid)"
+  rootless install -d -m 0700 "$units" "$fault"
+  backup_fixture_attempt "$candidate_key"
   cat > "$tmp/backup-tunnel.service" <<'UNIT'
 [Service]
 Type=oneshot
@@ -59,10 +96,11 @@ UNIT
 
   # A separate lock descriptor owned by the deployment fixture blocks a run
   # before either systemd service or the executor is touched.
+  trace_before="$(rootless sha256sum "$state/backup-fixture-log")"
   code=0
   rootless flock -xn "$state/host.lock" "$runner" "$run_id" || code=$?
   [[ "$code" == 75 ]]
-  rootless test ! -e "$state/backup-fixture-log"
+  [[ "$(rootless sha256sum "$state/backup-fixture-log")" == "$trace_before" ]]
 
   cat > "$tmp/backup-fault-systemctl" <<'SYSTEMCTL'
 #!/bin/bash
@@ -91,12 +129,12 @@ SYSTEMCTL
   rootless test ! -e "$state/backup-transaction"
   observe_runtime backup-interruption-recovery "$prior_key"
 
-  if run_deploy "$candidate_key" false '' deploy-required-off-vm-failure; then
+  if run_deploy "$candidate_key" false '' deploy-required-off-vm-failure off-vm-verification; then
     echo 'Candidate activation succeeded despite a required off-VM verification failure' >&2
     return 1
   fi
   grep -Fq 'Deployment transaction failed during off-VM backup admission' "$tmp/deploy-required-off-vm-failure.log"
-  rootless grep -q '^deploy-finish ' "$state/backup-fixture-log"
+  rootless tail -2 "$state/backup-fixture-log" | grep -q '^deploy-finish '
   rootless test ! -e "$state/deploy-transaction.json"
   rootless_systemctl is-active --quiet codexia-tunnel.service
   [[ "$(rootless sha256sum "$state/deployed-release.json")" == "$before" ]]
@@ -104,7 +142,7 @@ SYSTEMCTL
   append_observation backup_host_lifecycle '{"hostLockContention":true,"sigkillRecoveredApiAndFixtureTunnel":true,"failedOffVmVerificationBlockedCandidate":true,"sourceAndCandidateIdentityBound":true}'
 
   rootless_systemctl stop codexia-tunnel.service
-  rootless rm -- "$units/codexia-tunnel.service" "$settings/executor.env" "$state/backup-admission-enabled"
+  rootless rm -- "$units/codexia-tunnel.service"
   rootless_systemctl daemon-reload
 }
 

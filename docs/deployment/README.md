@@ -91,6 +91,8 @@ The [backup control plane](../../deploy/backup/CONSOLE.md) supports operator-pro
 
 The `codexia-data` volume (`/data`) holds derived module caches that can be rebuilt. Retain the prior API image tag and origin UI image until rollback is rehearsed.
 
+[Protected recovery handoff](PROTECTED-RECOVERY.md) defines the evidence required for the approved R2 restore and R3 publication through the existing deployment path.
+
 ## Rollback and live acceptance
 
 Keep the last origin image that still contains the UI until static delivery and Access behavior are proven. Terraform's `frontend_route_enabled=false` removes the static catch-all and its scriptless exclusions; all requests then reach the Tunnel. Rollback restores the retained origin image, disables the UI routes, and checks API login, write CSRF protection, Access denial, static 404 behavior, and an authenticated UI session.

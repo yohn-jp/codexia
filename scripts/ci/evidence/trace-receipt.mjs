@@ -5,7 +5,9 @@ import { pathToFileURL } from 'node:url';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 import { resolveProducerJobAttempts, selectLatestJobArtifact } from './artifact-selection.mjs';
-import { assertTraceArtifact, downloadArtifact, readTraceArtifact } from './download-artifacts.mjs';
+import { assertTraceArtifact, downloadArtifact, readBrowserArtifact, readTraceArtifact } from './download-artifacts.mjs';
+import { BROWSER_SHARDS, VERIFICATION_GROUPS } from '../impact/contract.mjs';
+import { summarizeBrowserCoverage } from '../browser/shards.mjs';
 
 const workflow = '.github/workflows/verify.yml';
 const producerName = 'types-trace';
@@ -79,6 +81,52 @@ export function summarizeCertifiedTrace({ expected, run, certification, producer
   };
 }
 
+export function summarizeCertifiedBrowser({ expected, run, certification, producer, selected, group, reports, cases }) {
+  assert.equal(selectTraceVerifyRun([run], expected), run, 'Verify run source mismatch');
+  assertTraceCertification(certification, run);
+  assertArtifactRepository(selected, expected.repositoryId);
+  assert.equal(selected.workflow_run.id, run.id, 'Browser artifact belongs to another run');
+  assert.equal(selected.workflow_run.head_sha, expected.sourceSha, 'Browser artifact source mismatch');
+  assert.ok(Number.isSafeInteger(selected.id) && selected.id > 0, 'Invalid browser artifact ID');
+  assert.match(selected.digest, /^sha256:[a-f0-9]{64}$/u, 'Invalid browser artifact digest');
+  assert.equal(group.group, producer.name, 'Browser evidence group mismatch');
+  assert.equal(group.workflowJob, 'browser', 'Unexpected browser workflow job');
+  assert.equal(group.workflowAttempt, producer.run_attempt, 'Wrong browser producer attempt');
+  assert.equal(group.workflowRunId, run.id, 'Browser evidence run mismatch');
+  assert.equal(group.sha, expected.sourceSha, 'Browser evidence source mismatch');
+  const allowed = VERIFICATION_GROUPS[group.group] ?? [];
+  return reports.flatMap(report => {
+    assert.equal(report.sourceSha, expected.sourceSha, 'Browser coverage source mismatch');
+    assert.equal(report.schemaVersion, 1, 'Unknown browser coverage schema');
+    const task = `browser-${report.profile}-${report.shard}`;
+    assert.ok(allowed.includes(task) && group.results.some(item => item.task === task && item.status === 'passed'),
+      'Browser coverage did not come from an executed browser task');
+    const shard = BROWSER_SHARDS.find(item => item.id === report.shard);
+    assert.equal(report.project, shard.project, 'Browser coverage project mismatch');
+    assert.equal(report.file, shard.file, 'Browser coverage file mismatch');
+    assert.equal(report.outcome, 'PASS', 'Browser coverage did not pass');
+    assert.equal(report.runStatus, 'passed', 'Browser run did not pass');
+    const observations = report.tests;
+    const counts = summarizeBrowserCoverage({ expected: report.expected, outcomes: observations.map(item => item.outcome) });
+    for (const [key, value] of Object.entries(counts)) assert.equal(report[key], value, `Browser coverage ${key} count mismatch`);
+    assert.ok(counts.failed === 0 && counts.notRun === 0 && counts.executed > 0, 'Browser coverage must execute all non-skipped cases successfully');
+    const file = `tests/e2e/${shard.file}`;
+    assert.ok(observations.every(item => item.file === file), 'Browser observations include a foreign file');
+    const passedCaseIds = cases.filter(item => {
+      const source = item.sourceRefs?.[0];
+      if (item.result !== 'NOT_RUN' || source?.path !== file || !Number.isInteger(source.line) || !item.name) return false;
+      const matches = observations.filter(observation => observation.line === source.line &&
+        (observation.title === item.name || observation.title?.endsWith(` › ${item.name}`)));
+      return matches.length === 1 && matches[0].outcome === 'expected' &&
+        matches[0].attempts?.length === 1 && matches[0].attempts[0].status === 'passed';
+    }).map(item => item.testId).sort();
+    return passedCaseIds.length ? [{
+      job: producer.name, task, profile: report.profile, project: report.project, attempt: producer.run_attempt,
+      artifactId: selected.id, artifactDigest: selected.digest, passedCaseIds,
+    }] : [];
+  });
+}
+
 async function readReceipt(expected, token, waitSeconds) {
   const { repository, repositoryId, sourceSha, event } = expected;
   const github = createGitHubOctokit({ token });
@@ -98,15 +146,29 @@ async function readReceipt(expected, token, waitSeconds) {
   assert.equal(certifications.length, 1, 'Expected one Verify certification job');
   const [certification] = certifications;
   assertTraceCertification(certification, run);
+  const browserNames = Object.keys(VERIFICATION_GROUPS).filter(name => name.startsWith('browser-'));
   const jobs = await resolveProducerJobAttempts(latestJobs, run,
     (runId, attempt) => paginateActionsInventory(github, actions.listJobsForWorkflowRunAttempt,
-      { ...target, run_id: runId, attempt_number: attempt }, 'jobs'), [producerName]);
+      { ...target, run_id: runId, attempt_number: attempt }, 'jobs'), [producerName, ...browserNames]);
   const identity = { runId: String(run.id), sourceSha };
   const selected = selectLatestJobArtifact(artifactName, producerName, artifacts, jobs, identity);
   assertArtifactRepository(selected, repositoryId);
   const { group, trace } = await readTraceArtifact(await downloadArtifact(selected, repository, token));
-  return summarizeCertifiedTrace({ expected, run, certification, producer: jobs.find(job => job.name === producerName),
+  const receipt = summarizeCertifiedTrace({ expected, run, certification, producer: jobs.find(job => job.name === producerName),
     selected, group, trace });
+  const productBrowser = await Promise.all(jobs.filter(job => browserNames.includes(job.name) && job.conclusion === 'success').map(async producer => {
+    try {
+      const artifact = selectLatestJobArtifact(`ci-evidence-${producer.name}`, producer.name, artifacts, jobs, identity);
+      assertArtifactRepository(artifact, repositoryId);
+      const { group: browserGroup, reports } = await readBrowserArtifact(
+        await downloadArtifact(artifact, repository, token), producer.name);
+      return summarizeCertifiedBrowser({ expected, run, certification, producer, selected: artifact, group: browserGroup, reports, cases: trace.caseExecutions });
+    } catch (error) {
+      console.error(`Browser case evidence unavailable for ${producer.name}:`, error.message);
+      return [];
+    }
+  }));
+  return { ...receipt, productBrowser: productBrowser.flat() };
 }
 
 async function main() {
@@ -126,7 +188,7 @@ async function main() {
   });
   await writeFile(output, JSON.stringify(receipt) + '\n', { flag: 'wx' });
   console.log(receipt.status === 'CERTIFIED'
-    ? `Verify trace receipt certified: run ${receipt.runId}, producer attempt ${receipt.attempt}, artifact ${receipt.artifactId}, ${receipt.passedCaseIds.length} passing cases.`
+    ? `Verify trace receipt certified: run ${receipt.runId}, producer attempt ${receipt.attempt}, artifact ${receipt.artifactId}, ${receipt.passedCaseIds.length} passing trace cases, ${receipt.productBrowser.reduce((total, browser) => total + browser.passedCaseIds.length, 0)} passing browser case observations.`
     : 'No certified Verify trace receipt is available for this source.');
 }
 

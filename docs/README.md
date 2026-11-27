@@ -63,6 +63,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Source ownership and licensing | [Source provenance](architecture/SOURCE-PROVENANCE.md) |
 | Standalone image checks | [OCI verification](verification/OCI.md) |
 | Edge UI, API service and operations | [Deployment](deployment/README.md) |
+| PostgreSQL recovery and backup simplification | [Backup contract](deployment/BACKUP.md) and [backup design decision](deployment/BACKUP-PRODUCT-PROPOSAL.md) |
 | Native SwiftUI iOS client and device acceptance | [iOS client](deployment/IOS-CLIENT.md) — native target and manual SwiftUI verification |
 | Declarative standalone VM configuration | [Infrastructure as code](deployment/IAC.md) |
 | UI visual preview and Impeccable Detector | [UI preview and scanning](verification/UI-PREVIEW.md) — disposable local PostgreSQL, API and authenticated visual baselines |

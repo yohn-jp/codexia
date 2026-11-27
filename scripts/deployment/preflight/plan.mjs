@@ -89,7 +89,7 @@ export function selectRoute(state, intent, frontendAdmission, bootstrapResume = 
       ['absent', 'setup'].includes(B) ? 'R5' : 'R0';
   }
   if (A !== 'ready' || H !== 'ready' || D !== 'compatible') return 'R0';
-  if (B === 'absent') return F === 'compatible' ? 'R6' : 'R0';
+  if (B === 'absent') return intent === 'install' && F === 'compatible' ? 'R6' : 'R0';
   if (F === 'absent') return 'R0';
   if (F === 'incompatible') {
     if (frontendAdmission === 'allowed') return 'R8';
@@ -154,7 +154,8 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   const candidateRoute = selectRoute(observation.state, intent, observation.frontendAdmission, observation.bootstrapResume !== undefined);
   const { binding, state } = observation;
   const knownBlockers = ['unverified-installed-backend-publication', 'stale-backend-candidate',
-    'stale-or-conflicting-frontend-candidate', 'writer-ledger-identity-mismatch', 'recovery-plan-required'];
+    'stale-or-conflicting-frontend-candidate', 'writer-ledger-identity-mismatch', 'recovery-plan-required',
+    'unverified-fresh-installation'];
   requireCondition(Array.isArray(evidenceBlockers) && evidenceBlockers.every(reason => knownBlockers.includes(reason)) &&
     new Set(evidenceBlockers).size === evidenceBlockers.length, 'Invalid external evidence blockers');
   const blockers = [...evidenceBlockers].sort();
@@ -167,7 +168,8 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   const changeAxes = changes.filter(key => observation.changeAxes.includes(key));
   const migrationAxes = ['api-epoch', 'oauth-contract', 'sql-ledger', 'persistence-format', 'auth-schema', 'auth-mode'];
   if (candidateRoute === 'R8' && changeAxes.some(key => migrationAxes.includes(key))) blockers.push('incompatible-ordinary-update');
-  const requiresPreservation = ['R6', 'R3', 'R2'].includes(candidateRoute);
+  const requiresPreservation = ['R3', 'R2'].includes(candidateRoute) ||
+    (candidateRoute === 'R4' && state.D === 'compatible' && state.A === 'ready');
   if (requiresPreservation && !binding.backupSha256) blockers.push('missing-preservation-evidence');
   if (['R1', 'R2', 'R3', 'R6'].includes(candidateRoute) &&
       (window === null || timestamp(window.notAfter) < now.getTime())) blockers.push('missing-or-expired-window');
@@ -178,7 +180,8 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   const candidateSystem = systems[candidateRoute];
   if (requiredApprovals.length) blockers.push('approval-required');
   const route = blockers.length ? 'R0' : candidateRoute;
-  const plan = { format: 'codexia-deployment-plan/v1', observation: { ...observation, changeAxes },
+  const plan = { format: 'codexia-deployment-plan/v1', observation: { ...observation, changeAxes,
+    binding: requiresPreservation ? binding : { ...binding, backupSha256: null } },
     evidenceBlockers: [...evidenceBlockers].sort(),
     target, intent, window, candidateRoute, candidateSystem, route,
     system: route === 'R0' ? null : candidateSystem,

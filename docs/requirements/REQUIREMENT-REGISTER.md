@@ -739,7 +739,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **UID**: OBL-REQ-MCP-001-O01
 **Design reference**: [MCP-first](../architecture/MCP-FIRST.md)、[Modules](../architecture/MODULES.md)
 **Implementation identifiers**: modules/mcp/src/http.ts; modules/mcp/src/stdio.ts; modules/mcp/src/tools.ts
-**Test IDs**: TEST-MCPV-004-001; TEST-MCPV-004-002; TEST-MCPV-006-001; TEST-MCPV-006-002; TEST-MCPV-006-003; TEST-MCPV-006-004; TEST-MCPV-006-005, TEST-MCPV-004-003
+**Test IDs**: TEST-MCPV-004-001; TEST-MCPV-004-002; TEST-MCPV-004-003
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
 
@@ -758,6 +758,76 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **Path**: modules/mcp/src/tools.ts
 - **Type**: File
   **Path**: docs/architecture/MCP-V2-MIGRATION.md
+
+## OBL-REQ-MCP-001-O02
+
+**Type**: OBLIGATION
+**MID**: 48ec31f4c3b8aa919dbb427ef88fb358
+**UID**: OBL-REQ-MCP-001-O02
+**Design reference**: [MCP v2 migration](../architecture/MCP-V2-MIGRATION.md#tool-schemaと追跡)
+**Implementation identifiers**: modules/mcp/src/tools.ts: registerMcpTools; modules/mcp/src/tools/knowledge.ts: registerKnowledgeTools
+**Test IDs**: TEST-MCPV-001-001; TEST-MCPV-001-002
+**Exact-run reference**: NOT_RUN
+**Comment**: Selected registered scenarios cover parts of this obligation. Exact-source execution evidence and full product conformance remain pending.
+
+公式SDK v2のtool登録と公開catalogを一致させ、登録したSchemaで引数を検証する。公開名、入力Schema、native KnowledgeのUUID・操作範囲を含む。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/tools.ts
+- **Type**: File
+  **Path**: modules/mcp/src/tools/knowledge.ts
+
+## OBL-REQ-MCP-001-O03
+
+**Type**: OBLIGATION
+**MID**: a421ecc15ad1918d430f31479b15accc
+**UID**: OBL-REQ-MCP-001-O03
+**Design reference**: [MCP v2 migration](../architecture/MCP-V2-MIGRATION.md#プロトコルの互換期間)
+**Implementation identifiers**: modules/mcp/src/http.ts: createMcpHttpContribution; modules/mcp/src/protocol-version.ts: isMcpStrict; modules/mcp/src/stdio.ts: serveStdio
+**Test IDs**: TEST-MCPV-007-001; TEST-MCPV-007-002; TEST-MCPV-007-003; TEST-MCPV-007-004
+**Exact-run reference**: NOT_RUN
+**Comment**: Selected registered scenarios cover parts of this obligation. Exact-source execution evidence and full product conformance remain pending.
+
+2026世代のHTTP交換をリクエスト単位で扱い、旧世代のstateless fallbackを承認済みの期限までに制限する。旧session操作を提供せず、期限以降は新規stdio接続と各HTTPリクエストで旧世代を拒否する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/http.ts
+- **Type**: File
+  **Path**: modules/mcp/src/protocol-version.ts
+- **Type**: File
+  **Path**: modules/mcp/src/stdio.ts
+
+## OBL-REQ-MCP-001-O04
+
+**Type**: OBLIGATION
+**MID**: f34fab5cb281e94ef96f4e5b8304e2c0
+**UID**: OBL-REQ-MCP-001-O04
+**Design reference**: [MCP v2 migration](../architecture/MCP-V2-MIGRATION.md#検証計画)
+**Implementation identifiers**: modules/mcp/src/http.ts: createMcpHttpContribution; modules/mcp/src/stdio.ts: serveStdio; packages/api/src/server.ts: createServer
+**Test IDs**: TEST-MCPV-006-001; TEST-MCPV-006-002; TEST-MCPV-006-003; TEST-MCPV-006-004; TEST-MCPV-006-005
+**Exact-run reference**: NOT_RUN
+**Comment**: Selected registered scenarios cover parts of this obligation. Exact-source execution evidence and full product conformance remain pending.
+
+HTTPとstdioの要求境界でキャンセルを処理し、処理中のactionを解放する。HTTPでは不正header・過大入力をtool dispatch前に拒否し、停止時に進行中の処理を終結させる。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-MCP-001
+- **Type**: File
+  **Path**: modules/mcp/src/http.ts
+- **Type**: File
+  **Path**: modules/mcp/src/stdio.ts
+- **Type**: File
+  **Path**: packages/api/src/server.ts
 
 ## REQ-MCP-002
 
@@ -1073,8 +1143,8 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 **Applicability**: CURRENT
 **Design owner**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
 **Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx; app/src/persistence/native-review-machine.ts; app/src/settings/owner-passkey-reauth-machine.ts; app/src/settings/owner-grant-revocation-machine.ts
-**Verification identifiers**: app/src/persistence/native-review-machine.test.ts; app/src/settings/owner-passkey-reauth-machine.test.ts; app/src/settings/owner-grant-revocation-machine.test.ts; tests/e2e/native-review.acceptance.spec.ts; tests/e2e/oauth-web.acceptance.spec.ts
-**Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+**Verification identifiers**: tests/e2e/core.acceptance.spec.ts; app/src/persistence/native-review-machine.test.ts; tests/e2e/native-review.acceptance.spec.ts; app/src/settings/owner-passkey-reauth-machine.test.ts; app/src/settings/owner-grant-revocation-machine.test.ts
+**Test IDs**: TEST-UI-006-002; TEST-UI-006-003; TEST-UI-006-004; TEST-UI-006-005; TEST-UI-006-006
 **Exact-run reference**: NOT_RUN
 **Comment**: ACCEPTED／XState v5 はWRT-01/REC-01、Native ChangeSetレビュー、Passkey再認証、OAuth同意撤回で部分導入済み。バックアップは未実装; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
 
@@ -1093,12 +1163,12 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
 **MID**: 0c54e429ce48db0abde06145b4640017
 **UID**: OBL-REQ-UI-006-O01
 **Design reference**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx; app/src/persistence/native-review-machine.ts; app/src/settings/owner-passkey-reauth-machine.ts; app/src/settings/owner-grant-revocation-machine.ts
-**Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+**Implementation identifiers**: app/src/application/persistence-save-machine.ts: createPersistenceSaveMachine; app/src/persistence/PersistenceWorkspace.tsx: PersistenceWorkspace
+**Test IDs**: TEST-UI-006-002
 **Exact-run reference**: NOT_RUN
-**Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+**Comment**: Selected existing tests cover described scenarios. Remaining transitions and exact-source evidence are pending.
 
-原稿保存・復旧、ChangeSet、認証、バックアップの複雑な状態と失敗・競合・接続断を決定的な遷移と独立テストで検証し、未確認の副作用を成功表示にしない
+WRT-01/REC-01の保存・復旧で応答不明時に同じ保存操作を再照合し、確認済みreceiptを受け取るまでDB確定を表示しない。競合、接続断、再起動、別文書・別作者、ブラウザー保護失敗でも未確定原稿を保護する。
 
 **Relations**:
 
@@ -1108,12 +1178,66 @@ IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可
   **Path**: app/src/application/persistence-save-machine.ts
 - **Type**: File
   **Path**: app/src/persistence/PersistenceWorkspace.tsx
+
+## OBL-REQ-UI-006-O02
+
+**Type**: OBLIGATION
+**MID**: 005dd3deb0796799ee2165c4779cd238
+**UID**: OBL-REQ-UI-006-O02
+**Design reference**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
+**Implementation identifiers**: app/src/persistence/native-review-machine.ts: createNativeReviewMachine
+**Test IDs**: TEST-UI-006-003; TEST-UI-006-004
+**Exact-run reference**: NOT_RUN
+**Comment**: Selected existing tests cover described scenarios. Remaining transitions and exact-source evidence are pending.
+
+REV-01/REV-02のChangeSet reviewで承認と適用を別操作にし、競合時は現行状態を取り直す。適用結果が不明なら元の操作を再照合し、確定済みの適用を重複させない。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
 - **Type**: File
   **Path**: app/src/persistence/native-review-machine.ts
+
+## OBL-REQ-UI-006-O03
+
+**Type**: OBLIGATION
+**MID**: 8d0f98b6e493ce99986244c669003b75
+**UID**: OBL-REQ-UI-006-O03
+**Design reference**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
+**Implementation identifiers**: app/src/settings/owner-passkey-reauth-machine.ts: createOwnerPasskeyReauthMachine; app/src/settings/owner-grant-revocation-machine.ts: createOwnerGrantRevocationMachine
+**Test IDs**: TEST-UI-006-005; TEST-UI-006-006
+**Exact-run reference**: NOT_RUN
+**Comment**: Selected existing tests cover described scenarios. Remaining transitions and exact-source evidence are pending.
+
+CON-10/CON-20の本人認証管理でWebAuthn中断を成功と扱わず、結果不明のOAuth同意撤回は対象grantをサーバーのidentityから再照合する。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
 - **Type**: File
   **Path**: app/src/settings/owner-passkey-reauth-machine.ts
 - **Type**: File
   **Path**: app/src/settings/owner-grant-revocation-machine.ts
+
+## OBL-REQ-UI-006-O04
+
+**Type**: OBLIGATION
+**MID**: 71c18268fd062de0776b8fbe66a766a8
+**UID**: OBL-REQ-UI-006-O04
+**Design reference**: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.md)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.md)
+**Implementation identifiers**: UNMAPPED
+**Test IDs**: NOT_ASSIGNED
+**Exact-run reference**: NOT_RUN
+**Comment**: Separate Backup Console workstream; machine implementation and verification pending.
+
+CON-30〜34のバックアップ状態管理で、受付・検証・実行結果を区別し、接続断後は同じrun IDを再照合する。確認済みreceiptを受け取るまで成功を表示しない。
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
 
 ## REQ-EXT-001
 
@@ -1258,7 +1382,7 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 **UID**: OBL-REQ-OPS-001-O01
 **Design reference**: [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md)
 **Implementation identifiers**: deploy/ansible/site.yml
-**Surface identifiers**: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/bootstrap-secret-escrow.yml; ansibleSource=deploy/ansible/deploy-ssh-key.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/managed-bootstrap-secrets.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/verify-base-tunnel-container.yml; ansibleSource=deploy/ansible/verify-bootstrap-escrow.yml; ciWorkflow=.github/workflows/bootstrap-recovery.yml; ciWorkflow=.github/workflows/initial-preservation.yml
+**Surface identifiers**: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/deploy-ssh-key.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/managed-bootstrap-secrets.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/verify-base-tunnel-container.yml
 **Test IDs**: TEST-OPS-001-001
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1313,19 +1437,7 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
   **Path**: deploy/ansible/verify-base-tunnel-container.yml
 
 - **Type**: File
-  **Path**: deploy/ansible/bootstrap-secret-escrow.yml
-
-- **Type**: File
   **Path**: deploy/ansible/managed-bootstrap-secrets.yml
-
-- **Type**: File
-  **Path**: deploy/ansible/verify-bootstrap-escrow.yml
-
-- **Type**: File
-  **Path**: .github/workflows/bootstrap-recovery.yml
-
-- **Type**: File
-  **Path**: .github/workflows/initial-preservation.yml
 
 ## REQ-OPS-002
 
@@ -2781,6 +2893,81 @@ Checks keyboard focus order and panel associations for the Desktop tab stack.
 
 - **Type**: Parent
   **ID**: REQ-UI-005
+
+## TEST-UI-006-002
+
+**Type**: TEST
+**MID**: 7b626d7bf92e75476f19fb6c9ab25cbc
+**UID**: TEST-UI-006-002
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks Chromium recovery retains newer edits after a lost response and rebases after acknowledgement.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
+
+## TEST-UI-006-003
+
+**Type**: TEST
+**MID**: 37274f1e217be18c48a9b7e642f42af7
+**UID**: TEST-UI-006-003
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks the machine blocks another ChangeSet mutation until fresh details resolve a version conflict.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
+
+## TEST-UI-006-004
+
+**Type**: TEST
+**MID**: 88330daf9ec769ec9fa7e29b370a2650
+**UID**: TEST-UI-006-004
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks Chromium reconciles a lost ChangeSet apply response after the database commits.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
+
+## TEST-UI-006-005
+
+**Type**: TEST
+**MID**: 1e347c42545fb1287dd77f5d6389e66c
+**UID**: TEST-UI-006-005
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks cancellation cannot report successful owner reauthentication.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
+
+## TEST-UI-006-006
+
+**Type**: TEST
+**MID**: 24724101b874344eae1cced50374bd28
+**UID**: TEST-UI-006-006
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Checks the machine reconciles an uncertain revocation against freshly fetched identity.
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-UI-006
 
 ## TEST-EXT-001-001
 

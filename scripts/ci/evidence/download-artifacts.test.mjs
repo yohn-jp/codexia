@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, open, readFile, readdir, rm, symlink, writeFile } from 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { assertTraceArtifact, downloadArtifact, extractArtifactFiles, extractJsonEntry, selectedArtifacts, validateZipEntryPath } from './download-artifacts.mjs';
+import { assertTraceArtifact, downloadArtifact, extractArtifactFiles, extractJsonEntry, readBrowserArtifact, selectedArtifacts, validateZipEntryPath } from './download-artifacts.mjs';
 
 const identity = { runId: '123', sourceSha: 'a'.repeat(40) };
 const bytes = Buffer.from('archive');
@@ -81,6 +81,14 @@ test('certification materializes only the selected plan and reports for one or m
   const tracePath = 'requirements-trace/strictdoc/trace-report.json';
   const selectedTrace = await fixture(4, 'ci-evidence-types-trace', 'report.json', traceGroup, { [tracePath]: trace });
   const missingTrace = await fixture(5, 'ci-evidence-types-trace', 'report.json', traceGroup);
+  const browserGroup = { group: 'browser-full-ui-v1', results: [{ task: 'browser-full-ui-v1', status: 'passed' }] };
+  const browserCoverage = { profile: 'full', shard: 'ui-v1' };
+  await fixture(6, artifact.name, 'report.json', browserGroup, { 'browser-full-ui-v1/browser-coverage.json': browserCoverage });
+  await fixture(7, artifact.name, 'report.json', browserGroup);
+  assert.deepEqual(await readBrowserArtifact(archives.get(6), browserGroup.group), { group: browserGroup, reports: [browserCoverage] });
+  await assert.rejects(extractJsonEntry(archives.get(6), 'browser-full-ui-v1/browser-coverage.json'), /Invalid evidence filename/);
+  await assert.rejects(readBrowserArtifact(archives.get(7), browserGroup.group), /missing required json entry/iu);
+  await assert.rejects(readBrowserArtifact(archives.get(6), 'browser-full-writing'), /browser evidence group mismatch/iu);
   const requestedIds = [];
   const options = {
     inventory: { identity, artifacts: [selectedPlan, selectedReport, olderReport, retainedReport, selectedTrace, missingTrace] },
@@ -362,16 +370,4 @@ test('artifact extraction rejects a parent path in an unmaterialized entry', asy
   await assert.rejects(extractJsonEntry(archive, 'report.json'), /unsafe|filename|path/i);
   await assert.rejects(extractArtifactFiles(archive, path.join(directory, 'out')), /unsafe|filename|path/i);
   await assert.rejects(readFile(path.join(directory, 'fixture.txt')), { code: 'ENOENT' });
-});
-
-test('initial preservation receipt is extracted from a real ZIP without widening arbitrary entry access', async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'codexia-preservation-zip-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const receipt = { format: 'codexia-initial-preservation/v1', sourceSha: identity.sourceSha, runId: 123, attempt: 1 };
-  await writeFile(path.join(dir, 'preservation.json'), JSON.stringify(receipt));
-  await writeFile(path.join(dir, 'unapproved.json'), '{}');
-  execFileSync('zip', ['-q', 'artifact.zip', 'preservation.json', 'unapproved.json'], { cwd: dir });
-  const archive = await readFile(path.join(dir, 'artifact.zip'));
-  assert.deepEqual(JSON.parse(await extractJsonEntry(archive, 'preservation.json')), receipt);
-  await assert.rejects(extractJsonEntry(archive, 'unapproved.json'), /Invalid evidence filename/);
 });

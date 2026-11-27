@@ -54,6 +54,8 @@ Cloudflare Worker Static Assetsは画面を配信し、API、MCP、OAuth metadat
 | `POST /api/auth/codexia/owner-session` | 通常APIのOWNER-SESSION、正確なsame-origin、空のJSON object | bearer、setup専用モード、owner以外、セッション情報の開示 |
 | `POST /api/auth/oauth2/consent-context`、同意決定 | OWNER-SESSION、same-origin、signed request、CSRF | cross-origin、scope逸脱、黙ったauto-consent |
 | `/api/auth/*` Passkey/session/consent管理 | OWNER-SESSION。追加削除・ポリシー変更はfresh再認証 | MCP/OWNER-API bearer/SETUPキーを管理セッション化 |
+| `GET /api/auth/codexia/owner-security/oidc`、同じリソースの `POST /{stage,link,activate,disable,remove}` | OWNER-SESSION。更新は exact Origin、CSRF、fresh再認証。各操作で対象 revision と許可済み issuer を検証する。[Owner OIDC 契約](OWNER-OIDC-MANAGEMENT-CONTRACT.md) | 管理用 bearer、operator 許可範囲外の登録、無検証の有効化、Better Auth の provider 管理 API への公開アクセス |
+| `POST /api/auth/sign-in/sso`、`GET /api/auth/sso/callback/codexia-owner-oidc` | 通常ログインは同一 origin と固定 provider key。callback は Better Auth が検証した state と、候補の紐付け時には開始した owner session を照合する | ブラウザー指定の任意 provider、任意の戻り先、未検証の state での紐付け |
 | `GET /api/auth/codexia/setup/status` | ANONへ機密のない登録可否状態のみ | ownerの存在詳細、grant値の漏えい・cache |
 | `POST /api/auth/codexia/setup/authorize` | owner不在＋NEW_APPROVED、期限内grant、CSRF/Origin、rate limit。短命setup transactionのみ生成 | 普通のAPI bearerやowner session発行、キーreplay、復旧DBでの新規owner |
 | `GET /api/auth/passkey/generate-register-options`、`POST /api/auth/passkey/verify-registration`（setup時） | 短命setup transactionに拘束されたWebAuthn ceremony、RP/origin/UV/challenge、原子的なowner登録＋grant消費 | 部分owner作成、同時登録二重成功、既存ownerの上書き |
@@ -119,6 +121,7 @@ Cloudflare Worker Static Assetsは画面を配信し、API、MCP、OAuth metadat
 | `GET /api/v1/persistence/projects/:p` | ownerのproject IDを確認 |
 | `PATCH /api/v1/persistence/projects/:p` | expectedVersionとname/settingsの検証 |
 | `GET /api/v1/persistence/projects/:p/archive` | 固定snapshotの現在状態をexport |
+| `GET /api/v1/persistence/projects/:p/open-export`（設計対象） | 実行枠の取得前に作品へのアクセスを確認し、固定スナップショットから完全な ZIP を取得する。送信前に認証と作品へのアクセスを再確認する。[離脱用 ZIP の実装契約](OPEN-WORK-EXPORT-CONTRACT.md) |
 | `GET /api/v1/persistence/projects/:p/documents` | 同じprojectの親/並びと取得上限 |
 | `POST /api/v1/persistence/projects/:p/documents` | 親とpath、idempotency、本文の新規Revision |
 | `GET /api/v1/persistence/projects/:p/documents/:d` | document/revisionが当該projectに属する |
