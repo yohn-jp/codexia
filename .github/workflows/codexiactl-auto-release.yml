@@ -51,7 +51,8 @@ jobs:
             const cliPath = p => p.startsWith('cmd/codexiactl/') ||
               p === 'scripts/ci/execution/verify-codexiactl.sh' ||
               p.startsWith('scripts/release/components/codexiactl-release') ||
-              p === '.github/workflows/publish-oci.yml';
+              p === '.github/workflows/publish-oci.yml' ||
+              p === '.github/workflows/codexiactl-auto-release.yml';
             if (!diff.data.files.some(f => cliPath(f.filename))) {
               core.info('No CodexiaCTL changes: no release');
               return;
