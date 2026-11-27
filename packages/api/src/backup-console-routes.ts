@@ -244,10 +244,9 @@ export function registerBackupConsole(
     });
     const configuration = () => options ?? reject(503, 'BACKUP_CONTROL_PLANE_UNAVAILABLE');
     const store = () => configuration().store;
-    app.get(path + '/status', wire('status_get'), async request => {
-      const query = z.strictObject({ requestId: z.string().regex(requestIdPattern).optional() }).safeParse(request.query);
-      if (!query.success) return invalid();
-      return store().status(query.data.requestId);
+    app.get<{ Querystring: { requestId?: string } }>(path + '/status', wire('status_get'), async request => {
+      if (request.validationError) return invalid();
+      return store().status(request.query.requestId);
     });
     app.get(path + '/config', wire('config_get'), async (_request, reply) => {
       const config = await store().config();
