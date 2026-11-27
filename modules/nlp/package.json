@@ -32,8 +32,6 @@
     "@codexia/contracts": "workspace:*",
     "lindera-wasm-nodejs-ipadic": "2.0.0",
     "yaml": "catalog:production",
-    "react": "catalog:production",
-    "react-dom": "catalog:production",
     "@codexia/module-runtime": "workspace:*",
     "@huggingface/transformers": "4.3.2"
   },

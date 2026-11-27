@@ -37,6 +37,8 @@ Document saves require the observed base revision, exact text changes, resulting
 
 Modules and MCP receive read and proposal ports. Only the authenticated author boundary may approve. Approved operations declare their read/write sets and scope guards; PostgreSQL transactions recheck preconditions and apply writes atomically. Durable proposal state and application receipts survive process or local-state replacement. Cancellation or a lost response does not imply that an accepted write was rolled back.
 
+Author-confirmed Knowledge merges and approved Knowledge merge ChangeSets share the Persistence planner and transaction implementation. Both check the project version and preview digest before transferring references and recording the merge audit.
+
 Browser IndexedDB stores recoverable drafts and pending proposals separately from canonical records. Input and IME state remain immediately authoritative while editing. A save indicator requires the database result and the corresponding durable local journal transition. Conflicts, storage errors and uncertain responses preserve recovery data. Author/project scope and navigation generations fence late responses.
 
 ## Portable work import, export and backup

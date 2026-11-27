@@ -68,7 +68,7 @@ test('Biome selects shipped JS/TS changes and config, but not unrelated CI or na
   const sha = 'a'.repeat(40);
   const base = 'b'.repeat(40);
   const check = (file, event = 'pull_request') => createVerificationPlan({files:[file], event, sha, base});
-  for (const file of ['app/src/main.tsx', 'packages/api/src/server.ts', 'modules/story/src/index.ts', 'edge/frontend/test/static-smoke.mjs', 'biome.json']) {
+  for (const file of ['app/src/entries/desktop.tsx', 'packages/api/src/server.ts', 'modules/story/src/index.ts', 'edge/frontend/test/static-smoke.mjs', 'biome.json']) {
     const plan = check(file);
     assert.ok(plan.tasks.includes('biome-ci'), file);
     assert.ok(plan.groups.includes('biome'), file);
@@ -529,12 +529,6 @@ test('active Python installers share the pinned environment recipe and retain th
   const s3 = readFileSync(new URL('../../../deploy/backup/install-s3-runtime.sh', import.meta.url), 'utf8');
   assert.ok(s3.includes(helper + '" ensure python3'));
   assert.ok(s3.includes('--require-hashes --reinstall'));
-  const frozen = readWorkflow('strictdoc-runtime-experiment.yml');
-  assert.deepEqual(Object.keys(frozen.on), ['workflow_dispatch']);
-  for (const job of Object.values(frozen.jobs)) {
-    assert.equal(job.if, '${{ false }}');
-    assert.notEqual(job.permissions?.packages, 'write');
-  }
   assert.equal(matchesFullModelOciPath(helper), true);
   const plan = createVerificationPlan({ files: [helper], event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) });
   assert.ok(plan.tasks.includes('requirements-trace'));

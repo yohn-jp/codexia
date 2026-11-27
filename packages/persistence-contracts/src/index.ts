@@ -576,7 +576,6 @@ export interface PersistenceReader {
     projectId: ProjectId,
   ): Promise<{ records: readonly ModuleRecord[]; omittedAuthorityModules: readonly string[] }>;
   getProject(projectId: ProjectId): Promise<Project | undefined>;
-  listProjects(limit?: number): Promise<readonly Project[]>;
   /** Recent-project keyset page; `limit` includes the optional lookahead row. */
   listProjectPage?(limit: number, after?: ProjectPageCursor): Promise<readonly Project[]>;
   getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined>;

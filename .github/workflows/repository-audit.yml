@@ -18,6 +18,7 @@ on:
       - 'scripts/ci/evidence/task-inputs.mjs'
       - 'scripts/ci/evidence/task-inputs.test.mjs'
       - 'app/src/**'
+      - 'edge/frontend/static/_redirects'
       - 'modules/**'
       - 'ios/**'
       - 'deploy/ansible/**'

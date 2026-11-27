@@ -5,7 +5,7 @@
 | 領域 | 既存実装・契約 | 接続・新規実装 | 受入証拠 |
 |---|---|---|---|
 | 永続化 | packages/persistence-contracts/src/index.ts → packages/persistence-postgres/src/postgres-store.ts | スキーマ互換、読み取り専用Knowledge投影 | postgres-store.test.ts、実PG |
-| Knowledge | packages/core/src/knowledge/index.ts、packages/core/src/evidence、packages/api/src/persistence-routes.ts | 既存Inspector、命題、別名、関係、統合 | tests/e2e/persistence-database.acceptance.spec.ts、Core knowledge-evidence.test.ts |
+| Knowledge | packages/core/src/knowledge/index.ts、packages/core/src/evidence、packages/api/src/persistence-routes.ts、packages/persistence-postgres/src/knowledge-merge.ts | 既存Inspector、命題、別名、関係、統合 | tests/e2e/persistence-database.acceptance.spec.ts、packages/core/src/knowledge-evidence.test.ts、packages/api/src/native-knowledge-merge-service.test.ts |
 | Story | modules/story/src/snapshot.ts → domain/worldState.ts、timeline.ts、readerKnowledge.ts、threadLifecycle.ts | | modules/story/src/actions.test.ts、domainテスト |
 | Search | modules/search の既存Term Registryと辞書 | Knowledge AliasはPostgreSQL正本、同名一致は確定としない。Searchとの明示参照・一方向投影の接続は明示的な参照を必要とする | 既存Searchテスト、実UIで曖昧性を検証 |
 | Context/MCP | modules/story/src/actions.ts、modules/mcp/src/tools.ts、既存Module Action registry、Assistantのローカル文脈 | 共通Context、プレビュー、外部AIの提出、内部LLM実行の凍結（[MCP-first](MCP-FIRST.md)） | Story fixture、MCP権限・Provider非実行・Snapshot受入 |

@@ -149,7 +149,7 @@ test('authenticated PostgreSQL API saves, replays, follows Evidence, conflicts a
   });
   assert.equal(bearerWrite.status, 403);
   assert.equal(((await bearerWrite.json()) as { code: string }).code, 'OAUTH_CLIENT_NOT_ALLOWED');
-  assert.ok(!(await persistence.read(reader => reader.listProjects(200))).some(project => project.title === forbiddenTitle));
+  assert.ok(!(await persistence.read(reader => reader.listProjectPage!(200))).some(project => project.title === forbiddenTitle));
 
   const projectResponse = await fetch(`${base}/api/v1/persistence/projects`, {
     method: 'POST',

@@ -115,12 +115,14 @@ assert.match(tunnelQuadlet, /^After=network-online\.target codexia-api\.service$
 assert.match(tunnelQuadlet, /PublishPort=127\.0\.0\.1:2000:2000\/tcp/u, 'Tunnel metrics must bind to host loopback only');
 assert.doesNotMatch(tunnelQuadlet, /^PublishPort=(?!127\.0\.0\.1:2000:2000\/tcp)/mu, 'the Tunnel must not publish a public host port');
 assert.match(backendDockerfile, /--server-only/u);
-assert.match(deploymentDocs, /pg_dump/u);
+assert.match(deploymentDocs, /\]\(BACKUP\.md#受入シナリオ\)/u,
+  'The deployment overview must link the canonical recovery acceptance');
+assert.match(deploymentDocs, /\]\(\.\.\/\.\.\/deploy\/backup\/CONSOLE\.md\)/u,
+  'The deployment overview must link operator backup provisioning');
 assert.match(deploymentDocs, /codexia-db\.service/u);
 assert.match(deploymentDocs, /codexia-postgres/u);
 assert.match(deploymentDocs, /VITE_API_URL/u);
 assert.match(deploymentDocs, /CORS/u);
-assert.match(deploymentDocs, /restore/u);
 assert.match(deploymentDocs, /127\.0\.0\.1:2000\/ready/u);
 const operationsDocs = [deploymentDocs, pushDeploymentDocs, iacDocs, ansibleDocs, backupDocs].join('\n');
 assert.ok(pushDeploymentDocs.includes('](PRODUCTION-BOOTSTRAP.md)') && pushDeploymentDocs.includes('`preflight_run_id`'),

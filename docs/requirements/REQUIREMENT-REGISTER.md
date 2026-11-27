@@ -928,7 +928,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **Conformance status**: PARTIAL
 **Applicability**: CURRENT
 **Design owner**: [Screen catalog](../design/SCREEN-CONTROL-CATALOG.md)、[State Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: app/src/App.tsx; app/src/components/; app/src/shells/
+**Implementation identifiers**: app/src/application/navigation.ts (parseApplicationLocation, applicationPath); app/src/persistence/PersistenceWorkspace.tsx (PersistenceWorkspace); app/src/shells/desktop/DesktopShell.tsx (DesktopShell)
 **Verification identifiers**: tests/e2e/ui-v1.acceptance.spec.ts
 **Test IDs**: TEST-UI-003-001
 **Exact-run reference**: NOT_RUN
@@ -943,7 +943,11 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 - **Type**: File
   **Path**: docs/design/SCREEN-STATE-ATLAS.md
 - **Type**: File
-  **Path**: app/src/App.tsx
+  **Path**: app/src/application/navigation.ts
+- **Type**: File
+  **Path**: app/src/persistence/PersistenceWorkspace.tsx
+- **Type**: File
+  **Path**: app/src/shells/desktop/DesktopShell.tsx
 - **Type**: File
   **Path**: tests/e2e/ui-v1.acceptance.spec.ts
 
@@ -953,7 +957,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **MID**: 6129fe71966b7841314c39b71c52cddf
 **UID**: OBL-REQ-UI-003-O01
 **Design reference**: [Screen catalog](../design/SCREEN-CONTROL-CATALOG.md)、[State Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: app/src/App.tsx
+**Implementation identifiers**: app/src/application/navigation.ts (parseApplicationLocation, applicationPath); app/src/persistence/PersistenceWorkspace.tsx (PersistenceWorkspace); app/src/shells/desktop/DesktopShell.tsx (DesktopShell)
 **Test IDs**: TEST-UI-003-001
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -966,7 +970,11 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **ID**: REQ-UI-003
 
 - **Type**: File
-  **Path**: app/src/App.tsx
+  **Path**: app/src/application/navigation.ts
+- **Type**: File
+  **Path**: app/src/persistence/PersistenceWorkspace.tsx
+- **Type**: File
+  **Path**: app/src/shells/desktop/DesktopShell.tsx
 
 ## REQ-UI-004
 
@@ -1737,7 +1745,7 @@ INP p75、CLS p75の品質目安に加え、原稿入力・保存・復旧の別
 **MID**: 0966fc7db2c488c5abd936cd7db8556f
 **UID**: OBL-REQ-TRACE-001-O02
 **Design reference**: docs/requirements/STRICTDOC-TRACEABILITY.md
-**Implementation identifiers**: scripts/strictdoc/verify.mjs
+**Implementation identifiers**: scripts/strictdoc/verify.mjs: compareExports
 **Test IDs**: TEST-TRC-02-001; TEST-TRC-02-002
 **Exact-run reference**: NOT_RUN
 **Comment**: Explicit criterion; source and test references are candidates only; no independent certification is implied.
@@ -1779,7 +1787,7 @@ A requirement-to-source relation must resolve to a repository file. The verifier
 **MID**: 6a8582691c1bc79a39f22ad3e99ee2b0
 **UID**: OBL-REQ-TRACE-001-O04
 **Design reference**: docs/requirements/STRICTDOC-TRACEABILITY.md
-**Implementation identifiers**: scripts/strictdoc/verify.mjs
+**Implementation identifiers**: scripts/strictdoc/verify.mjs: verifySourceInventory; scripts/strictdoc/reverse-trace.mjs: discoverReverseSurfaces
 **Test IDs**: TEST-TRC-04-001; TEST-TRC-04-002, TEST-TRC-04-003
 **Exact-run reference**: NOT_RUN
 **Comment**: Explicit criterion; source and test references are candidates only; no independent certification is implied.
@@ -1793,6 +1801,8 @@ Reverse inventory keeps discovered HTTP routes, MCP tools, database objects, Des
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
+- **Type**: File
+  **Path**: scripts/strictdoc/reverse-trace.mjs
 
 ## OBL-REQ-TRACE-001-O05
 
@@ -1800,7 +1810,7 @@ Reverse inventory keeps discovered HTTP routes, MCP tools, database objects, Des
 **MID**: f108acf33cf12b70e9072e7828390202
 **UID**: OBL-REQ-TRACE-001-O05
 **Design reference**: docs/requirements/STRICTDOC-TRACEABILITY.md
-**Implementation identifiers**: scripts/strictdoc/verify.mjs
+**Implementation identifiers**: scripts/strictdoc/verify.mjs: resolveRunIdentity
 **Test IDs**: TEST-TRC-05-001; TEST-TRC-05-002; TEST-TRC-05-003, TEST-TRC-05-004
 **Exact-run reference**: NOT_RUN
 **Comment**: Explicit criterion; source and test references are candidates only; no independent certification is implied.

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { componentReleaseAffected } from './impact.mjs';
 
 test('verified main release respects prior frontend and backend push path scopes', () => {
-  assert.equal(componentReleaseAffected('frontend', ['app/src/App.tsx']), true);
+  assert.equal(componentReleaseAffected('frontend', ['app/src/entries/desktop.tsx']), true);
   assert.equal(componentReleaseAffected('frontend', ['edge/frontend/wrangler.jsonc']), true);
   assert.equal(componentReleaseAffected('frontend', ['README.md']), false);
   assert.equal(componentReleaseAffected('backend', ['packages/api/src/server.ts']), true);

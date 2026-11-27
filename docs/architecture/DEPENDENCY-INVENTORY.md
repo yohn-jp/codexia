@@ -30,6 +30,8 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@types/react` | `^19.3.0` | root/app・React型 | **連動**: React 19の型とランタイムを一緒に検証 |
 | `@types/react-dom` | `^19.3.0` | root/app・React DOM型 | **連動**: React DOM 19と合わせる |
 | `typescript` | `7.0.2` | root・native型検査、宣言emit、HTTPルートのAST検査 | ambient型の自動取り込みに依存せず、共通tsconfigで`types: ["node"]`を明示する。HTTPルート検査が使うnative AST APIはunstableのため、compilerを厳密指定し、更新時はルート契約テストも検証する |
+| `@babel/parser` | `7.29.15` | root devDependency・StrictDocのJS/TSテスト登録のAST解析 | **検証専用**: traverseと同じ版を固定。更新時はTEST-IDと登録位置の解決、コメント・重複の拒否を検証 |
+| `@babel/traverse` | `7.29.15` | root devDependency・StrictDocのAST走査とテストランナーのbinding解決 | **検証専用**: parserと同じ版を固定。更新時はNode.js・Playwrightの登録検出と実行結果の照合を検証 |
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
 | `@redocly/cli` | `2.82.0` | `packages/http-contract`・OpenAPI lint | **既存採用**: CLI 2のcustom rulesで生成OpenAPI 3.1を検査。実API適合は別途検証 |
@@ -66,9 +68,8 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `react` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: React DOM・型と整合 |
-| `react-dom` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: Reactと整合 |
-| `react-router-dom` | `7.18.6` | app・画面遷移 | **既存採用**: Desktop画面遷移・リロード・保護ルートをブラウザーで検証 |
+| `react` | `^19.3.1`（Publishing peer `^19.1.0`） | app・Story・Semantic・Publishing | **連動**: React DOM・型と整合 |
+| `react-dom` | `^19.3.1`（Publishing peer `^19.1.0`） | app・Story・Semantic・Publishing | **連動**: Reactと整合 |
 | `react-resizable-panels` | `4.24.1` | app・パネル | **既存採用**: Desktop配置・ドラッグ・復元・popover下のseparatorをブラウザーで検証 |
 | `@codemirror/commands` | `^6.11.1` | app・編集コマンド | **要検証** |
 | `@codemirror/merge` | `6.12.3` | app・差分表示 | **要検証** |
@@ -76,8 +77,6 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@codemirror/view` | `^6.43.15` | app・編集画面 | **要検証** |
 | `@headless-tree/core` | `1.8.0` | app・アウトライン | **連動**: Reactアダプターと一緒に更新 |
 | `@headless-tree/react` | `1.8.0` | app・アウトライン | **連動**: coreと一緒に更新 |
-| `@radix-ui/react-separator` | `1.2.0` | app・UI | **要検証** |
-| `@radix-ui/react-tabs` | `1.2.1` | app・UI | **要検証** |
 | `@xstate/react` | `6.1.0` | app・保存／復旧、Native ChangeSet review、本人認証管理のactorとReact 19の接続 | **連動**: React peerは19を含み、XState `^5.28.0`と互換。各機能の統合を併せて検証 |
 | `xstate` | `5.33.4` | app・保存／復旧、Native ChangeSet review、本人認証管理の状態機械とasync actor | **連動**: v5 stable。公式React adapter 6.1.0とReact 19のpeer整合を検証 |
 | `@vitejs/plugin-react` | `^6.3.0` | app・フロントビルド | **要検証**: Vite・Reactビルドとの互換性を一緒に確認 |

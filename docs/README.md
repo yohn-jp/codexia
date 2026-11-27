@@ -7,7 +7,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Browser E2E execution and optimization | [E2E execution](verification/E2E-EXECUTION.md) — Chromium target, migration gates, fixture/artifact reuse and measured optimization |
 | Documentation precedence and change governance | [Documentation authority](architecture/DOCUMENTATION-AUTHORITY.md) — canonical design-first governance |
 | Implementation workstreams, dependencies and acceptance | [Specification implementation contract](architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md) — workstream boundaries and integration gates, not proof of implementation |
-| Backup settings in owner console | [Backup console contract](architecture/BACKUP-CONSOLE-CONTRACT.md) · [Backup screen flows](design/ADMIN-SCREEN-FLOW.md) — target routes, S3 settings and protected executor; not yet implemented |
+| Owner backup management | [Backup console contract](architecture/BACKUP-CONSOLE-CONTRACT.md) · [Backup screen flows](design/ADMIN-SCREEN-FLOW.md) — operator-provisioned API and executor, with owner screens as the implementation target |
 | XState state-machine adoption | [XState v5 contract](design/XSTATE-STATE-MACHINE-CONTRACT.md) — save/recovery first, independent server/DB invariants retained |
 | External dependencies, current-version policy and selected libraries | [Library selection policy](architecture/DEPENDENCY-POLICY.md) — normative library-first choices, compatibility boundaries and adoption criteria |
 | Existing dependencies, declared versions and update constraints | [Dependency inventory](architecture/DEPENDENCY-INVENTORY.md) — direct dependencies, version constraints, update lag and coordinated upgrades |
@@ -90,7 +90,7 @@ These maintained documents supplement the topic owners above. The classification
 | Base deployment | [Ansible deployment](../deploy/ansible/README.md) · [Base runtime](../deploy/ansible/BASE-RUNTIME.md) · [Base secrets](../deploy/ansible/BASE-SECRETS.md) | Operational procedures, subordinate to deployment design |
 | Edge configuration | [Cloudflare Access policy migration](../deploy/cloudflare/terraform/ACCESS-POLICY-MIGRATION.md) | Operational procedure |
 | Release and handoff | [Push deployment runbook](deployment/PUSH-DEPLOYMENT.md) · [Handoff revalidation](deployment/BACKEND-HANDOFF-REVALIDATION.md) | Operational procedures, subordinate to update design |
-| Recovery | [Encrypted backup and restore / S3-compatible storage target](deployment/BACKUP.md) · [Disposable host acceptance](deployment/PUSH-HOST-CI.md) | Operational / verification procedures; S3 target is approved but not implemented |
+| Recovery | [Encrypted backup, S3-compatible storage and isolated restore](deployment/BACKUP.md) · [Disposable host acceptance](deployment/PUSH-HOST-CI.md) | Operational procedures and recovery acceptance requirements |
 | Architecture decisions | [Optimization boundaries](architecture/decisions/OPTIMIZATION-BOUNDARIES.md) | Adopted bounded decisions; no legacy runtime authority |
 | Feature expansion | [Development inventory](architecture/NEXT-DEVELOPMENT-INVENTORY.md) · [Headless Tree outline](design/HEADLESS-TREE-OUTLINE.md) | Proposal and acceptance targets |
 | CI observability | [CI dashboard](verification/CI-DASHBOARD.md) · [Graphify Pages](verification/GRAPHIFY-PAGES.md) | Verification / visualization guidance, not runtime authority |

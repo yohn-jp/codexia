@@ -1,14 +1,12 @@
-import type { ClusterAssignmentTrail } from "./clusterAssignmentTrail.js";
-import { buildMentionDictionary, findMentions } from "./mentionIndex.js";
-import type { ResolveSpeakerCountInput, SpeakerAttribution } from "./speakerAttribution.js";
-import type { PartitionContext } from "./speakerClustering.js";
-import { removeDialogueBrackets } from "./styleFingerprint.js";
-import { isDialogue, splitIntoSentences } from "./textAnalysis.js";
-import type { Entity } from "./types.js";
+import type { ClusterAssignmentTrail } from './clusterAssignmentTrail.js';
+import { buildMentionDictionary, findMentions } from './mentionIndex.js';
+import type { SpeakerAttribution } from './speakerAttribution.js';
+import { removeDialogueBrackets } from './styleFingerprint.js';
+import { isDialogue, splitIntoSentences } from './textAnalysis.js';
+import type { Entity } from './types.js';
 
 /** セリフ冒頭の呼びかけ（speakerAttribution と同系。こちらは census 専用で複製）。 */
-const VOCATIVE_RE =
-  /^[「『][―…‥、\s]*([^、。！？」』\s]{1,15}?)(?:さん|くん|君|様|殿|ちゃん|よ|ね)?、/;
+const VOCATIVE_RE = /^[「『][―…‥、\s]*([^、。！？」』\s]{1,15}?)(?:さん|くん|君|様|殿|ちゃん|よ|ね)?、/;
 
 /** 名乗り・自己紹介パターン。 */
 const SELF_INTRO_RE = /(?:と申します|といいます|と名乗|私の名は|我が名は|名付け|名乗るがよい)/;
@@ -20,10 +18,7 @@ const SELF_INTRO_RE = /(?:と申します|といいます|と名乗|私の名は
 const TIME_PLACE_BREAK_RE =
   /(名も知らない|名前も知らない|見覚えのない|見知らぬ|扉が.{0,8}(?:叩かれ|開い|開かれ)|場面が変わ|翌朝|その夜|数日後|翌日|翌晩|しばらくして|その頃|一方その頃|別の場所|別室)/;
 
-/**
- * 話者数 N の推定結果。
- * `resolveSpeakerCount` より appears キャラ数ベースの推定と、根拠を返す。
- */
+/** 話者数 N の推定結果と根拠。 */
 export interface SpeakerCountEstimate {
   /** パイプラインが実際に使うクラスタ数 N */
   n: number;
@@ -35,8 +30,6 @@ export interface SpeakerCountEstimate {
   evidence: {
     knownFloor: number;
     vocativeCensus: number;
-    /** @deprecated G1 以降は N 推定に使わず、常に未設定 */
-    clusterQualityN?: number;
   };
 }
 
@@ -48,7 +41,7 @@ export interface AttributeSpeakersResult {
   attributions: SpeakerAttribution[];
   estimatedN: number;
   fromManual: boolean;
-  evidence: SpeakerCountEstimate["evidence"];
+  evidence: SpeakerCountEstimate['evidence'];
   /** 行ごとのクラスタ割当証跡（SpeakerAttribution とは並列） */
   clusterTrails: ClusterAssignmentTrail[];
 }
@@ -60,7 +53,7 @@ export interface AttributeSpeakersResult {
 export interface SceneBreakHint {
   /** splitIntoSentences 基準の文番号（1始まり） */
   sentenceIndex: number;
-  kind: "blank-line" | "time-place";
+  kind: 'blank-line' | 'time-place';
   /** time-place のときマッチした表層（任意） */
   matchedText?: string;
 }
@@ -70,10 +63,10 @@ export interface SceneBreakHint {
  * `reason: "mob"` は手動確定時のみ付与する（自動パイプラインでは付与しない）。
  * 評価では gold/predicted の null と同クラスタ判定を正解として扱う（speakerEval）。
  */
-export type MobSpeakerReason = Extract<SpeakerAttribution["reason"], "mob">;
+export type MobSpeakerReason = Extract<SpeakerAttribution['reason'], 'mob'>;
 
 /** モブ手動確定時に付与する reason。自動帰属では使わない。 */
-export const MOB_SPEAKER_REASON: MobSpeakerReason = "mob";
+export const MOB_SPEAKER_REASON: MobSpeakerReason = 'mob';
 
 /**
  * 未解決（entity なし）だがクラスタ ID がある行＝モブ一級市民のクラスタ表現。
@@ -91,20 +84,19 @@ export function confirmMobAttribution(attribution: SpeakerAttribution): SpeakerA
     ...attribution,
     speakerEntityId: null,
     reason: MOB_SPEAKER_REASON,
-    confidence: "none",
+    confidence: 'none',
   };
 }
 
-export type EstimateSpeakerCountInput = ResolveSpeakerCountInput & {
-  /**
-   * 互換のため受け付けるが、G1 の自動 N では未使用（クラスタ品質探索は行わない）。
-   */
-  partitionContext?: PartitionContext;
-  /**
-   * 互換のため受け付けるが、G1 の自動 N では未使用。
-   */
-  attributions?: SpeakerAttribution[];
-};
+export interface EstimateSpeakerCountInput {
+  /** シーンに指定された話者数。未設定なら自動推定。 */
+  speakerCount?: unknown;
+  dialogueCount: number;
+  appearsEntities?: Entity[];
+  text?: string;
+  /** 手動確定または確度 high の話者数。推定・手動指定の下限とする。 */
+  knownSpeakerCount?: number;
+}
 
 function clampSpeakerCount(value: number, dialogueCount: number): number {
   if (dialogueCount <= 0) return 0;
@@ -112,11 +104,9 @@ function clampSpeakerCount(value: number, dialogueCount: number): number {
 }
 
 function entityTerms(entity: Entity): string[] {
-  const rawTitles = Array.isArray(entity.raw.titles)
-    ? entity.raw.titles.filter((value): value is string => typeof value === "string")
-    : [];
+  const rawTitles = Array.isArray(entity.raw.titles) ? entity.raw.titles.filter((value): value is string => typeof value === 'string') : [];
   return [entity.name, ...(entity.aliases ?? []), ...rawTitles].filter(
-    (value): value is string => typeof value === "string" && value.length > 0,
+    (value): value is string => typeof value === 'string' && value.length > 0,
   );
 }
 
@@ -147,16 +137,13 @@ function matchEntityBySurface(surface: string, candidates: readonly Entity[]): s
  * 同一セリフ内で「呼びかけ先 ≠ 話者」「名乗り主体」として現れる entity を数え、
  * シーンに必要な話者下限を強化する。
  */
-export function countVocativeMutualExclusionCensus(
-  text: string,
-  appearsEntities: readonly Entity[],
-): number {
-  const candidates = appearsEntities.filter((entity) => entity.type === "character");
+export function countVocativeMutualExclusionCensus(text: string, appearsEntities: readonly Entity[]): number {
+  const candidates = appearsEntities.filter(entity => entity.type === 'character');
   if (candidates.length === 0 || text.length === 0) return 0;
 
-  const entityMap = new Map(candidates.map((entity) => [entity.id, entity]));
+  const entityMap = new Map(candidates.map(entity => [entity.id, entity]));
   const mentionDict = buildMentionDictionary(entityMap);
-  const candidateIds = new Set(candidates.map((entity) => entity.id));
+  const candidateIds = new Set(candidates.map(entity => entity.id));
   const present = new Set<string>();
 
   for (const sentence of splitIntoSentences(text)) {
@@ -165,9 +152,7 @@ export function countVocativeMutualExclusionCensus(
 
     const vocativeMatch = sentence.trim().match(VOCATIVE_RE);
     if (vocativeMatch?.[1]) {
-      const addressed = findMentions(mentionDict, vocativeMatch[1]).filter((id) =>
-        candidateIds.has(id),
-      );
+      const addressed = findMentions(mentionDict, vocativeMatch[1]).filter(id => candidateIds.has(id));
       const soleAddressed = addressed.length === 1 ? addressed[0] : undefined;
       if (soleAddressed) {
         present.add(soleAddressed);
@@ -178,7 +163,7 @@ export function countVocativeMutualExclusionCensus(
     }
 
     if (SELF_INTRO_RE.test(content)) {
-      const introMentions = findMentions(mentionDict, content).filter((id) => candidateIds.has(id));
+      const introMentions = findMentions(mentionDict, content).filter(id => candidateIds.has(id));
       for (const id of introMentions) present.add(id);
       // alias / 名のみの自己紹介（「私の名は〇〇」）
       for (const entity of candidates) {
@@ -195,12 +180,10 @@ export function countVocativeMutualExclusionCensus(
     const vocativeMatch = sentence.trim().match(VOCATIVE_RE);
     if (!vocativeMatch?.[1]) continue;
     const addressed =
-      findMentions(mentionDict, vocativeMatch[1]).filter((id) => candidateIds.has(id))[0] ??
+      findMentions(mentionDict, vocativeMatch[1]).filter(id => candidateIds.has(id))[0] ??
       matchEntityBySurface(vocativeMatch[1], candidates);
     if (!addressed) continue;
-    const others = findMentions(mentionDict, removeDialogueBrackets(sentence)).filter(
-      (id) => candidateIds.has(id) && id !== addressed,
-    );
+    const others = findMentions(mentionDict, removeDialogueBrackets(sentence)).filter(id => candidateIds.has(id) && id !== addressed);
     for (const id of others) present.add(id);
     present.add(addressed);
   }
@@ -222,7 +205,7 @@ export function detectSceneBreakHints(text: string): SceneBreakHint[] {
     const sentenceIndex = i + 1;
 
     if (sentence.trim().length === 0) {
-      hints.push({ sentenceIndex, kind: "blank-line" });
+      hints.push({ sentenceIndex, kind: 'blank-line' });
       continue;
     }
 
@@ -232,7 +215,7 @@ export function detectSceneBreakHints(text: string): SceneBreakHint[] {
     if (match) {
       hints.push({
         sentenceIndex,
-        kind: "time-place",
+        kind: 'time-place',
         matchedText: match[0],
       });
     }
@@ -248,7 +231,6 @@ export function detectSceneBreakHints(text: string): SceneBreakHint[] {
  * - `appearsCharacterCount` = appears のうち `type === "character"` の件数
  * - `appearsBased = clamp(max(knownFloor, appearsCharacterCount, dialogueCount>=2 ? 2 : 1), dialogueCount)`
  *
- * strongHintU / vocativeCensus / clusterQualityN は N 選択に使わない。
  * vocativeCensus は UI 用に evidence へ残す。クラスタ品質探索は呼ばない。
  * 手動 speakerCount があるときは n に採用し、estimatedN は自動推定を返す。
  */
@@ -256,7 +238,7 @@ export function estimateSpeakerCount(input: EstimateSpeakerCountInput): SpeakerC
   const dialogueCount = Math.max(0, Math.floor(input.dialogueCount));
   const knownFloor = Math.max(0, Math.floor(input.knownSpeakerCount ?? 0));
   const appears = input.appearsEntities ?? [];
-  const text = input.text ?? "";
+  const text = input.text ?? '';
 
   if (dialogueCount === 0) {
     return {
@@ -267,21 +249,18 @@ export function estimateSpeakerCount(input: EstimateSpeakerCountInput): SpeakerC
     };
   }
 
-  const appearsCharacterCount = appears.filter((entity) => entity.type === "character").length;
+  const appearsCharacterCount = appears.filter(entity => entity.type === 'character').length;
   const vocativeCensus = countVocativeMutualExclusionCensus(text, appears);
-  const appearsBased = clampSpeakerCount(
-    Math.max(knownFloor, appearsCharacterCount, dialogueCount >= 2 ? 2 : 1),
-    dialogueCount,
-  );
+  const appearsBased = clampSpeakerCount(Math.max(knownFloor, appearsCharacterCount, dialogueCount >= 2 ? 2 : 1), dialogueCount);
   const estimatedN = appearsBased;
 
-  const evidence: SpeakerCountEstimate["evidence"] = {
+  const evidence: SpeakerCountEstimate['evidence'] = {
     knownFloor,
     vocativeCensus,
   };
 
   const raw = input.speakerCount;
-  if (typeof raw === "number" && Number.isFinite(raw)) {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
     const manual = clampSpeakerCount(raw, dialogueCount);
     return {
       n: clampSpeakerCount(Math.max(manual, knownFloor), dialogueCount),

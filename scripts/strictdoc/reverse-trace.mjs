@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readRegularFile } from '../shared/read-regular-file.mjs';
 import { discoverAnsibleSourceGraph } from './ansible-source-graph.mjs';
+import { stripSourceComments } from './strip-source-comments.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, '../..');
@@ -34,14 +35,22 @@ function operationSurfaces(admitted, file) {
   return surfaces;
 }
 
-function literalMcpTools(source, file) {
-  const surfaces = [];
-  const regex = /\bserver\.(?:tool|registerTool)\s*\(\s*(["'])([A-Za-z][A-Za-z0-9_.-]*)\1/gu;
-  for (const match of source.matchAll(regex)) {
-    const line = source.slice(0, match.index).split('\n').length;
-    surfaces.push({ kind: 'mcpTool', id: match[2], source: { path: file, line }, provenance: 'Literal server.tool or server.registerTool registration in MCP source; dynamic registrations are outside this scan.' });
-  }
-  if (/\bserver\.(?:tool|registerTool)\s*\(\s*(?!["'])/u.test(source)) {
+export function discoverMcpToolRegistrations(source) {
+  const code = stripSourceComments(source);
+  return [...code.matchAll(/\bserver\.(?:tool|registerTool)\s*\(/gu)].map(match => {
+    const argument = code.slice(match.index + match[0].length);
+    const name = /^\s*(["'])([A-Za-z][A-Za-z0-9_.-]*)\1\s*(?=[,)])/u.exec(argument)?.[2] ?? null;
+    return { name, line: code.slice(0, match.index).split('\n').length };
+  });
+}
+
+function mcpToolSurfaces(source, file) {
+  const registrations = discoverMcpToolRegistrations(source);
+  const surfaces = registrations.filter(({ name }) => name).map(({ name, line }) => ({
+    kind: 'mcpTool', id: name, source: { path: file, line },
+    provenance: 'Literal server.tool or server.registerTool registration in MCP source; dynamic registrations are outside this scan.',
+  }));
+  if (registrations.some(({ name }) => !name)) {
     surfaces.push({ kind: 'mcpRegistration', id: `dynamic:${file}`, source: { path: file }, provenance: 'A non-literal tool registration was observed; name and effect require runtime/catalog resolution.' });
   }
   return surfaces;
@@ -158,7 +167,7 @@ export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, b
   }
 
   const mcpFiles = (await walkFiles(root, 'modules/mcp/src')).filter((file) => /\.tsx?$/u.test(file));
-  for (const file of mcpFiles) surfaces.push(...literalMcpTools(await readRegularFile(path.join(root, file)), file));
+  for (const file of mcpFiles) surfaces.push(...mcpToolSurfaces(await readRegularFile(path.join(root, file)), file));
   if (mcpFiles.length === 0) limitations.push({ area: 'mcp', reason: 'MCP source tree is unavailable.' });
   else limitations.push({ area: 'mcp-effect', reason: 'Per-tool effects and transport registration are not completely available as an authoritative static manifest; source tool names and existing effect tests do not certify the full action catalog.' });
 

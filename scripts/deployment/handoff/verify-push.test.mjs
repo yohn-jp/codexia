@@ -212,12 +212,16 @@ test('handoff validates the certified ancestor and its own Verify run in a histo
   await assert.rejects(run(workflowSha, workflowSha), /Certificate Verify source SHA mismatch/u);
   await assert.rejects(run(workflowSha, certifiedSha), /exact required job set/u);
   const completedJobs = REQUIRED_VERIFICATION_JOBS.map(name => ({ name, status: 'completed', conclusion: 'success' }));
-  const releaseRead = t.mock.method(globalThis, 'fetch', async input => {
-    assert.equal(new URL(input).pathname, '/repos/yohn-jp/codexia/releases');
-    return Response.json([]);
+  const tag = 'backend-v' + cert('full').identity.version;
+  t.mock.method(globalThis, 'fetch', async input => {
+    const path = decodeURIComponent(new URL(input).pathname);
+    if (path === '/repos/yohn-jp/codexia/releases/tags/' + tag) {
+      return Response.json({ message: 'Not Found' }, { status: 404 });
+    }
+    assert.equal(path, '/repos/yohn-jp/codexia/git/ref/tags/' + tag);
+    return Response.json({ ref: 'refs/tags/' + tag, object: { type: 'commit', sha: certifiedSha } });
   });
-  await assert.rejects(run(workflowSha, certifiedSha, completedJobs), /Expected one exact backend release record/u);
-  assert.equal(releaseRead.mock.callCount(), 1);
+  await assert.rejects(run(workflowSha, certifiedSha, completedJobs), { status: 404 });
   const changed = await commit('packages/api/src/server.ts', 'newer backend change');
   await assert.rejects(run(changed, certifiedSha), /newer backend change superseded/u);
 });
