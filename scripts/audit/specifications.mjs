@@ -5,6 +5,7 @@ import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, wr
 import { join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decoratePage } from '../pages-ui/navigation.mjs';
+import { BROWSER_SHARDS, VERIFICATION_GROUPS } from '../ci/impact/contract.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const esc = value => String(value).replace(/[&<>"']/gu, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -45,7 +46,7 @@ function publicExactRuns(items, testIds, execution, caseById) {
   });
 }
 
-const TRACE_INPUTS = ['docs/architecture/DOCUMENTATION-AUTHORITY.md', 'docs/architecture/MCP-V2-MIGRATION.md', 'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md', 'docs/architecture/SPECIFICATION-TOOLCHAIN.md', 'docs/requirements/README.md', 'docs/requirements/REQUIREMENT-REGISTER.md', 'docs/requirements/STRICTDOC-TRACEABILITY.md', 'docs/requirements/STRICTDOC-GRAMMAR.gra.md', 'docs/verification/TRACEABILITY-REGISTER.md', 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md', 'scripts/strictdoc/strictdoc_config.py', 'scripts/strictdoc/surface-inventory.json', 'scripts/strictdoc/requirements.lock.txt', 'scripts/strictdoc/verify.mjs', 'scripts/strictdoc/test-sources.mjs', 'scripts/strictdoc/test-source-path.mjs', 'scripts/strictdoc/ansible-source-graph.mjs', 'scripts/strictdoc/obligation-trace.mjs', 'scripts/strictdoc/reverse-trace.mjs', 'scripts/strictdoc/case-results.mjs', 'scripts/audit/specifications.mjs', 'scripts/audit/traceability.css', 'scripts/audit/traceability-ui.js', 'scripts/pages-ui/navigation.mjs', 'scripts/pages-ui/navigation.css', 'scripts/pages-ui/navigation.js'];
+const TRACE_INPUTS = ['docs/architecture/DOCUMENTATION-AUTHORITY.md', 'docs/architecture/MCP-V2-MIGRATION.md', 'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md', 'docs/architecture/SPECIFICATION-TOOLCHAIN.md', 'docs/requirements/README.md', 'docs/requirements/REQUIREMENT-REGISTER.md', 'docs/requirements/STRICTDOC-TRACEABILITY.md', 'docs/requirements/STRICTDOC-GRAMMAR.gra.md', 'docs/verification/TRACEABILITY-REGISTER.md', 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md', 'scripts/strictdoc/strictdoc_config.py', 'scripts/strictdoc/surface-inventory.json', 'scripts/strictdoc/requirements.lock.txt', 'scripts/strictdoc/verify.mjs', 'scripts/strictdoc/test-sources.mjs', 'scripts/strictdoc/test-source-path.mjs', 'scripts/strictdoc/ansible-source-graph.mjs', 'scripts/strictdoc/obligation-trace.mjs', 'scripts/strictdoc/reverse-trace.mjs', 'scripts/strictdoc/case-results.mjs', 'scripts/ci/evidence/trace-receipt.mjs', 'scripts/ci/evidence/download-artifacts.mjs', 'scripts/ci/browser/coverage-reporter.mjs', 'scripts/audit/specifications.mjs', 'scripts/audit/traceability.css', 'scripts/audit/traceability-ui.js', 'scripts/pages-ui/navigation.mjs', 'scripts/pages-ui/navigation.css', 'scripts/pages-ui/navigation.js'];
 const TRACE_REPOSITORY = 'yohn-jp/codexia';
 const AREA_LABELS = { API: 'API', AUTH: '認証', CORE: 'Core', DATA: 'DB', EXT: '外部IF・IaC', MCP: 'MCP', OPS: 'デプロイ・運用', QUAL: '品質', TRACE: '追跡基盤', UI: 'Desktop UI', IOS: 'Native iOS', OTHER: 'その他' };
 const SURFACE_AREA_LABELS = { ...AREA_LABELS, EXT: 'IaC', EXTIF: 'External IF' };
@@ -144,7 +145,7 @@ function implementationLinksFor(identifiers, sourceSha, audit, obligationId) {
 }
 function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABLE', sourceSha }) {
   const rows = report.obligationTrace?.rows;
-  const obligationGaps = report.obligationTrace?.gaps;
+  const sourceObligationGaps = report.obligationTrace?.gaps;
   const reverseRows = report.reverseTrace?.rows;
   const reverseGaps = report.reverseTrace?.gaps;
   const caseExecutions = report.caseExecutions;
@@ -186,7 +187,7 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
       passedCaseIds: [...receipt.passedCaseIds].sort(),
     };
   } else assert.deepEqual(Object.keys(receipt).sort(), ['sourceSha', 'status'], 'NOT_AVAILABLE receipt must not carry unverified evidence fields');
-  assert.ok(Array.isArray(rows) && Array.isArray(obligationGaps), 'StrictDoc obligation trace is missing');
+  assert.ok(Array.isArray(rows) && Array.isArray(sourceObligationGaps), 'StrictDoc obligation trace is missing');
   assert.ok(Array.isArray(reverseRows) && Array.isArray(reverseGaps), 'StrictDoc reverse trace is missing');
   assert.ok(Array.isArray(caseExecutions), 'StrictDoc case execution inventory is missing');
   const execution = exactExecution(report.execution, sourceSha);
@@ -196,10 +197,51 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
     assert.ok(['PASSED', 'FAILED', 'BLOCKED', 'NOT_RUN', 'SKIPPED', 'TODO', 'AMBIGUOUS'].includes(item.result), `Invalid observed test result for ${item.testId}`);
     return [item.testId, item];
   }));
+  const browserRunsByTest = new Map();
+  const browserReceipts = receipt.productBrowser ?? [];
+  assert.ok(Array.isArray(browserReceipts), 'Invalid certified browser observations');
+  const browserTasks = new Set();
+  for (const browser of browserReceipts) {
+    assert.ok(/^browser-(core|full)-/u.test(browser.job) && VERIFICATION_GROUPS[browser.job]?.includes(browser.task),
+      'Unexpected Verify browser job or task');
+    const shard = BROWSER_SHARDS.find(item => browser.task === `browser-${browser.profile}-${item.id}`);
+    assert.ok(shard && ['core', 'full'].includes(browser.profile) && shard.project === browser.project, 'Invalid Verify browser profile or project');
+    assert.ok(!browserTasks.has(browser.task), 'Duplicate Verify browser task evidence');
+    browserTasks.add(browser.task);
+    assert.ok(Number.isSafeInteger(browser.artifactId) && browser.artifactId > 0, 'Invalid Verify browser artifact ID');
+    assert.match(browser.artifactDigest ?? '', /^sha256:[a-f0-9]{64}$/u, 'Invalid Verify browser artifact digest');
+    assert.ok(Number.isInteger(browser.attempt) && browser.attempt > 0, 'Invalid Verify browser producer attempt');
+    assert.ok(Array.isArray(browser.passedCaseIds) && new Set(browser.passedCaseIds).size === browser.passedCaseIds.length,
+      'Invalid or duplicate Verify browser case IDs');
+    for (const testId of browser.passedCaseIds) {
+      const observation = caseById.get(testId);
+      assert.ok(observation?.result === 'NOT_RUN' && observation.sourceRefs?.[0]?.path === `tests/e2e/${shard.file}`,
+        `Verify browser evidence refers to a foreign case ${testId}`);
+      const exactRun = {
+        testId, sourceSha, repository: publicReceipt.repository, runId: publicReceipt.runId, attempt: browser.attempt,
+        job: browser.job, task: browser.task, profile: browser.profile, project: browser.project, result: 'PASS', url: publicReceipt.runUrl,
+        artifactId: browser.artifactId, artifactDigest: browser.artifactDigest,
+        artifactUrl: `${publicReceipt.runUrl}/artifacts/${browser.artifactId}`,
+      };
+      const runs = browserRunsByTest.get(testId) ?? [];
+      runs.push(exactRun);
+      browserRunsByTest.set(testId, runs);
+    }
+  }
+  if (browserRunsByTest.size > 0 && gates.G4.status === 'NOT_RUN') {
+    gates.G4 = {
+      status: 'PARTIAL',
+      evidence: `Verify certified ${browserRunsByTest.size} mapped Chromium cases. Remaining G4 obligations require independent evidence.`,
+    };
+  }
+  const resolvedGaps = new Set();
   const publicRows = rows.map(row => {
     assert.ok(row && /^REQ-[A-Z]+-\d{3}$/u.test(row.requirementId ?? '') && /^OBL-REQ-[A-Z]+-\d{3}-O\d{2}$/u.test(row.obligationId ?? ''), 'Invalid obligation trace identity');
     const testIds = row.testIds ?? [];
-    const exactRuns = publicExactRuns(row.exactRuns ?? [], testIds, execution, caseById);
+    const observedRuns = publicExactRuns(row.exactRuns ?? [], testIds, execution, caseById);
+    const browserRuns = testIds.flatMap(testId => browserRunsByTest.get(testId) ?? []);
+    for (const browser of browserRuns) resolvedGaps.add(`${row.obligationId}: no exact-source run evidence for ${browser.testId}`);
+    const exactRuns = [...observedRuns, ...browserRuns];
     return {
       requirementId: row.requirementId, obligationId: row.obligationId,
       statement: row.obligationText ?? '', decisionStatus: row.decisionStatus ?? 'UNKNOWN',
@@ -215,6 +257,7 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
       implementationLinks: implementationLinksFor(row.implementationIdentifiers ?? [], sourceSha, referenceAudit, row.obligationId),
     };
   });
+  const obligationGaps = sourceObligationGaps.filter(gap => !resolvedGaps.has(gap));
   const requirements = [...new Set(report.source.requirementIds ?? publicRows.map(row => row.requirementId))].sort().map(requirementId => {
     const matching = publicRows.filter(row => row.requirementId === requirementId);
     const partialDeclaration = /部分導入済み|partially implemented/iu;
@@ -246,7 +289,7 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
     if (obligation) assert.equal(row.requirementId, obligation.requirementId, 'Reverse trace requirement relation mismatch');
     else assert.ok(!row.requirementId, 'Reverse trace requirement requires an obligation relation');
     const exactRuns = obligation?.exactRuns ?? [];
-    assert.deepEqual(row.exactRuns ?? [], exactRuns, `Reverse trace exact-run evidence mismatch for ${row.surface.kind} ${row.surface.id}`);
+    assert.deepEqual(row.exactRuns ?? [], exactRuns.filter(run => !run.artifactId), `Reverse trace exact-run evidence mismatch for ${row.surface.kind} ${row.surface.id}`);
     const inventoryClassification = row.inventoryClassification ?? null;
     const candidateRequirementIds = [...new Set(row.candidateRequirementIds ?? (inventoryClassification?.match(/REQ-[A-Z]+-\d{3}/gu) ?? []))];
     const explicitNotApplicable = /\bNOT_APPLICABLE\b|no requirement applies|outside the requirements/iu.test(inventoryClassification ?? '');
@@ -268,9 +311,11 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
     const sourceRefs = (item.sourceRefs ?? (item.file ? [{ path: item.file, ...(Number.isInteger(item.line) ? { line: item.line } : {}) }] : [])).map(projectSourceReference).filter(Boolean);
     const sourceLinks = sourceRefs.map(reference => linkRepositoryPath(reference.path, sourceSha, referenceAudit, { kind: 'test', from: item.testId, reference })).filter(Boolean);
     const obligationIds = [...new Set(obligationIdsByTest.get(item.testId) ?? [])];
-    const exactRuns = [...new Map(obligationIds.flatMap(id => obligationById.get(id)?.exactRuns ?? []).filter(run => run.testId === item.testId).map(run => [`${run.runId}\0${run.testId}`, run])).values()];
+    const projectedRuns = [...new Map(obligationIds.flatMap(id => obligationById.get(id)?.exactRuns ?? []).filter(run => run.testId === item.testId).map(run => [`${run.runId}\0${run.task}\0${run.testId}`, run])).values()];
+    const browserRuns = browserRunsByTest.get(item.testId) ?? [];
+    const exactRuns = [...projectedRuns.filter(run => !run.artifactId), ...browserRuns];
     return {
-      testId: item.testId, name: item.name ?? '', result: item.result, sourceRefs, sourceLinks,
+      testId: item.testId, name: item.name ?? '', result: browserRuns.length ? 'PASSED' : item.result, sourceRefs, sourceLinks,
       requirementIds: [...new Set(obligationIds.map(id => obligationById.get(id)?.requirementId).filter(Boolean))],
       obligationIds, exactRuns,
       ...(publicReceipt.status === 'CERTIFIED' && publicReceipt.passedCaseIds.includes(item.testId) ? { verificationArtifact: { runId: publicReceipt.runId, attempt: publicReceipt.attempt, artifactId: publicReceipt.artifactId, artifactDigest: publicReceipt.artifactDigest, url: publicReceipt.artifactUrl } } : {}),
@@ -397,7 +442,9 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
     const sourceHtml = item.sourceLinks.map(link => `<a href="${esc(link.url)}">${esc(link.path)}${link.line ? `:L${esc(link.line)}` : ''}</a>`).join('<br>') || 'source refなし';
     const obligationHtml = item.obligationIds.map(id => `<a href="#obligation-${esc(id)}">${esc(id)}</a>`).join('<br>') || '個別義務へのリンクなし';
     const runHtml = [
-      ...item.exactRuns.map(run => `<a href="${esc(run.url)}">run ${esc(run.runId)} / ${esc(run.result)}</a>`),
+      ...item.exactRuns.map(run => run.artifactUrl
+        ? `<a href="${esc(run.artifactUrl)}">${esc(run.profile)}/${esc(run.project)} · run ${esc(run.runId)} / attempt ${esc(run.attempt)} · artifact ${esc(run.artifactId)} · ${esc(run.artifactDigest)}</a>`
+        : `<a href="${esc(run.url)}">run ${esc(run.runId)} / ${esc(run.result)}</a>`),
       ...(item.verificationArtifact ? [`<a href="${esc(item.verificationArtifact.url)}">Verify artifact ${esc(item.verificationArtifact.artifactId)} · ${esc(item.verificationArtifact.artifactDigest)}</a>`] : []),
     ].join('<br>') || 'exact-source runなし';
     return `<tr id="test-${esc(item.testId)}" ${attr({ area, status: item.result }, `${item.testId} ${item.name} ${item.result} ${item.obligationIds.join(' ')}`)}><td><strong>${esc(item.testId)}</strong><p>${esc(item.name)}</p></td><td><span class="state" data-state="${esc(item.result)}">${esc(item.result)}</span></td><td>${sourceHtml}</td><td>${obligationHtml}</td><td>${runHtml}</td></tr>`;

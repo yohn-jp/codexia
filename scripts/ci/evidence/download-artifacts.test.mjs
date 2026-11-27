@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, open, readFile, readdir, rm, symlink, writeFile } from 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { assertTraceArtifact, downloadArtifact, extractArtifactFiles, extractJsonEntry, selectedArtifacts, validateZipEntryPath } from './download-artifacts.mjs';
+import { assertTraceArtifact, downloadArtifact, extractArtifactFiles, extractJsonEntry, readBrowserArtifact, selectedArtifacts, validateZipEntryPath } from './download-artifacts.mjs';
 
 const identity = { runId: '123', sourceSha: 'a'.repeat(40) };
 const bytes = Buffer.from('archive');
@@ -81,6 +81,13 @@ test('certification materializes only the selected plan and reports for one or m
   const tracePath = 'requirements-trace/strictdoc/trace-report.json';
   const selectedTrace = await fixture(4, 'ci-evidence-types-trace', 'report.json', traceGroup, { [tracePath]: trace });
   const missingTrace = await fixture(5, 'ci-evidence-types-trace', 'report.json', traceGroup);
+  const browserGroup = { group: 'browser-full-ui-v1', results: [{ task: 'browser-full-ui-v1', status: 'passed' }] };
+  const browserCoverage = { profile: 'full', shard: 'ui-v1' };
+  await fixture(6, artifact.name, 'report.json', browserGroup, { 'browser-full-ui-v1/browser-coverage.json': browserCoverage });
+  await fixture(7, artifact.name, 'report.json', browserGroup);
+  assert.deepEqual(await readBrowserArtifact(archives.get(6), browserGroup.group), { group: browserGroup, reports: [browserCoverage] });
+  await assert.rejects(readBrowserArtifact(archives.get(7), browserGroup.group), /missing required json entry/iu);
+  await assert.rejects(readBrowserArtifact(archives.get(6), 'browser-full-writing'), /browser evidence group mismatch/iu);
   const requestedIds = [];
   const options = {
     inventory: { identity, artifacts: [selectedPlan, selectedReport, olderReport, retainedReport, selectedTrace, missingTrace] },

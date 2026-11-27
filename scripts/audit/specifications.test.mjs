@@ -143,6 +143,33 @@ test('[TEST-TRC-08-001] projects obligations, reverse surfaces, and evidence lin
       writeFileSync(join(output, 'trace-report.json'), JSON.stringify(invalid));
       assert.throws(() => packSpecifications(join(root, `bad-${name}`), output, sha), message);
     }
+    const browserCase = report.caseExecutions[1];
+    browserCase.sourceRefs = [{ path: 'tests/e2e/ui-v1.acceptance.spec.ts', line: 238 }];
+    report.obligationTrace.gaps.push('OBL-REQ-UI-001-O01: no exact-source run evidence for TEST-TRC-02-001');
+    writeFileSync(join(output, 'trace-report.json'), JSON.stringify(report));
+    const browserSite = join(root, 'browser');
+    const browserReceipt = { status: 'CERTIFIED', sourceSha: sha, repository: 'yohn-jp/codexia', runId: '43', attempt: 2, job: 'types',
+      task: 'requirements-trace', runUrl: 'https://github.com/yohn-jp/codexia/actions/runs/43', artifactId: 987,
+      artifactDigest: 'sha256:' + 'd'.repeat(64), passedCaseIds: ['TEST-TRC-01-001'], productBrowser: [{
+        job: 'browser-core-ui-v1', task: 'browser-core-ui-v1', attempt: 1, profile: 'core', project: 'chromium',
+        artifactId: 654, artifactDigest: 'sha256:' + 'e'.repeat(64), passedCaseIds: ['TEST-TRC-02-001'],
+      }],
+    };
+    packSpecifications(browserSite, output, sha, browserReceipt);
+    const browserTrace = JSON.parse(readFileSync(join(browserSite, 'requirements/traceability/traceability.json'), 'utf8'));
+    assert.equal(browserTrace.caseExecutions[1].result, 'PASSED');
+    assert.equal(browserTrace.qualificationGates.G4.status, 'PARTIAL');
+    assert.equal(browserTrace.caseExecutions[1].exactRuns[0].artifactId, 654);
+    assert.equal(browserTrace.caseExecutions[1].exactRuns[0].attempt, 1);
+    assert.equal(browserTrace.caseExecutions[1].exactRuns[0].sourceSha, sha);
+    assert.deepEqual(browserTrace.obligations[0].exactRuns[1], browserTrace.caseExecutions[1].exactRuns[0]);
+    assert.equal(browserTrace.obligations[0].conformanceStatus, 'PARTIAL');
+    assert.equal(browserTrace.caseExecutions[2].result, 'SKIPPED');
+    assert.ok(!browserTrace.gaps.obligations.some(gap => gap.includes('no exact-source run evidence for TEST-TRC-02-001')));
+    const browserHtml = readFileSync(join(browserSite, 'requirements/traceability/index.html'), 'utf8');
+    assert.match(browserHtml, /core\/chromium · run 43 \/ attempt 1 · artifact 654/u);
+    browserReceipt.productBrowser[0].passedCaseIds = ['TEST-TRC-03-001'];
+    assert.throws(() => packSpecifications(join(root, 'foreign-browser-case'), output, sha, browserReceipt), /foreign case/u);
     writeFileSync(join(output, 'trace-report.json'), JSON.stringify(report));
     writeFileSync(join(site, 'requirements/html/index.html'), 'tampered');
     assert.throws(() => verifySpecifications(site, sha), /size|digest/i);

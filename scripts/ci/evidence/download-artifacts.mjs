@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import { VERIFICATION_GROUPS } from '../impact/contract.mjs';
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, open, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -249,7 +250,9 @@ const TRACE_REPORT_ENTRY = 'requirements-trace/strictdoc/trace-report.json';
 
 async function extractJsonEntries(bytes, filenames) {
   const permitted = ['ci-plan.json', 'report.json', 'profile-build.json', 'native-report.json', 'preservation.json', TRACE_REPORT_ENTRY];
-  assert.ok(filenames.every(filename => permitted.includes(filename)), 'Invalid evidence filename');
+  const browserEntries = Object.entries(VERIFICATION_GROUPS).flatMap(([group, tasks]) =>
+    group.startsWith('browser-') ? tasks.map(task => `${task}/browser-coverage.json`) : []);
+  assert.ok(filenames.every(filename => permitted.includes(filename) || browserEntries.includes(filename)), 'Invalid evidence filename');
   const profile = filenames.includes('profile-build.json');
   const maxArchive = profile ? MAX_ASSET_ARCHIVE : MAX_ARCHIVE;
   const maxJson = profile ? MAX_ASSET_ARCHIVE : MAX_JSON;
@@ -284,6 +287,25 @@ export async function extractJsonEntry(bytes, filename) {
 export async function readTraceArtifact(bytes) {
   const [report, traceReport] = await extractJsonEntries(bytes, ['report.json', TRACE_REPORT_ENTRY]);
   return { group: JSON.parse(report), trace: JSON.parse(traceReport) };
+}
+
+export async function readBrowserArtifact(bytes, groupName) {
+  const tasks = VERIFICATION_GROUPS[groupName];
+  assert.ok(groupName.startsWith('browser-') && Array.isArray(tasks), 'Invalid browser evidence group');
+  const group = JSON.parse(await extractJsonEntry(bytes, 'report.json'));
+  assert.equal(group.group, groupName, 'Browser evidence group mismatch');
+  const executed = group.results.filter(item => item.status === 'passed').map(item => item.task);
+  assert.ok(executed.every(task => tasks.includes(task)) && new Set(executed).size === executed.length,
+    'Browser artifact contains invalid task identities');
+  const entries = executed.length
+    ? await extractJsonEntries(bytes, executed.map(task => `${task}/browser-coverage.json`))
+    : [];
+  const reports = entries.map((value, index) => {
+    const report = JSON.parse(value);
+    assert.equal(`browser-${report.profile}-${report.shard}`, executed[index], 'Browser coverage task does not match its artifact entry');
+    return report;
+  });
+  return { group, reports };
 }
 
 export function assertTraceArtifact(trace, group, identity, repository) {

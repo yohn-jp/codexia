@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { selectTraceVerifyRun, summarizeCertifiedTrace, waitForTraceVerifyRun } from './trace-receipt.mjs';
+import { selectTraceVerifyRun, summarizeCertifiedBrowser, summarizeCertifiedTrace, waitForTraceVerifyRun } from './trace-receipt.mjs';
 
 const sourceSha = 'a'.repeat(40);
 const repository = 'yohn-jp/codexia';
@@ -72,4 +72,31 @@ test('a Pages build waits for the current exact Verify run and stops on a termin
   assert.equal(await waitForTraceVerifyRun(async () => [failed], expected, options), null);
   assert.equal(waits.length, 1, 'a terminal failure must not wait or fall back to another run');
   assert.equal(await waitForTraceVerifyRun(async () => [inProgress], expected), null);
+});
+
+test('certifies only passing browser observations matching the exact source registration', () => {
+  const file = 'tests/e2e/ui-v1.acceptance.spec.ts';
+  const testId = 'TEST-UI-001-001';
+  const name = '[TEST-UI-001-001] opens Desktop';
+  const browserTask = 'browser-core-ui-v1';
+  const browserGroup = {
+    group: browserTask, sha: sourceSha, workflowRunId: run.id, workflowAttempt: 1, workflowJob: 'browser',
+    results: [{ task: browserTask, status: 'passed' }],
+  };
+  const observation = { file, line: 42, title: `ui-v1.acceptance.spec.ts › ${name}`, outcome: 'expected', attempts: [{ status: 'passed' }] };
+  const reports = [{
+    schemaVersion: 1, sourceSha, outcome: 'PASS', runStatus: 'passed', profile: 'core', shard: 'ui-v1', project: 'chromium',
+    file: 'ui-v1.acceptance.spec.ts', expected: 1, executed: 1, passed: 1, skipped: 0, failed: 0, notRun: 0, tests: [observation],
+  }];
+  const cases = [{ testId, name, sourceRefs: [{ path: file, line: 42 }], result: 'NOT_RUN' }];
+  const browserInputs = {
+    ...inputs, producer: { run_attempt: 1, name: browserTask }, group: browserGroup, reports, cases,
+  };
+  const receipt = summarizeCertifiedBrowser(browserInputs);
+  assert.equal(receipt[0].task, browserTask);
+  assert.deepEqual(receipt[0].passedCaseIds, [testId]);
+  assert.deepEqual(summarizeCertifiedBrowser({ ...browserInputs, cases: [{ ...cases[0], sourceRefs: [{ path: file, line: 43 }] }] }), []);
+  assert.deepEqual(summarizeCertifiedBrowser({ ...browserInputs, reports: [{ ...reports[0], tests: [{ ...observation, attempts: [{ status: 'failed' }] }] }] }), []);
+  assert.throws(() => summarizeCertifiedBrowser({ ...browserInputs, group: { ...browserGroup, workflowAttempt: 2 } }), /browser producer attempt/iu);
+  assert.throws(() => summarizeCertifiedBrowser({ ...browserInputs, reports: [{ ...reports[0], sourceSha: 'c'.repeat(40) }] }), /browser coverage source/iu);
 });
