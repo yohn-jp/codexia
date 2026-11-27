@@ -5,7 +5,7 @@ CI Observatory displays a progressively enumerated inventory of public GitHub Ac
 ## Deployment and ownership
 
 - Single publishing authority: [Repository Audit Pages](../../.github/workflows/repository-audit.yml). The CI dashboard is bundled at **/ci/** inside its existing Pages artifact. No second Pages publisher or competing root site.
-- Triggers are unchanged: main push or manual workflow dispatch, plus the existing audit PR preview. **No schedule and no workflow_run trigger.** The static bundle contains no captured run data.
+- Triggers: main push or manual workflow dispatch, plus PR previews **only when Pages-owned generators, renderers or portal contracts change**. Ordinary application, backend, Verify and deployment PRs do not run the full portal workflow. **No schedule and no workflow_run trigger.** The static bundle contains no captured run data.
 - Existing Pages upload/deploy actions and the **github-pages** environment are reused. Pages Source must be GitHub Actions.
 - The packaging workflow needs only **contents: read**. The browser requests public Actions metadata directly from GitHub's unauthenticated API.
 - Published URL: the repository's configured Pages base plus **/ci/** (typically https://yohn-jp.github.io/codexia/ci/ unless a custom domain is configured).

@@ -15,6 +15,18 @@ const backendWorkflow = parse(readFileSync(new URL('../../../.github/workflows/b
 const site = parse(readFileSync(new URL('../../../deploy/ansible/site.yml', import.meta.url), 'utf8'))[0];
 const deploy = parse(readFileSync(new URL('../../../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
 
+// GitHub paths filters are ordered: later negative and positive patterns can
+// exclude or re-include an earlier match. Compare effective source selection,
+// not only the textual spelling of a pattern.
+function selectsPath(patterns, file) {
+  let included = false;
+  for (const pattern of patterns) {
+    const exclude = pattern.startsWith('!');
+    if (matchesGlob(file, exclude ? pattern.slice(1) : pattern)) included = !exclude;
+  }
+  return included;
+}
+
 test('rootless Podman changes into the private service home after dropping privileges', () => {
   const source = readFileSync(new URL('./app.mjs', import.meta.url), 'utf8');
   const rootless = source.split('function rootlessPodman(args, options = {}) {')[1]
@@ -125,8 +137,10 @@ test('shell fixture publishes recent diagnostic lines with credentials redacted'
 test('app lifecycle CI is isolated, path limited, manually runnable, and has no production credentials', () => {
   assert.ok(Object.hasOwn(workflow.on, 'workflow_dispatch'));
   assert.ok(Array.isArray(workflow.on.pull_request.paths));
-  assert.ok(workflow.on.pull_request.paths.includes('packages/**'));
-  assert.ok(workflow.on.pull_request.paths.includes('deploy/ansible/site.yml'));
+  assert.ok(selectsPath(workflow.on.pull_request.paths, 'packages/api/src/server.ts'));
+  assert.ok(selectsPath(workflow.on.pull_request.paths, 'deploy/ansible/site.yml'));
+  assert.equal(selectsPath(workflow.on.pull_request.paths, 'packages/core/src/formatter.ts'), false);
+  assert.equal(selectsPath(workflow.on.pull_request.paths, 'docs/deployment/PUSH-DEPLOYMENT.md'), false);
   assert.ok(!workflow.on.pull_request.paths.includes('scripts/ci/impact/contract.mjs'),
     'generic CI planner edits must not launch the real-host lifecycle');
   assert.ok(backendWorkflow.on.pull_request.paths.includes('deploy/ansible/**'));
@@ -173,7 +187,7 @@ test('lifecycle CI activates pinned Mitogen and profiles stage-specific Ansible 
   assert.doesNotMatch(install.run, /ansible-doc.*mitogen_linear/u,
     'Mitogen has no ansible-doc metadata; its pinned strategy file is the contract');
   assert.match(install.run, /ANSIBLE_CALLBACKS_ENABLED=codexia_profile/u);
-  assert.ok(workflow.on.pull_request.paths.includes('deploy/ansible/callback_plugins/**'));
+  assert.ok(selectsPath(workflow.on.pull_request.paths, 'deploy/ansible/callback_plugins/codexia_profile.py'));
 
   const gather = site.tasks.find(task => task.name === 'Gather target host facts');
   assert.ok(gather, 'host fact collection remains explicit');
@@ -247,18 +261,37 @@ test('lifecycle readiness uses real conditions without time-based sleep loops', 
   assert.doesNotMatch(db, /^Tmpfs=\/var\/run\/postgresql:/mu);
 });
 
-test('every lifecycle PR path also produces an exact-source backend artifact', () => {
-  const backendPaths = backendWorkflow.on.pull_request.paths;
-  for (const pattern of new Set(workflow.on.pull_request.paths)) {
-    if (pattern.startsWith('!')) {
-      assert.ok(backendPaths.includes(pattern), pattern);
-      continue;
-    }
-    // A broader producer filter is acceptable if it covers the whole consumer pattern.
-    assert.ok(backendPaths.includes(pattern) || backendPaths.some(path =>
-      path.endsWith('/**') ? pattern.startsWith(path.slice(0, -2)) :
-        !pattern.includes('*') && matchesGlob(pattern, path)), pattern);
+test('every selected lifecycle source also selects an exact-source backend artifact', () => {
+  const consumerPaths = workflow.on.pull_request.paths;
+  const producerPaths = backendWorkflow.on.pull_request.paths;
+  const tracked = spawnSync('git', ['ls-files', '-z'], {
+    cwd: new URL('../../../', import.meta.url),
+    encoding: 'utf8',
+  });
+  assert.equal(tracked.status, 0, tracked.stderr);
+  const candidates = new Set([
+    ...tracked.stdout.split('\0').filter(Boolean),
+    // Admit future files under broad deployment/auth globs, and reject
+    // future unmapped producer paths before the fixture can run.
+    'packages/api/src/new-auth-activation.ts',
+    'packages/api/src/auth/authorize.ts',
+    'packages/persistence-postgres/migrations/new-ledger.sql',
+    'deploy/ansible/new-transaction.yml',
+    'deploy/ansible/callback_plugins/new-profile.py',
+    'deploy/backup/new-transfer.sh',
+    'scripts/deployment/lifecycle/app-new.mjs',
+    'modules/story/package.json',
+    'deploy/backup/CONSOLE.md',
+    'packages/api/src/better-auth.test.ts',
+  ]);
+  let admitted = 0;
+  for (const file of candidates) {
+    if (!selectsPath(consumerPaths, file)) continue;
+    admitted++;
+    assert.ok(selectsPath(producerPaths, file),
+      `Lifecycle would run without an exact-source backend artifact: ${file}`);
   }
+  assert.ok(admitted > 0, 'the lifecycle source selection must not be empty');
 });
 
 test('runtime verification uses a separate proof stage and shares the production transaction implementation', () => {

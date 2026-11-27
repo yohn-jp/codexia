@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { matchesGlob } from 'node:path';
@@ -7,7 +6,7 @@ import { test } from 'node:test';
 import { componentReleaseAffected } from '../../release/components/impact.mjs';
 import { PROFILES, VERIFICATION_TASKS } from './contract.mjs';
 import {
-  isRequirementsTraceInput, isTaskInputDocument, REQUIREMENTS_TRACE_DOCUMENTS, REQUIREMENTS_TRACE_SURFACE_FILES,
+  isTaskInputDocument,
   UX_PROJECTION_DOCUMENTS,
 } from '../evidence/task-inputs.mjs';
 import { isTraceTestSource } from '../../strictdoc/test-source-path.mjs';
@@ -128,26 +127,58 @@ test('PR paths and completed-Verify release impact retain component build inputs
   }
 });
 
-test('[TEST-QUAL-001-001] disposable app lifecycle is not admitted by isolated workspace tests', () => {
+test('[TEST-QUAL-001-001] disposable app lifecycle admits only deployment-relevant PR inputs', () => {
   const workflow = parse(readFileSync(new URL('../../../.github/workflows/push-app-lifecycle.yml', import.meta.url), 'utf8'));
   const paths = workflow.on.pull_request.paths;
-  for (const path of [
+  assert.ok(Object.hasOwn(workflow.on, 'workflow_dispatch'));
+  assert.deepEqual(workflow.jobs.lifecycle.strategy.matrix.scenario, ['app', 'auth'],
+    'admitted PRs must preserve both independent state-transition lanes');
+  for (const file of [
+    'packages/api/src/server.ts',
+    'packages/api/src/better-auth.ts',
+    'packages/api/src/oauth-owner.ts',
+    'packages/api/src/owner-security.ts',
+    'packages/api/src/auth/authorize.ts',
+    'packages/persistence-postgres/migrations/0001-create.sql',
+    'packages/persistence-postgres/src/connection.ts',
+    'packages/persistence-contracts/src/owner.ts',
+    'packages/module-runtime/src/registry.ts',
+    'packages/core/package.json',
+    'modules/mcp/package.json',
+    'deploy/quadlet/codexia-api.container',
+    'deploy/ansible/deploy.yml',
+    'deploy/ansible/test-push-app-lifecycle.sh',
+    'deploy/backup/backup.sh',
+    'deploy/fixtures/sshfs-server/Dockerfile',
+    'scripts/deployment/lifecycle/app-update.mjs',
+    'scripts/verification/runtime/better-auth-fixture.sh',
+    'scripts/build/packaging/profile-package.mjs',
+    '.github/workflows/push-app-lifecycle.yml',
+    'Dockerfile.backend',
+    'pnpm-lock.yaml',
+  ]) assert.equal(matchesWorkflowPaths(paths, [file]), true, file);
+  for (const file of [
     'packages/persistence-postgres/tests/db-contract/runner.test.mjs',
     'packages/http-contract/test/fastify-persistence-registration.test.ts',
     'packages/core/src/snapshot-reuse.test.ts',
-    // Other compiled test sources in this contract still contribute to the final dist, not host state.
-    'modules/mcp/src/tool-catalog.test.ts',
-  ]) assert.equal(matchesWorkflowPaths(paths, [path]), false, path);
-  for (const path of [
-    'packages/api/src/server.ts',
+    'packages/api/src/better-auth.test.ts',
+    'packages/api/src/auth/tests/owner-contract.test.ts',
+    'packages/api/src/recent-activity-store.ts',
     'modules/mcp/src/tools.ts',
-    'deploy/quadlet/codexia-api.container',
-    'deploy/ansible/deploy.yml',
-    '.github/workflows/push-app-lifecycle.yml',
-  ]) assert.equal(matchesWorkflowPaths(paths, [path]), true, path);
+    'packages/core/src/formatter.ts',
+    'app/src/entries/desktop.tsx',
+    'deploy/backup/CONSOLE.md',
+    'deploy/ansible/AUTH-RUNTIME.md',
+    'docs/deployment/PUSH-DEPLOYMENT.md',
+    'docs/deployment/IAC.md',
+    '.github/workflows/verify.yml',
+    'scripts/deployment/admission/documentation.test.mjs',
+    'scripts/ci/impact/plan.mjs',
+    'scripts/ci/evidence/download-artifacts.test.mjs',
+  ]) assert.equal(matchesWorkflowPaths(paths, [file]), false, file);
   assert.equal(matchesWorkflowPaths(paths, [
-    'packages/core/src/snapshot-reuse.test.ts', 'deploy/quadlet/codexia-db.container',
-  ]), true, 'runtime input must not be suppressed by an unrelated test file');
+    'modules/mcp/src/tools.ts', 'deploy/quadlet/codexia-db.container',
+  ]), true, 'runtime transaction changes cannot be hidden in a mixed PR');
 });
 
 const plan = async (files, event = 'pull_request') => {
@@ -171,42 +202,43 @@ test('official conformance fixtures select their own task and share the DB lane'
   assert.ok((await plan(['modules/mcp/src/stdio.ts'])).tasks.includes('mcp-conformance'));
 });
 
-test('audit Pages previews run when requirements authorities or receipt inputs change', () => {
-  const repository = new URL('../../../', import.meta.url);
-  const workflow = parse(readFileSync(new URL('.github/workflows/repository-audit.yml', repository), 'utf8'));
+test('audit Pages PR previews are scoped to Pages-owned inputs; main still publishes', () => {
+  const workflow = parse(readFileSync(new URL('../../../.github/workflows/repository-audit.yml', import.meta.url), 'utf8'));
   const paths = workflow.on.pull_request.paths;
-  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repository, encoding: 'utf8' }).split('\0');
-  const traceInputs = new Set([
-    ...REQUIREMENTS_TRACE_DOCUMENTS,
-    ...REQUIREMENTS_TRACE_SURFACE_FILES,
-    ...tracked.filter(file => isRequirementsTraceInput(file) ||
-      /^\.github\/workflows\/.*\.ya?ml$/u.test(file) ||
-      /^packages\/persistence-postgres\/migrations\/.*\.sql$/u.test(file)),
-    '.gitignore',
-    '.graphifyignore',
-    'app/package.json',
-    'docs/architecture/MCP-V2-MIGRATION.md',
+  assert.deepEqual(workflow.on.push.branches, ['main']);
+  assert.ok(Object.hasOwn(workflow.on, 'workflow_dispatch'));
+  for (const file of [
+    'scripts/audit/portal.mjs',
+    'scripts/strictdoc/verify.mjs',
+    'docs/requirements/REQUIREMENT-REGISTER.md',
+    'docs/architecture/likec4/codexia.c4',
+    'scripts/graphify-pages/pack.mjs',
+    'scripts/architecture-diagrams/pack.mjs',
+    'scripts/pages-ui/navigation.mjs',
+    'scripts/pages-api/pack.mjs',
+    'scripts/ux-simulator/generate.mjs',
+    'scripts/ci/dashboard/collect.mjs',
+    'scripts/verification/artifacts/pages-smoke.mjs',
     'scripts/ci/evidence/trace-receipt.mjs',
-    'scripts/ci/evidence/trace-receipt.test.mjs',
-    'scripts/ci/evidence/artifact-selection.mjs',
-    'scripts/ci/evidence/download-artifacts.mjs',
-    'scripts/ci/evidence/github-rest-sdk.mjs',
-    'scripts/ci/evidence/job-name.mjs',
-    'scripts/ci/browser/coverage-reporter.mjs',
-    'scripts/ci/browser/image-digests.mjs',
-    'scripts/ci/browser/shards.mjs',
-    'scripts/github/octokit.mjs',
-    'scripts/github/paginate-actions.mjs',
-    'scripts/shared/read-regular-file.mjs',
-    'packages/persistence-postgres/tests/db-contract/toolchain.json',
-    'packages/persistence-postgres/migrations/new-migration.sql',
-    '.github/workflows/new-workflow.yaml',
-    'scripts/new-domain/test.cjs',
-    'scripts/new-domain/feature-spec-contract.ts',
-    'scripts/new-domain/feature.browser.mjs',
-  ]);
-  assert.deepEqual([...traceInputs].filter(file => !matchesWorkflowPaths(paths, [file])).sort(), []);
-  assert.equal(matchesWorkflowPaths(paths, ['docs/README.md', 'docs/design/roadmap.test.md', 'scripts/performance/k6.mjs']), false);
+    '.github/workflows/repository-audit.yml',
+    'docs/design/DEVELOPMENT-PAGES-UX.md',
+  ]) assert.equal(matchesWorkflowPaths(paths, [file]), true, file);
+  for (const file of [
+    'app/src/entries/desktop.tsx',
+    'modules/mcp/src/tools.ts',
+    'packages/api/src/server.ts',
+    'packages/http-contract/src/contract.tsp',
+    'deploy/ansible/deploy.yml',
+    '.github/workflows/verify.yml',
+    '.github/workflows/push-app-lifecycle.yml',
+    'scripts/ci/impact/plan.mjs',
+    'docs/architecture/MCP-V2-MIGRATION.md',
+    'docs/verification/CI-CD.md',
+    'ios/CodexiaApp/Sources/Root.swift',
+  ]) assert.equal(matchesWorkflowPaths(paths, [file]), false, file);
+  assert.equal(matchesWorkflowPaths(paths, [
+    'packages/api/src/server.ts', 'scripts/pages-api/pack.mjs',
+  ]), true, 'mixed PR must retain Pages-owned admission');
 });
 
 test('MCP v2 migration edits select exact-source Verify trace proof', async () => {
