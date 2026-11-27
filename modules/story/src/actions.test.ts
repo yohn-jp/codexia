@@ -1572,6 +1572,7 @@ test('NarrativeChangeSet preserves all nine source operation kinds in one identi
     resultPaths: Record<string, string[]>;
     resultRevisions: Record<string, string>;
     affectedEntities: Record<string, Array<{ id: string; revision: string }>>;
+    sourceFingerprint: string;
   };
   assert.equal(Object.keys(data.operationMap).length, 9);
   assert.deepEqual(
@@ -1583,8 +1584,10 @@ test('NarrativeChangeSet preserves all nine source operation kinds in one identi
   assert.equal(data.resultIds['link-reference'], JSON.stringify(['loc-cafe', 'loc-new', 'related']));
   const coreProposal = result.proposals![0]!;
   const sourceEvidence = coreProposal.evidence!.find(item => item.kind === 'source.narrative-change-set.v1')!;
-  const details = sourceEvidence.details as { sourceChangeSet: unknown; operationMap: Record<string, string> };
+  const details = sourceEvidence.details as { sourceChangeSet: unknown; sourceFingerprint: string; operationMap: Record<string, string> };
   assert.deepEqual(details.sourceChangeSet, changeSet);
+  assert.match(details.sourceFingerprint, /^[0-9a-f]{64}$/, 'stored source evidence carries a SHA-256 fingerprint');
+  assert.equal(data.sourceFingerprint, details.sourceFingerprint, 'the action reports the fingerprint stored in Core evidence');
   assert.deepEqual(details.operationMap, data.operationMap);
   const rangeOperation = coreProposal.operations.find(operation => operation.message.includes('replace-manuscript'));
   assert.deepEqual(rangeOperation?.writes[0]?.textChanges, [
@@ -1857,7 +1860,11 @@ test('NarrativeChangeSet retries return the stored proposal and reject changed s
   );
   assert.equal(changed.ok, false);
   if (!changed.ok) assert.equal(changed.error.code, 'change_set_identity_conflict');
-  assert.equal(proposals.length, 1, 'an exact retry does not reset Core approvals by proposing again');
+
+  const changedGoal = await actionById('story.changes.propose').invoke({ ...changeSet, goal: 'Changed meaning under same ID' }, context);
+  assert.equal(changedGoal.ok, false);
+  if (!changedGoal.ok) assert.equal(changedGoal.error.code, 'change_set_identity_conflict');
+  assert.equal(proposals.length, 1, 'replays and identity conflicts leave the original Core proposal in place');
 });
 
 test('NarrativeChangeSet refuses to reconstruct an incomplete recovered Core proposal', async () => {
