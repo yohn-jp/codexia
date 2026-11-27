@@ -4,11 +4,9 @@
 It covers the existing v2 executor under the approved lifecycle and Ansible delivery path. The [Backup contract](BACKUP.md) owns the backup format and operational targets.
 [Backup Console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md) · [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) · [IaC](IAC.md)
 
-## Current deployment gap
+## Provisioning boundary
 
-The Ansible transaction installs the backup producer, runner and launcher. The long-lived executor and deploy control CLI also need a private database connection, least-privilege login roles, the operational schema, a sealing key and operator configuration. The API needs its own constrained login, the public half of the sealing key and the operator policy. The installed API Quadlet supplies none of those inputs. The PostgreSQL Quadlet attaches to the internal data network and keeps its Unix socket inside the container. A host executor has no configured route to that PostgreSQL instance. [Deployment helper installation](../../deploy/ansible/deploy-prepare.yml) · [PostgreSQL Quadlet](../../deploy/quadlet/codexia-db.container) · [API Quadlet](../../deploy/quadlet/codexia-api.container) · [Existing operator settings](../../deploy/backup/CONSOLE.md)
-
-An installation must reach ACTIVE with no S3 configuration or recovery receipt. The operator must then be able to enable the existing Console backup runtime and the owner must be able to configure a destination before R8 is enabled. This applies to current installations that reached ACTIVE before the runtime was provisioned as well as new installations. [Backup Console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md) · [Update flow](UPDATE-FLOW.md)
+The protected Ansible `base` operation provisions the VM runtime after ACTIVE. It takes executor code from the admitted Full image, installs the SDK adapter and binds a restricted API login and public policy to the API. Both the worker and R8 use the installed launcher. [Operator procedure](../../deploy/backup/CONSOLE.md)
 
 ## PostgreSQL access for the host executor
 

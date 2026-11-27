@@ -352,20 +352,21 @@ async function authorize(webClientId, ownerSubject) {
   requireCondition(code && redirect.searchParams.get("state") === state && redirect.searchParams.get("iss") === apiIssuer,
     "Owner consent did not return an authorization code bound to the request and issuer");
 
-  const token = jsonResponse(await httpsRequest(discovery.token_endpoint, {
+  const grant = await exchangeOwnerGrant(discovery.token_endpoint, webClientId, ownerSubject, {
+    grant_type: "authorization_code", code, redirect_uri: redirectUri, code_verifier: verifier,
+  });
+  return { ...grant, sessionRequest: request };
+}
+
+async function exchangeOwnerGrant(endpoint, webClientId, ownerSubject, grant) {
+  const token = jsonResponse(await httpsRequest(endpoint, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: webClientId,
-      code,
-      redirect_uri: redirectUri,
-      code_verifier: verifier,
-      resource: apiAudience,
-    }).toString(),
-  }), "Owner authorization code exchange");
-  requireCondition(token.token_type === "Bearer" && typeof token.access_token === "string",
-    "Owner authorization code exchange did not return a bearer token");
+    body: new URLSearchParams({ ...grant, client_id: webClientId, resource: apiAudience }).toString(),
+  }), "Owner OAuth grant exchange");
+  requireCondition(token.token_type === "Bearer" && typeof token.access_token === "string" &&
+    typeof token.refresh_token === "string" && token.refresh_token.length > 0,
+    "Owner OAuth grant did not return access and refresh tokens");
 
   const accessToken = token.access_token;
   const [encodedHeader, encodedClaims] = accessToken.split(".");
@@ -380,7 +381,7 @@ async function authorize(webClientId, ownerSubject) {
     claims.iss === apiIssuer && [claims.aud].flat().includes(apiAudience) && claims.client_id === webClientId &&
     (ownerSubject === undefined || claims.sub === ownerSubject), "Owner access token did not match the registration");
   await assertOwnerSession(accessToken);
-  return { accessToken, kid: header.kid, sessionRequest: request };
+  return { accessToken, refreshToken: token.refresh_token, kid: header.kid };
 }
 
 async function backendSmoke(webClientId, ownerSubject) {
@@ -429,14 +430,22 @@ async function main() {
   let result;
   if (command === "register") result = await register();
   else if (command === "authorize") {
-    const { accessToken, kid } = await authorize(argument, ownerSubject);
-    result = { accessToken, kid };
+    const { accessToken, refreshToken, kid } = await authorize(argument, ownerSubject);
+    result = { accessToken, refreshToken, kid };
+  } else if (command === "refresh") {
+    const { refreshToken } = JSON.parse((await readBody(process.stdin)).toString("utf8"));
+    requireCondition(typeof refreshToken === "string" && refreshToken.length > 0, "Original owner refresh token is required");
+    const discovery = await discover();
+    const { accessToken } = await exchangeOwnerGrant(discovery.token_endpoint, argument, ownerSubject, {
+      grant_type: "refresh_token", refresh_token: refreshToken,
+    });
+    result = { accessToken };
   } else if (command === "backend-smoke") result = await backendSmoke(argument, ownerSubject);
   else if (command === "probe") {
     const accessToken = argument === "-" ? (await readBody(process.stdin)).toString("utf8").trim() : argument;
     result = await probe(accessToken);
   } else {
-    throw new Error("Expected serve, register, authorize <web-client-id> [owner-subject], backend-smoke <web-client-id> <owner-subject>, or probe <token|->");
+    throw new Error("Expected serve, register, authorize, refresh, backend-smoke, or probe");
   }
   process.stdout.write(JSON.stringify(result) + "\n");
 }

@@ -134,8 +134,22 @@
           become_user: "{{ codexia_service_user }}"
           environment: "{{ service_runtime_env }}"
       when: >-
-        codexia_stage == 'base' or
+        (codexia_stage == 'base' and not (codexia_backup_runtime_approved | default(false) is sameas true)) or
         (codexia_stage == 'bootstrap' and 'base' in (codexia_bootstrap_stages | default(['host', 'secrets', 'base', 'auth-runtime'])))
+
+    - name: Provision the backup runtime on an explicitly approved ACTIVE installation
+      ansible.builtin.include_tasks:
+        file: backup-runtime.yml
+        apply:
+          become: "{{ ansible_facts.user_id != (codexia_service_user | default('codexia')) }}"
+          become_user: "{{ codexia_service_user | default('codexia') }}"
+          environment: "{{ service_runtime_env }}"
+      vars:
+        backup_config: "{{ home }}/.config/codexia-backup"
+        backup_root: "{{ home }}/.local/share/codexia-backup"
+        backup_staging: "{{ codexia_backup_staging_directory | default(backup_root + '/staging') }}"
+        backup_venv: "{{ backup_root }}/sdk-{{ lookup('ansible.builtin.file', repo_root + '/deploy/backup/requirements.lock', rstrip=false) | hash('sha256') }}"
+      when: codexia_stage == 'base' and codexia_backup_runtime_approved | default(false) is sameas true
 
     - name: Provision Better Auth runtime role, schema, and protected secrets before first activation
       ansible.builtin.include_tasks:

@@ -600,10 +600,3 @@
     that:
       - base_runtime_tunnel_content.content == (lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/codexia-tunnel.container', rstrip=false) | b64encode)
     fail_msg: Tunnel Quadlet differs from the reviewed source; it was not overwritten.
-- name: Converge the approved private backup socket on the initialized cluster
-  ansible.builtin.command:
-    argv: [bash, -s]
-    stdin: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/ansible/backup-postgres-socket.sh', rstrip=false) }}"
-  register: base_runtime_backup_socket
-  changed_when: "'PRIVATE_BACKUP_SOCKET_CONFIGURED' in base_runtime_backup_socket.stdout"
-  when: codexia_backup_socket_approved | default(false) is sameas true

@@ -7,7 +7,12 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
 import { BackupConsoleControl } from '../src/backup-console-control.js';
-import { BackupConsoleExecutor, backupExecutorConfigSchema, pythonBackupProbe } from '../src/backup-console-executor.js';
+import {
+  BackupConsoleExecutor,
+  backupExecutorConfigSchema,
+  protectedBackupRunner,
+  pythonBackupProbe,
+} from '../src/backup-console-executor.js';
 import type { BackupPolicy } from '../src/backup-console-routes.js';
 import { BackupConsoleStore } from '../src/backup-console-store.js';
 import { backupCredentialKeyId } from '../src/backup-credential-envelope.js';
@@ -55,6 +60,7 @@ test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof,
     secretAccessKey: 'test-fixture-secret-key',
   } as const;
   const policy: BackupPolicy = {
+    scheduleWindowId: 'fixture-window',
     maintenanceWindows: [
       {
         id: 'fixture-window',
@@ -121,6 +127,30 @@ test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof,
   );
   await assert.rejects(control.deployStart(randomUUID(), sourceSha, '-', sourceSha, candidateDigest), /Deployment identity is invalid/u);
   await writeFile(privateKey, keys.privateKey, { mode: 0o600 });
+  // An interrupted host recovery must preserve the claim until the real runner reports idle.
+  const orphan = randomUUID();
+  const hostRunner = join(restoreDirectory, 'runner');
+  const recoveryWorker = new BackupConsoleExecutor({
+    pool: workerPool,
+    policy,
+    privateKeys,
+    probe: async () => {
+      throw new Error('Unexpected probe during recovery');
+    },
+    ...protectedBackupRunner(hostRunner),
+  });
+  await admin.query(
+    "INSERT INTO codexia_backup.runs (id, request_id, kind, state, phase, maintenance_window_id) VALUES ($1::uuid, $2, 'manual', 'RUNNING', 'starting', 'fixture-window')",
+    [orphan, orphan],
+  );
+  await writeFile(hostRunner, '#!/bin/sh\nexit 75\n', { mode: 0o700 });
+  await recoveryWorker.processNext();
+  assert.equal((await api.run(orphan)).status, 'RUNNING');
+  await writeFile(hostRunner, '#!/bin/sh\ntest "$#" = 1 && test "$1" = recover\n');
+  await recoveryWorker.processNext();
+  assert.equal((await api.run(orphan)).reasonCode, 'runner_not_started');
+  await admin.query('DELETE FROM codexia_backup.runs WHERE id = $1', [orphan]);
+  await admin.query('DELETE FROM codexia_backup.runs WHERE id = $1', [orphan]);
   await worker.processNext();
   const fixture = await startBetterAuthFixture({
     databaseUrl,
@@ -324,8 +354,30 @@ test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof,
   ]);
   assert.equal((await post('activate', { revision: 4, probeId: retentionProbeId, confirmed: true })).status, 409);
 
+  const retainedWorker = new BackupConsoleExecutor({
+    pool: workerPool,
+    policy,
+    privateKeys,
+    probe: async () => ({ state: 'PASSED', reason: null, evidence: { objectLock: 'enabled', defaultRetentionDays: 30 } }),
+  });
+  const freshProbe = await post('probes', { revision: 4 });
+  const { probeId: freshProbeId } = (await freshProbe.json()) as { probeId: string };
+  assert.equal(await retainedWorker.processNext(), true);
+  assert.equal((await post('activate', { revision: 4, probeId: freshProbeId, confirmed: true })).status, 202);
+  assert.equal(await retainedWorker.processNext(), true);
+  assert.equal((await (await get('/status')).json()).activeRevision, 4);
+  await worker.processNext();
+
   await writeFile(privateKey, rotated.privateKey);
-  await writeFile(transferScript, 'print(\'{"status":"UNKNOWN","reasonCode":"s3_unavailable"}\')\nraise SystemExit(75)\n');
+  await writeFile(
+    transferScript,
+    `import json, pathlib, sys
+profile = json.loads(pathlib.Path(sys.argv[sys.argv.index("--profile") + 1]).read_text())
+pathlib.Path(__file__).with_suffix(".profile").write_text(json.dumps(profile))
+print('{"status":"UNKNOWN","reasonCode":"s3_unavailable"}')
+raise SystemExit(75)
+`,
+  );
   const checksumManifest = 'backup manifest for an interrupted transfer';
   await writeFile(join(restoreDirectory, 'SHA256SUMS'), checksumManifest);
   const manifestSha = createHash('sha256').update(checksumManifest).digest('hex');
@@ -339,8 +391,24 @@ test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof,
     rows: [interrupted],
   } = await workerPool.query('SELECT state, phase, reason_code, evidence FROM codexia_backup.runs WHERE id = $1', [interruptedRun]);
   assert.deepEqual(interrupted, { state: 'UNKNOWN', phase: 'recovery_required', reason_code: 's3_unavailable', evidence: null });
+  const transferProfile = JSON.parse(await readFile(join(restoreDirectory, 'transfer.profile'), 'utf8'));
+  assert.equal(transferProfile.retentionMode, 'BUCKET_DEFAULT');
+  assert.equal(transferProfile.retentionDays, 30);
   // Other assertions below expect an independent run history.
   await admin.query('DELETE FROM codexia_backup.runs WHERE id = $1', [interruptedRun]);
+
+  const oldScheduledId = randomUUID();
+  await admin.query(
+    `INSERT INTO codexia_backup.runs (id, request_id, kind, revision, maintenance_window_id, schedule_slot_key)
+     VALUES ($1, $1::uuid::text, 'scheduled', 4, 'fixture-window', 'historical-slot')`,
+    [oldScheduledId],
+  );
+  await assert.rejects(control.manualStart(oldScheduledId, sourceSha, sourceDigest), /not claimable/u);
+  await worker.processNext();
+  assert.deepEqual((await workerPool.query("SELECT state, reason_code FROM codexia_backup.runs WHERE kind = 'scheduled'")).rows, [
+    { state: 'BLOCKED', reason_code: 'schedule_disabled' },
+  ]);
+  await admin.query('DELETE FROM codexia_backup.runs WHERE id = $1', [oldScheduledId]);
 
   const runRequestId = randomUUID();
   const runStatusQuery = '/status?' + new URLSearchParams({ requestId: runRequestId });

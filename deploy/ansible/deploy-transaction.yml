@@ -80,6 +80,10 @@
   changed_when: false
   failed_when: codexia_current_container_exists.rc not in [0, 1]
 
+- name: Install backup entrypoints on a clean API slot
+  ansible.builtin.include_tasks: backup-helpers.yml
+  when: codexia_current_container_exists.rc == 1
+
 - name: Inspect the canonical API Quadlet without following links
   ansible.builtin.stat:
     path: "{{ quadlet_dir }}/codexia-api.container"
@@ -935,3 +939,33 @@
 - name: Report the admitted image deployment result
   ansible.builtin.debug:
     msg: "{{ 'Updated' if codexia_deploy_transaction.changed else 'Verified already active' }} image {{ codexia_image }}."
+
+# A retry after an already committed rollout can complete an interrupted worker switch.
+# An operator-disabled worker, including a restore target, remains fenced.
+- name: Follow the admitted Backend release for an enabled managed backup executor
+  when:
+    - codexia_current_container_exists.rc == 0
+    - codexia_expected_recovery_activation is not defined
+  block:
+    - name: Observe the installed host release after the API transaction
+      ansible.builtin.stat:
+        path: "{{ home }}/.local/share/codexia-backup/current"
+        follow: false
+        get_checksum: false
+      register: codexia_backup_selected
+
+    - name: Converge an older selected release on the opted-in VM
+      when:
+        - codexia_backup_selected.stat.islnk | default(false)
+        - codexia_backup_selected.stat.lnk_source != home + '/.local/share/codexia-backup/releases/' + codexia_image.split(':')[-1]
+      block:
+        - name: Check the operator's existing executor enablement
+          ansible.builtin.command:
+            argv: [systemctl, --user, is-enabled, codexia-backup-executor.service]
+          register: codexia_backup_unit_enabled
+          changed_when: false
+          failed_when: codexia_backup_unit_enabled.stdout not in ['enabled', 'disabled', 'masked']
+
+        - name: Select the committed image through the shared host release installer
+          ansible.builtin.include_tasks: backup-release.yml
+          when: codexia_backup_unit_enabled.stdout == 'enabled'

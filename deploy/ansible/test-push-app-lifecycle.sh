@@ -175,9 +175,6 @@ rootless_systemctl() { rootless /usr/bin/systemctl --user "$@"; }
 run_deploy() {
   local key=$1 approvals=${2:-false} fault_path=${3:-}
   local log_name=${4:-deploy-$key-$RANDOM}
-  if rootless_podman container exists codexia-api; then
-    backup_fixture_attempt "$key" "${5:-}"
-  fi
   cat > "$tmp/deploy-vars.yml" <<YAML
 codexia_stage: deploy-lifecycle-fixture
 codexia_service_user: codexia
@@ -202,7 +199,7 @@ TIMING
 }
 observe_runtime() {
   local key=$1 role=$2
-  local container_id image_id api_health api_unit quadlet_sha release_sha pg_volume pg_mount pg_created data_volume data_mount data_created history_volume history_mount history_created db_container api_count sentinel
+  local container_id image_id api_health api_unit quadlet_sha release_sha pg_volume pg_mount pg_created data_volume data_mount data_created history_volume history_mount history_created db_container db_image api_count sentinel
   container_id=$(rootless_podman inspect --format '{{.Id}}' codexia-api)
   image_id=$(rootless_podman inspect --format '{{.Image}}' codexia-api)
   api_health=$(rootless_podman inspect --format '{{.State.Health.Status}}' codexia-api)
@@ -215,7 +212,7 @@ observe_runtime() {
   api_unit=$(rootless_systemctl show --property=ActiveState --value codexia-api.service)
   quadlet_sha=$(rootless sha256sum "$fixture_home/.config/containers/systemd/codexia-api.container" | cut -d' ' -f1)
   release_sha=$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)
-  db_container=$(rootless_podman inspect --format '{{.Id}}' codexia-db)
+  read -r db_container db_image < <(rootless_podman inspect --format '{{.Id}} {{.Image}}' codexia-db)
   pg_volume=$(rootless_podman volume inspect --format '{{.Name}}' codexia-postgres)
   pg_mount=$(rootless_podman volume inspect --format '{{.Mountpoint}}' codexia-postgres)
   pg_created=$(rootless_podman volume inspect --format '{{.CreatedAt}}' codexia-postgres)
@@ -236,10 +233,10 @@ observe_runtime() {
     sentinel=not-created
   fi
   rootless_podman exec codexia-api node -e 'fetch("http://127.0.0.1:3000/health/ready").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' >/dev/null
-  node - "$report" "$key" "$role" "$container_id" "$image_id" "$api_health" "$api_unit" "$quadlet_sha" "$release_sha" "$db_container" \
+  node - "$report" "$key" "$role" "$container_id" "$image_id" "$api_health" "$api_unit" "$quadlet_sha" "$release_sha" "$db_container" "$db_image" \
     "$pg_volume" "$pg_mount" "$pg_created" "$data_volume" "$data_mount" "$data_created" "$history_volume" "$history_mount" "$history_created" "$api_count" "$sentinel" <<'NODE'
 const fs=require('node:fs');
-const [path,key,role,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,pgVolume,pgMount,pgCreated,dataVolume,dataMount,dataCreated,historyVolume,historyMount,historyCreated,apiCount,sentinel]=process.argv.slice(2);
+const [path,key,role,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,dbImage,pgVolume,pgMount,pgCreated,dataVolume,dataMount,dataCreated,historyVolume,historyMount,historyCreated,apiCount,sentinel]=process.argv.slice(2);
 const report=JSON.parse(fs.readFileSync(path,'utf8'));
 const evidence=JSON.parse(fs.readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,'utf8'));
 const expectedImageId=evidence.candidates[role]?.imageId;
@@ -248,17 +245,22 @@ if(!expectedImageId||apiImage!==expectedImageId)throw new Error(`${key}: API wri
 if(sentinel!==(['first-activation','same-digest-reapply'].includes(key)?'not-created':'preserved'))throw new Error(`${key}: PostgreSQL sentinel data was absent or changed`);
 report.observations ||= {}; const observations=report.observations.continuity ||= []; const previous=observations.at(-1);
 const explicitSocketRestart=key==='private-backup-socket-restart';
-if(explicitSocketRestart&&(!previous||apiImage!==previous.apiImage||quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Private socket provisioning changed the deployed API image, Quadlet or release record');
+if(explicitSocketRestart&&!previous)throw new Error('Private socket provisioning requires a previous runtime observation');
 if(previous){
-  if(!explicitSocketRestart&&dbContainer!==previous.dbContainer)throw new Error(`${key}: PostgreSQL container identity changed`);
+  if(explicitSocketRestart){
+    // Installing the private socket and exercising its restart recreates both Quadlet containers.
+    if(dbContainer===previous.dbContainer||apiContainer===previous.apiContainer)throw new Error('Backup socket maintenance did not recreate the database and API containers');
+    if(!dbImage||dbImage!==previous.dbImage)throw new Error('Backup provisioning changed the PostgreSQL image');
+    if(apiImage!==previous.apiImage||quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha)throw new Error('Backup provisioning changed the admitted application image, Quadlet or release record');
+  }else if(dbContainer!==previous.dbContainer)throw new Error(`${key}: PostgreSQL container identity changed`);
   if(JSON.stringify({postgres:{name:pgVolume,mountpoint:pgMount,createdAt:pgCreated},data:{name:dataVolume,mountpoint:dataMount,createdAt:dataCreated},history:{name:historyVolume,mountpoint:historyMount,createdAt:historyCreated}})!==JSON.stringify(previous.volumes))throw new Error(`${key}: persistent volume identity changed`);
 }
-if(['same-digest-reapply','better-auth-same-digest'].includes(key)&&(apiContainer!==previous.apiContainer||quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Same-digest application recreated the API container or changed the Quadlet or release record');
+if(['same-digest-reapply','better-auth-same-digest','missing-executor','console-unconfigured'].includes(key)&&(apiContainer!==previous.apiContainer||quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error(`${key}: expected the running API container, Quadlet and release record to be preserved`);
 if(['compatible-update','better-auth-compatible-update'].includes(key)&&(quadletSha===previous.quadletSha||releaseSha===previous.releaseSha))throw new Error('Compatible image update did not update the Quadlet and release record');
 if((key==='failed-candidate-rollback'||key==='better-auth-rollback')&&apiContainer===previous.apiContainer)throw new Error('Failed candidate rollback did not recreate the previous API writer');
 if((key==='failed-candidate-rollback'||key==='better-auth-rollback')&&(quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Failed candidate rollback did not restore the prior Quadlet and release record');
 if(key==='interrupted-recovery'&&(quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Interrupted transaction recovery did not preserve the previous Quadlet and release record');
-observations.push({checkpoint:key,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,
+observations.push({checkpoint:key,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,dbImage,
   volumes:{postgres:{name:pgVolume,mountpoint:pgMount,createdAt:pgCreated},data:{name:dataVolume,mountpoint:dataMount,createdAt:dataCreated},history:{name:historyVolume,mountpoint:historyMount,createdAt:historyCreated}},apiWriterCount:Number(apiCount),databaseSentinel:sentinel});
 report.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(report,null,2)+'\n',{mode:0o600});
 NODE
@@ -272,7 +274,7 @@ cleanup() {
     rootless mountpoint -q "$fixture_home/.local/state/codexia-backup-mount" && cleanup_failed "$LINENO" 'SSHFS mount remains'
   fi
   if [[ "$runtime_ready" == true ]] && getent passwd "$fixture_user" >/dev/null 2>&1; then
-    rootless_systemctl stop codexia-tunnel.service codexia-api.service codexia-db.service >/dev/null 2>&1 || true
+    rootless_systemctl stop codexia-backup-executor.service codexia-tunnel.service codexia-api.service codexia-db.service >/dev/null 2>&1 || true
     local name rc
     for name in codexia-api codexia-tunnel codexia-db codexia-lifecycle-registry codexia-backup-sshfs codexia-auth-registration codexia-lifecycle-proxy; do
       rc=0; rootless_podman container exists "$name" >/dev/null 2>&1 || rc=$?
@@ -292,7 +294,7 @@ cleanup() {
       rc=0; rootless_podman network exists "$name" >/dev/null 2>&1 || rc=$?
       (( rc == 1 )) || cleanup_failed "$LINENO" "$name network absence verification"
     done
-    for name in codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password \
+    for name in codexia-backup-api-database-url codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password \
       codexia-auth-database-url codexia-auth-secret codexia-oidc-client-secret codexia-oauth-introspection-client-secret; do
       rc=0; rootless_podman secret exists "$name" >/dev/null 2>&1 || rc=$?
       if (( rc == 0 )); then rootless_podman secret rm "$name" >/dev/null 2>&1 || cleanup_failed "$LINENO" "$name secret removal"; fi
@@ -712,6 +714,7 @@ rootless test ! -e "$fixture_home/.config/codexia-backup/executor.env"
 test "$(rootless_systemctl show codexia-backup-executor.service --property=ActiveState --value)" = inactive
 test "$(rootless_systemctl show codexia-backup-executor.service --property=UnitFileState --value)" = disabled
 set_state first_activation PASS 'fresh schema and API readiness verified without backup inputs, artifacts or prior writer'
+
 run_deploy "$initial_key" false
 observe_runtime same-digest-reapply "$initial_key"
 set_state same_digest_reapply PASS 'same immutable digest remained healthy with stable Quadlet and release record'
@@ -723,12 +726,9 @@ if run_deploy "$update_key" false '' deploy-executor-missing; then
 fi
 grep -Fq 'Deployment transaction failed during off-VM backup admission' "$tmp/deploy-executor-missing.log"
 observe_runtime missing-executor "$initial_key"
-# The private socket fixture deliberately restarts PostgreSQL and the API.
-# Observe its new container identities separately before any later deployment.
 verify_private_backup_socket
 observe_runtime private-backup-socket-restart "$initial_key"
-prepare_backup_console_fixture
-if run_deploy "$update_key" false '' deploy-console-unconfigured console-unconfigured; then
+if run_deploy "$update_key" false '' deploy-console-unconfigured; then
   echo 'An update reached candidate activation before Console backup configuration' >&2
   return 1
 fi
@@ -737,12 +737,18 @@ observe_runtime console-unconfigured "$initial_key"
 rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
 mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
 [[ "${#backup_artifacts[@]}" == 0 ]]
+activate_fixture_backup_destination
 run_deploy "$update_key" false
 observe_runtime compatible-update "$update_key"
+[[ "$(rootless readlink -e "$fixture_home/.local/share/codexia-backup/current")" == "$fixture_home/.local/share/codexia-backup/releases/${update_image##*:}" ]]
+rootless_systemctl is-active --quiet codexia-backup-executor.service
 set_state compatible_update PASS "$initial_key to $update_key activated the verified digest as the sole healthy API writer"
 
 mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
 [[ "${#backup_artifacts[@]}" == 1 ]]
+admitted_run="$(rootless jq -er '.backupRunId' "$fixture_home/.local/state/codexia-deploy/deployed-release.json")"
+[[ "$(backup_fixture_query -c "SELECT state || ':' || (evidence->>'offVmMethod') || ':' || (evidence->>'s3Status')
+  FROM codexia_backup.runs WHERE id = '$admitted_run' AND revision = 1 AND kind = 'deploy'")" == FAILED:independent_mount:failed ]]
 backup_validation=$(rootless "$fixture_home/.local/bin/codexia-backup" validate-artifact "${backup_artifacts[0]}")
 backup_checksum=$(rootless sha256sum "${backup_artifacts[0]}/SHA256SUMS" | cut -d' ' -f1)
 node - "$report" "${backup_artifacts[0]}" "$backup_validation" "$backup_checksum" <<'BACKUP_EVIDENCE'

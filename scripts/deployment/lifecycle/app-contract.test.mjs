@@ -316,6 +316,7 @@ test('Better Auth checkpoints identify their exact installed image, including th
   assert.deepEqual([...script.matchAll(/^ {2}observe_runtime (\S+) (\S+)$/gmu)].map(match => match.slice(1)), [
     ['better-auth-activation', 'auth-primary'],
     ['better-auth-same-digest', 'auth-primary'],
+    ['private-backup-socket-restart', 'auth-primary'],
     ['better-auth-compatible-update', 'auth-update'],
     ['better-auth-rollback', 'auth-update'],
   ]);
