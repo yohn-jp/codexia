@@ -313,3 +313,30 @@ test('a later detail refresh emits the recovered apply outcome once', async () =
   assert.equal(reselected.context.outcomeSequence, refreshed.context.outcomeSequence);
   actor.stop();
 });
+
+test('an expired session during feed refresh blocks mutation on the previously loaded proposal', async () => {
+  let expired = false;
+  const { actor, calls, load } = harness({
+    async load() {
+      if (expired) throw Object.assign(new Error('Session expired'), { status: 401 });
+      return { changeSets: [changeSet], coreReviews: [] };
+    },
+  });
+  try {
+    await load();
+    expired = true;
+    actor.send({ type: 'LOAD.REQUESTED' });
+    const failed = await waitFor(actor, snapshot => Boolean(snapshot.context.message), { timeout: 1_000 });
+
+    actor.send({ type: 'ACTION', action: 'apply' });
+    assert.deepEqual(calls, []);
+    assert.equal(failed.matches('unauthorized'), true);
+
+    expired = false;
+    await load();
+    actor.send({ type: 'ACTION', action: 'apply' });
+    assert.deepEqual(calls, [{ action: 'apply', version: 7 }]);
+  } finally {
+    actor.stop();
+  }
+});
