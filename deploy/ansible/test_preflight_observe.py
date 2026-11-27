@@ -366,21 +366,21 @@ class LockedCredentialTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             with path.open("w") as lock, patch.object(observer, "command", side_effect=podman):
                 expected = observer.digest(observer.secret_identities())
-                observer.verify_preserved_secrets(expected, lock.fileno())
+                observer.verify_secret_identities(expected, lock.fileno())
                 with (path.parent / "other").open("w") as other:
                     with self.assertRaises(ValueError):
-                        observer.verify_preserved_secrets(expected, other.fileno())
+                        observer.verify_secret_identities(expected, other.fileno())
                 ids[observer.AUTH_SECRETS[1]] = "rotated"
                 with self.assertRaises(ValueError):
-                    observer.verify_preserved_secrets(expected, lock.fileno())
+                    observer.verify_secret_identities(expected, lock.fileno())
                 ids[observer.AUTH_SECRETS[1]] = "initial-" + observer.AUTH_SECRETS[1]
                 ids[observer.OPTIONAL_SECRET] = "new"
                 with self.assertRaises(ValueError):
-                    observer.verify_preserved_secrets(expected, lock.fileno())
+                    observer.verify_secret_identities(expected, lock.fileno())
                 del ids[observer.OPTIONAL_SECRET]
                 del ids[names[0]]
                 with self.assertRaises(ValueError):
-                    observer.verify_preserved_secrets(observer.digest(observer.secret_identities()), lock.fileno())
+                    observer.verify_secret_identities(observer.digest(observer.secret_identities()), lock.fileno())
 
 
 if __name__ == "__main__":

@@ -58,7 +58,7 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     assert.ok(trace.requirements.some(item => item.requirementId === 'REQ-TRACE-001'));
     assert.equal(trace.summary.evidenceFreshness.sourceSha, registry.sourceSha);
     assert.ok(trace.summary.areaCounts.API.obligationCount > 0);
-    assert.equal(trace.referenceAudit.broken.length, 0, 'all declared repository references should resolve');
+    assert.deepEqual(trace.referenceAudit.broken, [], 'all declared repository references should resolve');
 
     const traceSearch = page.getByRole('searchbox', { name: '追跡データを検索' });
     await traceSearch.fill('REQ-OPS-004');
@@ -68,14 +68,19 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     assert.match(page.url(), /[?&]q=REQ-OPS-004/u, 'filters should be addressable in the URL');
     await traceSearch.fill('');
     await page.getByRole('combobox', { name: '状態', exact: true }).selectOption('EXPLICIT_NOT_IMPLEMENTED');
-    const declaredUnimplemented = await requirementRows.filter({ visible: true }).evaluateAll(rows => rows.map(row => row.dataset.search));
-    assert.ok(declaredUnimplemented.some(row => row.includes('req-ops-004') || row.includes('req-ops-005') || row.includes('req-ui-006')),
-      'explicit implementation declarations should be filterable without changing conformance status');
+    const declaredUnimplemented = trace.requirements.filter(item => item.implementationDeclarationStatus === 'EXPLICIT_NOT_IMPLEMENTED');
+    const unimplementedObligationIds = declaredUnimplemented.flatMap(item => item.obligationIds).sort();
+    assert.ok(unimplementedObligationIds.length > 0, 'published trace must exercise explicit implementation declarations');
+    const visibleUnimplementedIds = await requirementRows.filter({ visible: true }).evaluateAll(rows =>
+      rows.map(row => row.id.replace(/^obligation-/u, '')).sort());
+    assert.deepEqual(visibleUnimplementedIds, unimplementedObligationIds, 'explicit implementation declarations should filter the matching obligations');
     await page.getByRole('button', { name: '条件を解除' }).click();
     await page.getByRole('combobox', { name: '状態', exact: true }).selectOption('UNMAPPED');
-    const unmappedRequirementRows = await page.locator('#requirement-table tbody tr[data-trace-row]').filter({ visible: true }).evaluateAll(rows => rows.map(row => row.textContent));
-    assert.ok(unmappedRequirementRows.some(row => /REQ-UI-006|REQ-OPS-004|REQ-OPS-005/u.test(row)),
-      'conformance UNMAPPED should filter requirement obligations');
+    const unmappedRequirementIds = trace.requirements.filter(item => item.conformanceStatus === 'UNMAPPED').map(item => item.requirementId).sort();
+    assert.ok(unmappedRequirementIds.length > 0, 'published trace must exercise unmapped conformance');
+    const visibleUnmappedIds = await page.locator('#requirement-table tbody tr[data-trace-row] > td:first-child > a')
+      .filter({ visible: true }).evaluateAll(links => links.map(link => link.textContent.trim()).sort());
+    assert.deepEqual(visibleUnmappedIds, unmappedRequirementIds, 'conformance UNMAPPED should filter the matching requirements');
     await page.getByRole('button', { name: '条件を解除' }).click();
     await page.getByRole('combobox', { name: '領域', exact: true }).selectOption('API');
     assert.ok(await requirementRows.filter({ visible: true }).count() > 0);

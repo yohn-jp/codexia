@@ -73,7 +73,7 @@ AST discoveryは静的な登録を列挙し、実行結果とは別の情報と�
 | TRC-02 | Markdown parse→HTML/JSON→同一入力から再生成 | **LOCAL_PASS**: StrictDoc 0.32.1のHTML/JSONを2回生成し比較。HTML検索timestamp、確認済みMarkdown document MID、検索index key順とunordered membership順のみを正規化し、membership値と他の出力を保持 |
 | TRC-03 | REQ→設計→実装surface→obligation | **PARTIAL**: File relationのpathと明示したtyped surface identifierを検査する。生成Fastify routeのOperation IDと、AST discoveryによるTEST-ID・登録source・行・表示名を保持する。意味的な実装適合、全obligationに対するsymbol AST coverageは未証明 |
 | TRC-04 | 実装側の逆引き | **PARTIAL**: bounded scanからHTTP method/path、MCP tool、DB object、Desktop UI control、Native iOS SwiftUI view、Terraform resource、Ansible source、GitHub Actions workflow定義を `reverseTrace` に記録する。Ansibleはsource YAMLすべてをsurfaceとして列挙し、4つの宣言済みentrypointとliteral `include_tasks` / `import_tasks`の到達関係からplaybook群を導出する。4件の最小path-specific candidate overrideはexample inventoryと、REQ-OPS-001候補に分類する3つのaccess/bootstrap secret sourceに限る。group IDとcandidate REQはnavigation metadataに限りobligation relationや実行証拠を作らない。孤立YAML、未解決・動的include、不正root、未分類entrypoint/overrideはgateを失敗させる。workflow定義は実行済みjob/runを意味しない。surface inventoryの分類と候補REQはaccepted relationと分離し、未分類・対応未接続surfaceも表示する。動的登録、全migration/live DB、実画面・実機挙動、適用済みIaC、host実行、隔離復元は静的source scanでは証明しない。 |
-| TRC-05 | TEST→CI exact source evidence | `[TEST-ID]`付きネイティブ登録から静的に列挙したTEST-IDとsource identityを実行観測と照合する。照合キーはTEST-IDとdiscovery済みsourceであり、テスト表示名の変更や、trace taskで走らなかったケースの消失に依存しない。Pagesは同一SHAのVerify認定を確認できたケースにrun・attempt・artifact ID・digestを表示する。証拠を取得できないケースは未検証として残す。 |
+| TRC-05 | TEST→CI exact source evidence | `[TEST-ID]`付きネイティブ登録から静的に列挙したTEST-IDとsource identityを実行観測と照合する。照合キーはTEST-IDとdiscovery済みsourceであり、テスト表示名の変更や、trace taskで走らなかったケースの消失に依存しない。Pagesは同一SHAのVerify認定を確認できたケースにrun・attempt・artifact ID・digestを表示する。既存のChromium製品検証では、同じVerify runのartifactとproducer attemptを照合し、native登録と一致したケースの成功証拠を取り込む。証拠を取得できないケースは未検証として残す。 |
 | TRC-06 | 重複UID・切れた参照・inventory欠落・不正MIDへの故障注入 | **LOCAL_PASS**: `verify.test.mjs`の負例を実行。legacy product behaviorの適合試験とは区別 |
 | TRC-07 | Repository Audit Pagesに静的サイトを公開 | StrictDoc HTML/JSONと `/requirements/traceability/` のstatus HTML/JSONを既存の唯一のpublisherが生成する。PR artifactをChromiumで検査し、mainの同じpublisherが公開する。公開URLとsource SHAが一致するまで `PENDING_PAGES_PUBLISH` を維持する。 |
 
@@ -85,7 +85,7 @@ dashboardの検索とarea/status/surface type filterはURL queryへ反映する�
 
 この変更ではLikeC4の関係グラフを追加しない。関係の正本はRequirement Registerと既存StrictDoc relationのままであり、Matrix/HTML/JSONの標準出力と同じprojectionを使うdashboardで今回の双方向探索要件を満たす。新しいgraph authorityや別の要求台帳は導入しない。
 
-このsource scanの観測限界は以下の通りである。HTTP/MCPの動的登録と実行時権限・副作用、PostgreSQL live `pg_catalog` と全環境の適用状態、Desktop UIの全runtime状態遷移、実機iOS UI、Terraformの適用済みresource、Ansible/hostの実収束は静的宣言と一致するとは限らない。現在のREQ-UI-006 state machineは未導入で、その設計上の全遷移を正規実装から抽出できない。これらは「観測不能・証拠不足」として残し、追加の実行証拠がない限りVERIFIEDにしない。
+このsource scanの観測限界は以下の通りである。HTTP/MCPの動的登録と実行時権限・副作用、PostgreSQL live `pg_catalog` と全環境の適用状態、Desktop UIの全runtime状態遷移、実機iOS UI、Terraformの適用済みresource、Ansible/hostの実収束は静的宣言と一致するとは限らない。REQ-UI-006の状態機械は部分導入済みであり、静的scanでは全遷移を確認できない。これらは「観測不能・証拠不足」として残し、追加の実行証拠がない限りVERIFIEDにしない。
 
 ## 個別義務trace projection
 

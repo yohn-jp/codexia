@@ -436,7 +436,10 @@ export function NativeChangeSetReview({
   const loading = reviewSnapshot.matches('loading') || reviewSnapshot.matches('inspecting');
   const busy = reviewBusy || loading;
   const reviewNeedsRefresh =
-    reviewSnapshot.matches('conflict') || reviewSnapshot.matches('unauthorized') || reviewSnapshot.matches('forbidden');
+    reviewSnapshot.matches('readFailed') ||
+    reviewSnapshot.matches('conflict') ||
+    reviewSnapshot.matches('unauthorized') ||
+    reviewSnapshot.matches('forbidden');
   const changeSets = reviewSnapshot.context.changeSets;
   const coreReviews = reviewSnapshot.context.coreReviews;
   const selectedId = reviewSnapshot.context.selectedId;

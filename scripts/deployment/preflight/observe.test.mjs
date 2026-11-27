@@ -105,10 +105,17 @@ test('verified empty and partial infrastructure, owner setup, first activation a
   f.host.database.authState = 'ready';
   assert.equal(planFromObservations(f).plan.candidateRoute, 'R0');
   f.edge = { ...fixture().edge, backend: null };
+  const unverified = planFromObservations(f).plan;
+  assert.ok(unverified.blockers.includes('unverified-fresh-installation'));
+  f.host.database.databaseOid = '456';
+  f.host.database.bootstrapIntent = { clusterId: '123', databaseOid: '999', image: f.candidateBackend.image };
+  assert.ok(planFromObservations(f).plan.blockers.includes('unverified-fresh-installation'));
+  f.host.database.bootstrapIntent.databaseOid = '456';
   const activation = planFromObservations(f).plan;
   assert.equal(activation.candidateRoute, 'R6');
   assert.equal(activation.route, 'R0');
-  assert.ok(activation.blockers.includes('missing-preservation-evidence'));
+  assert.deepEqual(activation.blockers, ['approval-required']);
+  assert.equal(activation.observation.binding.backupSha256, null);
   const ui = fixture();
   absentFrontend(ui);
   ui.priorBackend = null;

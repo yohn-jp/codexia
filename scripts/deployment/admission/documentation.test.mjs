@@ -38,5 +38,5 @@ test('IAC retains the explicit staged deployment and authentication boundary', (
   const iac = files.get('iac');
   assert.match(iac, /`bootstrap` runs `host`, `secrets`, `base`, and the approved `auth-runtime` tasks in order/u);
   assert.match(iac, /initializes the application schema.*before provisioning the auth schema/u);
-  assert.match(iac, /pristine-schema first activation or certified image update, encrypted backup, application health and rollback/u);
+  assert.match(iac, /pristine-schema first activation or certified image update, with verified encrypted backup for the update/u);
 });

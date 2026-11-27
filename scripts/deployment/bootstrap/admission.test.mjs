@@ -10,7 +10,7 @@ const hash = 'a'.repeat(64);
 const now = new Date('2026-11-24T06:00:00.000Z');
 const observedAt = '2026-11-24T05:59:00.000Z';
 
-function fixture(state = {}, overrides = {}) {
+function fixture(state = {}, overrides = {}, backupSha256 = null) {
   const current = {
     observation: {
       state: { M: 'ready', H: 'partial', D: 'absent', A: 'absent', B: 'absent', F: 'absent', T: 'none', ...state },
@@ -18,7 +18,7 @@ function fixture(state = {}, overrides = {}) {
       binding: {
         environment: 'codexia-production', hostPinSha256: hash, hostId: hash,
         databaseSha256: hash, authSha256: hash, backendSha256: hash, frontendSha256: hash,
-        ingressSha256: hash, transactionSha256: hash, infrastructureSha256: hash, backupSha256: null,
+        ingressSha256: hash, transactionSha256: hash, infrastructureSha256: hash, backupSha256,
       },
       frontendAdmission: 'not-applicable',
       changeAxes: [],
@@ -45,7 +45,7 @@ test('R4 enables only wholly separate base stages still required by observed sta
     } },
   }).stages, ['base', 'auth-runtime']);
   assert.deepEqual(admitBootstrap({
-    ...fixture({ D: 'compatible', A: 'ready' }, { intent: 'adopt' }), mode: 'bootstrap',
+    ...fixture({ D: 'compatible', A: 'ready' }, { intent: 'adopt' }, hash), mode: 'bootstrap',
     initializeDatabase: false, topology: { hostReady: true, secrets: {
       'codexia-tunnel-token': true, 'codexia-postgres-admin-password': true, 'codexia-postgres-app-password': true,
     } },
@@ -145,6 +145,7 @@ function observedSetup(database, backend = { state: 'absent' }, intent = 'instal
   };
   const snapshots = at => planFromObservations({
     now: new Date(at), intent, hostPinSha256: hash,
+    window: { id: 'first-activation', notBefore: observedAt, notAfter: '2026-11-24T06:05:00.000Z' },
     host: {
       format: 'codexia-lifecycle-host/v1', hostId: hash, M: 'ready', H: 'ready',
       observedAt: at, topology, backend, transaction: null,
@@ -312,10 +313,10 @@ test('Preflight admits resuming activation preparation without owner reissuance 
   assert.deepEqual(admitBootstrap({ ...afterSettings, mode: 'prepare-activation' }), {
     route: 'R5', stages: [], installIntent: false,
   });
-  const prepared = observedSetup({ ...enrolled, authState: 'ready', settingsSha256: hash }, { state: 'absent' }, 'install', true);
+  const prepared = observedSetup({ ...enrolled, authState: 'ready', settingsSha256: hash, bootstrapIntent: installation }, { state: 'absent' }, 'install', true);
   assert.equal(prepared.plan.candidateRoute, 'R6');
   assert.equal(prepared.plan.route, 'R0');
-  assert.ok(prepared.plan.blockers.includes('missing-preservation-evidence'));
+  assert.deepEqual(prepared.plan.blockers, ['approval-required']);
   assert.throws(() => admitBootstrap({ ...prepared, mode: 'prepare-activation' }), /does not admit/u);
 });
 

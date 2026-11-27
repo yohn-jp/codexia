@@ -14,7 +14,7 @@ import { backupCredentialKeyId } from '../src/backup-credential-envelope.js';
 import { createServer } from '../src/server.js';
 import { assertDisposableAuthFixtureDatabaseUrl, startBetterAuthFixture } from './fixtures/better-auth-server.js';
 
-test('backup console requires owner proof, isolates credentials, and applies only verified executor results', async t => {
+test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof, isolates credentials, and applies only verified executor results', async t => {
   const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
   assert.ok(databaseUrl, 'Set CODEXIA_AUTH_TEST_DATABASE_URL to a disposable PostgreSQL auth database');
   assertDisposableAuthFixtureDatabaseUrl(databaseUrl);
@@ -98,6 +98,28 @@ test('backup console requires owner proof, isolates credentials, and applies onl
       return realProbe ? realProbe(revision, credential) : { state: 'PASSED', reason: null };
     },
   });
+  const restoreDirectory = await mkdtemp(join(tmpdir(), 'codexia-restore-receipt-'));
+  t.after(() => rm(restoreDirectory, { recursive: true, force: true }));
+  const privateKey = join(restoreDirectory, 'worker.pem');
+  const control = new BackupConsoleControl({
+    pool: workerPool,
+    policy,
+    config: backupExecutorConfigSchema.parse({ privateKeyFiles: [privateKey] }),
+    python: '/usr/bin/python3',
+    transferScript: '/unused',
+    receiptDirectory: restoreDirectory,
+    backupScript: '/unused',
+  });
+  const sourceSha = 'a'.repeat(40);
+  const sourceDigest = 'sha256:' + 'b'.repeat(64);
+  const candidateSha = 'c'.repeat(40);
+  const candidateDigest = 'sha256:' + 'd'.repeat(64);
+  await assert.rejects(
+    control.deployStart(randomUUID(), sourceSha, sourceDigest, candidateSha, candidateDigest),
+    /Active off-VM backup destination is unavailable/u,
+  );
+  await assert.rejects(control.deployStart(randomUUID(), sourceSha, '-', sourceSha, candidateDigest), /Deployment identity is invalid/u);
+  await writeFile(privateKey, keys.privateKey, { mode: 0o600 });
   await worker.processNext();
   const fixture = await startBetterAuthFixture({
     databaseUrl,
@@ -142,6 +164,7 @@ test('backup console requires owner proof, isolates credentials, and applies onl
     ['POST', '/config/disable'],
     ['POST', '/runs'],
     ['GET', '/runs'],
+    ['GET', `/runs/${randomUUID()}`],
     ['GET', '/recovery'],
   ];
   for (const [method, path] of routes) {
@@ -195,16 +218,56 @@ test('backup console requires owner proof, isolates credentials, and applies onl
   await worker.processNext();
   const activationRequest = randomUUID();
   const activation = { revision: 2, probeId: currentProbe, confirmed: true };
+  const statusQuery = '/status?' + new URLSearchParams({ requestId: activationRequest });
   const accepted = await post('activate', activation, activationRequest);
   assert.equal(accepted.status, 202);
-  const receipt = await accepted.json();
-  assert.deepEqual(await (await post('activate', activation, activationRequest)).json(), receipt);
+  // The server accepted the POST, but the caller loses the receipt before reading it.
+  await accepted.body?.cancel();
+  const queuedLookup = await get(statusQuery);
+  assert.equal(queuedLookup.status, 200);
+  const queuedActivation = await queuedLookup.json();
+  assert.equal(queuedActivation.activeRevision, null);
+  assert.equal(queuedActivation.operation.requestId, activationRequest);
+  assert.equal(queuedActivation.operation.status, 'QUEUED');
+  assert.equal(queuedActivation.operation.phase, 'activate');
+  const replay = await post('activate', activation, activationRequest);
+  assert.equal(replay.status, 202);
+  assert.equal((await replay.json()).operationId, queuedActivation.operation.operationId);
   assert.equal((await post('activate', activation)).status, 409);
-  assert.equal((await (await get('/status')).json()).activeRevision, null);
+  const overview = await get('/status');
+  assert.equal(overview.status, 200);
+  const overviewBody = await overview.json();
+  assert.equal(overviewBody.activeRevision, null);
+  assert.equal(overviewBody.operation, undefined);
   await worker.processNext();
-  const active = await (await get('/status?requestId=' + activationRequest)).json();
+  const appliedLookup = await get(statusQuery);
+  assert.equal(appliedLookup.status, 200);
+  const active = await appliedLookup.json();
   assert.equal(active.activeRevision, 2);
+  assert.equal(active.operation.operationId, queuedActivation.operation.operationId);
+  assert.equal(active.operation.requestId, activationRequest);
   assert.equal(active.operation.status, 'APPLIED');
+  const deployRunId = randomUUID();
+  assert.equal(await control.deployStart(deployRunId, sourceSha, sourceDigest, candidateSha, candidateDigest), deployRunId);
+  assert.equal(await control.deployStart(deployRunId, sourceSha, sourceDigest, candidateSha, candidateDigest), deployRunId);
+  await assert.rejects(
+    control.deployStart(deployRunId, sourceSha, sourceDigest, sourceSha, candidateDigest),
+    /Deployment run identity was reused/u,
+  );
+  const {
+    rows: [deployRun],
+  } = await workerPool.query(
+    'SELECT revision, source_sha, image_digest, candidate_source_sha, candidate_image_digest FROM codexia_backup.runs WHERE id = $1',
+    [deployRunId],
+  );
+  assert.deepEqual(deployRun, {
+    revision: 2,
+    source_sha: sourceSha,
+    image_digest: sourceDigest,
+    candidate_source_sha: candidateSha,
+    candidate_image_digest: candidateDigest,
+  });
+  await control.deployFail(deployRunId, 'fixture_complete');
   assert.equal(active.lastVerifiedOffVmBackup, 'unknown');
   assert.equal(probes, 3);
 
@@ -237,7 +300,14 @@ test('backup console requires owner proof, isolates credentials, and applies onl
   await worker.processNext();
   assert.equal((await (await get('/status')).json()).activeRevision, 3);
   assert.equal((await post('disable', { revision: 3, confirmed: true })).status, 409);
-  assert.equal((await get('/status?requestId=unrecognized-request-id')).status, 404);
+  const missing = await get('/status?requestId=unrecognized-request-id');
+  assert.equal(missing.status, 404);
+  assert.deepEqual(await missing.json(), { error: 'BACKUP_OPERATION_NOT_FOUND', code: 'BACKUP_OPERATION_NOT_FOUND' });
+  for (const query of ['requestId=', 'requestId=invalid-request-id%21', 'requestId=' + 'x'.repeat(129)]) {
+    const invalid = await get('/status?' + query);
+    assert.equal(invalid.status, 422);
+    assert.deepEqual(await invalid.json(), { error: 'BACKUP_INPUT_INVALID', code: 'BACKUP_INPUT_INVALID' });
+  }
   assert.equal((await put({ ...nonSecret, offVmPolicy: 'required', retentionRequest: { days: 30 } }, '"3"')).status, 200);
   const retentionProbe = await post('probes', { revision: 4 });
   assert.equal(retentionProbe.status, 202);
@@ -291,7 +361,7 @@ test('backup console requires owner proof, isolates credentials, and applies onl
     [historyIds],
   );
   let historyPagePath = '/runs?limit=1';
-  for (const runId of [runReceipt.runId, ...historyIds]) {
+  for (const runId of [runReceipt.runId, deployRunId, ...historyIds]) {
     const response = await get(historyPagePath);
     assert.equal(response.status, 200);
     const page = (await response.json()) as { runs: Array<{ runId: string }>; nextCursor: string | null };
@@ -310,39 +380,26 @@ test('backup console requires owner proof, isolates credentials, and applies onl
   assert.deepEqual((await get('/recovery').then(response => response.json())).missingConditions, [
     'independent_restore_drill_for_latest_backup',
   ]);
-  const restoreDirectory = await mkdtemp(join(tmpdir(), 'codexia-restore-receipt-'));
-  try {
-    const restoreReceipt = join(restoreDirectory, 'receipt.json');
-    await writeFile(restoreReceipt, JSON.stringify({ format: 'codexia-restore-receipt/v1', checksumManifestSha256: 'c'.repeat(64) }), {
-      mode: 0o600,
-    });
-    const control = new BackupConsoleControl({
-      pool: workerPool,
-      policy,
-      config: backupExecutorConfigSchema.parse({}),
-      python: '/usr/bin/python3',
-      transferScript: '/unused',
-      receiptDirectory: restoreDirectory,
-      backupScript: '/unused',
-    });
-    await control.recordRestore(runReceipt.runId, restoreReceipt);
-    const partial = await (await get('/recovery')).json();
-    assert.equal(partial.status, 'partial');
-    assert.deepEqual(partial.missingConditions, ['candidate_api_readiness']);
-    const readinessReceipt = {
-      format: 'codexia-restore-receipt/v1',
-      checksumManifestSha256: 'c'.repeat(64),
-      readyImageDigest: 'sha256:' + 'e'.repeat(64),
-      verifiedLedger: 'sha256:' + 'd'.repeat(64),
-    };
-    await writeFile(restoreReceipt, JSON.stringify(readinessReceipt));
-    await assert.rejects(control.recordRestore(runReceipt.runId, restoreReceipt), /different backup source image/u);
-    await writeFile(restoreReceipt, JSON.stringify({ ...readinessReceipt, readyImageDigest: 'sha256:' + 'b'.repeat(64) }));
-    await control.recordRestore(runReceipt.runId, restoreReceipt);
-    assert.equal((await (await get('/recovery')).json()).status, 'DRILL_PASSED');
-  } finally {
-    await rm(restoreDirectory, { recursive: true, force: true });
-  }
+  const restoreReceipt = join(restoreDirectory, 'receipt.json');
+  await writeFile(restoreReceipt, JSON.stringify({ format: 'codexia-restore-receipt/v1', checksumManifestSha256: 'c'.repeat(64) }), {
+    mode: 0o600,
+  });
+
+  await control.recordRestore(runReceipt.runId, restoreReceipt);
+  const partial = await (await get('/recovery')).json();
+  assert.equal(partial.status, 'partial');
+  assert.deepEqual(partial.missingConditions, ['candidate_api_readiness']);
+  const readinessReceipt = {
+    format: 'codexia-restore-receipt/v1',
+    checksumManifestSha256: 'c'.repeat(64),
+    readyImageDigest: 'sha256:' + 'e'.repeat(64),
+    verifiedLedger: 'sha256:' + 'd'.repeat(64),
+  };
+  await writeFile(restoreReceipt, JSON.stringify(readinessReceipt));
+  await assert.rejects(control.recordRestore(runReceipt.runId, restoreReceipt), /different backup source image/u);
+  await writeFile(restoreReceipt, JSON.stringify({ ...readinessReceipt, readyImageDigest: 'sha256:' + 'b'.repeat(64) }));
+  await control.recordRestore(runReceipt.runId, restoreReceipt);
+  assert.equal((await (await get('/recovery')).json()).status, 'DRILL_PASSED');
 
   await fixture.expireOwnerFreshProof();
   assert.equal((await get('/config')).status, 200);

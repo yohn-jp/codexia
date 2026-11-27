@@ -12,7 +12,7 @@
       "packages/persistence-postgres/migrations/0001-initial.sql"
     ],
     "method": "The verifier reads method/path operation registrations from the generated Fastify HTTP contract artifact. Tool names and named SQL objects remain source-derived from the listed files.",
-    "discovery": "Source-derived from the checked-in generated Fastify route artifact, independently compared to classifications in this manifest.",
+    "discovery": "Read from the Fastify route artifact generated from the current TypeSpec source and compared to classifications in this manifest.",
     "nativeIos": "ios",
     "iac": "deploy/cloudflare/terraform",
     "ansible": "deploy/ansible"
@@ -316,57 +316,57 @@
     {
       "kind": "route",
       "id": "GET /api/console/backups/config",
-      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+      "classification": "Registered by the Backup Console Fastify plugin; deployment conformance remains unverified"
     },
     {
       "kind": "route",
       "id": "POST /api/console/backups/config/activate",
-      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+      "classification": "Registered by the Backup Console Fastify plugin; deployment conformance remains unverified"
     },
     {
       "kind": "route",
       "id": "POST /api/console/backups/config/disable",
-      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+      "classification": "Registered by the Backup Console Fastify plugin; deployment conformance remains unverified"
     },
     {
       "kind": "route",
       "id": "PUT /api/console/backups/config/draft",
-      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+      "classification": "Registered by the Backup Console Fastify plugin; deployment conformance remains unverified"
     },
     {
       "kind": "route",
       "id": "POST /api/console/backups/config/probes",
-      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+      "classification": "Registered by the Backup Console Fastify plugin; deployment conformance remains unverified"
     },
     {
       "kind": "route",
       "id": "GET /api/console/backups/config/probes/{probeId}",
-      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+      "classification": "Registered by the Backup Console Fastify plugin; deployment conformance remains unverified"
     },
     {
       "kind": "route",
       "id": "GET /api/console/backups/recovery",
-      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+      "classification": "Registered by the Backup Console Fastify plugin; deployment conformance remains unverified"
     },
     {
       "kind": "route",
       "id": "POST /api/console/backups/runs",
-      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+      "classification": "Registered by the Backup Console Fastify plugin; deployment conformance remains unverified"
     },
     {
       "kind": "route",
       "id": "GET /api/console/backups/runs",
-      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+      "classification": "Registered by the Backup Console Fastify plugin; deployment conformance remains unverified"
     },
     {
       "kind": "route",
       "id": "GET /api/console/backups/runs/{runId}",
-      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+      "classification": "Registered by the Backup Console Fastify plugin; deployment conformance remains unverified"
     },
     {
       "kind": "route",
       "id": "GET /api/console/backups/status",
-      "classification": "TARGET: generated contract operation; runtime registration is intentionally excluded"
+      "classification": "Registered by the Backup Console Fastify plugin; deployment conformance remains unverified"
     },
     {
       "kind": "route",
@@ -863,21 +863,9 @@
       "entrypoint": "deploy/ansible/site.yml",
       "mappingBasis": "derivable",
       "classification": "Candidate REQ-OPS-001 / REQ-OPS-002; source membership follows literal playbook includes; host execution remains unverified."
-    },
-    {
-      "id": "entry-verify-bootstrap-escrow",
-      "entrypoint": "deploy/ansible/verify-bootstrap-escrow.yml",
-      "mappingBasis": "derivable",
-      "classification": "Candidate REQ-OPS-001; source membership follows literal playbook includes; host execution remains unverified."
     }
   ],
   "ansibleOverrides": [
-    {
-      "id": "source-bootstrap-secret-escrow",
-      "path": "deploy/ansible/bootstrap-secret-escrow.yml",
-      "mappingBasis": "semantic",
-      "classification": "Candidate REQ-OPS-001; escrow source role remains unverified."
-    },
     {
       "id": "source-deploy-ssh-key",
       "path": "deploy/ansible/deploy-ssh-key.yml",

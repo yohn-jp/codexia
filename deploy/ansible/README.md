@@ -16,7 +16,7 @@ Supported stages are `inspect`, `bootstrap`, `host`, `secrets`, `base`, `auth-ru
 
 The `host` stage validates Ubuntu 26.04, systemd and cgroup v2, and creates or adopts the authorized service account. The `secrets` stage installs the Tunnel credential and the two PostgreSQL credentials without implicit rotation. The `base` stage converges networks, volumes, PostgreSQL 17 and Tunnel Quadlets, verifying exact persistent storage and identities. These stages do not publish new API images.
 
-The `deploy` stage requires a certified immutable Full image, main-source provenance certificate, compatible deployed UI epoch and a backup directory and an age recipient. It recovers interrupted transactions, validates the backup destination, serializes application changes, backs up before replacing an existing API, and observes candidate health. Image-only updates refuse changed migration fingerprint, persistence format or API epoch. A failed candidate restores the prior Quadlet and release record.
+The `deploy` stage requires a certified immutable Full image, main-source provenance certificate, and a compatible deployed UI epoch. It recovers interrupted transactions, serializes application changes, and observes candidate health. Before replacing an existing API it requires off-VM backup through the active Console revision and VM-local executor settings. Image-only updates refuse changed migration fingerprint, persistence format or API epoch. A failed candidate restores the prior Quadlet and release record.
 
 ## Bring up a new VM
 

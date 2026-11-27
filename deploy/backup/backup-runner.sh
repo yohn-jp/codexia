@@ -16,21 +16,42 @@ exists(){ [[ -e "$1" || -L "$1" ]]; }
 private_file(){ [[ -f "$1" && ! -L "$1" && -O "$1" && "$(stat -c %a -- "$1")" == 600 ]]; }
 
 read_artifact(){
-  local destination_dir="$1" artifact_dir digest extra
+  local destination_dir="$1" expected_id="$2" artifact_dir digest extra
   IFS= read -r artifact_dir && IFS= read -r digest && ! IFS= read -r extra || return 1
   artifact_dir="${artifact_dir#Encrypted backup committed: }"
   digest="${digest#Published checksum manifest sha256: }"
-  [[ "${artifact_dir##*/}" =~ ^codexia-[0-9]{8}T[0-9]{6}Z-[a-f0-9-]{36}$ &&
-     "${artifact_dir%/*}" == "$destination_dir" && "$digest" =~ ^[a-f0-9]{64}$ ]] || return 1
+  [[ "$artifact_dir" == "$destination_dir/$expected_id" && "$digest" =~ ^[a-f0-9]{64}$ ]] || return 1
   [[ "$("$backup_program" validate-artifact "$artifact_dir")" == "$digest" ]] || return 1
   printf '%s\n%s\n' "$artifact_dir" "$digest"
 }
 
-# The locked push transaction uses the same canonical producer output check.
-if [[ "${1:-}" == artifact && $# == 2 ]]; then
-  read_artifact "$2"
-  exit
-fi
+load_staging(){
+  destination="${CODEXIA_BACKUP_DESTINATION:?Protected staging directory is required}"
+  recipient="${CODEXIA_BACKUP_AGE_RECIPIENT:?Protected age recipient is required}"
+  "$backup_program" validate-destination "$destination" >/dev/null
+}
+
+produce_artifact(){
+  local artifact_id="$1" output
+  output="$("$backup_program" backup-locked "$destination" "$recipient" \
+    --approved --lock-file "$lock_file" --lock-fd 9 --artifact-id "$artifact_id")" || return 1
+  read_artifact "$destination" "$artifact_id" <<< "$output"
+}
+
+case "${1:-}" in
+  deploy-check)
+    [[ $# == 1 ]] || die 'Invalid backup staging check'
+    load_staging
+    exit
+    ;;
+  deploy-backup)
+    [[ $# == 2 && "$2" =~ $uuid ]] || die 'Invalid deployment backup run'
+    load_staging
+    # The deployment transaction already owns descriptor 9. The producer verifies it.
+    produce_artifact "codexia-$(date -u +%Y%m%dT%H%M%SZ)-$2"
+    exit
+    ;;
+esac
 
 [[ $# == 1 && ( "$1" == recover || "$1" =~ $uuid ) ]] || die 'Invalid backup run request'
 if ! exists "$intent" && [[ "$1" == recover ]]; then exit 0; fi
@@ -110,9 +131,7 @@ for transaction in deploy-transaction.json cutover-transaction.json; do
   if exists "$state_dir/$transaction"; then exit 75; fi
 done
 run_id="$1"
-destination="${CODEXIA_BACKUP_DESTINATION:?Protected staging directory is required}"
-recipient="${CODEXIA_BACKUP_AGE_RECIPIENT:?Protected age recipient is required}"
-"$backup_program" validate-destination "$destination" >/dev/null
+load_staging
 systemctl --user is-active --quiet codexia-api.service
 [[ "$(podman inspect --format '{{.State.Health.Status}}' codexia-api)" == healthy ]] || die 'The backup requires a healthy API'
 image="$(podman inspect --format '{{.ImageName}}' codexia-api)"
@@ -146,13 +165,9 @@ if { [[ "$tunnel_active" == true ]] && ! systemctl --user stop codexia-tunnel.se
   clear_intent
   die 'Could not quiesce services for backup'
 fi
-result=
-if output="$("$backup_program" backup-locked "$destination" "$recipient" --approved --lock-file "$lock_file" --lock-fd 9 --artifact-id "$artifact_id")"; then
-  result="$(read_artifact "$destination" <<< "$output")" || result=
-fi
+result="$(produce_artifact "$artifact_id")" || result=
 if [[ -n "$result" ]]; then
   mapfile -t artifact <<< "$result"
-  [[ "${artifact[0]}" == "$artifact_path" ]] || die 'The backup produced an unexpected artifact path'
   write_intent "$run_id" "$image" "$tunnel_active" "${artifact[@]}"
 fi
 resume_services "$image" "$tunnel_active" || die 'Backup service recovery is pending'
