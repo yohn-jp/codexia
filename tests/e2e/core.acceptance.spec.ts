@@ -1520,7 +1520,9 @@ test("Desktop publishing preserves proposal, scope, expiration, reader isolation
     const shortExpiryUrl = new URL(`/r/publishing/${projectId}/${shortExpiryAction.data.token}`, publicReaderOrigin.origin);
     const shortExpiryBase = `${origin}/api/public/projects/${projectId}/modules/publishing/share/${encodeURIComponent(shortExpiryAction.data.token)}`;
     expect((await readerContext.request.get(shortExpiryBase)).ok()).toBe(true);
-    await page.waitForTimeout(Math.max(0, Date.parse(shortExpiryAction.data.share.expiresAt) - Date.now() + 100));
+    await expect
+      .poll(async () => (await readerContext.request.get(shortExpiryBase)).status(), { timeout: 30_000 })
+      .toBe(404);
     await readerPage.goto(shortExpiryUrl.toString());
     await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
     const expiredListResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.list`, {
