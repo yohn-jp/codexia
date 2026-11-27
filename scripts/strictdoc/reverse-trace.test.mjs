@@ -24,6 +24,17 @@ test('reverse discovery records authority and provenance for HTTP, MCP, DB, UI a
   assert.deepEqual(new Set(limitations.map((item) => item.area)), new Set(['mcp-effect', 'database-live', 'ui-runtime', 'ci-runtime', 'native-ios-runtime', 'iac-runtime', 'ansible-runtime', 'deployment-runtime', 'backup-receipt']));
 });
 
+test('reverse discovery attributes current backup console routes to their Fastify registrar', async () => {
+  const { surfaces } = await discoverReverseSurfaces({ repositoryRoot });
+  const operations = surfaces.filter(item => item.kind === 'httpOperation' && item.id.includes(' /api/console/backups/'));
+  const registrations = surfaces.filter(item => item.kind === 'httpRuntimeRoute' && item.id.includes(' /api/console/backups/'));
+
+  assert.equal(operations.length, 11);
+  assert.ok(operations.every(item => item.classification === 'current'));
+  assert.deepEqual(registrations.map(item => item.id).sort(), operations.map(item => item.id).sort());
+  assert.ok(registrations.every(item => item.source.path === 'packages/api/src/backup-console-routes.ts'));
+});
+
 test('reverse discovery inventories SDK v2 registerTool names with source coordinates', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'codexia-mcp-v2-inventory-'));
   t.after(() => rm(root, { recursive: true, force: true }));

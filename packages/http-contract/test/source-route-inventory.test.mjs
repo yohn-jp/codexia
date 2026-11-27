@@ -128,8 +128,8 @@ function contributionOperations(source, prefix) {
 test('current and target OpenAPI operations match the independent inventory', () => {
   const keys = assertAdmittedOperations(contract);
   assert.equal(keys.length, 115);
-  assert.equal(inventory.current.length, 104);
-  assert.equal(inventory.target.length, 11);
+  assert.equal(inventory.current.length, 115);
+  assert.equal(inventory.target.length, 0);
   assert.equal(new Set(keys.map(key => key.slice(key.indexOf(' ') + 1))).size, 90);
 });
 

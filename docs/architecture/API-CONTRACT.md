@@ -6,7 +6,7 @@ Codexiaが所有するHTTPのmethodとpath、DTO、header、ステータス、�
 公開中の [API Reference](https://yohn-jp.github.io/codexia/api/) で各操作のHTTP表現を参照できる。ローカルでは `pnpm --filter @codexia/http-contract generate` で同じリビジョンのOpenAPIを生成する。
 
 契約は90パスの115操作を収録する。
-[ルート照合用の一覧](../../packages/http-contract/test/fixtures/admitted-routes.json) は、現行の公開・登録範囲104操作と、未実装のバックアップ管理11操作を区別する。
+[ルート照合用の一覧](../../packages/http-contract/test/fixtures/admitted-routes.json) は、バックアップ管理11操作を含む現行の登録範囲を定義する。
 `x-codexia-security-deviation` と `x-codexia-runtime-response-deviation` は、承認済みの互換基準と設計または実装の差を示す。
 現行のジョブ一覧とOAuth同意一覧は配列を返し、互換基準ではオブジェクトとして定義されている。
 MCP の HTTP 入口は TypeSpec で定義し、JSON-RPC のペイロードは [MCP プロトコル契約](MCP-V2-MIGRATION.md) に従う。
@@ -183,11 +183,11 @@ Coreのoperation上限は書き込み内容の合計8,388,608 UTF-16コード単
 4. 廃止予定を告知する場合はTypeSpecに廃止予定を記載する。互換性を壊す削除や変更は、利用者の移行とAPI epochの切替を規定する互換手順で扱う。
 5. 初回本番導入の契約是正に限り、基準コミット `ed11a58d1c92f749d67e2d0db2c3d251c0bc5c87` からの epoch 3 → 4 を認める。oasdiff の実行・結果保存は必須で、許容対象は persistence 入力制約・アーカイブ形状と MCP POST の 400 応答の是正に限定する。同一 epoch の破壊的変更、他の基準・epoch 遷移、認可・経路の破壊的変更は拒否する。既存稼働環境への非互換自動更新は許可しない。
 
-## バックアップ管理API（採用済み目標・未実装）
+## バックアップ管理API
 
 `/api/console/backups/*` は通常の `OWNER-API` bearer用作品APIでもMCPのtool/actionでもない。Cloudflare Workers配信 `/console/backups` から**OWNER-SESSION専用・CSRF/Origin保護**で呼ぶ。fresh proofが必要なmutationと、各method、status/error、version/idempotency、secretの非表示は [Backup console contract](BACKUP-CONSOLE-CONTRACT.md) の `BKC-001`〜`BKC-010` が所有する。
 
-- 契約DTOは [Backup ConsoleのTypeSpec](../../packages/http-contract/src/routes-backup-console.tsp) から生成し、各操作に `target` を付ける。
+- [Backup ConsoleのTypeSpec](../../packages/http-contract/src/routes-backup-console.tsp) の11操作は、Fastifyのバックアップ管理プラグインが登録する。公開スキーマの認証宣言とワイヤ定義には残差があり、各操作の状態を `incomplete` とする。バックアップ実行基盤の有効化手順は [Backup Console provisioning](../../deploy/backup/CONSOLE.md) を参照する。
 - 秘密を含む入力は書き込み専用とし、公開契約の例やScalarへ秘密値を含めない。
 - `202`のprobe・activate・manual backup要求は`operationId`/`probeId`/`runId`を返し、成功は**実executor receiptをGETで再取得して**初めて判断する。別にPOST本番復元エンドポイントは存在しない。
 - 異常系として401/403/404/409/412/422/429/503と、重複/応答不明、S3 credential失効、metadata SSRF、bucket越境、CSRF、owner session expirationを実APIで検証する。

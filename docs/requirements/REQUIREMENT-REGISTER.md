@@ -1470,14 +1470,14 @@ S3互換ストレージへのage暗号化済みバックアップの転送、検
 **MID**: 4c77b2e2f9b1aa8aef0dd51ae3d35222
 **UID**: REQ-OPS-004
 **Decision status**: ACCEPTED
-**Conformance status**: UNMAPPED
-**Applicability**: FUTURE_TARGET
+**Conformance status**: PARTIAL
+**Applicability**: CURRENT
 **Design owner**: [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Admin flow](../design/ADMIN-SCREEN-FLOW.md)
-**Implementation identifiers**: /console/backups; config/secret store; Fastify BKC-001〜007は全て目標・未実装
-**Verification identifiers**: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
-**Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+**Implementation identifiers**: registerBackupConsole; BackupConsoleStore; BackupConsoleExecutor (BKC-001〜007)
+**Verification identifiers**: packages/api/test/backup-console.integration.test.ts
+**Test IDs**: TEST-OPS-004-001
 **Exact-run reference**: NOT_RUN
-**Comment**: ACCEPTED／画面/API/secret storeは**未実装**; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+**Comment**: Fastifyの設定APIとexecutorを登録済み。Console画面と実運用の証拠は別に確認する。
 
 ownerは管理コンソールからS3互換バックアップ先のdraft/検証/有効化/停止を操作できる。資格情報write-only、revisionとfresh再認証、operator保護のlocal staging/age鍵の非変更を保証する
 
@@ -1488,18 +1488,46 @@ ownerは管理コンソールからS3互換バックアップ先のdraft/検証/
 - **Type**: File
   **Path**: docs/design/ADMIN-SCREEN-FLOW.md
 
+- **Type**: File
+  **Path**: packages/api/src/backup-console-routes.ts
+
 ## OBL-REQ-OPS-004-O01
 
 **Type**: OBLIGATION
 **MID**: 7697c8d75f77faffd9e000e9b2db06b2
 **UID**: OBL-REQ-OPS-004-O01
 **Design reference**: [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Admin flow](../design/ADMIN-SCREEN-FLOW.md)
-**Implementation identifiers**: UNMAPPED (candidate source file not identified)
-**Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+**Implementation identifiers**: registerBackupConsole; BackupConsoleStore; BackupConsoleExecutor (BKC-001〜007)
+**Surface identifiers**: routeId=GET /api/console/backups/status; routeId=GET /api/console/backups/config; routeId=PUT /api/console/backups/config/draft; routeId=POST /api/console/backups/config/probes; routeId=GET /api/console/backups/config/probes/{probeId}; routeId=POST /api/console/backups/config/activate; routeId=POST /api/console/backups/config/disable
+**Test IDs**: TEST-OPS-004-001
 **Exact-run reference**: NOT_RUN
-**Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+**Comment**: APIと隔離運用schemaの検証を関連付ける。画面、実S3保管先、独立復旧は同じ検証では証明しない。
 
 ownerは管理コンソールからS3互換バックアップ先のdraft/検証/有効化/停止を操作できる。資格情報write-only、revisionとfresh再認証、operator保護のlocal staging/age鍵の非変更を保証する
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-OPS-004
+
+- **Type**: File
+  **Path**: packages/api/src/backup-console-routes.ts
+
+- **Type**: File
+  **Path**: packages/api/src/backup-console-store.ts
+
+- **Type**: File
+  **Path**: packages/api/src/backup-console-executor.ts
+
+## TEST-OPS-004-001
+
+**Type**: TEST
+**MID**: ce4e13acc7debed5ae86d232431558d1
+**UID**: TEST-OPS-004-001
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Verifies owner-session admission, credential isolation, revision handling, and executor-verified backup configuration in a disposable PostgreSQL database.
 
 **Relations**:
 
@@ -1511,14 +1539,14 @@ ownerは管理コンソールからS3互換バックアップ先のdraft/検証/
 **MID**: 8aff323e8c18bb058160c82a27869785
 **UID**: REQ-OPS-005
 **Decision status**: ACCEPTED
-**Conformance status**: UNMAPPED
-**Applicability**: FUTURE_TARGET
+**Conformance status**: PARTIAL
+**Applicability**: CURRENT
 **Design owner**: [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Backup](../deployment/BACKUP.md)
-**Implementation identifiers**: BKC-008〜010; protected rootless executor; durable run queue; shared host lock
-**Verification identifiers**: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
-**Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+**Implementation identifiers**: registerBackupConsole; BackupConsoleStore; BackupConsoleExecutor; deploy/backup/backup.sh (BKC-008〜010)
+**Verification identifiers**: packages/api/test/backup-console.integration.test.ts
+**Test IDs**: TEST-OPS-005-001
 **Exact-run reference**: NOT_RUN
-**Comment**: BKC-008〜010とホスト実行基盤を実装。画面はIssue #666。実際の保管先と独立復旧ホストでの適合認定は別証拠を要する。
+**Comment**: 手動保全受付と復旧証拠の読取APIを登録済み。実際の保管先と独立復旧ホストでの適合認定は別証拠を要する。
 
 ownerが手動保全を要求してrun/暗号文/独立復旧証拠を区別して確認でき、実副作用は既存host lock/backup.shと保護されたexecutorだけが実施。本番復元・遠隔削除をWebから禁止する
 
@@ -1529,18 +1557,49 @@ ownerが手動保全を要求してrun/暗号文/独立復旧証拠を区別し�
 - **Type**: File
   **Path**: docs/deployment/BACKUP.md
 
+- **Type**: File
+  **Path**: packages/api/src/backup-console-routes.ts
+
 ## OBL-REQ-OPS-005-O01
 
 **Type**: OBLIGATION
 **MID**: fe1292405731f817303d8340e74e674e
 **UID**: OBL-REQ-OPS-005-O01
 **Design reference**: [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Backup](../deployment/BACKUP.md)
-**Implementation identifiers**: UNMAPPED (candidate source file not identified)
-**Test IDs**: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+**Implementation identifiers**: registerBackupConsole; BackupConsoleStore; BackupConsoleExecutor; deploy/backup/backup.sh (BKC-008〜010)
+**Surface identifiers**: routeId=POST /api/console/backups/runs; routeId=GET /api/console/backups/runs; routeId=GET /api/console/backups/runs/{runId}; routeId=GET /api/console/backups/recovery
+**Test IDs**: TEST-OPS-005-001
 **Exact-run reference**: NOT_RUN
-**Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+**Comment**: APIと隔離運用schemaの検証を関連付ける。画面、実S3保管先、独立復旧は同じ検証では証明しない。
 
 ownerが手動保全を要求してrun/暗号文/独立復旧証拠を区別して確認でき、実副作用は既存host lock/backup.shと保護されたexecutorだけが実施。本番復元・遠隔削除をWebから禁止する
+
+**Relations**:
+
+- **Type**: Parent
+  **ID**: REQ-OPS-005
+
+- **Type**: File
+  **Path**: packages/api/src/backup-console-routes.ts
+
+- **Type**: File
+  **Path**: packages/api/src/backup-console-store.ts
+
+- **Type**: File
+  **Path**: packages/api/src/backup-console-executor.ts
+
+- **Type**: File
+  **Path**: deploy/backup/backup.sh
+
+## TEST-OPS-005-001
+
+**Type**: TEST
+**MID**: d975a41570fbb2454417adb7f9672f11
+**UID**: TEST-OPS-005-001
+**Execution scope**: PRODUCT
+**Exact-run reference**: NOT_RUN
+
+Verifies manual run admission, persisted run state and recovery evidence boundaries in a disposable PostgreSQL database.
 
 **Relations**:
 
