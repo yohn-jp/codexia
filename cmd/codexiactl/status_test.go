@@ -144,10 +144,14 @@ func TestDoctorReportsActionableBlockersWithoutDumpingWorkflowHistory(t *testing
 		t.Fatalf("expected one most recent run per workflow, got %#v", recent)
 	}
 	for _, code := range []string{
+		"interactive-authentication-required",
+		"github-authentication-unverified",
 		"github-environment-or-permission-unverified",
 		"tailnet-identity-or-policy-unverified",
 		"latest-target-lifecycle-evidence-unavailable",
 		"cloudflare-edge-unverified",
+		"independent-restore-acceptance-unverified",
+		"live-deployment-state-unverified",
 	} {
 		if blockerGuidance(code) == "" {
 			t.Fatalf("no user-facing remediation for %s", code)
