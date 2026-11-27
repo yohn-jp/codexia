@@ -662,7 +662,7 @@
       fi
       tunnel_was_active=false
       if systemctl --user is-active --quiet codexia-tunnel.service; then tunnel_was_active=true; fi
-      if [[ "$recovery_activation" != null && "$tunnel_was_active" == true ]]; then
+      if [[ ( "$recovery_activation" != null || "$first_activation" != null ) && "$tunnel_was_active" == true ]]; then
         stale_admission 'the restored target Tunnel started before publication'
       fi
       if [[ "$release_present" == true ]]; then
@@ -673,10 +673,12 @@
       if [[ "$had_unit" == true ]]; then
         backup_pending_id="$(cat /proc/sys/kernel/random/uuid)"
       fi
-      if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" "$backup_pending_id" "$recovery_operation_id" "$recovery_evidence_sha256" <<'NODE'
+      activation_tunnel_hold=false
+      if [[ "$first_activation" != null || "$recovery_activation" != null ]]; then activation_tunnel_hold=true; fi
+      if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" "$backup_pending_id" "$recovery_operation_id" "$recovery_evidence_sha256" "$activation_tunnel_hold" <<'NODE'
       const fs = require('node:fs');
       const [target, hadUnit, tunnelWasActive, apiLinkCreated, tunnelLinkCreated, releasePresent, backupRunId,
-        recoveryOperationId, recoveryEvidenceSha256] = process.argv.slice(2);
+        recoveryOperationId, recoveryEvidenceSha256, tunnelHeldForActivation] = process.argv.slice(2);
       const asBoolean = value => {
         if (value === 'true') return true;
         if (value === 'false') return false;
@@ -685,6 +687,7 @@
       fs.writeFileSync(target, JSON.stringify({format: 'codexia-deploy-transaction/v1', phase: 'pending',
         hadUnit: asBoolean(hadUnit), tunnelWasActive: asBoolean(tunnelWasActive),
         apiLinkCreated: asBoolean(apiLinkCreated), tunnelLinkCreated: asBoolean(tunnelLinkCreated),
+        tunnelHeldForActivation: asBoolean(tunnelHeldForActivation),
         releasePresent: asBoolean(releasePresent), ...(backupRunId && {backupRunId}),
         ...(recoveryOperationId && {recoveryOperationId, recoveryEvidenceSha256})}) + '\n',
         {mode: 0o600, flag: 'wx', flush: true});
@@ -727,7 +730,7 @@
           if [[ "$api_link_created" == true ]]; then rm -f -- "$api_wants_link"; fi
           if [[ "$tunnel_link_created" == true ]]; then rm -f -- "$tunnel_wants_link"; fi
           systemctl --user daemon-reload || restore_status=1
-          if [[ "$recovery_activation" != null && "$restore_status" == 0 ]]; then
+          if [[ ( "$recovery_activation" != null || "$first_activation" != null ) && "$restore_status" == 0 ]]; then
             systemctl --user unmask codexia-tunnel.service || restore_status=1
           fi
         fi
@@ -772,9 +775,9 @@
           exit 1
         fi
       fi
-      # Both Quadlets have generated boot activation links. Keep the Tunnel
-      # masked across restarts until the protected R3 publication check passes.
-      if [[ "$recovery_activation" != null ]]; then
+      # Keep the Tunnel masked across a VM reboot for both R3 and R6. A
+      # recorded first-activation window must be checked again before unmask.
+      if [[ "$recovery_activation" != null || "$first_activation" != null ]]; then
         if ! systemctl --user mask --now codexia-tunnel.service; then
           echo 'Could not hold the application Tunnel inactive for recovery; deployment remains pending' >&2
           exit 1
