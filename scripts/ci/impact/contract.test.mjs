@@ -107,7 +107,9 @@ test('the CodexiaCTL binary is validated by Verify and independently released at
   assert.equal(auto.jobs.tag.permissions.actions, 'write');
   assert.match(auto.jobs.tag.if, /conclusion == 'success'/u);
   assert.match(auto.jobs.tag.steps.find(step => step.uses?.startsWith('actions/github-script@')).with.script,
-    /createWorkflowDispatch/u);
+    /releaseVerifiedCodexiactl/u);
+  const dispatcher = readFileSync(new URL('../../release/components/codexiactl-automation.mjs', import.meta.url), 'utf8');
+  assert.match(dispatcher, /createWorkflowDispatch/u);
 });
 
 test('Biome selects shipped JS/TS changes and config, but not unrelated CI or native sources', () => {
