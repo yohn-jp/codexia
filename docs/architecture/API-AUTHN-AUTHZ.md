@@ -123,6 +123,8 @@ For OIDC runtime registration, constrain Better Auth SSO's defaults: only the ex
 
 SSO Discovery fetches may require an IdP origin in Better Auth `trustedOrigins`. That list is also used for CSRF/redirect trust: **never automatically append an arbitrary URL from the settings form**. Accept only operator-approved exact HTTPS issuer origins for registration and server egress; reject loopback, link-local, private-address, userinfo, fragments, redirect chains and DNS rebinding to forbidden ranges. Validate exact Discovery issuer and signed ID-token issuer, audience, nonce, time and subject. If the pinned plugin cannot implement these controls without broadening CSRF trust, block new provider activation rather than substituting custom token verification or trusting the UI. The issuer origin allowlist is a deployment-controlled precondition displayed by the form.
 
+[Owner-managed OIDC registration and activation](OWNER-OIDC-MANAGEMENT-PROPOSAL.md) proposes the implementation contract for the managed provider lifecycle.
+
 ### First-owner enrollment, ongoing credentials and recovery
 
 1. An already established Better Auth owner signing in through the current OIDC link may add a Passkey to their **existing** Better Auth user. The owner mapping is checked before and after the WebAuthn ceremony; no new user row or project ownership mapping is created.
