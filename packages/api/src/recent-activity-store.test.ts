@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -66,6 +67,31 @@ describe('RecentActivityStore', () => {
     } finally {
       await state.close();
     }
+  });
+
+  it('rejects a new partition at the entry limit without corrupting readable cursors', async t => {
+    const root = await mkdtemp(resolve(tmpdir(), 'codexia-recent-limit-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const history = resolve(root, 'history');
+    const store = new RecentActivityStore(history);
+    const input = { sceneId: 'scene-one', sentenceOffset: 1, deviceType: 'desktop' as const };
+    await store.upsert('owner', repository, input);
+    const statePath = resolve(history, 'recent-activity', 'recent-activity-state.json');
+    const state = JSON.parse(await readFile(statePath, 'utf8'));
+    const ownerKey = state.entries[0].ownerKey;
+    for (let i = 1; i < 20_000; i++) {
+      const projectId = 'limit-' + i;
+      const key = createHash('sha256').update(ownerKey + '\0postgres-project\0' + projectId).digest('hex');
+      state.entries.push({ key, ownerKey, projectId, items: [] });
+    }
+    await writeFile(statePath, JSON.stringify(state));
+    const before = await readFile(statePath);
+    await assert.rejects(store.upsert('owner', 'overflow', input), { code: 'recent_activity_history_full' });
+    assert.deepEqual(await readFile(statePath), before);
+    const restarted = new RecentActivityStore(history);
+    assert.equal((await restarted.list('owner', repository))[0]?.sentenceOffset, 1);
+    await restarted.upsert('owner', repository, { ...input, sentenceOffset: 2 });
+    assert.equal((await restarted.list('owner', repository))[0]?.sentenceOffset, 2);
   });
 
   it('fences reordered reports across store instances while merging only the omitted reading page', async t => {

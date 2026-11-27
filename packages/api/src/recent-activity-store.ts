@@ -113,6 +113,9 @@ export class RecentActivityStore {
         assertEntryScope(entry, ownerKey, identity);
         entry.projectId = identity;
       } else {
+        if (state.entries.length >= MAX_STATE_ENTRIES) {
+          throw new RecentActivityStoreError('recent_activity_history_full', 'Recent activity history exceeds its entry limit');
+        }
         entry = { key, ownerKey, projectId: identity, items: [] };
         state.entries.push(entry);
       }
