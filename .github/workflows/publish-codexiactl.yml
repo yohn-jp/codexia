@@ -1,7 +1,6 @@
 name: Publish CodexiaCTL
 on:
-  push:
-    tags: ['v0.1.*']
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
