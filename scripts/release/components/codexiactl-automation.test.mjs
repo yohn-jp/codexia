@@ -45,7 +45,9 @@ function fixture({tags = [], files = ['cmd/codexiactl/main.go'], current = sha, 
     throw Error('Unexpected git command: ' + args.join(' '));
   };
   return { calls, params: {github, context: {
-    repo: {owner: 'yohn-jp', repo: 'codexia'}, payload: {workflow_run: event} },
+    repo: {owner: 'yohn-jp', repo: 'codexia'}, payload: {workflow_run: {
+      ...event, repository: {...event.repository}, head_repository: {...event.head_repository},
+    }} },
     core: logger, sha, git} };
 }
 
