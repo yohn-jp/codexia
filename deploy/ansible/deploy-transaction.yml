@@ -552,10 +552,6 @@
           stale_admission 'the restored database and history fingerprint could not be verified'
         [[ "$actual_fingerprints" == "$expected_fingerprints" ]] ||
           stale_admission 'the restored database or history no longer matches the recovery point'
-        secret_set="$(jq -er '.secretSetSha256 | select(test("^[a-f0-9]{64}$"))' <<< "$recovery_activation")" ||
-          stale_admission 'recovered Podman credential identities are missing'
-        "$HOME/.local/bin/codexia-preflight-observe" verify-secret-identities "$secret_set" ||
-          stale_admission 'the recovered Podman credential identities changed'
       fi
       release_present=false
       if [[ -e "$release_state" || -L "$release_state" ]]; then
@@ -659,6 +655,9 @@
       fi
       tunnel_was_active=false
       if systemctl --user is-active --quiet codexia-tunnel.service; then tunnel_was_active=true; fi
+      if [[ "$recovery_activation" != null && "$tunnel_was_active" == true ]]; then
+        stale_admission 'the restored target Tunnel started before publication'
+      fi
       if [[ "$release_present" == true ]]; then
         cp --preserve=mode,ownership "$release_state" "$state_dir/rollback-release.json"
       fi
@@ -688,9 +687,12 @@
         exit 1
       fi
       sync -f "$state_dir"
+      recovery_tunnel_masked=false
       restore_previous(){
         local restore_status=0
-        if [[ "$tunnel_present" == true ]]; then systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || restore_status=1; fi
+        if [[ "$tunnel_present" == true && "$recovery_tunnel_masked" == false ]]; then
+          systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || restore_status=1
+        fi
         # Before first activation there may be no generated API service to stop.
         # Do not turn a failed pristine-schema check into an unrecoverable pending
         # transaction merely because systemctl cannot find that absent unit.
@@ -718,6 +720,9 @@
           if [[ "$api_link_created" == true ]]; then rm -f -- "$api_wants_link"; fi
           if [[ "$tunnel_link_created" == true ]]; then rm -f -- "$tunnel_wants_link"; fi
           systemctl --user daemon-reload || restore_status=1
+          if [[ "$recovery_activation" != null && "$restore_status" == 0 ]]; then
+            systemctl --user unmask codexia-tunnel.service || restore_status=1
+          fi
         fi
         if [[ "$restore_status" == 0 ]]; then
           if [[ "$release_present" == true ]]; then
@@ -760,9 +765,18 @@
           exit 1
         fi
       fi
+      # Both Quadlets have generated boot activation links. Keep the Tunnel
+      # masked across restarts until the protected R3 publication check passes.
+      if [[ "$recovery_activation" != null ]]; then
+        if ! systemctl --user mask --now codexia-tunnel.service; then
+          echo 'Could not hold the application Tunnel inactive for recovery; deployment remains pending' >&2
+          exit 1
+        fi
+        recovery_tunnel_masked=true
+      fi
       # Record which links recovery owns before creating either one.
       install_wants_links
-      if { [[ "$tunnel_present" == true ]] && ! systemctl --user stop codexia-tunnel.service >/dev/null 2>&1; } ||
+      if { [[ "$tunnel_present" == true && "$recovery_tunnel_masked" == false ]] && ! systemctl --user stop codexia-tunnel.service >/dev/null 2>&1; } ||
          { [[ "$had_unit" == true ]] && ! systemctl --user stop codexia-api.service >/dev/null 2>&1; }; then
         echo 'Could not stop the active API and Tunnel; deployment transaction remains pending for recovery' >&2
         exit 1
@@ -827,6 +841,11 @@
       fi
       if [[ "$tunnel_present" == true ]]; then
         require_activation_window_or_restore
+        if [[ "$recovery_tunnel_masked" == true ]] && ! systemctl --user unmask codexia-tunnel.service; then
+          restore_previous || echo 'Restored Backend rollback failed after Tunnel unmask failure' >&2
+          exit 1
+        fi
+        recovery_tunnel_masked=false
         if ! systemctl --user start codexia-tunnel.service; then
           restore_previous || echo 'Previous API recovery failed after Tunnel start failure' >&2
           echo 'Application Tunnel did not start; deployment transaction remains pending if rollback is unverified' >&2

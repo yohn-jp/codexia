@@ -64,6 +64,8 @@ case "$*" in
   "--user show --property=LoadState --value codexia-tunnel.service")
     [ "${'$'}{CODEXIA_TEST_SHOW_FAIL:-false}" = false ] || exit 1
     printf "%s\\n" "$CODEXIA_TEST_TUNNEL_LOAD_STATE" ;;
+  "--user show --property=ActiveState --value codexia-tunnel.service")
+    printf "%s\\n" inactive ;;
   "--user show --property=SourcePath --value codexia-api.service")
     printf "%s\\n" "$CODEXIA_TEST_API_SOURCE_PATH" ;;
   "--user is-active --quiet codexia-api.service")
@@ -188,6 +190,28 @@ test('recovery before first API unit installation does not require a nonexistent
     assert.equal(existsSync(path.join(target.stateDir, 'deployed-release.json.tmp')), false);
     assert.equal(existsSync(path.join(target.quadletDir, 'codexia-api.container')), false);
     assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /stop codexia-api\.service/u);
+  } finally {
+    rmSync(target.root, { recursive: true, force: true });
+  }
+});
+
+test('interrupted R3 keeps the Tunnel fenced until the unpublished API is removed', () => {
+  const target = fixture();
+  const intentPath = path.join(target.stateDir, 'deploy-transaction.json');
+  const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
+  writeFileSync(intentPath, JSON.stringify({
+    ...intent, hadUnit: false, tunnelWasActive: false, releasePresent: false,
+    recoveryOperationId: 'restore-one', recoveryEvidenceSha256: 'c'.repeat(64),
+  }));
+  target.env.CODEXIA_TEST_TUNNEL_LOAD_STATE = 'masked';
+  try {
+    const result = runRecovery(target);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(existsSync(intentPath), false);
+    assert.equal(existsSync(path.join(target.quadletDir, 'codexia-api.container')), false);
+    const calls = readFileSync(target.logFile, 'utf8');
+    assert.match(calls, /stop codexia-api\.service[\s\S]*daemon-reload[\s\S]*unmask codexia-tunnel\.service/u);
+    assert.doesNotMatch(calls, /start codexia-tunnel\.service/u);
   } finally {
     rmSync(target.root, { recursive: true, force: true });
   }
@@ -356,7 +380,7 @@ test('committed recovery retains its evidence when the live release cannot be re
       const intentPath = path.join(stateDir, 'deploy-transaction.json');
       const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
       writeFileSync(intentPath, JSON.stringify({
-        ...intent, hadUnit: false, releasePresent: false,
+        ...intent, hadUnit: false, tunnelWasActive: false, releasePresent: false,
         recoveryOperationId: 'restore-one', recoveryEvidenceSha256: 'c'.repeat(64),
       }));
       writeFileSync(path.join(stateDir, 'deployed-release.json'), JSON.stringify({

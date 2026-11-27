@@ -331,7 +331,7 @@ test('first activation checks the real transaction window at readiness and rolls
   const transaction = shell.slice(transactionStart, transactionEnd)
     .replaceAll("{{ '{{' }}", '{{').replaceAll("{{ '}}' }}", '}}');
   assert.match(transaction, /require_activation_window_or_restore\nif ! install -m 0600/u);
-  assert.match(transaction, /require_activation_window_or_restore\n\s*if ! systemctl --user start codexia-tunnel\.service/u);
+  assert.match(transaction, /require_activation_window_or_restore\n\s*if \[\[ "\$recovery_tunnel_masked" == true \]\] && ! systemctl --user unmask codexia-tunnel\.service/u);
 
   const directory = mkdtempSync(path.join(tmpdir(), 'codexia-first-activation-window-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -345,7 +345,7 @@ test('first activation checks the real transaction window at readiness and rolls
     'transaction_intent="$FIXTURE/deploy-transaction.json"',
     'release_state="$FIXTURE/deployed-release.json"',
     'trace="$FIXTURE/trace"',
-    'had_unit=false; tunnel_present=true; tunnel_was_active=false; release_present=false',
+    'had_unit=false; tunnel_present=true; tunnel_was_active=false; release_present=false; recovery_tunnel_masked=false',
     'api_link_created=true; tunnel_link_created=true',
     'candidate_image=fixture-image; first_activation="{}"; recovery_activation=null; approved_not_before=1000; approved_not_after=2000',
     'clock=1500; backup_control=control_fixture; backup_run_id=; backup_pending_id=',
@@ -378,6 +378,14 @@ test('first activation checks the real transaction window at readiness and rolls
     assert.doesNotMatch(result.stderr, /Unexpected Console command/u);
     assert.equal(calls.includes('--user start codexia-api.service'), scenario !== 'pre-start');
     assert.equal(calls.includes('--user start codexia-tunnel.service'), success);
+    const mask = calls.indexOf('--user mask --now codexia-tunnel.service');
+    const startApi = calls.indexOf('--user start codexia-api.service');
+    const stopApi = calls.indexOf('--user stop codexia-api.service');
+    const unmask = calls.indexOf('--user unmask codexia-tunnel.service');
+    const startTunnel = calls.indexOf('--user start codexia-tunnel.service');
+    if (scenario === 'recovery-current') assert.ok(mask >= 0 && mask < startApi && startApi < unmask && unmask < startTunnel);
+    else if (scenario === 'recovery-stale') assert.ok(mask >= 0 && mask < startApi && startApi < stopApi && stopApi < unmask);
+    else assert.equal(mask, -1);
     if (!success) assert.match(result.stderr, scenario === 'recovery-stale'
       ? /restored target or approval changed before publication/u
       : /First activation approval window expired before publication/u);

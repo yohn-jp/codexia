@@ -19,7 +19,7 @@ def recovery_record():
         "operationId": "restore-20261124-01",
         "environment": "codexia-production",
         "backup": {
-            "id": "codexia-20261124T000000Z-00000000-0000-4000-8000-000000000001",
+            "id": "codexia-20261123T220000Z-00000000-0000-4000-8000-000000000001",
             "sourceHostId": "b" * 64,
             "manifestSha256": sha, "transferReceiptSha256": sha, "restoreReceiptSha256": sha,
             "databaseFingerprint": sha, "historyFingerprint": sha,
@@ -27,7 +27,7 @@ def recovery_record():
         "target": {
             "hostId": "c" * 64, "clusterId": "123", "databaseOid": "456",
             "ledgerSha256": sha, "authSchemaSha256": f"sha256:{sha}",
-            "ownerBindingSha256": f"sha256:{sha}", "settingsSha256": sha,
+            "ownerBindingSha256": f"sha256:{sha}", "settingsSha256": sha, "secretSetSha256": sha,
         },
         "release": {
             "image": f"ghcr.io/yohn-jp/codexia-backend@sha256:{sha}", "sourceSha": "a" * 40,
@@ -37,10 +37,30 @@ def recovery_record():
         "writerFence": {"kind": "write-access-revoked", "recordSha256": sha},
         "executorFenceSha256": sha,
         "credentialsRecordSha256": sha,
+        "postBackupWritesRecordSha256": sha,
     }
 
 
 class ProtectedRecoveryTests(unittest.TestCase):
+    def test_recovery_source_and_disposition_match_the_operation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            path = directory / "recovery-handoff.json"
+            record = recovery_record()
+            record["backup"].update({"sourceHostId": record["target"]["hostId"],
+                                     "sourceClusterId": "123", "sourceDatabaseOid": "456"})
+            path.write_text(json.dumps(record))
+            path.chmod(0o600)
+            with self.assertRaises(ValueError):
+                observer.read_recovery_handoff(directory)
+            record["backup"]["sourceClusterId"] = "222"
+            path.write_text(json.dumps(record))
+            self.assertEqual(observer.read_recovery_handoff(directory)[0], record)
+            del record["postBackupWritesRecordSha256"]
+            path.write_text(json.dumps(record))
+            with self.assertRaises(ValueError):
+                observer.read_recovery_handoff(directory)
+
     def test_worker_requires_inactive_state_and_no_enabled_restart(self):
         with patch.object(observer, "command") as command:
             for state in (
