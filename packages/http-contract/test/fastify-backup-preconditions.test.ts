@@ -7,17 +7,63 @@ import { toFastifyRoutes } from '../src/fastify-schema.mjs';
 
 const { routes, schemas } = toFastifyRoutes(parse(readFileSync(new URL('../openapi/codexia.openapi.yaml', import.meta.url), 'utf8')));
 
-function registerBackupFixture(t: TestContext, method: 'PUT' | 'POST', url: string, handler: RouteHandlerMethod) {
+function registerBackupFixture(t: TestContext, method: 'GET' | 'PUT' | 'POST', url: string, handler: RouteHandlerMethod) {
   const route = routes.find(candidate => candidate.method === method && candidate.url === url);
   assert.ok(route, `missing generated route ${method} ${url}`);
 
-  // Exercise generated wire schemas for target routes in an isolated Fastify app.
+  // Exercise the generated Backup Console schemas in an isolated Fastify app.
   const app = Fastify({ ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
   t.after(() => app.close());
   for (const schema of schemas) app.addSchema(schema);
   app.route({ method: route.method, url: route.url, schema: route.schema, handler });
   return app;
 }
+
+test('backup console declares its admission errors and configuration revision header', () => {
+  const backupRoutes = routes.filter(route => route.operationId.startsWith('backup_console_'));
+  assert.equal(backupRoutes.length, 11);
+  for (const route of backupRoutes) {
+    for (const status of ['401', '403', '503']) {
+      assert.deepEqual(route.contentTypes[status], ['application/json'], `${route.operationId} ${status}`);
+    }
+  }
+  for (const id of ['backup_console_config_get', 'backup_console_config_draft_put']) {
+    const route = backupRoutes.find(candidate => candidate.operationId === id);
+    assert.equal(route?.responseHeaders['200']?.etag?.schema.type, 'string', id);
+  }
+});
+
+test('generated backup status schema serializes unset recovery observations without dropping operation details', async t => {
+  const url = '/api/console/backups/status';
+  const status = {
+    activeRevision: null,
+    enabled: false,
+    status: 'DISABLED',
+    degraded: false,
+    appliedAt: null,
+    lastVerifiedOffVmBackup: 'unknown',
+    restoreDrill: 'unknown',
+    staging: 'unknown',
+    operation: {
+      operationId: 'operation-1',
+      requestId: 'request-1',
+      revision: 2,
+      status: 'QUEUED',
+      phase: 'probe',
+      reasonCode: null,
+      observedAt: '2026-11-23T00:00:00.000Z',
+    },
+  };
+  const route = routes.find(candidate => candidate.method === 'GET' && candidate.url === url);
+  const responseSchema = route?.schema.response;
+  assert.ok(responseSchema && typeof responseSchema === 'object' && '200' in responseSchema);
+  assert.deepEqual(responseSchema['200'], { $ref: 'urn:codexia:http-contract:BackupStatusView' });
+  const app = registerBackupFixture(t, 'GET', url, async () => status);
+
+  const response = await app.inject({ method: 'GET', url });
+  assert.equal(response.statusCode, 200, response.payload);
+  assert.deepEqual(response.json(), status);
+});
 
 test('generated backup draft schema requires If-Match and serializes the stale revision error', async t => {
   const url = '/api/console/backups/config/draft';

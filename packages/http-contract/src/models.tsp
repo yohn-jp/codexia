@@ -1715,6 +1715,12 @@ model BackupConfigView {
   ...Record<never>;
 }
 
+model BackupConfigResponse {
+  @statusCode _: 200;
+  @header("ETag") etag: string;
+  @body body: BackupConfigView;
+}
+
 model AwsS3BackupConfigDraft {
   provider: "aws-s3";
   region: string;
@@ -1800,4 +1806,82 @@ model BackupRunReceipt {
   reasonCode?: string | null;
   observedAt?: utcDateTime;
   ...Record<never>;
+}
+
+model BackupOperationView {
+  operationId: string;
+  requestId: string;
+  revision: int32;
+  status: "QUEUED" | "RUNNING" | "PASSED" | "FAILED" | "BLOCKED" | "APPLIED";
+  phase: "probe" | "activate" | "disable";
+  reasonCode: string | null;
+  observedAt: utcDateTime;
+  ...Record<unknown>;
+}
+
+model BackupProbeView extends BackupOperationView {
+  probeId: string;
+  evidence: JsonObject | null;
+}
+
+model BackupRunView {
+  runId: string;
+  requestId: string;
+  revision: int32 | null;
+  maintenanceWindowId: string | null;
+  status: "QUEUED" | "RUNNING" | "UNKNOWN" | "FAILED" | "BLOCKED" | "REMOTE_VERIFIED";
+  phase: string;
+  reasonCode: string | null;
+  sourceSha: string | null;
+  imageDigest: string | null;
+  candidateSourceSha: string | null;
+  candidateImageDigest: string | null;
+  manifestSha256: string | null;
+  offVmConfirmation: JsonObject | null;
+  observedAt: utcDateTime;
+  createdAt: utcDateTime;
+  ...Record<unknown>;
+}
+
+model BackupRunPage {
+  runs: BackupRunView[];
+  nextCursor: string | null;
+  ...Record<unknown>;
+}
+
+model BackupVerificationReference {
+  runId: string;
+  sourceSha: string | null;
+  manifestSha256: string | null;
+  observedAt: utcDateTime;
+  ...Record<unknown>;
+}
+
+model BackupRestoreDrillReference extends BackupVerificationReference {
+  receiptSha256: string;
+}
+
+model BackupRestoreDrillEvidence extends BackupRestoreDrillReference {
+  status: "DRILL_PASSED" | "partial";
+}
+
+model BackupStatusView {
+  activeRevision: int32 | null;
+  enabled: boolean;
+  status: "DISABLED" | "ACTIVE";
+  degraded: boolean;
+  appliedAt: utcDateTime | null;
+  lastVerifiedOffVmBackup: BackupRunView | "unknown";
+  restoreDrill: BackupRestoreDrillReference | "unknown";
+  staging: string;
+  operation?: BackupOperationView;
+  ...Record<unknown>;
+}
+
+model BackupRecoveryView {
+  status: "DRILL_PASSED" | "partial" | "stale" | "unknown";
+  restoreDrill: BackupRestoreDrillEvidence | "unknown";
+  lastVerifiedOffVmBackup: BackupVerificationReference | "unknown";
+  missingConditions: string[];
+  ...Record<unknown>;
 }
