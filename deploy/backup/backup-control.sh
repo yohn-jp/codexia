@@ -25,6 +25,20 @@ runtime_env=(env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8
 node="$(command -v node)"
 
 case "${1:-}" in
+  reconcile-restored-journal|reconcile-restored-absence)
+    umask 077
+    state="$HOME/.local/state/codexia-deploy"
+    [[ -d "$state" && ! -L "$state" && -O "$state" && "$(stat -c %a -- "$state")" == 700 ]] ||
+      { echo 'Backup reconciliation requires private push state' >&2; exit 1; }
+    lock="$state/host.lock"
+    [[ ! -L "$lock" && ( ! -e "$lock" || ( -f "$lock" && -O "$lock" ) ) ]] || exit 1
+    exec 9>>"$lock"
+    flock --exclusive --nonblock 9 || exit 75
+    worker_state="$(systemctl --user show codexia-backup-executor.service --property=ActiveState --value)"
+    worker_enablement="$(systemctl --user show codexia-backup-executor.service --property=UnitFileState --value)"
+    [[ ( "$worker_state" == inactive || "$worker_state" == failed ) && "$worker_enablement" == disabled ]] ||
+      { echo 'Stop and disable the backup executor before reconciling a restored journal' >&2; exit 1; }
+    ;;
   deploy-check|deploy-backup)
     staging="$("${runtime_env[@]}" "$node" --env-file="$settings" -e '
       const { CODEXIA_BACKUP_DESTINATION: destination, CODEXIA_BACKUP_AGE_RECIPIENT: recipient } = process.env;

@@ -30,6 +30,7 @@
   loop:
     - {path: "{{ home }}/.local/state/codexia-deploy", mode: '0700'}
     - {path: "{{ home }}/.local/bin", mode: '0700'}
+    - {path: "{{ home }}/.config/systemd/user", mode: '0700'}
 
 - name: Stage the read-only observer for locked activation checks
   when: codexia_expected_first_activation is defined or codexia_expected_recovery_activation is defined
@@ -51,6 +52,21 @@
     - {src: backup.sh, dest: codexia-backup}
     - {src: backup-runner.sh, dest: codexia-backup-runner}
     - {src: backup-control.sh, dest: codexia-backup-control}
+
+- name: Install the existing executor as a rootless user service
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/backup/codexia-backup-executor.service"
+    dest: "{{ home }}/.config/systemd/user/codexia-backup-executor.service"
+    owner: codexia
+    group: "{{ codexia_service_group | default('codexia') }}"
+    mode: '0600'
+  register: codexia_backup_executor_unit
+
+- name: Reload the changed executor unit without starting or enabling it
+  ansible.builtin.systemd_service:
+    scope: user
+    daemon_reload: true
+  when: codexia_backup_executor_unit.changed
 
 - name: Install the interrupted deployment recovery helper
   ansible.builtin.copy:

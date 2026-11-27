@@ -1,5 +1,91 @@
 #!/usr/bin/env bash
 # Sourced by the disposable app lifecycle. No external Tunnel or S3 credentials.
+verify_private_backup_socket() (
+  set -e
+  local path="$fixture_home/.local/state/codexia-private-socket-fixture"
+  local socket_parent="$fixture_home/.local/share/codexia-backup-postgres"
+  local node_binary
+  node_binary="$(command -v node)"
+  rootless test ! -e "$path"
+  rootless test ! -L "$path"
+  trap 'rootless rm -rf -- "$path"' EXIT
+  rootless install -d -m 0700 "$path"
+  rootless install -d -m 0700 "$path/runtime"
+
+  socket_fixture_admin(){
+    rootless_podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"
+      exec psql -X -qAtw -v ON_ERROR_STOP=1 -U codexia_admin -d codexia "$@"' sh "$@"
+  }
+  await_socket_fixture(){
+    local attempt
+    for ((attempt=1; attempt<=30; attempt++)); do
+      if socket_fixture_admin -h 127.0.0.1 -c 'SELECT 1' >/dev/null 2>&1; then return; fi
+      sleep 1
+    done
+    return 1
+  }
+  test "$(socket_fixture_admin -c "SELECT count(*) > 0 FROM pg_hba_file_rules WHERE type = 'local' AND auth_method = 'trust'")" = t
+  local api_image
+  api_image="$(rootless_podman inspect --format '{{.Image}}' codexia-api)"
+  local locked_exit=0
+  rootless bash -c 'exec 9>> "$HOME/.local/state/codexia-deploy/host.lock"
+    flock --exclusive 9 || exit; bash -s; exit $?' \
+    < "$repo_root/deploy/ansible/backup-postgres-socket.sh" || locked_exit=$?
+  test "$locked_exit" = 75
+  rootless test ! -e "$socket_parent"
+  rootless bash -s < "$repo_root/deploy/ansible/backup-postgres-socket.sh"
+  test "$(rootless_podman inspect --format '{{.Image}}' codexia-api)" = "$api_image"
+  test "$(rootless systemctl --user is-active codexia-api.service)" = active
+  rootless_podman exec codexia-api test ! -e /run/codexia-backup-postgresql
+  test -z "$(rootless bash -s < "$repo_root/deploy/ansible/backup-postgres-socket.sh")"
+  if sudo -u nobody test -x "$socket_parent"; then
+    echo 'An unrelated host UID can reach the private PostgreSQL socket' >&2
+    exit 1
+  fi
+  socket_fixture_admin < "$repo_root/deploy/backup/operational-schema.sql"
+  socket_fixture_admin <<'SOCKET_ROLES'
+CREATE ROLE backup_api_fixture LOGIN PASSWORD 'disposable-private-socket-api';
+CREATE ROLE backup_executor_fixture LOGIN PASSWORD 'disposable-private-socket-executor';
+GRANT codexia_backup_api TO backup_api_fixture;
+GRANT codexia_backup_executor TO backup_executor_fixture;
+SOCKET_ROLES
+  socket_fixture_admin -v backup_api_login=backup_api_fixture -v backup_executor_login=backup_executor_fixture \
+    < "$repo_root/deploy/backup/verify-console-roles.sql"
+
+  rootless_podman exec codexia-api tar -cf - -C /app . |
+    rootless tar -xf - --no-same-owner -C "$path/runtime"
+  rootless tee "$path/runtime/verify-fixture-socket.mjs" >/dev/null <<'SOCKET_NODE'
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+const { Pool } = createRequire(import.meta.resolve('@codexia/api'))('pg');
+async function query(password, sql) {
+  const pool = new Pool({
+    connectionString: `postgresql://backup_executor_fixture:${password ?? ''}@localhost/codexia?host=${encodeURIComponent(process.argv[2])}`,
+    connectionTimeoutMillis: 4000,
+  });
+  try { return await pool.query(sql); } finally { await pool.end(); }
+}
+await assert.rejects(query(undefined, 'SELECT 1'), /password must be a string/u);
+await assert.rejects(query('wrong-password', 'SELECT 1'), { code: '28P01' });
+const verified = await query('disposable-private-socket-executor',
+  'SELECT current_user AS login, inet_client_addr() IS NULL AS socket, count(*)::integer AS runs FROM codexia_backup.runs');
+assert.deepEqual(verified.rows, [{ login: 'backup_executor_fixture', socket: true, runs: 0 }]);
+await assert.rejects(query('disposable-private-socket-executor',
+  'CREATE TABLE codexia_backup.ungranted (id integer)'), { code: '42501' });
+SOCKET_NODE
+  verify_socket_client(){
+    rootless test -S "$socket_parent/socket/.s.PGSQL.5432"
+    rootless "$node_binary" "$path/runtime/verify-fixture-socket.mjs" "$socket_parent/socket"
+  }
+  verify_socket_client
+  rootless systemctl --user stop codexia-api.service
+  rootless systemctl --user restart codexia-db.service
+  await_socket_fixture
+  verify_socket_client
+  rootless systemctl --user start codexia-api.service
+  printf '%s\n' 'Private backup socket verified on rootless Podman with dedicated PostgreSQL logins, SCRAM and restart'
+)
+
 prepare_backup_console_fixture(){
   local settings="$fixture_home/.config/codexia-backup"
   local destination="$fixture_home/.local/state/codexia-backup-mount"
