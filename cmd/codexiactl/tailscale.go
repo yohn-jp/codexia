@@ -24,7 +24,12 @@ import (
 )
 
 const tailnetCLI = "/usr/bin/tailscale"
-const wifAudience = "api.tailscale.com/Ts4P9VFjmJ11CNTRL-khX5P9DgL421CNTRL"
+// GitHub immutable OIDC subjects include stable owner/repository IDs. The
+// environment suffix matches only the two protected Codexia environments.
+const wifSubject = "repo:yohn-jp@299811358/codexia@1450072993:environment:codexia-*"
+const wifIssuer = "https://token.actions.githubusercontent.com"
+const wifTrustConsole = "https://login.tailscale.com/admin/settings/trust-credentials"
+
 
 var tailnetNodeID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 var tailnetBrowserPath = regexp.MustCompile(`^/a/[A-Za-z0-9_-]+$`)
@@ -118,7 +123,8 @@ func prepareTailnet(ctx context.Context, o operator, vm vmObservation, plan bool
 	if err := requireTailnetApproval(approved, err, "the observed Tailscale Tailnet and node were not confirmed"); err != nil {
 		return identity, err
 	}
-	o.Notice("Supply a short-lived Tailnet management access token from https://login.tailscale.com/admin/settings/keys. For an existing scoped trust credential use devices:core:read, devices:posture_attributes:read, policy_file:read and federated_keys:read.")
+	o.Notice("Tailscale administration is needed to verify this VM, the CI SSH policy and GitHub Actions OIDC trust. This is NOT an auth key or the GitHub token; it is used only during this CLI session.")
+	o.Notice("Create a short-lived API access token at https://login.tailscale.com/admin/settings/keys. Inspection requires devices:core:read, devices:posture_attributes:read, policy_file:read and federated_keys:read. If no correctly scoped OIDC trust exists, init can offer to create one after separate approval; that operation additionally requires federated_keys:write.")
 	token, err := o.Secret("Tailscale administration access token")
 	if err != nil {
 		return identity, err
@@ -141,7 +147,7 @@ func prepareTailnet(ctx context.Context, o operator, vm vmObservation, plan bool
 		},
 	}
 	defer func() { client.APIKey = "" }()
-	return inspectTailnet(ctx, client, local)
+	return inspectTailnetWithApproval(ctx, client, local, o, !plan)
 }
 
 func requireTailnetApproval(approved bool, err error, denied string) error {
@@ -282,6 +288,10 @@ func (local localTailnet) identity() (tailnetObservation, error) {
 }
 
 func inspectTailnet(ctx context.Context, client *ts.Client, local localTailnet) (tailnetObservation, error) {
+	return inspectTailnetWithApproval(ctx, client, local, nil, false)
+}
+
+func inspectTailnetWithApproval(ctx context.Context, client *ts.Client, local localTailnet, o operator, allowCreate bool) (tailnetObservation, error) {
 	identity, err := local.identity()
 	if err != nil {
 		return identity, err
@@ -296,9 +306,47 @@ func inspectTailnet(ctx context.Context, client *ts.Client, local localTailnet) 
 		return identity, err
 	}
 
-	keyID, err := discoverTailnetWIF(ctx, client)
+	keyID, mismatches, err := discoverTailnetWIF(ctx, client)
 	if err != nil {
 		return identity, err
+	}
+	if keyID == "" {
+		for _, mismatch := range mismatches {
+			if o != nil {
+				o.Notice("Tailscale OIDC trust mismatch: " + mismatch)
+			}
+		}
+		if !allowCreate || o == nil {
+			return identity, needsAction("No exact GitHub Actions OIDC trust exists. Inspect "+wifTrustConsole+"; init can create a separate, scoped credential after approval. Existing credentials are not changed")
+		}
+		o.Notice("A new credential will trust only "+wifSubject+", main-branch workflows, auth_keys and tag:ci; no existing credential will be modified.")
+		if err := requireApproval(o, "Create a separate minimal GitHub Actions OIDC trust credential in this Tailnet?"); err != nil {
+			return identity, err
+		}
+		created, createErr := client.Keys().CreateFederatedIdentity(ctx, ts.CreateFederatedIdentityRequest{
+			Description: "Codexia protected GitHub Actions",
+			Issuer: wifIssuer, Subject: wifSubject,
+			Scopes: []string{"auth_keys"}, Tags: []string{"tag:ci"},
+			CustomClaimRules: map[string]string{
+				"ref": "refs/heads/main",
+				"workflow_ref": "yohn-jp/codexia/.github/workflows/*@refs/heads/main",
+			},
+		})
+		if createErr != nil {
+			return identity, tailnetAPIError("create approved scoped GitHub OIDC trust (requires federated_keys:write)", createErr)
+		}
+		if created == nil || !tailnetNodeID.MatchString(created.ID) {
+			return identity, refused("Tailscale returned no valid identity for the created OIDC credential; inspect "+wifTrustConsole+" before retrying")
+		}
+		verified, getErr := client.Keys().Get(ctx, created.ID)
+		if getErr != nil {
+			return identity, tailnetAPIError("verify newly created OIDC trust", getErr)
+		}
+		if verified == nil || !matchesWIF(*verified) {
+			return identity, refused("New OIDC credential is not an exact match. Inspect "+wifTrustConsole+" before retrying; do not create another credential")
+		}
+		keyID = created.ID
+		o.Notice("Created and reverified scoped Tailscale OIDC credential "+keyID+". Its audience is api.tailscale.com/"+keyID+".")
 	}
 	identity.ClientID = keyID
 
@@ -342,12 +390,13 @@ func verifyTailnetNode(devices []ts.Device, identity tailnetObservation, local *
 	return nil
 }
 
-func discoverTailnetWIF(ctx context.Context, client *ts.Client) (string, error) {
+func discoverTailnetWIF(ctx context.Context, client *ts.Client) (string, []string, error) {
 	keys, err := client.Keys().List(ctx, true)
 	if err != nil {
-		return "", tailnetAPIError("list federated identities in the Tailnet", err)
+		return "", nil, tailnetAPIError("list federated identities in the Tailnet", err)
 	}
 	var matching string
+	var mismatches []string
 	seen := make(map[string]bool)
 	for _, item := range keys {
 		if !tailnetNodeID.MatchString(item.ID) || seen[item.ID] {
@@ -359,32 +408,59 @@ func discoverTailnetWIF(ctx context.Context, client *ts.Client) (string, error) 
 		}
 		key, err := client.Keys().Get(ctx, item.ID)
 		if err != nil {
-			return "", tailnetAPIError("read federated identity restrictions", err)
+			return "", nil, tailnetAPIError("read federated identity restrictions", err)
 		}
-		if key.ID != item.ID || !matchesWIF(*key) {
+		if key == nil || key.ID != item.ID {
+			return "", nil, refused("Tailscale federated identity changed while being inspected")
+		}
+		problems := wifProblems(*key)
+		if len(problems) != 0 {
+			// Only report credentials for this repository, not other unrelated
+			// workloads sharing the Tailnet.
+			if key.Issuer == wifIssuer && strings.Contains(key.Subject, "codexia") {
+				mismatches = append(mismatches, "credential "+item.ID+": "+strings.Join(problems, "; "))
+			}
 			continue
 		}
 		if matching != "" {
-			return "", refused("multiple federated identities match Codexia's fixed audience and claim requirements; reconcile them in the Tailnet console")
+			return "", nil, refused("Multiple valid GitHub OIDC credentials match this deployment. Resolve the ambiguity in "+wifTrustConsole)
 		}
 		matching = key.ID
 	}
-	if matching == "" {
-		return "", needsAction("no approved federated identity matches the existing workflow audience, main workflows, environments, auth_keys and tag:ci; reconcile in the authorized Tailnet trust settings and retry")
-	}
-	return matching, nil
+	return matching, mismatches, nil
 }
 
-func matchesWIF(key ts.Key) bool {
-	const main = "refs/heads/main"
-	return key.KeyType == "federated" && key.Audience == wifAudience &&
-		key.Issuer == "https://token.actions.githubusercontent.com" &&
-		key.Subject == "repo:yohn-jp/codexia:environment:codexia-*" &&
-		slices.Equal(key.Scopes, []string{"auth_keys"}) && slices.Equal(key.Tags, []string{"tag:ci"}) &&
-		!key.Invalid && key.Revoked.IsZero() && (key.Expires.IsZero() || time.Now().Before(key.Expires)) &&
-		key.CustomClaimRules["ref"] == main &&
-		key.CustomClaimRules["workflow_ref"] == "yohn-jp/codexia/.github/workflows/*@"+main
+func wifProblems(key ts.Key) []string {
+	var problems []string
+	if key.KeyType != "federated" || key.Invalid || !key.Revoked.IsZero() ||
+		(!key.Expires.IsZero() && !time.Now().Before(key.Expires)) {
+		problems = append(problems, "credential is not an active federated identity")
+	}
+	if !tailnetNodeID.MatchString(key.ID) || key.Audience != "api.tailscale.com/"+key.ID {
+		problems = append(problems, "audience must equal api.tailscale.com/<this credential client ID>")
+	}
+	if key.Issuer != wifIssuer {
+		problems = append(problems, "issuer must be "+wifIssuer)
+	}
+	if key.Subject != wifSubject {
+		problems = append(problems, "subject must be "+wifSubject+" (GitHub immutable owner/repository IDs, both protected Environments)")
+	}
+	if !slices.Equal(key.Scopes, []string{"auth_keys"}) {
+		problems = append(problems, "scopes must contain only auth_keys, not all or broader permissions")
+	}
+	if !slices.Equal(key.Tags, []string{"tag:ci"}) {
+		problems = append(problems, "tags must contain only tag:ci")
+	}
+	if key.CustomClaimRules["ref"] != "refs/heads/main" {
+		problems = append(problems, "custom claim ref must equal refs/heads/main")
+	}
+	if key.CustomClaimRules["workflow_ref"] != "yohn-jp/codexia/.github/workflows/*@refs/heads/main" {
+		problems = append(problems, "custom claim workflow_ref must restrict yohn-jp/codexia workflows on main")
+	}
+	return problems
 }
+
+func matchesWIF(key ts.Key) bool { return len(wifProblems(key)) == 0 }
 
 func tailnetAPIError(operation string, err error) error {
 	var response ts.APIError
