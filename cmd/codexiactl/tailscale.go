@@ -24,6 +24,7 @@ import (
 )
 
 const tailnetCLI = "/usr/bin/tailscale"
+
 // GitHub immutable OIDC subjects include stable owner/repository IDs. The
 // environment suffix matches only the two protected Codexia environments.
 const wifSubject = "repo:yohn-jp@299811358/codexia@1450072993:environment:codexia-*"
