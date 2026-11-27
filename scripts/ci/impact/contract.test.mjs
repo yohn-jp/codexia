@@ -12,6 +12,7 @@ import { createVerificationPlan, matchesFullModelOciPath } from './plan.mjs';
 const require = createRequire(new URL('../../../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../../../.github/workflows/verify.yml', import.meta.url), 'utf8'));
+const profileWorkflow = parse(readFileSync(new URL('../../../.github/workflows/verify-profile.yml', import.meta.url), 'utf8'));
 const fullModelWorkflow = parse(readFileSync(new URL('../../../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
 
 test('CI evidence consumers install the frozen dependency before loading evidence', () => {
@@ -87,7 +88,7 @@ test('Biome selects shipped JS/TS changes and config, but not unrelated CI or na
 
 test('the certified graph covers every declared obligation within the twenty-two-job cap', () => {
   assert.ok(REQUIRED_VERIFICATION_JOBS.length + 1 <= 22, 'CI-CD.md caps certification at twenty-two jobs');
-  assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'biome', 'unit', 'types', 'build', 'oci', 'browser', 'certification']);
+  assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'biome', 'unit', 'types', 'profile_core', 'profile_full', 'oci', 'certification']);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
@@ -104,10 +105,21 @@ test('the certified graph covers every declared obligation within the twenty-two
   const runner = readFileSync(new URL('../execution/group.mjs', import.meta.url), 'utf8');
   assert.match(runner, /CODEXIA_ARCHITECTURE_EVIDENCE_DIR: path\.join\(reportDirectory, 'architecture'\)/u);
   assert.deepEqual(REQUIRED_VERIFICATION_JOBS, ['plan', ...Object.keys(VERIFICATION_GROUPS), 'certification']);
-  for (const [family, axis] of [['unit', 'group'], ['types', 'group'], ['build', 'profile'], ['oci', 'profile']]) {
+  for (const [family, axis] of [['unit', 'group'], ['types', 'group'], ['oci', 'profile']]) {
     assert.equal(workflow.jobs[family].strategy.matrix[axis], '${{ fromJSON(needs.plan.outputs.' + family + ') }}');
   }
-  assert.equal(workflow.jobs.browser.strategy.matrix.include, '${{ fromJSON(needs.plan.outputs.browser) }}');
+  assert.equal(workflow.jobs.profile_core.uses, './.github/workflows/verify-profile.yml');
+  assert.equal(workflow.jobs.profile_full.uses, './.github/workflows/verify-profile.yml');
+  assert.equal(workflow.jobs.profile_core.with.profile, 'core');
+  assert.equal(workflow.jobs.profile_full.with.profile, 'full');
+  assert.equal(workflow.jobs.profile_core.with.browser, '${{ needs.plan.outputs.browser_core }}');
+  assert.equal(workflow.jobs.profile_full.with.browser, '${{ needs.plan.outputs.browser_full }}');
+  for (const profile of ['core', 'full']) {
+    const caller = workflow.jobs[`profile_${profile}`];
+    assert.deepEqual(caller.needs, ['plan']);
+    assert.equal(caller.if, `needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && contains(fromJSON(needs.plan.outputs.build), '${profile}')`);
+  }
+  assert.equal(profileWorkflow.jobs.browser.strategy.matrix.include, '${{ fromJSON(inputs.browser) }}');
   const modelJob = workflow.jobs.full_model_oci;
   assert.equal(modelJob.name, 'full-model-oci');
   assert.equal(modelJob.uses, './.github/workflows/full-model-oci-acceptance.yml');
@@ -213,14 +225,14 @@ test('generator inputs select source-to-consumer validation even when generated 
     }
   }
 });
-test('browser jobs start from plan while exact producer restore gates execution; independent groups cannot cancel other evidence', () => {
+test('profile callers start from plan and independent reusable profile graphs cannot wait on each other', () => {
   assert.deepEqual(workflow.concurrency, {
     group: 'verify-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}',
     'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
   });
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.jobs.plan.name, 'plan');
-  for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification', 'full_model_oci', 'biome'].includes(id))) {
+  for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification', 'full_model_oci', 'biome', 'profile_core', 'profile_full'].includes(id))) {
     assert.deepEqual(job.needs, ['plan'], id);
     assert.match(job.if, /needs\.plan\.result == 'success'/);
     assert.equal(job['continue-on-error'], undefined, id);
@@ -228,6 +240,14 @@ test('browser jobs start from plan while exact producer restore gates execution;
     assert.ok(job.steps.some(step => step.run?.includes('group.mjs')));
     assert.ok(job.steps.some(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.if === 'always()'));
   }
+  for (const profile of ['core', 'full']) {
+    const caller = workflow.jobs[`profile_${profile}`];
+    assert.deepEqual(caller.needs, ['plan']);
+    assert.equal(caller.with.profile, profile);
+    assert.deepEqual(profileWorkflow.jobs.browser.needs, ['build']);
+  }
+  assert.ok(workflow.jobs.certification.needs.includes('profile_core'));
+  assert.ok(workflow.jobs.certification.needs.includes('profile_full'));
   const biome = workflow.jobs.biome;
   assert.deepEqual(biome.needs, ['plan']);
   assert.equal(biome.permissions['security-events'], 'write');
@@ -267,7 +287,7 @@ test('browser jobs start from plan while exact producer restore gates execution;
   assert.ok(gate.steps.indexOf(evidenceSelector) < gate.steps.indexOf(evidenceDownload));
 });
 test('browser groups retain immutable runtime and restore the exact producer before running selected shards', () => {
-  const browser = workflow.jobs.browser;
+  const browser = profileWorkflow.jobs.browser;
   const { chromium: chromiumDigest } = PLAYWRIGHT_IMAGE_DIGESTS;
   assert.deepEqual(Object.keys(PLAYWRIGHT_IMAGE_DIGESTS), ['chromium']);
   assert.match(chromiumDigest, /^sha256:[0-9a-f]{64}$/u);
@@ -294,7 +314,7 @@ test('browser groups retain immutable runtime and restore the exact producer bef
   assert.ok(runnerIndex < diagnosticsIndex && diagnosticsIndex < reportIndex);
   const runner = readFileSync(new URL('../execution/group.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(runner, /(?:apt(?:-get)?\s|playwright install|--with-deps)/);
-  assert.match(browser.if, /always\(\)/);
+  assert.equal(browser.if, "needs.build.result == 'success' && inputs.browser != '[]'");
   const restore = browser.steps.find(step => step.id === 'restore-profile');
   assert.ok(restore);
   assert.match(restore.run, /profile-artifact\.mjs restore/);
@@ -305,9 +325,9 @@ test('browser groups retain immutable runtime and restore the exact producer bef
   assert.equal(restore.env.CODEXIA_CI_PROFILE_RECEIPT, browser.steps[runnerIndex].env.CODEXIA_CI_PROFILE_RECEIPT);
   assert.equal(browser.steps[runnerIndex].env.CODEXIA_CI_PROFILE_RESTORE, '${{ steps.restore-profile.outcome }}');
   assert.ok(browser.steps.indexOf(restore) < runnerIndex);
-  const producer = workflow.jobs.build.steps.find(step => step.run?.includes('profile-artifact.mjs pack'));
+  const producer = profileWorkflow.jobs.build.steps.find(step => step.run?.includes('profile-artifact.mjs pack'));
   assert.ok(producer);
-  assert.ok(workflow.jobs.build.steps.some(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.with.name === 'ci-profile-build-${{ matrix.profile }}'));
+  assert.ok(profileWorkflow.jobs.build.steps.some(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.with.name === 'ci-profile-build-${{ inputs.profile }}'));
   assert.doesNotMatch(runner, /run\('pnpm', \['build'\], \{ CODEXIA_PROFILE: group/);
   assert.match(runner, /run-shard\.mjs.*--prebuilt/);
 });
@@ -426,7 +446,7 @@ test('compact main proof is resolved only on main push, skips all heavy families
   assert.equal(reuse.run, 'node scripts/ci/certification/reuse-merged-pr.mjs plan');
   assert.equal(plan.permissions.actions, 'read');
   assert.equal(plan.permissions['pull-requests'], 'read');
-  const families = ['biome', 'unit', 'types', 'build', 'oci', 'browser'];
+  const families = ['biome', 'unit', 'types', 'profile_core', 'profile_full', 'oci'];
   for (const name of families) assert.match(workflow.jobs[name].if, /needs\.plan\.outputs\.reuse != 'true'/);
   assert.deepEqual(REUSED_MAIN_SKIPPED_JOBS, ['full_model_oci', ...families].map(name => workflow.jobs[name].name));
   const gate = workflow.jobs.certification;
