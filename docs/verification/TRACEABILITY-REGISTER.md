@@ -25,7 +25,8 @@
 `DEVIATION` は inventory または契約照合で明示された不一致を示す。
 要求正本に記録された未実装宣言は別欄に残す。
 
-義務に付けた TEST-ID には、既存テストの宣言名、リポジトリ内パス、宣言行、検証する条件を記録する。
+義務に付けたTEST-IDは、テスト登録のliteral `[TEST-ID]` prefixからAST discoveryがsource path、行、表示名を導出して解決する。
+Requirement RegisterにはobligationとTEST-IDの関係を記録し、テスト名やsource位置を複製しない。
 一つのケースが確認できる範囲は、そのケースが実際に観測する条件までである。
 XState v5 は Desktop の WRT-01/REC-01 保存・復旧で部分導入済み。ChangeSet・認証・バックアップへの展開、S3 互換バックアップの転送・隔離復元、owner backup console/executor には、実装または証拠の欠落が残る。
 正式な HTTP/MCP 適合性試験、性能検証、実機・運用証拠のうち exact-source の実行結果を取り込めていないものも未検証のままとする。
@@ -39,7 +40,7 @@ G7 には未接続の実装面、未実行のテスト、証拠を得られて�
 
 This plan-level crosswalk retains its recorded source/test associations as a migration reference. Its source snapshot and rows are not a current implementation inventory; use the generated traceability page and exact-source report for the current main state. `NOT_RUN` is not a pass. The accepted MCP requirements remain the conformance authorities; `MCPV-001..008` are verification-plan IDs from [MCP-V2-MIGRATION](../architecture/MCP-V2-MIGRATION.md), not product conformance statuses. Source locations and test case names below are trace candidates. `NOT_RUN` means no exact-source run/artifact was verified for this change. No MCPV item is marked PASS or VERIFIED here.
 
-MCP-specific source mapping was refreshed against integrated source `f4e574ec` (including the restored HTTP tests, worker cancellation and drain integration, and formatted API admission test). The repository requirement-trace gate checks deterministic UIDs/MIDs, source-path and line-range validity, each declared TEST-ID against its case name/source file, explicit requirement parents, and reverse-surface mappings; these checks do not replace protocol, Inspector, OAuth-client, PostgreSQL, or hosted exact-source evidence.
+MCP-specific source mapping was refreshed against integrated source `f4e574ec` (including the restored HTTP tests, worker cancellation and drain integration, and formatted API admission test). The repository requirement-trace gate checks deterministic UIDs/MIDs, source-path validity, each declared TEST-ID against a statically discovered native registration, its explicit execution scope and requirement parent, and reverse-surface mappings. Discovered line and title data are derived from source; they are not authored TEST-node relations. These checks do not replace protocol, Inspector, OAuth-client, PostgreSQL, or hosted exact-source evidence.
 
 | Plan ID | Requirement link | Source/test candidate | Trace state and remaining evidence |
 | --- | --- | --- | --- |
@@ -52,7 +53,7 @@ MCP-specific source mapping was refreshed against integrated source `f4e574ec` (
 | MCPV-007 | REQ-MCP-001 | `modules/mcp/src/http.test.ts`: modern official v2 client (`TEST-MCPV-007-001`), temporary stateless 2025 fallback (`TEST-MCPV-007-002`), strict legacy rejection/method delegation (`TEST-MCPV-007-003`); `modules/mcp/src/protocol-version.test.ts`: six-month cutoff (`TEST-MCPV-007-004`); `modules/mcp/src/http.test.ts`: production cutoff mode transition | MAPPED_UNVERIFIED; source tests cover modern protocol, bounded fallback, strict mode, and the cutoff predicate; no exact-source run result is recorded; exact run NOT_RUN |
 | MCPV-008 | REQ-MCP-001, REQ-MCP-002 | registered MCP client over Better Auth and PostgreSQL (`TEST-MCPV-004-003`); external client interop per migration design | PARTIAL; the integration case uses the official SDK as the MCP client. Hosted client registration and real OAuth tool interactions require external client evidence; exact run NOT_RUN |
 
-`TEST-MCP-CORE-001-001` links the existing external Assistant admission/no-provider-call case to REQ-MCP-002; it is not a substitute for MCPV-002 protocol conformance. The case names are declared in StrictDoc nodes, and their source file relations use line coordinates. The Better Auth integration case ties OAuth PKCE issuance and refresh to a real 2026 HTTP tool invocation through PostgreSQL. External client interoperability requires evidence from the selected products. Keep these mappings at MAPPED_UNVERIFIED/PARTIAL until the named cases are reviewed and exact-source evidence is captured.
+`TEST-MCP-CORE-001-001` links the existing external Assistant admission/no-provider-call case to REQ-MCP-002; it is not a substitute for MCPV-002 protocol conformance. A TEST node identifies its scenario by TEST-ID and declares whether its execution scope is `TRACE_NODE`, `TRACE_BROWSER`, or `PRODUCT`. The matching source registration carries the literal TEST-ID prefix; discovery supplies its source path, line, and display title. The Better Auth integration case ties OAuth PKCE issuance and refresh to a real 2026 HTTP tool invocation through PostgreSQL. External client interoperability requires evidence from the selected products. Keep these mappings at MAPPED_UNVERIFIED/PARTIAL until the named cases are reviewed and exact-source evidence is captured.
 
 ## E2E追跡例 — 保存・競合・復旧
 
@@ -79,7 +80,7 @@ MCP-specific source mapping was refreshed against integrated source `f4e574ec` (
 
 ## 自動検証の範囲と残件
 
-- StrictDoc verifierはUID/MID、typed relation、File/Test参照、登録済みTEST-IDを検査する。dashboard publisherはcheckout内のdesign/source/test path欠落、StrictDoc output digest、source SHA一致を検査する。
+- StrictDoc verifierはUID/MID、typed relation、source path、登録済みTEST-IDとネイティブ登録の対応を検査する。行・表示名はAST discoveryから導出する。dashboard publisherはcheckout内のdesign/source/test path欠落、StrictDoc output digest、source SHA一致を検査する。
 - reverse scanはAPI runtime route、MCP登録、DB宣言object、Desktop UI control、Native iOS view、Terraform resource、Ansible source、CI workflow definitionを採取する。bounded scan外の要素は未検出を不存在と見なさず、limitation gapとして提示する。
 - API Operation IDは生成Fastify contractから、CI workflow一覧は`.github/workflows`から抽出する。MCP effect、DB live catalog、Desktop runtime state、iOS device behavior、applied IaC、host convergenceとの一致はこの静的scan単独では検証しない。
 - `VERIFIED`は既存certifierが対象義務のexact-source evidenceを記録した場合のみ。ローカル成功、workflow定義、追加Markdown、source pathの存在では昇格しない。
@@ -87,7 +88,7 @@ MCP-specific source mapping was refreshed against integrated source `f4e574ec` (
 ## 生成された追跡結果
 
 義務を追加・修正するときは [Requirement register](../requirements/REQUIREMENT-REGISTER.md) の StrictDoc node を編集する。
-既存の `requirements-trace` はnodeの義務ID、設計・実装参照、surface identifier、TEST-IDを`trace-report.json`の`obligationTrace`に出力し、実装側から見つかった要素と義務の対応を`reverseTrace`に記録する。`caseExecutions`はテスト名と宣言source/rangeを保ち、未実行・skip・TODO・曖昧な対応をPASSに集約しない。両方向の表は同じ義務IDで照合でき、識別子が分からない要素や観測限界は生成結果のgapに残る。
+既存の `requirements-trace` はnodeの義務ID、設計・実装参照、surface identifier、TEST-IDを`trace-report.json`の`obligationTrace`に出力し、実装側から見つかった要素と義務の対応を`reverseTrace`に記録する。`caseExecutions`はAST discoveryで得た登録source path・行・表示名と実行観測をTEST-IDで結ぶ。`TRACE_NODE`と`TRACE_BROWSER`の実行対象source fileは発見した登録から選び、固定補助suiteも併せて実行する。`PRODUCT` suiteはtrace taskの実行対象に含めず、正規の製品検証taskによる証拠を待つ。未実行・skip・TODO・曖昧な対応をPASSに集約しない。両方向の表は同じ義務IDで照合でき、識別子が分からない要素や観測限界は生成結果のgapに残る。
 
 `caseExecutions` の結果は、そのテストケースが実際に実行されたことを示す。
 GitHub Actions 上の実行では同じレポートの `execution` が source SHA、run、attempt、job、task を保持する。

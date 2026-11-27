@@ -209,6 +209,12 @@ importers:
 
   .:
     devDependencies:
+      '@babel/parser':
+        specifier: 7.29.15
+        version: 7.29.15
+      '@babel/traverse':
+        specifier: 7.29.15
+        version: 7.29.15
       '@codexia/api':
         specifier: workspace:*
         version: link:packages/api

@@ -83,7 +83,7 @@ Existing Core / PostgreSQL snapshot / proposal
 
 - `modules/mcp/src/tools/{project,knowledge,story,search,legacy}.ts` と `tools.ts` で実際に登録するtoolをインベントリ化。tool名、説明、input/output Schema、read/compute/propose、project/snapshot requirement、size/time limit、エラーcode、対応するAction IDを記録する。
 - Tool Schemaの正本はSDKに渡す実行Schemaに置き、Markdownからの入力/出力を二重に手書き維持しない。設計上の意味、作用と禁止はMCP-OAUTH/CORE/MODULESが所有する。
-- StrictDocでは `REQ-MCP-*`、`EXT-MCP-*`、tool/Action、source range、TEST-ID、CI証拠を接続する。単にtools/listに載るだけではproposal/author-only invariantを満たしたことにならない。
+- StrictDocでは `REQ-MCP-*`、`EXT-MCP-*`、tool/Action、source fileと意味的識別子、TEST-ID、CI証拠を接続する。行位置はsourceから生成する。単にtools/listに載るだけではproposal/author-only invariantを満たしたことにならない。
 - `legacy.ts` 等の名前だけで廃止と判断しない。要求・runtime使用の逆照合で不要と確定したcompatibilityのみ削除する。旧仕様の保持を無期限に認めることもしない。
 
 ## 検証計画

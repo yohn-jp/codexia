@@ -145,7 +145,7 @@ test('packaged fingerprint works without a database and verified fingerprint wor
   assert.equal(verified, packaged);
 });
 
-test('read-only schema verification rejects missing, altered and newer migration ledgers', async t => {
+test('[TEST-DATA-004-001] read-only schema verification rejects missing, altered and newer migration ledgers', async t => {
   // Use a disposable namespace rather than modifying the shared integration ledger.
   const schema = `migration_gate_${randomUUID().replaceAll('-', '')}`;
   const ledger = `"${schema}".codexia_schema_migrations`;
@@ -179,7 +179,7 @@ test('read-only schema verification rejects missing, altered and newer migration
   await assert.rejects(verifyPostgresSchema(config), /Unexpected applied migration/);
 });
 
-test('migrations are repeatable and document revisions stay immutable', async () => {
+test('[TEST-DATA-002-001] migrations are repeatable and document revisions stay immutable', async () => {
   const project = await persistence.transaction(transaction =>
     transaction.createProject({
       title: `migration-${randomUUID()}`,
@@ -470,7 +470,7 @@ test('Knowledge keyset cursors use PostgreSQL lower semantics and preserve custo
   assert.equal(custom.length, names.length);
 });
 
-test('database foreign keys prevent Knowledge relations from crossing projects', async () => {
+test('[TEST-DATA-003-001] database foreign keys prevent Knowledge relations from crossing projects', async () => {
   const firstProject = await createProject(`scope-a-${randomUUID()}`);
   const secondProject = await createProject(`scope-b-${randomUUID()}`);
   const firstNodeId = randomUUID() as KnowledgeNodeId;
@@ -506,7 +506,7 @@ test('database foreign keys prevent Knowledge relations from crossing projects',
   );
 });
 
-test('UTF-16 edits, idempotency, revision restoration and stale-head conflicts', async () => {
+test('[TEST-DATA-002-002] UTF-16 edits, idempotency, revision restoration and stale-head conflicts', async () => {
   const project = await createProject(`revision-${randomUUID()}`);
   const originalMarkdown = '前😀\uFE0F章 e\u0301\r\n';
   const initial = await createDocument(project.id, originalMarkdown);

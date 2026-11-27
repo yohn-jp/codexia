@@ -27,7 +27,7 @@ test('builds a handoff certificate bound to the successful exact-main Verify run
   assert.equal(validated.image, `ghcr.io/yohn-jp/codexia-backend@${digest('f')}`);
 });
 
-test('rejects unsuccessful, foreign, non-main, stale, or wrong-workflow Verify evidence', () => {
+test('[TEST-OPS-002-001] rejects unsuccessful, foreign, non-main, stale, or wrong-workflow Verify evidence', () => {
   for (const override of [
     { conclusion: 'failure' }, { event: 'pull_request' }, { head_branch: 'feature' },
     { repository: { full_name: 'fork/codexia' } }, { head_repository: { full_name: 'fork/codexia' } },

@@ -435,7 +435,7 @@ test("direct-root Story scenes keep PostgreSQL positions and context through Act
   }
 });
 
-test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, review and receipt over both transports", {
+test("[TEST-MCPV-004-001] native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, review and receipt over both transports", {
   timeout: process.env.CODEXIA_MCP_EXTERNAL_CLIENT_TIMEOUT_MS
     ? Number(process.env.CODEXIA_MCP_EXTERNAL_CLIENT_TIMEOUT_MS)
     : 120_000,
@@ -856,7 +856,7 @@ async function verifyHttpDrain(connection, host, projectId) {
   assert.equal(host.runtime.status("nlp").activeJobs, 0, "shutdown must leave no real worker jobs active");
 }
 
-test("MCP cancellation stops real NLP worker jobs through stdio and Streamable HTTP", {
+test("[TEST-MCPV-006-001] MCP cancellation stops real NLP worker jobs through stdio and Streamable HTTP", {
   skip: !READY_MODULES.includes("nlp"),
   timeout: 120_000,
 }, async (t) => {
@@ -885,7 +885,7 @@ test("MCP cancellation stops real NLP worker jobs through stdio and Streamable H
   await verifyHttpDrain(http, host, projectId);
 });
 
-test("stdio and Streamable HTTP enforce external Assistant admission with a configured provider", {
+test("[TEST-MCP-CORE-001-001] stdio and Streamable HTTP enforce external Assistant admission with a configured provider", {
   skip: !READY_MODULES.includes("assistant"),
   timeout: 120_000,
 }, async (t) => {

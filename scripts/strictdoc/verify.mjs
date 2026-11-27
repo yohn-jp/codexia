@@ -7,8 +7,10 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readRegularFile } from '../shared/read-regular-file.mjs';
 import { associateTraceCases } from './case-results.mjs';
-import { buildObligationTrace } from './obligation-trace.mjs';
+import { discoverTestSources } from './test-sources.mjs';
+import { buildObligationTrace, testIdReferences, TEST_ID } from './obligation-trace.mjs';
 import { buildReverseTrace, discoverPlatformSurfaces, discoverReverseSurfaces } from './reverse-trace.mjs';
+import { discoverAnsibleSourceGraph } from './ansible-source-graph.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');
@@ -17,6 +19,7 @@ const DECISION_STATES = new Set(['ACCEPTED', 'PROPOSED', 'RETIRED']);
 const CONFORMANCE_STATES = new Set([
   'UNMAPPED', 'MAPPED_UNVERIFIED', 'PARTIAL', 'DEVIATION', 'BLOCKED', 'VERIFIED', 'NOT_APPLICABLE',
 ]);
+const EXECUTION_SCOPES = new Set(['TRACE_NODE', 'TRACE_BROWSER', 'PRODUCT']);
 const APPLICABILITY_STATES = new Set(['CURRENT', 'FUTURE_TARGET', 'RETIRED']);
 
 export function deterministicMid(uid) {
@@ -60,8 +63,7 @@ export function validateRequirementNodes(nodes) {
 /** Project gate observations without promoting partial evidence to a product verdict. */
 export function projectTraceabilityGates({ requirementNodes, obligationTrace, reverseTrace, caseExecutions, run, publisherStatus = 'NOT_PUBLISHED' }) {
   const byId = new Map(caseExecutions.map(item => [item.testId, item]));
-  const required = requirementNodes.flatMap(node => String(node['Test IDs'] ?? '').split(/[\s,;]+/u)
-    .filter(id => /^TEST-(?:[A-Z0-9]+-)+\d{3}$/u.test(id)));
+  const required = requirementNodes.flatMap(testIdReferences);
   const unresolvedCases = required.filter(id => byId.get(id)?.result !== 'PASSED');
   const hasTraceFailures = obligationTrace.violations.length > 0 || reverseTrace.violations.length > 0;
   const gapCount = obligationTrace.gaps.length + reverseTrace.gaps.length;
@@ -108,30 +110,11 @@ export async function validateRelations(nodes, repositoryRoot) {
         violations.push(`${node.UID}: File relation resolves outside repository: ${relativePath}`);
         continue;
       }
-      const nonFileMessage = `${node.UID}: File relation target is not a file: ${relativePath}`;
-      if (relation.LINE_RANGE === undefined) {
-        if (!(await lstat(source)).isFile()) violations.push(nonFileMessage);
-        continue;
+      if (!(await lstat(source)).isFile()) {
+        violations.push(`${node.UID}: File relation target is not a file: ${relativePath}`);
       }
-      const lineRange = String(relation.LINE_RANGE);
-      const match = /^(\d+)\s*,\s*(\d+)$/u.exec(lineRange);
-      if (!match) {
-        violations.push(`${node.UID}: Invalid line range for ${relativePath}: ${lineRange}`);
-        continue;
-      }
-      let content;
-      try {
-        content = await readRegularFile(source, { message: nonFileMessage });
-      } catch (error) {
-        if (error?.code !== 'ERR_NOT_REGULAR_FILE') throw error;
-        violations.push(error.message);
-        continue;
-      }
-      const start = Number(match[1]);
-      const end = Number(match[2]);
-      const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/u).length - (content.endsWith('\n') ? 1 : 0);
-      if (start < 1 || end < start || end > lineCount) {
-        violations.push(`${node.UID}: ${relativePath} line range ${lineRange} exceeds source length (${lineCount} lines)`);
+      if (relation.LINE_RANGE !== undefined) {
+        violations.push(`${node.UID}: Authored line range is forbidden for ${relativePath}`);
       }
     }
   }
@@ -153,26 +136,24 @@ export function validateObligationDesignRefs(nodes, registerPath, repositoryRoot
   return validateRelations(withRelations, repositoryRoot);
 }
 
-export async function validateScenarioNodes(scenarios, requirements, repositoryRoot) {
+export function validateScenarioNodes(scenarios, requirements, testSources) {
   const violations = [];
   const requirementByUid = new Map(requirements.map((node) => [node.UID, node]));
-  const seen = new Set();
-  const root = await realpath(repositoryRoot);
+  const parentsByTest = new Map();
   for (const scenario of scenarios) {
     const uid = scenario.UID;
-    if (typeof uid !== 'string' || !/^TEST-[A-Z0-9]+(?:-[A-Z0-9]+)*$/u.test(uid)) {
+    if (typeof uid !== 'string' || !TEST_ID.test(uid)) {
       violations.push(`Invalid test scenario UID: ${String(uid)}`);
       continue;
     }
-    if (seen.has(uid)) violations.push(`Duplicate test scenario UID ${uid}`);
-    seen.add(uid);
+    if (parentsByTest.has(uid)) violations.push(`Duplicate test scenario UID ${uid}`);
     if (scenario.MID !== deterministicMid(uid)) violations.push(`MID for ${uid} is not deterministic`);
-    const caseName = scenario['Case name'];
-    if (typeof caseName !== 'string' || caseName.trim() === '') violations.push(`Missing Case name for ${uid}`);
+    if (!EXECUTION_SCOPES.has(scenario['Execution scope'])) violations.push(`${uid} has invalid Execution scope`);
     if (scenario['Exact-run reference'] !== 'NOT_RUN') {
       violations.push(`${uid} authored Exact-run reference must be NOT_RUN; observed runs are attached in Verify evidence`);
     }
     const parentRelations = (scenario.RELATIONS ?? []).filter((relation) => relation.TYPE === 'Parent');
+    parentsByTest.set(uid, parentRelations[0]?.VALUE);
     if (parentRelations.length === 0) violations.push(`${uid} is missing a parent requirement`);
     if (parentRelations.length > 1) violations.push(`${uid} has multiple parent requirements`);
     for (const relation of parentRelations) {
@@ -181,53 +162,33 @@ export async function validateScenarioNodes(scenarios, requirements, repositoryR
         violations.push(`${uid} points to unknown parent requirement ${relation.VALUE}`);
         continue;
       }
-      const declaredIds = String(parent['Test IDs'] ?? '').split(/[\s,;]+/u)
-        .filter((item) => /^TEST-(?:[A-Z0-9]+-)+\d{3}$/u.test(item));
-      if (!declaredIds.includes(uid)) violations.push(`${uid} is not declared by parent requirement ${relation.VALUE}`);
+      if (!testIdReferences(parent).includes(uid)) violations.push(`${uid} is not declared by parent requirement ${relation.VALUE}`);
     }
-    const fileRelations = (scenario.RELATIONS ?? []).filter((relation) => relation.TYPE === 'File');
-    if (fileRelations.length === 0) violations.push(`${uid} is missing a test source File relation`);
-    let caseFound = false;
-    let rangedCaseFound = false;
-    for (const relation of fileRelations) {
-      const relativePath = relation.VALUE ?? relation.PATH;
-      if (typeof relativePath !== 'string' || path.isAbsolute(relativePath)) continue;
-      const resolved = path.resolve(root, relativePath);
-      if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) continue;
-      try {
-        const realSource = await realpath(resolved);
-        if (!realSource.startsWith(`${root}${path.sep}`)) continue;
-        const source = await readRegularFile(realSource);
-        if (typeof caseName === 'string' && source.includes(caseName)) {
-          caseFound = true;
-          if (relation.LINE_RANGE === undefined) rangedCaseFound = true;
-          else {
-            const match = /^(\d+)\s*,\s*(\d+)$/u.exec(String(relation.LINE_RANGE));
-            if (match) {
-              const [start, end] = match.slice(1).map(Number);
-              const lines = source.split(/\r?\n/u);
-              if (lines.some((line, index) => index + 1 >= start && index + 1 <= end && line.includes(caseName))) rangedCaseFound = true;
-            }
-          }
-        }
-      } catch {
-        // File relation failures are also checked by validateRelations.
-      }
+    if ((scenario.RELATIONS ?? []).some(relation => relation.TYPE === 'File')) {
+      violations.push(`${uid} test File relations must be derived from the native registration`);
     }
-    if (typeof caseName === 'string' && !caseFound) violations.push(`${uid} Case name was not found in its test source file`);
-    else if (typeof caseName === 'string' && !rangedCaseFound) violations.push(`${uid} Case name was not found within its declared test source line range`);
+    const source = testSources.get(uid);
+    if (!source) violations.push(`${uid} has no native test registration`);
+    else if (['TRACE_NODE', 'TRACE_BROWSER'].includes(scenario['Execution scope']) && source.runner !== 'node') {
+      violations.push(`${uid} must register with node:test in ${scenario['Execution scope']}`);
+    }
   }
   for (const requirement of requirements) {
-    const ids = String(requirement['Test IDs'] ?? '').split(/[\s,;]+/u)
-      .filter((item) => /^TEST-(?:[A-Z0-9]+-)+\d{3}$/u.test(item));
+    const ids = testIdReferences(requirement);
+    if (new Set(ids).size !== ids.length) violations.push(`${requirement.UID} contains duplicate TEST-ID references`);
     for (const id of ids) {
-      if (!seen.has(id)) violations.push(`${requirement.UID} declares missing test scenario ${id}`);
+      if (!TEST_ID.test(id)) violations.push(`${requirement.UID} has invalid TEST-ID ${id}`);
+      else if (!parentsByTest.has(id)) violations.push(`${requirement.UID} declares missing test scenario ${id}`);
+      else if (parentsByTest.get(id) !== requirement.UID) violations.push(`${requirement.UID} declares ${id} parented by ${parentsByTest.get(id) ?? 'no requirement'}`);
     }
+  }
+  for (const id of testSources.keys()) {
+    if (!parentsByTest.has(id)) violations.push(`Native test registration refers to unknown TEST-ID ${id}`);
   }
   return [...new Set(violations)];
 }
 
-export function validateInventory(discovered, classifications) {
+export function validateInventory(discovered, classifications, ansibleProjection = { surfaces: [], violations: [] }) {
   const violations = [];
   const classificationByKey = new Map();
   for (const entry of classifications) {
@@ -241,7 +202,7 @@ export function validateInventory(discovered, classifications) {
 
   const kindMap = {
     routes: 'route', tools: 'tool', databaseObjects: 'databaseObject',
-    nativeIosViews: 'nativeIosView', iacResources: 'iacResource', ansibleFiles: 'ansibleSource',
+    nativeIosViews: 'nativeIosView', iacResources: 'iacResource',
   };
   for (const [bucket, kind] of Object.entries(kindMap)) {
     for (const id of discovered[bucket] ?? []) {
@@ -256,6 +217,18 @@ export function validateInventory(discovered, classifications) {
     if (!hasDiscoveredSurface) {
       violations.push(`Stale inventory classification for ${entry.kind} ${entry.id}`);
     }
+  }
+
+  const projectedAnsibleFiles = new Set((ansibleProjection.surfaces ?? []).map(surface => surface.id));
+  for (const file of discovered.ansibleFiles ?? []) {
+    if (!projectedAnsibleFiles.has(file)) violations.push(`Unclassified ansibleSource ${file}`);
+  }
+  for (const file of projectedAnsibleFiles) {
+    if (!(discovered.ansibleFiles ?? []).includes(file)) violations.push(`Stale Ansible source projection ${file}`);
+  }
+  violations.push(...(ansibleProjection.violations ?? []));
+  if (classifications.some(entry => entry.kind === 'ansibleSource')) {
+    violations.push('Per-file ansibleSource classifications are not supported; classify Ansible source groups instead.');
   }
   return violations;
 }
@@ -448,15 +421,22 @@ async function readScopedSourceFiles(root, paths, kind) {
   return files;
 }
 
-export async function discoverSourceInventory(root, scope) {
+export async function discoverSourceInventory(root, scope, inventory = {}) {
   const routeFiles = await readScopedSourceFiles(root, scope?.routes, 'route');
   const toolFiles = await readScopedSourceFiles(root, scope?.tools, 'tool');
   const databaseFiles = await readScopedSourceFiles(root, scope?.databaseObjects, 'database object');
+  const ansibleProjection = await discoverAnsibleSourceGraph({
+    repositoryRoot: root,
+    ansibleRoot: scope?.ansible,
+    groups: inventory.ansibleGroups ?? [],
+    overrides: inventory.ansibleOverrides ?? [],
+  });
   const platform = await discoverPlatformSurfaces({
     repositoryRoot: root,
     nativeIosRoot: scope?.nativeIos,
     iacRoot: scope?.iac,
     ansibleRoot: scope?.ansible,
+    ansibleProjection,
   });
   const discovered = {
     routes: routeFiles.flatMap(({ source }) => discoverGeneratedContractRoutes(source)),
@@ -464,18 +444,19 @@ export async function discoverSourceInventory(root, scope) {
     databaseObjects: databaseFiles.flatMap(({ source }) => discoverSqlObjects(source)),
     nativeIosViews: platform.surfaces.filter(item => item.kind === 'nativeIosView').map(item => item.id),
     iacResources: platform.surfaces.filter(item => item.kind === 'iacResource').map(item => item.id),
-    ansibleFiles: platform.surfaces.filter(item => item.kind === 'ansibleSource').map(item => item.id),
+    ansibleFiles: ansibleProjection.surfaces.map(item => item.id),
   };
   for (const [bucket, values] of Object.entries(discovered)) {
     discovered[bucket] = [...new Set(values)].sort();
   }
-  return discovered;
+  return { ...discovered, ansibleProjection };
 }
 
 export async function verifySourceInventory(root, inventory) {
-  const discovered = await discoverSourceInventory(root, inventory?.scope);
-  const violations = validateInventory(discovered, inventory?.classifications ?? []);
-  return { discovered, violations };
+  const sourceInventory = await discoverSourceInventory(root, inventory?.scope, inventory);
+  const { ansibleProjection, ...discovered } = sourceInventory;
+  const violations = validateInventory(discovered, inventory?.classifications ?? [], ansibleProjection);
+  return { discovered, ansibleProjection, violations };
 }
 
 export function resolveRunIdentity(env) {
@@ -843,7 +824,8 @@ async function runVerifier(args) {
     }
     const nodeViolations = validateRequirementNodes(requirementNodes);
     if (nodeViolations.length > 0) throw new Error(nodeViolations.join('\n'));
-    const scenarioViolations = await validateScenarioNodes(scenarioNodes, requirementNodes, root);
+    const { sources: testSources, violations: discoveryViolations } = await discoverTestSources(root);
+    const scenarioViolations = [...discoveryViolations, ...validateScenarioNodes(scenarioNodes, requirementNodes, testSources)];
     if (scenarioViolations.length > 0) throw new Error(scenarioViolations.join('\n'));
     const exportedIds = requirementNodes.map((node) => node.UID);
     const missingFromExport = currentSourceIds.filter((id) => !exportedIds.includes(id));
@@ -857,7 +839,7 @@ async function runVerifier(args) {
     if (designViolations.length > 0) throw new Error(designViolations.join('\n'));
 
     const inventory = JSON.parse(await readFile(inventoryPath, 'utf8'));
-    const { discovered, violations: inventoryViolations } = await verifySourceInventory(root, inventory);
+    const { discovered, ansibleProjection, violations: inventoryViolations } = await verifySourceInventory(root, inventory);
     if (inventoryViolations.length > 0) throw new Error(inventoryViolations.join('\n'));
     const stableMids = [...requirementNodes, ...scenarioNodes, ...obligationNodes].map((node) => node.MID);
     const determinism = await compareExports(run1, run2, stableMids);
@@ -887,18 +869,32 @@ async function runVerifier(args) {
     const nodeTraceTests = [
       'scripts/strictdoc/verify.test.mjs', 'scripts/strictdoc/case-results.test.mjs',
       'scripts/strictdoc/obligation-trace.test.mjs', 'scripts/strictdoc/reverse-trace.test.mjs',
+      'scripts/strictdoc/test-sources.test.mjs',
       'scripts/audit/specifications.test.mjs', 'scripts/ci/evidence/trace-receipt.test.mjs',
       'scripts/verification/artifacts/pages-live-ux.test.mjs',
     ];
     const browserTraceTests = ['scripts/strictdoc/verify.browser.mjs'];
-    const nodeTest = await executeTraceTests(root, tempRoot, 'node', nodeTraceTests);
-    const browserTest = await executeTraceTests(root, tempRoot, 'playwright', browserTraceTests, {
+    const testsForScope = (scope, supportingFiles) => [...new Set([
+      ...supportingFiles,
+      ...scenarioNodes.filter(node => node['Execution scope'] === scope).map(node => testSources.get(node.UID).file),
+    ])];
+    const nodeFiles = testsForScope('TRACE_NODE', nodeTraceTests);
+    const browserFiles = testsForScope('TRACE_BROWSER', browserTraceTests);
+    const nodeFileSet = new Set(nodeFiles);
+    const browserFileSet = new Set(browserFiles);
+    for (const node of scenarioNodes) {
+      const { file } = testSources.get(node.UID);
+      const actualScope = nodeFileSet.has(file) ? 'TRACE_NODE' : browserFileSet.has(file) ? 'TRACE_BROWSER' : 'PRODUCT';
+      if (actualScope !== node['Execution scope'] || (nodeFileSet.has(file) && browserFileSet.has(file))) {
+        throw new Error(`${node.UID} execution scope conflicts with the trace runner assignment for ${file}`);
+      }
+    }
+    const nodeTest = await executeTraceTests(root, tempRoot, 'node', nodeFiles);
+    const browserTest = await executeTraceTests(root, tempRoot, 'playwright', browserFiles, {
       ...process.env, CODEXIA_STRICTDOC_OUTPUT_DIR: finalOutput,
     });
-    const caseExecutions = associateTraceCases(scenarioNodes, [...nodeTest.outcomes, ...browserTest.outcomes]);
-    const traceTestPaths = new Set([...nodeTraceTests, ...browserTraceTests]);
-    const requiredCases = scenarioNodes.filter(node => (node.RELATIONS ?? []).some(relation =>
-      relation.TYPE === 'File' && traceTestPaths.has(relation.VALUE ?? relation.PATH)));
+    const caseExecutions = associateTraceCases(testSources, [...nodeTest.outcomes, ...browserTest.outcomes]);
+    const requiredCases = scenarioNodes.filter(node => node['Execution scope'] !== 'PRODUCT');
     const caseById = new Map(caseExecutions.map(outcome => [outcome.testId, outcome]));
     const casesWithoutPass = requiredCases.filter(node => caseById.get(node.UID)?.result !== 'PASSED');
     if (casesWithoutPass.length > 0) {
@@ -924,7 +920,7 @@ async function runVerifier(args) {
       repositoryRoot: root, expectedRepository: run.repository, expectedSourceSha: git.sourceSha, runEvidence,
     });
     if (obligationTrace.violations.length > 0) throw new Error(obligationTrace.violations.join('\n'));
-    const reverseDiscovery = await discoverReverseSurfaces({ repositoryRoot: root, boundedDiscovery: discovered });
+    const reverseDiscovery = await discoverReverseSurfaces({ repositoryRoot: root, boundedDiscovery: discovered, ansibleProjection });
     const reverseTrace = await buildReverseTrace({ discovered: reverseDiscovery, inventory, obligations: obligationTrace.rows });
     if (reverseTrace.violations.length > 0) throw new Error(reverseTrace.violations.join('\n'));
     const lockPath = path.join(SCRIPT_DIR, 'requirements.lock.txt');

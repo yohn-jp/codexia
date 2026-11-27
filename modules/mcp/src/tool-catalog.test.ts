@@ -93,7 +93,7 @@ async function connectToolClient(t: TestContext, actions: ActionDescriptor[] = [
   return { client, calls };
 }
 
-test('MCP tools/list publishes the compatible tool names and object input schemas', async t => {
+test('[TEST-MCPV-001-002] MCP tools/list publishes the compatible tool names and object input schemas', async t => {
   const { client } = await connectToolClient(t);
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map(tool => tool.name).sort(), publicToolNames);

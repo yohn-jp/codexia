@@ -322,7 +322,7 @@ test("exact revision acknowledgement removes its draft without reviving deleted 
   expect((await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
 });
 
-test("a committed save with a lost response is reconciled after reload with the same operation identity", async ({ page, authorizeAuthor }) => {
+test("[TEST-API-002-001] a committed save with a lost response is reconciled after reload with the same operation identity", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);
   const text = "Committed before its response was lost.";
   const before = await read(f);
@@ -395,7 +395,7 @@ test("replaying a saved operation after a newer remote revision shows the curren
   expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
 });
 
-test("a lost save response survives newer input, reloads, and rebases the newer draft after acknowledgement", async ({ page, authorizeAuthor }) => {
+test("[TEST-UI-002-001] a lost save response survives newer input, reloads, and rebases the newer draft after acknowledgement", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);
   const submitted = "Submitted B before newer input.";
   const newer = "Newer C entered while B was saving.";

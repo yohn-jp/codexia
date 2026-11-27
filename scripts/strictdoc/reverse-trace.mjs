@@ -2,6 +2,7 @@ import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readRegularFile } from '../shared/read-regular-file.mjs';
+import { discoverAnsibleSourceGraph } from './ansible-source-graph.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, '../..');
@@ -97,6 +98,7 @@ export async function discoverPlatformSurfaces({
   nativeIosRoot = 'ios',
   iacRoot = 'deploy/cloudflare/terraform',
   ansibleRoot = 'deploy/ansible',
+  ansibleProjection,
 } = {}) {
   const root = path.resolve(repositoryRoot);
   const surfaces = [];
@@ -111,18 +113,15 @@ export async function discoverPlatformSurfaces({
   for (const file of terraformFiles) surfaces.push(...terraformResources(await readRegularFile(path.join(root, file)), file));
   if (terraformFiles.length === 0) limitations.push({ area: 'iac', reason: `Canonical Terraform source tree is empty: ${iacRoot}` });
   limitations.push({ area: 'iac-runtime', reason: 'Terraform declarations do not prove a plan, applied provider state, or live routing configuration.' });
-  const ansibleFiles = (await walkFiles(root, ansibleRoot)).filter(file => /\.ya?ml$/u.test(file));
-  for (const file of ansibleFiles) surfaces.push({
-    kind: 'ansibleSource', id: file, source: { path: file },
-    provenance: 'Canonical Ansible playbook or inventory source under the repository IaC tree; source presence does not prove host execution or desired-state convergence.',
-  });
-  if (ansibleFiles.length === 0) limitations.push({ area: 'ansible', reason: `Canonical Ansible source tree is empty: ${ansibleRoot}` });
+  const ansible = ansibleProjection ?? await discoverAnsibleSourceGraph({ repositoryRoot: root, ansibleRoot });
+  surfaces.push(...ansible.surfaces);
+  if (ansible.surfaces.length === 0) limitations.push({ area: 'ansible', reason: `Canonical Ansible source tree is empty: ${ansibleRoot}` });
   limitations.push({ area: 'ansible-runtime', reason: 'Ansible playbook declarations do not prove execution against a host or resulting system state.' });
   return { surfaces, limitations };
 }
 
 /** Discover source-declared surfaces from domain authorities. The output is an inventory, never a certification. */
-export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, boundedDiscovery } = {}) {
+export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, boundedDiscovery, ansibleProjection } = {}) {
   const root = path.resolve(repositoryRoot);
   const surfaces = [];
   const limitations = [];
@@ -189,7 +188,7 @@ export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, b
   if (workflowFiles.length === 0) limitations.push({ area: 'ci', reason: 'GitHub Actions workflow directory is unavailable.' });
   else limitations.push({ area: 'ci-runtime', reason: 'Workflow source is not a run result. The exact-source task, job, attempt, and artifact certification remain in the existing execution evidence.' });
 
-  const platform = await discoverPlatformSurfaces({ repositoryRoot: root });
+  const platform = await discoverPlatformSurfaces({ repositoryRoot: root, ansibleProjection });
   surfaces.push(...platform.surfaces);
   limitations.push(...platform.limitations);
 
@@ -250,7 +249,6 @@ function inventoryKindMatches(surfaceKind, inventoryKind) {
   if (['databaseObject', 'databaseCatalogObject', 'databaseMigrationObject'].includes(surfaceKind)) return inventoryKind === 'databaseObject';
   if (surfaceKind === 'nativeIosView') return inventoryKind === 'nativeIosView';
   if (surfaceKind === 'iacResource') return inventoryKind === 'iacResource';
-  if (surfaceKind === 'ansibleSource') return inventoryKind === 'ansibleSource';
   return false;
 }
 
@@ -275,11 +273,17 @@ export function buildReverseTrace({ discovered = [], inventory = [], obligations
         .some((reference) => isExactSurfaceReference(reference, surface));
     });
     const kindMatches = inventoryEntries.filter((entry) => inventoryKindMatches(surface.kind, entry.kind) && (entry.id === surface.id || entry.id === `${surface.kind} ${surface.id}`));
-    const inventoryClassification = kindMatches[0]?.classification;
-    const candidateRequirementIds = [...new Set((inventoryClassification?.match(/REQ-[A-Z]+-\d{3}/gu) ?? []))];
+    const inventoryClassification = surface.kind === 'ansibleSource' ? surface.inventoryClassification : kindMatches[0]?.classification;
+    const candidateRequirementIds = surface.kind === 'ansibleSource'
+      ? surface.candidateRequirementIds ?? []
+      : [...new Set((inventoryClassification?.match(/REQ-[A-Z]+-\d{3}/gu) ?? []))];
     const classificationFields = {
       ...(inventoryClassification ? { inventoryClassification } : {}),
       ...(candidateRequirementIds.length ? { candidateRequirementIds } : {}),
+      ...(surface.kind === 'ansibleSource' ? {
+        inventoryGroups: surface.inventoryGroups ?? [],
+        mappingBasis: surface.mappingBasis ?? 'unclassified',
+      } : {}),
     };
     const provenance = surface.provenance ?? 'Source discovery provided without provenance.';
     if (surface.kind === 'httpRuntimeRoute' && (surface.classification === 'unadmitted' || !admittedHttpOperations.has(surface.id))) {

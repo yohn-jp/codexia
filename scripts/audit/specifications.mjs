@@ -45,7 +45,7 @@ function publicExactRuns(items, testIds, execution, caseById) {
   });
 }
 
-const TRACE_INPUTS = ['docs/architecture/DOCUMENTATION-AUTHORITY.md', 'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md', 'docs/architecture/SPECIFICATION-TOOLCHAIN.md', 'docs/requirements/REQUIREMENT-REGISTER.md', 'docs/requirements/STRICTDOC-TRACEABILITY.md', 'docs/requirements/STRICTDOC-GRAMMAR.gra.md', 'docs/verification/TRACEABILITY-REGISTER.md', 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md', 'scripts/strictdoc/strictdoc_config.py', 'scripts/strictdoc/surface-inventory.json', 'scripts/strictdoc/requirements.lock.txt', 'scripts/strictdoc/verify.mjs', 'scripts/strictdoc/obligation-trace.mjs', 'scripts/strictdoc/reverse-trace.mjs', 'scripts/strictdoc/case-results.mjs', 'scripts/audit/specifications.mjs', 'scripts/audit/traceability.css', 'scripts/audit/traceability-ui.js', 'scripts/pages-ui/navigation.mjs', 'scripts/pages-ui/navigation.css', 'scripts/pages-ui/navigation.js'];
+const TRACE_INPUTS = ['docs/architecture/DOCUMENTATION-AUTHORITY.md', 'docs/architecture/MCP-V2-MIGRATION.md', 'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md', 'docs/architecture/SPECIFICATION-TOOLCHAIN.md', 'docs/requirements/README.md', 'docs/requirements/REQUIREMENT-REGISTER.md', 'docs/requirements/STRICTDOC-TRACEABILITY.md', 'docs/requirements/STRICTDOC-GRAMMAR.gra.md', 'docs/verification/TRACEABILITY-REGISTER.md', 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md', 'scripts/strictdoc/strictdoc_config.py', 'scripts/strictdoc/surface-inventory.json', 'scripts/strictdoc/requirements.lock.txt', 'scripts/strictdoc/verify.mjs', 'scripts/strictdoc/test-sources.mjs', 'scripts/strictdoc/test-source-path.mjs', 'scripts/strictdoc/ansible-source-graph.mjs', 'scripts/strictdoc/obligation-trace.mjs', 'scripts/strictdoc/reverse-trace.mjs', 'scripts/strictdoc/case-results.mjs', 'scripts/audit/specifications.mjs', 'scripts/audit/traceability.css', 'scripts/audit/traceability-ui.js', 'scripts/pages-ui/navigation.mjs', 'scripts/pages-ui/navigation.css', 'scripts/pages-ui/navigation.js'];
 const TRACE_REPOSITORY = 'yohn-jp/codexia';
 const AREA_LABELS = { API: 'API', AUTH: '認証', CORE: 'Core', DATA: 'DB', EXT: '外部IF・IaC', MCP: 'MCP', OPS: 'デプロイ・運用', QUAL: '品質', TRACE: '追跡基盤', UI: 'Desktop UI', IOS: 'Native iOS', OTHER: 'その他' };
 const SURFACE_AREA_LABELS = { ...AREA_LABELS, EXT: 'IaC', EXTIF: 'External IF' };
@@ -76,11 +76,11 @@ function repositoryPathInfo(repoPath) {
 }
 function lineFragment(reference) {
   if (Number.isInteger(reference?.line)) return `#L${reference.line}`;
-  const range = reference?.range ?? reference?.LINE_RANGE;
-  if (range === undefined) return '';
-  const match = String(range).match(/^\s*(\d+)(?:\s*,\s*(\d+))?\s*$/u);
-  if (!match) return '';
-  return match[2] && match[2] !== match[1] ? `#L${match[1]}-L${match[2]}` : `#L${match[1]}`;
+  return '';
+}
+function projectSourceReference(reference) {
+  if (!reference || typeof reference.path !== 'string' || reference.path === '') return null;
+  return { path: reference.path, ...(Number.isInteger(reference.line) ? { line: reference.line } : {}) };
 }
 function repositoryHref(repoPath, sourceSha, reference = {}) {
   const info = repositoryPathInfo(repoPath);
@@ -101,7 +101,7 @@ function linkRepositoryPath(pathValue, sourceSha, audit, { kind, from, base = ''
   const repoPath = posix.normalize(posix.join(base, pathValue.replaceAll('\\', '/')));
   const href = repositoryHref(repoPath, sourceSha, reference);
   if (!href) { addBrokenReference(audit, { kind, path: repoPath, from }); return null; }
-  return { path: repoPath, ...(reference.range ? { range: String(reference.range) } : {}), ...(Number.isInteger(reference.line) ? { line: reference.line } : {}), url: href };
+  return { path: repoPath, ...(Number.isInteger(reference.line) ? { line: reference.line } : {}), url: href };
 }
 function designLinksFor(references, sourceSha, audit, obligationId) {
   const links = [];
@@ -206,12 +206,12 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
       conformanceStatus: row.conformanceStatus ?? 'UNMAPPED', applicability: row.applicability ?? 'UNKNOWN',
       requirementImplementationIdentifiers: row.requirementImplementationIdentifiers ?? [],
       requirementComment: row.requirementComment ?? '',
-      status: row.status, designRefs: row.designRefs ?? [], sourceRefs: row.sourceRefs ?? [],
+      status: row.status, designRefs: row.designRefs ?? [], sourceRefs: (row.sourceRefs ?? []).map(projectSourceReference).filter(Boolean),
       implementationIdentifiers: row.implementationIdentifiers ?? [], surfaceIdentifiers: row.surfaceIdentifiers ?? [],
       testIds: row.testIds ?? [], exactRuns,
       area: requirementArea(row.requirementId),
       designLinks: designLinksFor(row.designRefs ?? [], sourceSha, referenceAudit, row.obligationId),
-      sourceLinks: (row.sourceRefs ?? []).map(reference => linkRepositoryPath(reference.path, sourceSha, referenceAudit, { kind: 'implementation', from: row.obligationId, reference })).filter(Boolean),
+      sourceLinks: (row.sourceRefs ?? []).map(projectSourceReference).filter(Boolean).map(reference => linkRepositoryPath(reference.path, sourceSha, referenceAudit, { kind: 'implementation', from: row.obligationId, reference })).filter(Boolean),
       implementationLinks: implementationLinksFor(row.implementationIdentifiers ?? [], sourceSha, referenceAudit, row.obligationId),
     };
   });
@@ -251,7 +251,7 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
     const candidateRequirementIds = [...new Set(row.candidateRequirementIds ?? (inventoryClassification?.match(/REQ-[A-Z]+-\d{3}/gu) ?? []))];
     const explicitNotApplicable = /\bNOT_APPLICABLE\b|no requirement applies|outside the requirements/iu.test(inventoryClassification ?? '');
     const disposition = obligation ? 'LINKED' : explicitNotApplicable ? 'NOT_APPLICABLE' : candidateRequirementIds.length ? 'CANDIDATE_ONLY' : inventoryClassification ? 'NO_OBLIGATION_LINK' : 'UNCLASSIFIED';
-    const source = row.source ?? null;
+    const source = projectSourceReference(row.source);
     const sourceLink = source?.path ? linkRepositoryPath(source.path, sourceSha, referenceAudit, { kind: 'surface', from: `${row.surface.kind} ${row.surface.id}`, reference: source }) : null;
     return {
       surface: row.surface, requirementId: row.requirementId ?? null, obligationId: row.obligationId ?? null,
@@ -265,7 +265,7 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
   const obligationIdsByTest = new Map();
   for (const row of publicRows) for (const testId of row.testIds) obligationIdsByTest.set(testId, [...(obligationIdsByTest.get(testId) ?? []), row.obligationId]);
   const publicCases = caseExecutions.map(item => {
-    const sourceRefs = item.sourceRefs ?? (item.file ? [{ path: item.file, ...(Number.isInteger(item.line) ? { line: item.line } : {}) }] : []);
+    const sourceRefs = (item.sourceRefs ?? (item.file ? [{ path: item.file, ...(Number.isInteger(item.line) ? { line: item.line } : {}) }] : [])).map(projectSourceReference).filter(Boolean);
     const sourceLinks = sourceRefs.map(reference => linkRepositoryPath(reference.path, sourceSha, referenceAudit, { kind: 'test', from: item.testId, reference })).filter(Boolean);
     const obligationIds = [...new Set(obligationIdsByTest.get(item.testId) ?? [])];
     const exactRuns = [...new Map(obligationIds.flatMap(id => obligationById.get(id)?.exactRuns ?? []).filter(run => run.testId === item.testId).map(run => [`${run.runId}\0${run.testId}`, run])).values()];
@@ -350,7 +350,7 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
   const obligationHtml = publicRows.map((row, index) => {
     const relatedSurfaces = reverse.filter(surface => surface.obligationId === row.obligationId);
     const designHtml = row.designLinks.map(link => `<li><a href="${esc(link.url)}">${esc(link.label)}</a></li>`).join('') || '<li>設計参照のリンクがありません</li>';
-    const sourceHtml = [...row.sourceLinks, ...row.implementationLinks.filter(link => link.url)].map(link => `<li><a href="${esc(link.url)}">${esc(link.path)}${link.range ? ` · L${esc(link.range)}` : ''}</a></li>`).join('') || '<li>識別済みsourceリンクなし</li>';
+    const sourceHtml = [...row.sourceLinks, ...row.implementationLinks.filter(link => link.url)].map(link => `<li><a href="${esc(link.url)}">${esc(link.path)}${link.line ? `:L${esc(link.line)}` : ''}</a></li>`).join('') || '<li>識別済みsourceリンクなし</li>';
     const symbolsHtml = row.implementationLinks.filter(link => !link.url).map(link => `<li><code>${esc(link.identifier)}</code></li>`).join('');
     const testHtml = row.testIds.map(testId => {
       const item = publicCases.find(candidate => candidate.testId === testId);
@@ -394,7 +394,7 @@ function publicTraceability(report, sourceSha, receipt = { status: 'NOT_AVAILABL
   }).join('');
   const caseHtml = publicCases.map(item => {
     const area = requirementArea(item.requirementIds[0]);
-    const sourceHtml = item.sourceLinks.map(link => `<a href="${esc(link.url)}">${esc(link.path)}${link.range ? ` · ${esc(link.range)}` : ''}</a>`).join('<br>') || 'source refなし';
+    const sourceHtml = item.sourceLinks.map(link => `<a href="${esc(link.url)}">${esc(link.path)}${link.line ? `:L${esc(link.line)}` : ''}</a>`).join('<br>') || 'source refなし';
     const obligationHtml = item.obligationIds.map(id => `<a href="#obligation-${esc(id)}">${esc(id)}</a>`).join('<br>') || '個別義務へのリンクなし';
     const runHtml = [
       ...item.exactRuns.map(run => `<a href="${esc(run.url)}">run ${esc(run.runId)} / ${esc(run.result)}</a>`),

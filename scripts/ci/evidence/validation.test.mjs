@@ -39,7 +39,7 @@ test('supplemental Full-model OCI results stay outside authenticated artifact ce
     { name: 'full-model-oci', head_sha: sha, status: 'completed', conclusion: 'success' },
   ], reports), /Duplicate supplemental Full-model OCI job/);
 });
-test('missing, stale, failed, skipped and duplicate evidence cannot certify selected work', () => {
+test('[TEST-QUAL-002-001] missing, stale, failed, skipped and duplicate evidence cannot certify selected work', () => {
   for (const mutate of [
     data => data.jobs.pop(),
     data => { data.jobs[1].conclusion = 'skipped'; },

@@ -18,6 +18,7 @@ import {
   validateRelations,
   projectTraceabilityGates,
 } from './verify.mjs';
+import { discoverAnsibleSourceGraph } from './ansible-source-graph.mjs';
 
 test('projects unauthenticated or incomplete gates as partial and preserves missing case evidence', () => {
   const gates = projectTraceabilityGates({
@@ -46,7 +47,7 @@ test('blocks the trace gate when relation validation finds injected defects', ()
   assert.equal(gates.G7.status, 'BLOCKED');
 });
 
-test('fault injection rejects stale route, tool, and database classifications removed from source inventory', () => {
+test('[TEST-TRC-04-003] fault injection rejects stale route, tool, and database classifications removed from source inventory', () => {
   const violations = validateInventory({ routes: [], tools: [], databaseObjects: [] }, [
     { kind: 'route', id: 'GET /api/removed', classification: 'REQ-API-001' },
     { kind: 'tool', id: 'removed_tool', classification: 'REQ-MCP-001' },
@@ -59,7 +60,7 @@ test('fault injection rejects stale route, tool, and database classifications re
   ]);
 });
 
-test('missing S3 receipt remains a blocked trace limitation and G5 remains NOT_RUN', () => {
+test('[TEST-TRC-06-002] missing S3 receipt remains a blocked trace limitation and G5 remains NOT_RUN', () => {
   const gates = projectTraceabilityGates({
     requirementNodes: [], obligationTrace: { violations: [], gaps: [] },
     reverseTrace: { violations: [], gaps: [{ kind: 'BLOCKED', provenance: 'Discovery limitation', area: 'backup-receipt', reason: 'No run-bound S3 receipt or isolated restore result.' }] },
@@ -74,7 +75,7 @@ test('missing S3 receipt remains a blocked trace limitation and G5 remains NOT_R
 
 const stableMid = (uid) => createHash('sha256').update(uid).digest('hex').slice(0, 32);
 
-test('rejects duplicate requirement UIDs and unstable MIDs', () => {
+test('[TEST-TRC-01-001] rejects duplicate requirement UIDs and unstable MIDs', () => {
   assert.equal(deterministicMid('REQ-DATA-001'), stableMid('REQ-DATA-001'));
   const violations = validateRequirementNodes([
     { UID: 'REQ-DATA-001', MID: stableMid('REQ-DATA-001'), TITLE: 'First' },
@@ -107,20 +108,20 @@ test('rejects missing normative design links in obligation nodes', async t => {
   assert.deepEqual(violations, ['OBL-REQ-DATA-001-O01: File relation target is missing: docs/architecture/missing.md']);
 });
 
-test('rejects missing files and ranges beyond the referenced source', async (t) => {
+test('[TEST-TRC-03-001] rejects missing files and authored source ranges', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-trace-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, 'tiny.ts'), 'line one\nline two\n');
   const violations = await validateRelations([
-    { UID: 'REQ-DATA-001', RELATIONS: [{ TYPE: 'File', VALUE: 'missing.ts', LINE_RANGE: '1, 2' }] },
+    { UID: 'REQ-DATA-001', RELATIONS: [{ TYPE: 'File', VALUE: 'missing.ts' }] },
     { UID: 'REQ-DATA-002', RELATIONS: [{ TYPE: 'File', VALUE: 'tiny.ts', LINE_RANGE: '1, 8' }] },
   ], root);
 
   assert.match(violations.join('\n'), /missing\.ts/i);
-  assert.match(violations.join('\n'), /tiny\.ts.*line range/i);
+  assert.match(violations.join('\n'), /line range.*tiny\.ts/i);
 });
 
-test('accepts ranged relations through repository-local links and rejects other file targets', async (t) => {
+test('accepts file relations through repository-local links and rejects other file targets', async (t) => {
   const scratch = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-relation-targets-'));
   t.after(() => rm(scratch, { recursive: true, force: true }));
   const root = path.join(scratch, 'repo');
@@ -131,9 +132,9 @@ test('accepts ranged relations through repository-local links and rejects other 
   await symlink('../outside.ts', path.join(root, 'outside-link.ts'));
 
   const violations = await validateRelations([
-    { UID: 'REQ-DATA-001', RELATIONS: [{ TYPE: 'File', VALUE: 'inside-link.ts', LINE_RANGE: '1, 2' }] },
-    { UID: 'REQ-DATA-002', RELATIONS: [{ TYPE: 'File', VALUE: 'outside-link.ts', LINE_RANGE: '1, 1' }] },
-    { UID: 'REQ-DATA-003', RELATIONS: [{ TYPE: 'File', VALUE: 'directory', LINE_RANGE: '1, 1' }] },
+    { UID: 'REQ-DATA-001', RELATIONS: [{ TYPE: 'File', VALUE: 'inside-link.ts' }] },
+    { UID: 'REQ-DATA-002', RELATIONS: [{ TYPE: 'File', VALUE: 'outside-link.ts' }] },
+    { UID: 'REQ-DATA-003', RELATIONS: [{ TYPE: 'File', VALUE: 'directory' }] },
   ], root);
 
   assert.deepEqual(violations, [
@@ -157,13 +158,13 @@ test('rejects FIFO relations and inventory paths without blocking', { skip: proc
   const created = spawnSync('mkfifo', [fifo], { encoding: 'utf8' });
   assert.equal(created.status, 0, created.stderr);
   const violations = await validateRelations([
-    { UID: 'REQ-FIFO-001', RELATIONS: [{ TYPE: 'File', VALUE: 'named.pipe', LINE_RANGE: '1, 1' }] },
+    { UID: 'REQ-FIFO-001', RELATIONS: [{ TYPE: 'File', VALUE: 'named.pipe' }] },
   ], root);
   assert.deepEqual(violations, ['REQ-FIFO-001: File relation target is not a file: named.pipe']);
   await assert.rejects(discoverSourceInventory(root, { routes: ['named.pipe'] }), /Inventory route source.*named.pipe/u);
 });
 
-test('reports discovered runtime surfaces that lack an explicit classification', () => {
+test('[TEST-TRC-04-001] reports discovered runtime surfaces that lack an explicit classification', () => {
   const violations = validateInventory({
     routes: ['GET /api/v1/projects', 'DELETE /api/v1/projects/:id'],
     tools: ['project_read'],
@@ -192,12 +193,54 @@ test('requires explicit inventory classifications for native iOS and IaC surface
   const complete = validateInventory(discovered, [
     { kind: 'nativeIosView', id: 'AuthoringView', classification: 'candidate REQ-UI-001; behavior unverified' },
     { kind: 'iacResource', id: 'cloudflare_workers_route.frontend', classification: 'candidate REQ-EXT-001; applied state unverified' },
-    { kind: 'ansibleSource', id: 'deploy/ansible/site.yml', classification: 'candidate REQ-OPS-001; host execution unverified' },
-  ]);
+  ], { surfaces: [{ id: 'deploy/ansible/site.yml' }], violations: [] });
   assert.deepEqual(complete, []);
 });
 
-test('discovers an unclassified SQL object from source instead of trusting cached inventory data', async (t) => {
+test('Ansible projection follows parsed literal include graphs and rejects orphan YAML', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-ansible-graph-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const write = async (relative, source) => {
+    await mkdir(path.dirname(path.join(root, relative)), { recursive: true });
+    await writeFile(path.join(root, relative), source);
+  };
+  await write('deploy/ansible/site.yml', [
+    '- name: Site stage', '  hosts: all', '  tasks:',
+    '    - name: Include base tasks', '      ansible.builtin.include_tasks:',
+    '        file: tasks/base.yml',
+  ].join('\n'));
+  await write('deploy/ansible/tasks/base.yml', [
+    '- name: Import nested tasks', '  ansible.builtin.import_tasks: nested/runtime.yml',
+  ].join('\n'));
+  await write('deploy/ansible/tasks/nested/runtime.yml', '- name: Runtime task\n  ansible.builtin.debug:\n    msg: ready\n');
+  await write('deploy/ansible/prepare-owner-activation.yml', '- name: Owner handoff\n  hosts: codexia\n  tasks: []\n');
+  await write('deploy/ansible/inventory.example.yml', 'all:\n  hosts: {}\n');
+  await write('deploy/ansible/roles/new-role/tasks/main.yml', '- name: Unreferenced role task\n  ansible.builtin.debug:\n    msg: orphan\n');
+
+  const projection = await discoverAnsibleSourceGraph({
+    repositoryRoot: root,
+    groups: [
+      { id: 'site', entrypoint: 'deploy/ansible/site.yml', mappingBasis: 'derivable', classification: 'Candidate REQ-OPS-001 / REQ-OPS-002' },
+      { id: 'owner-handoff', entrypoint: 'deploy/ansible/prepare-owner-activation.yml', mappingBasis: 'derivable', classification: 'Candidate REQ-OPS-001 / REQ-OPS-002' },
+    ],
+    overrides: [{
+      id: 'example-inventory', path: 'deploy/ansible/inventory.example.yml', mappingBasis: 'semantic',
+      classification: 'Candidate REQ-OPS-001 / REQ-OPS-002; example only',
+    }],
+  });
+  assert.ok(projection.surfaces.find(item => item.id === 'deploy/ansible/tasks/nested/runtime.yml')?.inventoryGroups.includes('site'));
+  assert.ok(projection.surfaces.find(item => item.id === 'deploy/ansible/inventory.example.yml')?.mappingBasis === 'semantic');
+  assert.ok(projection.violations.some(item => item.includes('not reachable') && item.endsWith('deploy/ansible/roles/new-role/tasks/main.yml')));
+
+  await write('deploy/ansible/dynamic.yml', '- name: Dynamic include\n  ansible.builtin.include_tasks: "{{ task_path }}"\n');
+  const dynamicProjection = await discoverAnsibleSourceGraph({
+    repositoryRoot: root,
+    groups: [{ id: 'site', entrypoint: 'deploy/ansible/site.yml', mappingBasis: 'derivable', classification: 'candidate REQ-OPS-001' }],
+  });
+  assert.ok(dynamicProjection.violations.some(item => item.includes('Unresolved ansible.builtin.include_tasks')));
+});
+
+test('[TEST-TRC-04-002] discovers an unclassified SQL object from source instead of trusting cached inventory data', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-inventory-source-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, 'packages', 'persistence-postgres', 'migrations'), { recursive: true });
@@ -245,48 +288,38 @@ test('discovers an unclassified SQL object from source instead of trusting cache
   assert.match(result.violations.join('\n'), /Unclassified tool spec01_inventory_fixture/);
 });
 
-test('requires each TEST-ID to resolve to a declared requirement and a real test case', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-scenarios-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  await writeFile(path.join(root, 'case.test.mjs'), "test('rejects a damaged identifier', () => {});\n");
+test('[TEST-TRC-05-003] requires each TEST-ID to resolve to a declared requirement and a real test case', () => {
+  const id = 'TEST-TRC-06-001';
   const parent = {
     UID: 'REQ-TRACE-001',
     'Test IDs': 'TEST-TRC-06-001, NOT_ASSIGNED (no standalone TEST-ID exists)',
   };
-  const scenarios = [{
-    UID: 'TEST-TRC-06-001',
-    MID: stableMid('TEST-TRC-06-001'),
-    'Case name': 'rejects a damaged identifier',
+  const scenario = {
+    UID: id,
+    MID: stableMid(id),
     'Exact-run reference': 'NOT_RUN',
-    RELATIONS: [
-      { TYPE: 'Parent', VALUE: 'REQ-TRACE-001' },
-      { TYPE: 'File', VALUE: 'case.test.mjs' },
-    ],
-  }];
-
-  assert.deepEqual(await validateScenarioNodes(scenarios, [parent], root), []);
-  const authoredRun = await validateScenarioNodes([{
-    ...scenarios[0], 'Exact-run reference': 'https://github.com/yohn-jp/codexia/actions/runs/7',
-  }], [parent], root);
-  assert.match(authoredRun.join('\n'), /authored Exact-run reference must be NOT_RUN/u);
-  const broken = [{
-    ...scenarios[0],
-    'Case name': 'does not exist in the source file',
-    RELATIONS: [{ TYPE: 'File', VALUE: 'case.test.mjs' }],
-  }];
-  const violations = await validateScenarioNodes(broken, [parent], root);
-  assert.match(violations.join('\n'), /missing a parent requirement/i);
-  assert.match(violations.join('\n'), /case name.*not found/i);
-  const staleRange = await validateScenarioNodes([{
-    ...scenarios[0], RELATIONS: [
-      { TYPE: 'Parent', VALUE: 'REQ-TRACE-001' },
-      { TYPE: 'File', VALUE: 'case.test.mjs', LINE_RANGE: '10, 10' },
-    ],
-  }], [parent], root);
-  assert.match(staleRange.join('\n'), /Case name was not found within its declared test source line range/u);
+    'Execution scope': 'TRACE_NODE',
+    RELATIONS: [{ TYPE: 'Parent', VALUE: parent.UID }],
+  };
+  const sources = new Map([[id, { file: 'case.test.mjs', line: 3, name: `[${id}] case`, runner: 'node' }]]);
+  assert.deepEqual(validateScenarioNodes([scenario], [parent], sources), []);
+  assert.match(validateScenarioNodes([{
+    ...scenario, 'Exact-run reference': 'https://github.com/yohn-jp/codexia/actions/runs/7',
+  }], [parent], sources).join('\n'), /authored Exact-run reference must be NOT_RUN/u);
+  assert.match(validateScenarioNodes([{
+    ...scenario, 'Execution scope': 'unknown', RELATIONS: [{ TYPE: 'File', VALUE: 'case.test.mjs' }],
+  }], [parent], new Map()).join('\n'), /invalid Execution scope[\s\S]*missing a parent[\s\S]*must be derived[\s\S]*no native test registration/iu);
+  assert.match(validateScenarioNodes([], [parent], sources).join('\n'), /missing test scenario/u);
+  assert.match(validateScenarioNodes([scenario, scenario], [parent], sources).join('\n'), /Duplicate test scenario UID/u);
+  assert.match(validateScenarioNodes([scenario], [{ ...parent, 'Test IDs': `${id} ${id} TEST-INVALID` }], sources).join('\n'),
+    /duplicate TEST-ID references[\s\S]*invalid TEST-ID TEST-INVALID/u);
+  assert.match(validateScenarioNodes([scenario], [parent, { ...parent, UID: 'REQ-TRACE-002' }], sources).join('\n'),
+    /REQ-TRACE-002 declares TEST-TRC-06-001 parented by REQ-TRACE-001/u);
+  const unknownSources = new Map([...sources, ['TEST-TRC-99-999', { file: 'other.test.mjs', line: 1 }]]);
+  assert.match(validateScenarioNodes([scenario], [parent], unknownSources).join('\n'), /unknown TEST-ID TEST-TRC-99-999/u);
 });
 
-test('requires complete exact GitHub run identity when running in Actions', () => {
+test('[TEST-TRC-05-001] requires complete exact GitHub run identity when running in Actions', () => {
   const result = resolveRunIdentity({
     GITHUB_ACTIONS: 'true',
     GITHUB_SERVER_URL: 'https://github.com',
@@ -317,11 +350,11 @@ test('requires complete exact GitHub run identity when running in Actions', () =
   );
 });
 
-test('keeps local execution as NOT_RUN instead of inventing a CI link', () => {
+test('[TEST-TRC-05-002] keeps local execution as NOT_RUN instead of inventing a CI link', () => {
   assert.deepEqual(resolveRunIdentity({}), { status: 'NOT_RUN' });
 });
 
-test('normalizes only the observed StrictDoc HTML volatility', () => {
+test('[TEST-TRC-02-001] normalizes only the observed StrictDoc HTML volatility', () => {
   const html = [
     '<meta name="strictdoc-search-index-timestamp" content="1795413779.221949">',
     '<turbo-frame id="article-b9e6dedfa4674cb9af824ccffd19b566">',
@@ -337,7 +370,7 @@ test('normalizes only the observed StrictDoc HTML volatility', () => {
   assert.match(normalized, /https:\/\/example\.test\/1795413779\.221949/);
 });
 
-test('canonicalizes only StrictDoc search index object keys and set membership order', () => {
+test('[TEST-TRC-02-002] canonicalizes only StrictDoc search index object keys and set membership order', () => {
   const first = 'window.StrictDoc.search.index = {"z":[2,1],"a":[2,1]};\nwindow.other = {"b":2,"a":1};';
   const second = 'window.StrictDoc.search.index = {"a":[1,2],"z":[1,2]};\nwindow.other = {"b":2,"a":1};';
   const expected = 'window.StrictDoc.search.index = {"a":[1,2],"z":[1,2]};\nwindow.other = {"b":2,"a":1};';

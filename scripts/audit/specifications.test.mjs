@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { packSpecifications, verifySpecifications } from './specifications.mjs';
 
-test('projects obligations, reverse surfaces, and evidence links without conformance promotion', () => {
+test('[TEST-TRC-08-001] projects obligations, reverse surfaces, and evidence links without conformance promotion', () => {
   const root = mkdtempSync(join(tmpdir(), 'pages-spec-'));
   try {
     const output = join(root, 'export'); const site = join(root, 'site');
@@ -23,13 +23,13 @@ test('projects obligations, reverse surfaces, and evidence links without conform
       source: { sourceSha: sha, worktreeClean: true, registerPath: 'docs/requirements/REQUIREMENT-REGISTER.md' },
       toolchain: { strictdocVersion: '0.32.1', requirementsLockSha256: createHash('sha256').update(readFileSync('scripts/strictdoc/requirements.lock.txt')).digest('hex') },
       traceability: { TRC01: { status: 'LOCAL_PASS' }, TRC02: { status: 'LOCAL_PASS' }, TRC07: { status: 'PENDING_PAGES_PUBLISH', staticStaging: 'PASSED', browserAcceptance: 'PASSED' }, gates: Object.fromEntries(Array.from({length: 8}, (_, index) => [`G${index}`, {status: index === 0 ? 'LOCAL_PASS' : index === 7 ? 'PARTIAL' : 'NOT_RUN', evidence: `Gate ${index} evidence` }])) },
-      obligationTrace: { rows: [{ requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', obligationText: 'Native UI remains separately accepted', decisionStatus: 'ACCEPTED', conformanceStatus: 'PARTIAL', applicability: 'CURRENT', requirementImplementationIdentifiers: ['Native state machine 未導入'], requirementComment: 'XState actorは目標・未実装', status: 'PARTIAL', designRefs: ['[Traceability design](STRICTDOC-TRACEABILITY.md)'], sourceRefs: [{ path: 'scripts/strictdoc/case-results.mjs', range: '17, 28' }], implementationIdentifiers: ['packages/api/src/job-history-store.ts: JobHistoryStore (target candidate)'], surfaceIdentifiers: [], testIds: ['TEST-TRC-01-001', 'TEST-TRC-02-001', 'TEST-TRC-03-001'], exactRuns: [exactRun] }], gaps: ['OBL-REQ-UI-001-O01: no semantic/device acceptance'] },
+      obligationTrace: { rows: [{ requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', obligationText: 'Native UI remains separately accepted', decisionStatus: 'ACCEPTED', conformanceStatus: 'PARTIAL', applicability: 'CURRENT', requirementImplementationIdentifiers: ['Native state machine 未導入'], requirementComment: 'XState actorは目標・未実装', status: 'PARTIAL', designRefs: ['[Traceability design](STRICTDOC-TRACEABILITY.md)'], sourceRefs: [{ path: 'scripts/strictdoc/case-results.mjs', range: '17, 28', LINE_RANGE: '17, 28' }], implementationIdentifiers: ['packages/api/src/job-history-store.ts: JobHistoryStore (target candidate)'], surfaceIdentifiers: [], testIds: ['TEST-TRC-01-001', 'TEST-TRC-02-001', 'TEST-TRC-03-001'], exactRuns: [exactRun] }], gaps: ['OBL-REQ-UI-001-O01: no semantic/device acceptance'] },
       reverseTrace: { rows: [
         { surface: { kind: 'mcpTool', id: 'list_projects' }, requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', status: 'UNVERIFIED', provenance: 'Literal registration', source: { path: 'scripts/strictdoc/reverse-trace.mjs', line: 18 }, testIds: ['TEST-TRC-01-001'], exactRuns: [exactRun] },
         { surface: { kind: 'mcpTool', id: 'unlinked.export' }, status: 'UNMAPPED', provenance: 'Literal registration', source: { path: 'scripts/strictdoc/reverse-trace.mjs', line: 19 }, inventoryClassification: 'candidate REQ-MCP-002; effect remains unverified', candidateRequirementIds: ['REQ-MCP-002'], testIds: [], exactRuns: [] },
       ], gaps: [{ kind: 'BLOCKED', provenance: 'Discovery limitation', area: 'native-ios-runtime', reason: 'Physical device not tested' }] },
       caseExecutions: [
-        { testId: 'TEST-TRC-01-001', name: 'observed trace test', result: 'PASSED', sourceRefs: [{ path: 'scripts/strictdoc/verify.test.mjs', range: '23, 28' }], file: 'scripts/strictdoc/verify.test.mjs', line: 23 },
+        { testId: 'TEST-TRC-01-001', name: 'observed trace test', result: 'PASSED', sourceRefs: [{ path: 'scripts/strictdoc/verify.test.mjs', line: 23 }], file: 'scripts/strictdoc/verify.test.mjs', line: 23 },
         { testId: 'TEST-TRC-02-001', name: 'declared test not run', result: 'NOT_RUN', sourceRefs: [{ path: 'scripts/strictdoc/verify.test.mjs' }] },
         { testId: 'TEST-TRC-03-001', name: 'declared test skipped', result: 'SKIPPED', sourceRefs: [{ path: 'scripts/strictdoc/verify.test.mjs' }] },
       ],
@@ -70,6 +70,10 @@ test('projects obligations, reverse surfaces, and evidence links without conform
     assert.deepEqual(traceJson.requirements[0].implementationDeclarations.map(item => item.sourceField), ['Implementation identifiers', 'Comment']);
     assert.equal(traceJson.summary.implementationDeclarationCounts.EXPLICIT_NOT_IMPLEMENTED, 1);
     assert.equal(traceJson.caseExecutions[0].result, 'PASSED');
+    assert.equal(traceJson.caseExecutions[0].sourceLinks[0].line, 23, 'discovered source line is retained');
+    assert.match(traceJson.caseExecutions[0].sourceLinks[0].url, /#L23$/u, 'discovered source line is linked');
+    assert.deepEqual(traceJson.caseExecutions[0].sourceRefs[0], { path: 'scripts/strictdoc/verify.test.mjs', line: 23 });
+    assert.deepEqual(traceJson.obligations[0].sourceRefs[0], { path: 'scripts/strictdoc/case-results.mjs' }, 'legacy authored ranges are dropped');
     assert.equal(traceJson.execution.runUrl, 'https://github.com/yohn-jp/codexia/actions/runs/42');
     assert.equal(traceJson.obligations[0].exactRuns[0].job, 'specification');
     assert.equal(traceJson.requirements[0].area, 'UI');

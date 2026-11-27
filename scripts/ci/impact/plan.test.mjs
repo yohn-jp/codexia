@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { componentReleaseAffected } from '../../release/components/impact.mjs';
 import { VERIFICATION_TASKS } from './contract.mjs';
 import { UX_PROJECTION_DOCUMENTS } from '../evidence/task-inputs.mjs';
+import { isTraceTestSource } from '../../strictdoc/test-source-path.mjs';
 const { parse } = createRequire(new URL('../../../packages/core/package.json', import.meta.url))('yaml');
 
 function matchesWorkflowPaths(patterns, files) {
@@ -122,7 +123,7 @@ test('PR paths and completed-Verify release impact retain component build inputs
   }
 });
 
-test('disposable app lifecycle is not admitted by isolated workspace tests', () => {
+test('[TEST-QUAL-001-001] disposable app lifecycle is not admitted by isolated workspace tests', () => {
   const workflow = parse(readFileSync(new URL('../../../.github/workflows/push-app-lifecycle.yml', import.meta.url), 'utf8'));
   const paths = workflow.on.pull_request.paths;
   for (const path of [
@@ -264,6 +265,18 @@ test('StrictDoc authority selects trace proof and the requirement register also 
       : uxAuthority ? ['unit-core', 'types-tests', 'types-trace']
         : architectureAuthority ? ['unit-architecture', 'types-tests', 'types-trace']
           : toolingAcceptance ? ['unit-api', 'unit-db', 'types-tests', 'types-trace'] : ['types-tests', 'types-trace'], file);
+  }
+});
+
+test('selects requirements trace for test-only source changes', async () => {
+  for (const file of [
+    'packages/api/src/server.test.ts',
+    'tests/e2e/core.acceptance.spec.ts',
+    'tests/integration/mcp-acceptance.test.mjs',
+    'scripts/verification/artifacts/pages-live-ux.test.mjs',
+    'scripts/strictdoc/verify.browser.mjs',
+  ]) {
+    assert.ok((await plan([file])).tasks.includes('requirements-trace'), file);
   }
 });
 
@@ -590,7 +603,7 @@ test('every selected task has one execution group and every exclusion has a reas
   assert.ok(selected.excluded.every(item => item.reason && !selected.tasks.includes(item.task)));
 });
 
-test('known operational inputs retain root proof without unrelated browser or OCI work', async () => {
+test('known operational inputs retain root proof and trace evidence for registered test sources', async () => {
   const { OPERATIONAL_ROOT_PATHS } = await import('./plan.mjs');
   for (const file of OPERATIONAL_ROOT_PATHS) {
     const selected = await plan([file]);
@@ -609,6 +622,7 @@ test('known operational inputs retain root proof without unrelated browser or OC
     ].includes(file)) expected.push('requirements-trace');
     if (file.startsWith('deploy/ansible/') && /\.ya?ml$/u.test(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf') && !expected.includes('requirements-trace')) expected.push('requirements-trace');
+    if (isTraceTestSource(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (SWIFT_LINUX_RECIPES.includes(file)) expected.push('swift-linux');
     assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
@@ -687,17 +701,19 @@ test('the native Swift app owns manual unsigned IPA packaging', () => {
   assert.deepEqual(native.jobs.editor.strategy.matrix.lane, ['state-model', 'editor-simulator', 'app-simulator']);
 });
 
-test('CI contract-test changes select only root and coverage, including the iOS freeze diff', async () => {
+test('CI contract-test changes select root, coverage, and trace for test sources, including the iOS freeze diff', async () => {
   const paths = ['scripts/ci/impact/plan.test.mjs', 'scripts/ci/evidence/proof-reuse.test.mjs',
     'scripts/ci/certification/reuse-merged-pr.test.mjs'];
   for (const file of paths) {
     const result = await plan([file]);
     assert.equal(result.mode, 'affected', file);
-    assert.deepEqual(result.tasks, ['unit-root', 'coverage'], file);
+    assert.deepEqual(result.tasks, isTraceTestSource(file)
+      ? ['unit-root', 'coverage', 'requirements-trace']
+      : ['unit-root', 'coverage'], file);
     assert.equal(result.full_model_oci, false, file);
   }
   const freeze = await plan([...paths, '.github/workflows/ios-api.yml', '.github/workflows/ios-editor.yml']);
-  assert.deepEqual(freeze.tasks, ['unit-root', 'coverage']);
+  assert.deepEqual(freeze.tasks, ['unit-root', 'coverage', 'requirements-trace']);
   for (const file of ['scripts/ci/impact/plan.mjs', 'scripts/ci/evidence/proof-reuse.mjs', 'scripts/ci/impact/unknown.test.mjs']) {
     const result = await plan([...paths, file]);
     assert.deepEqual(result.tasks, file === 'scripts/ci/impact/plan.mjs' ? VERIFICATION_TASKS : NON_SWIFT_TASKS, file);
@@ -714,7 +730,7 @@ test('root and coverage-only plans have a single owner for contract test executi
   assert.deepEqual((await plan(['deploy/ansible/host.yml'])).tasks, ['unit-root','coverage','requirements-trace']);
 });
 
-test('push backup changes retain root and independent exact-head verification', async () => {
+test('push backup changes and registered tests retain trace selection with independent exact-head verification', async () => {
   const backup = parse(readFileSync(new URL('../../../.github/workflows/push-backup.yml', import.meta.url), 'utf8'));
   const source = [
     'deploy/backup/backup.sh',
@@ -732,6 +748,7 @@ test('push backup changes retain root and independent exact-head verification', 
     if (['deploy/ansible/deploy.yml', 'deploy/ansible/restore-drill.yml', '.github/workflows/push-backup.yml'].includes(file)) {
       expected.push('requirements-trace');
     }
+    if (isTraceTestSource(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     assert.deepEqual((await plan([file])).tasks, expected, file);
     assert.equal((await plan([file])).full_model_oci, false, file);
     for (const event of ['pull_request', 'push']) {
@@ -761,13 +778,14 @@ test('CI dashboard changes remain root-scoped, mixed source remains fully covere
   assert.deepEqual((await plan(['scripts/ci/dashboard/analysis.mjs'], 'push')).tasks, NON_SWIFT_TASKS);
 });
 
-test('the Passkey browser acceptance source is owned by the API unit, package typecheck, and dedicated Core Chromium shard', async () => {
-  const expected = ['unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap', 'coverage', 'biome-ci'];
+test('the Passkey browser acceptance source selects its owner proofs and trace evidence', async () => {
+  const baseExpected = ['unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap', 'coverage', 'biome-ci'];
   for (const [file, expectedModelOci] of [
     ['packages/api/test/passkey-bootstrap.acceptance.test.ts', false],
     ['packages/api/scripts/run-passkey-acceptance.mjs', true],
   ]) {
     const result = await plan([file]);
+    const expected = isTraceTestSource(file) ? [...baseExpected, 'requirements-trace'] : baseExpected;
     assert.deepEqual(result.tasks, expected, file);
     assert.equal(result.mode, 'affected', file);
     assert.equal(result.full_model_oci, expectedModelOci, `Full-model OCI admission: ${file}`);

@@ -219,6 +219,8 @@ test('browser input proofs bind the Chromium image for every lane', async t => {
   await writeFile(digestsFile, digests.replace(PLAYWRIGHT_IMAGE_DIGESTS.chromium, `sha256:${'f'.repeat(64)}`));
   await mkdir(path.join(mutatedRoot, 'scripts/architecture'), { recursive: true });
   await cp(new URL('../../architecture/constants.mjs', import.meta.url), path.join(mutatedRoot, 'scripts/architecture/constants.mjs'));
+  await mkdir(path.join(mutatedRoot, 'scripts/strictdoc'), { recursive: true });
+  await cp(new URL('../../strictdoc/test-source-path.mjs', import.meta.url), path.join(mutatedRoot, 'scripts/strictdoc/test-source-path.mjs'));
   const { captureTaskInputSource: captureWithChangedChromiumImage } = await import(
     pathToFileURL(path.join(mutatedScripts, 'task-inputs.mjs')).href
   );

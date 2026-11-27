@@ -21,14 +21,14 @@
 
 | 段階 | 検証と生成物 | fail条件 | 速さ/環境 |
 | --- | --- | --- | --- |
-| G0 ドキュメント静的 | StrictDoc parse、REQ-ID/relationのvalidation、Markdownリンク、TypeSpec compile | 欠落、重複、不正grammar、無効なreference | 文書変更時の軽量CI |
+| G0 ドキュメント静的 | StrictDoc parse、REQ-ID/relationのvalidation、TEST-ID付きネイティブ登録のAST discovery、Markdownリンク、TypeSpec compile | 欠落、重複、不正grammar、無効なreference、登録IDまたはExecution scopeの不整合 | 文書変更時の軽量CI |
 | G1 HTTPスキーマ | TypeSpec→OpenAPI 3.1.0、Redocly、oasdiff、実行時 Fastify route inventory と JSON Schema 生成物の照合、Orval client再生成diff、TypeScript typecheck | 実routeの未定義、破壊的変更の無承認、二重schema、非決定的生成 | API/contracts/client変更時 |
 | G2 実行時契約 | 使い捨てPostgreSQLのAPIでSchemathesis、owner/BOLA/競合/冪等性/receiptとMCP conformance | 仕様違反/認可迂回/保存不一致、未実行対象の偽PASS | API/MCP/DB変更時 |
 | G3 データ契約 | migration適用→pgTAP/pg_catalog、Better Auth schema、復元、tbls生成 | 物理差分/不一致、schema identity異常、復元失敗 | DB/auth/migration/依存変更時 |
 | G4 UX/host | 既存Playwright（正式対応Chromium。移行例外は [E2E execution](E2E-EXECUTION.md)）、XState v5の状態遷移義務、OCI、Ansible/Cloudflare config/probes、S3互換fixture | UI保存/復旧、session/auth、backup config/保全job/復元証拠、edge/deploy回帰 | 既存impact rulesに従う |
 | G5 設計図/脅威 | LikeC4 validation、Threagile risk、公開の可否と画像/文書リンク | 不正なモデル、設計不整合、秘密露出 | docs/security/deploy変更時 |
 | G6 性能 | k6 threshold、現行比較baseline、起動/stream/DB負荷 | 承認済みp95/p99、RPS、RSS、SSE維持等のbudget違反 | cheap smokeはPR、長時間は明示したisolated run |
-| G7 追跡・証明 | 要求→仕様→実装→TEST-ID→exact-source evidence、逆引き未追跡一覧 | 未対応の採用済み要求や仕様外runtimeを未報告、証拠偽装 | 部分的にはPR、全量認定はrelease前 |
+| G7 追跡・証明 | 要求→仕様→実装→TEST-ID→exact-source evidence、逆引き未追跡一覧 | 未対応の採用済み要求や仕様外runtimeを未報告、証拠偽装、登録した検証scopeの消失 | 部分的にはPR、全量認定はrelease前 |
 
 G0〜G7は受入モデルであり、実行タスクは [CI/CD契約](CI-CD.md) から参照する。
 HTTP契約の検証は既存Verifyの `unit-http-contract` と `typecheck-http-contract` を使用する。
@@ -102,6 +102,19 @@ PRでは小さな回帰チェック、長時間/高負荷は適切に隔離し�
 - PR previewでは公開せず従来のartifactへ格納し、mainの正規公開にのみ昇格する。GitHub Pages自体がCodexiaの本番Workers UI/Owner consoleになることはない。
 
 ## 証拠の取り扱いと完成判定
+
+TEST nodeは`Execution scope`に`TRACE_NODE`、`TRACE_BROWSER`、`PRODUCT`を宣言する。
+テストのネイティブ登録には文字列リテラルの`[TEST-ID]` prefixを置き、AST discoveryがTEST-ID、source path、行、表示名を抽出する。
+一つのケースを複数の独立TEST-IDが参照するときは、異なるID prefixを登録タイトルの先頭に連続して置き、それぞれを同じ登録へ対応させる。
+Requirement RegisterはobligationとTEST-IDだけを結び、手入力の`Case name`、TEST nodeの`File` relation、`Lines`属性を持たない。
+実装relationはfile scopeと既存の意味的識別子を保持する。
+
+`TRACE_NODE`と`TRACE_BROWSER`のsource fileは、discovery結果からtrace taskの実行対象に選ぶ。
+この仕組みにより、テストを別のsource fileへ移しても、登録されたscopeが同じならCI実行から外れない。
+discovery対象のテストsourceだけを変更したPRも既存の`requirements-trace` taskを選択する。
+trace taskは従来の固定補助suiteも実行する。
+`PRODUCT`は製品検証taskのscopeであり、trace taskによる未実行をPASSへ置き換えない。
+実行観測はTEST-IDとdiscovery済みsource identityで結び、exact-source Verify認定とartifact identityの既存条件を維持する。
 
 - CIの検査結果は `PASSED`、`FAILED`、`BLOCKED`、`NOT_SELECTED` を区別し、docsの `VERIFIED` へ昇格するには要求の**対象義務すべて**について成功証拠が必要。
 - 追加検証がselectedなら、実行されたjob/attempt/artifactを同じplan digestとsource SHAに束縛する。selectedタスクがskipなら成功判定しない。
