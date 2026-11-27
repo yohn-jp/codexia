@@ -264,6 +264,8 @@ test('manual first Backend activation uses protected admission and the existing 
   const prepare = parse(readFileSync(new URL('../../../deploy/ansible/deploy-prepare.yml', import.meta.url), 'utf8'));
   assert.equal(prepare.find(task => task.name === 'Recover interrupted deployment before preparing target state').when,
     'codexia_expected_first_activation is not defined and codexia_expected_recovery_activation is not defined');
+  assert.equal(prepare.find(task => task.name === 'Resume an interrupted backup before observing the installed API').when,
+    'codexia_expected_recovery_activation is not defined');
 });
 
 test('locked production admission requires separate R6 or restored R3 evidence for a clean API slot', () => {

@@ -11,6 +11,7 @@
   changed_when: "'RECOVERED_PREVIOUS_RELEASE' in codexia_deploy_recovery.stdout or 'CLEANED_COMMITTED_TRANSACTION' in codexia_deploy_recovery.stdout"
 
 - name: Resume an interrupted backup before observing the installed API
+  when: codexia_expected_recovery_activation is not defined
   ansible.builtin.command:
     argv: [bash, -s, --, recover]
     stdin: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/backup/backup-runner.sh') }}"

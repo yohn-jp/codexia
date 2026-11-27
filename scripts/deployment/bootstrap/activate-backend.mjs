@@ -109,7 +109,7 @@ async function main(stage, env) {
   const releases = await readLifecycleCandidate(request);
   assert.deepEqual(releases.candidateBackend, JSON.parse(Buffer.from(env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, 'base64')),
     'Reverified backend certificate differs from the verified deployment handoff');
-  const { host, hostPinSha256 } = await readLifecycleHost({
+  const { host, hostPinSha256, authSchemaQuery } = await readLifecycleHost({
     inventory: join(env.RUNNER_TEMP, 'codexia-first-activation-inventory.yml'),
     targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST, recovery,
   });
@@ -128,7 +128,7 @@ async function main(stage, env) {
       databaseUse: env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
     } });
   const name = recovery ? 'codexia-recovery-activation.json' : 'codexia-first-activation.json';
-  await writeFile(join(env.RUNNER_TEMP, name), JSON.stringify(evidence) + '\n',
+  await writeFile(join(env.RUNNER_TEMP, name), JSON.stringify(recovery ? { ...evidence, authSchemaQuery } : evidence) + '\n',
     { flag: 'wx', mode: 0o600 });
   console.log(recovery ? 'Protected R3 restored Backend publication admitted against the deployed Frontend.' :
     'Protected R6 Backend-only activation admitted against the deployed Frontend.');

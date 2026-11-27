@@ -532,7 +532,8 @@
       recovery_operation_id=''
       recovery_evidence_sha256=''
       check_recovery_record(){
-        "$HOME/.local/bin/codexia-preflight-observe" verify-recovery-handoff \
+        CODEXIA_AUTH_SCHEMA_QUERY="$recovery_auth_schema_query" \
+          "$HOME/.local/bin/codexia-preflight-observe" verify-recovery-handoff \
           "$recovery_evidence_sha256" "$recovery_operation_id" "$candidate_image" "$candidate_source_sha"
       }
       if [[ "$recovery_activation" != null ]]; then
@@ -542,6 +543,8 @@
           stale_admission 'invalid recovery operation identity'
         recovery_evidence_sha256="$(jq -er '.evidenceSha256 | select(test("^[a-f0-9]{64}$"))' <<< "$recovery_activation")" ||
           stale_admission 'invalid recovery evidence digest'
+        recovery_auth_schema_query="$(jq -er '.authSchemaQuery | select(type == "string" and length > 0)' <<< "$recovery_activation")" ||
+          stale_admission 'missing certified Auth catalog observer'
         approved_settings="$(jq -er '.settingsSha256 | select(test("^[a-f0-9]{64}$"))' <<< "$recovery_activation")" ||
           stale_admission 'invalid recovery runtime settings digest'
         [[ "$auth_settings_digest" == "$approved_settings" ]] ||

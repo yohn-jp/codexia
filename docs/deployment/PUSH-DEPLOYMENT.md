@@ -63,7 +63,9 @@ With the runtime identity, run [Production Access Preflight](../../.github/workf
 
 ### Restored Backend publication
 
-Complete R2 using the [protected recovery contract](PROTECTED-RECOVERY.md). On the isolated target, keep the API, Tunnel and `codexia-backup-executor.service` stopped. Leave the executor disabled until its restored journal is reconciled. Keep the existing owner, Passkey and compatible Frontend. The target uses the normal DB and Auth settings and a clean API slot.
+Complete R2 using the [protected recovery contract](PROTECTED-RECOVERY.md). On the isolated target, keep the API, Tunnel and `codexia-backup-executor.service` stopped. Leave the executor disabled until its restored journal is reconciled. Keep the existing owner, Passkey and compatible Frontend. The target uses the normal DB and Auth settings and a clean API slot. Prepare it under the normal `codexia` host lock at `~/.local/state/codexia-deploy/host.lock`. Start with a mode-0700 state directory and create the lock with `umask 077` if the isolated target has no lock yet.
+
+Run the existing read-only Preflight with runtime management and `restore` intent to observe the prepared target before placing the record. With no handoff present, the plan cannot approve publication. Use the redacted host observation to fill in the actual target data. The backup and restore receipts come from the recovery operator's independent record.
 
 The deployment operator uses the existing protected VM management path and the shared host lock to place the approved record at `~/.local/state/codexia-deploy/recovery-handoff.json` for the `codexia` service identity. Place it by atomic rename into the mode-0700 state directory. The record is a regular, non-hardlinked mode-0600 JSON file of at most 16 KiB. Retain the authoritative record and restoration receipts in the independent protected operations record. The VM file carries only the following nonsecret values. Digests are lowercase SHA-256 in hexadecimal unless indicated.
 
@@ -71,7 +73,7 @@ The deployment operator uses the existing protected VM management path and the s
 | --- | --- |
 | `format`, `environment`, `operationId` | `codexia-recovery-handoff/v1`, `codexia-production`, and the protected restoration operation ID |
 | `backup` | v2 artifact `id` with its UTC timestamp, `sourceHostId`, `manifestSha256`, `transferReceiptSha256`, `restoreReceiptSha256`, and restored `databaseFingerprint` and `historyFingerprint` from the verified v2 manifest. Include `sourceClusterId` and `sourceDatabaseOid` as strings together if the source was observed. |
-| `target` | `hostId`, `clusterId` and `databaseOid` as observed by Preflight. Supply `ledgerSha256` for the Preflight ledger's canonical JSON, using sorted object keys and no insignificant whitespace. Include observed `authSchemaSha256` and `ownerBindingSha256` with their `sha256:` prefix, the private runtime settings file's `settingsSha256`, and `secretSetSha256` of the observed Podman credential identities. |
+| `target` | `hostId`, `clusterId` and `databaseOid` as observed by Preflight. Supply `ledgerSha256` for the reported `database.ledger` and `secretSetSha256` for `topology.secretHashes`, both as SHA-256 of canonical JSON with sorted object keys and no insignificant whitespace. Include observed `authSchemaSha256` and `ownerBindingSha256` with their `sha256:` prefix and the private runtime settings file's `settingsSha256`. |
 | `release` | Immutable certified Backend `image`, its 40-character producer `sourceSha`, and certified `frontendArtifactSha256` |
 | `window` | `id`, `notBefore`, and `notAfter` from the identical approved window. Use UTC ISO 8601 with milliseconds and a trailing `Z`. |
 | `writerFence` | `kind` is `decommissioned` or `write-access-revoked`. `recordSha256` identifies the independent proof that the source cannot resume writing. |

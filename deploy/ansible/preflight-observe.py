@@ -182,6 +182,11 @@ def read_migration_ledger():
     return ledger
 
 
+def read_auth_schema_fingerprint(auth_query):
+    definitions = sql("codexia", "BEGIN READ ONLY; SET LOCAL search_path TO codexia_auth; " + auth_query + "; COMMIT;").splitlines()
+    return "sha256:" + hashlib.sha256(json.dumps(definitions, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
 def restored_owner_settings(auth_dir):
     owner = sql("codexia", """SELECT 'sha256:' || encode(sha256(convert_to(setup.owner_id::text,'UTF8')),'hex')
         FROM codexia_auth.owner_setup setup
@@ -211,8 +216,7 @@ def assert_restored_target(record, database, host_id):
     require(target["hostId"] == host_id and target["ledgerSha256"] == digest(database["ledger"]))
     require(all(target[key] == database[key]
                 for key in ("clusterId", "databaseOid", "ownerBindingSha256", "settingsSha256")))
-    if "authSchemaSha256" in database:
-        require(target["authSchemaSha256"] == database["authSchemaSha256"])
+    require(target["authSchemaSha256"] == database["authSchemaSha256"])
 
 
 def require_recovery_worker_stopped():
@@ -249,6 +253,7 @@ def verify_recovery_handoff(expected_digest, operation_id, image, source_sha, lo
         'databaseOid', (SELECT oid::text FROM pg_database WHERE datname=current_database()))
         FROM pg_control_system();""")
     database["ledger"] = read_migration_ledger()
+    database["authSchemaSha256"] = read_auth_schema_fingerprint(os.environ["CODEXIA_AUTH_SCHEMA_QUERY"])
     database.update(restored_owner_settings(home / ".config/codexia-auth"))
     assert_restored_target(record, database, machine_identity())
     return {key: record["backup"][key] for key in ("databaseFingerprint", "historyFingerprint")}
@@ -293,7 +298,7 @@ def observe_transaction(state_dir):
 
 
 def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_query, volume_layout,
-                     resume_clean=False, restored=None):
+                     resume_clean=False, inspect_restored=False):
     if not volumes["codexia-postgres"]:
         require(not containers["codexia-db"])
         return {"state": "absent", "authState": "absent"}
@@ -362,15 +367,12 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
                            "bootstrapIntent": intent})
     # Use the owning auth-schema catalog query supplied by the checked-out source.
     # Hash its ordered text definitions locally; never emit them.
-    definitions = sql("codexia", "BEGIN READ ONLY; SET LOCAL search_path TO codexia_auth; " + auth_query + "; COMMIT;").splitlines()
-    result["authSchemaSha256"] = "sha256:" + hashlib.sha256(
-        json.dumps(definitions, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    result["authSchemaSha256"] = read_auth_schema_fingerprint(auth_query)
     if result.get("emptyAuthSchema") is True:
         return result
-    if restored is not None:
+    if inspect_restored:
         require(writer is None)
         result.update(restored_owner_settings(auth_dir))
-        assert_restored_target(restored, result, machine_identity())
         result["authState"] = "ready"
         return result
     if writer and writer.get("authMode") == "better-auth":
@@ -582,21 +584,23 @@ def observe():
             if set(unit_state.splitlines()) == {"LoadState=not-found", "ActiveState=inactive"}:
                 backend = {"state": "absent"}
         recovery = None
-        if transaction is None and os.environ.get("CODEXIA_OBSERVE_RECOVERY") == "true":
+        observe_restore = transaction is None and os.environ.get("CODEXIA_OBSERVE_RECOVERY") == "true"
+        clean_restore = bool(lock_handle is not None and backend["state"] == "absent" and not residue and
+                             not containers["codexia-api"] and not containers["codexia-tunnel"])
+        if observe_restore:
             recovery = read_recovery_handoff(state_dir)
         if recovery is not None:
-            require(lock_handle is not None and backend["state"] == "absent" and
-                    not residue and not containers["codexia-api"] and not containers["codexia-tunnel"])
+            require(clean_restore)
             require_recovery_worker_stopped()
             require_tunnel_inactive()
             require(set(BASE_SECRETS + AUTH_SECRETS).issubset(secret_hashes) and
                     digest(secret_hashes) == recovery[0]["target"]["secretSetSha256"])
         database = observe_database(volumes, containers, state_dir, auth_dir, full,
                                     os.environ["CODEXIA_AUTH_SCHEMA_QUERY"], facts["volumeLayout"],
-                                    resume_clean=lock_handle is not None and transaction is None and
+                                    resume_clean=not observe_restore and lock_handle is not None and transaction is None and
                                     backend.get("state") == "absent" and not residue and
                                     not containers["codexia-api"],
-                                    restored=recovery[0] if recovery else None)
+                                    inspect_restored=observe_restore and clean_restore)
         if database["state"] in ("missing", "absent"):
             # Verify the canonical residual slot independently of old DB health.
             if containers["codexia-api"]:
@@ -622,6 +626,7 @@ def observe():
             record, evidence_digest = recovery
             require(h == "ready" and database["state"] == "initialized" and database["authState"] == "ready" and
                     datetime.now(timezone.utc) <= datetime.fromisoformat(record["window"]["notAfter"]))
+            assert_restored_target(record, database, host_id)
             result["recovery"] = {"operationId": record["operationId"], "evidenceSha256": evidence_digest,
                                   "release": record["release"], "window": record["window"]}
         return result

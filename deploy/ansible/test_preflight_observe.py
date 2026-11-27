@@ -108,10 +108,29 @@ class ProtectedRecoveryTests(unittest.TestCase):
 
 class ObserveDatabaseTests(unittest.TestCase):
     def observe(self, *, volume=True, container=True, layout="ready", writer=None,
-                directory=Path("/unused"), resume_clean=False):
+                directory=Path("/unused"), resume_clean=False, inspect_restored=False):
         return observer.observe_database(
             {"codexia-postgres": volume}, {"codexia-db": container},
-            directory, directory, writer, "", layout, resume_clean=resume_clean)
+            directory, directory, writer, "", layout, resume_clean=resume_clean, inspect_restored=inspect_restored)
+
+    def test_restore_observation_reads_owner_without_fresh_installation_markers(self):
+        owner = "sha256:" + "a" * 64
+        settings = "b" * 64
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(observer, "command", return_value=(0, "true")), \
+                    patch.object(observer, "sql", return_value="auth catalog"), \
+                    patch.object(observer, "restored_owner_settings", return_value={
+                        "ownerBindingSha256": owner, "settingsSha256": settings}), \
+                    patch.object(observer, "json_sql", side_effect=[
+                        {"clusterId": "123", "databaseOid": "456", "appExists": True, "rolesValid": True},
+                        {"ledgerExists": True, "authExists": True, "appRelations": 5},
+                        [{"version": "0001-initial.sql", "checksum": "a" * 64}], {"empty": False},
+                    ]):
+                result = self.observe(directory=Path(folder), inspect_restored=True)
+            self.assertEqual(result["authState"], "ready")
+            self.assertEqual(result["ownerBindingSha256"], owner)
+            self.assertEqual(result["settingsSha256"], settings)
+            self.assertNotIn("bootstrapIntent", result)
 
     def test_positive_absence_and_empty_volume_need_no_sql_or_container_start(self):
         with patch.object(observer, "command") as command:

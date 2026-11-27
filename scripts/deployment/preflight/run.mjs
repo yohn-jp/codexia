@@ -79,7 +79,7 @@ export async function readLifecycleHost({ inventory, targetHost, sshDirectory = 
     await run('ansible-playbook', ['-i', inventory,
       'deploy/ansible/preflight-observe.yml', '--extra-vars', '@' + vars], { timeout: 180_000, maxBuffer: 2 * 1024 * 1024 });
     const host = JSON.parse(await readFile(out, 'utf8'));
-    return { hostPinSha256, host };
+    return { hostPinSha256, host, authSchemaQuery: query };
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
@@ -87,14 +87,14 @@ export async function readLifecycleHost({ inventory, targetHost, sshDirectory = 
 
 async function hostObservation({ bootstrap = false } = {}) {
   const binding = runBinding();
-  const observed = await readLifecycleHost({
+  const { host, hostPinSha256 } = await readLifecycleHost({
     inventory: join(env.RUNNER_TEMP, bootstrap ? 'codexia-bootstrap/control/inventory.yml' : 'codexia-preflight-inventory.yml'),
     targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST,
     sshDirectory: bootstrap ? 'codexia-bootstrap/ssh' : 'codexia-ssh',
     recovery: !bootstrap && env.CODEXIA_PREFLIGHT_INTENT === 'restore',
   });
   await writeFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-host.json'),
-    JSON.stringify({ ...binding, ...observed }) + '\n', { mode: 0o600, flag: 'wx' });
+    JSON.stringify({ ...binding, host, hostPinSha256 }) + '\n', { mode: 0o600, flag: 'wx' });
 }
 
 async function mainSource() {
