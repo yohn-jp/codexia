@@ -440,7 +440,6 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   assert.equal(restoredImageId.replace(/^sha256:/u, ''), postgresId.replace(/^sha256:/u, ''),
     'The restore engine must use the exact source PostgreSQL image config');
   const authSql = path.join(contractDirectory, 'restore-proof-auth.sql');
-  const identitySql = path.join(contractDirectory, 'restore-proof-identity.sql');
   const restoreScript = path.join(contractDirectory, 'restore-proof.sh');
   const sourceAuthDefinitions = invoke('docker', ['exec', '-i', sourceContainer, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'codexia'], {
     input: await readFile(authSql),
