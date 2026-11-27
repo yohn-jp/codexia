@@ -2308,7 +2308,7 @@ Exercise signed MCP bearer admission for exact client, scope, assigned-project, 
   **ID**: REQ-MCP-001
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 2110, 2448
+  **Lines**: 2109, 2456
 
 ## TEST-MCPV-001-002
 
@@ -2470,7 +2470,7 @@ Close an MCP connection during OAuth admission and confirm that only the connect
   **ID**: REQ-MCP-001
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 5023, 5070
+  **Lines**: 5031, 5078
 
 ## TEST-MCPV-004-003
 
@@ -2542,7 +2542,7 @@ Checks the selected document and revision on current and pinned snapshots.
   **ID**: REQ-CORE-003
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 3101, 3101
+  **Lines**: 3105, 3105
 
 ## TEST-DATA-001-001
 

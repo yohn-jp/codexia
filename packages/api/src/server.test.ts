@@ -2233,9 +2233,13 @@ describe('Codexia HTTP boundary', () => {
     const persistence = admissionPersistence(storeFixture.store, [firstAssignedProject, unassignedProject, assignedProject]);
     // Simulate both assigned works falling outside the most recent global page.
     Object.assign(storeFixture.store, {
-      listProjectsPage: async () => ({ projects: Array.from({ length: 200 }, (_, index) => ({
-        ...TEST_PROJECT, id: `00000000-0000-4000-8000-${String(100 + index).padStart(12, '0')}`,
-      })), nextCursor: { updatedAt: TEST_PROJECT.updatedAt, id: '00000000-0000-4000-8000-000000000299' } }),
+      listProjectsPage: async () => ({
+        projects: Array.from({ length: 200 }, (_, index) => ({
+          ...TEST_PROJECT,
+          id: `00000000-0000-4000-8000-${String(100 + index).padStart(12, '0')}`,
+        })),
+        nextCursor: { updatedAt: TEST_PROJECT.updatedAt, id: '00000000-0000-4000-8000-000000000299' },
+      }),
     });
     const api = await startCustomApi(storeFixture.store, staticDir, {
       persistence,
