@@ -548,6 +548,57 @@
         "$HOME/.local/bin/codexia-preflight-observe" verify-secret-identities "$secret_set" ||
           stale_admission 'the prepared Podman credential identities changed'
       fi
+      if [[ "$adoption_activation" != null ]]; then
+        [[ "$had_unit" == false && "$first_activation" == null && "$recovery_activation" == null ]] ||
+          stale_admission 'existing-owner adoption requires a clean isolated API slot'
+        adoption_binding="$(node - "$adoption_activation" <<'NODE'
+      const {hostId, clusterId, databaseOid, ownerBindingSha256, settingsSha256,
+        secretSetSha256, preservationSha256, notBeforeMs, notAfterMs} = JSON.parse(process.argv[2]);
+      const hash = /^[a-f0-9]{64}$/u;
+      if (!hash.test(hostId) || !hash.test(settingsSha256) || !hash.test(secretSetSha256) ||
+          !hash.test(preservationSha256) || !/^sha256:[a-f0-9]{64}$/u.test(ownerBindingSha256) ||
+          !/^[1-9][0-9]{0,19}$/u.test(clusterId) || !/^[1-9][0-9]{0,9}$/u.test(databaseOid) ||
+          !Number.isSafeInteger(notBeforeMs) || !Number.isSafeInteger(notAfterMs) ||
+          notBeforeMs <= 0 || notAfterMs <= notBeforeMs) process.exit(2);
+      process.stdout.write([hostId, settingsSha256, clusterId, databaseOid,
+        ownerBindingSha256, notBeforeMs, notAfterMs, secretSetSha256, preservationSha256].join(' '));
+      NODE
+        )" || stale_admission 'existing-owner adoption evidence is invalid'
+        read -r approved_host approved_settings approved_cluster approved_database approved_owner \
+          approved_not_before approved_not_after approved_secrets approved_preservation <<< "$adoption_binding"
+        first_activation_window_current || stale_admission 'existing-owner adoption window expired'
+        machine_id="$(cat /etc/machine-id)" || stale_admission 'adoption host identity unavailable'
+        [[ "$(printf '%s' "$machine_id" | sha256sum)" == "$approved_host  -" ]] ||
+          stale_admission 'existing-owner adoption target changed'
+        live_runtime={{ (home + '/.config/codexia-auth/runtime.env') | quote }}
+        [[ "$auth_settings_digest" == "$approved_settings" && -f "$live_runtime" && ! -L "$live_runtime" &&
+           -O "$live_runtime" && "$(stat -c %a -- "$live_runtime")" == 600 &&
+           "$(sha256sum < "$live_runtime")" == "$approved_settings  -" ]] ||
+          stale_admission 'existing-owner authentication configuration changed'
+        adoption_database="$(podman exec -i codexia-db sh -ec '
+          export PGPASSWORD="$(cat /run/secrets/admin-password)"
+          export PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=10000"
+          exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia
+        ' <<'SQL'
+      SELECT system_identifier || ' ' || (SELECT oid FROM pg_database WHERE datname=current_database()) ||
+        ' sha256:' || encode(sha256(convert_to(setup.owner_id::text,'UTF8')),'hex')
+      FROM pg_control_system() CROSS JOIN codexia_auth.owner_setup setup
+      WHERE setup.id='first-owner' AND setup.consumed_at IS NOT NULL
+        AND (SELECT count(*) FROM codexia_auth."user") = 1
+        AND EXISTS (SELECT FROM codexia_auth."user" u JOIN codexia_auth."passkey" p ON p."userId"=u.id
+          WHERE u.id=setup.owner_id);
+      SQL
+        )" || stale_admission 'existing-owner database identity could not be verified'
+        [[ "$adoption_database" == "$approved_cluster $approved_database $approved_owner" ]] ||
+          stale_admission 'the existing database or owner differs from the approved adoption'
+        "$HOME/.local/bin/codexia-preflight-observe" verify-secret-identities "$approved_secrets" ||
+          stale_admission 'adopted deployment secrets changed'
+        # The protected plan already binds the authenticated independent backup
+        # receipt. A missing receipt is rejected by plan verification before
+        # this host lock is acquired. Never initialize or rewrite this database.
+        [[ "$approved_preservation" =~ ^[a-f0-9]{64}$ ]] ||
+          stale_admission 'existing-owner preservation evidence is missing'
+      fi
       recovery_operation_id=''
       recovery_evidence_sha256=''
       check_recovery_record(){
