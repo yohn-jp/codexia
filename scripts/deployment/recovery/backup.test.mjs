@@ -361,7 +361,7 @@ test('encrypted backup verification accepts read-only artifacts without weakenin
     assert.match(verified.stdout, /^[a-f0-9]{64}\n$/u);
     const independent = () => spawnSync('bash', [
       backupProgram, 'validate-independent-artifact', fixture.backupDestination, archive,
-    ], { encoding: 'utf8', env: { ...process.env, PATH: fixture.bin + ':' + process.env.PATH } });
+    ], { encoding: 'utf8', env: { PATH: fixture.bin + ':/usr/bin:/bin', LANG: 'C.UTF-8' } });
     const onRemoteMount = independent();
     assert.equal(onRemoteMount.status, 0, onRemoteMount.stderr);
     assert.equal(onRemoteMount.stdout, verified.stdout);

@@ -314,6 +314,7 @@ YAML
   set_state better_auth_same_digest PASS 'same release, settings, signing keys, auth schema and owner session'
 
   verify_private_backup_socket
+  observe_runtime backup-provisioned auth-primary
   activate_fixture_backup_destination
   run_deploy auth-update false '' auth-compatible-update
   [[ "$(observe_auth "$update_image")" == "$proof" ]]

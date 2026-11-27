@@ -199,7 +199,7 @@ TIMING
 }
 observe_runtime() {
   local key=$1 role=$2
-  local container_id image_id api_health api_unit quadlet_sha release_sha pg_volume pg_mount pg_created data_volume data_mount data_created history_volume history_mount history_created db_container api_count sentinel
+  local container_id image_id api_health api_unit quadlet_sha release_sha pg_volume pg_mount pg_created data_volume data_mount data_created history_volume history_mount history_created db_container db_image api_count sentinel
   container_id=$(rootless_podman inspect --format '{{.Id}}' codexia-api)
   image_id=$(rootless_podman inspect --format '{{.Image}}' codexia-api)
   api_health=$(rootless_podman inspect --format '{{.State.Health.Status}}' codexia-api)
@@ -212,7 +212,7 @@ observe_runtime() {
   api_unit=$(rootless_systemctl show --property=ActiveState --value codexia-api.service)
   quadlet_sha=$(rootless sha256sum "$fixture_home/.config/containers/systemd/codexia-api.container" | cut -d' ' -f1)
   release_sha=$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)
-  db_container=$(rootless_podman inspect --format '{{.Id}}' codexia-db)
+  read -r db_container db_image < <(rootless_podman inspect --format '{{.Id}} {{.Image}}' codexia-db)
   pg_volume=$(rootless_podman volume inspect --format '{{.Name}}' codexia-postgres)
   pg_mount=$(rootless_podman volume inspect --format '{{.Mountpoint}}' codexia-postgres)
   pg_created=$(rootless_podman volume inspect --format '{{.CreatedAt}}' codexia-postgres)
@@ -233,10 +233,10 @@ observe_runtime() {
     sentinel=not-created
   fi
   rootless_podman exec codexia-api node -e 'fetch("http://127.0.0.1:3000/health/ready").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' >/dev/null
-  node - "$report" "$key" "$role" "$container_id" "$image_id" "$api_health" "$api_unit" "$quadlet_sha" "$release_sha" "$db_container" \
+  node - "$report" "$key" "$role" "$container_id" "$image_id" "$api_health" "$api_unit" "$quadlet_sha" "$release_sha" "$db_container" "$db_image" \
     "$pg_volume" "$pg_mount" "$pg_created" "$data_volume" "$data_mount" "$data_created" "$history_volume" "$history_mount" "$history_created" "$api_count" "$sentinel" <<'NODE'
 const fs=require('node:fs');
-const [path,key,role,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,pgVolume,pgMount,pgCreated,dataVolume,dataMount,dataCreated,historyVolume,historyMount,historyCreated,apiCount,sentinel]=process.argv.slice(2);
+const [path,key,role,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,dbImage,pgVolume,pgMount,pgCreated,dataVolume,dataMount,dataCreated,historyVolume,historyMount,historyCreated,apiCount,sentinel]=process.argv.slice(2);
 const report=JSON.parse(fs.readFileSync(path,'utf8'));
 const evidence=JSON.parse(fs.readFileSync(process.env.CODEXIA_LIFECYCLE_EVIDENCE_FILE,'utf8'));
 const expectedImageId=evidence.candidates[role]?.imageId;
@@ -245,15 +245,20 @@ if(!expectedImageId||apiImage!==expectedImageId)throw new Error(`${key}: API wri
 if(sentinel!==(['first-activation','same-digest-reapply'].includes(key)?'not-created':'preserved'))throw new Error(`${key}: PostgreSQL sentinel data was absent or changed`);
 report.observations ||= {}; const observations=report.observations.continuity ||= []; const previous=observations.at(-1);
 if(previous){
-  if(dbContainer!==previous.dbContainer)throw new Error(`${key}: PostgreSQL container identity changed`);
+  if(key==='backup-provisioned'){
+    // Installing the private socket and exercising its restart recreates both Quadlet containers.
+    if(dbContainer===previous.dbContainer||apiContainer===previous.apiContainer)throw new Error('Backup socket maintenance did not recreate the database and API containers');
+    if(!dbImage||dbImage!==previous.dbImage)throw new Error('Backup provisioning changed the PostgreSQL image');
+    if(apiImage!==previous.apiImage||quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha)throw new Error('Backup provisioning changed the admitted application image, Quadlet or release record');
+  }else if(dbContainer!==previous.dbContainer)throw new Error(`${key}: PostgreSQL container identity changed`);
   if(JSON.stringify({postgres:{name:pgVolume,mountpoint:pgMount,createdAt:pgCreated},data:{name:dataVolume,mountpoint:dataMount,createdAt:dataCreated},history:{name:historyVolume,mountpoint:historyMount,createdAt:historyCreated}})!==JSON.stringify(previous.volumes))throw new Error(`${key}: persistent volume identity changed`);
 }
-if(['same-digest-reapply','better-auth-same-digest'].includes(key)&&(apiContainer!==previous.apiContainer||quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Same-digest application recreated the API container or changed the Quadlet or release record');
+if(['same-digest-reapply','better-auth-same-digest','missing-executor','console-unconfigured'].includes(key)&&(apiContainer!==previous.apiContainer||quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error(`${key}: expected the running API container, Quadlet and release record to be preserved`);
 if(['compatible-update','better-auth-compatible-update'].includes(key)&&(quadletSha===previous.quadletSha||releaseSha===previous.releaseSha))throw new Error('Compatible image update did not update the Quadlet and release record');
 if((key==='failed-candidate-rollback'||key==='better-auth-rollback')&&apiContainer===previous.apiContainer)throw new Error('Failed candidate rollback did not recreate the previous API writer');
 if((key==='failed-candidate-rollback'||key==='better-auth-rollback')&&(quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Failed candidate rollback did not restore the prior Quadlet and release record');
 if(key==='interrupted-recovery'&&(quadletSha!==previous.quadletSha||releaseSha!==previous.releaseSha))throw new Error('Interrupted transaction recovery did not preserve the previous Quadlet and release record');
-observations.push({checkpoint:key,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,
+observations.push({checkpoint:key,apiContainer,apiImage,apiHealth,apiUnit,quadletSha,releaseSha,dbContainer,dbImage,
   volumes:{postgres:{name:pgVolume,mountpoint:pgMount,createdAt:pgCreated},data:{name:dataVolume,mountpoint:dataMount,createdAt:dataCreated},history:{name:historyVolume,mountpoint:historyMount,createdAt:historyCreated}},apiWriterCount:Number(apiCount),databaseSentinel:sentinel});
 report.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(report,null,2)+'\n',{mode:0o600});
 NODE
@@ -720,6 +725,7 @@ fi
 grep -Fq 'Deployment transaction failed during off-VM backup admission' "$tmp/deploy-executor-missing.log"
 observe_runtime missing-executor "$initial_key"
 verify_private_backup_socket
+observe_runtime backup-provisioned "$initial_key"
 if run_deploy "$update_key" false '' deploy-console-unconfigured; then
   echo 'An update reached candidate activation before Console backup configuration' >&2
   return 1
