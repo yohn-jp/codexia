@@ -1,8 +1,8 @@
 # MCP HTTP 405 応答の公開契約是正
 
-**種別: 未採用提案。**
+**種別は承認済みの API epoch 5 設計。**
 HTTP ワイヤ契約と MCP transport の所有者を対象とする。
-この提案の対象は MCP HTTP の GET・DELETE の 405 応答である。
+この契約の対象は MCP HTTP の GET・DELETE の 405 応答である。
 既存の principal、作品割当、scope、POST の契約およびプロトコル移行期限は維持する。
 [HTTP API 契約](API-CONTRACT.md) と [MCP v2 移行設計](MCP-V2-MIGRATION.md) が現行正本である。
 
@@ -23,7 +23,7 @@ epoch 4 の生成 OpenAPI は、この本文をトップレベルに文字列の
 HTTP と PostgreSQL を接続した試験は、割当外の作品への要求が 404 になり、割当済みの作品への要求だけが上記の 405 になることを検査する。
 SDK は期間限定の stateless fallback と strict mode の両方で同じ 405 を返す。
 
-## 提案する変更
+## 採用する変更
 
 4 操作の 405 応答に必須の `Allow: POST` と上記の JSON-RPC 本文を TypeSpec で定義する。
 コンシューマーは 405 の型を更新し、認可失敗の HTTP 401・403 や作品割当失敗の HTTP 404 は引き続き `ApiError` として扱う。
@@ -31,7 +31,7 @@ Fastify は入場制御を行い、入場後の 405 は引き続き公式 SDK �
 
 公開済みの 405 本文からトップレベルの `code` を削除し、`error` を文字列からオブジェクトに置き換えるため、oasdiff はこれらの変更を `ERR` として検出する。
 対象は表の 4 操作の 405 応答に限る。
-実装に進む条件は、対象の `ERR` と比較基準を含む API epoch の遷移が明示的に承認されることである。 [互換性手順の提案](API-COMPATIBILITY-TRANSITION-PROPOSAL.md)
+実装前に初回本番導入前であることを確認し、基準 SHA と `ERR` の完全照合を行う。 [API epoch 5 契約是正](API-COMPATIBILITY-TRANSITION-PROPOSAL.md)
 
 ## 受入条件
 
