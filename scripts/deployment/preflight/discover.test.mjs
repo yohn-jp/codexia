@@ -84,4 +84,13 @@ test('the production REST reader recovers a first-install pair even with an unav
   assert.deepEqual(request, { backendPublisherRunId: 10, frontend: {
     runId: 11, verifyRunId: 12, artifactId: 15, artifactDigest: 'e'.repeat(64),
   }, intent: 'install', window: null });
+  const recoveryEnv = {
+    GH_TOKEN: 'fixture', CODEXIA_REPOSITORY_ID: String(repo.id), GITHUB_SHA: sha, CODEXIA_PREFLIGHT_INTENT: 'restore',
+    CODEXIA_WINDOW_START: '2026-11-24T00:00:00.000Z', CODEXIA_WINDOW_END: '2026-11-24T01:00:00.000Z',
+  };
+  await assert.rejects(discoverRequest(recoveryEnv, fetchImpl), /existing approved window ID/u);
+  const restored = await discoverRequest({ ...recoveryEnv, CODEXIA_WINDOW_ID: 'approved-restoration' }, fetchImpl);
+  assert.deepEqual(restored.window, {
+    id: 'approved-restoration', notBefore: recoveryEnv.CODEXIA_WINDOW_START, notAfter: recoveryEnv.CODEXIA_WINDOW_END,
+  });
 });
