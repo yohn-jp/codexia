@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readFile, readlink, readdir, rm, symlink, writeFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,7 +12,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.
 const backupProgram = path.join(root, 'deploy/backup/backup.sh');
 const backupRunner = path.join(root, 'deploy/backup/backup-runner.sh');
 const backupControl = path.join(root, 'deploy/backup/backup-control.sh');
-const { parse } = createRequire(new URL('../../../packages/core/package.json', import.meta.url))('yaml');
 const shellQuote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 
 async function createFixture() {
@@ -65,9 +63,11 @@ function invokeBackup(fixture, { activeUnits = '', approved = true, lockFile = f
 test('a stopped enabled backup executor resumes before and after the release symlink switch', async t => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.directory, { recursive: true, force: true }));
-  const tasks = parse(await readFile(path.join(root, 'deploy/ansible/backup-release.yml'), 'utf8'));
-  const installer = tasks.find(task => task['ansible.builtin.shell'])['ansible.builtin.shell']
-    .replaceAll('{% raw %}', '').replaceAll('{% endraw %}', '');
+  const playbook = await readFile(path.join(root, 'deploy/ansible/backup-release.yml'), 'utf8');
+  // This workflow also runs from a checkout without installed workspace packages.
+  const shell = /^  ansible\.builtin\.shell: \|\n((?: {4}[^\n]*\n|\n)+)/mu.exec(playbook)?.[1];
+  assert.ok(shell, 'The backup release task must provide its Bash program');
+  const installer = shell.replace(/^ {4}/gmu, '').replaceAll('{% raw %}', '').replaceAll('{% endraw %}', '');
   const digest = 'a'.repeat(64);
   const identity = { format: 'codexia-backend-identity/v1', profile: 'full', sourceSha: 'b'.repeat(40) };
   const record = JSON.stringify({ image: 'ghcr.io/yohn-jp/codexia-backend@sha256:' + digest, identity });
