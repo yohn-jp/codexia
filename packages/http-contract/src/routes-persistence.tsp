@@ -36,6 +36,19 @@ op updatePersistenceProject(@path projectId: PersistenceId, @body body: Persiste
 op exportPersistenceArchive(@path projectId: PersistenceId): WorkArchiveExport | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | PersistenceUnauthorized;
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
+@route("/api/v1/persistence/projects/{projectId}/open-export") @get @operationId("persistence_project_open_export_get")
+op exportOpenWork(@path projectId: PersistenceId):
+    { @statusCode _: 200; @header contentType: "application/zip"; @header("Content-Length") length: uint32; @header("Content-Disposition") disposition: string; @body body: bytes; }
+    | { @statusCode _: 400; @body body: ApiError; }
+    | PersistenceUnauthorized
+    | { @statusCode _: 403; @body body: ApiError; }
+    | { @statusCode _: 404; @body body: ApiError; }
+    | { @statusCode _: 409; @body body: ApiError; }
+    | { @statusCode _: 413; @body body: ApiError; }
+    | { @statusCode _: 503; @body body: ApiError; }
+    | { @statusCode _: 500; @body body: ApiError; };
+
+@tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/documents") @get @operationId("persistence_documents_get")
 op listPersistenceDocuments(
   @path projectId: PersistenceId,

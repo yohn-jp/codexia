@@ -950,6 +950,16 @@ test("desktop author can download a portable work and import it without replacin
   expect(archive.format).toBe("codexia-work/v1");
   expect(archive.documents.find((item) => item.id === scene.id)?.markdown).toContain("最初の本文。");
 
+  const [openExport] = await Promise.all([
+    page.waitForEvent("download"),
+    transfer.getByRole("button", { name: "離脱用 ZIP をダウンロード" }).click(),
+  ]);
+  expect(openExport.suggestedFilename()).toBe(`codexia-work-${project.id}.zip`);
+  const zipPath = await openExport.path();
+  expect(zipPath).toBeTruthy();
+  expect((await readFile(zipPath!)).subarray(0, 4).toString("hex")).toBe("504b0304");
+  await expect(transfer.getByText("ZIP の受信完了", { exact: true })).toBeVisible();
+
   await transfer.locator('input[type="file"]').setInputFiles({
     name: "portable-work.json", mimeType: "application/json", buffer: Buffer.from(json),
   });

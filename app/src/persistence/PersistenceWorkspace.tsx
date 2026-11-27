@@ -513,6 +513,8 @@ export function PersistenceWorkspace({
   const loading = loadingWorkspace || loadingDocument;
   const [workTransferBusy, setWorkTransferBusy] = useState(false);
   const [workTransferStatus, setWorkTransferStatus] = useState('');
+  const openWorkExportAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => openWorkExportAbort.current?.abort(), [projectId]);
   const [pageError, setPageError] = useState('');
   const [outlineError, setOutlineError] = useState('');
   const [outlineReadyProject, setOutlineReadyProject] = useState('');
@@ -1923,6 +1925,51 @@ export function PersistenceWorkspace({
     }
   }
 
+  function saveWorkBlob(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  }
+
+  async function exportOpenWork(): Promise<void> {
+    if (!project || workTransferBusy || openWorkExportAbort.current) return;
+    const id = project.id;
+    const controller = new AbortController();
+    openWorkExportAbort.current = controller;
+    setWorkTransferBusy(true);
+    setWorkTransferStatus('');
+    setPageError('');
+    try {
+      const blob = await api.downloadOpenWorkExport(id, controller.signal);
+      controller.signal.throwIfAborted();
+      saveWorkBlob(blob, 'codexia-work-' + id + '.zip');
+      setWorkTransferStatus('ZIP の受信完了');
+    } catch (error) {
+      if (controller.signal.aborted) {
+        setWorkTransferStatus('ZIP の受信を中止しました。');
+      } else {
+        const message =
+          error instanceof ApiError && error.status === 413
+            ? '上限を超えたため、離脱用 ZIP を作成できませんでした。'
+            : error instanceof ApiError && error.status === 404
+              ? 'この作品の離脱用 ZIP を取得できません。'
+              : '離脱用 ZIP の受信を完了できませんでした。もう一度お試しください。';
+        setPageError(message);
+      }
+    } finally {
+      openWorkExportAbort.current = null;
+      setWorkTransferBusy(false);
+    }
+  }
+
   async function exportCurrentWork(): Promise<void> {
     if (!project || workTransferBusy) return;
     const current = activeRef.current;
@@ -1936,17 +1983,7 @@ export function PersistenceWorkspace({
     try {
       const archive = await api.exportWorkArchive(project.id);
       const blob = new Blob([`${JSON.stringify(archive)}\n`], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      try {
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `codexia-${project.title.replace(/[^\p{L}\p{N}._-]+/gu, '-').slice(0, 64) || 'work'}.json`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      } finally {
-        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      }
+      saveWorkBlob(blob, `codexia-${project.title.replace(/[^\p{L}\p{N}._-]+/gu, '-').slice(0, 64) || 'work'}.json`);
       setWorkTransferStatus(
         '作品のJSONスナップショットを生成しました。過去のRevisionとブラウザーDraftは含まれません。' +
           (archive.omittedRecords.length ? ` セキュリティ保護のため除外された項目が ${archive.omittedRecords.length} 項目あります。` : '') +
@@ -3299,11 +3336,26 @@ export function PersistenceWorkspace({
             </button>
           </form>
         </details>
-        <details>
+        <details
+          onToggle={event => {
+            if (!event.currentTarget.open) openWorkExportAbort.current?.abort();
+          }}
+        >
           <summary>作品のエクスポート・インポート</summary>
           <p>
-            Markdown本文・構成・Knowledge・Evidence・作者データを作品JSONで持ち出せます。PostgreSQLの全Revision履歴やブラウザーの下書きは含まれません。
+            交換用の作品 JSON には、現在の Markdown 本文、構成、Knowledge、Evidence、作者データを収録します。離脱用 ZIP には保存済みの
+            Revision 履歴も含まれます。
           </p>
+          {project && (
+            <button type="button" data-ux-control="LIB-01.E" disabled={workTransferBusy || loading} onClick={() => void exportOpenWork()}>
+              離脱用 ZIP をダウンロード
+            </button>
+          )}
+          {openWorkExportAbort.current && (
+            <button type="button" onClick={() => openWorkExportAbort.current?.abort()}>
+              ZIP の受信を中止
+            </button>
+          )}
           {project && (
             <button
               type="button"

@@ -59,6 +59,7 @@ import {
   type LinkAssertionEvidenceCommand,
   type MentionLink,
   type ModuleRecord,
+  type OpenWorkExportRows,
   NLP_FEATURE_SETTINGS_CHANGESET_SOURCE,
   type Persistence,
   PersistenceError,
@@ -695,6 +696,80 @@ class PostgresTransaction implements PersistenceTransaction {
 
   private markChanged(projectId: ProjectId): void {
     this.changedProjects.add(projectId);
+  }
+
+  async *scanOpenWorkExport<K extends keyof OpenWorkExportRows>(
+    projectId: ProjectId,
+    section: K,
+    maximumRowBytes: number,
+  ): AsyncIterable<OpenWorkExportRows[K]> {
+    const sources: {
+      [P in keyof OpenWorkExportRows]: {
+        table: string;
+        projectColumn?: string;
+        key: readonly string[];
+        filter?: string;
+        size?: string;
+        map: (row: DbRow) => OpenWorkExportRows[P];
+      };
+    } = {
+      project: { table: 'project', projectColumn: 'id', key: ['id'], map: mapProject },
+      documents: { table: 'document', key: ['id'], map: row => ({ ...mapDocument(row), deletedAt: asNullableString(row.deleted_at) }) },
+      revisions: { table: 'document_revision', key: ['document_id', 'id'], size: 'octet_length(selected.markdown)', map: mapRevision },
+      nodes: { table: 'knowledge_node', key: ['id'], map: mapKnowledgeNode },
+      aliases: { table: 'knowledge_alias', key: ['id'], map: mapKnowledgeAlias },
+      relations: { table: 'knowledge_relation', key: ['id'], map: mapKnowledgeRelation },
+      anchors: { table: 'text_anchor', key: ['id'], map: mapEvidenceAnchor },
+      mentions: { table: 'mention_link', key: ['evidence_id', 'node_id'], map: mapMentionLink },
+      assertions: { table: 'assertion', key: ['id'], map: mapAssertion },
+      assertionEvidence: {
+        table: 'assertion_evidence',
+        key: ['assertion_id', 'evidence_id'],
+        map: row => ({ ...mapAssertionEvidence(row), assertionId: asString(row.assertion_id) as AssertionId }),
+      },
+      moduleRecords: {
+        table: 'module_record',
+        key: ['module_id', 'key'],
+        filter: "AND module_id NOT LIKE 'core.authority.%'",
+        map: row => this.mapModuleRecord(row),
+      },
+      omittedAuthority: {
+        table:
+          "(SELECT project_id, count(*)::int AS count FROM module_record WHERE module_id LIKE 'core.authority.%' GROUP BY project_id) AS authority",
+        key: ['project_id'],
+        map: row => ({ count: asNumber(row.count) }),
+      },
+    };
+    const source = sources[section];
+    const columns = source.key.join(', ');
+    const parameterType = section === 'moduleRecords' ? 'text' : 'uuid';
+    const parameters = source.key.map((_, i) => '$' + (i + 4) + '::' + parameterType);
+    const cursor = parameters.join(', ');
+    let after: readonly (string | null)[] = source.key.map(() => null);
+    const pageBytes = Math.min(maximumRowBytes, 2 * 1024 * 1024);
+    while (true) {
+      const { rows } = await this.query(
+        `WITH selected AS MATERIALIZED (
+           SELECT * FROM ${source.table} WHERE ${source.projectColumn ?? 'project_id'} = $1
+             ${source.filter ?? ''} AND (${parameters[0]} IS NULL OR ROW(${columns}) > ROW(${cursor}))
+           ORDER BY ${columns} LIMIT 64
+         ), sizes AS (
+           SELECT selected.*, ${source.size ?? 'octet_length(row_to_json(selected)::text)'} AS row_bytes FROM selected
+         ), budget AS (
+           SELECT sizes.*, row_number() OVER (ORDER BY ${columns}) AS ordinal,
+             sum(row_bytes) OVER (ORDER BY ${columns}) AS page_bytes FROM sizes
+         ) SELECT ${columns},
+           CASE WHEN row_bytes <= $2 THEN to_jsonb(budget) - 'ordinal' - 'row_bytes' - 'page_bytes' END AS payload
+           FROM budget WHERE ordinal = 1 OR page_bytes <= $3 ORDER BY ${columns}`,
+        [projectId, maximumRowBytes, pageBytes, ...after],
+      );
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        if (row.payload === null) throw new PersistenceError('export_limit', 'Open work export exceeds the maximum row size');
+        yield source.map(row.payload);
+      }
+      after = source.key.map(column => asString(rows.at(-1)?.[column]));
+    }
   }
 
   async getProject(projectId: ProjectId): Promise<Project | undefined> {
@@ -2936,19 +3011,34 @@ export class PostgresPersistence implements Persistence {
     }
   }
 
-  async read<T>(work: (reader: PersistenceReader) => Promise<T>): Promise<T> {
+  async read<T>(
+    work: (reader: PersistenceReader) => Promise<T>,
+    options?: { signal: AbortSignal; statementTimeoutMs: number },
+  ): Promise<T> {
+    options?.signal.throwIfAborted();
     const client = await this.acquireClient();
+    let released = false;
+    const onAbort = () => {
+      released = true;
+      client.release(true);
+    };
+    options?.signal.addEventListener('abort', onAbort, { once: true });
     try {
+      options?.signal.throwIfAborted();
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      if (options) await client.query("SELECT set_config('statement_timeout', $1, true)", [String(options.statementTimeoutMs)]);
       const reader = new PostgresTransaction(client, true);
       const result = await work(reader);
+      options?.signal.throwIfAborted();
       await client.query('COMMIT');
       return result;
     } catch (error) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      mapDatabaseError(error);
+      if (!released) await client.query('ROLLBACK').catch(() => undefined);
+      options?.signal.throwIfAborted();
+      return mapDatabaseError(error);
     } finally {
-      client.release();
+      options?.signal.removeEventListener('abort', onAbort);
+      if (!released) client.release();
     }
   }
 

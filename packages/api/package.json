@@ -43,6 +43,7 @@
     "@fastify/ajv-compiler": "4.0.8",
     "@fastify/rate-limit": "11.3.0",
     "@simplewebauthn/server": "13.3.3",
+    "@zip.js/zip.js": "2.25.0",
     "better-auth": "catalog:production",
     "fastify": "^5.12.8",
     "jose": "6.2.18",

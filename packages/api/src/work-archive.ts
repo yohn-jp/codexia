@@ -116,7 +116,7 @@ const assertionEvidenceSchema = z
     role: z.enum(['supports', 'contradicts', 'quotes', 'context']),
   })
   .strict();
-const unresolvedSchema = z
+export const unresolvedSchema = z
   .object({
     anchors: bounded(anchorSchema, 20000),
     mentions: bounded(mentionSchema, 40000),
@@ -223,6 +223,21 @@ function isRetiredPublishingRecord(moduleId: string, key: string): boolean {
 function isRetiredNlpFeatureSettings(moduleId: string, key: string): boolean {
   return moduleId === 'core.artifacts' && key === NLP_LEGACY_FEATURE_SETTINGS_PATH;
 }
+export function omitPortableModuleRecord(moduleId: string, key: string, value: JsonObject): boolean {
+  if (isRetiredPublishingRecord(moduleId, key)) {
+    if (key === legacyEpisodesPath && value.deleted !== true) {
+      fail(409, 'PUBLISHING_MAINTENANCE_REQUIRED', 'Publishing episodes require maintenance before portable export');
+    }
+    return true;
+  }
+  if (isRetiredNlpFeatureSettings(moduleId, key)) {
+    if (value.deleted !== true) {
+      fail(409, 'NLP_FEATURE_SETTINGS_MAINTENANCE_REQUIRED', 'NLP feature settings require maintenance before portable export');
+    }
+    return true;
+  }
+  return excludedRecord(moduleId, key, value);
+}
 function safeSettingsValue(value: unknown, omitted: string[], path: string): unknown {
   if (Array.isArray(value)) return value.map((item, index) => safeSettingsValue(item, omitted, path + '[' + index + ']'));
   if (value !== null && typeof value === 'object') {
@@ -239,7 +254,7 @@ function safeSettingsValue(value: unknown, omitted: string[], path: string): unk
   }
   return value;
 }
-function safeSettings(value: Record<string, unknown>, omitted: string[]): JsonObject {
+export function safeSettings(value: Record<string, unknown>, omitted: string[]): JsonObject {
   return safeSettingsValue(value, omitted, 'project.settings') as JsonObject;
 }
 function validateGraph(archive: WorkArchive): void {
@@ -504,21 +519,7 @@ export async function exportWorkArchive(persistence: Persistence, projectId: Pro
     }));
     const moduleRecords: WorkArchive['moduleRecords'] = [];
     for (const item of modules) {
-      if (isRetiredPublishingRecord(item.moduleId, item.key)) {
-        if (item.key === legacyEpisodesPath && item.value.deleted !== true) {
-          fail(409, 'PUBLISHING_MAINTENANCE_REQUIRED', 'Publishing episodes require maintenance before portable export');
-        }
-        omittedRecords.push(item.moduleId + ':' + item.key);
-        continue;
-      }
-      if (isRetiredNlpFeatureSettings(item.moduleId, item.key)) {
-        if (item.value.deleted !== true) {
-          fail(409, 'NLP_FEATURE_SETTINGS_MAINTENANCE_REQUIRED', 'NLP feature settings require maintenance before portable export');
-        }
-        omittedRecords.push(item.moduleId + ':' + item.key);
-        continue;
-      }
-      if (excludedRecord(item.moduleId, item.key, item.value)) {
+      if (omitPortableModuleRecord(item.moduleId, item.key, item.value)) {
         if (!(item.moduleId === 'core.portable.archive')) omittedRecords.push(item.moduleId + ':' + item.key);
         continue;
       }

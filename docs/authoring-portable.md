@@ -76,7 +76,7 @@ APIは認証と作品へのアクセス権限を確認します。ブラウザ�
 ### 形式と内容
 
 - 作品単位で標準ZIPを一つ取得する。テキストはUTF-8 Markdown（[CommonMark](https://spec.commonmark.org/) を参照し、原文の文字・改行・構文を変換しない）、構造化データは [RFC 8259 JSON](https://www.rfc-editor.org/rfc/rfc8259) と公開 [JSON Schema](https://json-schema.org/) を使用する。Codexia独自の実行環境・プラグイン・DB・ネット接続なしで閲覧、解析、編集できること。
-- manifestはバージョン付きの公開パッケージ仕様とし、作品ID、snapshot/version、文書UUID・親子関係・種別・順序・最新Revision・各ファイルパス、収録/除外区分、ファイルごとのbyte size・SHA-256を記述する。manifest自身を循環ハッシュに含めない。Schemaと説明書を同梱し公開する。独自暗号・圧縮フォーマット、必須の専用viewerは採用しない。
+- manifestはバージョン付きの公開パッケージ仕様とし、作品ID、snapshot/version、文書UUID・親子関係・種別・順序・最新Revision・各ファイルパス、収録/除外区分、ファイルごとのbyte size・SHA-256を記述する。manifest自身を循環ハッシュに含めない。[v1 の JSON Schema](../packages/api/src/open-work-export-v1.schema.json) と説明書を同梱し、同じスキーマを公開する。独自暗号・圧縮フォーマット、必須の専用viewerは採用しない。
 - 以下の構成を採用する。順序と階層の厳密な復元はmanifestを使用し、人間には自然な名前と順序で利用できるファイルを提示する。Knowledgeの閲覧用Markdownは構造化JSONの派生表示であり、別の編集正本ではない。
 
 ```text

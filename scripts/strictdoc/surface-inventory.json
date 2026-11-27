@@ -615,6 +615,11 @@
     },
     {
       "kind": "route",
+      "id": "GET /api/v1/persistence/projects/{projectId}/open-export",
+      "classification": "UNMAPPED: generated owner API open work export route; obligation evidence is tracked separately"
+    },
+    {
+      "kind": "route",
       "id": "GET /api/v1/persistence/projects/{projectId}/archive",
       "classification": "UNMAPPED: generated Fastify route operation; detailed obligation mapping remains unassigned in this bounded source inventory"
     },

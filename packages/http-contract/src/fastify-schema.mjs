@@ -155,6 +155,15 @@ function isClosedSchemaMarker(value) {
 }
 
 function mapSchema(value, location, componentNames) {
+  // The open export handler sends an already completed binary stream with a
+  // verified length. Its media type is an OpenAPI annotation for consumers.
+  if (
+    location === 'GET /api/v1/persistence/projects/{projectId}/open-export.responses.200.application/zip' &&
+    isRecord(value) &&
+    Object.keys(value).length === 1 &&
+    value.contentMediaType === 'application/zip'
+  )
+    return {};
   if (typeof value === 'boolean') return value;
   if (!isRecord(value)) fail(`invalid JSON Schema at ${location}`);
   const validTypes = new Set(['array', 'boolean', 'integer', 'null', 'number', 'object', 'string']);
