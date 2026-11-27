@@ -40,7 +40,7 @@ class ControllerTests(unittest.TestCase):
         if mode == "bootstrap":
             self.env["CODEXIA_RUNTIME_SSH_PUBLIC_KEY"] = " ".join((self.tmp / "runtime.pub").read_text().split()[:2])
             self.env["CODEXIA_TUNNEL_TOKEN"] = "fixture-connector"
-        if mode != "prepare-activation":
+        if mode == "owner-setup":
             self.env["CODEXIA_OWNER_SETUP_AGE_RECIPIENT"] = "age1fixture"
         (self.tmp / "codexia-lifecycle-candidate.json").write_text(json.dumps(self.receipt))
 
@@ -63,9 +63,11 @@ class ControllerTests(unittest.TestCase):
 
     def test_bootstrap_generates_inventory_and_binds_certified_image(self):
         self.mutation()
+        self.env["CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED"] = "true"
         target, values, runtime = self.prepare()
         self.assertIs(values["codexia_managed_bootstrap_secrets"], True)
-        self.assertIs(runtime["codexia_database_initialization_approved"], False)
+        self.assertIs(runtime["codexia_database_initialization_approved"], True)
+        self.assertNotIn("codexia_owner_setup_age_recipient", values)
         self.assertEqual(runtime["codexia_auth_bootstrap_image"], self.image)
         token = Path(values["codexia_tunnel_token_file"])
         self.assertEqual(stat.S_IMODE(token.stat().st_mode), 0o600)
@@ -76,7 +78,6 @@ class ControllerTests(unittest.TestCase):
     def test_existing_installation_can_adopt_its_tunnel_without_resupply(self):
         self.mutation()
         self.env.pop("CODEXIA_TUNNEL_TOKEN")
-        self.env.pop("CODEXIA_OWNER_SETUP_AGE_RECIPIENT")
         _, values, _ = self.prepare()
         self.assertNotIn("codexia_tunnel_token_file", values)
 
@@ -90,7 +91,14 @@ class ControllerTests(unittest.TestCase):
         self.mutation("owner-setup")
         _, values, _ = self.prepare()
         self.assertTrue(values["codexia_owner_setup_edge_approved"])
+        self.assertEqual(values["codexia_owner_setup_age_recipient"], "age1fixture")
         self.assertNotIn("codexia_host_approved", values)
+
+    def test_owner_setup_refuses_missing_handoff_recipient(self):
+        self.mutation("owner-setup")
+        del self.env["CODEXIA_OWNER_SETUP_AGE_RECIPIENT"]
+        with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "CODEXIA_OWNER_SETUP_AGE_RECIPIENT"):
+            self.prepare()
 
     def test_independent_admin_and_runtime_keys(self):
         self.mutation()

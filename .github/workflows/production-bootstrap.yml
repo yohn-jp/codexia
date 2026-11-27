@@ -243,7 +243,7 @@ jobs:
           CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS }}
           CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY }}
           CODEXIA_TUNNEL_TOKEN: ${{ inputs.mode == 'bootstrap' && secrets.CODEXIA_TUNNEL_TOKEN || '' }}
-          CODEXIA_OWNER_SETUP_AGE_RECIPIENT: ${{ vars.CODEXIA_OWNER_SETUP_AGE_RECIPIENT }}
+          CODEXIA_OWNER_SETUP_AGE_RECIPIENT: ${{ inputs.mode == 'owner-setup' && vars.CODEXIA_OWNER_SETUP_AGE_RECIPIENT || '' }}
           CODEXIA_RUNTIME_SSH_PUBLIC_KEY: ${{ needs.runtime-identity.outputs.public-key }}
           CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED: ${{ inputs.mode == 'bootstrap' && inputs.initialize_database && vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED == 'true' }}
         run: |

@@ -75,11 +75,11 @@
       - codexia_oauth_mcp_client_ids is not defined
       - codexia_oauth_owner_client_ids.split(',') | length == 2
       - codexia_auth_bootstrap_image is match('^ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
-      - codexia_owner_setup_age_recipient is match('^age1[0-9a-z]+$')
+      - not (codexia_owner_setup_approved | default(false)) or codexia_owner_setup_age_recipient is match('^age1[0-9a-z]+$')
       - codexia_owner_setup_web_redirect_uris is sequence and codexia_owner_setup_web_redirect_uris is not string
       - codexia_owner_setup_web_redirect_uris | length > 0
       - codexia_owner_setup_web_redirect_uris | reject('match', '^' + (codexia_public_origin | regex_escape) + '/[a-zA-Z0-9._/-]*$') | list | length == 0
-    fail_msg: Fresh owner setup requires approved database initialization, a reviewed immutable Full image, a protected recipient and exact Web redirects. Opening the browser setup also requires independent Cloudflare path approval.
+    fail_msg: Staging owner setup requires approved database initialization, a reviewed immutable Full image and exact Web redirects. Issuing the grant and opening browser setup also require a protected recipient and independent Cloudflare path approval.
 
 - name: Observe completed browser setup before rewriting the protected runtime settings
   when: owner_setup_requested
