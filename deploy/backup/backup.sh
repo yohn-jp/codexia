@@ -72,6 +72,11 @@ validate_artifact(){
   sha256sum "$dir/SHA256SUMS" | cut -d' ' -f1
 }
 case "$operation" in
+  fingerprint-restored-target)
+    [[ $# == 5 && "$2" == --lock-file && "$3" == "$lock_file" && "$4" == --lock-fd ]] ||
+      die 'Restored target fingerprint requires the inherited canonical host lock'
+    verify_lock_descriptor "$3" "$5"
+    ;;
   backup-locked)
     [[ ( $# == 8 || ( $# == 10 && "${9}" == --artifact-id &&
       "${10}" =~ ^codexia-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$ ) ) &&
@@ -324,6 +329,14 @@ SQL
 }
 
 case "${1:-}" in
+  fingerprint-restored-target)
+    require_quiesced
+    podman volume exists codexia-history || die 'Restored history volume absent'
+    database_hash="$(db_fingerprint codexia-db codexia_admin)" || die 'Could not fingerprint restored database'
+    history_hash="$(history_fingerprint codexia-history)" || die 'Could not fingerprint restored history'
+    require_quiesced
+    printf '{"databaseFingerprint":"%s","historyFingerprint":"%s"}\n' "$database_hash" "$history_hash"
+    ;;
   backup-locked)
     backup_directory "$2"
     [[ "$3" =~ ^age1[0-9a-z]+$ ]] || die 'Provide an age public recipient, not a private key'

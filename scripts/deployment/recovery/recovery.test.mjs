@@ -352,6 +352,17 @@ test('committed recovery retains its evidence when the live release cannot be re
       delete intent.candidateImage;
       writeFileSync(intentPath, JSON.stringify(intent));
     },
+    'the restored release disagrees with its protected recovery evidence': ({ stateDir, candidate }) => {
+      const intentPath = path.join(stateDir, 'deploy-transaction.json');
+      const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
+      writeFileSync(intentPath, JSON.stringify({
+        ...intent, hadUnit: false, releasePresent: false,
+        recoveryOperationId: 'restore-one', recoveryEvidenceSha256: 'c'.repeat(64),
+      }));
+      writeFileSync(path.join(stateDir, 'deployed-release.json'), JSON.stringify({
+        ...candidate.record, recoveryOperationId: 'restore-one', recoveryEvidenceSha256: 'd'.repeat(64),
+      }));
+    },
     'live image is unhealthy': ({ env }) => { env.CODEXIA_TEST_HEALTH = 'unhealthy'; },
     'API service is inactive': ({ env }) => { env.CODEXIA_TEST_API_ACTIVE = 'false'; },
     'loaded API uses another Quadlet': ({ env, quadletDir }) => { env.CODEXIA_TEST_API_SOURCE_PATH = path.join(quadletDir, 'other.container'); },

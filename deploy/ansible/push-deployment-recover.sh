@@ -53,6 +53,10 @@ if (value.format !== 'codexia-deploy-transaction/v1' || !['pending', 'committed'
     typeof value.releasePresent !== 'boolean' ||
     (value.backupRunId !== undefined && (typeof value.backupRunId !== 'string' ||
       !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value.backupRunId)))) process.exit(2);
+if ((value.recoveryOperationId !== undefined || value.recoveryEvidenceSha256 !== undefined) &&
+    (value.hadUnit || typeof value.recoveryOperationId !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value.recoveryOperationId) ||
+      typeof value.recoveryEvidenceSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.recoveryEvidenceSha256))) process.exit(2);
 function reviewedReleaseImage(unitPath, releasePath) {
   const unitInfo = fs.lstatSync(unitPath, { throwIfNoEntry: false });
   if (!unitInfo?.isFile()) process.exit(2);
@@ -78,6 +82,8 @@ function reviewedReleaseImage(unitPath, releasePath) {
   if (value.phase === 'committed' &&
       (release.format !== 'codexia-push-deployment/v1' ||
         value.candidateImage !== image || value.authSettingsSha256 !== digest ||
+        value.recoveryOperationId !== release.recoveryOperationId ||
+        value.recoveryEvidenceSha256 !== release.recoveryEvidenceSha256 ||
         [unitInfo, releaseInfo].some(info => info.uid !== process.getuid() || (info.mode & 0o777) !== 0o600))) process.exit(2);
   return image;
 }

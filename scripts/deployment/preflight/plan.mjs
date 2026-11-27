@@ -54,7 +54,7 @@ function validAxes(state) {
 
 // Ordered lifecycle decision table. Admission evidence and change details are
 // checked separately; no R0 result confers permission to mutate.
-export function selectRoute(state, intent, frontendAdmission, bootstrapResume = false) {
+export function selectRoute(state, intent, frontendAdmission, bootstrapResume = false, restored = false) {
   requireCondition(validAxes(state) && intents.includes(intent) &&
     ['allowed', 'denied', 'not-applicable', 'unknown'].includes(frontendAdmission),
   'Invalid normalized deployment observation');
@@ -63,7 +63,10 @@ export function selectRoute(state, intent, frontendAdmission, bootstrapResume = 
   if (T !== 'none') return 'R1';
   if (D === 'lost') return intent === 'restore' ? 'R2' : 'R0';
   if (axes.some(key => state[key] === 'unknown')) return 'R0';
-  if (intent === 'restore') return 'R0'; // Never reinterpret a restore as a fresh install.
+  if (intent === 'restore') {
+    return restored && H === 'ready' && D === 'compatible' && A === 'ready' &&
+      B === 'absent' && F === 'compatible' ? 'R3' : 'R0';
+  }
   // A positively absent database has no prior schema or owner to migrate.
   if (intent === 'install' && D === 'absent' && A === 'absent' &&
       ['ready', 'partial'].includes(H) && ['absent', 'fault'].includes(B) && F !== 'fault') return 'R4';
@@ -101,11 +104,17 @@ export function selectRoute(state, intent, frontendAdmission, bootstrapResume = 
 function validateObservation(observation) {
   const fields = ['state', 'observedAt', 'binding', 'frontendAdmission', 'changeAxes'];
   if (Object.hasOwn(observation ?? {}, 'bootstrapResume')) fields.push('bootstrapResume');
+  if (Object.hasOwn(observation ?? {}, 'recoveryOperationId')) fields.push('recoveryOperationId');
   requireCondition(record(observation, fields),
     'Invalid deployment observation envelope');
   requireCondition(validAxes(observation.state), 'Invalid deployment state');
   timestamp(observation.observedAt);
   const { binding, changeAxes, bootstrapResume } = observation;
+  if (fields.includes('recoveryOperationId')) {
+    requireCondition(typeof observation.recoveryOperationId === 'string' &&
+      /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/u.test(observation.recoveryOperationId) &&
+      hashPattern.test(binding?.backupSha256 ?? ''), 'Invalid protected recovery evidence');
+  }
   if (fields.includes('bootstrapResume')) {
     const resumeFields = Object.hasOwn(bootstrapResume ?? {}, 'checkpoint')
       ? ['clusterId', 'databaseOid', 'image', 'migrationFingerprint', 'checkpoint']
@@ -151,7 +160,9 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   validateTarget(target);
   assertFreshObservationTime(observation.observedAt, { now, maxAgeMs });
   if (window !== null) validateWindow(window);
-  const candidateRoute = selectRoute(observation.state, intent, observation.frontendAdmission, observation.bootstrapResume !== undefined);
+  const restored = intent === 'restore' && observation.recoveryOperationId !== undefined;
+  const candidateRoute = selectRoute(observation.state, intent, observation.frontendAdmission,
+    observation.bootstrapResume !== undefined, restored);
   const { binding, state } = observation;
   const knownBlockers = ['unverified-installed-backend-publication', 'stale-backend-candidate',
     'stale-or-conflicting-frontend-candidate', 'writer-ledger-identity-mismatch', 'recovery-plan-required',
@@ -174,6 +185,7 @@ export function createDeploymentPlan({ observation, target, intent, window = nul
   if (['R1', 'R2', 'R3', 'R6'].includes(candidateRoute) &&
       (window === null || timestamp(window.notAfter) < now.getTime())) blockers.push('missing-or-expired-window');
   const requiredApprovals = [...mutationApprovals[candidateRoute]];
+  if (candidateRoute === 'R3' && restored) requiredApprovals.push('recovery', 'publication');
   if (candidateRoute === 'R4' && (observation.bootstrapResume || ['absent', 'pristine'].includes(state.D))) {
     requiredApprovals.push('database-initialization');
   }

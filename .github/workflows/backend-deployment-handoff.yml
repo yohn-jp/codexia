@@ -3,11 +3,11 @@ on:
   workflow_dispatch:
     inputs:
       preflight_run_id:
-        description: Reviewed runtime lifecycle Preflight run ID for R6
+        description: Reviewed runtime lifecycle Preflight run ID for R6 or restored R3
         type: string
         required: true
       approval_phrase:
-        description: Enter ACTIVATE_CODEXIA_BACKEND to publish the first Backend with a compatible deployed Frontend
+        description: Enter ACTIVATE_CODEXIA_BACKEND for R6 or PUBLISH_RESTORED_CODEXIA_BACKEND for R3
         type: string
         required: true
   workflow_run:
@@ -25,7 +25,8 @@ jobs:
     name: Verify certified backend handoff (read-only)
     if: >-
       (github.event_name == 'workflow_dispatch' && github.repository == 'yohn-jp/codexia' &&
-       github.ref == 'refs/heads/main' && inputs.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND') ||
+       github.ref == 'refs/heads/main' &&
+       (inputs.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND' || inputs.approval_phrase == 'PUBLISH_RESTORED_CODEXIA_BACKEND')) ||
       (github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'workflow_run' &&
       github.event.workflow_run.head_branch == 'main' &&
@@ -73,11 +74,12 @@ jobs:
         with:
           run-id: ${{ inputs.preflight_run_id }}
           management: runtime
-      - name: Certify the selected published Backend for manual first activation
+      - name: Certify the selected published Backend for manual activation
         if: github.event_name == 'workflow_dispatch'
         id: manual
         env:
           GH_TOKEN: ${{ github.token }}
+          CODEXIA_FIRST_ACTIVATION_APPROVAL: ${{ inputs.approval_phrase }}
         run: node scripts/deployment/bootstrap/activate-backend.mjs certify
 
   deploy-production:
@@ -85,7 +87,8 @@ jobs:
     needs: [verify-handoff]
     if: >-
       ((github.event_name == 'workflow_dispatch' && github.repository == 'yohn-jp/codexia' &&
-        github.ref == 'refs/heads/main' && inputs.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND') ||
+        github.ref == 'refs/heads/main' &&
+        (inputs.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND' || inputs.approval_phrase == 'PUBLISH_RESTORED_CODEXIA_BACKEND')) ||
       (github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'workflow_run' &&
       github.event.workflow_run.head_branch == 'main' &&
@@ -116,12 +119,14 @@ jobs:
         env:
           CODEXIA_PUSH_DEPLOYMENT_ENABLED: ${{ vars.CODEXIA_PUSH_DEPLOYMENT_ENABLED }}
           CODEXIA_MANUAL_ACTIVATION: ${{ github.event_name == 'workflow_dispatch' }}
+          CODEXIA_FIRST_ACTIVATION_APPROVAL: ${{ inputs.approval_phrase }}
           CODEXIA_INITIAL_INSTALL_APPROVED: ${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED }}
           CODEXIA_DATABASE_INITIALIZATION_APPROVED: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED }}
         run: |
           set -euo pipefail
 
           if [[ "${CODEXIA_MANUAL_ACTIVATION:-false}" == true &&
+                "${CODEXIA_FIRST_ACTIVATION_APPROVAL:-}" != 'PUBLISH_RESTORED_CODEXIA_BACKEND' &&
                 ( "${CODEXIA_INITIAL_INSTALL_APPROVED:-}" != true || "${CODEXIA_DATABASE_INITIALIZATION_APPROVED:-}" != true ) ]]; then
             echo 'Protected first Backend activation requires first-install and database-use approvals.' >&2
             exit 1
@@ -131,7 +136,7 @@ jobs:
             echo 'Protected backend push deployment is enabled.'
           else
             if [[ "${CODEXIA_MANUAL_ACTIVATION:-false}" == true ]]; then
-              echo 'Protected first Backend activation requires CODEXIA_PUSH_DEPLOYMENT_ENABLED=true.' >&2
+              echo 'Protected manual Backend activation requires CODEXIA_PUSH_DEPLOYMENT_ENABLED=true.' >&2
               exit 1
             fi
             echo 'enabled=false' >> "$GITHUB_OUTPUT"
@@ -217,7 +222,7 @@ jobs:
         with:
           run-id: ${{ inputs.preflight_run_id }}
           management: runtime
-      - name: Reverify the R6 plan after entering the production queue
+      - name: Reverify the reviewed deployment plan after entering the production queue
         if: github.event_name == 'workflow_dispatch' && steps.freshness.outputs.current == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -251,6 +256,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.event_name == 'workflow_dispatch' && github.token || '' }}
           CODEXIA_MANUAL_ACTIVATION: ${{ github.event_name == 'workflow_dispatch' }}
+          CODEXIA_FIRST_ACTIVATION_APPROVAL: ${{ inputs.approval_phrase }}
           CODEXIA_CERTIFIED_FULL_IMAGE: ${{ needs.verify-handoff.outputs.certified-full-image }}
           CODEXIA_DEPLOYMENT_CERTIFICATE_B64: ${{ needs.verify-handoff.outputs.deployment-certificate }}
           CODEXIA_VERIFIED_MAIN_SHA: ${{ needs.verify-handoff.outputs.verified-main-sha }}
@@ -270,7 +276,7 @@ jobs:
           [[ "$CODEXIA_DATABASE_INITIALIZATION_APPROVED" == true || "$CODEXIA_DATABASE_INITIALIZATION_APPROVED" == false ]]
           if [[ "${CODEXIA_MANUAL_ACTIVATION:-false}" == true ]]; then
             current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
-            [[ "$current" == "$GITHUB_SHA" ]] || { echo 'Main changed after first activation admission.' >&2; exit 1; }
+            [[ "$current" == "$GITHUB_SHA" ]] || { echo 'Main changed after manual activation admission.' >&2; exit 1; }
           fi
           certificate="$RUNNER_TEMP/codexia-deployment-certificate.json"
           (umask 077; printf '%s' "$CODEXIA_DEPLOYMENT_CERTIFICATE_B64" | base64 --decode > "$certificate")
@@ -293,6 +299,7 @@ jobs:
           import { join } from 'node:path';
           const env = process.env;
           const manual = env.CODEXIA_MANUAL_ACTIVATION === 'true';
+          const recovery = manual && env.CODEXIA_FIRST_ACTIVATION_APPROVAL === 'PUBLISH_RESTORED_CODEXIA_BACKEND';
           const vars = {
             codexia_image: env.CODEXIA_CERTIFIED_FULL_IMAGE,
             codexia_source_sha: env.CODEXIA_SOURCE_SHA,
@@ -300,10 +307,12 @@ jobs:
             codexia_verified_main_sha: env.CODEXIA_VERIFIED_MAIN_SHA,
             codexia_deployed_ui_epoch: Number(env.CODEXIA_DEPLOYED_UI_EPOCH),
             codexia_deployment_certificate_file: env.CODEXIA_DEPLOYMENT_CERTIFICATE_FILE,
-            codexia_initial_install_approved: manual && env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
-            codexia_database_initialization_approved: manual && env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
+            codexia_initial_install_approved: manual && !recovery && env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
+            codexia_database_initialization_approved: manual && !recovery && env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
           };
-          if (manual) {
+          if (recovery) {
+            vars.codexia_expected_recovery_activation = JSON.parse(readFileSync(join(env.RUNNER_TEMP, 'codexia-recovery-activation.json'), 'utf8'));
+          } else if (manual) {
             vars.codexia_expected_first_activation = JSON.parse(readFileSync(join(env.RUNNER_TEMP, 'codexia-first-activation.json'), 'utf8'));
           }
           process.stdout.write(JSON.stringify(vars));

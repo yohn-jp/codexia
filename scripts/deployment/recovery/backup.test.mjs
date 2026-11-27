@@ -59,6 +59,41 @@ function invokeBackup(fixture, { activeUnits = '', approved = true, lockFile = f
   });
 }
 
+test('restored target fingerprints are read-only and require quiescence under the inherited lock', async t => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.directory, { recursive: true, force: true }));
+  await writeFile(path.join(fixture.bin, 'podman'), [
+    '#!/bin/sh',
+    'case "$*" in',
+    '  "volume exists codexia-history") exit 0;;',
+    '  "container exists codexia-api") exit 1;;',
+    '  exec*) cat >/dev/null; printf "restored database\\n";;',
+    '  run*) printf "restored history\\n";;',
+    '  *) exit 2;;',
+    'esac',
+  ].join('\n') + '\n');
+  const command = [backupProgram, 'fingerprint-restored-target', '--lock-file', fixture.lockFile,
+    '--lock-fd', '9'].map(shellQuote).join(' ');
+  const lock = 'exec 9>' + shellQuote(fixture.lockFile) + '; flock -nx 9 && ';
+  const invoke = (line, activeUnits = '') => spawnSync('bash', ['-c', line], {
+    encoding: 'utf8', env: { ...process.env, CODEXIA_PUSH_STATE_DIR: fixture.stateDir,
+      PATH: fixture.bin + ':' + process.env.PATH, CODEXIA_TEST_ACTIVE_UNITS: activeUnits },
+  });
+  assert.match(invoke(command).stderr, /lock descriptor was not inherited/u);
+  for (const service of ['codexia-api.service', 'codexia-tunnel.service']) {
+    const blocked = invoke(lock + command, service);
+    assert.notEqual(blocked.status, 0);
+    assert.match(blocked.stderr, /inactive systemd unit/u);
+  }
+  const verified = invoke(lock + command);
+  assert.equal(verified.status, 0, verified.stderr);
+  const sha = content => createHash('sha256').update(content + '\n').digest('hex');
+  assert.deepEqual(JSON.parse(verified.stdout), {
+    databaseFingerprint: sha('restored database'), historyFingerprint: sha('restored history'),
+  });
+  assert.deepEqual(await readdir(fixture.backupDestination), []);
+});
+
 test('update backup uses the private executor settings and inherited deployment lock', async t => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.directory, { recursive: true, force: true }));

@@ -171,6 +171,7 @@ jobs:
       - name: Observe existing host evidence
         env:
           CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.runtime.outputs.host || steps.bootstrap.outputs.host }}
+          CODEXIA_PREFLIGHT_INTENT: ${{ inputs.intent }}
         run: node scripts/deployment/preflight/run.mjs host
       - uses: actions/upload-artifact@v7.0.2
         with:

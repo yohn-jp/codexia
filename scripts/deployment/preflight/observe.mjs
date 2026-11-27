@@ -172,6 +172,15 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
     .map(value => assertFreshObservationTime(value.observedAt, { now }));
   const observedAt = times.length ? new Date(Math.min(...times)).toISOString() : now.toISOString();
   const database = host?.database;
+  const recovery = host?.recovery;
+  const restored = intent === 'restore' && recovery && state.D === 'compatible' && state.A === 'ready' &&
+    rawHash.test(recovery.evidenceSha256 ?? '') &&
+    isDeepStrictEqual(recovery.release, {
+      image: targetIdentity.image,
+      sourceSha: targetIdentity.backend.sourceSha,
+      frontendArtifactSha256: candidateFrontend.artifactDigest,
+    }) &&
+    window !== null && isDeepStrictEqual(recovery.window, window);
   const bootstrapIntent = database?.bootstrapIntent;
   const matchesFreshInstallation = bootstrapIntent &&
     typeof database.clusterId === 'string' && /^[1-9][0-9]{0,19}$/u.test(database.clusterId) &&
@@ -188,6 +197,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
     (emptyAuthResume || database.emptyAuthSchema === undefined);
   const observation = {
     state, observedAt, frontendAdmission, changeAxes: [...new Set(changeAxes)],
+    ...(restored ? { recoveryOperationId: recovery.operationId } : {}),
     ...(bootstrapResume ? { bootstrapResume: {
       ...(emptyAuthResume ? { checkpoint: 'empty-auth-schema' } : {}),
       clusterId: database.clusterId, databaseOid: database.databaseOid, image: targetIdentity.image,
@@ -205,7 +215,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       infrastructureSha256: host ? digestEvidence({ state: host.H, topology: host.topology }) : null,
       // Only an authenticated preservation receipt can be supplied by the
       // owning recovery adapter. A request hash is not a receipt.
-      backupSha256: hash(preservationReceipt),
+      backupSha256: restored ? recovery.evidenceSha256 : hash(preservationReceipt),
     },
   };
   if (host && host.database?.state === 'initialized' && host.backend?.state === 'running' &&
