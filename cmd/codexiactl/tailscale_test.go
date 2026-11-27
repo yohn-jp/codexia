@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -252,5 +254,25 @@ func TestTailscaleErrorsDoNotExposeProviderResponses(t *testing.T) {
 	})
 	if strings.Contains(err.Error(), token) || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("provider response was not sanitized: %v", err)
+	}
+}
+
+func TestEveryProtectedTailnetWorkflowUsesTheApprovedCredentialAudience(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{
+		"production-bootstrap.yml", "production-preflight.yml",
+		"frontend-release.yml", "backend-deployment-handoff.yml",
+		"tailscale-connectivity.yml",
+	} {
+		t.Run(name, func(t *testing.T) {
+			contents, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", name))
+			if err != nil { t.Fatal(err) }
+			text := string(contents)
+			count := strings.Count(text, "uses: tailscale/github-action@")
+			if count == 0 || strings.Count(text,
+				"audience: ${{ format('api.tailscale.com/{0}', secrets.TS_OAUTH_CLIENT_ID) }}") != count {
+				t.Fatalf("%s must bind each OIDC audience to its protected TS_OAUTH_CLIENT_ID, actions=%d", name, count)
+			}
+		})
 	}
 }
