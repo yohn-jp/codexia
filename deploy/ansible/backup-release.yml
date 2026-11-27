@@ -1,0 +1,115 @@
+---
+- name: Read the deployment record committed by the certified rollout
+  ansible.builtin.slurp:
+    src: "{{ home }}/.local/state/codexia-deploy/deployed-release.json"
+  register: codexia_backup_deployed_release
+
+- name: Require an admitted Full image and matching embedded source identity
+  vars:
+    deployed: "{{ codexia_backup_deployed_release.content | b64decode | from_json }}"
+  ansible.builtin.assert:
+    that:
+      - deployed.format == 'codexia-push-deployment/v1'
+      - deployed.image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - deployed.identity.format == 'codexia-backend-identity/v1'
+      - deployed.identity.profile == 'full'
+      - deployed.identity.sourceSha is match('^[a-f0-9]{40}$')
+
+- name: Bind host release selection to the same image as the API refresh
+  ansible.builtin.set_fact:
+    codexia_backup_release_image: "{{ (codexia_backup_deployed_release.content | b64decode | from_json).image }}"
+
+- name: Create the private rootless release directory
+  ansible.builtin.file:
+    path: "{{ home }}/.local/share/codexia-backup/releases"
+    state: directory
+    mode: '0700'
+
+- name: Install and atomically select the verified Node runtime from the admitted image
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    state="$HOME/.local/state/codexia-deploy"
+    record="$state/deployed-release.json"
+    root="$HOME/.local/share/codexia-backup"
+    release="$root/releases/${BACKUP_IMAGE##*:}"
+    [[ -f "$state/host.lock" && ! -L "$state/host.lock" ]]
+    exec 9<"$state/host.lock"
+    flock -xn 9
+    [[ -f "$record" && -O "$record" && ! -L "$record" && "$(stat -c %a "$record")" == 600 ]]
+    [[ "$(sha256sum < "$record")" == "$BACKUP_RECORD_SHA  -" ]]
+    for pending in deploy-transaction.json cutover-transaction.json backup-transaction; do
+      [[ ! -e "$state/$pending" && ! -L "$state/$pending" ]]
+    done
+    image_id="$(podman image inspect --format '{% raw %}{{.Id}}{% endraw %}' "$BACKUP_IMAGE")"
+    running="$(podman inspect --type container --format '{% raw %}{{.State.Running}} {{.State.Health.Status}} {{.Image}}{% endraw %}' codexia-api)"
+    running_id="${running##* }"
+    [[ "$running" == "true healthy $running_id" && "${image_id#sha256:}" =~ ^[a-f0-9]{64}$ &&
+       "${running_id#sha256:}" == "${image_id#sha256:}" ]]
+
+    verify_release() {
+      (cd "$1" && ./bin/node --input-type=module -e '
+        import { readFileSync } from "node:fs";
+        import { isDeepStrictEqual } from "node:util";
+        const json = file => JSON.parse(readFileSync(file, "utf8"));
+        if (!isDeepStrictEqual(json("app/update-identity.json"), json(process.argv[1]).identity)) process.exit(1);
+        await import("./app/node_modules/@codexia/api/dist/backup-console-control.js");
+        await import("./app/node_modules/@codexia/api/dist/backup-console-executor.js");
+      ' "$record")
+    }
+
+    if [[ -L "$root/current" && "$(realpath -e -- "$root/current")" == "$release" ]]; then
+      verify_release "$release"
+      exit 0
+    fi
+    [[ ! -e "$root/current" || -L "$root/current" ]]
+    stage="$(mktemp -d "$root/.install.XXXXXXXX")"
+    trap 'rm -rf -- "$stage"' EXIT
+    if [[ ! -e "$release" && ! -L "$release" ]]; then
+      mkdir "$stage/package"
+      podman run --rm --pull=never --network=none --read-only --cap-drop=all --security-opt=no-new-privileges \
+        --image-volume=ignore --entrypoint=tar "$BACKUP_IMAGE" -cf - -C / app -C /usr/local bin/node |
+        tar -xf - --no-same-owner -C "$stage/package"
+      verify_release "$stage/package"
+      mv -T -- "$stage/package" "$release"
+    else
+      [[ -d "$release" && ! -L "$release" ]]
+      verify_release "$release"
+    fi
+    unit=codexia-backup-executor.service
+    worker="$(systemctl --user show "$unit" --property=ActiveState --value)"
+    [[ "$worker" == active || "$worker" == inactive || "$worker" == failed ]]
+    ln -s -- "$release" "$stage/current"
+    if [[ "$worker" == active ]]; then
+      [[ -L "$root/current" ]]
+      ln -s -- "$(readlink -e -- "$root/current")" "$stage/previous"
+      # Allow the old worker to finish a probe before replacing its code.
+      systemctl --user stop "$unit"
+      rollback() {
+        systemctl --user stop "$unit" &&
+          mv -Tf -- "$stage/previous" "$root/current" && systemctl --user start "$unit"
+      }
+      # If any following admission or activation step fails, resume the previously selected release.
+      trap 'result=$?; if (( result != 0 )); then rollback || echo "Prior backup executor needs operator recovery" >&2; fi; rm -rf -- "$stage"; exit "$result"' EXIT
+      idle="$(podman exec codexia-db sh -ec '
+        export PGPASSWORD="$(cat /run/secrets/admin-password)"
+        exec psql -X -qAtw -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "$1"
+      ' sh "SELECT NOT EXISTS (SELECT 1 FROM codexia_backup.operations WHERE state IN ('QUEUED', 'RUNNING'))
+               AND NOT EXISTS (SELECT 1 FROM codexia_backup.runs WHERE state IN ('QUEUED', 'RUNNING')
+                                OR (state = 'UNKNOWN' AND reason_code = 'restored_outcome_unknown'))")"
+      [[ "$idle" == t ]]
+    fi
+    mv -Tf -- "$stage/current" "$root/current"
+    if [[ "$worker" == active ]]; then
+      systemctl --user start "$unit"
+      "$HOME/.local/bin/codexia-backup-control" recover
+      systemctl --user is-active --quiet "$unit"
+    fi
+    echo BACKUP_RELEASE_SELECTED
+  args:
+    executable: /bin/bash
+  environment:
+    BACKUP_IMAGE: "{{ codexia_backup_release_image }}"
+    BACKUP_RECORD_SHA: "{{ codexia_backup_deployed_release.content | b64decode | hash('sha256') }}"
+  register: codexia_backup_release_install
+  changed_when: "'BACKUP_RELEASE_SELECTED' in codexia_backup_release_install.stdout_lines"

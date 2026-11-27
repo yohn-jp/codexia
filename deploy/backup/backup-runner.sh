@@ -63,14 +63,20 @@ fi
 exec 9>>"$lock_file"
 flock --exclusive --nonblock 9 || exit 75
 
+same_running_image(){
+  local expected actual
+  expected="$(podman image inspect --format '{{.Id}}' "$1")" &&
+    actual="$(podman inspect --format '{{.Image}}' codexia-api)" &&
+    [[ "${expected#sha256:}" =~ ^[a-f0-9]{64}$ && "${actual#sha256:}" == "${expected#sha256:}" ]]
+}
+
 resume_services(){
-  local image="$1" tunnel_active="$2" actual
+  local image="$1" tunnel_active="$2"
   if ! systemctl --user is-active --quiet codexia-api.service; then
     systemctl --user reset-failed codexia-api.service >/dev/null 2>&1 || :
     systemctl --user start codexia-api.service || return 1
   fi
-  actual="$(podman inspect --format '{{.ImageName}}' codexia-api)" || return 1
-  [[ "$actual" == "$image" && "$(podman inspect --format '{{.State.Health.Status}}' codexia-api)" == healthy ]] || return 1
+  same_running_image "$image" && [[ "$(podman inspect --format '{{.State.Health.Status}}' codexia-api)" == healthy ]] || return 1
   if [[ "$tunnel_active" == true ]]; then
     systemctl --user start codexia-tunnel.service || return 1
   fi
@@ -134,14 +140,13 @@ run_id="$1"
 load_staging
 systemctl --user is-active --quiet codexia-api.service
 [[ "$(podman inspect --format '{{.State.Health.Status}}' codexia-api)" == healthy ]] || die 'The backup requires a healthy API'
-image="$(podman inspect --format '{{.ImageName}}' codexia-api)"
-[[ "$image" =~ $image_pattern ]] || die 'The backup requires an immutable API image'
-source_sha="$(podman exec codexia-api cat /app/update-identity.json | node -e '
-  const value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
-  if (value.format !== "codexia-backend-identity/v1" || value.profile !== "full" ||
-      !/^[a-f0-9]{40}$/.test(value.sourceSha)) process.exit(2);
-  process.stdout.write(value.sourceSha);
-')"
+release="$state_dir/deployed-release.json"
+private_file "$release" || die 'A committed deployment record is required for backup'
+image="$(jq -er '.image' "$release")"
+[[ "$image" =~ $image_pattern ]] && same_running_image "$image" || die 'The running API differs from the admitted image'
+source_sha="$(podman exec codexia-api cat /app/update-identity.json |
+  jq -er --slurpfile record "$release" 'select(. == $record[0].identity and .format == "codexia-backend-identity/v1" and .profile == "full") | .sourceSha')"
+[[ "$source_sha" =~ ^[a-f0-9]{40}$ ]] || die 'The admitted API source identity is invalid'
 tunnel_active=false
 tunnel_status=0
 systemctl --user is-active --quiet codexia-tunnel.service || tunnel_status=$?

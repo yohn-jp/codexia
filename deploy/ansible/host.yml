@@ -91,7 +91,7 @@
       environment:
         NEEDRESTART_MODE: l
       vars:
-        host_packages: [podman, nodejs, uidmap, netavark, aardvark-dns, passt, slirp4netns, fuse-overlayfs, dbus-user-session, age, jq, iproute2, util-linux, ca-certificates, acl]
+        host_packages: [podman, nodejs, uidmap, netavark, aardvark-dns, passt, slirp4netns, fuse-overlayfs, dbus-user-session, age, jq, iproute2, util-linux, ca-certificates, acl, curl, openssl]
       when: host_packages | difference(ansible_facts.packages.keys() | list) | length > 0
     - name: Verify actual Podman and Node runtime versions
       ansible.builtin.command:

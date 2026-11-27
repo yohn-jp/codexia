@@ -111,18 +111,11 @@ export const backupPolicySchema = z
 export type BackupPolicy = z.infer<typeof backupPolicySchema>;
 
 export function allowedBackupMaintenanceWindow(policy: BackupPolicy, id: string, at = new Date()) {
-  return backupMaintenanceWindowSlot(policy, id, at)?.open ?? false;
-}
-
-export function backupMaintenanceWindowSlot(policy: BackupPolicy, id: string, at = new Date()) {
   const window = policy.maintenanceWindows.find(candidate => candidate.id === id);
-  if (!window) return null;
+  if (!window) return false;
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: window.timeZone,
     weekday: 'short',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',
@@ -131,19 +124,13 @@ export function backupMaintenanceWindowSlot(policy: BackupPolicy, id: string, at
   const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(value('weekday') ?? '');
   const hour = Number(value('hour'));
   const minute = Number(value('minute'));
-  const date = `${value('year')}-${value('month')}-${value('day')}`;
   const start = Number(window.start.slice(0, 2)) * 60 + Number(window.start.slice(3, 5));
   const current = hour * 60 + minute;
-  const startDay = window.daysOfWeek.find(startDay => {
+  return window.daysOfWeek.some(startDay => {
     const offset = (weekday - startDay + 7) % 7;
-    return offset * 1440 + current - start >= 0 && offset * 1440 + current - start < window.durationMinutes;
+    const elapsed = offset * 1440 + current - start;
+    return elapsed >= 0 && elapsed < window.durationMinutes;
   });
-  let slotDate = date;
-  if (startDay !== undefined && weekday !== startDay) {
-    const [year, month, day] = date.split('-').map(Number);
-    slotDate = new Date(Date.UTC(year!, month! - 1, day!) - 86_400_000).toISOString().slice(0, 10);
-  }
-  return { slotKey: `${id}:${slotDate}`, localDate: slotDate, open: startDay !== undefined };
 }
 
 export function allowedBackupDestination(destination: BackupDestination, policy: BackupPolicy) {

@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Read-only SSH preflight, R4 convergence, or one protected R5 owner operation
+        description: SSH preflight, R4/R5, or backup provisioning on an ACTIVE installation
         type: choice
-        options: [preflight, bootstrap, owner-setup, prepare-activation]
+        options: [preflight, bootstrap, owner-setup, prepare-activation, provision-backups]
         default: preflight
         required: true
       initialize_database:
@@ -105,6 +105,25 @@ jobs:
           cat "$fixture/result"
           grep -F 'Retired deployment journal requires explicit operator recovery before ordinary convergence.' "$fixture/result"
           if grep -F 'TASK [Converge the rootless host account and dependencies]' "$fixture/result"; then exit 1; fi
+      - name: Verify backup maintenance on an unconfigured host cannot enter a privileged stage
+        env:
+          ANSIBLE_DISPLAY_SKIPPED_HOSTS: 'false'
+        run: |
+          set -euo pipefail
+          fixture=$(mktemp -d)
+          trap 'rm -rf -- "$fixture"' EXIT
+          printf '[codexia]\nlocalhost ansible_connection=local\n' > "$fixture/inventory"
+          if "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i "$fixture/inventory" deploy/ansible/site.yml \
+            -e '{"codexia_stage":"base","codexia_backup_runtime_approved":true,"codexia_database_initialization_approved":false}' \
+            -e "codexia_service_home=$fixture codexia_service_user=$(id -un)" > "$fixture/result" 2>&1; then
+            echo 'Missing VM policy unexpectedly admitted backup provisioning.' >&2; exit 1
+          fi
+          grep -Fq 'included: ' "$fixture/result"
+          grep -Fq '/backup-runtime.yml for localhost' "$fixture/result"
+          grep -Eq 'changed=0 .*failed=1' "$fixture/result"
+          if grep -Eq 'included: .*/(host|base-secrets|base-runtime|auth-runtime|deploy|owner-setup)\.yml ' "$fixture/result"; then
+            echo 'Backup maintenance entered an unrelated convergence stage.' >&2; exit 1
+          fi
 
   runtime-identity:
     name: Derive the existing runtime SSH public key before R4
@@ -140,7 +159,7 @@ jobs:
   bootstrap:
     needs: runtime-identity
     name: Protected production controller (${{ inputs.mode }})
-    if: always() && !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'yohn-jp/codexia' && (inputs.mode != 'bootstrap' || needs.runtime-identity.result == 'success')
+    if: always() && !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'yohn-jp/codexia' && inputs.mode != 'provision-backups' && (inputs.mode != 'bootstrap' || needs.runtime-identity.result == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment:
@@ -321,11 +340,14 @@ jobs:
           fi
 
   runtime-acceptance:
-    name: Verify R4 runtime SSH on the same pinned VM
+    name: Protected runtime operation (${{ inputs.mode }})
     needs: bootstrap
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'yohn-jp/codexia' && inputs.mode == 'bootstrap' && needs.bootstrap.result == 'success'
+    if: >-
+      always() && !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+      github.repository == 'yohn-jp/codexia' && ((inputs.mode == 'bootstrap' && needs.bootstrap.result == 'success') ||
+      (inputs.mode == 'provision-backups' && needs.bootstrap.result == 'skipped'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 30
     environment: codexia-production
     permissions:
       contents: read
@@ -335,6 +357,19 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Admit post-ACTIVE backup maintenance on current main
+        if: inputs.mode == 'provision-backups'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INIT_REQUESTED: ${{ inputs.initialize_database }}
+          LIFECYCLE_PLAN: ${{ inputs.preflight_run_id }}
+          LIFECYCLE_APPROVAL: ${{ inputs.approval_phrase }}
+        run: |
+          set -euo pipefail
+          [[ "$INIT_REQUESTED" == false && -z "$LIFECYCLE_PLAN" && -z "$LIFECYCLE_APPROVAL" ]] ||
+            { echo 'Backup maintenance cannot consume lifecycle approvals.' >&2; exit 1; }
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = "$GITHUB_SHA"
+          bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt
       - name: Prepare existing protected runtime SSH identity
         id: runtime
         env:
@@ -350,6 +385,7 @@ jobs:
           tags: tag:ci
           ping: ${{ steps.runtime.outputs.host }}
       - name: Prove the runtime credential reaches the same rootless service account and VM
+        if: inputs.mode == 'bootstrap'
         env:
           EXPECTED_HOST_ID: ${{ needs.bootstrap.outputs.host-id }}
         run: |
@@ -362,6 +398,21 @@ jobs:
           actual=$(printf '%s' "$machine" | sha256sum | cut -d' ' -f1)
           [[ "$actual" == "$EXPECTED_HOST_ID" ]]
           echo 'R4 runtime SSH identity and host binding verified.'
+      - name: Provision the VM-local backup runtime on the existing writer
+        if: inputs.mode == 'provision-backups'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANSIBLE_HOST_KEY_CHECKING: 'True'
+        run: |
+          set -euo pipefail
+          umask 077
+          control="$RUNNER_TEMP/codexia-ssh"
+          export ANSIBLE_SSH_COMMON_ARGS="-F $control/config"
+          [[ "$(ssh -F "$control/config" codexia-target 'id -un')" == codexia ]]
+          printf 'codexia ansible_host=codexia-target ansible_user=codexia\n' > "$control/inventory"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = "$GITHUB_SHA"
+          "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i "$control/inventory" deploy/ansible/site.yml \
+            --limit codexia --extra-vars '{"codexia_stage":"base","codexia_service_user":"codexia","codexia_service_home":"/home/codexia","codexia_backup_runtime_approved":true,"codexia_database_initialization_approved":false}'
       - name: Remove the temporary runtime identity
         if: always()
         run: rm -rf -- "$RUNNER_TEMP/codexia-ssh"
