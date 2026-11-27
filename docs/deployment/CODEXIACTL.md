@@ -62,12 +62,12 @@ CLI の**配布**は本節が所有し、CLI を使う初回 VM 導入・R0–R8
 1. 開発者が `cmd/codexiactl/**`、`scripts/ci/execution/verify-codexiactl.sh`、CLI release component、または `.github/workflows/publish-codexiactl.yml` を変更して PR を main に統合する。対象変更の定義は自動タグ付け Workflow と一致させる。ドキュメントだけの変更はリリースを要求しない。
 2. `Verify Codexia` の main push 実行が成功した後、`.github/workflows/codexiactl-auto-release.yml` が成功 run の exact SHA と現行 main HEAD を照合する。変更のない main、失敗した認定、追い越された SHA は発行しない。比較不能・API 応答不完全なら安全停止する。
 3. 既存の `v0.1.x` タグから最大 patch を求め、次の未使用 `v0.1.(x+1)` を発行する。タグの再割当て、削除、既存バージョンの上書きは禁止。競合や API 応答喪失時は現存タグと SHA を再照合し、曖昧なら停止する。発行されたが公開に失敗した番号は再利用せず、修復した main の次の番号を使う。
-4. タグ push で独立した `Publish CodexiaCTL`（`.github/workflows/publish-codexiactl.yml`）が起動する。exact-source Verify 証明、Immutable Releases 設定、Linux amd64 CLI ビルド、provenance/attestation、SHA-256 manifest、Release asset の照合を**すべて**維持する。OCI core/full の公開・本番配備は実行しない。自動タグ作成の成功は公開成功を意味しない。
+4. `GITHUB_TOKEN` でタグを作成した後、同じトークンの `workflow_dispatch` でタグ ref を指定し、独立した `Publish CodexiaCTL`（`.github/workflows/publish-codexiactl.yml`）が起動する。exact-source Verify 証明、Immutable Releases 設定、Linux amd64 CLI ビルド、provenance/attestation、SHA-256 manifest、Release asset の照合を**すべて**維持する。OCI core/full の公開・本番配備は実行しない。自動タグ作成の成功は公開成功を意味しない。
 5. 正式公開後に運用者は immutable GitHub Release から `codexiactl-linux-amd64` と `codexiactl-linux-amd64.sha256` を取得し、SHA-256 と GitHub attestation/provenance を照合して通常ユーザーで配置する。初回導入は `version`、`doctor`、`init --plan`、`init` の順。更新時も認定済みバイナリに置き換えるだけで、既存 owner/DB/鍵を再初期化しない。
 
 ### 発行用認証と保護
 
-`CODEXIA_RELEASE_TAG_TOKEN` は自動タグ付け Workflow が GitHub の `refs/tags/v0.1.x` を作成するため**だけ**の GitHub 認証資格である。標準 `GITHUB_TOKEN` による push は通常後続 Workflow の push trigger を起動しないため、GitHub App installation token または期限付き・リポジトリ限定の fine-grained PAT（Contents: write）が必要となる。これは CLI が VM で使う認証でも、GitHub Release の公開認証でも、Cloudflare/Tailscale/本番配備認証でもない。認証資格をコード・ログ・VM・Release artifact に埋め込まない。資格の最小権限・有効期限・失効・rotation と、Workflow の default-branch trusted source 制約を守る。可能なら GitHub App の短命 installation token を優先し、恒久 PAT を前提としない。
+自動タグ作成と後続公開 Workflow の起動には標準 `GITHUB_TOKEN` の `contents: write` と `actions: write` を利用する。GitHub Actions で `GITHUB_TOKEN` により作成されたタグの push は別 Workflow の push trigger を起動しないため、タグ ref を指定した `workflow_dispatch` を明示的に発行する。`CODEXIA_RELEASE_TAG_TOKEN`、専用 GitHub App、PAT は不要であり、登録してはならない。公開 Workflow は tag ref、remote tag の exact SHA、成功した main Verify を再検証する。
 
 `CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN` は既存公開 Workflow が repository の Immutable Releases 設定を検証する**別資格**であり、タグ発行権限とは別に扱う。公開失敗時に検証を緩和しない。
 
