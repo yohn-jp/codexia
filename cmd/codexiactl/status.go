@@ -153,6 +153,14 @@ func latestWorkflowSummary(runs []observedRun) []observedRun {
 
 func blockerGuidance(blocker string) string {
 	switch blocker {
+	case "interactive-authentication-required":
+		return "Reconnect to the target VM over a real interactive SSH terminal (ssh -t), not a pipe or CI stdin. Read-only provider access is authenticated through /dev/tty."
+	case "github-authentication-unverified":
+		return "Use the official GitHub App Device Flow when provisioned, or a one-day fine-grained PAT restricted to this Codexia repository. The temporary PAT needs Contents read, Actions write, Environments write and Metadata read; no token belongs in the CI Secrets."
+	case "independent-restore-acceptance-unverified":
+		return "The app can be ACTIVE, but ACCEPTED requires independent verified backup restoration and protected recovery evidence. Use the existing Backup and Restore runbooks; a green CI job is insufficient."
+	case "live-deployment-state-unverified":
+		return "The latest signed Preflight did not prove a known Bootstrap/Activation/ACTIVE state. Review the exact plan and live VM evidence before issuing a new deployment; do not initialize an unknown DB."
 	case "github-environment-or-permission-unverified":
 		return "Settings > Environments: for codexia-bootstrap and codexia-production, require a separate reviewer, prevent self-review, and restrict deployment branches to main. Verify the PAT has Environments read/write. https://github.com/yohn-jp/codexia/settings/environments"
 	case "latest-target-lifecycle-evidence-unavailable":
