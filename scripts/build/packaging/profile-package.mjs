@@ -53,14 +53,16 @@ export function createBuildCommands(profileName, profile, { includeUi = true, in
   // the profile-specific UI build behind the workspace build barrier.
   const roots = [
     '@codexia/contracts', '@codexia/persistence-contracts',
-    '@codexia/persistence-postgres', '@codexia/module-runtime',
+    '@codexia/module-runtime',
     ...profile.modules.map((id) => `${modulePackagePrefix}${id}...`),
-    ...(includeApi ? ['@codexia/api...'] : []),
   ];
   const commands = [{
     command: 'pnpm',
     args: ['--recursive', '--sort', '--workspace-concurrency=2', '--fail-if-no-match',
-      ...roots.flatMap((name) => ['--filter', name]), 'run', 'build'],
+      ...roots.flatMap((name) => ['--filter', name]),
+      // The API builds its schema from TypeSpec source. Its dev-only test
+      // workspaces stay installed, but aren't profile build products.
+      ...(includeApi ? ['--filter-prod', '@codexia/api...'] : []), 'run', 'build'],
   }];
   commands.push({ command: process.execPath, args: [path.join(root, 'scripts/build/packaging/profile-build.mjs'), '--profile', profileName] });
   if (includeUi) {
