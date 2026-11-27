@@ -24,6 +24,15 @@ function assertBackendOnly(plan) {
     'Backend-only first activation requires R6 with a clean API slot and compatible deployed Frontend');
 }
 
+function assertAdoptedBackendOnly(plan) {
+  const s = plan?.observation?.state;
+  assert.ok(plan?.candidateRoute === 'R6' && plan.intent === 'adopt' &&
+    s?.M === 'ready' && s.H === 'ready' && s.D === 'compatible' && s.A === 'ready' &&
+    s.B === 'absent' && s.F === 'compatible' && s.T === 'none' &&
+    /^[a-f0-9]{64}$/u.test(plan.observation.binding.backupSha256 ?? ''),
+  'Existing-owner R6 adoption requires verified compatible database, owner and preservation evidence');
+}
+
 function assertRestoredBackendOnly(plan) {
   const state = plan?.observation?.state;
   assert.ok(plan?.candidateRoute === 'R3' && plan.intent === 'restore' && state?.B === 'absent' &&
@@ -53,6 +62,17 @@ export function admitBackendActivation({ deployment, current, host, flags, now =
     'First installation and database use require protected approvals');
   assertDeploymentPlanApproval({ ...deployment, current, now });
   return backendAdmissionEvidence({ plan, current, host });
+}
+
+export function admitBackendAdoption({ deployment, current, host, flags, now = new Date() }) {
+  const { plan } = deployment;
+  assertAdoptedBackendOnly(plan);
+  assert.ok(flags.databaseAdoption === true && flags.initialInstall !== true &&
+    flags.databaseInitialization !== true,
+  'Existing database adoption requires distinct protected approval without initialization');
+  assertDeploymentPlanApproval({ ...deployment, current, now });
+  return { ...backendAdmissionEvidence({ plan, current, host }),
+    preservationSha256: plan.observation.binding.backupSha256 };
 }
 
 export function admitBackendRecovery({ deployment, current, host, now = new Date() }) {
@@ -86,14 +106,17 @@ async function main(stage, env) {
   const request = parsePreflightRequest(JSON.stringify(receipt.request));
   const { plan, planSha256 } = receipt;
   const recovery = env.CODEXIA_FIRST_ACTIVATION_APPROVAL === 'PUBLISH_RESTORED_CODEXIA_BACKEND';
+  const adoption = env.CODEXIA_FIRST_ACTIVATION_APPROVAL === 'ADOPT_EXISTING_CODEXIA_BACKEND';
   if (recovery) assertRestoredBackendOnly(plan);
+  else if (adoption) assertAdoptedBackendOnly(plan);
   else {
     assert.equal(env.CODEXIA_FIRST_ACTIVATION_APPROVAL, 'ACTIVATE_CODEXIA_BACKEND');
     assertBackendOnly(plan);
   }
   assert.equal(request.intent, plan.intent);
   assert.deepEqual(request.window, plan.window);
-  const grants = recovery ? ['maintenance', 'recovery', 'publication'] : ['first-install', 'database-use', 'publication'];
+  const grants = recovery ? ['maintenance', 'recovery', 'publication']
+    : adoption ? ['database-adoption', 'publication'] : ['first-install', 'database-use', 'publication'];
   const deployment = { plan, planSha256, approval: { planSha256, grants } };
   assertDeploymentPlanBinding(deployment);
   if (stage === 'certify') {
@@ -111,27 +134,38 @@ async function main(stage, env) {
     'Reverified backend certificate differs from the verified deployment handoff');
   const { host, hostPinSha256, authSchemaQuery } = await readLifecycleHost({
     inventory: join(env.RUNNER_TEMP, 'codexia-first-activation-inventory.yml'),
-    targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST, recovery,
+    targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST, recovery, adoption,
   });
   const edge = await createDeploymentEdge({ ...JSON.parse(env.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET),
     origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
     readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN,
   }).observeLifecycle({ backendExpected: host.backend.state === 'running' });
+  const { readPreservationEvidence } = await import('../preflight/preservation.mjs');
+  const preservationReceipt = adoption
+    ? readPreservationEvidence(JSON.stringify(receipt.evidence?.preservationReceipt ?? null), host)
+    : null;
   const { plan: current } = planFromObservations({ host, edge, hostPinSha256, ...releases,
-    intent: request.intent, window: request.window });
-  if (!recovery) assert.equal(host.database.setupImage, releases.candidateBackend.image,
+    intent: request.intent, window: request.window, preservationReceipt });
+  if (!recovery && !adoption) assert.equal(host.database.setupImage, releases.candidateBackend.image,
     'First activation must use the certified owner setup image');
   const evidence = recovery
     ? admitBackendRecovery({ deployment, current, host })
+    : adoption ? admitBackendAdoption({ deployment, current, host, flags: {
+      databaseAdoption: env.CODEXIA_DATABASE_ADOPTION_APPROVED === 'true',
+      initialInstall: env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
+      databaseInitialization: env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
+    } })
     : admitBackendActivation({ deployment, current, host, flags: {
       initialInstall: env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
       databaseUse: env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
     } });
-  const name = recovery ? 'codexia-recovery-activation.json' : 'codexia-first-activation.json';
-  await writeFile(join(env.RUNNER_TEMP, name), JSON.stringify(recovery ? { ...evidence, authSchemaQuery } : evidence) + '\n',
+  const name = recovery ? 'codexia-recovery-activation.json'
+    : adoption ? 'codexia-adopt-activation.json' : 'codexia-first-activation.json';
+  await writeFile(join(env.RUNNER_TEMP, name), JSON.stringify(recovery || adoption ? { ...evidence, authSchemaQuery } : evidence) + '\n',
     { flag: 'wx', mode: 0o600 });
   console.log(recovery ? 'Protected R3 restored Backend publication admitted against the deployed Frontend.' :
-    'Protected R6 Backend-only activation admitted against the deployed Frontend.');
+    adoption ? 'Protected R6 existing-owner adoption admitted against the deployed Frontend.' :
+      'Protected R6 Backend-only activation admitted against the deployed Frontend.');
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
