@@ -69,9 +69,9 @@ APIは認証と作品へのアクセス権限を確認します。ブラウザ�
 
 ## 離脱用オープンエクスポート契約（REQ-DATA-006）
 
-**種別: 採用済みの規範的設計目標・未実装。** 本節は作者がCodexiaから離脱する場合の作品データ取得を所有する。対象読者は作者・開発者。上記 `codexia-work/v1` は現行のバージョン付きJSON交換（新規作品へのimportを含む）として区別する。運用DR、SQL/DB dump、ZIP import、専用viewer、EPUB/DOCX出版形式の拡張はこの決定の対象外。運用DRは [Backup](deployment/BACKUP.md)、永続データ境界は [Data model](architecture/DATA-MODEL.md) が所有する。
+**種別: 採用済みの規範的設計。実装と実測は未完了。** 本節は作者がCodexiaから離脱する場合の作品データ取得を所有する。対象読者は作者・開発者。上記 `codexia-work/v1` は現行のバージョン付きJSON交換（新規作品へのimportを含む）として区別する。運用DR、SQL/DB dump、ZIP import、専用viewer、EPUB/DOCX出版形式の拡張はこの決定の対象外。運用DRは [Backup](deployment/BACKUP.md)、永続データ境界は [Data model](architecture/DATA-MODEL.md) が所有する。
 
-[実装契約案](architecture/OPEN-WORK-EXPORT-PROPOSAL.md)は、HTTP、認可、画面および資源上限の承認前の詳細を扱う。
+[離脱用 ZIP の実装契約](architecture/OPEN-WORK-EXPORT-CONTRACT.md) に HTTP、認可、画面および資源管理の詳細を定める。
 
 ### 形式と内容
 
@@ -104,7 +104,7 @@ work.zip
 
 - 既存作品パネルのエクスポートから作品を選択し、離脱用ZIPを取得できる。現行JSON交換は用途を明示して区別する。作者の認証と対象作品の認可をAPIで強制し、MCP・公開reader・非認可クライアントに包括的エクスポートを付与しない。HTTP契約、画面操作、Native対応は実装前に所有するTypeSpec/API/route authorization/画面契約で定義し、既存対応クライアントの責務を維持する。
 - 全ファイルは単一のPostgreSQL読み取りsnapshotから生成する。作品・履歴・知識等のページングは同一snapshotを保持し、編集中の別Revisionを混在させない。既存 `exportWorkArchive` の認可済み読み取り・データ投影・機密除外と永続化層のページングを再利用し、第二のドメインwriterやSQL接続境界を作らない。現行v1の8 MiB／件数上限を新形式へそのまま流用せず、streaming等でメモリ・接続時間・同時実行・一時領域の上限を管理する。
-- 作品名・文書名をそのまま安全なパスとみなさない。絶対path、親directory traversal、特殊ファイル・リンク、Windows予約名、大小文字・Unicode・同名衝突を回避し、manifestのID/path対応が一意であること。ZIP生成は既存の [library-first規約](architecture/DEPENDENCY-POLICY.md) に従い、保守されたライブラリを用いる。ZIP64等の必要な互換性、具体的サイズ上限は受入条件とともに実装前に確定する。
+- 作品名・文書名をそのまま安全なパスとみなさない。絶対path、親directory traversal、特殊ファイル・リンク、Windows予約名、大小文字・Unicode・同名衝突を回避し、manifestのID/path対応が一意であること。ZIP生成は既存の [library-first規約](architecture/DEPENDENCY-POLICY.md) に従い、保守されたライブラリを用いる。初期実装は [実装契約](architecture/OPEN-WORK-EXPORT-CONTRACT.md#スナップショットと資源上限) の暫定値で検証し、同契約の計測条件で上限を確定する。
 - 生成失敗、DB停止、snapshot不成立、容量上限超過、キャンセル、通信切断を完了と表示しない。全件が入った成果物だけを成功とし、部分ZIPや黙った省略を許さない。生成途中の一時資源は確実に解放し、未承認の永続ファイルストアを作らない。
 
 ### 受入条件
