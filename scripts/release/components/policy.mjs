@@ -125,7 +125,14 @@ export function assertReleaseIdentity(tag, expectedSha, actualSha) {
   }
 }
 
-/** Resolve lightweight and annotated release tags through the existing GitHub source authority. */
+/**
+ * Resolve lightweight and annotated release tags through the existing GitHub source authority.
+ * @param {{rest: {git: {
+ *   getRef(input: {owner: string, repo: string, ref: string}): Promise<{data: {object: {type: string, sha: string}}}>,
+ *   getTag(input: {owner: string, repo: string, tag_sha: string}): Promise<{data: {object: {type: string, sha: string}}}>
+ * }}}} github
+ * @param {{owner: string, repo: string, tag: string, sha: string}} release
+ */
 export async function assertRemoteReleaseTag(github, { owner, repo, tag, sha }) {
   let reference = (await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` })).data.object;
   for (let depth = 0; reference?.type === 'tag' && depth < 8; depth++) {
