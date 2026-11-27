@@ -2912,7 +2912,13 @@ export function createServer(options: ApiServerOptions): Server {
     };
   for (const route of httpContract.routes) {
     if (route.contractStatus === 'target' || ownerSetupOnly.has(route.operationId) || authAdapters.has(route.operationId)) continue;
-    if (route.operationId.startsWith('project_mcp_') || route.operationId.startsWith('public_share_')) continue;
+    if (
+      route.operationId.startsWith('project_mcp_') ||
+      route.operationId.startsWith('public_share_') ||
+      route.operationId.startsWith('backup_console_')
+    ) {
+      continue;
+    }
     const policy =
       route.url === '/mcp'
         ? 'mcp'

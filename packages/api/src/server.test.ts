@@ -31,6 +31,7 @@ import type {
 import { createPostgresPersistence, migratePostgresDatabase } from '@codexia/persistence-postgres';
 import { fromNodeHeaders } from 'better-auth/node';
 import { advertisePublicClientTokenAuth } from './better-auth.js';
+import { httpContract } from './http-contract.js';
 import { JobHistoryError, JobHistoryStore, type WorkerJobLifecycle } from './job-history-store.js';
 import type { createOAuthMcpAuthenticator } from './oauth-mcp.js';
 import { type ApiServerOptions, createServer, start } from './server.js';
@@ -865,6 +866,40 @@ it('confirms only a cookie-backed owner session on the exact same origin', async
   const crossOrigin = await post({ Origin: 'https://attacker.example', Cookie: 'codexia_session=owner' });
   assert.equal(crossOrigin.status, 403);
   assert.equal(checks.length, beforeCrossOrigin, 'a mismatched Origin must not reach Better Auth session lookup');
+});
+
+it('registers every contracted backup console operation on the owner session boundary', async t => {
+  const staticDir = await mkdtemp(resolve(tmpdir(), 'codexia-backup-console-route-'));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const betterAuth = {
+    issuer: TEST_ISSUER,
+    audience: TEST_AUDIENCE,
+    toHeaders: (input: Record<string, string | string[] | undefined>) => new Headers(input as HeadersInit),
+    async checkOwnerSession(headers: Headers) {
+      return { status: headers.get('cookie') === 'codexia_session=owner' ? 200 : 401 } as const;
+    },
+  } as unknown as NonNullable<ApiServerOptions['betterAuth']>;
+  const api = await startCustomApi(makeStore(), staticDir, { betterAuth });
+  t.after(api.close);
+
+  const operations = httpContract.routes.filter(route => route.operationId.startsWith('backup_console_'));
+  assert.equal(operations.length, 11);
+  for (const route of operations) {
+    assert.equal(route.contractStatus, 'incomplete', route.operationId);
+    const url = api.base + route.url.replace(/:\w+/gu, randomUUID());
+    const mutation = route.method !== 'GET';
+    const headers = { Origin: api.base, 'Content-Type': 'application/json', 'X-Codexia-Csrf': '1' };
+    const request = { method: route.method, ...(mutation ? { body: '{}' } : {}) };
+
+    const anonymous = await fetch(url, { ...request, headers });
+    assert.equal(anonymous.status, 401, route.operationId);
+    assert.equal((await anonymous.json()).code, 'BACKUP_OWNER_SESSION_REQUIRED', route.operationId);
+
+    const owner = await fetch(url, { ...request, headers: { ...headers, Cookie: 'codexia_session=owner' } });
+    assert.equal(owner.status, 503, route.operationId);
+    assert.equal((await owner.json()).code, 'BACKUP_CONTROL_PLANE_UNAVAILABLE', route.operationId);
+    assert.equal(owner.headers.get('cache-control'), 'no-store', route.operationId);
+  }
 });
 
 async function startApi(staticDir: string, trustProxy = false) {

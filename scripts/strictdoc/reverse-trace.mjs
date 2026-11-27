@@ -150,7 +150,14 @@ export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, b
     for (const route of generated.routes ?? []) {
       const id = `${route.method} ${route.url.replace(/:([A-Za-z][A-Za-z0-9_]*)/gu, '{$1}')}`;
       if (route.contractStatus === 'target') continue;
-      surfaces.push({ kind: 'httpRuntimeRoute', id, operationId: route.operationId, contractStatus: route.contractStatus, source: { path: 'packages/api/src/http-contract.ts' }, provenance: `Generated Fastify registration (${generatedContractPath}) with operationId ${route.operationId}; server registration resolves handlers by operationId and fails closed when a handler is missing.` });
+      const backupConsole = route.operationId.startsWith('backup_console_');
+      surfaces.push({
+        kind: 'httpRuntimeRoute', id, operationId: route.operationId, contractStatus: route.contractStatus,
+        source: { path: backupConsole ? 'packages/api/src/backup-console-routes.ts' : 'packages/api/src/http-contract.ts' },
+        provenance: backupConsole
+          ? `Generated Fastify schema (${generatedContractPath}); the Backup Console plugin registers this operation under owner-session admission.`
+          : `Generated Fastify registration (${generatedContractPath}) with operationId ${route.operationId}; server registration resolves handlers by operationId and fails closed when a handler is missing.`,
+      });
     }
   } catch {
     limitations.push({ area: 'http', reason: `Generated Fastify HTTP contract is missing or invalid: ${generatedContractPath}` });

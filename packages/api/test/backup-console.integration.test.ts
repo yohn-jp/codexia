@@ -14,7 +14,7 @@ import { backupCredentialKeyId } from '../src/backup-credential-envelope.js';
 import { createServer } from '../src/server.js';
 import { assertDisposableAuthFixtureDatabaseUrl, startBetterAuthFixture } from './fixtures/better-auth-server.js';
 
-test('backup console requires owner proof, isolates credentials, and applies only verified executor results', async t => {
+test('[TEST-OPS-004-001] [TEST-OPS-005-001] backup console requires owner proof, isolates credentials, and applies only verified executor results', async t => {
   const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
   assert.ok(databaseUrl, 'Set CODEXIA_AUTH_TEST_DATABASE_URL to a disposable PostgreSQL auth database');
   assertDisposableAuthFixtureDatabaseUrl(databaseUrl);
@@ -142,6 +142,7 @@ test('backup console requires owner proof, isolates credentials, and applies onl
     ['POST', '/config/disable'],
     ['POST', '/runs'],
     ['GET', '/runs'],
+    ['GET', `/runs/${randomUUID()}`],
     ['GET', '/recovery'],
   ];
   for (const [method, path] of routes) {
