@@ -35,7 +35,7 @@ var operations = map[string]workflowOperation{
 			"Compute the read-only lifecycle plan from fresh host and certified candidate evidence"}},
 	"bootstrap": {file: bootstrapFile, inputs: map[string]string{"mode": "bootstrap", "approval_phrase": "BOOTSTRAP_CODEXIA"},
 		jobs: []string{"Derive the existing runtime SSH public key before R4", "Protected production controller (bootstrap)",
-			"Verify R4 runtime SSH on the same pinned VM"}},
+			"Protected runtime operation (bootstrap)"}},
 	"frontend": {file: frontendFile, inputs: map[string]string{"approval_phrase": "PUBLISH_INITIAL_FRONTEND"},
 		jobs: []string{"Publish canonical frontend for initial owner enrollment"}},
 	"owner-setup": {file: bootstrapFile, inputs: map[string]string{"mode": "owner-setup", "approval_phrase": "OWNER_SETUP_CODEXIA"},

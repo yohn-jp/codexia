@@ -272,3 +272,15 @@ func TestInterruptedFirstHostUsesAdministratorPreflight(t *testing.T) {
 		t.Fatalf("existing runtime should retain its independent observation path: %s", found)
 	}
 }
+
+func TestOwnerSetupRechecksRecipientBeforeProtectedDispatch(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	reviewed := githubSnapshot{MainSHA: sha, Bootstrap: githubEnvironment{Variables: map[string]string{ownerRecipient: "owner-A"}}}
+	if err := requireApprovedOwnerRecipient(reviewed, sha, "owner-A"); err != nil {
+		t.Fatal(err)
+	}
+	reviewed.Bootstrap.Variables[ownerRecipient] = "owner-B"
+	if err := requireApprovedOwnerRecipient(reviewed, sha, "owner-A"); err == nil {
+		t.Fatal("an unapproved new recipient would receive the newly issued grant")
+	}
+}

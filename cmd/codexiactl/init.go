@@ -333,6 +333,9 @@ func (c *workflowController) install(ctx context.Context, gh *githubControl, set
 	if receipt.setupForDelivery() && c.state.OwnerSetupRunID > 0 {
 		return c.deliver(ctx, gh, settings, receipt, nil)
 	}
+	if err := c.requireSettingsWindow(ctx, gh); err != nil {
+		return err
+	}
 	current, err := gh.Observe(ctx)
 	if err != nil {
 		return err
@@ -380,10 +383,20 @@ func (c *workflowController) install(ctx context.Context, gh *githubControl, set
 		}
 	}
 	if err := c.withBootstrapGates(ctx, gh, false, func() error {
+		if err := c.requireSettingsWindow(ctx, gh); err != nil {
+			return err
+		}
+		latest, err := gh.Observe(ctx)
+		if err != nil {
+			return err
+		}
+		if err := requireApprovedOwnerRecipient(latest, c.sha, handoff.Recipient); err != nil {
+			return err
+		}
 		if err := requireFresh(receipt); err != nil {
 			return err
 		}
-		_, err := c.execute(ctx, "owner-setup", map[string]string{"preflight_run_id": strconv.FormatInt(id, 10)})
+		_, err = c.execute(ctx, "owner-setup", map[string]string{"preflight_run_id": strconv.FormatInt(id, 10)})
 		return err
 	}); err != nil {
 		return err
@@ -397,6 +410,13 @@ func (c *workflowController) install(ctx context.Context, gh *githubControl, set
 		return refused("Post-setup evidence did not establish the same certified Frontend, setup-only API and live encrypted grant")
 	}
 	return c.deliver(ctx, gh, settings, after, handoff)
+}
+
+func requireApprovedOwnerRecipient(snapshot githubSnapshot, sha, recipient string) error {
+	if snapshot.MainSHA != sha || recipient == "" || snapshot.Bootstrap.Variables[ownerRecipient] != recipient {
+		return refused("The source or Owner recipient changed after approval. No Owner setup was dispatched")
+	}
+	return nil
 }
 
 func (c *workflowController) selectOwnerHandoff(receipt lifecycleReceipt, existing string) (*ownerHandoff, error) {

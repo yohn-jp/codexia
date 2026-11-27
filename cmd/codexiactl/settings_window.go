@@ -10,7 +10,7 @@ import (
 
 func (c *workflowController) requireSettingsWindow(ctx context.Context, gh *githubControl) error {
 	if c.settingsWindow != nil {
-		return nil
+		return c.settingsWindow.verify(ctx)
 	}
 	resume := c.state.BootstrapKeyWrite == "unresolved" || c.state.BootstrapKeyWrite == "registered" ||
 		len(c.state.GateOriginal) > 0
