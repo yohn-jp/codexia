@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { reconcileCodexiactlRelease, assertImmutableReleaseSetting, readTaggedRelease } from './codexiactl-release.mjs';
+import { reconcileCodexiactlRelease, readTaggedRelease } from './codexiactl-release.mjs';
 
 const tag = 'v1.2.3';
 const binary = { name: 'codexiactl-linux-amd64', digest: `sha256:${'a'.repeat(64)}`, size: 100 };
@@ -17,7 +17,7 @@ const validRelease = () => ({
   ],
 });
 
-function fixture({ release = validRelease(), created = validRelease(), disabled = false, readError, attestError } = {}) {
+function fixture({ release = validRelease(), created = validRelease(), readError, attestError } = {}) {
   const calls = [];
   return {
     calls,
@@ -34,10 +34,6 @@ function fixture({ release = validRelease(), created = validRelease(), disabled 
       async verifyReleaseAsset(asset) {
         calls.push(asset.name);
         if (attestError) throw attestError;
-      },
-      async checkSetting() {
-        calls.push('setting');
-        assertImmutableReleaseSetting({ enabled: !disabled, enforced_by_owner: false });
       },
       async createRelease() { calls.push('create'); },
     },
@@ -74,16 +70,13 @@ test('mutable, incomplete, mismatched, draft and foreign existing releases are r
   }
 });
 
-test('settings are checked before a new Release is created and existing failures do not turn into absence', async () => {
-  const disabled = fixture({ release: null, disabled: true });
-  await assert.rejects(reconcileCodexiactlRelease(disabled.options), /Immutable Releases must be enabled/u);
-  assert.ok(!disabled.calls.includes('create'));
+test('new Release is verified immutable after creation and existing failures do not turn into absence', async () => {
   const inaccessible = fixture({ readError: new Error('HTTP 403') });
   await assert.rejects(reconcileCodexiactlRelease(inaccessible.options), /403/u);
   assert.deepEqual(inaccessible.calls, ['read']);
   const allowed = fixture({ release: null });
   assert.equal(await reconcileCodexiactlRelease(allowed.options), 'published');
-  assert.deepEqual(allowed.calls, ['read', 'tag', 'build-attestation', 'setting', 'create', 'read', 'tag', binary.name, checksum.name]);
+  assert.deepEqual(allowed.calls, ['read', 'tag', 'build-attestation', 'create', 'read', 'tag', binary.name, checksum.name]);
   const invalidAfterCreate = fixture({ release: null, created: { ...validRelease(), immutable: false } });
   await assert.rejects(reconcileCodexiactlRelease(invalidAfterCreate.options), /Use a new verified version tag/u);
   assert.equal(invalidAfterCreate.calls.filter(call => call === 'create').length, 1);

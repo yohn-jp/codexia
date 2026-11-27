@@ -55,6 +55,24 @@ flowchart TD
 
 `--json` は読取り結果に限定し、スキーマ版、対象、観測時刻、状態、blockers、run IDs、証拠参照を含む。秘密、grant、OAuth code、認証用 URL の query、トークンレスポンスを含めない。機械出力は stdout、診断は stderr。初回対話を stdin から無条件に自動承認する `--yes`、`--force`、任意 command 実行、秘密の command-line 引数、隠れた非対話モードは提供しない。ユーザー中断を除き終了コードは 0（要求した段階の成立）、1（失敗または不明）、2（不足・承認待ちで安全停止）、3（対象/状態の不整合・拒否）とする。中断は 130。ACTIVE と ACCEPTED は結果に必ず区別して表示する。
 
+## 2.1 CLI 自身のリリース・更新ライフサイクル（正本）
+
+CLI の**配布**は本節が所有し、CLI を使う初回 VM 導入・R0–R8 は本書 §3 と [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) が所有する。CLI のバージョンと Backend/Frontend の配備バージョンを混同しない。Backend は既存 `backend-release.yml` → `backend-deployment-handoff.yml` の自動認定・公開・互換更新経路、Frontend は `frontend-release.yml` を利用する。CTL のタグでは OCI や本番配備を起動しない。CLI は常駐更新器ではなく、既存 VM の自動更新・再起動を行わない。
+
+1. 開発者が `cmd/codexiactl/**`、`scripts/ci/execution/verify-codexiactl.sh`、CLI release component、または `.github/workflows/publish-codexiactl.yml` を変更して PR を main に統合する。対象変更の定義は自動タグ付け Workflow と一致させる。ドキュメントだけの変更はリリースを要求しない。
+2. `Verify Codexia` の main push 実行が成功した後、`.github/workflows/codexiactl-auto-release.yml` が成功 run の exact SHA と現行 main HEAD を照合する。変更のない main、失敗した認定、追い越された SHA は発行しない。比較不能・API 応答不完全なら安全停止する。
+3. 既存の `v0.1.x` タグから最大 patch を求め、次の未使用 `v0.1.(x+1)` を発行する。タグの再割当て、削除、既存バージョンの上書きは禁止。競合や API 応答喪失時は現存タグと SHA を再照合し、曖昧なら停止する。発行されたが公開に失敗した番号は再利用せず、修復した main の次の番号を使う。
+4. `GITHUB_TOKEN` でタグを作成した後、同じトークンの `workflow_dispatch` でタグ ref を指定し、独立した `Publish CodexiaCTL`（`.github/workflows/publish-codexiactl.yml`）が起動する。exact-source Verify 証明、Linux amd64 CLI ビルド、provenance/attestation、SHA-256 manifest、Release asset の照合を**すべて**維持する。OCI core/full の公開・本番配備は実行しない。自動タグ作成の成功は公開成功を意味しない。
+5. 正式公開後に運用者は immutable GitHub Release から `codexiactl-linux-amd64` と `codexiactl-linux-amd64.sha256` を取得し、SHA-256 と GitHub attestation/provenance を照合して通常ユーザーで配置する。初回導入は `version`、`doctor`、`init --plan`、`init` の順。更新時も認定済みバイナリに置き換えるだけで、既存 owner/DB/鍵を再初期化しない。
+
+### 発行用認証と保護
+
+自動タグ作成と後続公開 Workflow の起動には標準 `GITHUB_TOKEN` の `contents: write` と `actions: write` を利用する。GitHub Actions で `GITHUB_TOKEN` により作成されたタグの push は別 Workflow の push trigger を起動しないため、タグ ref を指定した `workflow_dispatch` を明示的に発行する。`CODEXIA_RELEASE_TAG_TOKEN`、専用 GitHub App、PAT は不要であり、登録してはならない。公開 Workflow は tag ref、remote tag の exact SHA、成功した main Verify を再検証する。
+
+`CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN` は要求しない。公開結果の Release API 応答で `immutable=true` と asset digest/size を検証し、設定が無効な場合は公開失敗として扱う。管理権限の読み取り専用トークンを新設しない。
+
+**受入:** (a) CLI 変更を含む main の認定成功でタグが一つだけ発行され Release に CLI バイナリと manifest が存在する、(b) 非対象変更・失敗・stale SHA では発行されない、(c) 連続変更で patch が単調増加し既存タグを変更しない、(d) 同時実行・API 障害・資格不足で重複/未認定公開がない、(e) Release の SHA/provenance が元の main SHA と一致し VM 上で `version` が動作する。実際の公開が成功するまでは「自動リリース完了」と判定しない。
+
 ## 3. init の順序と状態遷移
 
 操作の前に read-only で対象を確定し、外部変更の直前に意図・対象・差分を提示する。安全に並列できる読取り以外は次の順序を守る。step の成功をログの文字列や Workflow 全体の緑色から推定しない。CLI 内の step は配備 R 経路の第二定義ではなく、その入力準備と既存 operation の呼出しである。

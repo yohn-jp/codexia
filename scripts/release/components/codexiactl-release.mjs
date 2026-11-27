@@ -11,13 +11,6 @@ const repository = 'yohn-jp/codexia';
 const [owner, repo] = repository.split('/');
 const binaryName = 'codexiactl-linux-amd64';
 const checksumName = `${binaryName}.sha256`;
-const readTokenKey = 'CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN';
-
-export function assertImmutableReleaseSetting(settings) {
-  if (settings?.enabled !== true || typeof settings.enforced_by_owner !== 'boolean') {
-    throw new Error('Immutable Releases must be enabled for yohn-jp/codexia before publishing');
-  }
-}
 
 function requireReleaseAssets(release, tag, assets) {
   const correctRelease = release?.tag_name === tag && release?.immutable === true && release?.draft === false &&
@@ -33,14 +26,13 @@ function requireReleaseAssets(release, tag, assets) {
 }
 
 export async function reconcileCodexiactlRelease({ tag, assets, readRelease, verifySource, verifyBuildProvenance,
-  verifyReleaseAsset, checkSetting, createRelease }) {
+  verifyReleaseAsset, createRelease }) {
   let release = await readRelease();
   const existing = release !== null;
   if (existing) requireReleaseAssets(release, tag, assets);
   await verifySource();
   await verifyBuildProvenance();
   if (!existing) {
-    await checkSetting();
     await createRelease();
     release = await readRelease();
     requireReleaseAssets(release, tag, assets);
@@ -51,18 +43,6 @@ export async function reconcileCodexiactlRelease({ tag, assets, readRelease, ver
 }
 
 const httpSuffix = error => Number.isSafeInteger(error?.status) ? ` (HTTP ${error.status})` : '';
-
-async function checkSetting(token) {
-  if (!token) throw new Error(`Configure ${readTokenKey} with repository Administration read permission`);
-  const github = createGitHubOctokit({ token });
-  let settings;
-  try {
-    ({ data: settings } = await github.request('GET /repos/{owner}/{repo}/immutable-releases', { owner, repo }));
-  } catch (error) {
-    throw new Error(`Could not verify the repository Immutable Releases setting${httpSuffix(error)}. Check ${readTokenKey} and enable Immutable Releases.`);
-  }
-  assertImmutableReleaseSetting(settings);
-}
 
 export async function readTaggedRelease(github, tag) {
   const matching = [];
@@ -96,7 +76,7 @@ async function stagedAssets(directory) {
 }
 
 function githubCLI(message, args) {
-  const { [readTokenKey]: _readToken, ...env } = process.env;
+  const env = process.env;
   try {
     execFileSync('gh', [...args, '--repo', repository], {
       env: { ...env, GH_HOST: 'github.com' }, timeout: 90_000, stdio: ['ignore', 'pipe', 'pipe'],
@@ -110,15 +90,10 @@ async function main() {
   const env = process.env;
   const tag = env.GITHUB_REF_NAME;
   const sha = env.GITHUB_SHA;
-  if (env.GITHUB_REPOSITORY !== repository || env.GITHUB_EVENT_NAME !== 'push' || env.GITHUB_REF !== `refs/tags/${tag}`) {
+  if (env.GITHUB_REPOSITORY !== repository || env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || env.GITHUB_REF !== `refs/tags/${tag}`) {
     throw new Error('CLI release is limited to the canonical repository tag publisher');
   }
   assertReleaseIdentity(tag, sha, sha);
-  if (process.argv[2] === 'check-setting') {
-    await checkSetting(env[readTokenKey]);
-    console.log('Repository Immutable Releases setting is enabled.');
-    return;
-  }
   if (process.argv[2] !== 'reconcile' || !env.RUNNER_TEMP || !path.isAbsolute(env.RUNNER_TEMP)) {
     throw new Error('CLI release requires a trusted workflow artifact directory');
   }
@@ -137,13 +112,12 @@ async function main() {
       }
     },
     verifyBuildProvenance: () => githubCLI('CLI build provenance verification failed', [
-      'attestation', 'verify', assets[0].file, '--signer-workflow', `${repository}/.github/workflows/publish-oci.yml`,
+      'attestation', 'verify', assets[0].file, '--signer-workflow', `${repository}/.github/workflows/publish-codexiactl.yml`,
       '--source-ref', env.GITHUB_REF, '--source-digest', sha, '--deny-self-hosted-runners',
     ]),
     verifyReleaseAsset: asset => githubCLI(`Immutable Release attestation could not verify ${asset.name}`, [
       'release', 'verify-asset', tag, asset.file,
     ]),
-    checkSetting: () => checkSetting(env[readTokenKey]),
     createRelease: () => githubCLI('Release creation was not confirmed. Inspect the tag and Release before retrying.', [
       'release', 'create', tag, ...assets.map(asset => asset.file),
       '--verify-tag', '--target', sha, '--generate-notes', '--title', tag,
