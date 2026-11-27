@@ -417,7 +417,7 @@ func discoverTailnetWIF(ctx context.Context, client *ts.Client) (string, []strin
 			// Only report credentials for this repository, not other unrelated
 			// workloads sharing the Tailnet.
 			if key.Issuer == wifIssuer && strings.Contains(key.Subject, "codexia") {
-				mismatches = append(mismatches, "credential " + item.ID + ": " + strings.Join(problems, "; "))
+				mismatches = append(mismatches, "credential "+item.ID+": "+strings.Join(problems, "; "))
 			}
 			continue
 		}
@@ -435,14 +435,14 @@ func wifProblems(key ts.Key) []string {
 		(!key.Expires.IsZero() && !time.Now().Before(key.Expires)) {
 		problems = append(problems, "credential is not an active federated identity")
 	}
-	if !tailnetNodeID.MatchString(key.ID) || key.Audience != "api.tailscale.com/" + key.ID {
+	if !tailnetNodeID.MatchString(key.ID) || key.Audience != "api.tailscale.com/"+key.ID {
 		problems = append(problems, "audience must equal api.tailscale.com/<this credential client ID>")
 	}
 	if key.Issuer != wifIssuer {
-		problems = append(problems, "issuer must be " + wifIssuer)
+		problems = append(problems, "issuer must be "+wifIssuer)
 	}
 	if key.Subject != wifSubject {
-		problems = append(problems, "subject must be " + wifSubject + " (GitHub immutable owner/repository IDs, both protected Environments)")
+		problems = append(problems, "subject must be "+wifSubject+" (GitHub immutable owner/repository IDs, both protected Environments)")
 	}
 	if !slices.Equal(key.Scopes, []string{"auth_keys"}) {
 		problems = append(problems, "scopes must contain only auth_keys, not all or broader permissions")
