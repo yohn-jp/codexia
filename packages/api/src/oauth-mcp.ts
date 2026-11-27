@@ -1,8 +1,7 @@
 import { MCP_OAUTH_SCOPES } from '@codexia/contracts';
 import { visit } from 'jsonc-parser';
 import { z } from 'zod';
-import { OAuthAuthenticationError } from './oauth-owner.js';
-import { createOAuthAccessTokenVerifier, type OAuthAccessTokenVerifierOptions, OAuthTokenVerifierError } from './oauth-token.js';
+import { createOAuthAccessTokenVerifier, type OAuthAccessTokenVerifierOptions, OAuthAuthenticationError } from './oauth-token.js';
 
 export const OAUTH_MCP_SCOPES = MCP_OAUTH_SCOPES;
 export const OAUTH_MCP_SCOPE_BY_EFFECT = {
@@ -146,42 +145,32 @@ export function createOAuthMcpAuthenticator(options: OAuthMcpOptions): (token: s
   if ([...allowedClientIds].some(clientId => ownerClientIds.has(clientId))) {
     throw new Error('OAuth owner and MCP client allowlists must be disjoint');
   }
-  const verifyToken = createOAuthAccessTokenVerifier(options);
   const validScopes = new Set<string>([...OAUTH_MCP_SCOPES, ...MCP_IDENTITY_SCOPES]);
+  const verifyToken = createOAuthAccessTokenVerifier(options, claims => {
+    if (!allowedClientIds.has(claims.clientId)) {
+      throw new OAuthAuthenticationError(403, 'OAUTH_MCP_CLIENT_NOT_ALLOWED', 'OAuth client is not registered for MCP access');
+    }
+    if (claims.subject !== options.ownerSubject) {
+      throw new OAuthAuthenticationError(
+        403,
+        'OAUTH_MCP_SUBJECT_NOT_ALLOWED',
+        'Authenticated identity is not configured for MCP API access',
+      );
+    }
+    if (claims.scopes.some(scope => !validScopes.has(scope)) || !OAUTH_MCP_SCOPES.some(scope => claims.scopes.includes(scope))) {
+      throw new OAuthAuthenticationError(403, 'OAUTH_MCP_SCOPE_INVALID', 'Access token must grant only explicit MCP operation scopes');
+    }
+  });
 
   return async (token: string): Promise<OAuthMcpPrincipal> => {
-    try {
-      const claims = await verifyToken(token, candidate => {
-        if (!allowedClientIds.has(candidate.clientId)) {
-          throw new OAuthAuthenticationError(403, 'OAUTH_MCP_CLIENT_NOT_ALLOWED', 'OAuth client is not registered for MCP access');
-        }
-        if (candidate.subject !== options.ownerSubject) {
-          throw new OAuthAuthenticationError(
-            403,
-            'OAUTH_MCP_SUBJECT_NOT_ALLOWED',
-            'Authenticated identity is not configured for MCP API access',
-          );
-        }
-        if (candidate.scopes.some(scope => !validScopes.has(scope)) || !OAUTH_MCP_SCOPES.some(scope => candidate.scopes.includes(scope))) {
-          throw new OAuthAuthenticationError(403, 'OAUTH_MCP_SCOPE_INVALID', 'Access token must grant only explicit MCP operation scopes');
-        }
-        if (ownerClientIds.has(candidate.clientId)) {
-          throw new OAuthAuthenticationError(403, 'OAUTH_MCP_CLIENT_NOT_ALLOWED', 'Owner OAuth clients cannot be used as MCP clients');
-        }
-      });
-      return {
-        kind: 'external-mcp',
-        issuer: claims.issuer,
-        userId: claims.subject,
-        clientId: claims.clientId,
-        projectIds: assignments.get(claims.clientId)!,
-        scopes: OAUTH_MCP_SCOPES.filter(scope => claims.scopes.includes(scope)),
-      };
-    } catch (error) {
-      if (error instanceof OAuthTokenVerifierError) {
-        throw new OAuthAuthenticationError(error.status, error.code, error.message);
-      }
-      throw error;
-    }
+    const claims = await verifyToken(token);
+    return {
+      kind: 'external-mcp',
+      issuer: claims.issuer,
+      userId: claims.subject,
+      clientId: claims.clientId,
+      projectIds: assignments.get(claims.clientId)!,
+      scopes: OAUTH_MCP_SCOPES.filter(scope => claims.scopes.includes(scope)),
+    };
   };
 }

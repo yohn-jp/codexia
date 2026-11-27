@@ -75,6 +75,7 @@ Fastify admission in `packages/api` owns the request lifecycle, failure semantic
 Use Better Auth, Generic OAuth and OAuth Provider maintained plugins for protocol, session, client, token and key management. Use the existing `jose` verifier for API JWT profile validation and the official OAuth introspection endpoint for online token status. Do not hand-write discovery, token issuance, signature verification or a second auth router. Reuse Fastify 5 and the existing API admission boundary.
 
 Better Auth admits the enrolled owner through registered author clients and admits MCP clients through their explicit project assignments and limited scopes. Verification and introspection outages fail closed.
+OWNER-API and MCP-CLIENT use the same resource-server verifier and read the space-delimited `scope` claim issued by Better Auth. Each applies its own subject, client, and scope policy before online introspection. The API distinguishes invalid and inactive credentials from unavailable signing keys and unavailable token status.
 
 ### Better Auth standalone owner bearer
 
