@@ -68,7 +68,7 @@ test('Biome selects shipped JS/TS changes and config, but not unrelated CI or na
   const sha = 'a'.repeat(40);
   const base = 'b'.repeat(40);
   const check = (file, event = 'pull_request') => createVerificationPlan({files:[file], event, sha, base});
-  for (const file of ['app/src/main.tsx', 'packages/api/src/server.ts', 'modules/story/src/index.ts', 'edge/frontend/test/static-smoke.mjs', 'biome.json']) {
+  for (const file of ['app/src/entries/desktop.tsx', 'packages/api/src/server.ts', 'modules/story/src/index.ts', 'edge/frontend/test/static-smoke.mjs', 'biome.json']) {
     const plan = check(file);
     assert.ok(plan.tasks.includes('biome-ci'), file);
     assert.ok(plan.groups.includes('biome'), file);

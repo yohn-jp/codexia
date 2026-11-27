@@ -41,7 +41,6 @@ import {
   applyTextChanges,
   composeTextChanges,
   type DocumentEvidenceState,
-  type EditorEvidenceAdapter,
   emptyDocumentEvidence,
   initializeDocumentEvidence,
   markEvidenceNeedsReview,
@@ -320,7 +319,7 @@ function desktopDurabilityFor(active: ActiveDocument | null): DesktopDurability 
   return active.save === 'saved' && active.recovery === 'stored' ? 'saved' : 'uncertain';
 }
 
-const editorAdapter: EditorEvidenceAdapter = createPostgresEditorEvidenceAdapter();
+const editorAdapter = createPostgresEditorEvidenceAdapter();
 
 function persistSelectionSafely(authorScope: string, selection: { projectId: string; documentId: string }): void {
   try {
@@ -1686,7 +1685,7 @@ export function PersistenceWorkspace({
           pending,
           reconcileReplay: input.reconcileReplay,
           journal: currentJournal,
-          save: editorAdapter.save ?? (async () => undefined),
+          save: editorAdapter.save,
           readHead: (projectId, documentId, signal) => api.persistenceDocument(projectId, documentId, signal),
           signal: controller.signal,
         });
