@@ -173,6 +173,13 @@ jobs:
           else
             node scripts/release/components/source-gate.mjs backend-deployment
           fi
+      - name: Revalidate exact Backend Verify after entering the production queue
+        if: github.event_name == 'workflow_run' && steps.freshness.outputs.current == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_DEPLOYMENT_CERTIFICATE_B64: ${{ needs.verify-handoff.outputs.deployment-certificate }}
+          CODEXIA_VERIFIED_MAIN_SHA: ${{ needs.verify-handoff.outputs.verified-main-sha }}
+        run: node scripts/deployment/handoff/recheck-verify.mjs
       - name: Load the public production origin and OAuth configuration
         if: steps.freshness.outputs.current == 'true'
         run: node scripts/deployment/bootstrap/public-env.mjs
