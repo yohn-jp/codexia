@@ -445,12 +445,11 @@ export function createNativeReviewMachine(services: NativeReviewServices) {
           { guard: 'readUnauthorized', target: 'unauthorized' },
           { guard: 'readForbidden', target: 'forbidden' },
           { guard: 'readConflict', target: 'conflict' },
-          { guard: 'outcomeConflict', target: 'conflict' },
-          { guard: 'outcomeUnknown', target: 'unknown' },
-          { guard: 'outcomeUnauthorized', target: 'unauthorized' },
-          { guard: 'outcomeForbidden', target: 'forbidden' },
-          { target: 'idle' },
         ],
+        on: {
+          'LOAD.REQUESTED': { target: 'loading', actions: 'beginLoad' },
+          'SELECT.REQUESTED': { target: 'inspecting', actions: 'beginInspect' },
+        },
       },
       unauthorized: {
         on: {

@@ -109,18 +109,21 @@ test('approval and rejection are available only from proposed state', async () =
 
 test('a failed feed refresh preserves the last native ChangeSet list', async () => {
   let fail = false;
-  const { actor } = harness({
+  const { actor, calls, load } = harness({
     async load() {
       if (fail) throw new Error('feed unavailable');
       return { changeSets: [changeSet], coreReviews: [] };
     },
   });
-  actor.send({ type: 'LOAD.REQUESTED', canWrite: false, showCoreReviews: false });
-  await waitFor(actor, snapshot => snapshot.matches('idle') && snapshot.context.changeSets.length === 1, { timeout: 1_000 });
+  await load();
   fail = true;
-  actor.send({ type: 'LOAD.REQUESTED', canWrite: false, showCoreReviews: false });
-  await waitFor(actor, snapshot => snapshot.matches('idle') && snapshot.context.message === 'feed unavailable', { timeout: 1_000 });
-  assert.deepEqual(actor.getSnapshot().context.changeSets, [changeSet]);
+  actor.send({ type: 'LOAD.REQUESTED' });
+  const failed = await waitFor(actor, snapshot => snapshot.context.message === 'feed unavailable', { timeout: 1_000 });
+  actor.send({ type: 'ACTION', action: 'apply' });
+
+  assert.deepEqual(calls, []);
+  assert.equal(failed.matches('readFailed'), true);
+  assert.deepEqual(failed.context.changeSets, [changeSet]);
   actor.stop();
 });
 
@@ -135,7 +138,9 @@ test('a detail read failure keeps the newly fetched list available', async () =>
     },
   });
   actor.send({ type: 'LOAD.REQUESTED', canWrite: false, showCoreReviews: false });
-  await waitFor(actor, snapshot => snapshot.matches('idle') && snapshot.context.message === 'detail unavailable', { timeout: 1_000 });
+  await waitFor(actor, snapshot => snapshot.matches('readFailed') && snapshot.context.message === 'detail unavailable', {
+    timeout: 1_000,
+  });
   assert.deepEqual(actor.getSnapshot().context.changeSets, [fresh]);
   assert.equal(actor.getSnapshot().context.selectedId, fresh.id);
   assert.equal(actor.getSnapshot().context.detail, null);
