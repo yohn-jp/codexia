@@ -18,7 +18,7 @@ The deployment backup is a pre-rollout recovery point for the database and histo
 
 [Data model — REQ-DATA-005](../architecture/DATA-MODEL.md) owns the approved target of consolidating all recovery-required server application state into one PostgreSQL cluster. Once migrated and independently verified, application-state disaster recovery must not depend on the former host-history volume or derived caches. Infrastructure configuration, recovery keys, credentials and independently protected evidence remain separately recoverable. Author-facing [open work export](../authoring-portable.md) is data portability, not operational recovery.
 
-The current logical DB + history + age backup and protected host lock remain the only admitted path until a separately approved replacement has passed isolated clean-VM restore, off-VM protection, key custody, integrity/authenticity, failure and deployment admission tests. Evaluate established PostgreSQL physical backup/WAL/PITR tools (e.g. pgBackRest or WAL-G) under that change; neither product nor a new encryption/retention policy is selected here. Do not retire the existing backup or its S3/restore obligations merely because a DB migration is complete.
+Continue the logical PostgreSQL backup using `pg_dump`, age, and S3-compatible off-VM storage. Retain the history input and the v2 recovery procedure until PostgreSQL-only recovery and the successor preservation path pass isolated restore, off-VM protection, key custody, integrity, failure and deployment admission tests. The [backup design decision](BACKUP-PRODUCT-PROPOSAL.md) records the approved simplification and the conditions for reevaluating physical backup.
 
 ## Verify a candidate ledger on a restored backup
 
@@ -38,7 +38,9 @@ OWNER-SESSIONで保存先とwrite-only資格情報を扱う画面の設計は[�
 暗号化アーティファクトの生成とwriter停止の確認には`backup.sh`と共通host lockを使う。
 ローカルstagingとage受取公開鍵はVM上の保護された実行設定で管理する。本番復元、VMやIAM変更は保護されたオペレーター手順で行う。通常のS3保存先・実行資格情報はConsoleからのみ設定する。Actionsに保全設定・復号鍵を登録しない。
 
-ローカルまたは独立mount先で生成したv2 artifactは、S3 API互換ストレージへ転送できる。保護されたexecutorとAnsibleのデプロイ受入は、同じ`backup.sh`と転送アダプターを使う。クラウドベンダー、バケット名、リージョン、保持期間、RPO/RTOは配備先の運用方針で決める。
+ローカルまたは独立 mount 先で生成した v2 artifact は、S3 API 互換ストレージへ転送できる。
+保護された executor と Ansible のデプロイ受入は、同じ `backup.sh` と転送アダプターを使う。
+クラウドベンダー、バケット名、リージョン、保持期間は配備先の運用方針で決める。
 
 ### 機能・データフロー
 
@@ -105,10 +107,35 @@ It starts the pinned Silo S3-compatible service on loopback with a temporary CA,
 | ネットワーク | VMから対象S3 endpointへの最小の送信経路。S3への書込のためにAPI/Tunnel/SSH/MCPの新たな公開入口を作らない |
 | 観測 | backup ID、source SHA、schema fingerprint、ciphertext SHA-256、object key、endpoint識別子（秘密を含まない）、size、timestamp、upload/download/restore結果を監査可能にする |
 
+### 初期の復旧目標
+
+| 対象 | 運用目標 |
+| --- | --- |
+| VM 喪失時の復旧時点目標（RPO） | 24 時間以内。事故時の最終確定書込みと、独立保管から取得できる最新の検証済み復旧点との差を測る。 |
+| 復旧時間目標（RTO） | 障害検知から公開再開まで 4 時間以内。鍵と保管物の取得、隔離環境の準備、復元、API と既存 owner の認証確認を含む。 |
+| 定期バックアップ | 原則 1 日 1 回。取得と転送の時間、失敗後に次の検証済み復旧点を確保するまでの時間を踏まえ、RPO を満たす間隔を実測で確定する。 |
+| 通常 Backend 更新 | host lock と writer 停止の下で、候補起動前の最後の確定書込みまで含む復旧点を確保し、必要なオフ VM 保全と照合の完了を候補起動の条件にする。 |
+| 作者による原稿の誤編集 | [既存 Revision](../architecture/DATA-MODEL.md) から復旧する。災害復旧では取得時点の論理 dump を用いる。 |
+
+これらは運用目標である。
+保管先への転送と独立ホストでの復旧を測定し、復旧担当が達成の根拠を保護された運用記録に残す。
+現時点では物理バックアップと PITR は採用対象外とする。
+現行方式が実測で目標を満たせない場合に、取得間隔、転送、鍵の取得、環境準備、DB 復元の所要時間を分けて原因を特定する。
+DB 保全または復元方式が達成を妨げる場合に限り、原因に応じて物理方式を再評価する。
+
+### 実装の簡素化
+
+PostgreSQL 標準コマンドと age を保全物の生成に、既存 Boto3 を S3 の通信と再試行に、Ansible と systemd を既存 executor の配備と監視に使う。
+手動、定期、R8 は同じ実行主体、設定 revision、journal と host lock を使う。
+同じ事実を表す転送処理、再試行、journal、receipt の管理、wrapper と実行制御を集約する。
+独立した復旧証拠、暗号文の読み戻しと完全性、復号鍵の分離、同一 ID の冪等性、R8 の失敗停止を受入条件にする。
+S3 の commit marker と独立 receipt は別の保護境界に置く。
+保全失敗、marker の応答消失、VM 喪失を検証し、独立復元と更新前保全を再現できた処理から置き換える。
+
 ### 運用ポリシーと失敗時
 
 - **通常Backend更新前バックアップ**は既存のhost lock・停止・暗号化・復元可能性の契約を維持する。S3を必須の保管先に指定した環境では、S3アップロードと検証が成功するまでcandidate activationを禁止する。S3が任意の二次保管先である環境では、既存の承認済み独立バックアップが成立した場合に限りS3失敗を別の運用障害として記録できる。失敗を黙って無視しない。
-- **定期的な保全**の頻度、RPO/RTO、retention、世代数は運用要件として別途承認する。新しいVM polling updaterや第二のデプロイ制御器を作らない。定期実行はConsoleの既存schedule契約と同じVM内実行主体で受入するまで無効。新しいschedulerを追加する許可ではない。writer整合性・host lock・可用性を検証する。
+- **定期的な保全**は既存の Console schedule と同じ VM 内実行主体で受け入れてから有効にする。writer 整合性、host lock、可用性、および上の復旧目標への適合を検証する。保持期間と世代数は運用方針に従う。
 - S3 provider障害、credential失効、quota不足、TLS失敗、誤bucket、アップロード中断、object改ざん、削除/retention違反、age鍵紛失を想定する。暗号文がアップロードされた事実だけで災害復旧成功とみなさない。
 - **Restore drill**は本番データを公開CIへ送らず、隔離した復旧ホスト・合成データでS3→download→decrypt→PostgreSQL/history→API readinessまで実証する。productionでの復旧には別途明示承認が必要。
 
@@ -135,4 +162,6 @@ No initial backup, credential escrow, S3 profile, recovery Environment, independ
 3. 復旧担当は別ホストで、独立保全したreceiptを用いて選択backupを取得・照合・復号し、隔離DB/historyに復元してowner/Auth/role/ledgerとAPI readinessを照合する。VM・Console・GitHubが失われても独立秘密・保管先から取り出せることを確認する。保護された運用記録に結果を保持し、既存のConsole記録経路で参照できるようにする。通常データ投入と継続的な自動配備を受け入れる前に実環境で確認する。未受入を新たな初回配備gateや実装上の画面ロックに置き換えない。
 4. 本番復元はR2として明示承認する。既存writer/Tunnelを停止し、復元先が隔離されていることを確認し、必要な新VMを既存Ansibleで収束する。復元対象DBに新規ownerを作らず、必要なruntime秘密/roleと選択したDB/historyを復元し、同一owner・Passkey・client・DB内容と認定済み候補を照合する。復元点以後の更新の扱いを承認し、readiness・公開経路・backup運用の再確認後に復帰する。完全なDB集約受入後は旧historyなしの復元を要求する。復元失敗・鍵欠落・未知状態は停止。
 
-廃止対象は初回専用のcredential escrow、initial-preservation/credential-recovery workflowと対応gate/設定/receipt形式であり、現行の通常backup producer・S3 transfer・独立restore-drill・既存保護済みデータではない。現行の実体と廃止対象の証拠/receiptを調査し、必要な復旧資料は復旧担当へ安全に引き渡した後に依存を除去する。代替backup製品は未選定。GitHub Environmentの廃止も既存資料の保全・承認なしに実環境を変更する指示ではない。
+廃止対象は初回専用の credential escrow、initial-preservation/credential-recovery workflow と対応する gate、設定、receipt 形式とする。
+現行の実体と廃止対象の証拠を調査し、必要な復旧資料を復旧担当へ安全に引き渡した後に依存を除去する。
+GitHub Environment の廃止は既存資料の保全と運用承認に従う。
