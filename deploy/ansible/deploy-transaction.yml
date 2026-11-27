@@ -565,15 +565,20 @@
         [[ -f "$release_state" && ! -L "$release_state" ]] || { echo 'Previous deployment record is not a regular file' >&2; exit 1; }
         release_present=true
         if [[ "$had_unit" == true ]]; then
-          if ! recorded_image="$(node - "$release_state" "$active_unit" <<'NODE'
+          if ! recorded_image="$(node - "$release_state" "$active_unit" "$rollback_image" "$(podman exec codexia-api cat /app/update-identity.json)" <<'NODE'
       const fs = require('node:fs');
-      const [releasePath, unitPath] = process.argv.slice(2);
+      const { isDeepStrictEqual } = require('node:util');
+      const [releasePath, unitPath, expectedImage, liveIdentityJson] = process.argv.slice(2);
       const value = JSON.parse(fs.readFileSync(releasePath, 'utf8'));
+      const liveIdentity = JSON.parse(liveIdentityJson);
       const unit = fs.readFileSync(unitPath, 'utf8');
       const digests = [...unit.matchAll(/^Environment=CODEXIA_AUTH_SETTINGS_SHA256=([^\r\n]*)$/gm)].map(match => match[1]);
-      if (value.authMode !== 'better-auth' || digests.length !== 1 ||
-          !/^[a-f0-9]{64}$/.test(digests[0]) || value.authSettingsSha256 !== digests[0]) process.exit(2);
-      process.stdout.write(typeof value.image === 'string' ? value.image : '');
+      if (value.format !== 'codexia-push-deployment/v1' ||
+          value.authMode !== 'better-auth' || digests.length !== 1 ||
+          !/^[a-f0-9]{64}$/.test(digests[0]) || value.authSettingsSha256 !== digests[0] ||
+          value.image !== expectedImage || !isDeepStrictEqual(value.identity, liveIdentity) ||
+          value.identity?.format !== 'codexia-backend-identity/v1' || value.identity.profile !== 'full') process.exit(2);
+      process.stdout.write(value.image);
       NODE
           )" || [[ "$recorded_image" != "$rollback_image" ]]; then
             echo 'Prior deployment record does not match its Quadlet image or authentication settings' >&2
