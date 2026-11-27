@@ -801,7 +801,7 @@
           if [[ "$api_link_created" == true ]]; then rm -f -- "$api_wants_link"; fi
           if [[ "$tunnel_link_created" == true ]]; then rm -f -- "$tunnel_wants_link"; fi
           systemctl --user daemon-reload || restore_status=1
-          if [[ ( "$recovery_activation" != null || "$first_activation" != null ) && "$restore_status" == 0 ]]; then
+          if [[ ( "$recovery_activation" != null || "$first_activation" != null || "$adoption_activation" != null ) && "$restore_status" == 0 ]]; then
             systemctl --user unmask codexia-tunnel.service || restore_status=1
           fi
         fi
@@ -848,7 +848,7 @@
       fi
       # Keep the Tunnel masked across a VM reboot for both R3 and R6. A
       # recorded first-activation window must be checked again before unmask.
-      if [[ "$recovery_activation" != null || "$first_activation" != null ]]; then
+      if [[ "$recovery_activation" != null || "$first_activation" != null || "$adoption_activation" != null ]]; then
         if ! systemctl --user mask --now codexia-tunnel.service; then
           echo 'Could not hold the application Tunnel inactive for recovery; deployment remains pending' >&2
           exit 1
