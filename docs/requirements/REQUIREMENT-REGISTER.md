@@ -2974,7 +2974,7 @@ Checks that workspace tests cannot substitute for the isolated lifecycle proof.
   **ID**: REQ-QUAL-001
 - **Type**: File
   **Path**: scripts/ci/impact/plan.test.mjs
-  **Lines**: 121, 121
+  **Lines**: 125, 125
 
 ## TEST-QUAL-002-001
 
