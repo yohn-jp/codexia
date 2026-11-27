@@ -286,7 +286,7 @@ jobs:
           name: ${{ steps.producer.outputs.artifact-name }}
           path: app/dist
           if-no-files-found: error
-          retention-days: ${{ github.event_name == 'pull_request' && 14 || 2 }}
+          retention-days: 14
   # Independent source certification still gates deployment after build selection.
   deploy:
     name: Deploy UI Static Assets
