@@ -36,7 +36,7 @@ const evidence = {
   stdioProtocolProbe: { status: 'NOT_RUN' },
   inspector: { status: 'NOT_RUN' },
   authorization: { status: 'NOT_RUN' },
-  transportErrors: { malformedJson: 'NOT_RUN' },
+  transportErrors: { malformedJson: 'NOT_RUN', unsupportedMethods: 'NOT_RUN' },
   contract: { status: 'NOT_RUN' },
   mutation: { status: 'NOT_RUN' },
 };
@@ -363,6 +363,41 @@ try {
       expected: { status: 400, jsonrpc: '2.0', id: null, errorCode: -32700 },
     };
     assert.ok(conforms, 'live MCP malformed JSON response must be a JSON-RPC parse error');
+  });
+
+  await guarded('live MCP method denial occurs after project admission', async () => {
+    const routes = [
+      { name: 'standalone', url: endpoint, deniedUrl: `${liveHost.baseUrl}/mcp?projectId=${liveHost.unassignedProjectId}` },
+      {
+        name: 'project',
+        url: `${liveHost.baseUrl}/api/projects/${liveHost.projectId}/modules/mcp/streamable`,
+        deniedUrl: `${liveHost.baseUrl}/api/projects/${liveHost.unassignedProjectId}/modules/mcp/streamable`,
+      },
+    ];
+    const results = [];
+    for (const { name, url, deniedUrl } of routes) {
+      for (const method of ['GET', 'DELETE']) {
+        const headers = { Authorization: `Bearer ${liveHost.tokens.full}` };
+        const anonymous = await fetch(url, { method, signal: AbortSignal.timeout(5_000) });
+        assert.equal(anonymous.status, 401);
+        assert.match(anonymous.headers.get('www-authenticate') ?? '', /^Bearer\b/u);
+        assert.equal((await anonymous.json()).code, 'UNAUTHORIZED');
+        const denied = await fetch(deniedUrl, { method, headers, signal: AbortSignal.timeout(5_000) });
+        assert.equal(denied.status, 404);
+        assert.equal((await denied.json()).code, 'PROJECT_NOT_FOUND');
+        const admitted = await fetch(url, { method, headers, signal: AbortSignal.timeout(5_000) });
+        assert.equal(admitted.status, 405);
+        assert.equal(admitted.headers.get('allow'), 'POST');
+        const body = await admitted.json();
+        assert.equal(body.jsonrpc, '2.0');
+        assert.equal(body.id, null);
+        assert.equal(body.error?.code, -32000);
+        results.push({
+          route: name, method, anonymousStatus: anonymous.status, unassignedStatus: denied.status, admittedStatus: admitted.status, body,
+        });
+      }
+    }
+    evidence.transportErrors.unsupportedMethods = { status: 'PASS', results };
   });
 
   await guarded('live product loopback and configured origin policy', async () => {
