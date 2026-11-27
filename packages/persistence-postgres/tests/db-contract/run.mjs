@@ -418,18 +418,27 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   }
   await writeFile(path.join(negativeBackup, 'SHA256SUMS'), `${negativeChecksums.join('\n')}\n`, { mode: 0o600 });
 
-  const arch = process.arch === 'arm64' ? 'arm64' : process.arch === 'x64' ? 'x64' : undefined;
-  if (!arch) throw new Error(`Unsupported isolated restore architecture ${process.arch}`);
-  const postgresTar = path.join(tempDirectory, 'postgres-pinned-image.tar');
-  invoke('docker', ['image', 'save', pgImage, '--output', postgresTar], { maxBuffer: 1024 * 1024 });
+  // The source Docker engine and the local rootless Podman target are
+  // separate container stores. Use the same immutable PostgreSQL image;
+  // no nested privileged engine, tar transfer or substituted executable.
+  assert.equal(process.platform, 'linux', 'Isolated restore requires a local Linux Podman host');
+  assert.notEqual(process.getuid(), 0, 'Isolated restore must run as an unprivileged user');
+  const env = { ...process.env, PATH: `${ageDirectory}:${process.env.PATH}`,
+    CODEXIA_PUSH_STATE_DIR: path.join(tempDirectory, 'restore-state') };
+  delete env.CONTAINER_HOST;
+  delete env.CONTAINER_CONNECTION;
+  delete env.CONTAINER_SSHKEY;
+  const podmanInfo = JSON.parse(output('podman', ['info', '--format', 'json'], { env }));
+  assert.equal(podmanInfo.host.security.rootless, true, 'Restore engine must be rootless');
+  assert.equal(podmanInfo.host.serviceIsRemote, false, 'Restore engine must be local');
+  const podmanVersion = output('podman', ['--version'], { env });
+  assert.match(podmanVersion, /^podman version \S+/u);
+  const restoreStarted = performance.now();
   const postgresId = output('docker', ['image', 'inspect', '--format', '{{.Id}}', pgImage]);
-  const toolsDirectory = path.join(tempDirectory, 'restore-tools');
-  await mkdir(toolsDirectory);
-  const wrapper = '#!/bin/bash\nset -euo pipefail\nargs=()\nfor arg in "$@"; do\n  if [[ "$arg" == "$CODEXIA_PG_IMAGE_REF" ]]; then args+=("$CODEXIA_PG_IMAGE_ID"); else args+=("$arg"); fi\ndone\nexec /usr/bin/podman --storage-driver=vfs "${args[@]}"\n';
-  await writeFile(path.join(toolsDirectory, 'podman'), wrapper, { mode: 0o700 });
-  await writeFile(path.join(toolsDirectory, 'ip'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
-  await writeFile(path.join(toolsDirectory, 'age'), await readFile(agePath), { mode: 0o700 });
-  await writeFile(path.join(toolsDirectory, 'age-keygen'), await readFile(path.join(path.dirname(agePath), 'age-keygen')), { mode: 0o700 });
+  invoke('podman', ['pull', pgImage], { env });
+  const restoredImageId = output('podman', ['image', 'inspect', '--format', '{{.Id}}', pgImage], { env });
+  assert.equal(restoredImageId.replace(/^sha256:/u, ''), postgresId.replace(/^sha256:/u, ''),
+    'The restore engine must use the exact source PostgreSQL image config');
   const authSql = path.join(contractDirectory, 'restore-proof-auth.sql');
   const identitySql = path.join(contractDirectory, 'restore-proof-identity.sql');
   const restoreScript = path.join(contractDirectory, 'restore-proof.sh');
@@ -438,37 +447,18 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   }).toString('utf8').trimEnd().split('\n');
   assert.equal(`sha256:${digest(JSON.stringify(sourceAuthDefinitions))}`, expectedAuthFingerprint,
     'restore proof query matches the API auth schema fingerprint source');
-  const toolImage = toolchain.restoreDrill.podmanImage;
-  const innerCommand = [
-    'mkdir -p /run/user/0 /tmp/codexia-state /contract/restore-proof',
-    'chmod 700 /run/user/0 /tmp/codexia-state',
-    'cp /contract/identity /tmp/codexia-restore-identity',
-    'chmod 600 /tmp/codexia-restore-identity',
-    'export CODEXIA_RESTORE_IDENTITY=/tmp/codexia-restore-identity',
-    'export PATH=/contract/tools:/usr/local/bin:/usr/bin:/bin',
-    'podman load -i /contract/postgres-image.tar >/dev/null',
-    `loaded_id="$(podman image inspect --format '{{.Id}}' ${postgresId})"`,
-    'test "${loaded_id#sha256:}" = "' + postgresId.replace(/^sha256:/u, '') + '"',
-    'bash /contract/backup.sh drill /contract/backup "$CODEXIA_RESTORE_IDENTITY" --approved',
-    'bash /contract/restore-proof.sh',
-    'if bash /contract/backup.sh drill /contract/tampered-backup "$CODEXIA_RESTORE_IDENTITY" --approved > /contract/restore-proof/tampered-history-rejection.txt 2>&1; then echo "Tampered history restore unexpectedly succeeded" >&2; exit 1; fi',
-    'grep -F "Restored history fingerprint mismatch" /contract/restore-proof/tampered-history-rejection.txt >/dev/null',
-    'chown -R "$CODEXIA_HOST_UID:$CODEXIA_HOST_GID" /contract/restore-proof',
-  ].join('\n');
-  invoke('docker', [
-    'run', '--rm', '--privileged', '--security-opt', 'label=disable', '--user', '0:0',
-    '--env', 'HOME=/root', '--env', 'XDG_RUNTIME_DIR=/run/user/0', '--env', 'CODEXIA_PUSH_STATE_DIR=/tmp/codexia-state',
-    '--env', `CODEXIA_HOST_UID=${process.getuid()}`, '--env', `CODEXIA_HOST_GID=${process.getgid()}`,
-    '--env', `CODEXIA_PG_IMAGE_REF=${pgImage}`, '--env', `CODEXIA_PG_IMAGE_ID=${postgresId}`,
-    '--env', `CODEXIA_RESTORE_PROJECT_ID=${identity.projectId}`,
-    '--volume', `${backup}:/contract/backup:rw`, '--volume', `${proof}:/contract/restore-proof:rw`,
-    '--volume', `${negativeBackup}:/contract/tampered-backup:rw`,
-    '--volume', `${keyFile}:/contract/identity:ro`, '--volume', `${toolsDirectory}:/contract/tools:ro`,
-    '--volume', `${path.join(root, 'deploy/backup/backup.sh')}:/contract/backup.sh:ro`,
-    '--volume', `${restoreScript}:/contract/restore-proof.sh:ro`,
-    '--volume', `${authSql}:/contract/auth-fingerprint.sql:ro`, '--volume', `${identitySql}:/contract/restore-identity.sql:ro`,
-    '--volume', `${postgresTar}:/contract/postgres-image.tar:ro`, toolImage, 'bash', '-ceu', innerCommand,
-  ], { maxBuffer: 8 * 1024 * 1024 });
+  const canonicalBackup = path.join(root, 'deploy/backup/backup.sh');
+  const positiveLog = output('bash', [canonicalBackup, 'drill', backup, keyFile, '--approved'], { env });
+  assert.match(positiveLog, /Isolated restore verified: database and history fingerprints match/u);
+  await writeFile(path.join(proof, 'canonical-restore.txt'), `${positiveLog}\n`, { mode: 0o600 });
+  invoke('bash', [restoreScript, backup, keyFile, proof, pgImage, restoredImageId, identity.projectId], { env });
+  const negative = spawnSync('bash', [canonicalBackup, 'drill', negativeBackup, keyFile, '--approved'],
+    { cwd: root, env, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+  assert.equal(negative.error, undefined, 'Tampered history drill must execute');
+  assert.equal(negative.status, 1, 'Tampered history restore must fail');
+  await writeFile(path.join(proof, 'tampered-history-rejection.txt'),
+    `${negative.stdout}\n${negative.stderr}`, { mode: 0o600 });
+  console.log(`Native rootless restore: ${podmanVersion}; elapsed ${((performance.now() - restoreStarted) / 1000).toFixed(3)}s`);
 
   const ledger = JSON.parse(await readFile(path.join(proof, 'migration-ledger.json'), 'utf8'));
   assert.deepEqual(ledger, expectedLedger.map(row => [row.version, row.checksum]));
@@ -485,9 +475,10 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   const tamperedHistoryRejection = await readFile(path.join(proof, 'tampered-history-rejection.txt'), 'utf8');
   assert.match(tamperedHistoryRejection, /Restored history fingerprint mismatch/u,
     'the canonical restore drill must reject altered history with a valid ciphertext checksum list');
-  assert.doesNotMatch(tamperedHistoryRejection, /Permission denied|sha256sum:/iu,
+  assert.doesNotMatch(tamperedHistoryRejection, /Permission denied|sha256sum:|cleanup failed/iu,
     'tampered history rejection must come from its digest mismatch, not a reader permission failure');
-  return { databaseFingerprint, historyHash, artifactDigest, restoredAuthFingerprint, tamperedHistoryRejected: true };
+  return { databaseFingerprint, historyHash, artifactDigest, restoredAuthFingerprint, tamperedHistoryRejected: true,
+    podman: { version: podmanVersion, rootless: true, local: true, postgresImageId: restoredImageId } };
 }
 
 async function main() {
@@ -652,7 +643,7 @@ async function main() {
         pgTap: { version: toolchain.pgtap.version, extensionVersion: toolchain.pgtap.version },
         tbls: { version: toolchain.tbls.version, archiveSha256: toolchain.tbls.archives[arch].sha256 },
         age: { version: toolchain.restoreDrill.age.version, archiveSha256: toolchain.restoreDrill.age.archives[arch].sha256 },
-        podmanImage: toolchain.restoreDrill.podmanImage },
+        podman: restore.podman },
       schema: { migrationFingerprint, authFingerprint, catalogFingerprint, migrationLedger: reviewedCatalog.migrationLedger },
       tests: { pgTap, drift, tblsReadOnly: true, roleContractSql: 'deploy/ansible/verify-postgres-roles.sql' },
       restore: { format: 'codexia-backup/v2', encrypted: true, isolatedTargetNetwork: 'none',
