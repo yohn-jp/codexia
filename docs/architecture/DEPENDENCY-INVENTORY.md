@@ -66,8 +66,8 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `react` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: React DOM・型と整合 |
-| `react-dom` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: Reactと整合 |
+| `react` | `^19.3.1`（Publishing peer `^19.1.0`） | app・Story・Semantic・Publishing | **連動**: React DOM・型と整合 |
+| `react-dom` | `^19.3.1`（Publishing peer `^19.1.0`） | app・Story・Semantic・Publishing | **連動**: Reactと整合 |
 | `react-router-dom` | `7.18.6` | app・画面遷移 | **既存採用**: Desktop画面遷移・リロード・保護ルートをブラウザーで検証 |
 | `react-resizable-panels` | `4.24.1` | app・パネル | **既存採用**: Desktop配置・ドラッグ・復元・popover下のseparatorをブラウザーで検証 |
 | `@codemirror/commands` | `^6.11.1` | app・編集コマンド | **要検証** |
