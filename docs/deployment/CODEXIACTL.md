@@ -61,7 +61,7 @@ CLI の**配布**は本節が所有し、CLI を使う初回 VM 導入・R0–R8
 
 1. 開発者が `cmd/codexiactl/**`、`scripts/ci/execution/verify-codexiactl.sh`、CLI release component、または `.github/workflows/publish-codexiactl.yml` を変更して PR を main に統合する。対象変更の定義は自動タグ付け Workflow と一致させる。ドキュメントだけの変更はリリースを要求しない。
 2. `Verify Codexia` の main push 実行が成功した後、`.github/workflows/codexiactl-auto-release.yml` が成功 run の exact SHA と現行 main HEAD を照合する。失敗した認定、追い越された SHA は発行しない。初回の認定成功では、直前のコミットの変更範囲によらず CLI を一度公開する。比較不能・API 応答不完全なら安全停止する。
-3. 既存の `v0.1.x` の最大 patch とそのソース SHA を取得する。以前のタグと現在の認定済み `main` の全差分（第一親の直近1コミットではない）に CLI 関連入力の実変更がある場合のみ `v0.1.(x+1)` を発行する。同一 SHA が既存タグを持つ場合は新しい番号を発行しない。公開完了済みなら no-op、タグ作成後の dispatch 失敗や結果不明なら同一タグを再 dispatch して再開する。異なるソースに既存番号を転用しない。タグの再割当て・削除・上書きは禁止。取得したタグの祖先性、競合する書込み、対象範囲が検証できなければ安全停止する。
+3. 既存の `v0.1.x` の最大 patch とそのソース SHA を取得する。以前のタグと現在の認定済み `main` の全差分（第一親の直近1コミットではない）に CLI 関連入力の実変更がある場合のみ `v0.1.(x+1)` を発行する。同一 SHA が既存タグを持つ場合は新しい番号を発行しない。公開完了済みなら no-op、タグ作成後の dispatch 失敗や結果不明なら、後続の無関係な main 更新後も公開未完了の既存タグを再 dispatch して再開する。異なるソースに既存番号を転用しない。タグの再割当て・削除・上書きは禁止。取得したタグの祖先性、競合する書込み、対象範囲が検証できなければ安全停止する。
 4. `GITHUB_TOKEN` でタグを作成した後、同じトークンの `workflow_dispatch` でタグ ref を指定し、独立した `Publish CodexiaCTL`（`.github/workflows/publish-codexiactl.yml`）が起動する。exact-source Verify 証明、Linux amd64 CLI ビルド、provenance/attestation、SHA-256 manifest、Release asset の照合を**すべて**維持する。OCI core/full の公開・本番配備は実行しない。自動タグ作成の成功は公開成功を意味しない。
 5. 正式公開後に運用者は immutable GitHub Release から `codexiactl-linux-amd64` と `codexiactl-linux-amd64.sha256` を取得し、SHA-256 と GitHub attestation/provenance を照合して通常ユーザーで配置する。初回導入は `version`、`doctor`、`init --plan`、`init` の順。更新時も認定済みバイナリに置き換えるだけで、既存 owner/DB/鍵を再初期化しない。
 
