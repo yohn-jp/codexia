@@ -671,17 +671,6 @@ model PersistenceChangeSetDesktopApplicationBody {
   replayed: boolean;
 }
 
-model PersistenceChangeSetDesktopResultBody {
-  changeSet: PersistenceChangeSetDesktopBody;
-  replayed: boolean;
-}
-
-model PersistenceChangeSetDesktopApplyBody {
-  changeSet: PersistenceChangeSetDesktopBody;
-  results: JsonObject[];
-  replayed: boolean;
-}
-
 model DesktopCoreReviewFeedItem {
   kind: "core-proposal";
   id: string;
