@@ -30,6 +30,15 @@
     PUBLIC_RECIPIENT: "{{ backup_vm_recipient.stdout }}"
   changed_when: false
 
+- name: Resume a protected socket transaction before checking the active API
+  ansible.builtin.command:
+    argv: [bash, -s, --, --recover-only]
+    stdin: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/ansible/backup-postgres-socket.sh', rstrip=false) }}"
+  register: backup_socket_recovery
+  changed_when: >-
+    'PRIVATE_BACKUP_SOCKET_CONFIGURED' in backup_socket_recovery.stdout_lines or
+    'PRIVATE_BACKUP_SOCKET_RECOVERED' in backup_socket_recovery.stdout_lines
+
 - name: Select the admitted executor from the running Full image
   ansible.builtin.include_tasks: backup-release.yml
 
