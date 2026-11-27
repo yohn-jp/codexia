@@ -9,7 +9,7 @@
 
 ## 運用サイクルと実行主体（全操作の責務境界）
 
-以下はこのPRでレビューする採用目標の横断契約であり、実装済みとは主張しない。承認後の実装は本表に従う。新しいWorkflow・Environment・秘密情報管理経路・バックアップ形式を暗黙に追加する許可ではない。個々の詳細はリンク先の既存正本に従う。人が同一でも役割と資格情報は混同しない。
+以下は運用の規範的な目標契約であり、実装済みとは主張しない。実装は本表に従う。新しいWorkflow・Environment・秘密情報管理経路・バックアップ形式を暗黙に追加する許可ではない。個々の詳細はリンク先の既存正本に従う。人が同一でも役割と資格情報は混同しない。
 
 - **インフラ管理者:** VM提供元、Tailnet、Cloudflare、S3/IAMの各管理面で外部資源を準備する。Gitで管理する設定はPRで変更する。
 - **配備運用者 (OPERATOR):** GitHub Actionsの既存保護環境で対象・導入意図・変更を承認し、AnsibleでVMを収束させる。Bootstrap管理者はsudoを使用し、通常配備はrootless identityを使用する。
@@ -17,25 +17,7 @@
 - **復旧担当 (OPERATOR):** GitHub/CDやCodexiaの稼働に依存しない保護された復旧ホストと独立秘密保管を使う。復号・復元・受入を明示承認し、配備運用者へ検証済み状態を引き渡す。
 - **自動実行主体:** CIは認定・公開・配備制御、VM上の既存バックアップ実行主体は保全・検証・結果記録、PostgreSQLは確定済みアプリケーション状態の正本。CIがバックアップ資格や復号鍵を受け取ることはない。
 
-```mermaid
-flowchart TD
-    INF["インフラ管理者: VM / Tailnet / Cloudflare準備"] --> R4["配備運用者: Actions → Tailscale → SSH → Ansible<br/>R4 基盤・内部秘密・空DB"]
-    R4 --> R5["配備運用者: 通常Frontend・setup-only Backend"]
-    R5 --> OWN["所有者: /console/setup・Passkey"]
-    OWN --> R6["配備運用者: R6 通常Backend初回起動"]
-    R6 --> ACTIVE["ACTIVE: 通常Consoleが利用可能"]
-    ACTIVE --> CFG["所有者: /console/backups 設定・検証・実行"]
-    CFG --> STORE["VM上の共通backup実行主体 → 独立保管先"]
-    STORE --> DRILL["復旧担当: 独立ホストで復元試験"]
-    DRILL -->|成功・運用者が受入| USE["ACCEPTED: 通常運用"]
-    DRILL -->|失敗| CFG
-    USE -->|手動 / 承認済み定期保全| CFG
-    USE -->|互換main release| UP["Actions: R8 配備<br/>VMの同じ保全経路 → 更新 → health"]
-    UP -->|成功 / 安全な切戻し| USE
-    USE -->|障害・喪失| REC["復旧担当: R1/R2/R3<br/>停止・独立保管から復元・同一性確認"]
-    REC -->|既存owner・DBを維持| R6
-    REC -->|安全な既存稼働へ復帰| USE
-```
+全操作の状態と実行主体は [統合Deployment経路](#統合deployment経路) の図と以下の表で定義する。
 
 | 操作・発火条件 | 誰が・どこから操作 | 実行先・使用する入力 | 成功・失敗時の行き先 |
 | --- | --- | --- | --- |
@@ -102,7 +84,7 @@ Preflightは環境、host pin、観測時刻、source/candidate、現在のident
 
 | 経路 | 条件（先行条件は除外済み） | 実行と遷移先 |
 | --- | --- | --- |
-| R0 STOP / PREPARE | M未準備・異常、選択に必要な観測不明、解釈不能な操作記録、必要な承認・証明不足 | 無変更で停止。VM/SSH/edge/backupの前提を準備・調査し再観測 |
+| R0 STOP / PREPARE | M未準備・異常、選択に必要な観測不明、解釈不能な操作記録、必要な承認・証明不足 | 無変更で停止。選択経路に必要なVM/SSH/edge等の前提を準備・調査し再観測 |
 | R1 RESUME / RECOVER | Tに既知の未完了操作あり | 同一操作の記録・現状態を照合して再開または切戻し。未知記録はR0 |
 | R2 RESTORE | 既存環境の復旧意図があり必要な保存状態が欠落・故障 | 独立backup・外部秘密管理から復元。必要なら先に基盤構築するが初回owner発行は禁止 |
 | R3 MAINTENANCE | H drift、A回復必要、B/F障害（既存データ・認証の非互換はR0） | 明示的な基盤修復・通常deploy復旧・owner回復のみ。非互換移行を実行しない |
@@ -128,17 +110,18 @@ DB不在が確定した旧配備では、旧epoch・旧owner・旧API稼働記�
 
 ```mermaid
 flowchart TD
-    REQ["Deployment要求 / 所望release"] --> OBS["Production Preflight<br/>VM・DB・Auth・API・Frontend・操作記録"]
+    INF["インフラ管理者: VM / Tailnet / Cloudflare準備"] --> REQ["配備運用者: Deployment要求 / 所望release"]
+    REQ --> OBS["Production Preflight<br/>VM・DB・Auth・API・Frontend・操作記録"]
     OBS --> KNOWN{"必要な観測・承認が確定?"}
     KNOWN -->|いいえ| STOP["R0: 停止 / 前提準備"]
     KNOWN -->|はい| PENDING{"既知の未完了操作?"}
     PENDING -->|あり| REC["R1: 再開または切戻し"]
     REC --> OBS
     PENDING -->|なし| LOST{"既存状態の復旧が必要?"}
-    LOST -->|はい| RESTORE["R2: 独立backup / Secret復元"]
+    LOST -->|はい| RESTORE["R2: 復旧担当 / 独立ホスト<br/>backup・必要なSecret復元"]
     RESTORE --> OBS
     LOST -->|いいえ| EMPTYDB{"DB不在を確認・新規承認済み・基盤正常?"}
-    EMPTYDB -->|はい| BOOT["R4: Bootstrap"]
+    EMPTYDB -->|はい| BOOT["R4: Actions → Tailscale → SSH → Ansible<br/>基盤・VM内部秘密・DB/Auth"]
     EMPTYDB -->|いいえ| INCOMPAT{"既存DB/Auth/Backend非互換?"}
     INCOMPAT -->|はい| STOP
     INCOMPAT -->|いいえ| DRIFT{"drift・障害?"}
@@ -147,21 +130,29 @@ flowchart TD
     BASE -->|いいえ| BOOT
     BOOT --> OBS
     BASE -->|はい| OWNER{"owner activation準備済み?"}
-    OWNER -->|いいえ / 新規承認済み| SETUP["R5: 通常Frontend・setup-only API<br/>owner登録・activation preparation"]
+    OWNER -->|いいえ / 新規承認済み| SETUP["R5: 配備運用者 / Actions<br/>通常Frontend・setup-only API<br/>所有者 / console/setup・Passkey<br/>activation preparation"]
     SETUP --> OBS
     OWNER -->|いいえ / 既存・不明| STOP
     OWNER -->|はい| API{"cleanなAPI未配備?"}
     API -->|はい| FRONT{"互換Frontend稼働済み?"}
     FRONT -->|いいえ| STOP
-    FRONT -->|はい| ACT["R6: 互換Frontend確認後の初回Backend activation"]
+    FRONT -->|はい| ACT["R6: 配備運用者 / Actions<br/>互換Frontend確認後の初回Backend activation"]
     API -->|いいえ| COMPAT{"通常release admission成立?"}
     COMPAT -->|いいえ| STOP
-    COMPAT -->|はい| UPDATE["R8: 通常更新 / no-op"]
+    COMPAT -->|はい| UPDATE["R8: Actions / 通常更新<br/>Backend変更前はVMの共通backup経路<br/>同一digest no-op"]
     MAINT --> OBS
     ACT --> ACCEPT["identity・health・Auth・データ・公開境界を検証"]
     UPDATE --> ACCEPT
     ACCEPT -->|不成立| REC
-    ACCEPT -->|成立| ACTIVE["Active / 独立した本番受入"]
+    ACCEPT -->|成立| ACTIVE["ACTIVE: 通常Console利用可能"]
+    ACTIVE -->|純新規 / 保全未受入| CFG["所有者 / console/backups<br/>設定・検証・実行"]
+    CFG --> STORE["VMの共通backup実行主体 → 独立保管先"]
+    STORE --> DRILL["復旧担当 / 独立ホスト<br/>復元試験・運用者受入"]
+    DRILL -->|失敗| CFG
+    DRILL -->|成功| USE["ACCEPTED: 通常運用"]
+    ACTIVE -->|既に運用受入済み| USE
+    USE -->|手動 / 承認済み定期保全| STORE
+    USE -->|互換release / 障害・復旧要求| REQ
     STOP -->|前提確定・再要求| OBS
 ```
 
@@ -232,7 +223,7 @@ Bootstrap入力Full digestは既存release handoffの証明書・発行元・mai
 
 ## 受入契約
 
-互換性検査の変更は非互換拒否と通常更新の回帰を、Bootstrap/Activationの変更は初回経路と通常deployの安全性を実証する。旧Cutover専用fixture・認定レーンは廃止し、既存の通常deploy/backup/restore/認証・成果物認定の検証は弱めない。計画改変、陳腐化、別host/DB/候補への承認流用、未知transaction、証拠欠落は拒否する。
+互換性検査の変更は非互換拒否と通常更新の回帰を、Bootstrap/Activationの変更は初回経路と通常deployの安全性を実証する。旧Cutover専用fixture・認定レーンは廃止し、既存の通常deploy/backup/restore/認証・成果物認定の検証は弱めない。計画改変、陳腐化、別host/DB/候補への承認流用、未知transaction、当該経路で必要な証拠欠落は拒否する。
 
 CIは認定済み候補、使い捨てUbuntu/rootless Podman/PostgreSQL 17、Cloudflare限定権限fixture/APIモックで以下を検証する。実VM・実edgeの成功とは区別する。経路判定は全状態の直積を網羅的に評価し、各入力に対して選択経路が一意または明示停止となること、各分岐に到達可能な代表ケースがあることを確認する。
 

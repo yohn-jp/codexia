@@ -19,7 +19,7 @@
 | AWS S3／互換storeの実bucket/IAM/versioning/Object Lock/retention | operator/provisioned provider policy | 読取・検査した能力を表示。providerの管理権限や削除権限をWebへ渡さない |
 | 災害復旧・本番DB復元 | 独立復旧hostと別途承認済みOPERATOR手順 | 説明・復元確認証拠の表示のみ。本番restore実行ボタンなし |
 
-**競合解決:** ローカルstagingパスはVMの保護設定とし、GitHub Environmentのbackup入力にはしない。WebのS3設定でローカルパス/Ansible inventoryを上書きしない。既存の暗号化v2アーティファクトを一度だけ生成し、executorが**active revisionとして確定したS3設定**をバックアップ開始時に読み取って暗号文を遠隔保管する。設定変更は進行中のジョブに遡及適用せず、各run receiptに採用revisionを固定する。S3必須指定の場合はアップロード・再取得照合が完了するまで通常Backend更新のadmissionを成功としない。純新規の初回activationとは別である。S3接続失敗時に別の保存先へ暗黙フォールバックしない。
+**競合解決:** ローカルstagingパスはVMの保護設定とし、GitHub Environmentのbackup入力にはしない。WebのS3設定でローカルパス/Ansible inventoryを上書きしない。既存の暗号化v2アーティファクトを一度だけ生成し、executorが**active revisionとして確定したS3設定**をバックアップ開始時に読み取って暗号文を遠隔保管する。設定変更は進行中のジョブに遡及適用せず、各run receiptに採用revisionを固定する。通常Backend更新時は、S3必須指定の場合、アップロード・再取得照合が完了するまでadmissionを成功としない。純新規の初回activationとは別である。S3接続失敗時に別の保存先へ暗黙フォールバックしない。
 
 ## 受理するS3設定の契約
 

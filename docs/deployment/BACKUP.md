@@ -126,11 +126,9 @@ It starts the pinned Silo S3-compatible service on loopback with a temporary CA,
 
 本番のDR受入には、実際の保管先での転送・読み戻しと、独立したホストでの復元ドリルの証拠が必要になる。S3互換fixtureで確認できる範囲は、使用した互換実装とその隔離復元環境に限られる。[External interfaces](../architecture/EXTERNAL-INTERFACES.md)（`EXT-OPS-003`）と [Requirements](../requirements/REQUIREMENT-REGISTER.md)（`REQ-OPS-003`）を参照。
 
-## Initial recovery before activation
-
-This heading is retained as an existing link target; the former initial-recovery gate is retired by the target design. No initial backup, credential escrow, S3 profile, recovery Environment, independent restore receipt, or backup encryption recipient is required to bootstrap and activate a genuinely new installation. R4 generates internal credentials on the VM; R5 enrolls the owner; R6 starts the normal Backend. These steps do not establish disaster-recovery acceptance.
-
 ## 通常運用のバックアップと災害復旧
+
+No initial backup, credential escrow, S3 profile, recovery Environment, independent restore receipt, or backup encryption recipient is required to bootstrap and activate a genuinely new installation. R4 generates internal credentials on the VM; R5 enrolls the owner; R6 starts the normal Backend. These steps do not establish disaster-recovery acceptance.
 
 1. ACTIVE後、インフラ管理者は実バケット・prefix・IAM/retentionを準備する。復旧担当は独立秘密管理に復号鍵、復旧reader資格情報、復旧に不可欠なVM秘密（Podman secrets、DB role資格、Better Auth/内省、backup executorの封印解除鍵等の現行利用対象）を保全する。外部Tunnel/OIDC等は元の管理面から再取得または再発行できることを確認する。保全・取得は既存の保護されたoperator手順で行い、手製復旧bundle、独自の資格情報エスクロー、新規Workflowを要求しない。鍵/秘密を紛失したらDR未受入とする。
 2. 所有者は `/console/backups` で保存先、実行資格、保護方針を設定し、接続試験、有効化、通常バックアップを実行する。VMの共通実行主体が現行v2を生成し、転送・readbackを行う。GitHubへの保管先・age鍵・S3 credentialの転記は不要。手動・定期・通常Backend更新前のバックアップは同じ保管設定と実行経路を使う。既存host lock、整合性、暗号化・検証の条件を維持する。
