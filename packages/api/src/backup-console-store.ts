@@ -206,6 +206,7 @@ export class BackupConsoleStore {
     } = await this.pool.query<
       State & {
         operation: Record<string, unknown> | null;
+        run: BackupRun | null;
         last_verified_run: BackupRun | null;
         last_restore_drill: Record<string, unknown> | null;
       }
@@ -215,17 +216,20 @@ export class BackupConsoleStore {
            'operationId', o.id, 'requestId', o.request_id, 'revision', o.revision, 'status', o.state,
            'phase', o.kind, 'reasonCode', o.reason_code, 'observedAt', o.observed_at
          ) END AS operation,
+         to_jsonb(manual_run) AS run,
          (SELECT to_jsonb(r) FROM codexia_backup.runs r WHERE r.state = 'REMOTE_VERIFIED'
           ORDER BY r.observed_at DESC LIMIT 1) AS last_verified_run,
          (SELECT jsonb_build_object('runId', r.id, 'sourceSha', d.source_sha, 'manifestSha256', d.manifest_sha256,
            'receiptSha256', d.receipt_sha256, 'observedAt', d.observed_at)
           FROM codexia_backup.restore_drills d JOIN codexia_backup.runs r ON r.id = d.run_id
           ORDER BY d.observed_at DESC LIMIT 1) AS last_restore_drill
-       FROM ${scope}state s LEFT JOIN ${scope}operations o ON o.request_id = $1`,
+       FROM ${scope}state s
+       LEFT JOIN ${scope}operations o ON o.request_id = $1
+       LEFT JOIN ${scope}runs manual_run ON manual_run.request_id = $1 AND manual_run.kind = 'manual'`,
       [requestId ?? null],
     );
     if (!state) throw unavailable();
-    if (requestId && !state.operation) throw new BackupConsoleError(404, 'BACKUP_OPERATION_NOT_FOUND');
+    if (requestId && !state.operation && !state.run) throw new BackupConsoleError(404, 'BACKUP_OPERATION_NOT_FOUND');
     return {
       activeRevision: state.active_revision,
       enabled: state.active_revision !== null,
@@ -235,7 +239,8 @@ export class BackupConsoleStore {
       lastVerifiedOffVmBackup: state.last_verified_run ? viewRun(state.last_verified_run) : 'unknown',
       restoreDrill: state.last_restore_drill ?? 'unknown',
       staging: 'unknown',
-      ...(requestId ? { operation: state.operation } : {}),
+      ...(state.operation ? { operation: state.operation } : {}),
+      ...(state.run ? { run: viewRun(state.run) } : {}),
     };
   }
 

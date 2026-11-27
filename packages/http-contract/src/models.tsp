@@ -1895,6 +1895,7 @@ model BackupStatusView {
   restoreDrill: BackupRestoreDrillReference | "unknown";
   staging: string;
   operation?: BackupOperationView;
+  run?: BackupRunView;
   ...Record<unknown>;
 }
 
