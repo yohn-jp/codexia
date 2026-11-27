@@ -6,23 +6,26 @@ if [[ ! -f "$settings" || -L "$settings" || ! -O "$settings" || "$(stat -c %a --
   echo 'Backup executor requires an owner-only environment file' >&2
   exit 1
 fi
-mapfile -t entrypoints < <(sed -n 's/^CODEXIA_BACKUP_EXECUTOR_ENTRYPOINT=//p' "$settings")
-if [[ "${#entrypoints[@]}" != 1 || ! "${entrypoints[0]}" =~ ^/[^[:cntrl:]]+/backup-console-control\.js$ ||
-      ! -f "${entrypoints[0]}" ]]; then
-  echo 'Backup executor entry point is unavailable' >&2
-  exit 1
+release="$HOME/.local/share/codexia-backup/current"
+node="$release/bin/node"
+command=backup-console-control.js
+if [[ $# == 0 ]]; then command=backup-console-executor.js; fi
+entrypoint="$(realpath -e -- "$release/app/node_modules/@codexia/api/dist/$command")" &&
+  [[ -x "$node" && -f "$entrypoint" ]] || { echo 'Certified backup runtime is unavailable' >&2; exit 1; }
+database="${settings%/*}/database.env"
+env_files=()
+if [[ -e "$database" || -L "$database" ]]; then
+  [[ -f "$database" && ! -L "$database" && -O "$database" && "$(stat -c %a -- "$database")" == 600 ]] ||
+    { echo 'Backup database settings must be owner-only' >&2; exit 1; }
+  env_files+=("--env-file=$database")
 fi
-entrypoint="${entrypoints[0]}"
-if [[ $# == 0 ]]; then
-  entrypoint="${entrypoint%/*}/backup-console-executor.js"
-  [[ -f "$entrypoint" ]] || { echo 'Backup console executor is unavailable' >&2; exit 1; }
-fi
+env_files+=("--env-file=$settings")
 # Load the same protected settings for manual, scheduled and deployment backups.
 # Do not forward Ansible or SSH environment values.
 runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 runtime_env=(env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8
   XDG_RUNTIME_DIR="$runtime_dir" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$runtime_dir/bus}")
-node="$(command -v node)"
+
 
 case "${1:-}" in
   reconcile-restored-journal|reconcile-restored-absence)
@@ -40,7 +43,7 @@ case "${1:-}" in
       { echo 'Stop and disable the backup executor before reconciling a restored journal' >&2; exit 1; }
     ;;
   deploy-check|deploy-backup)
-    staging="$("${runtime_env[@]}" "$node" --env-file="$settings" -e '
+    staging="$("${runtime_env[@]}" "$node" "${env_files[@]}" -e '
       const { CODEXIA_BACKUP_DESTINATION: destination, CODEXIA_BACKUP_AGE_RECIPIENT: recipient } = process.env;
       if (!destination || !recipient || !/^\/[^\x00-\x1f\x7f]+$/.test(destination) || !/^age1[0-9a-z]+$/.test(recipient)) process.exit(1);
       process.stdout.write(destination + "\n" + recipient);
@@ -50,4 +53,4 @@ case "${1:-}" in
       "$HOME/.local/bin/codexia-backup-runner" "$@"
     ;;
 esac
-exec "${runtime_env[@]}" "$node" --env-file="$settings" "$entrypoint" "$@"
+exec "${runtime_env[@]}" "$node" "${env_files[@]}" "$entrypoint" "$@"

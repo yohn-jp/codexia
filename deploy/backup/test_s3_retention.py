@@ -15,6 +15,7 @@ class ObjectLockClient(FakeS3Client):
         super().__init__()
         self.retention = {}
         self.readbacks = []
+        self.provider_defaults = {}
         self.capability_error = None
 
     def get_object_lock_configuration(self, **_):
@@ -43,7 +44,7 @@ class ObjectLockClient(FakeS3Client):
     def get_object(self, *, Bucket, Key, VersionId=None):
         response = super().get_object(Bucket=Bucket, Key=Key, VersionId=VersionId)
         self.readbacks.append((Key, VersionId))
-        return {**response, **self.retention.get(Key, {})}
+        return {**response, **self.provider_defaults, **self.retention.get(Key, {})}
 
 
 class S3RetentionTests(unittest.TestCase):
@@ -78,6 +79,42 @@ class S3RetentionTests(unittest.TestCase):
             self.artifact, backup_id=self.backup_id, source_identity=self.source,
             receipt_path=receipt or self.receipt,
         )
+
+    def test_console_retention_observes_provider_defaults_for_uuid_runs(self):
+        self.write_artifact(multipart=True)
+        self.backup_id = "158f39af-3a6d-4b4c-8fd3-9d0b0eb1fa11"
+        created = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(minutes=5)
+        self.client.provider_defaults = {
+            "LastModified": created,
+            "ObjectLockMode": "GOVERNANCE",
+            "ObjectLockRetainUntilDate": created + timedelta(days=7),
+        }
+
+        transfer = s3_transfer.S3BackupTransfer(profile(retentionMode="BUCKET_DEFAULT", retentionDays=7), client=self.client)
+
+        def upload():
+            return transfer.upload_artifact(
+                self.artifact, backup_id=self.backup_id, source_identity=self.source, receipt_path=self.receipt,
+            )
+
+        for name in ("database.dump.age", "COMMIT.json"):
+            key = self.key(name)
+            for bad in (
+                {"ObjectLockRetainUntilDate": created + timedelta(days=7, seconds=-1)},
+                {"ObjectLockMode": None}, {"LastModified": None},
+            ):
+                with self.subTest(name=name, metadata=bad):
+                    self.client.retention[key] = bad
+                    with self.assertRaisesRegex(s3_transfer.TransferError, "retention"):
+                        upload()
+                    self.assertFalse(self.receipt.exists())
+            self.client.retention[key] = {}
+        receipt = upload()
+        self.assertEqual(receipt["capabilities"]["requestedRetention"], {"mode": "BUCKET_DEFAULT", "days": 7})
+        self.assertEqual(self.client.retention, {self.key(name): {} for name in (*s3_transfer.OBJECT_FILES, "COMMIT.json")})
+        # The verified object versions remain retained after bucket default discovery becomes unavailable.
+        self.client.capability_error = "AccessDenied"
+        self.assertEqual(upload(), receipt)
 
     def test_explicit_retention_is_read_back_for_every_exact_object_version(self):
         self.write_artifact(multipart=True)

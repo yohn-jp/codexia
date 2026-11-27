@@ -46,6 +46,7 @@ on:
       - deploy/ansible/site.yml
       - deploy/ansible/host.yml
       - deploy/ansible/host-validate.yml
+      - deploy/ansible/backup-*
       - deploy/ansible/base-*.yml
       - deploy/ansible/deploy*.yml
       - deploy/ansible/auth-runtime*

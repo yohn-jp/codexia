@@ -5,6 +5,7 @@ After=codexia-db.service
 
 [Service]
 Type=simple
+KillMode=mixed
 ExecStart=%h/.local/bin/codexia-backup-control
 Restart=on-failure
 RestartSec=10s

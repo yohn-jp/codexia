@@ -3,10 +3,12 @@
 set -euo pipefail
 umask 077
 readonly PG_IMAGE='docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'
-readonly STATE_DIR="${CODEXIA_PUSH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/codexia-deploy}"
 die(){ printf '%s\n' "$*" >&2; exit 1; }
-for cmd in podman age sha256sum flock findmnt sync stat getent ip; do command -v "$cmd" >/dev/null || die "Missing dependency: $cmd"; done
-lock_file="$STATE_DIR/host.lock"
+require_commands(){
+  local cmd
+  for cmd do command -v "$cmd" >/dev/null || die "Missing dependency: $cmd"; done
+}
+require_commands sha256sum findmnt getent ip
 operation="${1:-}"
 verify_lock_descriptor(){
   local lock_file="$1" lock_fd="$2" fd_identity lock_identity
@@ -72,23 +74,6 @@ validate_artifact(){
   sha256sum "$dir/SHA256SUMS" | cut -d' ' -f1
 }
 case "$operation" in
-  fingerprint-restored-target)
-    [[ $# == 5 && "$2" == --lock-file && "$3" == "$lock_file" && "$4" == --lock-fd ]] ||
-      die 'Restored target fingerprint requires the inherited canonical host lock'
-    verify_lock_descriptor "$3" "$5"
-    ;;
-  backup-locked)
-    [[ ( $# == 8 || ( $# == 10 && "${9}" == --artifact-id &&
-      "${10}" =~ ^codexia-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$ ) ) &&
-      "${4:-}" == --approved && "${5:-}" == --lock-file && "${6:-}" == "$lock_file" && "${7:-}" == --lock-fd ]] ||
-      die 'Push backup requires explicit approval and the canonical host lock'
-    verify_lock_descriptor "$6" "$8"
-    ;;
-  drill)
-    mkdir -p "$STATE_DIR"
-    exec 9>"$lock_file"
-    flock --exclusive --nonblock 9 || die 'Backup or deployment already running'
-    ;;
   validate-artifact)
     [[ $# == 2 ]] || die 'Usage: validate-artifact /absolute/backup'
     validate_artifact "$2"
@@ -115,6 +100,29 @@ case "$operation" in
     backup_directory "$2"
     printf '%s\n' 'Backup destination preflight passed'
     exit 0
+    ;;
+esac
+
+readonly STATE_DIR="${CODEXIA_PUSH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/codexia-deploy}"
+lock_file="$STATE_DIR/host.lock"
+require_commands podman age flock sync stat
+case "$operation" in
+  fingerprint-restored-target)
+    [[ $# == 5 && "$2" == --lock-file && "$3" == "$lock_file" && "$4" == --lock-fd ]] ||
+      die 'Restored target fingerprint requires the inherited canonical host lock'
+    verify_lock_descriptor "$3" "$5"
+    ;;
+  backup-locked)
+    [[ ( $# == 8 || ( $# == 10 && "${9}" == --artifact-id &&
+      "${10}" =~ ^codexia-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$ ) ) &&
+      "${4:-}" == --approved && "${5:-}" == --lock-file && "${6:-}" == "$lock_file" && "${7:-}" == --lock-fd ]] ||
+      die 'Push backup requires explicit approval and the canonical host lock'
+    verify_lock_descriptor "$6" "$8"
+    ;;
+  drill)
+    mkdir -p "$STATE_DIR"
+    exec 9>"$lock_file"
+    flock --exclusive --nonblock 9 || die 'Backup or deployment already running'
     ;;
   *) die 'Unsupported backup operation';;
 esac

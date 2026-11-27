@@ -1,0 +1,159 @@
+---
+# Included for the explicitly approved backup runtime, as the rootless service user.
+- name: Use the existing database administrator only for backup schema and role provisioning
+  ansible.builtin.set_fact:
+    backup_admin_command:
+      - podman
+      - exec
+      - -i
+      - codexia-db
+      - sh
+      - -ec
+      - 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -XqAtw -v ON_ERROR_STOP=1 -U codexia_admin -d codexia'
+    backup_database_env: "{{ home }}/.config/codexia-backup/database.env"
+
+- name: Identify the existing backup schema and login roles before changing credentials
+  ansible.builtin.command:
+    argv: "{{ backup_admin_command }}"
+    stdin: |
+      SELECT CASE WHEN to_regnamespace('codexia_backup') IS NULL THEN
+        CASE WHEN EXISTS (SELECT FROM pg_roles WHERE rolname IN
+          ('codexia_backup_api','codexia_backup_executor','codexia_backup_api_login','codexia_backup_executor_login'))
+          THEN 'unknown' ELSE 'absent' END
+        WHEN NOT EXISTS (SELECT FROM pg_namespace WHERE nspname='codexia_backup' AND nspowner=current_user::regrole)
+          OR EXISTS (SELECT FROM pg_class WHERE relnamespace=to_regnamespace('codexia_backup') AND relowner<>current_user::regrole)
+          THEN 'unknown'
+        WHEN tables = ARRAY['credentials','operations','revisions','state'] THEN 'pre-journal'
+        WHEN tables = ARRAY['credentials','operations','restore_drills','revisions','runs','state'] THEN 'journal'
+        ELSE 'unknown' END
+      FROM (SELECT array_agg(relname::text ORDER BY relname) AS tables FROM pg_class
+            WHERE relnamespace=to_regnamespace('codexia_backup') AND relkind IN ('r','p','v','m','f')) AS existing;
+      SELECT rolname FROM pg_roles WHERE rolname IN ('codexia_backup_api_login','codexia_backup_executor_login');
+  register: backup_database_state
+  changed_when: false
+
+- name: Require an absent or recognized administrator-owned backup schema
+  ansible.builtin.assert:
+    that: backup_database_state.stdout_lines[0] in ['absent', 'pre-journal', 'journal']
+    fail_msg: An unrecognized backup schema requires operator reconciliation.
+
+- name: Refuse a missing backup journal when its protected runtime credentials remain
+  ansible.builtin.shell:
+    cmd: |
+      test ! -e "$DATABASE_ENV" && test ! -L "$DATABASE_ENV" || exit 1
+      status=0
+      podman secret exists codexia-backup-api-database-url || status=$?
+      test "$status" = 1
+  environment:
+    DATABASE_ENV: "{{ backup_database_env }}"
+  changed_when: false
+  when: backup_database_state.stdout_lines[0] == 'absent'
+
+- name: Apply the approved schema or the existing journal upgrade
+  ansible.builtin.command:
+    argv: "{{ backup_admin_command }}"
+    stdin: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/backup/' + schema_filename, rstrip=false) }}"
+  vars:
+    schema_filename: "{{ 'operational-schema.sql' if backup_database_state.stdout_lines[0] == 'absent' else 'operational-schema-667-upgrade.sql' }}"
+  when: backup_database_state.stdout_lines[0] != 'journal'
+
+- name: Create missing local database credentials and verify both dedicated logins
+  ansible.builtin.shell:
+    cmd: |
+      set -Eeuo pipefail
+      umask 077
+      api_secret=codexia-backup-api-database-url
+      admin() {
+        podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"
+          exec psql -XqAtw -v ON_ERROR_STOP=1 -U codexia_admin -d codexia'
+      }
+      secret_status=0
+      podman secret exists "$api_secret" || secret_status=$?
+      if [[ "$secret_status" == 1 ]]; then
+        [[ "$API_ROLE_EXISTS" == false ]] || { echo 'Existing API login requires its original secret' >&2; exit 1; }
+        api_password="$(openssl rand -hex 32)"
+        printf 'postgresql://codexia_backup_api_login:%s@codexia-db:5432/codexia' "$api_password" |
+          podman secret create "$api_secret" - >/dev/null
+        echo CREATED
+      elif [[ "$secret_status" != 0 ]]; then
+        exit "$secret_status"
+      fi
+      api_url="$(podman secret inspect --showsecret --format '{{ '{{' }}.SecretData{{ '}}' }}' "$api_secret")"
+      [[ "$api_url" =~ ^postgresql://codexia_backup_api_login:([0-9a-f]{64})@codexia-db:5432/codexia$ ]]
+      api_password="${BASH_REMATCH[1]}"
+
+      executor_suffix='@localhost/codexia?host=%2Fhome%2Fcodexia%2F.local%2Fshare%2Fcodexia-backup-postgres%2Fsocket'
+      if [[ ! -e "$DATABASE_ENV" && ! -L "$DATABASE_ENV" ]]; then
+        [[ "$EXECUTOR_ROLE_EXISTS" == false ]] || { echo 'Existing executor login requires its original secret' >&2; exit 1; }
+        tmp="$(mktemp "${DATABASE_ENV}.XXXXXX")"
+        trap 'rm -f -- "$tmp"' EXIT
+        printf 'CODEXIA_BACKUP_EXECUTOR_DATABASE_URL=postgresql://codexia_backup_executor_login:%s%s\n' \
+          "$(openssl rand -hex 32)" "$executor_suffix" > "$tmp"
+        ln -- "$tmp" "$DATABASE_ENV"
+        echo CREATED
+      fi
+      [[ -f "$DATABASE_ENV" && ! -L "$DATABASE_ENV" && -O "$DATABASE_ENV" && "$(stat -c %a "$DATABASE_ENV")" == 600 ]]
+      mapfile -t lines < "$DATABASE_ENV"
+      [[ -v 'lines[0]' && ! -v 'lines[1]' && "${lines[0]}" == *"$executor_suffix" ]]
+      executor="${lines[0]%"$executor_suffix"}"
+      [[ "$executor" =~ ^CODEXIA_BACKUP_EXECUTOR_DATABASE_URL=postgresql://codexia_backup_executor_login:([0-9a-f]{64})$ ]]
+      executor_password="${BASH_REMATCH[1]}"
+      [[ "$api_password" != "$executor_password" ]]
+
+      # Existing roles are authenticated with their saved password, never reset.
+      # Keep all secret bytes on the host and out of process arguments.
+      {
+        echo 'BEGIN;'
+        if [[ "$API_ROLE_EXISTS" == false ]]; then
+          printf "CREATE ROLE codexia_backup_api_login LOGIN PASSWORD '%s' IN ROLE codexia_backup_api;\n" "$api_password"
+        fi
+        if [[ "$EXECUTOR_ROLE_EXISTS" == false ]]; then
+          printf "CREATE ROLE codexia_backup_executor_login LOGIN PASSWORD '%s' IN ROLE codexia_backup_executor;\n" "$executor_password"
+        fi
+        cat
+        echo 'COMMIT;'
+      } | admin
+      verify_login() {
+        printf '%s\n' "$2" | podman exec -i codexia-db sh -ec 'IFS= read -r PGPASSWORD; export PGPASSWORD
+          exec psql -XqAtw -h 127.0.0.1 -v ON_ERROR_STOP=1 -U "$1" -d codexia -c "SELECT current_user"' sh "$1" | grep -Fxq "$1"
+      }
+      verify_login codexia_backup_api_login "$api_password"
+      verify_login codexia_backup_executor_login "$executor_password"
+    executable: /bin/bash
+    stdin: |
+      DO $grants$
+      BEGIN
+        IF EXISTS (
+          SELECT FROM pg_auth_members m JOIN pg_roles gr ON gr.oid=m.roleid JOIN pg_roles login ON login.oid=m.member
+          WHERE (gr.rolname IN ('codexia_backup_api','codexia_backup_executor','codexia_backup_api_login','codexia_backup_executor_login')
+                 OR login.rolname IN ('codexia_backup_api','codexia_backup_executor','codexia_backup_api_login','codexia_backup_executor_login'))
+            AND (login.rolname <> (gr.rolname || '_login') OR m.admin_option OR NOT m.inherit_option)
+        ) THEN RAISE EXCEPTION 'Backup role membership differs from the dedicated logins'; END IF;
+      END $grants$;
+      \set backup_api_login codexia_backup_api_login
+      \set backup_executor_login codexia_backup_executor_login
+      {{ lookup('ansible.builtin.file', repo_root + '/deploy/backup/verify-console-roles.sql', rstrip=false) }}
+  environment:
+    API_ROLE_EXISTS: "{{ ('codexia_backup_api_login' in backup_database_state.stdout_lines) | ternary('true', 'false') }}"
+    EXECUTOR_ROLE_EXISTS: "{{ ('codexia_backup_executor_login' in backup_database_state.stdout_lines) | ternary('true', 'false') }}"
+    DATABASE_ENV: "{{ backup_database_env }}"
+  no_log: true
+  register: backup_database_logins
+  changed_when: >-
+    'CREATED' in backup_database_logins.stdout_lines or
+    'codexia_backup_api_login' not in backup_database_state.stdout_lines or
+    'codexia_backup_executor_login' not in backup_database_state.stdout_lines
+
+- name: Stage the API-only Quadlet settings for the locked activation
+  ansible.builtin.copy:
+    dest: "{{ home }}/.config/codexia-backup/api-quadlet.conf"
+    mode: '0600'
+    content: |
+      # Operator policy SHA-256 {{ backup_policy_file.stat.checksum }}
+      [Container]
+      Secret=codexia-backup-api-database-url,type=env,target=CODEXIA_BACKUP_API_DATABASE_URL
+      Volume=%h/.config/codexia-backup/policy.json:/run/codexia-backup/policy.json:ro,z
+      Volume=%h/.config/codexia-backup/sealing-public.pem:/run/codexia-backup/sealing-public.pem:ro,z
+      Environment=CODEXIA_BACKUP_POLICY_FILE=/run/codexia-backup/policy.json
+      Environment=CODEXIA_BACKUP_PUBLIC_KEY_FILE=/run/codexia-backup/sealing-public.pem
+  register: codexia_backup_api_dropin

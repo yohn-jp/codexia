@@ -1,0 +1,27 @@
+---
+- name: Install the backup helpers for the rootless deployment identity
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/backup/{{ item.src }}"
+    dest: "{{ home }}/.local/bin/{{ item.dest }}"
+    owner: codexia
+    group: "{{ codexia_service_group | default('codexia') }}"
+    mode: '0700'
+  loop:
+    - {src: backup.sh, dest: codexia-backup}
+    - {src: backup-runner.sh, dest: codexia-backup-runner}
+    - {src: backup-control.sh, dest: codexia-backup-control}
+
+- name: Install the existing executor as a rootless user service
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/backup/codexia-backup-executor.service"
+    dest: "{{ home }}/.config/systemd/user/codexia-backup-executor.service"
+    owner: codexia
+    group: "{{ codexia_service_group | default('codexia') }}"
+    mode: '0600'
+  register: codexia_backup_executor_unit
+
+- name: Reload the changed executor unit without starting or enabling it
+  ansible.builtin.systemd_service:
+    scope: user
+    daemon_reload: true
+  when: codexia_backup_executor_unit.changed

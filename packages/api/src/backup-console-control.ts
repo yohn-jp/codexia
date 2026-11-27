@@ -14,7 +14,7 @@ import {
   restoredBackupUnknownReason,
 } from './backup-console-executor.js';
 import { allowedBackupDestination, allowedBackupMaintenanceWindow, backupPolicySchema } from './backup-console-routes.js';
-import { backupTransaction } from './backup-console-store.js';
+import { type BackupRevision, backupTransaction, readBackupRevision } from './backup-console-store.js';
 import {
   type BackupCredential,
   backupCredentialBinding,
@@ -61,22 +61,6 @@ class S3TransferFailure extends Error {
   }
 }
 
-interface Revision {
-  revision: number;
-  destination: {
-    provider: 'aws-s3' | 's3-compatible';
-    endpoint: string;
-    region: string;
-    bucket: string;
-    prefix: string;
-    addressing: 'path-style' | 'virtual-hosted-style';
-    credentialMode: 'operator-role' | 'sealed-access-key';
-    offVmPolicy: 'required' | 'secondary';
-    schedule: 'disabled';
-  };
-  credential_id: string | null;
-  key_id: string | null;
-}
 export class BackupConsoleControl {
   constructor(
     private readonly options: {
@@ -126,7 +110,7 @@ export class BackupConsoleControl {
         'SELECT active_revision, active_usable, active_health FROM codexia_backup.state',
       );
       if (!state?.active_revision) throw new Error('Active off-VM backup destination is unavailable');
-      const revision = await this.readRevision(client, state.active_revision);
+      const revision = await readBackupRevision(client, state.active_revision);
       if (!revision || !allowedBackupDestination(revision.destination, this.options.policy))
         throw new Error('Active off-VM backup destination is unavailable');
       if (revision.destination.offVmPolicy === 'required' && (!state.active_usable || state.active_health !== 'ready'))
@@ -174,17 +158,14 @@ export class BackupConsoleControl {
       } = await client.query<{
         revision: number;
         maintenance_window_id: string;
-        kind: 'manual' | 'scheduled';
         state: string;
         source_sha: string | null;
         image_digest: string | null;
       }>(
-        "SELECT revision, maintenance_window_id, kind, state, source_sha, image_digest FROM codexia_backup.runs WHERE id = $1 AND kind IN ('manual', 'scheduled') FOR UPDATE",
+        "SELECT revision, maintenance_window_id, state, source_sha, image_digest FROM codexia_backup.runs WHERE id = $1 AND kind = 'manual' FOR UPDATE",
         [runId],
       );
       if (!run || !['QUEUED', 'RUNNING'].includes(run.state)) throw new Error('Manual run is not claimable');
-      if (run.kind === 'scheduled' && this.options.policy.scheduleWindowId !== run.maintenance_window_id)
-        throw new Error('Scheduled backup is not operator-enabled');
       if (!allowedBackupMaintenanceWindow(this.options.policy, run.maintenance_window_id)) throw new Error('Maintenance window is closed');
       const {
         rows: [state],
@@ -233,7 +214,7 @@ export class BackupConsoleControl {
         return;
       if (run.state !== 'RUNNING' && !((kind === 'manual' || kind === 'scheduled') && run.state === 'UNKNOWN'))
         throw new Error('Backup run is not eligible to finish');
-      const revision = await this.readRevision(client, run.revision);
+      const revision = await readBackupRevision(client, run.revision);
       if (!revision || !allowedBackupDestination(revision.destination, this.options.policy))
         throw new Error('Pinned backup destination is unavailable');
       const sums = await readFile(join(artifactDirectory, 'SHA256SUMS'));
@@ -518,14 +499,7 @@ export class BackupConsoleControl {
       throw new Error('Deployment identity is invalid');
   }
 
-  private async readRevision(client: import('pg').PoolClient, revision: number) {
-    const {
-      rows: [row],
-    } = await client.query<Revision>('SELECT * FROM codexia_backup.revisions WHERE revision = $1', [revision]);
-    return row ?? null;
-  }
-
-  private async credential(client: import('pg').PoolClient, revision: Revision): Promise<BackupCredential | null> {
+  private async credential(client: import('pg').PoolClient, revision: BackupRevision): Promise<BackupCredential | null> {
     const { destination } = revision;
     if (destination.credentialMode === 'operator-role') {
       const value = this.options.config.operatorCredential;
@@ -560,7 +534,7 @@ export class BackupConsoleControl {
     artifactDirectory: string,
     sourceSha: string,
     expectedManifestSha: string,
-    revision: Revision,
+    revision: BackupRevision,
     credential: BackupCredential,
   ) {
     const { destination } = revision;
@@ -574,6 +548,10 @@ export class BackupConsoleControl {
       endpointUrl: origin ?? null,
       allowedOrigins: origin ? [origin] : [],
       addressingStyle: destination.addressing === 'path-style' ? 'path' : 'virtual',
+      ...(destination.retentionRequest?.days !== undefined && {
+        retentionMode: 'BUCKET_DEFAULT',
+        retentionDays: destination.retentionRequest.days,
+      }),
       ...(origin && this.options.config.transportByOrigin[origin]?.caBundle
         ? { caBundle: this.options.config.transportByOrigin[origin].caBundle }
         : {}),

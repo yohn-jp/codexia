@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { createPublicKey, randomUUID } from 'node:crypto';
+import { createPublicKey } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
@@ -7,7 +7,7 @@ import { setTimeout } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { Pool, type PoolClient } from 'pg';
 import { z } from 'zod';
-import { allowedBackupDestination, type BackupPolicy, backupMaintenanceWindowSlot, backupPolicySchema } from './backup-console-routes.js';
+import { allowedBackupDestination, type BackupPolicy, backupPolicySchema } from './backup-console-routes.js';
 import {
   type BackupOperation,
   type BackupRevision,
@@ -42,7 +42,6 @@ interface ExecutorOptions {
   probe: (revision: BackupRevision, credential: BackupCredential) => Promise<ProbeResult>;
   run?: (runId: string) => Promise<void>;
   recoverRuns?: () => Promise<void>;
-  scheduleWindowId?: string;
 }
 
 export const backupExecutorLock = 66502;
@@ -107,42 +106,6 @@ export class BackupConsoleExecutor {
         } catch {
           return false;
         }
-        if (this.options.scheduleWindowId) {
-          await backupTransaction(client, async () => {
-            const slot = backupMaintenanceWindowSlot(this.options.policy, this.options.scheduleWindowId!);
-            if (!slot?.open) return;
-            const {
-              rows: [state],
-            } = await client.query<{ active_revision: number | null; active_usable: boolean }>(
-              'SELECT active_revision, active_usable FROM codexia_backup.state',
-            );
-            const { rowCount: operationCount } = await client.query(
-              "SELECT 1 FROM codexia_backup.operations WHERE state IN ('QUEUED', 'RUNNING')",
-            );
-            const { rowCount: runCount } = await client.query("SELECT 1 FROM codexia_backup.runs WHERE state IN ('QUEUED', 'RUNNING')");
-            if (operationCount || runCount) return;
-            const stateValue = !state?.active_revision ? 'BLOCKED' : state.active_usable ? 'QUEUED' : 'BLOCKED';
-            const reason = !state?.active_revision
-              ? 'active_destination_missing'
-              : state.active_usable
-                ? null
-                : 'active_destination_unavailable';
-            await client.query(
-              `INSERT INTO codexia_backup.runs (id, request_id, kind, revision, maintenance_window_id, schedule_slot_key, state, phase, reason_code)
-               VALUES ($1, $2, 'scheduled', $3, $4, $5, $6, $7, $8) ON CONFLICT (schedule_slot_key) DO NOTHING`,
-              [
-                randomUUID(),
-                `schedule:${this.options.scheduleWindowId}:${slot.localDate}`,
-                state?.active_revision ?? null,
-                this.options.scheduleWindowId,
-                slot.slotKey,
-                stateValue,
-                stateValue === 'QUEUED' ? 'queued' : 'blocked',
-                reason,
-              ],
-            );
-          });
-        }
         const run = await backupTransaction(client, async () => {
           const {
             rows: [queued],
@@ -150,6 +113,14 @@ export class BackupConsoleExecutor {
             "SELECT * FROM codexia_backup.runs WHERE state = 'QUEUED' ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED",
           );
           if (!queued) return null;
+          if (queued.kind === 'scheduled') {
+            // Existing revisions only authorize manual runs. Keep a disposition for older queued slots.
+            await client.query(
+              "UPDATE codexia_backup.runs SET state = 'BLOCKED', phase = 'blocked', reason_code = 'schedule_disabled', observed_at = clock_timestamp() WHERE id = $1",
+              [queued.id],
+            );
+            return null;
+          }
           await client.query(
             "UPDATE codexia_backup.runs SET state = 'RUNNING', phase = 'starting', reason_code = NULL, observed_at = clock_timestamp() WHERE id = $1",
             [queued.id],
@@ -288,7 +259,7 @@ export class BackupConsoleExecutor {
   }
 }
 
-export function protectedBackupRunner(executable: string, timeoutMs = 30 * 60_000) {
+export function protectedBackupRunner(executable: string, timeoutMs = 30 * 60_000): Required<Pick<ExecutorOptions, 'run' | 'recoverRuns'>> {
   if (!isAbsolute(executable)) throw new Error('Backup runner must be an absolute operator-provisioned path');
   const environment: NodeJS.ProcessEnv = {
     PATH: '/usr/bin:/bin',
@@ -318,7 +289,7 @@ export function protectedBackupRunner(executable: string, timeoutMs = 30 * 60_00
     });
   return {
     run: (runId: string) => invoke([runId]),
-    recover: () => invoke(['recover']),
+    recoverRuns: () => invoke(['recover']),
   };
 }
 
@@ -487,7 +458,7 @@ async function main() {
         }
       : {}),
     probe: pythonBackupProbe(python, script, policy, config.transportByOrigin),
-    ...(runnerPath ? { ...protectedBackupRunner(runnerPath), scheduleWindowId: policy.scheduleWindowId } : {}),
+    ...(runnerPath ? protectedBackupRunner(runnerPath) : {}),
   });
   const stop = new AbortController();
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => stop.abort());

@@ -2,161 +2,106 @@
 # Sourced by the disposable app lifecycle. No external Tunnel or S3 credentials.
 verify_private_backup_socket() (
   set -e
-  local path="$fixture_home/.local/state/codexia-private-socket-fixture"
+  local settings="$fixture_home/.config/codexia-backup"
+  local runtime="$fixture_home/.local/share/codexia-backup/current"
   local socket_parent="$fixture_home/.local/share/codexia-backup-postgres"
-  local node_binary
-  node_binary="$(command -v node)"
-  rootless test ! -e "$path"
-  rootless test ! -L "$path"
-  trap 'rootless rm -rf -- "$path"' EXIT
-  rootless install -d -m 0700 "$path"
-  rootless install -d -m 0700 "$path/runtime"
-
-  socket_fixture_admin(){
-    rootless_podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"
-      exec psql -X -qAtw -v ON_ERROR_STOP=1 -U codexia_admin -d codexia "$@"' sh "$@"
-  }
-  await_socket_fixture(){
-    local attempt
-    for ((attempt=1; attempt<=30; attempt++)); do
-      if socket_fixture_admin -h 127.0.0.1 -c 'SELECT 1' >/dev/null 2>&1; then return; fi
-      sleep 1
-    done
-    return 1
-  }
-  test "$(socket_fixture_admin -c "SELECT count(*) > 0 FROM pg_hba_file_rules WHERE type = 'local' AND auth_method = 'trust'")" = t
-  local api_image
-  api_image="$(rootless_podman inspect --format '{{.Image}}' codexia-api)"
-  local locked_exit=0
-  rootless bash -c 'exec 9>> "$HOME/.local/state/codexia-deploy/host.lock"
-    flock --exclusive 9 || exit; bash -s; exit $?' \
-    < "$repo_root/deploy/ansible/backup-postgres-socket.sh" || locked_exit=$?
-  test "$locked_exit" = 75
-  rootless test ! -e "$socket_parent"
-  rootless bash -s < "$repo_root/deploy/ansible/backup-postgres-socket.sh"
-  test "$(rootless_podman inspect --format '{{.Image}}' codexia-api)" = "$api_image"
-  test "$(rootless systemctl --user is-active codexia-api.service)" = active
-  rootless_podman exec codexia-api test ! -e /run/codexia-backup-postgresql
-  test -z "$(rootless bash -s < "$repo_root/deploy/ansible/backup-postgres-socket.sh")"
-  if sudo -u nobody test -x "$socket_parent"; then
-    echo 'An unrelated host UID can reach the private PostgreSQL socket' >&2
-    exit 1
-  fi
-  socket_fixture_admin < "$repo_root/deploy/backup/operational-schema.sql"
-  socket_fixture_admin <<'SOCKET_ROLES'
-CREATE ROLE backup_api_fixture LOGIN PASSWORD 'disposable-private-socket-api';
-CREATE ROLE backup_executor_fixture LOGIN PASSWORD 'disposable-private-socket-executor';
-GRANT codexia_backup_api TO backup_api_fixture;
-GRANT codexia_backup_executor TO backup_executor_fixture;
-SOCKET_ROLES
-  socket_fixture_admin -v backup_api_login=backup_api_fixture -v backup_executor_login=backup_executor_fixture \
-    < "$repo_root/deploy/backup/verify-console-roles.sql"
-
-  rootless_podman exec codexia-api tar -cf - -C /app . |
-    rootless tar -xf - --no-same-owner -C "$path/runtime"
-  rootless tee "$path/runtime/verify-fixture-socket.mjs" >/dev/null <<'SOCKET_NODE'
-import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-const { Pool } = createRequire(import.meta.resolve('@codexia/api'))('pg');
-async function query(password, sql) {
-  const pool = new Pool({
-    connectionString: `postgresql://backup_executor_fixture:${password ?? ''}@localhost/codexia?host=${encodeURIComponent(process.argv[2])}`,
-    connectionTimeoutMillis: 4000,
-  });
-  try { return await pool.query(sql); } finally { await pool.end(); }
-}
-await assert.rejects(query(undefined, 'SELECT 1'), /password must be a string/u);
-await assert.rejects(query('wrong-password', 'SELECT 1'), { code: '28P01' });
-const verified = await query('disposable-private-socket-executor',
-  'SELECT current_user AS login, inet_client_addr() IS NULL AS socket, count(*)::integer AS runs FROM codexia_backup.runs');
-assert.deepEqual(verified.rows, [{ login: 'backup_executor_fixture', socket: true, runs: 0 }]);
-await assert.rejects(query('disposable-private-socket-executor',
-  'CREATE TABLE codexia_backup.ungranted (id integer)'), { code: '42501' });
-SOCKET_NODE
+  local image before after status=0
+  image="$(rootless_podman inspect --format '{{.Image}}' codexia-api)"
+  rootless flock -xn "$fixture_home/.local/state/codexia-deploy/host.lock" \
+    bash -s < "$repo_root/deploy/ansible/backup-postgres-socket.sh" || status=$?
+  test "$status" = 75
+  rootless install -d -m 0700 "$settings"
+  rootless install -m 0600 /dev/null "$settings/executor.json"
+  rootless tee "$settings/executor.json" >/dev/null <<JSON
+{"privateKeyFiles":["$settings/sealing-private.pem"],"operatorCredential":{"origin":"https://backup.fixture.invalid","accessKeyId":"synthetic","secretAccessKey":"synthetic"}}
+JSON
+  test "$(rootless stat -c '%u:%a' "$settings/executor.json")" = "$fixture_uid:600"
+  printf '%s\n' "$backup_recipient" | rootless tee "$settings/age-recipient.txt" >/dev/null
+  rootless tee "$settings/policy.json" >/dev/null <<JSON
+{"destinations":[{"provider":"s3-compatible","region":"us-east-1","endpoint":"https://backup.fixture.invalid","bucket":"codexia-fixture","prefix":"fixture","credentialModes":["operator-role"]}],
+ "maintenanceWindows":[{"id":"fixture","timeZone":"UTC","daysOfWeek":[0,1,2,3,4,5,6],"start":"$(date -u +%H:%M)","durationMinutes":360}]}
+JSON
+  cat > "$tmp/backup-provision.yml" <<YAML
+codexia_stage: base
+codexia_backup_runtime_approved: true
+codexia_backup_staging_directory: "$fixture_home/.local/state/codexia-backup-mount"
+codexia_backup_secondary_independent_mount: "$fixture_home/.local/state/codexia-backup-mount"
+YAML
+  local tunnel="$fixture_home/.config/systemd/user/codexia-tunnel.service"
+  rootless tee "$tunnel" >/dev/null <<'UNIT'
+[Unit]
+Requires=codexia-api.service
+After=codexia-api.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+UNIT
+  rootless_systemctl daemon-reload
+  rootless_systemctl start codexia-tunnel.service
+  run_playbook "$tmp/backup-provision.yml" backup-provision
+  rootless_systemctl is-active --quiet codexia-tunnel.service
+  before="$(rootless sha256sum "$settings/sealing-private.pem" "$settings/database.env")"
+  before+=" $(rootless_podman inspect --format '{{.Id}}' codexia-api)"
+  run_playbook "$tmp/backup-provision.yml" backup-provision-reapply
+  after="$(rootless sha256sum "$settings/sealing-private.pem" "$settings/database.env")"
+  after+=" $(rootless_podman inspect --format '{{.Id}}' codexia-api)"
+  test "$before" = "$after"
+  test "$(rootless_podman inspect --format '{{.Image}}' codexia-api)" = "$image"
+  rootless_systemctl is-active --quiet codexia-backup-executor.service
+  rootless_systemctl is-enabled --quiet codexia-backup-executor.service
+  rootless_podman exec codexia-api sh -ec 'test -z "${CODEXIA_BACKUP_EXECUTOR_DATABASE_URL:-}" &&
+    test ! -e /run/codexia-backup-postgresql && test -r "$CODEXIA_BACKUP_PUBLIC_KEY_FILE"'
+  ! sudo -u nobody test -x "$socket_parent" || return 1
   verify_socket_client(){
-    rootless test -S "$socket_parent/socket/.s.PGSQL.5432"
-    rootless "$node_binary" "$path/runtime/verify-fixture-socket.mjs" "$socket_parent/socket"
+    rootless "$runtime/bin/node" --env-file="$settings/database.env" --input-type=module - "$runtime/app" <<'SOCKET_NODE'
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+const {Pool} = createRequire(createRequire(process.argv[2] + '/package.json').resolve('@codexia/api'))('pg');
+const url = new URL(process.env.CODEXIA_BACKUP_EXECUTOR_DATABASE_URL);
+async function query(connectionString, sql) {
+  const pool = new Pool({connectionString, connectionTimeoutMillis: 4000});
+  try { return (await pool.query(sql)).rows; } finally { await pool.end(); }
+}
+assert.deepEqual(await query(url.href, 'SELECT inet_client_addr() IS NULL AS socket'), [{socket:true}]);
+await assert.rejects(query(url.href, 'CREATE TABLE codexia_backup.ungranted (id integer)'), {code:'42501'});
+url.password = 'invalid';
+await assert.rejects(query(url.href, 'SELECT 1'), {code:'28P01'});
+url.password = '';
+await assert.rejects(query(url.href, 'SELECT 1'));
+SOCKET_NODE
   }
   verify_socket_client
-  rootless systemctl --user stop codexia-api.service
-  rootless systemctl --user restart codexia-db.service
-  await_socket_fixture
+  rootless_systemctl stop codexia-tunnel.service
+  rootless rm -- "$tunnel"
+  rootless_systemctl daemon-reload
+  rootless_systemctl stop codexia-backup-executor.service codexia-api.service
+  rootless_systemctl restart codexia-db.service
+  rootless timeout 60s podman wait --condition=healthy codexia-db >/dev/null
   verify_socket_client
-  rootless systemctl --user start codexia-api.service
-  printf '%s\n' 'Private backup socket verified on rootless Podman with dedicated PostgreSQL logins, SCRAM and restart'
+  rootless_systemctl start codexia-api.service codexia-backup-executor.service
+  # The synthetic lifecycle intentionally has no production Tunnel token.
+  disable_fixture_tunnel
+
 )
 
-prepare_backup_console_fixture(){
-  local settings="$fixture_home/.config/codexia-backup"
-  local destination="$fixture_home/.local/state/codexia-backup-mount"
-  rootless install -d -m 0700 "$settings"
-  cat > "$tmp/backup-console-control.js" <<'CLI'
-const { execFileSync } = require('node:child_process');
-const { appendFileSync, readFileSync } = require('node:fs');
-const path = require('node:path');
-const [mode, id, ...args] = process.argv.slice(2);
-const state = path.join(process.env.HOME, '.local/state/codexia-deploy');
-const trace = path.join(state, 'backup-fixture-log');
-const fixture = JSON.parse(readFileSync(path.join(state, 'backup-fixture-deploy.json'), 'utf8'));
-if (!/^[a-f0-9-]{36}$/.test(id)) process.exit(2);
-switch (mode) {
-  case 'deploy-start':
-    if (args.join(' ') !== fixture.deployIdentities) process.exit(2);
-    if (fixture.fault === 'console-unconfigured') {
-      console.log('NONE');
-      process.exit(0);
-    }
-    console.log(id);
-    break;
-  case 'deploy-finish': {
-    const [artifact, expected] = args;
-    const destination = process.env.CODEXIA_BACKUP_DESTINATION;
-    if (path.dirname(artifact) !== destination || !path.basename(artifact).endsWith('-' + id) ||
-        !/^[a-f0-9]{64}$/.test(expected)) process.exit(2);
-    const actual = execFileSync(path.join(process.env.HOME, '.local/bin/codexia-backup'),
-      ['validate-independent-artifact', destination, artifact], { encoding: 'utf8' }).trim();
-    if (actual !== expected) process.exit(2);
-    break;
-  }
-  case 'deploy-interrupted':
-  case 'deploy-fail':
-  case 'manual-interrupted':
-    break;
-  case 'manual-start':
-    if (args.join(' ') !== fixture.manualIdentity) process.exit(2);
-    break;
-  default:
-    process.exit(2);
-}
-appendFileSync(trace, mode + ' ' + id + ' ' + args.join(' ') + '\n', { mode: 0o600 });
-if (mode === 'deploy-finish' && fixture.fault === 'off-vm-verification') process.exit(1);
-CLI
-  sudo install -o codexia -g codexia -m 0600 "$tmp/backup-console-control.js" "$settings/backup-console-control.js"
-  cat > "$tmp/backup-executor.env" <<ENVFILE
-CODEXIA_BACKUP_EXECUTOR_ENTRYPOINT=$settings/backup-console-control.js
-CODEXIA_BACKUP_DESTINATION=$destination
-CODEXIA_BACKUP_AGE_RECIPIENT=$backup_recipient
-ENVFILE
-  sudo install -o codexia -g codexia -m 0600 "$tmp/backup-executor.env" "$settings/executor.env"
+# Fixture-only data setup; all backup decisions and receipts are produced by the packaged executor.
+backup_fixture_query() {
+  rootless_podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"
+    exec psql -X -qAtw -v ON_ERROR_STOP=1 -U codexia_admin -d codexia "$@"' sh "$@"
 }
 
-backup_fixture_attempt(){
-  local candidate_key="$1" fault="${2:-}" current_release
-  local state="$fixture_home/.local/state/codexia-deploy"
-  current_release="$(rootless cat "$state/deployed-release.json")"
-  node - "$evidence" "$candidate_key" "$current_release" "$fault" >"$tmp/backup-fixture-deploy.json" <<'FIXTURE'
-const fs = require('node:fs');
-const [evidence, key, release, fault] = process.argv.slice(2);
-const { identity, image } = JSON.parse(release);
-const candidate = JSON.parse(fs.readFileSync(evidence, 'utf8')).candidates[key];
-const manualIdentity = identity.sourceSha + ' ' + image.split('@')[1];
-console.log(JSON.stringify({
-  manualIdentity,
-  deployIdentities: manualIdentity + ' ' + candidate.identity.sourceSha + ' ' + candidate.image.split('@')[1],
-  fault,
-}));
-FIXTURE
-  sudo install -o codexia -g codexia -m 0600 "$tmp/backup-fixture-deploy.json" "$state/backup-fixture-deploy.json"
+activate_fixture_backup_destination() {
+  backup_fixture_query <<'SQL'
+BEGIN;
+INSERT INTO codexia_backup.revisions (revision, destination)
+SELECT revision, jsonb_build_object('provider', 's3-compatible', 'endpoint', 'https://backup.fixture.invalid',
+  'region', 'us-east-1', 'bucket', 'codexia-fixture', 'prefix', 'fixture', 'credentialMode', 'operator-role',
+  'addressing', 'path-style', 'schedule', 'disabled', 'offVmPolicy', protection)
+FROM (VALUES (1, 'secondary'), (2, 'required')) AS fixture(revision, protection);
+UPDATE codexia_backup.state SET draft_revision = 1, active_revision = 1, active_usable = true, active_health = 'ready';
+COMMIT;
+SQL
 }
 
 verify_backup_host_lifecycle(){
@@ -165,11 +110,15 @@ verify_backup_host_lifecycle(){
   local units="$fixture_home/.config/systemd/user"
   local runner="$fixture_home/.local/bin/codexia-backup-runner"
   local destination="$fixture_home/.local/state/codexia-backup-mount"
-  local fault="$state/backup-fault-bin" before trace_before run_id code
+  local fault="$state/backup-fault-bin" before run_id code required_run
   before="$(rootless sha256sum "$state/deployed-release.json")"
   run_id="$(cat /proc/sys/kernel/random/uuid)"
   rootless install -d -m 0700 "$units" "$fault"
-  backup_fixture_attempt "$candidate_key"
+  rootless_systemctl stop codexia-backup-executor.service
+  backup_fixture_query -v run_id="$run_id" <<'SQL'
+INSERT INTO codexia_backup.runs (id, request_id, kind, revision, maintenance_window_id)
+VALUES (:'run_id', :'run_id', 'manual', 1, 'fixture');
+SQL
   cat > "$tmp/backup-tunnel.service" <<'UNIT'
 [Service]
 Type=oneshot
@@ -182,11 +131,11 @@ UNIT
 
   # A separate lock descriptor owned by the deployment fixture blocks a run
   # before either systemd service or the executor is touched.
-  trace_before="$(rootless sha256sum "$state/backup-fixture-log")"
+
   code=0
   rootless flock -xn "$state/host.lock" "$runner" "$run_id" || code=$?
   [[ "$code" == 75 ]]
-  [[ "$(rootless sha256sum "$state/backup-fixture-log")" == "$trace_before" ]]
+  [[ "$(backup_fixture_query -c "SELECT state FROM codexia_backup.runs WHERE id = '$run_id'")" == QUEUED ]]
 
   cat > "$tmp/backup-fault-systemctl" <<'SYSTEMCTL'
 #!/bin/bash
@@ -211,16 +160,24 @@ SYSTEMCTL
   fi
   rootless "$runner" recover
   rootless_systemctl is-active --quiet codexia-tunnel.service
-  rootless grep -Fxq "manual-interrupted $run_id " "$state/backup-fixture-log"
+  [[ "$(backup_fixture_query -c "SELECT state || ':' || reason_code FROM codexia_backup.runs WHERE id = '$run_id'")" == UNKNOWN:manual_interrupted ]]
+  rootless_systemctl start codexia-backup-executor.service
   rootless test ! -e "$state/backup-transaction"
   observe_runtime backup-interruption-recovery "$prior_key"
 
-  if run_deploy "$candidate_key" false '' deploy-required-off-vm-failure off-vm-verification; then
+  backup_fixture_query -c "UPDATE codexia_backup.state SET active_revision = 2, active_usable = true, active_health = 'ready'"
+  if run_deploy "$candidate_key" false '' deploy-required-off-vm-failure; then
     echo 'Candidate activation succeeded despite a required off-VM verification failure' >&2
     return 1
   fi
   grep -Fq 'Deployment transaction failed during off-VM backup admission' "$tmp/deploy-required-off-vm-failure.log"
-  rootless tail -2 "$state/backup-fixture-log" | grep -q '^deploy-finish '
+  required_run="$(backup_fixture_query -c "SELECT source_sha || ' ' || image_digest || ' ' || candidate_source_sha || ' ' || candidate_image_digest
+    FROM codexia_backup.runs WHERE revision = 2 AND kind = 'deploy' AND state IN ('UNKNOWN', 'FAILED')
+    AND manifest_sha256 IS NOT NULL AND (evidence->>'offVmMethod') IS NULL")"
+  [[ "$required_run" == "$(jq -r --arg prior "$prior_key" --arg next "$candidate_key" '
+    [.candidates[$prior].identity.sourceSha, (.candidates[$prior].image | split("@")[1]),
+     .candidates[$next].identity.sourceSha, (.candidates[$next].image | split("@")[1])] | join(" ")' "$evidence")" ]]
+  backup_fixture_query -c "UPDATE codexia_backup.state SET active_revision = 1"
   rootless test ! -e "$state/deploy-transaction.json"
   rootless_systemctl is-active --quiet codexia-tunnel.service
   [[ "$(rootless sha256sum "$state/deployed-release.json")" == "$before" ]]

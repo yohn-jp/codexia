@@ -99,17 +99,20 @@ test('update backup uses the private executor settings and inherited deployment 
   t.after(() => rm(fixture.directory, { recursive: true, force: true }));
   const config = path.join(fixture.home, '.config', 'codexia-backup');
   const localBin = path.join(fixture.home, '.local/bin');
-  const entrypoint = path.join(config, 'backup-console-control.js');
+  const release = path.join(fixture.home, '.local/share/codexia-backup/current');
+  const entrypoint = path.join(release, 'app/node_modules/@codexia/api/dist/backup-console-control.js');
   const settings = path.join(config, 'executor.env');
   const runId = '1485f702-eb68-4854-979d-fad9fd12d90d';
   const digest = 'a'.repeat(64);
   await mkdir(config, { recursive: true, mode: 0o700 });
   await mkdir(localBin, { recursive: true });
   await symlink(backupRunner, path.join(localBin, 'codexia-backup-runner'));
-  await symlink(process.execPath, path.join(fixture.bin, 'node'));
+  const nodeBin = path.join(fixture.home, '.local/share/codexia-backup/current/bin');
+  await mkdir(nodeBin, { recursive: true });
+  await symlink(process.execPath, path.join(nodeBin, 'node'));
+  await mkdir(path.dirname(entrypoint), { recursive: true });
   await writeFile(entrypoint, 'throw new Error("Unexpected control command");\n');
   await writeFile(settings, [
-    'CODEXIA_BACKUP_EXECUTOR_ENTRYPOINT=' + entrypoint,
     'CODEXIA_BACKUP_DESTINATION=' + fixture.backupDestination,
     'CODEXIA_BACKUP_AGE_RECIPIENT=age1private',
   ].join('\n') + '\n', { mode: 0o600 });
@@ -163,7 +166,10 @@ test('the protected run shares the deploy lock and recovers both services after 
   const localBin = path.join(fixture.home, '.local/bin');
   const launcher = path.join(fixture.bin, 'run-backup-fixture');
   await mkdir(localBin, { recursive: true });
-  await symlink(process.execPath, path.join(fixture.bin, 'node'));
+  await writeFile(path.join(fixture.stateDir, 'deployed-release.json'), JSON.stringify({
+    image: 'ghcr.io/yohn-jp/codexia-backend@' + digest,
+    identity: { format: 'codexia-backend-identity/v1', profile: 'full', sourceSha: source },
+  }), { mode: 0o600 });
   await Promise.all(['trace', 'api', 'tunnel'].map(name => writeFile(path.join(fixture.directory, name), '')));
   const scripts = {
     [launcher]: [
@@ -180,7 +186,7 @@ test('the protected run shares the deploy lock and recovers both services after 
     [path.join(fixture.bin, 'podman')]: [
       'case "$*" in',
       '*update-identity.json) echo \'{"format":"codexia-backend-identity/v1","profile":"full","sourceSha":"' + source + '"}\';;',
-      '*ImageName*) echo ghcr.io/yohn-jp/codexia-backend@' + digest + ';;',
+      '*{{.Id}}*|*{{.Image}}*) echo ' + digest + ';;',
       '*Health.Status*) [[ -f "$FIXTURE/api" ]] && echo healthy;;',
       '*) exit 4;; esac',
     ],
@@ -355,7 +361,7 @@ test('encrypted backup verification accepts read-only artifacts without weakenin
     assert.match(verified.stdout, /^[a-f0-9]{64}\n$/u);
     const independent = () => spawnSync('bash', [
       backupProgram, 'validate-independent-artifact', fixture.backupDestination, archive,
-    ], { encoding: 'utf8', env: { ...process.env, PATH: fixture.bin + ':' + process.env.PATH } });
+    ], { encoding: 'utf8', env: { PATH: fixture.bin + ':/usr/bin:/bin', LANG: 'C.UTF-8' } });
     const onRemoteMount = independent();
     assert.equal(onRemoteMount.status, 0, onRemoteMount.stderr);
     assert.equal(onRemoteMount.stdout, verified.stdout);
