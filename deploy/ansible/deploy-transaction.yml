@@ -801,13 +801,14 @@
         echo 'Could not commit the successful deployment record; previous Quadlet was restored' >&2
         exit 1
       fi
-      if ! node - "$transaction_intent" <<'NODE'
+      if ! node - "$transaction_intent" "$candidate_image" "$auth_settings_digest" <<'NODE'
       const fs = require('node:fs');
-      const target = process.argv[2];
+      const [target, candidateImage, authSettingsSha256] = process.argv.slice(2);
       const value = JSON.parse(fs.readFileSync(target, 'utf8'));
       if (value.format !== 'codexia-deploy-transaction/v1' || value.phase !== 'pending') process.exit(2);
       const temporary = `${target}.tmp`;
-      fs.writeFileSync(temporary, JSON.stringify({...value, phase: 'committed'}) + '\n', {mode: 0o600, flag: 'wx'});
+      fs.writeFileSync(temporary, JSON.stringify({...value, phase: 'committed', candidateImage, authSettingsSha256}) + '\n',
+        {mode: 0o600, flag: 'wx'});
       fs.renameSync(temporary, target);
       NODE
       then
