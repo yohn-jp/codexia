@@ -21,8 +21,6 @@
     "@codexia/persistence-contracts": "workspace:*",
     "@headless-tree/core": "1.8.0",
     "@headless-tree/react": "1.8.0",
-    "@radix-ui/react-separator": "1.2.0",
-    "@radix-ui/react-tabs": "1.2.1",
     "@xstate/react": "6.1.0",
     "better-auth": "catalog:production",
     "oauth4webapi": "3.8.9",

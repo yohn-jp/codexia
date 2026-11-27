@@ -46,21 +46,6 @@ globalStyle('.st-desktop-shell .st-desktop-controls', {
   borderTop: '1px solid var(--line)',
   background: 'var(--surface-subtle)',
 });
-globalStyle('.st-desktop-shell .st-desktop-workbench-label', {
-  color: 'var(--muted)',
-  fontSize: '0.7rem',
-  fontWeight: '700',
-  letterSpacing: '0.14em',
-});
-globalStyle('.st-desktop-shell .st-desktop-workbench-label::before', {
-  display: 'inline-block',
-  width: '1.1rem',
-  height: '1px',
-  marginRight: '0.6rem',
-  background: 'var(--accent)',
-  verticalAlign: 'middle',
-  content: '""',
-});
 globalStyle('.st-desktop-shell .st-desktop-switch', {
   minHeight: '1.95rem',
   borderColor: 'var(--input-border)',
@@ -70,44 +55,6 @@ globalStyle('.st-desktop-shell .st-desktop-switch', {
 });
 globalStyle('.st-desktop-shell .application-status', { display: 'grid', gap: '0.3rem', minWidth: '0' });
 globalStyle('.st-desktop-shell .topbar-status', { fontSize: '0.8rem', whiteSpace: 'normal', overflowWrap: 'anywhere' });
-globalStyle('.st-desktop-shell .st-desktop-workbench', { background: 'var(--st-canvas)' });
-globalStyle('.st-desktop-shell .st-desktop-navigation', {
-  color: 'var(--st-rail-ink)',
-  background: 'var(--st-rail)',
-  vars: {
-    '--ink': 'var(--st-rail-ink)',
-    '--muted': 'var(--st-rail-muted)',
-    '--line': 'var(--st-rail-edge)',
-    '--paper': 'var(--st-rail)',
-    '--sidebar-bg': 'var(--st-rail)',
-    '--toolbar-bg': 'var(--st-rail)',
-    '--surface-selected': 'var(--st-rail-selected)',
-  },
-});
-globalStyle('.st-desktop-shell .st-desktop-panel-tabs', {
-  gap: '0.3rem',
-  padding: '0.75rem 0.8rem 0',
-  borderBottom: '1px solid var(--st-rail-edge)',
-  background: 'var(--st-rail)',
-});
-globalStyle('.st-desktop-shell .st-desktop-panel-tab', {
-  minHeight: '2.75rem',
-  padding: '0.45rem 0.7rem 0.7rem',
-  borderColor: 'transparent',
-  borderBottom: '2px solid transparent',
-  color: 'var(--st-rail-muted)',
-  background: 'transparent',
-  fontSize: '0.79rem',
-  letterSpacing: '0.025em',
-});
-globalStyle('.st-desktop-shell .st-desktop-panel-tab:hover', { color: 'var(--st-rail-ink)', background: 'var(--surface-hover)' });
-globalStyle('.st-desktop-shell .st-desktop-panel-tab[data-state="active"]', {
-  borderBottomColor: 'var(--surface-selected-border)',
-  color: 'var(--st-rail-ink)',
-  background: 'transparent',
-});
-globalStyle('.st-desktop-shell .st-desktop-slot', { padding: '1.25rem 1rem 2.25rem' });
-globalStyle('.st-desktop-shell .st-desktop-library-slot,\n.st-desktop-shell .st-desktop-tools-slot', { background: 'var(--st-rail)' });
 globalStyle('.st-desktop-shell .sidebar', { padding: '0', border: '0', background: 'transparent' });
 globalStyle('.st-desktop-shell .sidebar h2,\n.st-desktop-shell .tree-volume h3,\n.st-desktop-shell .shared-tools h2', {
   color: 'var(--st-rail-ink)',
@@ -122,7 +69,6 @@ globalStyle(
 globalStyle('.st-desktop-shell .project-form', { paddingTop: '0' });
 globalStyle('.st-desktop-shell .project-form label', { color: 'var(--st-rail-muted)' });
 globalStyle('.st-desktop-shell .project-form input', { borderRadius: '0.5rem' });
-globalStyle('.st-desktop-shell .st-desktop-navigation .danger-button', { color: '#fffefa' });
 globalStyle('.st-desktop-shell .project-button,\n.st-desktop-shell .scene-button', {
   minHeight: '2.75rem',
   padding: '0.65rem 0.8rem',
@@ -142,17 +88,6 @@ globalStyle('.st-desktop-shell .tree-volume', { margin: '0.9rem 0', paddingLeft:
 globalStyle('.st-desktop-shell .tree summary', { color: 'var(--st-rail-ink)', fontSize: '0.84rem' });
 globalStyle('.st-desktop-shell .scene-list', { paddingLeft: '0.2rem' });
 globalStyle('.st-desktop-shell .continue-list li', { padding: '0.45rem 0' });
-globalStyle('.st-desktop-shell .st-desktop-resize-handle', {
-  width: '0.4rem',
-  minWidth: '0.4rem',
-  flexBasis: '0.4rem',
-  background: 'var(--st-canvas)',
-});
-globalStyle('.st-desktop-shell .st-desktop-resize-line', { background: 'var(--st-folio-edge)' });
-globalStyle('.st-desktop-shell .st-desktop-editor-slot', {
-  padding: 'clamp(1.3rem, 2.5vw, 2.7rem) clamp(1.3rem, 3.5vw, 4rem) 4rem',
-  background: 'var(--st-canvas)',
-});
 globalStyle('.st-desktop-shell .editor', { maxWidth: '92rem' });
 globalStyle('.st-desktop-shell .editor-header', {
   alignItems: 'center',
@@ -288,24 +223,15 @@ globalStyle('.st-desktop-shell .brand', { '@media': { '(max-width: 680px)': { fo
 globalStyle('.st-desktop-shell .brand::before', {
   '@media': { '(max-width: 680px)': { width: '1.7rem', height: '1.7rem', fontSize: '1rem' } },
 });
-globalStyle('.st-desktop-shell .st-desktop-editor-slot', { '@media': { '(max-width: 680px)': { padding: '1rem 0.75rem 2rem' } } });
-globalStyle('.st-desktop-shell .st-desktop-panel-tabs', { '@media': { '(max-width: 680px)': { paddingInline: '0.3rem' } } });
-globalStyle('.st-desktop-shell .st-desktop-panel-tab', {
-  '@media': { '(max-width: 680px)': { paddingInline: '0.35rem', fontSize: '0.71rem' } },
-});
-globalStyle('.st-desktop-shell .st-desktop-slot', { '@media': { '(max-width: 680px)': { padding: '0.65rem' } } });
 globalStyle('.st-desktop-shell *', {
   '@media': { '(prefers-reduced-motion: reduce)': { scrollBehavior: 'auto !important' as unknown as CSSProperties['scrollBehavior'] } },
 });
-globalStyle(
-  '.st-desktop-shell,\n  .st-desktop-shell .st-desktop-workbench,\n  .st-desktop-shell .st-desktop-editor-panel,\n  .st-desktop-shell .st-desktop-editor-slot',
-  { '@media': { print: { height: 'auto !important', overflow: 'visible !important', background: 'white !important' } } },
-);
-globalStyle(
-  '.st-desktop-shell .st-desktop-chrome,\n  .st-desktop-shell .st-desktop-status,\n  .st-desktop-shell .st-desktop-navigation-panel,\n  .st-desktop-shell .st-desktop-resize-handle',
-  { '@media': { print: { display: 'none !important' } } },
-);
-globalStyle('.st-desktop-shell .st-desktop-editor-slot', { '@media': { print: { padding: '0 !important' } } });
+globalStyle('.st-desktop-shell', {
+  '@media': { print: { height: 'auto !important', overflow: 'visible !important', background: 'white !important' } },
+});
+globalStyle('.st-desktop-shell .st-desktop-chrome,\n  .st-desktop-shell .st-desktop-status', {
+  '@media': { print: { display: 'none !important' } },
+});
 globalStyle('.st-desktop-shell .manuscript-column', {
   '@media': { print: { border: '0', boxShadow: 'none' } },
 });

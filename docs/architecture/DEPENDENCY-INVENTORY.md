@@ -76,8 +76,6 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@codemirror/view` | `^6.43.15` | app・編集画面 | **要検証** |
 | `@headless-tree/core` | `1.8.0` | app・アウトライン | **連動**: Reactアダプターと一緒に更新 |
 | `@headless-tree/react` | `1.8.0` | app・アウトライン | **連動**: coreと一緒に更新 |
-| `@radix-ui/react-separator` | `1.2.0` | app・UI | **要検証** |
-| `@radix-ui/react-tabs` | `1.2.1` | app・UI | **要検証** |
 | `@xstate/react` | `6.1.0` | app・保存／復旧、Native ChangeSet review、本人認証管理のactorとReact 19の接続 | **連動**: React peerは19を含み、XState `^5.28.0`と互換。各機能の統合を併せて検証 |
 | `xstate` | `5.33.4` | app・保存／復旧、Native ChangeSet review、本人認証管理の状態機械とasync actor | **連動**: v5 stable。公式React adapter 6.1.0とReact 19のpeer整合を検証 |
 | `@vitejs/plugin-react` | `^6.3.0` | app・フロントビルド | **要検証**: Vite・Reactビルドとの互換性を一緒に確認 |
