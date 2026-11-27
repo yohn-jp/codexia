@@ -121,6 +121,7 @@ Cloudflare Worker Static Assetsは画面を配信し、API、MCP、OAuth metadat
 | `GET /api/v1/persistence/projects/:p` | ownerのproject IDを確認 |
 | `PATCH /api/v1/persistence/projects/:p` | expectedVersionとname/settingsの検証 |
 | `GET /api/v1/persistence/projects/:p/archive` | 固定snapshotの現在状態をexport |
+| `GET /api/v1/persistence/projects/:p/open-export`（設計対象） | 実行枠の取得前に作品へのアクセスを確認し、固定スナップショットから完全な ZIP を取得する。送信前に認証と作品へのアクセスを再確認する。[離脱用 ZIP の実装契約](OPEN-WORK-EXPORT-CONTRACT.md) |
 | `GET /api/v1/persistence/projects/:p/documents` | 同じprojectの親/並びと取得上限 |
 | `POST /api/v1/persistence/projects/:p/documents` | 親とpath、idempotency、本文の新規Revision |
 | `GET /api/v1/persistence/projects/:p/documents/:d` | document/revisionが当該projectに属する |
