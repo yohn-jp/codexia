@@ -1,14 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { createServer as createHttpServer } from 'node:http';
 import { request as nodeHttpsRequest } from 'node:https';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { getCACertificates, setDefaultCACertificates } from 'node:tls';
-import { setTimeout as deadline } from 'node:timers/promises';
 import { assertDisposableAuthFixtureDatabaseUrl, startBetterAuthFixture } from './fixtures/better-auth-server.js';
 
 async function apiRequest(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
@@ -52,41 +50,6 @@ async function apiRequest(input: RequestInfo | URL, init: RequestInit = {}): Pro
     request.end();
   });
 }
-
-test('Better Auth fixture teardown closes an active proxied response when the backend stops', async () => {
-  const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
-  assert.ok(databaseUrl, 'CODEXIA_AUTH_TEST_DATABASE_URL must name an explicitly disposable PostgreSQL auth database');
-  const fixture = await startBetterAuthFixture({
-    databaseUrl,
-    createApiServer: () => {
-      const server = createHttpServer((_, response) => {
-        response.writeHead(200, { 'content-type': 'text/event-stream' });
-        response.write('data: fixture-ready\n\n');
-      });
-      const close = server.close.bind(server);
-      server.close = callback => {
-        close(callback);
-        server.closeAllConnections();
-        return server;
-      };
-      return server;
-    },
-  });
-  const request = new AbortController();
-  let closing: Promise<void> | undefined;
-  try {
-    const response = await fetch(fixture.apiOrigin, { signal: request.signal });
-    assert.equal(response.status, 200);
-    const chunk = await response.body?.getReader().read();
-    assert.equal(new TextDecoder().decode(chunk?.value), 'data: fixture-ready\n\n');
-    closing = fixture.close();
-    assert.equal(await Promise.race([closing.then(() => true), deadline(2_000, false, { ref: false })]), true,
-      'fixture teardown waited for a client that had not yet been disposed');
-  } finally {
-    request.abort();
-    await (closing ?? fixture.close());
-  }
-});
 
 test('Better Auth PKCE MCP client lists and invokes tools through central OAuth admission', async t => {
   const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
@@ -868,5 +831,45 @@ test('Better Auth PKCE MCP client lists and invokes tools through central OAuth 
   } finally {
     if (previousWindow === undefined) delete (globalThis as unknown as { window?: unknown }).window;
     else (globalThis as unknown as { window: unknown }).window = previousWindow;
+  }
+});
+
+test('Better Auth fixture teardown closes an active proxied response when the backend stops', async () => {
+  const { createServer: createHttpServer } = await import('node:http');
+  const { setTimeout: deadline } = await import('node:timers/promises');
+  const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
+  assert.ok(databaseUrl, 'CODEXIA_AUTH_TEST_DATABASE_URL must name an explicitly disposable PostgreSQL auth database');
+  const fixture = await startBetterAuthFixture({
+    databaseUrl,
+    createApiServer: () => {
+      const server = createHttpServer((_, response) => {
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.write('data: fixture-ready\n\n');
+      });
+      const close = server.close.bind(server);
+      server.close = callback => {
+        close(callback);
+        server.closeAllConnections();
+        return server;
+      };
+      return server;
+    },
+  });
+  const request = new AbortController();
+  let closing: Promise<void> | undefined;
+  try {
+    const response = await fetch(fixture.apiOrigin, { signal: request.signal });
+    assert.equal(response.status, 200);
+    const chunk = await response.body?.getReader().read();
+    assert.equal(new TextDecoder().decode(chunk?.value), 'data: fixture-ready\n\n');
+    closing = fixture.close();
+    assert.equal(
+      await Promise.race([closing.then(() => true), deadline(2_000, false, { ref: false })]),
+      true,
+      'fixture teardown waited for a client that had not yet been disposed',
+    );
+  } finally {
+    request.abort();
+    await (closing ?? fixture.close());
   }
 });
