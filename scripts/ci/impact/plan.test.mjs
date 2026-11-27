@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { matchesGlob } from 'node:path';
@@ -7,7 +6,7 @@ import { test } from 'node:test';
 import { componentReleaseAffected } from '../../release/components/impact.mjs';
 import { PROFILES, VERIFICATION_TASKS } from './contract.mjs';
 import {
-  isRequirementsTraceInput, isTaskInputDocument, REQUIREMENTS_TRACE_DOCUMENTS, REQUIREMENTS_TRACE_SURFACE_FILES,
+  isTaskInputDocument,
   UX_PROJECTION_DOCUMENTS,
 } from '../evidence/task-inputs.mjs';
 import { isTraceTestSource } from '../../strictdoc/test-source-path.mjs';
@@ -171,42 +170,43 @@ test('official conformance fixtures select their own task and share the DB lane'
   assert.ok((await plan(['modules/mcp/src/stdio.ts'])).tasks.includes('mcp-conformance'));
 });
 
-test('audit Pages previews run when requirements authorities or receipt inputs change', () => {
-  const repository = new URL('../../../', import.meta.url);
-  const workflow = parse(readFileSync(new URL('.github/workflows/repository-audit.yml', repository), 'utf8'));
+test('audit Pages PR previews are scoped to Pages-owned inputs; main still publishes', () => {
+  const workflow = parse(readFileSync(new URL('../../../.github/workflows/repository-audit.yml', import.meta.url), 'utf8'));
   const paths = workflow.on.pull_request.paths;
-  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repository, encoding: 'utf8' }).split('\0');
-  const traceInputs = new Set([
-    ...REQUIREMENTS_TRACE_DOCUMENTS,
-    ...REQUIREMENTS_TRACE_SURFACE_FILES,
-    ...tracked.filter(file => isRequirementsTraceInput(file) ||
-      /^\.github\/workflows\/.*\.ya?ml$/u.test(file) ||
-      /^packages\/persistence-postgres\/migrations\/.*\.sql$/u.test(file)),
-    '.gitignore',
-    '.graphifyignore',
-    'app/package.json',
-    'docs/architecture/MCP-V2-MIGRATION.md',
+  assert.deepEqual(workflow.on.push.branches, ['main']);
+  assert.ok(Object.hasOwn(workflow.on, 'workflow_dispatch'));
+  for (const file of [
+    'scripts/audit/portal.mjs',
+    'scripts/strictdoc/verify.mjs',
+    'docs/requirements/REQUIREMENT-REGISTER.md',
+    'docs/architecture/likec4/codexia.c4',
+    'scripts/graphify-pages/pack.mjs',
+    'scripts/architecture-diagrams/pack.mjs',
+    'scripts/pages-ui/navigation.mjs',
+    'scripts/pages-api/pack.mjs',
+    'scripts/ux-simulator/generate.mjs',
+    'scripts/ci/dashboard/collect.mjs',
+    'scripts/verification/artifacts/pages-smoke.mjs',
     'scripts/ci/evidence/trace-receipt.mjs',
-    'scripts/ci/evidence/trace-receipt.test.mjs',
-    'scripts/ci/evidence/artifact-selection.mjs',
-    'scripts/ci/evidence/download-artifacts.mjs',
-    'scripts/ci/evidence/github-rest-sdk.mjs',
-    'scripts/ci/evidence/job-name.mjs',
-    'scripts/ci/browser/coverage-reporter.mjs',
-    'scripts/ci/browser/image-digests.mjs',
-    'scripts/ci/browser/shards.mjs',
-    'scripts/github/octokit.mjs',
-    'scripts/github/paginate-actions.mjs',
-    'scripts/shared/read-regular-file.mjs',
-    'packages/persistence-postgres/tests/db-contract/toolchain.json',
-    'packages/persistence-postgres/migrations/new-migration.sql',
-    '.github/workflows/new-workflow.yaml',
-    'scripts/new-domain/test.cjs',
-    'scripts/new-domain/feature-spec-contract.ts',
-    'scripts/new-domain/feature.browser.mjs',
-  ]);
-  assert.deepEqual([...traceInputs].filter(file => !matchesWorkflowPaths(paths, [file])).sort(), []);
-  assert.equal(matchesWorkflowPaths(paths, ['docs/README.md', 'docs/design/roadmap.test.md', 'scripts/performance/k6.mjs']), false);
+    '.github/workflows/repository-audit.yml',
+    'docs/design/DEVELOPMENT-PAGES-UX.md',
+  ]) assert.equal(matchesWorkflowPaths(paths, [file]), true, file);
+  for (const file of [
+    'app/src/entries/desktop.tsx',
+    'modules/mcp/src/tools.ts',
+    'packages/api/src/server.ts',
+    'packages/http-contract/src/contract.tsp',
+    'deploy/ansible/deploy.yml',
+    '.github/workflows/verify.yml',
+    '.github/workflows/push-app-lifecycle.yml',
+    'scripts/ci/impact/plan.mjs',
+    'docs/architecture/MCP-V2-MIGRATION.md',
+    'docs/verification/CI-CD.md',
+    'ios/CodexiaApp/Sources/Root.swift',
+  ]) assert.equal(matchesWorkflowPaths(paths, [file]), false, file);
+  assert.equal(matchesWorkflowPaths(paths, [
+    'packages/api/src/server.ts', 'scripts/pages-api/pack.mjs',
+  ]), true, 'mixed PR must retain Pages-owned admission');
 });
 
 test('MCP v2 migration edits select exact-source Verify trace proof', async () => {
