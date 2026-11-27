@@ -4,8 +4,9 @@ import {
   readBackupAction,
   readConfigOperation,
   submitBackupAction,
-  useBackupMutation,
+  backupObservation,
   useBackupRead,
+  useBackupWorkflow,
 } from './backup-actions';
 import { backupConsoleClient } from './backup-client';
 import * as styles from './backup-console.css';
@@ -21,7 +22,6 @@ import {
 } from './backup-view';
 
 export function BackupOverview({ href, onReauthenticate }: { href: BackupHref; onReauthenticate: () => void }) {
-  const mutation = useBackupMutation();
   const load = useCallback(async (signal: AbortSignal) => {
     const [status, config] = await Promise.all([backupConsoleClient.status(undefined, signal), backupConsoleClient.config(signal)]);
     const disable = readBackupAction('disable');
@@ -36,7 +36,7 @@ export function BackupOverview({ href, onReauthenticate }: { href: BackupHref; o
       manual
         ? (manual.resultId
             ? backupConsoleClient.run(manual.resultId, signal)
-            : backupConsoleClient.runs(undefined, signal).then(page => page.runs.find(run => run.requestId === manual.requestId) ?? null)
+            : backupConsoleClient.status(manual.requestId, signal).then(receipt => receipt.run)
           ).then(
             value => ({ value: value?.requestId === manual.requestId ? value : null, error: null }),
             error => ({ value: null, error }),
@@ -54,16 +54,21 @@ export function BackupOverview({ href, onReauthenticate }: { href: BackupHref; o
   const runInProgress =
     recordedRun && (recordedRun.status === 'QUEUED' || recordedRun.status === 'RUNNING' || recordedRun.status === 'UNKNOWN');
   const operation = data?.disableResult?.value;
+  const mutation = useBackupWorkflow(read, [
+    backupObservation(manual, recordedRun, data?.manualResult?.error),
+    backupObservation(data?.disable, operation, data?.disableResult?.error),
+  ]);
   const disableUnavailable = operation?.status === 'QUEUED' || operation?.status === 'RUNNING';
-  const retryDisable = data?.disable?.kind === 'disable' && !operation;
+  const retryDisable = data?.disable?.kind === 'disable' && !operation && mutation.canStart('disable', data.disable);
 
   function requestRun(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const id = String(new FormData(event.currentTarget).get('window') ?? '').trim();
-    if ((!active && !unresolvedRun) || runInProgress || !/^[A-Za-z0-9_-]{1,64}$/u.test(id)) return;
-    mutation.submit(async () => {
+    if ((!active && !unresolvedRun) || runInProgress || !/^[A-Za-z0-9_-]{1,64}$/u.test(id) || !mutation.canStart('manual', manual)) return;
+    const action = unresolvedRun ? manual : beginBackupAction({ kind: 'manual', maintenanceWindowId: id });
+    void mutation.submit(action, async () => {
       try {
-        const saved = await submitBackupAction(unresolvedRun ? manual : beginBackupAction({ kind: 'manual', maintenanceWindowId: id }));
+        const saved = await submitBackupAction(action);
         if (saved.resultId) window.location.assign(backupQuery(href, 'history', { run: saved.resultId }));
       } finally {
         refresh();
@@ -73,11 +78,12 @@ export function BackupOverview({ href, onReauthenticate }: { href: BackupHref; o
 
   function requestDisable(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if ((!active && !retryDisable) || disableUnavailable) return;
-    mutation.submit(async () => {
+    if ((!active && !retryDisable) || disableUnavailable || !mutation.canStart('disable', data?.disable)) return;
+    const action = retryDisable ? data.disable : active ? beginBackupAction({ kind: 'disable', revision: active.revision }) : null;
+    if (!action) return;
+    void mutation.submit(action, async () => {
       try {
-        const action = retryDisable ? data.disable : active ? beginBackupAction({ kind: 'disable', revision: active.revision }) : null;
-        if (action) await submitBackupAction(action);
+        await submitBackupAction(action);
       } finally {
         refresh();
       }
@@ -180,7 +186,7 @@ export function BackupOverview({ href, onReauthenticate }: { href: BackupHref; o
                   <input className={styles.checkInput} name="confirmed" type="checkbox" required /> 一時停止の影響を確認した
                 </label>
                 <div>
-                  <button type="submit" disabled={mutation.busy}>
+                  <button type="submit" disabled={!mutation.canStart('manual', manual)}>
                     {unresolvedRun ? '再認証して同じ要求を照合' : 'パスキーで再認証してバックアップを要求'}
                   </button>
                 </div>
@@ -220,7 +226,7 @@ export function BackupOverview({ href, onReauthenticate }: { href: BackupHref; o
                     <input className={styles.checkInput} name="confirmed" type="checkbox" required /> 遠隔保全への影響を確認した
                   </label>
                   <div>
-                    <button type="submit" className="quiet-button" disabled={mutation.busy}>
+                    <button type="submit" className="quiet-button" disabled={!mutation.canStart('disable', data.disable)}>
                       {retryDisable ? '再認証して同じ無効化要求を再送' : 'パスキーで再認証して無効化を要求'}
                     </button>
                   </div>

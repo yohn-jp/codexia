@@ -99,6 +99,7 @@ const status = z.object({
   lastVerifiedOffVmBackup: z.union([run, z.literal('unknown')]),
   restoreDrill: z.union([verifiedPoint, z.literal('unknown')]),
   operation: operation.optional(),
+  run: run.optional(),
 });
 
 const runPage = z.object({ runs: z.array(run), nextCursor: backupId.nullable() });

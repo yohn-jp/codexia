@@ -1,13 +1,13 @@
 import { type FormEvent, useCallback, useState } from 'react';
-import { ApiError } from '../api-error';
 import {
   beginBackupAction,
   readBackupAction,
   readConfigOperation,
   requireFreshBackupOwner,
   submitBackupAction,
-  useBackupMutation,
+  backupObservation,
   useBackupRead,
+  useBackupWorkflow,
 } from './backup-actions';
 import { type BackupConfiguration, type BackupDraftInput, backupConsoleClient } from './backup-client';
 import * as styles from './backup-console.css';
@@ -93,36 +93,37 @@ function DestinationForm({ config, href, onReauthenticate }: Props & { config: B
   const [credentialMode, setCredentialMode] = useState(current?.credentialMode ?? 'operator-role');
   const [latest, setLatest] = useState<BackupConfiguration | null>(null);
   const [revision, setRevision] = useState(config.revision);
-  const mutation = useBackupMutation();
-  const [reviewRequired, setReviewRequired] = useState(false);
+  const mutation = useBackupWorkflow();
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState<unknown>(null);
+  const reviewRequired = ['conflict', 'unknown', 'disconnected'].includes(mutation.state);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (mutation.busy || reviewRequired) return;
+    if (!mutation.canStart('draft') || reviewRequired) return;
     const form = event.currentTarget;
     const body = readDraft(form);
     clearCredentialInputs(form);
     if (!body) return;
-    mutation.submit(async () => {
+    setLatest(null);
+    setReviewError(null);
+    void mutation.submit({ kind: 'draft' }, async () => {
       await requireFreshBackupOwner();
-      try {
-        await backupConsoleClient.saveDraft(body, revision);
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 412) {
-          setLatest(null);
-          setReviewRequired(true);
-        }
-        throw error;
-      }
+      await backupConsoleClient.saveDraft(body, revision);
       window.location.assign(href('/console/backups/verification'));
     });
   }
 
-  function reviewLatest() {
-    mutation.submit(async () => {
-      const updated = await backupConsoleClient.config();
-      setLatest(updated);
-    });
+  async function reviewLatest() {
+    setReviewLoading(true);
+    setReviewError(null);
+    try {
+      setLatest(await backupConsoleClient.config());
+    } catch (error) {
+      setReviewError(error);
+    } finally {
+      setReviewLoading(false);
+    }
   }
 
   const retention = current?.retentionRequest;
@@ -146,8 +147,8 @@ function DestinationForm({ config, href, onReauthenticate }: Props & { config: B
             type="button"
             onClick={() => {
               setRevision(latest.revision);
-              setReviewRequired(false);
-              mutation.reset();
+              mutation.reviewCurrent();
+              setReviewError(null);
             }}
           >
             このリビジョンに対して入力を使う
@@ -306,17 +307,17 @@ function DestinationForm({ config, href, onReauthenticate }: Props & { config: B
           </label>
         </fieldset>
         <div className="codexia-console__actions">
-          <button type="submit" disabled={mutation.busy || reviewRequired}>
+          <button type="submit" disabled={!mutation.canStart('draft') || reviewRequired || reviewLoading}>
             パスキーで再認証して設定案を保存
           </button>
           {reviewRequired && (
-            <button className="quiet-button" type="button" onClick={reviewLatest}>
+            <button className="quiet-button" type="button" onClick={() => void reviewLatest()} disabled={reviewLoading}>
               最新のリビジョンを確認
             </button>
           )}
         </div>
       </form>
-      <BackupFeedback error={mutation.error} busy={mutation.busy} onReauthenticate={onReauthenticate} />
+      <BackupFeedback error={reviewError ?? mutation.error} busy={mutation.busy || reviewLoading} onReauthenticate={onReauthenticate} />
     </>
   );
 }
@@ -328,7 +329,6 @@ const retentionLabel = (value: unknown, unit: string, absent: string) => (typeof
 const pending = (status: string) => status === 'QUEUED' || status === 'RUNNING';
 
 export function BackupVerification({ href, onReauthenticate }: Props) {
-  const mutation = useBackupMutation();
   const load = useCallback(async (signal: AbortSignal) => {
     const config = await backupConsoleClient.config(signal);
     const check = async (kind: 'probe' | 'activate') => {
@@ -349,23 +349,28 @@ export function BackupVerification({ href, onReauthenticate }: Props) {
   const draft = data?.config.draft;
   const probe = data?.probe.value;
   const operation = data?.activate.value;
+  const mutation = useBackupWorkflow(read, [
+    backupObservation(data?.activate.action, operation, data?.activate.error),
+    backupObservation(data?.probe.action, probe, data?.probe.error),
+  ]);
   const current = draft && data?.config.active?.revision === draft.revision;
   const verifying = data?.probe.action && (!probe || pending(probe.status));
   const applying = data?.activate.action && (!operation || pending(operation.status));
 
   function request(kind: 'probe' | 'activate') {
     if (!draft) return;
-    mutation.submit(async () => {
-      const prior = kind === 'probe' ? data?.probe : data?.activate;
-      const action =
-        prior?.action && !prior.value
-          ? prior.action
-          : kind === 'probe'
-            ? beginBackupAction({ kind, revision: draft.revision })
-            : probe
-              ? beginBackupAction({ kind, revision: draft.revision, probeId: probe.operationId })
-              : null;
-      if (!action) return;
+    const prior = kind === 'probe' ? data?.probe : data?.activate;
+    if (!mutation.canStart(kind, prior?.action)) return;
+    const action =
+      prior?.action && !prior.value
+        ? prior.action
+        : kind === 'probe'
+          ? beginBackupAction({ kind, revision: draft.revision })
+          : probe
+            ? beginBackupAction({ kind, revision: draft.revision, probeId: probe.operationId })
+            : null;
+    if (!action) return;
+    void mutation.submit(action, async () => {
       try {
         await submitBackupAction(action);
       } finally {
@@ -439,7 +444,7 @@ export function BackupVerification({ href, onReauthenticate }: Props) {
               <button
                 type="button"
                 onClick={() => request('probe')}
-                disabled={mutation.busy || Boolean(probe && pending(probe.status)) || Boolean(applying)}
+                disabled={!mutation.canStart('probe', data?.probe.action) || Boolean(probe && pending(probe.status)) || Boolean(applying)}
               >
                 {verifying && !probe ? '同じ接続検証要求を再送' : '接続検証を要求'}
               </button>
@@ -456,7 +461,10 @@ export function BackupVerification({ href, onReauthenticate }: Props) {
                   <label className={styles.check}>
                     <input className={styles.checkInput} type="checkbox" required /> この設定案を有効化する
                   </label>
-                  <button type="submit" disabled={mutation.busy || Boolean(operation && pending(operation.status))}>
+                  <button
+                    type="submit"
+                    disabled={!mutation.canStart('activate', data?.activate.action) || Boolean(operation && pending(operation.status))}
+                  >
                     {applying && !operation ? '再認証して同じ有効化要求を再送' : 'パスキーで再認証して有効化を要求'}
                   </button>
                 </form>

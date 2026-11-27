@@ -1,10 +1,10 @@
 import { useActorRef, useSelector } from '@xstate/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { assign, fromPromise, setup } from 'xstate';
 import { z } from 'zod';
 import { ApiError } from '../api-error';
 import { authClient } from '../auth-client';
 import { type BackupOperation, backupConsoleClient, backupId } from './backup-client';
+import { backupWorkflowMachine, isBackupConnectionError, type BackupCommand, type BackupObservation } from './backup-workflow';
 import { checkOwnerSession, type OwnerSessionState } from './console-session';
 
 const requestIdentity = z.object({
@@ -40,9 +40,7 @@ function writeBackupAction(action: PendingBackupAction) {
 }
 
 export function beginBackupAction(input: Input<PendingBackupAction>) {
-  const action: PendingBackupAction = { ...input, requestId: crypto.randomUUID() };
-  writeBackupAction(action);
-  return action;
+  return { ...input, requestId: crypto.randomUUID() } satisfies PendingBackupAction;
 }
 
 export class BackupPasskeyError extends Error {
@@ -106,6 +104,7 @@ export async function readConfigOperation(action: PendingBackupAction, signal?: 
 
 /** Remember only identities needed for reconciliation before any write can leave the browser. */
 export async function submitBackupAction(action: PendingBackupAction) {
+  writeBackupAction(action);
   if (action.kind !== 'probe') await requireFreshBackupOwner();
   let resultId: string;
   try {
@@ -134,54 +133,65 @@ export async function submitBackupAction(action: PendingBackupAction) {
   return accepted;
 }
 
-type Task = () => Promise<void>;
-const mutationMachine = setup({
-  types: {
-    context: {} as { task: Task | null; error: unknown },
-    events: {} as { type: 'SUBMIT'; task: Task } | { type: 'RESET' },
-  },
-  actors: { mutate: fromPromise<void, Task>(({ input }) => input()) },
-}).createMachine({
-  context: { task: null, error: null },
-  initial: 'ready',
-  states: {
-    ready: {},
-    submitting: {
-      invoke: {
-        src: 'mutate',
-        input: ({ context }) => context.task!,
-        onDone: { target: 'ready', actions: assign({ task: null }) },
-        onError: { target: 'failed', actions: assign({ task: null, error: ({ event }) => event.error }) },
-      },
-    },
-    failed: {},
-  },
-  on: {
-    SUBMIT: {
-      guard: ({ context }) => context.task === null,
-      target: '.submitting',
-      actions: assign({ task: ({ event }) => event.task, error: null }),
-    },
-    RESET: {
-      guard: ({ context }) => context.task === null,
-      target: '.ready',
-      actions: assign({ error: null }),
-    },
-  },
-});
+type ReadState<T> = { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error'; error: unknown };
 
-export function useBackupMutation() {
-  const actor = useActorRef(mutationMachine);
+export function backupObservation(
+  action: PendingBackupAction | null | undefined,
+  result: { status: Exclude<BackupObservation['status'], 'ABSENT' | 'UNREACHABLE'> } | null | undefined,
+  error: unknown,
+): BackupObservation | undefined {
+  if (!action) return undefined;
+  const command = { kind: action.kind, requestId: action.requestId };
+  if (result) return { command, status: result.status };
+  if (error instanceof ApiError && error.status === 404) return { command, status: 'ABSENT' };
+  if (isBackupConnectionError(error)) return { command, status: 'UNREACHABLE' };
+  return undefined;
+}
+
+export function useBackupWorkflow(read?: ReadState<unknown>, observations: readonly (BackupObservation | undefined)[] = []) {
+  const actor = useActorRef(backupWorkflowMachine);
   const current = useSelector(actor, snapshot => snapshot);
+  const tracked = current.context.command;
+  const observation = tracked
+    ? observations.find(
+        item => item && 'requestId' in tracked && tracked.kind === item.command.kind && tracked.requestId === item.command.requestId,
+      )
+    : (observations.find(item => item && ['QUEUED', 'RUNNING', 'UNKNOWN', 'UNREACHABLE', 'ABSENT'].includes(item.status)) ??
+      observations.find(item => item !== undefined));
+  const kind = observation?.command.kind;
+  const requestId = observation?.command.requestId;
+  const status = observation?.status;
+  useEffect(() => {
+    if (read?.state === 'loading') actor.send({ type: 'RECHECK' });
+    if (read?.state === 'error' && isBackupConnectionError(read.error)) actor.send({ type: 'DISCONNECTED' });
+    if (read?.state === 'ready') {
+      if (kind && requestId && status) actor.send({ type: 'OBSERVED', command: { kind, requestId }, status });
+      actor.send({ type: 'CURRENT_READ' });
+    }
+  }, [actor, kind, read, requestId, status]);
+
   return {
     busy: current.matches('submitting'),
     error: current.context.error,
-    submit: (task: Task) => actor.send({ type: 'SUBMIT', task }),
-    reset: () => actor.send({ type: 'RESET' }),
+    state: current.value,
+    canStart: (kind: BackupCommand['kind'], pending?: PendingBackupAction | null) =>
+      current.can({ type: 'START', command: kind === 'draft' ? { kind } : { kind, requestId: pending?.requestId ?? '' } }),
+    reviewCurrent: () => actor.send({ type: 'REVIEW_CURRENT' }),
+    async submit(command: BackupCommand, send: () => Promise<unknown>) {
+      // The draft data, including write-only credentials, stays in the event handler.
+      // The feature actor retains only command identity and server observations.
+      const event = { type: 'START', command } as const;
+      if (!actor.getSnapshot().can(event)) return;
+      actor.send(event);
+      try {
+        await send();
+        actor.send({ type: 'ACKNOWLEDGED' });
+      } catch (error) {
+        actor.send({ type: 'FAILED', error });
+      }
+    },
   };
 }
-
-type ReadState<T> = { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error'; error: unknown };
 
 export function useBackupRead<T>(load: (signal: AbortSignal) => Promise<T>, recheckOnline = true) {
   const [read, setRead] = useState<ReadState<T>>({ state: 'loading' });
