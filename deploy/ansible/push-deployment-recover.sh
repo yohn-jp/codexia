@@ -77,6 +77,7 @@ function reviewedReleaseImage(unitPath, releasePath) {
   if (release.authMode !== 'better-auth' || release.authSettingsSha256 !== digest || release.image !== image) process.exit(2);
   if (value.phase === 'committed' &&
       (release.format !== 'codexia-push-deployment/v1' ||
+        value.candidateImage !== image || value.authSettingsSha256 !== digest ||
         [unitInfo, releaseInfo].some(info => info.uid !== process.getuid() || (info.mode & 0o777) !== 0o600))) process.exit(2);
   return image;
 }

@@ -50,6 +50,10 @@ function fixture({ phase = 'pending', health = 'healthy' } = {}) {
     apiLinkCreated: false,
     tunnelLinkCreated: false,
     releasePresent: true,
+    ...(phase === 'committed' && {
+      candidateImage,
+      authSettingsSha256: candidate.record.authSettingsSha256,
+    }),
   }));
   writeFileSync(path.join(mockBin, 'systemctl'), `#!/bin/sh
 printf "systemctl %s\\n" "$*" >> "$CODEXIA_TEST_LOG"
@@ -330,6 +334,24 @@ test('committed transaction only cleans snapshots and does not switch a healthy 
 test('committed recovery retains its evidence when the live release cannot be reconciled', async t => {
   const cases = {
     'live image is the prior release': ({ env }) => { env.CODEXIA_TEST_RUNNING_IMAGE = env.CODEXIA_TEST_PREVIOUS_IMAGE; },
+    'healthy prior runtime, Quadlet and release record agree': ({ env, stateDir, quadletDir, previous }) => {
+      env.CODEXIA_TEST_RUNNING_IMAGE = env.CODEXIA_TEST_PREVIOUS_IMAGE;
+      writeFileSync(path.join(quadletDir, 'codexia-api.container'), previous.unit);
+      writeFileSync(path.join(stateDir, 'deployed-release.json'), JSON.stringify(previous.record));
+    },
+    'candidate image is running with the prior runtime settings': ({ stateDir, quadletDir, previous, candidate }) => {
+      const unit = previous.unit.replace(previous.record.image, candidate.record.image);
+      writeFileSync(path.join(quadletDir, 'codexia-api.container'), unit);
+      writeFileSync(path.join(stateDir, 'deployed-release.json'), JSON.stringify({
+        ...previous.record, image: candidate.record.image,
+      }));
+    },
+    'the committed intent omits its candidate identity': ({ stateDir }) => {
+      const intentPath = path.join(stateDir, 'deploy-transaction.json');
+      const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
+      delete intent.candidateImage;
+      writeFileSync(intentPath, JSON.stringify(intent));
+    },
     'live image is unhealthy': ({ env }) => { env.CODEXIA_TEST_HEALTH = 'unhealthy'; },
     'API service is inactive': ({ env }) => { env.CODEXIA_TEST_API_ACTIVE = 'false'; },
     'loaded API uses another Quadlet': ({ env, quadletDir }) => { env.CODEXIA_TEST_API_SOURCE_PATH = path.join(quadletDir, 'other.container'); },
