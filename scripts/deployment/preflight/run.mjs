@@ -48,7 +48,7 @@ export function parsePreflightRequest(raw) {
   return request;
 }
 
-export async function readLifecycleHost({ inventory, targetHost, sshDirectory = 'codexia-ssh', recovery = false }) {
+export async function readLifecycleHost({ inventory, targetHost, sshDirectory = 'codexia-ssh', recovery = false, adoption = false }) {
   const scratch = await mkdtemp(join(env.RUNNER_TEMP, 'codexia-lifecycle-'));
   try {
     const pin = (await readFile(join(env.RUNNER_TEMP, sshDirectory, 'known_hosts'), 'utf8')).trimEnd();
@@ -74,6 +74,7 @@ export async function readLifecycleHost({ inventory, targetHost, sshDirectory = 
     await writeFile(vars, JSON.stringify({
       codexia_preflight_observation_file: out, codexia_preflight_auth_schema_query: query,
       codexia_preflight_quadlets: quadlets, codexia_preflight_recovery: recovery,
+       codexia_preflight_adoption: adoption,
     }), { mode: 0o600, flag: 'wx' });
     await run('ansible-playbook', ['-i', inventory,
       'deploy/ansible/preflight-observe.yml', '--extra-vars', '@' + vars], { timeout: 180_000, maxBuffer: 2 * 1024 * 1024 });
@@ -91,6 +92,7 @@ async function hostObservation({ bootstrap = false } = {}) {
     targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST,
     sshDirectory: bootstrap ? 'codexia-bootstrap/ssh' : 'codexia-ssh',
     recovery: !bootstrap && env.CODEXIA_PREFLIGHT_INTENT === 'restore',
+    adoption: !bootstrap && env.CODEXIA_PREFLIGHT_INTENT === 'adopt',
   });
   await writeFile(join(env.RUNNER_TEMP, 'codexia-lifecycle-host.json'),
     JSON.stringify({ ...binding, host, hostPinSha256 }) + '\n', { mode: 0o600, flag: 'wx' });
