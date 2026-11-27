@@ -1,7 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { BackupConsoleExecutor } from "../../packages/api/src/backup-console-executor.js";
+import type { BackupPolicy } from "../../packages/api/src/backup-console-routes.js";
+import { BackupConsoleStore } from "../../packages/api/src/backup-console-store.js";
+import { createServer as createApiServer } from "../../packages/api/src/server.js";
+import {
+  assertDisposableAuthFixtureDatabaseUrl,
+  startBetterAuthFixture,
+  type BetterAuthFixture,
+} from "../../packages/api/test/fixtures/better-auth-server.js";
 
 const desktop = resolve("app/dist/desktop");
 const revision = 7;
@@ -211,5 +221,105 @@ test("Backup Console displays fixture-backed evidence and recovers a lost probe 
     await expect(page.getByRole("button", { name: /本番の復元/u })).toHaveCount(0);
   } finally {
     await new Promise<void>((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose()));
+  }
+});
+
+
+test("Backup Console recovers a dropped probe receipt from real Fastify, Better Auth and PostgreSQL", async ({ page }) => {
+  const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
+  if (!databaseUrl) throw new Error("The Backup Console browser test requires a disposable PostgreSQL database");
+  assertDisposableAuthFixtureDatabaseUrl(databaseUrl);
+  const requireApi = createRequire(new URL("../../packages/api/package.json", import.meta.url));
+  const { Pool } = requireApi("pg") as {
+    Pool: new (options: { connectionString: string; options?: string }) => ConstructorParameters<typeof BackupConsoleStore>[0];
+  };
+  const admin = new Pool({ connectionString: databaseUrl });
+  const apiPool = new Pool({ connectionString: databaseUrl, options: "-c role=codexia_backup_api" });
+  const executorPool = new Pool({ connectionString: databaseUrl, options: "-c role=codexia_backup_executor" });
+  const destination = {
+    provider: "s3-compatible",
+    endpoint: "https://backups.fixture.test",
+    region: "us-east-1",
+    bucket: "codexia-fixture",
+    prefix: "install/backup",
+  } as const;
+  const policy: BackupPolicy = { destinations: [{ ...destination, credentialModes: ["operator-role"] }], maintenanceWindows: [] };
+  const executor = new BackupConsoleExecutor({
+    pool: executorPool,
+    policy,
+    privateKeys: new Map(),
+    operatorCredential: { origin: destination.endpoint, credential: { accessKeyId: "fixture-key-id", secretAccessKey: "fixture-key" } },
+    async probe() { return { state: "PASSED", reason: null }; },
+  });
+  let fixture: BetterAuthFixture | undefined;
+  try {
+    await admin.query(await readFile(new URL("../../deploy/backup/operational-schema.sql", import.meta.url), "utf8"));
+    await executor.processNext();
+    const store = new BackupConsoleStore(apiPool);
+    fixture = await startBetterAuthFixture({
+      databaseUrl,
+      usePostgresPersistence: true,
+      staticDirectory: resolve("app/dist"),
+      createApiServer: options => createApiServer({ ...options, backupConsole: { store, policy } }),
+    });
+    const origin = fixture.apiOrigin;
+    const scope = "/api/console/backups";
+    const verification = origin + "/console/backups/verification";
+    // Production serves the Console through its edge rewrite to the Desktop shell.
+    await page.route(verification, async route => route.fulfill({ response: await route.fetch({ url: origin + "/desktop/" }) }));
+    expect((await page.request.get(origin + scope + "/status")).status()).toBe(401);
+    await page.context().addCookies(fixture.ownerSessionCookie().split("; ").map(cookie => {
+      const equals = cookie.indexOf("=");
+      return { name: cookie.slice(0, equals), value: cookie.slice(equals + 1), url: origin };
+    }));
+    const draft = await page.request.put(origin + scope + "/config/draft", {
+      headers: { Origin: origin, "If-Match": '"0"', "X-Codexia-CSRF": "1" },
+      data: { ...destination, credentialMode: "operator-role", offVmPolicy: "secondary" },
+    });
+    expect(draft.status(), await draft.text()).toBe(200);
+
+    const posted: { requestId: string; probeId: string }[] = [];
+    await page.route(origin + scope + "/config/probes", async route => {
+      const requestId = route.request().headers()["idempotency-key"];
+      const response = await route.fetch();
+      expect(response.status(), await response.text()).toBe(202);
+      posted.push({ requestId, probeId: (await response.json()).probeId });
+      await route.abort("failed");
+    });
+    const receiptLookup = (url: URL) => url.origin === origin && url.pathname === scope + "/status" && url.searchParams.has("requestId");
+    await page.route(receiptLookup, route => route.abort("failed"));
+    await page.goto(verification);
+    await page.getByRole("button", { name: "接続検証を要求" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("受付結果未確認", { exact: true })).toBeVisible();
+    expect(posted).toHaveLength(1);
+    const [receipt] = posted;
+
+    await page.unroute(receiptLookup);
+    const lookup = page.waitForResponse(response => receiptLookup(new URL(response.url())));
+    await page.reload();
+    const recovered = await lookup;
+    expect(recovered.status()).toBe(200);
+    expect(new URL(recovered.url()).searchParams.get("requestId")).toBe(receipt.requestId);
+    expect(await recovered.json()).toMatchObject({ activeRevision: null, operation: {
+      operationId: receipt.probeId, requestId: receipt.requestId, phase: "probe", status: "QUEUED",
+    } });
+    await expect(page.getByText("受付済み", { exact: true })).toBeVisible();
+    await expect(page.getByText("現在は未適用", { exact: true })).toBeVisible();
+    expect(await executor.processNext()).toBe(true);
+    await page.getByRole("button", { name: "状態を更新" }).click();
+    await expect(page.getByText("接続検証に合格", { exact: true })).toBeVisible();
+    expect(posted).toHaveLength(1);
+    const { rows } = await admin.query("SELECT id, request_id, state FROM codexia_backup.operations");
+    expect(rows).toEqual([{ id: receipt.probeId, request_id: receipt.requestId, state: "PASSED" }]);
+  } finally {
+    try { await fixture?.close(); }
+    finally {
+      try { await Promise.all([apiPool.end(), executorPool.end()]); }
+      finally {
+        try { await admin.query("DROP SCHEMA IF EXISTS codexia_backup CASCADE"); }
+        finally { await admin.end(); }
+      }
+    }
   }
 });
