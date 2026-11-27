@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { PublicModuleView, publicModuleIdForPath } from './contributions/PublicModuleView';
-import { OAuthConsentPage } from './OAuthConsentPage';
-import { OAuthLoginPage } from './OAuthLoginPage';
 import { applyThemeMode, loadThemeMode, persistThemeMode, type ThemeMode } from './theme';
 import './styles.css';
 
@@ -14,19 +12,13 @@ applyThemeMode(theme);
 // The public reader remains a distinct read-only presentation. No Git authoring
 // workspace or automatic fallback is reachable through the launcher.
 const isReader = window.location.pathname.startsWith('/r/');
-const isOAuthLogin = window.location.pathname === '/oauth/login';
-const isOAuthConsent = window.location.pathname === '/oauth/consent';
 let remembered: string | null = null;
 try {
   remembered = localStorage.getItem('scriptorium:ui-mode');
 } catch {
   /* The picker works without local storage. */
 }
-if (isOAuthLogin) {
-  createRoot(root).render(<OAuthLoginPage />);
-} else if (isOAuthConsent) {
-  createRoot(root).render(<OAuthConsentPage />);
-} else if (!isReader && (remembered === 'desktop' || remembered === 'mobile')) {
+if (!isReader && (remembered === 'desktop' || remembered === 'mobile')) {
   const search = new URLSearchParams(window.location.search);
   search.delete('store');
   window.location.replace(`/desktop${search.size ? `?${search}` : ''}${window.location.hash}`);

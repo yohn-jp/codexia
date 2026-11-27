@@ -1,20 +1,18 @@
 import { control, gap, records, sourceAt, sourceRef, transition } from './owner-source.mjs';
 
-const launcher = 'app/src/launcher.tsx';
+const redirects = 'edge/frontend/static/_redirects';
 const login = 'app/src/OAuthLoginPage.tsx';
 const consent = 'app/src/OAuthConsentPage.tsx';
 
-function routeFor(source, name) {
-  if (!source.exists(launcher)) return null;
-  const text = source.read(launcher);
-  const match = text.match(new RegExp(String.raw`const ${name} = window\.location\.pathname === (["'])(.+?)\1;`));
-  if (!match) return null;
-  return { route: match[2], location: source.location(launcher, match[0]) };
+function routeFor(source, route, entry) {
+  if (!source.exists(redirects)) return null;
+  const rewrite = `${route} ${entry} 200`;
+  return source.read(redirects).split(/\r?\n/u).some(line => line.trim().replace(/\s+/gu, ' ') === rewrite) ? route : null;
 }
 
 export function projectAuth(source) {
-  const loginRoute = routeFor(source, 'isOAuthLogin');
-  const consentRoute = routeFor(source, 'isOAuthConsent');
+  const loginRoute = routeFor(source, '/oauth/login', '/oauth/oauth-login.html');
+  const consentRoute = routeFor(source, '/oauth/consent', '/oauth/oauth-consent.html');
   const loginComponent = sourceAt(source, login, 'export function OAuthLoginPage()');
   const consentComponent = sourceAt(source, consent, 'export function OAuthConsentPage()');
   const passkeySignIn = sourceAt(source, login, 'onClick={() => void signInWithPasskey()}');
@@ -23,14 +21,14 @@ export function projectAuth(source) {
   const denyConsent = sourceAt(source, consent, 'onClick={() => void decide(false)}');
   const screens = records(
     loginRoute && loginComponent && {
-      id: 'AUTH-01', platform: 'auth', source: sourceRef(loginComponent), route: loginRoute.route,
+      id: 'AUTH-01', platform: 'auth', source: sourceRef(loginComponent), route: loginRoute,
       regions: [
         { id: 'login-content', role: 'content', label: 'サインイン案内', source: sourceRef(sourceAt(source, login, '<section className="pg-login"')) },
         { id: 'login-actions', role: 'actions', label: '登録済みのサインイン方法', source: sourceRef(sourceAt(source, login, 'onClick={() => void signInWithPasskey()}')) },
       ],
     },
     consentRoute && consentComponent && {
-      id: 'AUTH-02', platform: 'auth', source: sourceRef(consentComponent), route: consentRoute.route,
+      id: 'AUTH-02', platform: 'auth', source: sourceRef(consentComponent), route: consentRoute,
       regions: [
         { id: 'consent-content', role: 'content', label: '要求されたclientとscope', source: sourceRef(sourceAt(source, consent, 'context.requestedScopes.map')) },
         { id: 'consent-actions', role: 'actions', label: '許可または拒否', source: sourceRef(sourceAt(source, consent, 'onClick={() => void decide(true)}')) },
