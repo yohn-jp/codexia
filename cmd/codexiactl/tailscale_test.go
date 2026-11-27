@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -119,6 +120,90 @@ func TestTailscaleWIFReportsExactReconciliationActions(t *testing.T) {
 	}
 	if matchesWIF(key) {
 		t.Fatal("legacy broad OIDC credential bypassed scoped trust")
+	}
+}
+
+type wifApprovalOperator struct {
+	approve bool
+	notices []string
+}
+func (o *wifApprovalOperator) Confirm(string) (bool, error) { return o.approve, nil }
+func (o *wifApprovalOperator) Ask(string) (string, error) { return "", nil }
+func (o *wifApprovalOperator) Secret(string) ([]byte, error) { return nil, nil }
+func (o *wifApprovalOperator) Notice(message string) { o.notices = append(o.notices, message) }
+
+func TestTailnetCreatesOnlySeparatelyApprovedScopedOIDCTrust(t *testing.T) {
+	const network = "tnOwner"
+	const address = "100.64.20.10"
+	var created atomic.Int32
+	legacy := validWIFKey("old-wide-key")
+	legacy.Subject = "repo:yohn-jp@299811358/codexia@1450072993:environment:codexia-production"
+	legacy.Scopes = []string{"all"}
+	legacy.CustomClaimRules = nil
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/devices":
+			fmt.Fprintf(w, `{"devices":[{"addresses":[%q],"nodeId":"nVM","authorized":true,"connectedToControl":true,"nodeKey":"nodekey:%s","name":"codexia.example.ts.net","os":"linux"}]}`, address, strings.Repeat("a", 64))
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/keys" && r.Method == http.MethodGet:
+			fmt.Fprint(w, `{"keys":[{"id":"old-wide-key"}]}`)
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/keys/old-wide-key":
+			_ = json.NewEncoder(w).Encode(legacy)
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/keys" && r.Method == http.MethodPost:
+			var request struct {
+				KeyType string `json:"keyType"`
+				Subject string `json:"subject"`
+				Issuer string `json:"issuer"`
+				Scopes []string `json:"scopes"`
+				Tags []string `json:"tags"`
+				CustomClaimRules map[string]string `json:"customClaimRules"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil ||
+				request.KeyType != "federated" || request.Subject != wifSubject || request.Issuer != wifIssuer ||
+				!matchesWIF(validWIFKey("new-scoped-key")) || !slices.Equal(request.Scopes, []string{"auth_keys"}) ||
+				!slices.Equal(request.Tags, []string{"tag:ci"}) ||
+				request.CustomClaimRules["ref"] != "refs/heads/main" ||
+				request.CustomClaimRules["workflow_ref"] != "yohn-jp/codexia/.github/workflows/*@refs/heads/main" {
+				t.Errorf("unexpected scoped WIF creation request: %+v (%v)", request, err)
+			}
+			created.Add(1)
+			_ = json.NewEncoder(w).Encode(validWIFKey("new-scoped-key"))
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/keys/new-scoped-key":
+			_ = json.NewEncoder(w).Encode(validWIFKey("new-scoped-key"))
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/acl":
+			fmt.Fprint(w, `{"grants":[{"src":["tag:ci"],"dst":["100.64.20.10"],"ip":["tcp:22"]]}`)
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/acl/validate":
+			fmt.Fprint(w, `{}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	base, err := url.Parse(server.URL)
+	if err != nil { t.Fatal(err) }
+	client := &ts.Client{BaseURL: base, Tailnet: network}
+	local := localTailnet{BackendState: "Running",
+		CurrentTailnet: &localTailnetIdentity{Name: "example", StableID: network},
+		Self: &localTailnetNode{ID: "nVM", PublicKey: "nodekey:"+strings.Repeat("a", 64),
+			DNSName: "codexia.example.ts.net.", TailscaleIPs: []string{address}}}
+	if _, err := inspectTailnet(context.Background(), client, local); err == nil {
+		t.Fatal("read-only inspection accepted broad legacy WIF")
+	}
+	declined := &wifApprovalOperator{}
+	if _, err := inspectTailnetWithApproval(context.Background(), client, local, declined, true); err == nil {
+		t.Fatal("declined WIF creation was not stopped")
+	}
+	if created.Load() != 0 {
+		t.Fatal("WIF was created without separate approval")
+	}
+	approved := &wifApprovalOperator{approve: true}
+	got, err := inspectTailnetWithApproval(context.Background(), client, local, approved, true)
+	if err != nil { t.Fatal(err) }
+	if got.ClientID != "new-scoped-key" || created.Load() != 1 {
+		t.Fatalf("unexpected WIF creation outcome: %+v, count %d", got, created.Load())
+	}
+	if !strings.Contains(strings.Join(approved.notices, "\n"), "scopes must contain only auth_keys") {
+		t.Fatal("existing broad WIF mismatch was not explained before approval")
 	}
 }
 
