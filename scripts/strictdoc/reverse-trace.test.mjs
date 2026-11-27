@@ -29,15 +29,32 @@ test('reverse discovery inventories SDK v2 registerTool names with source coordi
   t.after(() => rm(root, { recursive: true, force: true }));
   const toolPath = 'modules/mcp/src/tools/project.ts';
   await mkdir(path.dirname(path.join(root, toolPath)), { recursive: true });
-  await writeFile(path.join(root, toolPath), [
-    'server.registerTool("list_projects", { description: "List", inputSchema: {} }, async () => {});',
+  const literal = [
+    'server.registerTool(',
+    '  "list_projects", { description: "List", inputSchema: {} }, async () => {});',
+  ];
+  await writeFile(path.join(root, toolPath), literal.join('\n'));
+
+  const staticOnly = await discoverReverseSurfaces({ repositoryRoot: root });
+  assert.ok(staticOnly.surfaces.every(item => item.kind !== 'mcpRegistration'),
+    'whitespace before a literal name must not create a dynamic-registration gap');
+
+  await writeFile(path.join(root, toolPath), [...literal,
+    '// server.registerTool("unregistered", config, handler);',
     'server.registerTool(dynamicToolName, { description: "Dynamic", inputSchema: {} }, handler);',
   ].join('\n'));
 
   const { surfaces } = await discoverReverseSurfaces({ repositoryRoot: root });
-  assert.ok(surfaces.some(item => item.kind === 'mcpTool' && item.id === 'list_projects'
-    && item.source.path === toolPath && item.source.line === 1));
+  assert.deepEqual(surfaces.filter(item => item.kind === 'mcpTool').map(item => [item.id, item.source]),
+    [['list_projects', { path: toolPath, line: 1 }]]);
   assert.ok(surfaces.some(item => item.kind === 'mcpRegistration' && item.id === `dynamic:${toolPath}`));
+
+  const { discoverSourceInventory } = await import('./verify.mjs');
+  await writeFile(path.join(root, 'routes.json'), '{"routes":[]}');
+  await writeFile(path.join(root, 'migration.sql'), 'CREATE TABLE project (id integer);');
+  await assert.rejects(discoverSourceInventory(root, {
+    routes: ['routes.json'], tools: [toolPath], databaseObjects: ['migration.sql'],
+  }), /MCP tool registration must use a literal tool name/u);
 });
 
 test('reverse discovery inventories native iOS views and declared IaC resources', async t => {

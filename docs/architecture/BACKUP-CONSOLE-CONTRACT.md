@@ -1,8 +1,10 @@
 # バックアップ管理コンソール・S3制御プレーン詳細契約
 
-**種別: 採用済みの機能・安全設計、実装未完了。** 本書は `/console/backups` の**運用設定・S3保管先・ジョブ要求・監視**についての責務境界、バックエンド契約、受入条件を所有する。画面のIDと操作は [Screen control catalog](../design/SCREEN-CONTROL-CATALOG.md)、状態遷移図は [Screen State Atlas](../design/SCREEN-STATE-ATLAS.md)、権限の正本は [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md)、生成する暗号化アーティファクトと実復旧は [Backup](../deployment/BACKUP.md)、初期配備/更新とhost lockは [Push deployment](../deployment/PUSH-DEPLOYMENT.md) に従う。
+**種別: 採用済みの機能・安全設計、部分導入。** 本書は `/console/backups` の**運用設定・S3保管先・ジョブ要求・監視**についての責務境界、バックエンド契約、受入条件を所有する。画面のIDと操作は [Screen control catalog](../design/SCREEN-CONTROL-CATALOG.md)、状態遷移図は [Screen State Atlas](../design/SCREEN-STATE-ATLAS.md)、権限の正本は [Route authorization](ROUTE-AUTHORIZATION-CONTRACT.md)、生成する暗号化アーティファクトと実復旧は [Backup](../deployment/BACKUP.md)、初期配備/更新とhost lockは [Push deployment](../deployment/PUSH-DEPLOYMENT.md) に従う。
 
-対象は**単一ownerのインストール**。OWNER-SESSIONはバックアップ先をUIから**指定・検証・有効化**し、保全状態と証拠を参照できる。一方、ownerセッション/公開HTTP APIはOPERATOR、SSH、Ansible、Podman、PG管理者、S3 bucket管理者の資格ではない。**本番DBの復元、任意コマンド実行、IAM/Object Lock変更、秘密鍵の読取、保全済みオブジェクトの削除を管理画面に提供しない。** BKC-001〜007の導入条件と運用手順は [Backup console provisioning](../../deploy/backup/CONSOLE.md) を参照。
+対象は**単一ownerのインストール**。BKC-001〜010のAPIとexecutorはオペレーターによる明示的な設定で有効になる。導入条件と運用手順は [Backup console provisioning](../../deploy/backup/CONSOLE.md) を参照。
+
+バックアップ先の指定、検証、有効化、保全状態と証拠の参照を行うOWNER-SESSION向けの画面は実装目標である。ownerセッション/公開HTTP APIはOPERATOR、SSH、Ansible、Podman、PG管理者、S3 bucket管理者の資格ではない。**本番DBの復元、任意コマンド実行、IAM/Object Lock変更、秘密鍵の読取、保全済みオブジェクトの削除を管理画面に提供しない。**
 
 ## 配備との一意の責務分担
 

@@ -66,9 +66,8 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `react` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: React DOM・型と整合 |
-| `react-dom` | `^19.3.1`（Publishing peer `^19.1.0`） | app・各モジュール | **連動**: Reactと整合 |
-| `react-router-dom` | `7.18.6` | app・画面遷移 | **既存採用**: Desktop画面遷移・リロード・保護ルートをブラウザーで検証 |
+| `react` | `^19.3.1`（Publishing peer `^19.1.0`） | app・Story・Semantic・Publishing | **連動**: React DOM・型と整合 |
+| `react-dom` | `^19.3.1`（Publishing peer `^19.1.0`） | app・Story・Semantic・Publishing | **連動**: Reactと整合 |
 | `react-resizable-panels` | `4.24.1` | app・パネル | **既存採用**: Desktop配置・ドラッグ・復元・popover下のseparatorをブラウザーで検証 |
 | `@codemirror/commands` | `^6.11.1` | app・編集コマンド | **要検証** |
 | `@codemirror/merge` | `6.12.3` | app・差分表示 | **要検証** |
@@ -76,8 +75,6 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `@codemirror/view` | `^6.43.15` | app・編集画面 | **要検証** |
 | `@headless-tree/core` | `1.8.0` | app・アウトライン | **連動**: Reactアダプターと一緒に更新 |
 | `@headless-tree/react` | `1.8.0` | app・アウトライン | **連動**: coreと一緒に更新 |
-| `@radix-ui/react-separator` | `1.2.0` | app・UI | **要検証** |
-| `@radix-ui/react-tabs` | `1.2.1` | app・UI | **要検証** |
 | `@xstate/react` | `6.1.0` | app・保存／復旧、Native ChangeSet review、本人認証管理のactorとReact 19の接続 | **連動**: React peerは19を含み、XState `^5.28.0`と互換。各機能の統合を併せて検証 |
 | `xstate` | `5.33.4` | app・保存／復旧、Native ChangeSet review、本人認証管理の状態機械とasync actor | **連動**: v5 stable。公式React adapter 6.1.0とReact 19のpeer整合を検証 |
 | `@vitejs/plugin-react` | `^6.3.0` | app・フロントビルド | **要検証**: Vite・Reactビルドとの互換性を一緒に確認 |

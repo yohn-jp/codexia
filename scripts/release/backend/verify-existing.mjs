@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { backendPublicationFromEnvironment, buildComponentReleaseRecord, publicationInWorkflowWindow } from '../components/record-model.mjs';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
-import { paginateActionsInventory, paginateGitHubArray } from '../../github/paginate-actions.mjs';
+import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
 const REPOSITORY='yohn-jp/codexia';
 const digestImage=/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
@@ -38,40 +38,6 @@ export function assertExistingBackendReleaseBinding(release,tagRef,expected){
   return metadata;
 }
 
-async function request(github,resource){
-  // Repository metadata can influence run identifiers, but never an arbitrary API endpoint.
-  const safeResource =
-    resource === 'git/matching-refs/tags/backend-v' ||
-    resource === 'releases' ||
-    /^actions\/runs\/[1-9]\d{0,15}$/u.test(resource) ||
-    /^actions\/runs\/[1-9]\d{0,15}\/jobs$/u.test(resource) ||
-    resource === 'actions/workflows/backend-release.yml/runs';
-  assert.ok(safeResource, 'Unapproved backend release proof API resource');
-  const run=/^actions\/runs\/([1-9]\d{0,15})$/u.exec(resource);
-  assert.ok(run,'Unapproved backend release proof API resource');
-  return (await github.rest.actions.getWorkflowRun({owner:'yohn-jp',repo:'codexia',run_id:Number(run[1])})).data;
-}
-async function pages(github,resource,key,parameters={},options={}){
-  const safeResource=resource==='releases'||resource==='git/matching-refs/tags/backend-v'||
-    resource==='actions/workflows/backend-release.yml/runs'||/^actions\/runs\/[1-9]\d{0,15}\/jobs$/u.test(resource);
-  assert.ok(safeResource,'Unapproved backend release pagination resource');
-  const [owner,repo]=REPOSITORY.split('/');
-  if(resource==='releases') return paginateGitHubArray(github,github.rest.repos.listReleases,
-    {owner,repo,...parameters},{maxItems:options.maxItems ?? 1_000_000});
-  if(resource==='git/matching-refs/tags/backend-v') return paginateGitHubArray(github,github.rest.git.listMatchingRefs,
-    {owner,repo,ref:'tags/backend-v',...parameters},{maxItems:options.maxItems ?? 1_000_000});
-  if(resource==='actions/workflows/backend-release.yml/runs') return paginateActionsInventory(github,
-    github.rest.actions.listWorkflowRuns,{owner,repo,workflow_id:'backend-release.yml',...parameters},key,options);
-  const jobs=/^actions\/runs\/([1-9]\d{0,15})\/jobs$/u.exec(resource);
-  if(jobs) return paginateActionsInventory(github,github.rest.actions.listJobsForWorkflowRun,
-    {owner,repo,run_id:Number(jobs[1]),...parameters},key,options);
-  throw new Error('Unapproved backend release pagination resource');
-}
-async function listBackendReleases(github){
-  const releases=await pages(github,'releases',null,{}, {maxItems:1999});
-  assert.ok(Array.isArray(releases)&&releases.length<=1999,'GitHub release inventory is invalid or exceeds the supported bound');
-  return releases;
-}
 export function successfulPublicationJobs(jobs,promoted,hasPromotion=promoted){
   if(!Array.isArray(jobs))return false;
   const exactJob=(name,conclusion)=>{
@@ -112,13 +78,12 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
   const token=env.GH_TOKEN;assert.ok(typeof token==='string'&&token.length>0,'GitHub Actions read token required');
   const github=createGitHubOctokit({token});
   const tag='backend-v'+version;
-  const releaseMatches=(await listBackendReleases(github)).filter(item=>item?.tag_name===tag);
-  assert.equal(releaseMatches.length,1,'Expected one exact backend release record');
-  const release=releaseMatches[0];
-  const refMatches=(await pages(github,'git/matching-refs/tags/backend-v',null))
-    .filter(item=>item?.ref==='refs/tags/'+tag);
-  assert.equal(refMatches.length,1,'Expected one exact backend release tag');
-  const tagRef=refMatches[0];
+  const [owner,repo]=REPOSITORY.split('/');
+  const [{data:release},{data:tagRef}]=await Promise.all([
+    github.rest.repos.getReleaseByTag({owner,repo,tag}),
+    github.rest.git.getRef({owner,repo,ref:'tags/'+tag}),
+  ]);
+  assert.equal(tagRef?.ref,'refs/tags/'+tag,'Backend release ref does not match the exact requested tag');
   if (usePublishedSourceCompatibility) {
     assert.equal(tagRef.object?.type, 'commit', 'Existing backend tag must directly name its source');
     assert.equal(tagRef.object.sha, mainSha, 'Existing backend tag/main source mismatch');
@@ -148,14 +113,18 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
   if(event==='pull_request')assert.equal(metadata.producer.sourceSha,producerSha,'Existing release producer SHA mismatch');
   else assert.equal(producerSha,mainSha,'Main producer SHA mismatch');
   const workflowHeadSha=publication?.workflowHeadSha??mainSha;
-  const runs=publication ? [await request(github,'actions/runs/'+publication.workflowRunId)] :
-    await pages(github,'actions/workflows/backend-release.yml/runs','workflow_runs',{head_sha:workflowHeadSha,branch:'main',event:publicationEvent});
+  const runs=publication ? [(await github.rest.actions.getWorkflowRun({owner,repo,run_id:publication.workflowRunId})).data] :
+    await paginateActionsInventory(github,github.rest.actions.listWorkflowRuns,{
+      owner,repo,workflow_id:'backend-release.yml',head_sha:workflowHeadSha,branch:'main',event:publicationEvent,
+    },'workflow_runs');
   for(const run of runs){
     if(run?.path!=='.github/workflows/backend-release.yml'||run.event!==publicationEvent||run.head_branch!=='main'||run.head_sha!==workflowHeadSha||
       run.status!=='completed'||run.conclusion!=='success'||!publicationInWorkflowWindow(release,run))continue;
     if(publication&&run.id!==publication.workflowRunId)continue;
     if(event!=='pull_request'&&(run.id!==receipt.workflowRunId||run.run_number!==receipt.workflowRunNumber))continue;
-    const jobs=await pages(github,'actions/runs/'+run.id+'/jobs','jobs',{filter:'latest'});
+    assert.ok(Number.isSafeInteger(run.id)&&run.id>0,'Backend publication run ID is invalid');
+    const jobs=await paginateActionsInventory(github,github.rest.actions.listJobsForWorkflowRun,
+      {owner,repo,run_id:run.id,filter:'latest'},'jobs');
     if(successfulPublicationJobs(jobs,event==='pull_request',true))return {release,metadata,publicationRunId:run.id};
   }
   throw new Error('No successful main backend publication run binds the existing immutable digest');

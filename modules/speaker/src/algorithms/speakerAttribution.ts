@@ -1,21 +1,19 @@
-import type { MentionDictionary } from "./mentionIndex.js";
-import { findMentions } from "./mentionIndex.js";
-import type { Token, Tokenizer } from "@codexia/module-nlp";
-import { isParticle, isVerb } from "@codexia/module-nlp";
-import { isDialogue, splitIntoSentences } from "./textAnalysis.js";
-import { hashDialogueText } from "./textHash.js";
-import type { Entity } from "./types.js";
+import type { Token, Tokenizer } from '@codexia/module-nlp';
+import { isParticle, isVerb } from '@codexia/module-nlp';
+import type { MentionDictionary } from './mentionIndex.js';
+import { findMentions } from './mentionIndex.js';
+import { isDialogue, splitIntoSentences } from './textAnalysis.js';
+import { hashDialogueText } from './textHash.js';
+import type { Entity } from './types.js';
 
-export type { ResolvedSpeakerCount, ResolveSpeakerCountInput } from "./speakerCountEstimate.js";
-export { resolveSpeakerCount } from "./speakerCountEstimate.js";
-export type { SpeakerCorrectionInput, SpeakerOverride } from "./speakerOverrides.js";
+export type { SpeakerCorrectionInput, SpeakerOverride } from './speakerOverrides.js';
 export {
   alignOverrideClusters,
   applySpeakerOverrides,
   applySpeakerOverridesDetailed,
   speakerOverrideSource,
-} from "./speakerOverrides.js";
-export type { SoftSpeakerLabel } from "./speakerSoftLabels.js";
+} from './speakerOverrides.js';
+export type { SoftSpeakerLabel } from './speakerSoftLabels.js';
 export {
   aggregateDialoguesBySpeaker,
   assertSpeakerClusterInvariants,
@@ -24,7 +22,7 @@ export {
   isHardSpeakerAnchor,
   mergeDialogueMaps,
   reattachSoftSpeakerLabels,
-} from "./speakerSoftLabels.js";
+} from './speakerSoftLabels.js';
 export { hashDialogueText };
 
 export interface SpeakerAttribution {
@@ -46,35 +44,34 @@ export interface SpeakerAttribution {
    * `pov-reply` / `mob` は追加規則用。
    */
   reason:
-    | "attribution-verb" // 直後の地の文に話者動詞＋候補1名の言及（近接・low）
-    | "attribution-verb-subject" // 主語判定つき厳格版（規則A'・low）
-    | "strong-hint" // 分割中 promoteStrongHintEntities の entity 埋め（クラスタ用・low）
-    | "pov-reply" // 一人称語り手への返答（規則P）
-    | "mob" // モブ話者として確定
-    | "preceding-narration" // 直前の地の文ブロックで候補1名のみ言及（G1・high）
-    | "vocative-other" // セリフ冒頭の呼びかけ先を除いた残り候補が1名
-    | "addressed-by-next" // 次のセリフの呼びかけ先＝このセリフの話者
-    | "alternating-turn" // 2名の交互パターンから推定
-    | "rerank" // S7 学習済み再ランカーによる最終選択
-    | "manual-override" // ユーザーが手動で話者を確定
-    | "none";
+    | 'attribution-verb' // 直後の地の文に話者動詞＋候補1名の言及（近接・low）
+    | 'attribution-verb-subject' // 主語判定つき厳格版（規則A'・low）
+    | 'strong-hint' // 分割中 promoteStrongHintEntities の entity 埋め（クラスタ用・low）
+    | 'pov-reply' // 一人称語り手への返答（規則P）
+    | 'mob' // モブ話者として確定
+    | 'preceding-narration' // 直前の地の文ブロックで候補1名のみ言及（G1・high）
+    | 'vocative-other' // セリフ冒頭の呼びかけ先を除いた残り候補が1名
+    | 'addressed-by-next' // 次のセリフの呼びかけ先＝このセリフの話者
+    | 'alternating-turn' // 2名の交互パターンから推定
+    | 'rerank' // S7 学習済み再ランカーによる最終選択
+    | 'manual-override' // ユーザーが手動で話者を確定
+    | 'none';
   /** 信頼度: high（G1 高精密度理由）| low（弱い根拠のみ）| none */
-  confidence: "high" | "low" | "none";
+  confidence: 'high' | 'low' | 'none';
 }
 
 /**
  * G1 — high only for reasons with empirical precision ≥0.95; currently preceding-narration.
  * Automatic attribution may assign `confidence: "high"` only for these reasons.
  */
-export const HIGH_PRECISION_ATTRIBUTION_REASONS: ReadonlySet<SpeakerAttribution["reason"]> =
-  new Set(["preceding-narration"]);
+export const HIGH_PRECISION_ATTRIBUTION_REASONS: ReadonlySet<SpeakerAttribution['reason']> = new Set(['preceding-narration']);
 
 /**
  * Automatic-rule confidence under the G1 highPrecision policy.
  * Returns `"high"` iff `reason` is in {@link HIGH_PRECISION_ATTRIBUTION_REASONS}.
  */
-export function confidenceForAutomaticReason(reason: SpeakerAttribution["reason"]): "high" | "low" {
-  return HIGH_PRECISION_ATTRIBUTION_REASONS.has(reason) ? "high" : "low";
+export function confidenceForAutomaticReason(reason: SpeakerAttribution['reason']): 'high' | 'low' {
+  return HIGH_PRECISION_ATTRIBUTION_REASONS.has(reason) ? 'high' : 'low';
 }
 
 /** `attributeSpeakers` の追加オプション（非破壊・未使用でも受け付ける）。 */
@@ -86,14 +83,12 @@ export interface AttributeSpeakersOptions {
 }
 
 /** 話者動詞パターン（終止・連体・連用形を含む） */
-const ATTRIBUTION_VERB_RE =
-  /(言っ|言う|言い|答え|叫ん|叫ぶ|呟い|呟く|尋ね|返し|返す|問う|問い|囁い|続け|呼びかけ)/;
+const ATTRIBUTION_VERB_RE = /(言っ|言う|言い|答え|叫ん|叫ぶ|呟い|呟く|尋ね|返し|返す|問う|問い|囁い|続け|呼びかけ)/;
 
 /** セリフ冒頭の呼びかけ語（「名前（＋敬称）、」。先頭のダッシュ・三点リーダは読み飛ばす）
  *  二人称の呼びかけ（「お前、」「あなた、」等）は誰宛か特定できないため、
  *  マッチしてもエンティティ照合で候補が絞れず vocative-other には使われない。 */
-const VOCATIVE_RE =
-  /^[「『][―…‥、\s]*([^、。！？」』\s]{1,15}?)(?:さん|くん|君|様|殿|ちゃん|よ|ね)?、/;
+const VOCATIVE_RE = /^[「『][―…‥、\s]*([^、。！？」』\s]{1,15}?)(?:さん|くん|君|様|殿|ちゃん|よ|ね)?、/;
 
 export function attributeSpeakers(
   text: string,
@@ -104,8 +99,8 @@ export function attributeSpeakers(
   const povEntityId = options?.povEntityId;
   const tokenizer = options?.tokenizer;
   const sentences = splitIntoSentences(text);
-  const candidateIds = new Set(candidateSpeakers.map((e) => e.id));
-  const candidatesById = new Map(candidateSpeakers.map((e) => [e.id, e]));
+  const candidateIds = new Set(candidateSpeakers.map(e => e.id));
+  const candidatesById = new Map(candidateSpeakers.map(e => [e.id, e]));
   const byIndex = new Map<number, SpeakerAttribution>();
 
   for (let i = 0; i < sentences.length; i++) {
@@ -115,8 +110,8 @@ export function attributeSpeakers(
       text: sentences[i],
       speakerEntityId: null,
       speakerGroupId: null,
-      reason: "none",
-      confidence: "none",
+      reason: 'none',
+      confidence: 'none',
     });
   }
 
@@ -133,8 +128,8 @@ export function attributeSpeakers(
       const subjectIds = findAttributionVerbSubjects(tokens, candidatesById, candidateIds);
       if (subjectIds.length === 1) {
         attribution.speakerEntityId = subjectIds[0];
-        attribution.reason = "attribution-verb-subject";
-        attribution.confidence = confidenceForAutomaticReason("attribution-verb-subject");
+        attribution.reason = 'attribution-verb-subject';
+        attribution.confidence = confidenceForAutomaticReason('attribution-verb-subject');
       }
     }
   }
@@ -142,14 +137,12 @@ export function attributeSpeakers(
   // 規則A（近接・low）: 直後地の文に話者動詞＋候補1名の言及。
   // POV では受け手・反応文の言及を除外（tokenizer があるとき）。
   for (const [i, attribution] of byIndex.entries()) {
-    if (attribution.reason !== "none") continue;
+    if (attribution.reason !== 'none') continue;
     const nextNonDialogueIndex = findNextNonDialogueIndex(sentences, i);
     if (nextNonDialogueIndex === -1) continue;
     const nextNonDialogue = sentences[nextNonDialogueIndex];
     if (!ATTRIBUTION_VERB_RE.test(nextNonDialogue)) continue;
-    const candidateMentions = findMentions(mentionDict, nextNonDialogue).filter((id) =>
-      candidateIds.has(id),
-    );
+    const candidateMentions = findMentions(mentionDict, nextNonDialogue).filter(id => candidateIds.has(id));
     if (candidateMentions.length !== 1) continue;
     const mentionId = candidateMentions[0];
     if (povEntityId && tokenizer) {
@@ -158,32 +151,30 @@ export function attributeSpeakers(
       if (entity && isRecipientOrReactionMention(tokens, entity)) continue;
     }
     attribution.speakerEntityId = mentionId;
-    attribution.reason = "attribution-verb";
-    attribution.confidence = confidenceForAutomaticReason("attribution-verb");
+    attribution.reason = 'attribution-verb';
+    attribution.confidence = confidenceForAutomaticReason('attribution-verb');
   }
 
   // 規則P: POV シーンで直後地の文が「候補言及なし＋話者動詞」→ 話者 = pov（low）
   if (povEntityId && candidateIds.has(povEntityId)) {
     for (const [i, attribution] of byIndex.entries()) {
-      if (attribution.reason !== "none") continue;
+      if (attribution.reason !== 'none') continue;
       const nextNonDialogueIndex = findNextNonDialogueIndex(sentences, i);
       if (nextNonDialogueIndex === -1) continue;
       const nextNonDialogue = sentences[nextNonDialogueIndex];
       if (!ATTRIBUTION_VERB_RE.test(nextNonDialogue)) continue;
-      const candidateMentions = findMentions(mentionDict, nextNonDialogue).filter((id) =>
-        candidateIds.has(id),
-      );
+      const candidateMentions = findMentions(mentionDict, nextNonDialogue).filter(id => candidateIds.has(id));
       if (candidateMentions.length > 0) continue;
       attribution.speakerEntityId = povEntityId;
-      attribution.reason = "pov-reply";
-      attribution.confidence = confidenceForAutomaticReason("pov-reply");
+      attribution.reason = 'pov-reply';
+      attribution.confidence = confidenceForAutomaticReason('pov-reply');
     }
   }
 
   // 規則B: 直前の地の文ブロック（前のセリフ以降に連続する地の文）で候補1名のみ言及（G1・high）。
   // 話者動詞を含む文は直前のセリフの帰属根拠である可能性が高いため、言及の収集から除外する。
   for (const [i, attribution] of byIndex.entries()) {
-    if (attribution.reason !== "none") continue;
+    if (attribution.reason !== 'none') continue;
     const mentioned = new Set<string>();
     for (let j = i - 1; j >= 0; j--) {
       const sentence = sentences[j];
@@ -195,22 +186,22 @@ export function attributeSpeakers(
     }
     if (mentioned.size === 1) {
       attribution.speakerEntityId = [...mentioned][0];
-      attribution.reason = "preceding-narration";
-      attribution.confidence = confidenceForAutomaticReason("preceding-narration");
+      attribution.reason = 'preceding-narration';
+      attribution.confidence = confidenceForAutomaticReason('preceding-narration');
     }
   }
 
   // 規則C: セリフ冒頭の呼びかけ先は話者ではない。候補が2名ならもう一方を話者とする（low）
   if (candidateIds.size === 2) {
     for (const attribution of byIndex.values()) {
-      if (attribution.reason !== "none") continue;
+      if (attribution.reason !== 'none') continue;
       const addressedId = findAddressedCandidate(attribution.text, candidateIds, mentionDict);
       if (addressedId !== null) {
-        const other = [...candidateIds].find((id) => id !== addressedId);
+        const other = [...candidateIds].find(id => id !== addressedId);
         if (other) {
           attribution.speakerEntityId = other;
-          attribution.reason = "vocative-other";
-          attribution.confidence = confidenceForAutomaticReason("vocative-other");
+          attribution.reason = 'vocative-other';
+          attribution.confidence = confidenceForAutomaticReason('vocative-other');
         }
       }
     }
@@ -218,18 +209,14 @@ export function attributeSpeakers(
 
   // 規則D: 次のセリフの冒頭に呼びかけ語があれば、呼びかけられた人物が現在のセリフの話者（low）
   for (const [i, attribution] of byIndex.entries()) {
-    if (attribution.reason !== "none") continue;
+    if (attribution.reason !== 'none') continue;
     const nextDialogueIndex = findNextDialogueIndex(sentences, i);
     if (nextDialogueIndex === -1) continue;
-    const addressedId = findAddressedCandidate(
-      sentences[nextDialogueIndex],
-      candidateIds,
-      mentionDict,
-    );
+    const addressedId = findAddressedCandidate(sentences[nextDialogueIndex], candidateIds, mentionDict);
     if (addressedId !== null) {
       attribution.speakerEntityId = addressedId;
-      attribution.reason = "addressed-by-next";
-      attribution.confidence = confidenceForAutomaticReason("addressed-by-next");
+      attribution.reason = 'addressed-by-next';
+      attribution.confidence = confidenceForAutomaticReason('addressed-by-next');
     }
   }
 
@@ -240,14 +227,14 @@ export function attributeSpeakers(
     for (let d = 2; d < dialogueIndices.length; d++) {
       const i = dialogueIndices[d];
       const attribution = byIndex.get(i);
-      if (attribution === undefined || attribution.reason !== "none") continue;
+      if (attribution === undefined || attribution.reason !== 'none') continue;
       const prev1 = byIndex.get(dialogueIndices[d - 1]);
       const prev2 = byIndex.get(dialogueIndices[d - 2]);
       if (!prev1?.speakerEntityId || !prev2?.speakerEntityId) continue;
       if (prev1.speakerEntityId === prev2.speakerEntityId) continue;
       attribution.speakerEntityId = prev2.speakerEntityId;
-      attribution.reason = "alternating-turn";
-      attribution.confidence = confidenceForAutomaticReason("alternating-turn");
+      attribution.reason = 'alternating-turn';
+      attribution.confidence = confidenceForAutomaticReason('alternating-turn');
     }
   }
 
@@ -265,7 +252,7 @@ function entityMentionTerms(entity: Entity): string[] {
 
 /** term が tokens[index] から連結一致するとき、消費トークン数を返す。 */
 function matchTermAt(tokens: Token[], index: number, term: string): number {
-  let built = "";
+  let built = '';
   for (let i = index; i < tokens.length; i++) {
     built += tokens[i].surface;
     if (built === term) return i - index + 1;
@@ -280,15 +267,15 @@ function isAttributionVerbToken(token: Token): boolean {
 }
 
 function isGaOrWa(token: Token): boolean {
-  return isParticle(token) && (token.surface === "が" || token.surface === "は");
+  return isParticle(token) && (token.surface === 'が' || token.surface === 'は');
 }
 
 function isNiOrHe(token: Token): boolean {
-  return isParticle(token) && (token.surface === "に" || token.surface === "へ");
+  return isParticle(token) && (token.surface === 'に' || token.surface === 'へ');
 }
 
 /** 名前と格助詞の間に挟まりうる敬称（表層一致）。 */
-const HONORIFIC_SURFACES = new Set(["さん", "くん", "君", "様", "殿", "ちゃん", "氏"]);
+const HONORIFIC_SURFACES = new Set(['さん', 'くん', '君', '様', '殿', 'ちゃん', '氏']);
 
 /**
  * term 直後から が/は までのオフセット（term 消費分を含む）。
@@ -325,11 +312,7 @@ function hasAttributionVerbAfterSubject(tokens: Token[], afterParticleIndex: num
  * white-sigil 調では「Xが、呆れたように、言った」「Xが、ぼそりと言った」のように
  * が/は と話者動詞の間に別動詞・誤分割トークンが入りうるため、非話者動詞で打ち切らない。
  */
-function findAttributionVerbSubjects(
-  tokens: Token[],
-  candidatesById: Map<string, Entity>,
-  candidateIds: Set<string>,
-): string[] {
+function findAttributionVerbSubjects(tokens: Token[], candidatesById: Map<string, Entity>, candidateIds: Set<string>): string[] {
   const subjects = new Set<string>();
   for (const entityId of candidateIds) {
     const entity = candidatesById.get(entityId);
@@ -381,14 +364,10 @@ function isRecipientOrReactionMention(tokens: Token[], entity: Entity): boolean 
 }
 
 /** セリフ冒頭の呼びかけ語が候補キャラ1名に解決できればそのIDを返す。 */
-function findAddressedCandidate(
-  dialogue: string,
-  candidateIds: Set<string>,
-  mentionDict: MentionDictionary,
-): string | null {
+function findAddressedCandidate(dialogue: string, candidateIds: Set<string>, mentionDict: MentionDictionary): string | null {
   const match = dialogue.trim().match(VOCATIVE_RE);
   if (!match) return null;
-  const addressed = findMentions(mentionDict, match[1]).filter((id) => candidateIds.has(id));
+  const addressed = findMentions(mentionDict, match[1]).filter(id => candidateIds.has(id));
   return addressed.length === 1 ? addressed[0] : null;
 }
 

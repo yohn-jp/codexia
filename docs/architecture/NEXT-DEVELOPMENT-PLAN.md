@@ -23,7 +23,7 @@ Codexiaを、原稿の執筆・作品世界の知識管理・物語の整合性�
 | 領域 | 現行の資産 | 次期開発での扱い |
 |---|---|---|
 | 永続化 | `packages/persistence-contracts` / `persistence-postgres`。Project、Document、Revision、Knowledge、Evidence、Assertion、ChangeSet、ModuleRecord | 唯一の正本。新しいDB・別ストアを作らない |
-| Knowledge | `packages/core/src/knowledge` のノード・関係・命題・統合 | 現行グラフ型と永続型の対応を明確にする |
+| Knowledge | `packages/core/src/knowledge` のノード・関係・命題、`packages/persistence-postgres/src/knowledge-merge.ts` の統合 | 現行グラフ型と永続型の対応を明確にする |
 | Evidence | `packages/core/src/evidence` のAnchor追従、辞書、候補抽出、逆引き | 既存アルゴリズムを利用し、操作導線と永続化の整合を証明する |
 | Story | `modules/story/src/domain` のグラフ、年表、世界状態、伏線、読者知識 | 既存計算を再利用。PostgreSQLのID・Revision・Evidenceへの接続を強化 |
 | Story UI/API | `story.timeline.query`、`story.world-state.at-scene`、`story.threads.lifecycle`、`story.reader-model.build`、既存Workbench | 新規の並行Storyシステムを作らない |

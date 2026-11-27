@@ -939,7 +939,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **Conformance status**: PARTIAL
 **Applicability**: CURRENT
 **Design owner**: [Screen catalog](../design/SCREEN-CONTROL-CATALOG.md)、[State Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: app/src/App.tsx; app/src/components/; app/src/shells/
+**Implementation identifiers**: app/src/application/navigation.ts (parseApplicationLocation, applicationPath); app/src/persistence/PersistenceWorkspace.tsx (PersistenceWorkspace); app/src/shells/desktop/DesktopShell.tsx (DesktopShell)
 **Verification identifiers**: tests/e2e/ui-v1.acceptance.spec.ts
 **Test IDs**: TEST-UI-003-001
 **Exact-run reference**: NOT_RUN
@@ -954,7 +954,11 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 - **Type**: File
   **Path**: docs/design/SCREEN-STATE-ATLAS.md
 - **Type**: File
-  **Path**: app/src/App.tsx
+  **Path**: app/src/application/navigation.ts
+- **Type**: File
+  **Path**: app/src/persistence/PersistenceWorkspace.tsx
+- **Type**: File
+  **Path**: app/src/shells/desktop/DesktopShell.tsx
 - **Type**: File
   **Path**: tests/e2e/ui-v1.acceptance.spec.ts
 
@@ -964,7 +968,7 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
 **MID**: 6129fe71966b7841314c39b71c52cddf
 **UID**: OBL-REQ-UI-003-O01
 **Design reference**: [Screen catalog](../design/SCREEN-CONTROL-CATALOG.md)、[State Atlas](../design/SCREEN-STATE-ATLAS.md)
-**Implementation identifiers**: app/src/App.tsx
+**Implementation identifiers**: app/src/application/navigation.ts (parseApplicationLocation, applicationPath); app/src/persistence/PersistenceWorkspace.tsx (PersistenceWorkspace); app/src/shells/desktop/DesktopShell.tsx (DesktopShell)
 **Test IDs**: TEST-UI-003-001
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -977,7 +981,11 @@ stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writer�
   **ID**: REQ-UI-003
 
 - **Type**: File
-  **Path**: app/src/App.tsx
+  **Path**: app/src/application/navigation.ts
+- **Type**: File
+  **Path**: app/src/persistence/PersistenceWorkspace.tsx
+- **Type**: File
+  **Path**: app/src/shells/desktop/DesktopShell.tsx
 
 ## REQ-UI-004
 
@@ -1751,7 +1759,7 @@ INP p75、CLS p75の品質目安に加え、原稿入力・保存・復旧の別
 **MID**: 0966fc7db2c488c5abd936cd7db8556f
 **UID**: OBL-REQ-TRACE-001-O02
 **Design reference**: docs/requirements/STRICTDOC-TRACEABILITY.md
-**Implementation identifiers**: scripts/strictdoc/verify.mjs
+**Implementation identifiers**: scripts/strictdoc/verify.mjs: compareExports
 **Test IDs**: TEST-TRC-02-001; TEST-TRC-02-002
 **Exact-run reference**: NOT_RUN
 **Comment**: Explicit criterion; source and test references are candidates only; no independent certification is implied.
@@ -1765,7 +1773,7 @@ StrictDoc Markdown parsing and same-input HTML/JSON export are repeatable within
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
-  **Lines**: 684, 744
+  **Lines**: 632, 692
 
 ## OBL-REQ-TRACE-001-O03
 
@@ -1787,7 +1795,7 @@ A requirement-to-source relation must use a repository file path and any declare
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
-  **Lines**: 83, 147
+  **Lines**: 84, 148
 
 ## OBL-REQ-TRACE-001-O04
 
@@ -1795,7 +1803,7 @@ A requirement-to-source relation must use a repository file path and any declare
 **MID**: 6a8582691c1bc79a39f22ad3e99ee2b0
 **UID**: OBL-REQ-TRACE-001-O04
 **Design reference**: docs/requirements/STRICTDOC-TRACEABILITY.md
-**Implementation identifiers**: scripts/strictdoc/verify.mjs
+**Implementation identifiers**: scripts/strictdoc/verify.mjs: verifySourceInventory; scripts/strictdoc/reverse-trace.mjs: discoverReverseSurfaces
 **Test IDs**: TEST-TRC-04-001; TEST-TRC-04-002, TEST-TRC-04-003
 **Exact-run reference**: NOT_RUN
 **Comment**: Explicit criterion; source and test references are candidates only; no independent certification is implied.
@@ -1809,7 +1817,9 @@ Reverse inventory keeps discovered HTTP routes, MCP tools, database objects, Des
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
-  **Lines**: 475, 480
+  **Lines**: 423, 427
+- **Type**: File
+  **Path**: scripts/strictdoc/reverse-trace.mjs
 
 ## OBL-REQ-TRACE-001-O05
 
@@ -1817,7 +1827,7 @@ Reverse inventory keeps discovered HTTP routes, MCP tools, database objects, Des
 **MID**: f108acf33cf12b70e9072e7828390202
 **UID**: OBL-REQ-TRACE-001-O05
 **Design reference**: docs/requirements/STRICTDOC-TRACEABILITY.md
-**Implementation identifiers**: scripts/strictdoc/verify.mjs
+**Implementation identifiers**: scripts/strictdoc/verify.mjs: resolveRunIdentity
 **Test IDs**: TEST-TRC-05-001; TEST-TRC-05-002; TEST-TRC-05-003, TEST-TRC-05-004
 **Exact-run reference**: NOT_RUN
 **Comment**: Explicit criterion; source and test references are candidates only; no independent certification is implied.
@@ -1831,7 +1841,7 @@ Execution references retain exact repository, source SHA, run, attempt, job, tas
 
 - **Type**: File
   **Path**: scripts/strictdoc/verify.mjs
-  **Lines**: 481, 499
+  **Lines**: 429, 455
 
 ## OBL-REQ-TRACE-001-O06
 
@@ -2031,7 +2041,7 @@ A recovery draft is durably journaled before remote write, and an unknown respon
 
 - **Type**: File
   **Path**: app/src/editor/postgresEvidenceAdapter.ts
-  **Lines**: 73, 80
+  **Lines**: 96, 108
 
 ## TEST-TRC-01-001
 
@@ -2308,7 +2318,7 @@ Exercise signed MCP bearer admission for exact client, scope, assigned-project, 
   **ID**: REQ-MCP-001
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 2110, 2448
+  **Lines**: 2109, 2456
 
 ## TEST-MCPV-001-002
 
@@ -2470,7 +2480,7 @@ Close an MCP connection during OAuth admission and confirm that only the connect
   **ID**: REQ-MCP-001
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 5023, 5070
+  **Lines**: 5031, 5078
 
 ## TEST-MCPV-004-003
 
@@ -2542,7 +2552,7 @@ Checks the selected document and revision on current and pinned snapshots.
   **ID**: REQ-CORE-003
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 3097, 3097
+  **Lines**: 3105, 3105
 
 ## TEST-DATA-001-001
 
@@ -2650,7 +2660,7 @@ Checks the API entry point rejects writes without a verified owner token for its
   **ID**: REQ-AUTH-001
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 1951, 1951
+  **Lines**: 1950, 1950
 
 ## TEST-AUTH-002-001
 
@@ -2668,7 +2678,7 @@ Checks admission ordering and refusal of unregistered methods and origins.
   **ID**: REQ-AUTH-002
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 892, 892
+  **Lines**: 891, 891
 
 ## TEST-AUTH-003-001
 
@@ -2704,7 +2714,7 @@ Checks admitted MCP scope and denies owner operations through Fastify.
   **ID**: REQ-AUTH-003
 - **Type**: File
   **Path**: packages/api/src/server.test.ts
-  **Lines**: 2178, 2178
+  **Lines**: 2177, 2177
 
 ## TEST-AUTH-004-001
 
@@ -2722,7 +2732,7 @@ Checks verified owner enrollment and closure of the isolated setup endpoint.
   **ID**: REQ-AUTH-004
 - **Type**: File
   **Path**: packages/api/test/passkey-bootstrap.acceptance.test.ts
-  **Lines**: 924, 924
+  **Lines**: 921, 921
 
 ## TEST-AUTH-005-001
 

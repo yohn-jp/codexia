@@ -88,113 +88,43 @@ test('coverage ignores package directories without a workspace manifest', async 
   }
 });
 
-test('root unit preparation builds the API dependency closure before invoking root script tests', async () => {
-  const temporary = await mkdtemp(path.join(tmpdir(), 'codexia-ci-workspace-'));
-  const bin = path.join(temporary, 'bin');
-  const pnpm = path.join(bin, 'pnpm');
-  const record = path.join(temporary, 'pnpm-commands.jsonl');
-  await mkdir(bin);
-  await writeFile(pnpm, '#!/usr/bin/env node\nconst fs = require("node:fs");\nfs.appendFileSync(process.env.CODEXIA_CI_PNPM_RECORD, JSON.stringify(process.argv.slice(2)) + "\\n");\n');
-  await chmod(pnpm, 0o755);
-  const env = {
-    ...process.env,
-    PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
-    CODEXIA_CI_PNPM_RECORD: record,
-  };
-  try {
-    const prepared = run(['prepare', 'unit', 'root'], env);
-    assert.equal(prepared.status, 0, prepared.stderr);
-    assert.match(prepared.stdout, /built API and its declared workspace dependencies/u);
-
-    const executed = run(['unit', 'root'], env);
-    assert.equal(executed.status, 0, executed.stderr);
-    assert.match(executed.stdout, /using package\.json script test:scripts/u);
-
-    const commands = (await readFile(record, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
-    assert.deepEqual(commands, [
-      ['--filter', '@codexia/api...', 'build'],
-      ['run', 'test:scripts'],
-    ]);
-  } finally {
-    await rm(temporary, { recursive: true, force: true });
-  }
-});
-
-test('grouped unit preparation builds shared dependencies once and retains root API preparation', async () => {
+test('root unit execution delegates to the root script tests', async t => {
   const fixture = await makeWorkspaceFixture('pnpm run test:scripts');
-  try {
-    const prepared = runProject(fixture.projectRoot, ['prepare', 'unit-group', 'contracts,persistence-contracts,persistence-postgres,module-runtime,core,api,root'], fixture.env);
-    assert.equal(prepared.status, 0, prepared.stderr);
-    const commands = (await readFile(fixture.record, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
-    const packages = commands.flatMap(command => command.flatMap((arg, index) => arg === '--filter' ? [command[index + 1]] : []));
-    assert.equal(new Set(packages).size, packages.length);
-    assert.ok(packages.includes('@codexia/contracts'));
-    assert.ok(packages.includes('@codexia/core'));
-    assert.equal(packages.at(-1), '@codexia/api');
-    assert.equal(commands.length, 1);
-    assert.deepEqual(commands[0].slice(0, 3), ['--recursive', '--sort', '--workspace-concurrency=2']);
-    assert.deepEqual(commands[0].slice(-2), ['run', 'build']);
-  } finally {
-    await rm(fixture.projectRoot, { recursive: true, force: true });
-  }
+  t.after(() => rm(fixture.projectRoot, { recursive: true, force: true }));
+  const executed = runProject(fixture.projectRoot, ['unit', 'root'], fixture.env);
+  assert.equal(executed.status, 0, executed.stderr);
+  const commands = (await readFile(fixture.record, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual(commands, [['run', 'test:scripts']]);
 });
 
-test('speaker unit tests own their worker build while preparation follows workspace dependencies', async () => {
-  const temporary = await mkdtemp(path.join(tmpdir(), 'codexia-ci-workspace-'));
-  const bin = path.join(temporary, 'bin');
-  const pnpm = path.join(bin, 'pnpm');
-  const record = path.join(temporary, 'pnpm-commands.jsonl');
-  await mkdir(bin);
-  await writeFile(pnpm, '#!/usr/bin/env node\nconst fs = require("node:fs");\nfs.appendFileSync(process.env.CODEXIA_CI_PNPM_RECORD, JSON.stringify(process.argv.slice(2)) + "\\n");\n');
-  await chmod(pnpm, 0o755);
-  const env = {
-    ...process.env,
-    PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
-    CODEXIA_CI_PNPM_RECORD: record,
-  };
-  try {
-    const prepared = run(['prepare', 'unit', 'speaker'], env);
-    assert.equal(prepared.status, 0, prepared.stderr);
-    assert.match(prepared.stdout, /built dependency workspaces/u);
-
-    const executed = run(['unit', 'speaker'], env);
-    assert.equal(executed.status, 0, executed.stderr);
-
-    const commands = (await readFile(record, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
-    const builtPackages = commands.filter(command => command.includes('build')).flatMap(command => command.flatMap((arg, index) => arg === '--filter' ? [command[index + 1]] : []));
-    assert.ok(builtPackages.includes('@codexia/module-nlp'));
-    assert.ok(builtPackages.includes('@codexia/module-diagnostics'));
-    assert.equal(builtPackages.includes('@codexia/module-speaker'), false);
-    assert.deepEqual(commands.at(-1), ['--filter', '@codexia/module-speaker', 'run', 'test']);
-    const speakerManifest = JSON.parse(await readFile(path.join(root, 'modules/speaker/package.json'), 'utf8'));
-    assert.match(speakerManifest.scripts.test, /^pnpm run build && /u);
-  } finally {
-    await rm(temporary, { recursive: true, force: true });
-  }
-});
-
-test('unit preparation is unchanged when root test orchestration order changes', async () => {
+test('speaker preparation follows manifest dependencies independently of root test order', async t => {
   const rootTestScripts = [
     'pnpm --filter @codexia/module-speaker build && pnpm --filter @codexia/module-speaker test && pnpm --filter @codexia/module-runtime test',
     'pnpm --filter @codexia/module-speaker build && pnpm --filter @codexia/module-runtime test && pnpm --filter @codexia/module-speaker test',
   ];
   const observed = [];
-  const fixtures = [];
-  try {
-    for (const rootTestScript of rootTestScripts) {
-      const fixture = await makeWorkspaceFixture(rootTestScript);
-      fixtures.push(fixture.projectRoot);
-      const prepared = runProject(fixture.projectRoot, ['prepare', 'unit', 'speaker'], fixture.env);
-      assert.equal(prepared.status, 0, prepared.stderr);
-      const executed = runProject(fixture.projectRoot, ['unit', 'speaker'], fixture.env);
-      assert.equal(executed.status, 0, executed.stderr);
-      observed.push((await readFile(fixture.record, 'utf8')).trim().split('\n').map((line) => JSON.parse(line)));
-    }
-    assert.deepEqual(observed[0], observed[1]);
-    assert.deepEqual(observed[0].at(-1), ['--filter', '@codexia/module-speaker', 'run', 'test']);
-  } finally {
-    await Promise.all(fixtures.map((fixture) => rm(fixture, { recursive: true, force: true })));
+  for (const rootTestScript of rootTestScripts) {
+    const fixture = await makeWorkspaceFixture(rootTestScript);
+    t.after(() => rm(fixture.projectRoot, { recursive: true, force: true }));
+    const reportPath = path.join(fixture.projectRoot, 'prepare.json');
+    const prepared = runProject(fixture.projectRoot, ['prepare', 'selected-group', reportPath], {
+      ...fixture.env, CODEXIA_CI_GROUP_TASKS: '["unit-speaker"]', CODEXIA_CI_CONCURRENCY: '1',
+    });
+    assert.equal(prepared.status, 0, prepared.stderr);
+    assert.deepEqual(JSON.parse(await readFile(reportPath, 'utf8')), [{ task: 'unit-speaker', exclusive: false }]);
+    const executed = runProject(fixture.projectRoot, ['unit', 'speaker'], fixture.env);
+    assert.equal(executed.status, 0, executed.stderr);
+    observed.push((await readFile(fixture.record, 'utf8')).trim().split('\n').map(JSON.parse));
   }
+  assert.deepEqual(observed[0], observed[1]);
+  const commands = observed[0];
+  const builtPackages = commands.filter(command => command.at(-1) === 'build').map(command => command[1]);
+  assert.ok(builtPackages.includes('@codexia/module-nlp'));
+  assert.ok(builtPackages.includes('@codexia/module-diagnostics'));
+  assert.equal(builtPackages.includes('@codexia/module-speaker'), false);
+  assert.deepEqual(commands.at(-1), ['--filter', '@codexia/module-speaker', 'run', 'test']);
+  const speakerManifest = JSON.parse(await readFile(path.join(root, 'modules/speaker/package.json'), 'utf8'));
+  assert.match(speakerManifest.scripts.test, /^pnpm run build && /u);
 });
 
 test('coverage and test typecheck reject TypeScript tests outside workspace src', async () => {
@@ -277,6 +207,9 @@ test('real workspace preparation overlaps independent builds and blocks dependen
     const observedLines = (await readFile(events, 'utf8')).trim().split('\n');
     assert.ok(successReport.every(entry => !entry.error), `${JSON.stringify(successReport)}\n${success.stdout}\n${success.stderr}\n${observedLines.join('\n')}`);
     const observed = observedLines.map(JSON.parse);
+    const started = observed.filter(event => event.event === 'start').map(event => event.id);
+    assert.equal(new Set(started).size, started.length, 'tasks share a single build per workspace');
+    assert.ok(observed.some(event => event.id === 'api' && event.event === 'end'), 'root tests prepare the API');
     assert.ok(observed.some(event => event.id === 'persistence-postgres' && event.event === 'end'));
     assert.equal(observed.filter(event => event.event === 'barrier-release').length, 2, 'the independent-build barrier releases only after both peers start');
     let active = 0;

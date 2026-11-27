@@ -33,7 +33,10 @@ After verifying the restored database and history fingerprints, the drill checks
 
 ## 採用済み目標: S3互換オブジェクトストレージへの暗号化バックアップ
 
-**運用設定UIの正本:** [バックアップ管理コンソール設計](../architecture/BACKUP-CONSOLE-CONTRACT.md)。ownerは`/console/backups`からS3の保存先・credential（write-only）・要求する保持期間・検証・有効化・run状態を操作する。通常の保存先指定にSSH/Ansible編集を要求しない。一方、既存の暗号化アーティファクト生成・host lock・writer停止は`backup.sh`が所有し、実本番復元やVM/IAM変更は引き続き保護されたOPERATORの経路で行う。local stagingとage受取公開鍵はoperator-controlledでありWeb変更を禁止する。
+[バックアップ制御の運用手順](../../deploy/backup/CONSOLE.md)に従い、オペレーターがS3保存先を扱うAPIとexecutorを有効化する。
+OWNER-SESSIONで保存先とwrite-only資格情報を扱う画面の設計は[バックアップ管理コンソール](../architecture/BACKUP-CONSOLE-CONTRACT.md)に従う。
+暗号化アーティファクトの生成とwriter停止の確認には`backup.sh`と共通host lockを使う。
+ローカルの保管先とage受取公開鍵の管理、本番の復元、VMやIAMの変更は、保護されたオペレーターの手順で行う。
 
 ローカルまたは独立mount先で生成したv2 artifactは、S3 API互換ストレージへ転送できる。保護されたexecutorとAnsibleのデプロイ受入は、同じ`backup.sh`と転送アダプターを使う。クラウドベンダー、バケット名、リージョン、保持期間、RPO/RTOは配備先の運用方針で決める。
 

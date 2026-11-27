@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { buildComponentReleaseRecord } from '../components/record-model.mjs';
-import { assertExistingBackendReleaseBinding, backendReleaseSourceTree, successfulPublicationJobs } from './verify-existing.mjs';
+import { assertExistingBackendReleaseBinding, backendReleaseSourceTree, publishedBackendCompatibility,
+  successfulPublicationJobs, verifyExistingBackendRelease } from './verify-existing.mjs';
 import { readComponentVersion } from '../components/version.mjs';
 
 const sha=char=>char.repeat(40),image=char=>'ghcr.io/yohn-jp/codexia-backend@sha256:'+char.repeat(64);
@@ -83,6 +84,61 @@ test('main fallback digest retry requires the exact build artifact receipt',()=>
   const changed=structuredClone(receipt);changed.artifacts.core.digest='sha256:'+'7'.repeat(64);
   assert.throws(()=>assertExistingBackendReleaseBinding(release,tagRef,{...expected,receipt:changed}),/exact main build receipt/);
   assert.throws(()=>assertExistingBackendReleaseBinding(release,tagRef,{...expected,mainTree:sha('9')}),/tree differs/);
+});
+
+test('verifies a backend release when the tag prefix matches more than one REST page', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'codexia-release-read-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const sourceTree = backendReleaseSourceTree(sourceSha);
+  const version = readComponentVersion('backend', '450');
+  const receipt = {
+    format: 'codexia-backend-build/v1', event: 'workflow_run', sourceSha, sourceTree, version,
+    workflowRunId: 451, workflowRunNumber: 450,
+    artifacts: {
+      core: { id: 452, digest: 'sha256:' + '1'.repeat(64), producerAttempt: 1, archiveSha256: '2'.repeat(64) },
+      full: { id: 453, digest: 'sha256:' + '3'.repeat(64), producerAttempt: 1, archiveSha256: '4'.repeat(64) },
+    },
+  };
+  const record = buildComponentReleaseRecord('backend', sourceSha, null, {
+    core: image('5'), full: image('6'), compatibility: publishedBackendCompatibility(sourceSha),
+    event: 'workflow_run', receipt, mainTree: sourceTree,
+  });
+  const manifest = path.join(dir, 'build.json');
+  await writeFile(manifest, JSON.stringify(receipt));
+  const release = { tag_name: record.tag, draft: false, prerelease: false, body: record.body, published_at: '2026-01-01T00:01:00Z' };
+  const tag = { ref: 'refs/tags/' + record.tag, object: { type: 'commit', sha: sourceSha } };
+  const otherTags = Array.from({ length: 104 }, (_, index) => ({ ref: 'refs/tags/backend-v0.0.' + index, object: tag.object }));
+  const jobs = ['Resolve verified backend promotion', 'Build and test backend OCI image (core)',
+    'Build and test backend OCI image (full)', 'Publish immutable GHCR image'].map(name => ({
+    name, status: 'completed', conclusion: 'success',
+  }));
+  t.mock.method(globalThis, 'fetch', async input => {
+    const endpoint = decodeURIComponent(new URL(input).pathname).replace('/repos/yohn-jp/codexia/', '');
+    switch (endpoint) {
+      case 'releases': return Response.json([release]);
+      case 'git/matching-refs/tags/backend-v': return Response.json([...otherTags, tag]);
+      case 'releases/tags/' + record.tag: return Response.json(release);
+      case 'git/ref/tags/' + record.tag: return Response.json(tag);
+      case 'actions/workflows/backend-release.yml/runs': return Response.json({ total_count: 1, workflow_runs: [{
+        id: 451, run_number: 450, path: '.github/workflows/backend-release.yml', event: 'workflow_run',
+        head_branch: 'main', head_sha: sourceSha, status: 'completed', conclusion: 'success',
+        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:02:00Z',
+      }] });
+      case 'actions/runs/451/jobs': return Response.json({ total_count: jobs.length, jobs });
+      default: assert.fail('Unexpected GitHub API path: ' + endpoint);
+    }
+  });
+
+  const verified = await verifyExistingBackendRelease({
+    env: { GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_REF: 'refs/heads/main', GITHUB_EVENT_NAME: 'workflow_run',
+      GITHUB_SHA: sourceSha, GITHUB_RUN_ID: '451', GITHUB_RUN_NUMBER: '450', CODEXIA_BACKEND_ARTIFACT_MANIFEST: manifest,
+      GH_TOKEN: 'fixture' },
+    args: [image('6'), sourceSha, sourceSha, version, 'full', 'workflow_run'],
+    usePublishedSourceCompatibility: true,
+  });
+  assert.equal(verified.publicationRunId, 451);
+  assert.equal(verified.metadata.images.full, image('6'));
 });
 
 test('existing digest requires successful prior main publication jobs for its path',()=>{

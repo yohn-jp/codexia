@@ -1,13 +1,13 @@
-import type { Document as PersistenceDocument, DocumentRevision as PersistenceRevision } from "@codexia/persistence-contracts";
+import type { Document as PersistenceDocument, DocumentRevision as PersistenceRevision } from '@codexia/persistence-contracts';
 
 /** UI-facing text evidence types. The persistence adapter translates these to the published API contract. */
-export type TextAnchorStatus = "proposed" | "current" | "needs_review" | "orphaned" | "revision_conflict";
+export type TextAnchorStatus = 'proposed' | 'current' | 'needs_review' | 'orphaned' | 'revision_conflict';
 
 export interface MarkdownBlockIdentity {
   id: string;
   from: number;
   to: number;
-  kind: "frontmatter" | "code" | "heading" | "list" | "quote" | "paragraph";
+  kind: 'frontmatter' | 'code' | 'heading' | 'list' | 'quote' | 'paragraph';
 }
 
 export interface KnowledgeReference {
@@ -20,8 +20,8 @@ export interface KnowledgeReference {
 export interface AssertionReference {
   id: string;
   label: string;
-  role: "supports" | "contradicts" | "quotes" | "context";
-  status: "proposed" | "confirmed" | "rejected" | "retired";
+  role: 'supports' | 'contradicts' | 'quotes' | 'context';
+  status: 'proposed' | 'confirmed' | 'rejected' | 'retired';
 }
 
 export interface TextAnchor {
@@ -56,39 +56,35 @@ export function applyTextChanges(source: string, changes: readonly TextChange[])
     parts.push(source.slice(offset, change.from), change.insert);
     offset = change.to;
   }
-  return parts.join("") + source.slice(offset);
+  return parts.join('') + source.slice(offset);
 }
 
 interface TextPiece {
-  kind: "source" | "inserted";
+  kind: 'source' | 'inserted';
   from: number;
   to: number;
   text?: string;
 }
 
 /** Compose sequential CodeMirror changes into UTF-16 ranges against one saved revision. */
-export function composeTextChanges(
-  sourceText: string,
-  previous: readonly TextChange[],
-  next: readonly TextChange[],
-): TextChange[] {
-  const pieces: TextPiece[] = sourceText.length > 0 ? [{ kind: "source", from: 0, to: sourceText.length }] : [];
+export function composeTextChanges(sourceText: string, previous: readonly TextChange[], next: readonly TextChange[]): TextChange[] {
+  const pieces: TextPiece[] = sourceText.length > 0 ? [{ kind: 'source', from: 0, to: sourceText.length }] : [];
   applyChangesToPieces(pieces, previous, sourceText.length);
   const currentLength = pieces.reduce((total, piece) => total + pieceLength(piece), 0);
   applyChangesToPieces(pieces, next, currentLength);
 
   const composed: TextChange[] = [];
   let sourceOffset = 0;
-  let inserted = "";
+  let inserted = '';
   for (const piece of pieces) {
-    if (piece.kind === "inserted") {
-      inserted += piece.text ?? "";
+    if (piece.kind === 'inserted') {
+      inserted += piece.text ?? '';
       continue;
     }
-    if (piece.from < sourceOffset) throw new RangeError("Text changes reordered source text.");
+    if (piece.from < sourceOffset) throw new RangeError('Text changes reordered source text.');
     if (piece.from > sourceOffset || inserted.length > 0) {
       composed.push({ from: sourceOffset, to: piece.from, insert: inserted });
-      inserted = "";
+      inserted = '';
     }
     sourceOffset = piece.to;
   }
@@ -99,7 +95,7 @@ export function composeTextChanges(
 }
 
 function pieceLength(piece: TextPiece): number {
-  return piece.kind === "source" ? piece.to - piece.from : (piece.text ?? "").length;
+  return piece.kind === 'source' ? piece.to - piece.from : (piece.text ?? '').length;
 }
 
 function splitPiecesAt(pieces: TextPiece[], offset: number): number {
@@ -111,37 +107,43 @@ function splitPiecesAt(pieces: TextPiece[], offset: number): number {
     if (offset === cursor + length) return index + 1;
     if (offset > cursor && offset < cursor + length) {
       const leftLength = offset - cursor;
-      const left: TextPiece = piece.kind === "source"
-        ? { kind: "source", from: piece.from, to: piece.from + leftLength }
-        : { kind: "inserted", from: 0, to: 0, text: piece.text!.slice(0, leftLength) };
-      const right: TextPiece = piece.kind === "source"
-        ? { kind: "source", from: piece.from + leftLength, to: piece.to }
-        : { kind: "inserted", from: 0, to: 0, text: piece.text!.slice(leftLength) };
+      const left: TextPiece =
+        piece.kind === 'source'
+          ? { kind: 'source', from: piece.from, to: piece.from + leftLength }
+          : { kind: 'inserted', from: 0, to: 0, text: piece.text!.slice(0, leftLength) };
+      const right: TextPiece =
+        piece.kind === 'source'
+          ? { kind: 'source', from: piece.from + leftLength, to: piece.to }
+          : { kind: 'inserted', from: 0, to: 0, text: piece.text!.slice(leftLength) };
       pieces.splice(index, 1, left, right);
       return index + 1;
     }
     cursor += length;
   }
   if (offset === cursor) return pieces.length;
-  throw new RangeError("Text change offset is outside its source revision.");
+  throw new RangeError('Text change offset is outside its source revision.');
 }
 
 function applyChangesToPieces(pieces: TextPiece[], changes: readonly TextChange[], sourceLength: number): void {
   const ordered = [...changes].sort((left, right) => left.from - right.from || left.to - right.to);
   let previousEnd = 0;
   for (const change of ordered) {
-    if (!Number.isInteger(change.from) || !Number.isInteger(change.to) || change.from < previousEnd
-      || change.to < change.from || change.to > sourceLength || typeof change.insert !== "string") {
-      throw new RangeError("Text changes must be ordered, non-overlapping UTF-16 ranges.");
+    if (
+      !Number.isInteger(change.from) ||
+      !Number.isInteger(change.to) ||
+      change.from < previousEnd ||
+      change.to < change.from ||
+      change.to > sourceLength ||
+      typeof change.insert !== 'string'
+    ) {
+      throw new RangeError('Text changes must be ordered, non-overlapping UTF-16 ranges.');
     }
     previousEnd = change.to;
   }
   for (const change of [...ordered].reverse()) {
     const startIndex = splitPiecesAt(pieces, change.from);
     const endIndex = splitPiecesAt(pieces, change.to);
-    const replacement = change.insert.length > 0
-      ? [{ kind: "inserted", from: 0, to: 0, text: change.insert } satisfies TextPiece]
-      : [];
+    const replacement = change.insert.length > 0 ? [{ kind: 'inserted', from: 0, to: 0, text: change.insert } satisfies TextPiece] : [];
     pieces.splice(startIndex, endIndex - startIndex, ...replacement);
   }
 }
@@ -159,7 +161,7 @@ export interface EditorEvidenceIdentity {
   projectId: string;
   documentId: string;
   revisionId: string;
-  /** Exact source text lets adapters reject a stale or unmapped revision before decorating. */
+  /** Exact source text lets the editor reject stale evidence before decorating. */
   markdown?: string;
 }
 
@@ -185,66 +187,93 @@ export interface EditorPersistenceSaveResult {
   revision?: PersistenceRevision;
 }
 
-/** Host adapter for a revision-pinned PostgreSQL document binding used by the existing Editor. */
-export interface EditorEvidenceAdapter {
-  read(identity: EditorEvidenceIdentity, signal: AbortSignal): Promise<EditorEvidenceSnapshot>;
-  /** Optional writer for a PG-backed Editor binding; invoked only after the browser Draft Journal stores the text. */
-  save?(identity: EditorEvidenceIdentity, request: EditorPersistenceSave, signal: AbortSignal): Promise<EditorPersistenceSaveResult>;
-}
-
 /** Validates host adapter data before offsets become CodeMirror decorations. */
 export function assertEditorEvidenceSnapshot(value: unknown, documentLength: number): EditorEvidenceSnapshot {
-  const record = (input: unknown): input is Record<string, unknown> => typeof input === "object" && input !== null && !Array.isArray(input);
-  if (!record(value) || typeof value.revisionId !== "string" || value.revisionId.length === 0
-    || (value.markdown !== undefined && typeof value.markdown !== "string")
-    || !Array.isArray(value.blocks) || !Array.isArray(value.anchors)) throw new TypeError("Text Anchor adapter returned an invalid snapshot.");
-  const blockKinds = new Set(["frontmatter", "code", "heading", "list", "quote", "paragraph"]);
-  const blocks = value.blocks.map((item) => {
-    if (!record(item) || typeof item.id !== "string" || item.id.length === 0
-      || !Number.isInteger(item.from) || !Number.isInteger(item.to)
-      || (item.from as number) < 0 || (item.to as number) <= (item.from as number) || (item.to as number) > documentLength
-      || typeof item.kind !== "string" || !blockKinds.has(item.kind)) throw new TypeError("Text Anchor adapter returned an invalid block identity.");
+  const record = (input: unknown): input is Record<string, unknown> => typeof input === 'object' && input !== null && !Array.isArray(input);
+  if (
+    !record(value) ||
+    typeof value.revisionId !== 'string' ||
+    value.revisionId.length === 0 ||
+    (value.markdown !== undefined && typeof value.markdown !== 'string') ||
+    !Array.isArray(value.blocks) ||
+    !Array.isArray(value.anchors)
+  )
+    throw new TypeError('Text Anchor adapter returned an invalid snapshot.');
+  const blockKinds = new Set(['frontmatter', 'code', 'heading', 'list', 'quote', 'paragraph']);
+  const blocks = value.blocks.map(item => {
+    if (
+      !record(item) ||
+      typeof item.id !== 'string' ||
+      item.id.length === 0 ||
+      !Number.isInteger(item.from) ||
+      !Number.isInteger(item.to) ||
+      (item.from as number) < 0 ||
+      (item.to as number) <= (item.from as number) ||
+      (item.to as number) > documentLength ||
+      typeof item.kind !== 'string' ||
+      !blockKinds.has(item.kind)
+    )
+      throw new TypeError('Text Anchor adapter returned an invalid block identity.');
     return item as unknown as MarkdownBlockIdentity;
   });
-  if (!validBlocksOfLength(blocks, documentLength)) throw new TypeError("Text Anchor adapter returned duplicate or unordered block identities.");
-  const statuses = new Set(["proposed", "current", "needs_review", "orphaned", "revision_conflict"]);
-  const anchors = value.anchors.map((item) => {
-    if (!record(item) || typeof item.id !== "string" || item.id.length === 0
-      || (item.blockId !== null && (typeof item.blockId !== "string" || item.blockId.length === 0))
-      || !Number.isInteger(item.from) || !Number.isInteger(item.to)
-      || (item.from as number) < 0 || (item.to as number) < (item.from as number)
-      || typeof item.quote !== "string" || (item.quote.length === 0 && item.status !== "orphaned" && item.status !== "revision_conflict")
-      || typeof item.revisionId !== "string" || item.revisionId.length === 0 || typeof item.status !== "string" || !statuses.has(item.status)
-      || ((item.to as number) === (item.from as number) && item.status !== "orphaned" && item.status !== "revision_conflict")
-      || (item.target !== undefined && !validKnowledgeReference(item.target))
-       || (item.targets !== undefined && (!Array.isArray(item.targets) || !item.targets.every(validKnowledgeReference)))
-      || (item.candidates !== undefined && (!Array.isArray(item.candidates) || !item.candidates.every(validKnowledgeReference)))
-      || (item.assertions !== undefined && (!Array.isArray(item.assertions) || !item.assertions.every(validAssertionReference)))) {
-      throw new TypeError("Text Anchor adapter returned an invalid anchor.");
+  if (!validBlocksOfLength(blocks, documentLength))
+    throw new TypeError('Text Anchor adapter returned duplicate or unordered block identities.');
+  const statuses = new Set(['proposed', 'current', 'needs_review', 'orphaned', 'revision_conflict']);
+  const anchors = value.anchors.map(item => {
+    if (
+      !record(item) ||
+      typeof item.id !== 'string' ||
+      item.id.length === 0 ||
+      (item.blockId !== null && (typeof item.blockId !== 'string' || item.blockId.length === 0)) ||
+      !Number.isInteger(item.from) ||
+      !Number.isInteger(item.to) ||
+      (item.from as number) < 0 ||
+      (item.to as number) < (item.from as number) ||
+      typeof item.quote !== 'string' ||
+      (item.quote.length === 0 && item.status !== 'orphaned' && item.status !== 'revision_conflict') ||
+      typeof item.revisionId !== 'string' ||
+      item.revisionId.length === 0 ||
+      typeof item.status !== 'string' ||
+      !statuses.has(item.status) ||
+      ((item.to as number) === (item.from as number) && item.status !== 'orphaned' && item.status !== 'revision_conflict') ||
+      (item.target !== undefined && !validKnowledgeReference(item.target)) ||
+      (item.targets !== undefined && (!Array.isArray(item.targets) || !item.targets.every(validKnowledgeReference))) ||
+      (item.candidates !== undefined && (!Array.isArray(item.candidates) || !item.candidates.every(validKnowledgeReference))) ||
+      (item.assertions !== undefined && (!Array.isArray(item.assertions) || !item.assertions.every(validAssertionReference)))
+    ) {
+      throw new TypeError('Text Anchor adapter returned an invalid anchor.');
     }
-    if ((item.to as number) > documentLength && item.status !== "orphaned" && item.status !== "revision_conflict") {
-      throw new TypeError("Text Anchor adapter returned an out-of-range current anchor.");
+    if ((item.to as number) > documentLength && item.status !== 'orphaned' && item.status !== 'revision_conflict') {
+      throw new TypeError('Text Anchor adapter returned an out-of-range current anchor.');
     }
     return item as unknown as TextAnchor;
   });
-  return { revisionId: value.revisionId, ...(typeof value.markdown === "string" ? { markdown: value.markdown } : {}), blocks, anchors };
+  return { revisionId: value.revisionId, ...(typeof value.markdown === 'string' ? { markdown: value.markdown } : {}), blocks, anchors };
 }
 
 function validKnowledgeReference(value: unknown): value is KnowledgeReference {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const reference = value as Record<string, unknown>;
-  return typeof reference.id === "string" && reference.id.length > 0
-    && typeof reference.label === "string" && reference.label.length > 0
-    && (reference.targetPath === undefined || typeof reference.targetPath === "string");
+  return (
+    typeof reference.id === 'string' &&
+    reference.id.length > 0 &&
+    typeof reference.label === 'string' &&
+    reference.label.length > 0 &&
+    (reference.targetPath === undefined || typeof reference.targetPath === 'string')
+  );
 }
 
 function validAssertionReference(value: unknown): value is AssertionReference {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const reference = value as Record<string, unknown>;
-  return typeof reference.id === "string" && reference.id.length > 0
-    && typeof reference.label === "string" && reference.label.length > 0
-    && ["supports", "contradicts", "quotes", "context"].includes(String(reference.role))
-    && ["proposed", "confirmed", "rejected", "retired"].includes(String(reference.status));
+  return (
+    typeof reference.id === 'string' &&
+    reference.id.length > 0 &&
+    typeof reference.label === 'string' &&
+    reference.label.length > 0 &&
+    ['supports', 'contradicts', 'quotes', 'context'].includes(String(reference.role)) &&
+    ['proposed', 'confirmed', 'rejected', 'retired'].includes(String(reference.status))
+  );
 }
 
 export type CreateBlockId = () => string;
@@ -252,7 +281,7 @@ export type CreateBlockId = () => string;
 let fallbackBlockSequence = 0;
 
 export function createBlockId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
   fallbackBlockSequence += 1;
   return `block-${Date.now().toString(36)}-${fallbackBlockSequence.toString(36)}`;
 }
@@ -265,11 +294,11 @@ export function parseMarkdownBlocks(text: string, makeId: CreateBlockId = create
   const lines = lineRanges(text);
   const blocks: MarkdownBlockIdentity[] = [];
   let start: number | null = null;
-  let kind: MarkdownBlockIdentity["kind"] = "paragraph";
+  let kind: MarkdownBlockIdentity['kind'] = 'paragraph';
   let fence: { marker: string; length: number } | null = null;
-  let frontmatter = lines[0]?.content === "---";
+  let frontmatter = lines[0]?.content === '---';
 
-  const add = (from: number, to: number, blockKind: MarkdownBlockIdentity["kind"]) => {
+  const add = (from: number, to: number, blockKind: MarkdownBlockIdentity['kind']) => {
     if (to > from) blocks.push({ id: makeId(), from, to, kind: blockKind });
   };
 
@@ -277,12 +306,12 @@ export function parseMarkdownBlocks(text: string, makeId: CreateBlockId = create
     const line = lines[index]!;
     if (frontmatter) {
       if (index === 0) start = line.from;
-      if (index > 0 && (line.content === "---" || line.content === "...")) {
-        add(start ?? 0, line.to, "frontmatter");
+      if (index > 0 && (line.content === '---' || line.content === '...')) {
+        add(start ?? 0, line.to, 'frontmatter');
         start = null;
         frontmatter = false;
       } else if (index === lines.length - 1) {
-        add(start ?? 0, line.to, "frontmatter");
+        add(start ?? 0, line.to, 'frontmatter');
         start = null;
         frontmatter = false;
       }
@@ -292,14 +321,14 @@ export function parseMarkdownBlocks(text: string, makeId: CreateBlockId = create
     const fenceOpening = /^ {0,3}(`{3,}|~{3,})/u.exec(line.content)?.[1];
     if (start === null && fenceOpening) {
       start = line.from;
-      kind = "code";
+      kind = 'code';
       fence = { marker: fenceOpening[0]!, length: fenceOpening.length };
       continue;
     }
     if (fence) {
-      const close = new RegExp(`^ {0,3}${fence.marker}{${fence.length},}\\s*$`, "u");
+      const close = new RegExp(`^ {0,3}${fence.marker}{${fence.length},}\\s*$`, 'u');
       if (close.test(line.content) || index === lines.length - 1) {
-        add(start ?? line.from, line.from + line.content.length, "code");
+        add(start ?? line.from, line.from + line.content.length, 'code');
         start = null;
         fence = null;
       }
@@ -313,9 +342,13 @@ export function parseMarkdownBlocks(text: string, makeId: CreateBlockId = create
     }
     if (start === null) {
       start = line.from;
-      kind = /^ {0,3}#{1,6}(?:\s|$)/u.test(line.content) ? "heading"
-        : /^\s*(?:[-+*]|\d+[.)])\s+/u.test(line.content) ? "list"
-          : /^\s*>/u.test(line.content) ? "quote" : "paragraph";
+      kind = /^ {0,3}#{1,6}(?:\s|$)/u.test(line.content)
+        ? 'heading'
+        : /^\s*(?:[-+*]|\d+[.)])\s+/u.test(line.content)
+          ? 'list'
+          : /^\s*>/u.test(line.content)
+            ? 'quote'
+            : 'paragraph';
     }
     if (index === lines.length - 1) {
       add(start, line.from + line.content.length, kind);
@@ -323,7 +356,7 @@ export function parseMarkdownBlocks(text: string, makeId: CreateBlockId = create
     }
   }
 
-  if (start !== null && lines.length > 0) add(start, previousContentEnd(lines, lines.length), fence ? "code" : kind);
+  if (start !== null && lines.length > 0) add(start, previousContentEnd(lines, lines.length), fence ? 'code' : kind);
   return blocks;
 }
 
@@ -333,8 +366,8 @@ function lineRanges(text: string): Array<{ from: number; to: number; content: st
   let from = 0;
   while (from < text.length) {
     let end = from;
-    while (end < text.length && text[end] !== "\n" && text[end] !== "\r") end += 1;
-    const newlineWidth = end === text.length ? 0 : text[end] === "\r" && text[end + 1] === "\n" ? 2 : 1;
+    while (end < text.length && text[end] !== '\n' && text[end] !== '\r') end += 1;
+    const newlineWidth = end === text.length ? 0 : text[end] === '\r' && text[end + 1] === '\n' ? 2 : 1;
     const to = end + newlineWidth;
     lines.push({ from, to, content: text.slice(from, end) });
     from = to;
@@ -379,15 +412,12 @@ export function reconcileMarkdownBlocks(
   const next = parseMarkdownBlocks(nextText, makeId);
   const assigned = new Map<number, string>();
 
-  previous.forEach((block) => {
+  previous.forEach(block => {
     if (block.from < 0 || block.to <= block.from || block.to > oldText.length) return;
     let bestIndex = -1;
     let bestOverlap = 0;
     const surviving = survivingBlockSegments(block.from, block.to, changes);
-    const projected = surviving.map(([from, to]) => [
-      mapTextOffset(from, changes, 1),
-      mapTextOffset(to, changes, -1),
-    ] as const);
+    const projected = surviving.map(([from, to]) => [mapTextOffset(from, changes, 1), mapTextOffset(to, changes, -1)] as const);
     for (const [from, to] of projected) {
       next.forEach((candidate, newIndex) => {
         const overlap = Math.max(0, Math.min(to, candidate.to) - Math.max(from, candidate.from));
@@ -400,7 +430,7 @@ export function reconcileMarkdownBlocks(
       });
     }
     if (bestIndex < 0) {
-      const replacement = changes.find((change) => change.from <= block.from && change.to >= block.to && change.insert.length > 0);
+      const replacement = changes.find(change => change.from <= block.from && change.to >= block.to && change.insert.length > 0);
       if (replacement) {
         const newFrom = changeInsertedStart(replacement, changes);
         const newTo = newFrom + replacement.insert.length;
@@ -447,7 +477,7 @@ function changeInsertedStart(change: TextChange, changes: readonly TextChange[])
 }
 
 function blockAt(blocks: readonly MarkdownBlockIdentity[], from: number, to: number): MarkdownBlockIdentity | undefined {
-  return blocks.find((block) => from >= block.from && from < block.to && to <= block.to);
+  return blocks.find(block => from >= block.from && from < block.to && to <= block.to);
 }
 
 export function initializeDocumentEvidence(
@@ -457,24 +487,47 @@ export function initializeDocumentEvidence(
   makeId: CreateBlockId = createBlockId,
 ): DocumentEvidenceState {
   const sourceMatches = !snapshot || snapshot.revisionId === revisionId;
-  const blocks = snapshot?.revisionId === revisionId && validBlocks(text, snapshot.blocks) && (snapshot.blocks.length > 0 || text.length === 0)
-    ? snapshot.blocks.map((block) => ({ ...block }))
-    : parseMarkdownBlocks(text, makeId);
-  const anchors = (snapshot?.anchors ?? []).flatMap((anchor) => {
-    if (!Number.isInteger(anchor.from) || !Number.isInteger(anchor.to) || anchor.from < 0 || anchor.to < anchor.from
-      || (anchor.to === anchor.from && anchor.status !== "orphaned" && anchor.status !== "revision_conflict")) return [];
+  const blocks =
+    snapshot?.revisionId === revisionId && validBlocks(text, snapshot.blocks) && (snapshot.blocks.length > 0 || text.length === 0)
+      ? snapshot.blocks.map(block => ({ ...block }))
+      : parseMarkdownBlocks(text, makeId);
+  const anchors = (snapshot?.anchors ?? []).flatMap(anchor => {
+    if (
+      !Number.isInteger(anchor.from) ||
+      !Number.isInteger(anchor.to) ||
+      anchor.from < 0 ||
+      anchor.to < anchor.from ||
+      (anchor.to === anchor.from && anchor.status !== 'orphaned' && anchor.status !== 'revision_conflict')
+    )
+      return [];
     const inRange = anchor.to <= text.length;
     const quoteMatches = inRange && text.slice(anchor.from, anchor.to) === anchor.quote;
     const revisionMatches = anchor.revisionId === revisionId && snapshot?.revisionId === revisionId;
-    const persistedBlock = blocks.find((block) => block.id === anchor.blockId);
-    const actualBlock = inRange && anchor.status !== "orphaned" && anchor.status !== "revision_conflict" ? blockAt(blocks, anchor.from, anchor.to) : undefined;
-    return [{
-      ...anchor,
-      blockId: persistedBlock && actualBlock && inRange && anchor.from >= persistedBlock.from && anchor.from < persistedBlock.to && anchor.to <= persistedBlock.to
-        ? persistedBlock.id : actualBlock?.id ?? null,
-      status: sourceMatches && revisionMatches && quoteMatches ? anchor.status
-        : anchor.status === "orphaned" ? "orphaned" as const : "revision_conflict" as const,
-    }];
+    const persistedBlock = blocks.find(block => block.id === anchor.blockId);
+    const actualBlock =
+      inRange && anchor.status !== 'orphaned' && anchor.status !== 'revision_conflict'
+        ? blockAt(blocks, anchor.from, anchor.to)
+        : undefined;
+    return [
+      {
+        ...anchor,
+        blockId:
+          persistedBlock &&
+          actualBlock &&
+          inRange &&
+          anchor.from >= persistedBlock.from &&
+          anchor.from < persistedBlock.to &&
+          anchor.to <= persistedBlock.to
+            ? persistedBlock.id
+            : (actualBlock?.id ?? null),
+        status:
+          sourceMatches && revisionMatches && quoteMatches
+            ? anchor.status
+            : anchor.status === 'orphaned'
+              ? ('orphaned' as const)
+              : ('revision_conflict' as const),
+      },
+    ];
   });
   return { revisionId, blocks, anchors, revisionConflict: !sourceMatches, positionsTrusted: sourceMatches };
 }
@@ -487,9 +540,7 @@ export function markEvidenceNeedsReview(state: DocumentEvidenceState): DocumentE
   return {
     ...state,
     positionsTrusted: false,
-    anchors: state.anchors.map((anchor) => anchor.status === "current"
-      ? { ...anchor, status: "needs_review" }
-      : anchor),
+    anchors: state.anchors.map(anchor => (anchor.status === 'current' ? { ...anchor, status: 'needs_review' } : anchor)),
   };
 }
 
@@ -502,9 +553,17 @@ function validBlocksOfLength(blocks: readonly MarkdownBlockIdentity[], length: n
   const ids = new Set<string>();
   let previousEnd = 0;
   for (const block of blocks) {
-    if (typeof block.id !== "string" || block.id.length === 0 || ids.has(block.id)
-      || !Number.isInteger(block.from) || !Number.isInteger(block.to)
-      || block.from < previousEnd || block.to <= block.from || block.to > length) return false;
+    if (
+      typeof block.id !== 'string' ||
+      block.id.length === 0 ||
+      ids.has(block.id) ||
+      !Number.isInteger(block.from) ||
+      !Number.isInteger(block.to) ||
+      block.from < previousEnd ||
+      block.to <= block.from ||
+      block.to > length
+    )
+      return false;
     ids.add(block.id);
     previousEnd = block.to;
   }
@@ -521,20 +580,21 @@ export function trackTextChanges(
   const previousBlocks = state.positionsTrusted ? state.blocks : parseMarkdownBlocks(oldText, makeId);
   const blocks = reconcileMarkdownBlocks(previousBlocks, oldText, nextText, changes, makeId);
   if (!state.positionsTrusted) return { ...state, blocks };
-  const anchors = state.anchors.map((anchor) => {
-    if (anchor.status === "orphaned" || anchor.status === "revision_conflict") return anchor;
-    const overlapping = changes.some((change) => change.from === change.to
-      ? change.from > anchor.from && change.from < anchor.to
-      : change.from < anchor.to && change.to > anchor.from);
-    const deleted = overlapping && changes.some((change) => change.from < change.to
-      && change.insert.length === 0 && change.from <= anchor.from && change.to >= anchor.to);
+  const anchors = state.anchors.map(anchor => {
+    if (anchor.status === 'orphaned' || anchor.status === 'revision_conflict') return anchor;
+    const overlapping = changes.some(change =>
+      change.from === change.to ? change.from > anchor.from && change.from < anchor.to : change.from < anchor.to && change.to > anchor.from,
+    );
+    const deleted =
+      overlapping &&
+      changes.some(change => change.from < change.to && change.insert.length === 0 && change.from <= anchor.from && change.to >= anchor.to);
     const from = mapTextOffset(anchor.from, changes, overlapping ? -1 : 1);
     const to = mapTextOffset(anchor.to, changes, overlapping ? 1 : -1);
     if (deleted || to <= from) {
-      return { ...anchor, from, to: from, blockId: null, status: "orphaned" as const };
+      return { ...anchor, from, to: from, blockId: null, status: 'orphaned' as const };
     }
     const quoteMatches = nextText.slice(from, to) === anchor.quote;
-    const status = overlapping || !quoteMatches ? "needs_review" as const : anchor.status;
+    const status = overlapping || !quoteMatches ? ('needs_review' as const) : anchor.status;
     return { ...anchor, from, to, blockId: blockAt(blocks, from, to)?.id ?? null, status };
   });
   return { ...state, blocks, anchors };
@@ -551,9 +611,9 @@ export function invalidateDocumentEvidence(state: DocumentEvidenceState): Docume
     ...state,
     revisionConflict: true,
     positionsTrusted: false,
-    anchors: state.anchors.map((anchor) => ({
+    anchors: state.anchors.map(anchor => ({
       ...anchor,
-      status: anchor.status === "orphaned" ? "orphaned" : "revision_conflict",
+      status: anchor.status === 'orphaned' ? 'orphaned' : 'revision_conflict',
     })),
   };
 }

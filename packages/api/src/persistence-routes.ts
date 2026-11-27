@@ -12,7 +12,7 @@ import {
   type ProjectId,
   type RevisionId,
 } from '@codexia/persistence-contracts';
-import { applyKnowledgeMerge, planKnowledgeMerge } from './knowledge-merge.js';
+import { applyKnowledgeMerge, planKnowledgeMerge } from '@codexia/persistence-postgres/knowledge-merge';
 import {
   applyNativeChangeSet,
   approveNativeChangeSet,

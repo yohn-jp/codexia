@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { trackedHttpOutputs } from '../evidence/coverage-inputs.mjs';
+import { discoverWorkspacePaths, trackedHttpOutputs } from '../evidence/coverage-inputs.mjs';
 import { runDependencyBuilds } from './parallel.mjs';
 import { CONFORMANCE_TASKS, TEST_TYPECHECK_SCOPES, TYPECHECK_TARGETS, UNIT_TARGETS, WORKSPACES } from '../impact/contract.mjs';
 
@@ -83,12 +83,6 @@ function buildDependencies(ids) {
   return ordered;
 }
 
-function buildTargets(ids) {
-  const targets = buildDependencies(ids);
-  runWorkspaceScript(targets, 'build');
-  return targets;
-}
-
 function runWorkspaceScript(targets, script) {
   for (const id of targets) {
     const manifest = packageManifests.get(id);
@@ -112,24 +106,6 @@ function getTypecheckTarget(targetId) {
   return target;
 }
 
-async function prepareUnit(targetId) {
-  const target = getUnitTarget(targetId);
-  if (target.path === '.') {
-    if (target.id !== 'root' || !rootManifest.scripts?.['test:scripts']) fail('Root unit target requires package.json scripts.test:scripts');
-    if (!rootManifest.scripts.test?.includes('pnpm run test:scripts')) fail('Root pnpm test must include the scripts test target');
-    if (rootManifest.devDependencies?.['@codexia/api'] !== 'workspace:*') fail('Root scripts tests require the API workspace dependency');
-    run('pnpm', ['--filter', '@codexia/api...', 'build']);
-    console.log('Unit target root: built API and its declared workspace dependencies.');
-    return;
-  }
-  const workspace = WORKSPACES.find(({ id, path: workspacePath }) => id === target.id && workspacePath === target.path);
-  if (!workspace) fail(`Unit target ${targetId} does not match a canonical workspace path`);
-  const manifest = packageManifests.get(workspace.id);
-  if (!manifest.scripts?.test) fail(`Workspace unit target ${targetId} has no package.json test script`);
-  const dependencies = buildTargets([workspace.id]);
-  console.log(`Unit target ${targetId}: built dependency workspaces [${dependencies.join(', ')}]`);
-}
-
 async function runUnit(targetId) {
   const target = getUnitTarget(targetId);
   if (target.path === '.') {
@@ -146,28 +122,12 @@ async function runUnit(targetId) {
   run('pnpm', ['--filter', manifest.name, 'run', 'test']);
 }
 
-async function prepareUnitGroup(targets) {
-  const ids = targets.split(',');
-  ids.forEach(getUnitTarget);
-  const workspaceIds = ids.filter(id => id !== 'root');
-  if (ids.includes('root')) workspaceIds.push('api');
-  const dependencies = buildDependencies(workspaceIds);
-  if (ids.includes('root') && !dependencies.includes('api')) dependencies.push('api');
-  runWorkspaceScript(dependencies, 'build');
-}
-
 function typecheckWorkspaceIds(targetId) {
   const target = getTypecheckTarget(targetId);
   const ids = target.workspaces;
   const invalid = ids.filter((id) => !workspaceById.has(id));
   if (invalid.length) fail(`Production typecheck target ${targetId} has unknown workspaces: ${invalid.join(', ')}`);
   return ids;
-}
-
-async function prepareTypecheck(targetId) {
-  const ids = typecheckWorkspaceIds(targetId);
-  const dependencies = buildTargets(ids);
-  console.log(`Production typecheck ${targetId}: built dependency workspaces [${dependencies.join(', ')}]`);
 }
 
 async function runTypecheck(targetId) {
@@ -187,18 +147,6 @@ function testTypecheckWorkspaceIds(scope) {
     : WORKSPACES.filter(({ path: workspacePath }) => scope === 'packages'
       ? workspacePath.startsWith('packages/')
       : workspacePath.startsWith('modules/')).map(({ id }) => id);
-}
-
-async function prepareTestTypecheck(scope) {
-  if (scope === 'app-e2e') {
-    if (rootManifest.devDependencies?.['@codexia/api'] !== 'workspace:*') fail('App/E2E typecheck requires the API workspace dependency');
-    run('pnpm', ['--filter', '@codexia/api...', 'build']);
-    console.log('Test typecheck app-e2e: built API and its declared workspace dependencies.');
-    return;
-  }
-  const roots = testTypecheckWorkspaceIds(scope);
-  const dependencies = buildTargets(roots);
-  console.log(`Test typecheck ${scope}: built dependency workspaces [${dependencies.join(', ')}]`);
 }
 
 async function runTestTypecheck(scope) {
@@ -337,14 +285,7 @@ function assertUnique(values, label) {
 async function checkCoverage() {
   const committed = trackedHttpOutputs(root);
   if (committed.length) fail('HTTP contract build outputs must be untracked: ' + committed.join(', '));
-  const actualWorkspacePaths = ['app'];
-  for (const area of ['packages', 'modules']) {
-    const entries = await readdir(path.join(root, area), { withFileTypes: true });
-    for (const entry of entries.filter((candidate) => candidate.isDirectory())) {
-      const packageEntries = await readdir(path.join(root, area, entry.name));
-      if (packageEntries.includes('package.json')) actualWorkspacePaths.push(`${area}/${entry.name}`);
-    }
-  }
+  const actualWorkspacePaths = await discoverWorkspacePaths(root);
   const declaredPaths = WORKSPACES.map(({ path: workspacePath }) => workspacePath);
   const missingTargets = actualWorkspacePaths.filter((workspacePath) => !declaredPaths.includes(workspacePath));
   const unknownTargets = declaredPaths.filter((workspacePath) => !actualWorkspacePaths.includes(workspacePath));
@@ -402,18 +343,13 @@ async function checkCoverage() {
 }
 
 const [command, targetId, scopeOrTarget, ...extra] = process.argv.slice(2);
-if (extra.length || !command) {
-  fail('Usage: node scripts/ci/execution/workspace.mjs <prepare|unit|typecheck|test-types|coverage> [kind] [target]');
-}
+const usage = 'Usage: node scripts/ci/execution/workspace.mjs <build-workspace|prepare selected-group <report>|unit <target>|typecheck [target]|test-types <scope>|coverage>';
+if (extra.length || !command) fail(usage);
 if (command === 'build-workspace' && !targetId) buildWorkspace();
 else if (command === 'prepare' && targetId === 'selected-group' && scopeOrTarget) await prepareSelectedGroup(scopeOrTarget);
-else if (command === 'prepare' && targetId === 'unit' && scopeOrTarget) await prepareUnit(scopeOrTarget);
-else if (command === 'prepare' && targetId === 'unit-group' && scopeOrTarget) await prepareUnitGroup(scopeOrTarget);
-else if (command === 'prepare' && targetId === 'typecheck' && scopeOrTarget) await prepareTypecheck(scopeOrTarget);
-else if (command === 'prepare' && targetId === 'test-types' && scopeOrTarget) await prepareTestTypecheck(scopeOrTarget);
 else if (command === 'unit' && targetId && !scopeOrTarget) await runUnit(targetId);
 else if (command === 'typecheck' && !targetId) typecheckWorkspace();
 else if (command === 'typecheck' && targetId && !scopeOrTarget) await runTypecheck(targetId);
 else if (command === 'test-types' && targetId && !scopeOrTarget) await runTestTypecheck(targetId);
 else if (command === 'coverage' && !targetId && !scopeOrTarget) await checkCoverage();
-else fail('Usage: node scripts/ci/execution/workspace.mjs <prepare|unit|typecheck|test-types|coverage> [kind] [target]');
+else fail(usage);

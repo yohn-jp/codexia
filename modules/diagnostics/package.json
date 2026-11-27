@@ -32,8 +32,6 @@
     "@codexia/contracts": "workspace:*",
     "@codexia/module-nlp": "workspace:*",
     "yaml": "catalog:production",
-    "react": "catalog:production",
-    "react-dom": "catalog:production",
     "@codexia/module-runtime": "workspace:*"
   },
   "codexiaModule": {

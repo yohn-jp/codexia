@@ -363,7 +363,7 @@ test('invalid imported references fail without creating a partial work', async (
   });
   await assert.rejects(importWorkArchive(persistence, corrupt, 'owner'), /parent|reference|archive/i);
   assert.equal((await exportWorkArchive(persistence, projectId)).documents.length, 0);
-  const matchingWork = (await persistence.read(reader => reader.listProjects(200))).filter(project => project.title === title);
+  const matchingWork = (await persistence.read(reader => reader.listProjectPage!(200))).filter(project => project.title === title);
   assert.deepEqual(
     matchingWork.map(project => project.id),
     [projectId],
@@ -550,7 +550,7 @@ test('unresolved evidence links require bundled anchors and graph records before
   });
   archive.evidence.unresolved.assertionEvidence.push({ assertionId, evidenceId: anchorId, role: 'supports' });
   await assert.rejects(importWorkArchive(persistence, archive, 'owner'), /missing evidence or knowledge|missing evidence or assertion/u);
-  const projects = await persistence.read(reader => reader.listProjects(200));
+  const projects = await persistence.read(reader => reader.listProjectPage!(200));
   assert.deepEqual(
     projects.filter(project => project.title === title).map(project => project.id),
     [sourceId],
