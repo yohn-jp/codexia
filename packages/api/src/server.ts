@@ -645,9 +645,21 @@ export function createServer(options: ApiServerOptions): Server {
   const projectEventStreams = new EventStreams();
   const jobEventStreams = new EventStreams();
   const coreStore = options.store as CoreStoreApi;
-  const listProjects = async (allowedProjectIds?: readonly string[]): Promise<Project[]> => {
-    const projects = await options.store.listProjects();
-    return allowedProjectIds ? projects.filter(project => allowedProjectIds.includes(project.id)) : projects;
+  const listVisibleProjectsPage = async (limit: number, cursor?: ProjectPageCursor, assignedIds?: readonly string[]) => {
+    if (!assignedIds) return options.store.listProjectsPage(limit, cursor);
+
+    const eligible = await options.persistence.read(async reader => {
+      const projects: Project[] = [];
+      for (const id of assignedIds) {
+        const project = await reader.getProject(id as ProjectId);
+        if (project?.id === id && (!cursor || compareProjectPageKeys(project, cursor) > 0)) projects.push(project);
+      }
+      return projects;
+    });
+    eligible.sort(compareProjectPageKeys);
+    const projects = eligible.slice(0, limit);
+    const last = projects.at(-1);
+    return { projects, nextCursor: eligible.length > limit && last ? { updatedAt: last.updatedAt, id: last.id } : null };
   };
   const assertAssignedProject = (projectId: string, allowedProjectIds?: readonly string[]): void => {
     if (allowedProjectIds && !allowedProjectIds.includes(projectId)) {
@@ -1268,7 +1280,13 @@ export function createServer(options: ApiServerOptions): Server {
           return result.stats;
         }),
       },
-      { module: 'core', action: make('core.projects.list', emptyInput, async () => ({ projects: await listProjects(allowedProjectIds) })) },
+      {
+        module: 'core',
+        action: make('core.projects.list', emptyInput, async () => {
+          const { projects } = await listVisibleProjectsPage(200, undefined, allowedProjectIds);
+          return { projects };
+        }),
+      },
       ...createNativeKnowledgeActions({
         persistence: options.persistence!,
         projectId: projectId as import('@codexia/persistence-contracts').ProjectId,
@@ -2087,27 +2105,7 @@ export function createServer(options: ApiServerOptions): Server {
         throw httpFailure(400, 'INVALID_CURSOR', 'Project cursor is invalid');
       }
 
-      const assignedIds = admittedMcpClient?.projectIds;
-      const assigned =
-        assignedIds &&
-        (await options.persistence.read(async reader => {
-          const projects: Project[] = [];
-          for (const id of assignedIds) {
-            const project = await reader.getProject(id as ProjectId);
-            if (project?.id === id) projects.push(project);
-          }
-          return projects;
-        }));
-      let page: { projects: Project[]; nextCursor: ProjectPageCursor | null };
-      if (assigned) {
-        const eligible = cursor ? assigned.filter(project => compareProjectPageKeys(project, cursor) > 0) : assigned;
-        eligible.sort(compareProjectPageKeys);
-        const projects = eligible.slice(0, limit);
-        const last = projects.at(-1);
-        page = { projects, nextCursor: eligible.length > limit && last ? { updatedAt: last.updatedAt, id: last.id } : null };
-      } else {
-        page = await options.store.listProjectsPage(limit, cursor);
-      }
+      const page = await listVisibleProjectsPage(limit, cursor, admittedMcpClient?.projectIds);
       json(200, { projects: page.projects, nextCursor: page.nextCursor ? encodeProjectPageCursor(page.nextCursor) : null });
       return;
     },

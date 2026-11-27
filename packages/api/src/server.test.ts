@@ -138,7 +138,6 @@ const TEST_PROJECT = {
 function makeStore(onSaveScene: () => void = () => undefined): CoreStoreShape {
   const project = TEST_PROJECT;
   return {
-    listProjects: async () => [project],
     listProjectsPage: async () => ({ projects: [project], nextCursor: null }),
     createProject: async ({ title }: { title: string }) => ({ ...project, id: 'project-2', title, version: 1 }),
     status: async () => ({ ...SNAPSHOT, state: 'durable' as const }),
@@ -150,13 +149,13 @@ function makeStore(onSaveScene: () => void = () => undefined): CoreStoreShape {
   } as unknown as CoreStore;
 }
 
-function admissionPersistence(store: CoreStore): ApiServerOptions['persistence'] {
+function admissionPersistence(store: CoreStore, projects?: readonly { id: string; title: string }[]): ApiServerOptions['persistence'] {
   return {
     async checkHealth() {},
     async read<T>(read: (reader: { getProject(id: string): Promise<unknown> }) => Promise<T>) {
       return read({
         async getProject(id) {
-          const project = (await store.listProjects()).find(item => item.id === id);
+          const project = (projects ?? (await store.listProjectsPage()).projects).find(item => item.id === id);
           return project
             ? { ...project, version: 1, settings: {}, createdAt: '2026-10-17T00:00:00.000Z', updatedAt: '2026-10-17T00:00:00.000Z' }
             : null;
@@ -2231,10 +2230,19 @@ describe('Codexia HTTP boundary', () => {
     const assignedProject = { id: 'project-1', title: 'Assigned MCP project', version: 1 };
     const firstAssignedProject = { id: firstAssignedId, title: 'Previous MCP project', version: 1, updatedAt: '2026-10-17T00:00:00.000Z' };
     const unassignedProject = { id: unassignedId, title: 'Other disposable project', version: 1 };
+    const persistence = admissionPersistence(storeFixture.store, [firstAssignedProject, unassignedProject, assignedProject]);
+    // Simulate both assigned works falling outside the most recent global page.
     Object.assign(storeFixture.store, {
-      listProjects: async () => [firstAssignedProject, unassignedProject, assignedProject],
+      listProjectsPage: async () => ({
+        projects: Array.from({ length: 200 }, (_, index) => ({
+          ...TEST_PROJECT,
+          id: `00000000-0000-4000-8000-${String(100 + index).padStart(12, '0')}`,
+        })),
+        nextCursor: { updatedAt: TEST_PROJECT.updatedAt, id: '00000000-0000-4000-8000-000000000299' },
+      }),
     });
     const api = await startCustomApi(storeFixture.store, staticDir, {
+      persistence,
       usageDirectory: staticDir,
       runtime: actionBoundaryRuntime(staticDir),
       corsAllowedOrigins: ['https://mcp-client.example.test'],
@@ -3001,7 +3009,7 @@ describe('Codexia HTTP boundary', () => {
     store = new CoreStore({ persistence });
     apiServer = await startCustomApi(store, staticDir, { persistence, ...settings });
     owner = signedRequests.ownerHeaders();
-    const recoveredProject = (await store.listProjects()).find(item => item.id === project.id)!;
+    const recoveredProject = (await store.listProjectsPage()).projects.find(item => item.id === project.id)!;
     assert.equal(recoveredProject.id, project.id, 'PostgreSQL project identity survives host replacement');
 
     const statusPath = `${apiServer.base}/api/projects/${recoveredProject.id}/proposals/${proposal.id}`;

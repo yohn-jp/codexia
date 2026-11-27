@@ -227,9 +227,6 @@ function cookieJar() {
 
 function coreStoreForAuthFixture(): CoreStore {
   return {
-    async listProjects() {
-      return [];
-    },
     async createProject({ title }: { title: string }) {
       return { id: 'fixture-project', title, version: 1 };
     },
