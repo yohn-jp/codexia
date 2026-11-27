@@ -22,7 +22,6 @@ epoch 4 の生成 OpenAPI は、この本文をトップレベルに文字列の
 
 HTTP と PostgreSQL を接続した試験は、割当外の作品への要求が 404 になり、割当済みの作品への要求だけが上記の 405 になることを検査する。
 SDK は期間限定の stateless fallback と strict mode の両方で同じ 405 を返す。
-[実経路の検証](https://github.com/yohn-jp/codexia/pull/971)
 
 ## 提案する変更
 
@@ -30,15 +29,13 @@ SDK は期間限定の stateless fallback と strict mode の両方で同じ 405
 コンシューマーは 405 の型を更新し、認可失敗の HTTP 401・403 や作品割当失敗の HTTP 404 は引き続き `ApiError` として扱う。
 Fastify は入場制御を行い、入場後の 405 は引き続き公式 SDK に委譲する。
 
-現行の epoch 4 OpenAPI と上記 405 のみを変更した比較案を、固定版 oasdiff 1.39.0 で比較した。
-`error` の型変更とトップレベル `code` の削除は、全 4 操作でエラー級の破壊的差分になった。
-採用時は対象 4 操作の 405 応答だけを互換手順に追加し、比較基準となる SHA、承認する API epoch の遷移、生成クライアントの切替および導入保護を [HTTP API 契約](API-CONTRACT.md#操作の追加変更廃止) に確定する。
-実装 PR に進む条件は、その正本変更が承認されることである。
-既存の oasdiff と正確なソース SHA に対する CI の検証を適用する。
+公開済みの 405 本文からトップレベルの `code` を削除し、`error` を文字列からオブジェクトに置き換えるため、oasdiff はこれらの変更を `ERR` として検出する。
+対象は表の 4 操作の 405 応答に限る。
+実装に進む条件は、対象の `ERR` と比較基準を含む API epoch の遷移が明示的に承認されることである。 [互換性手順の提案](API-COMPATIBILITY-TRANSITION-PROPOSAL.md)
 
 ## 受入条件
 
 - 生成 OpenAPI の対象 4 操作に、405 の必須 `Allow: POST` と JSON-RPC エラー本文がある。
 - 公式 SDK は、既存の入場制御を通過した実 API リクエストで同じ 405 を返す。
 - 作品割当外の API 応答は 404 を維持し、認証なしの応答は 401 と認証チャレンジを維持する。
-- oasdiff の結果、承認済み比較元と変更範囲、生成物の決定性、実 API と実 PostgreSQL の結果を同じ候補 SHA に結び付ける。
+- 実 PostgreSQL を使う入場前後の試験を、互換性比較と同じ実装候補 SHA で確認する。
