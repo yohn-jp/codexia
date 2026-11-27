@@ -8,7 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readRegularFile } from '../shared/read-regular-file.mjs';
 import { associateTraceCases } from './case-results.mjs';
 import { buildObligationTrace } from './obligation-trace.mjs';
-import { buildReverseTrace, discoverPlatformSurfaces, discoverReverseSurfaces } from './reverse-trace.mjs';
+import { buildReverseTrace, discoverMcpToolRegistrations, discoverPlatformSurfaces, discoverReverseSurfaces } from './reverse-trace.mjs';
+import { stripSourceComments } from './strip-source-comments.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');
@@ -260,54 +261,6 @@ export function validateInventory(discovered, classifications) {
   return violations;
 }
 
-function stripSourceComments(source) {
-  const characters = source.split('');
-  let state = 'code';
-  for (let index = 0; index < characters.length; index += 1) {
-    const character = characters[index];
-    const next = characters[index + 1];
-    if (state === 'line-comment') {
-      if (character === '\n' || character === '\r') state = 'code';
-      else characters[index] = ' ';
-      continue;
-    }
-    if (state === 'block-comment') {
-      if (character === '*' && next === '/') {
-        characters[index] = ' ';
-        characters[index + 1] = ' ';
-        index += 1;
-        state = 'code';
-      } else if (character !== '\n' && character !== '\r') {
-        characters[index] = ' ';
-      }
-      continue;
-    }
-    if (state === 'single' || state === 'double' || state === 'template') {
-      if (character === '\\') {
-        index += 1;
-        continue;
-      }
-      if ((state === 'single' && character === "'") || (state === 'double' && character === '"') ||
-          (state === 'template' && character === '`')) state = 'code';
-      continue;
-    }
-    if (character === '/' && next === '/') {
-      characters[index] = ' ';
-      characters[index + 1] = ' ';
-      index += 1;
-      state = 'line-comment';
-    } else if (character === '/' && next === '*') {
-      characters[index] = ' ';
-      characters[index + 1] = ' ';
-      index += 1;
-      state = 'block-comment';
-    } else if (character === "'") state = 'single';
-    else if (character === '"') state = 'double';
-    else if (character === '`') state = 'template';
-  }
-  return characters.join('');
-}
-
 function discoverGeneratedContractRoutes(source) {
   let contract;
   try {
@@ -330,15 +283,10 @@ function discoverGeneratedContractRoutes(source) {
 }
 
 function discoverMcpToolNames(source) {
-  const code = stripSourceComments(source);
-  const names = [];
-  for (const match of code.matchAll(/\bserver\.(?:tool|registerTool)\s*\(/gu)) {
-    const argument = code.slice(match.index + match[0].length);
-    const nameMatch = /^\s*(["'])([A-Za-z][A-Za-z0-9_.-]*)\1/u.exec(argument);
-    if (!nameMatch) throw new Error('MCP tool registration must use a literal tool name in the supported inventory scope');
-    names.push(nameMatch[2]);
-  }
-  return names;
+  return discoverMcpToolRegistrations(source).map(({ name }) => {
+    if (!name) throw new Error('MCP tool registration must use a literal tool name in the supported inventory scope');
+    return name;
+  });
 }
 
 function qualifySqlObject(identifier) {
