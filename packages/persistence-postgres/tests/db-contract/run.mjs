@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { createHash, randomBytes } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { createHash, randomBytes } from 'node:crypto';
+import { once } from 'node:events';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { once } from 'node:events';
 import { Pool } from 'pg';
+import { authSchemaFingerprint, CODEXIA_AUTH_SCHEMA, verifyAuthSchema } from '../../../../packages/api/dist/auth-schema.js';
+import { migrateBetterAuth, readBetterAuthMigrationConfig } from '../../../../packages/api/dist/migrate-auth.js';
 import { assertCatalogMatches, buildSourceIdentity, parseTapOutput } from '../../../../scripts/postgres-contract/contract-runner.mjs';
 import { initializeFreshPostgresSchema, packagedMigrationFingerprint, verifyPostgresSchema } from '../../dist/index.js';
-import { CODEXIA_AUTH_SCHEMA, authSchemaFingerprint, verifyAuthSchema } from '../../../../packages/api/dist/auth-schema.js';
-import { migrateBetterAuth, readBetterAuthMigrationConfig } from '../../../../packages/api/dist/migrate-auth.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const packageRoot = path.join(root, 'packages/persistence-postgres');
@@ -28,9 +28,13 @@ function invoke(command, args, { input, env = process.env, maxBuffer = 32 * 1024
   const result = spawnSync(command, args, { cwd: root, input, env, encoding: null, maxBuffer });
   if (result.error) throw new Error(`${path.basename(command)} could not start`);
   if (result.status !== 0) {
-    let diagnostic = `${(result.stderr ?? Buffer.alloc(0)).toString('utf8')}\n${(result.stdout ?? Buffer.alloc(0)).toString('utf8')}`.trim();
-    for (const argument of args) if (/^postgres:\/\//u.test(String(argument))) diagnostic = diagnostic.replaceAll(String(argument), '<disposable-database-url>');
-    throw new Error(`${path.basename(command)} failed with status ${result.status ?? result.signal}${diagnostic ? `: ${diagnostic.slice(-1200)}` : ''}`);
+    let diagnostic =
+      `${(result.stderr ?? Buffer.alloc(0)).toString('utf8')}\n${(result.stdout ?? Buffer.alloc(0)).toString('utf8')}`.trim();
+    for (const argument of args)
+      if (/^postgres:\/\//u.test(String(argument))) diagnostic = diagnostic.replaceAll(String(argument), '<disposable-database-url>');
+    throw new Error(
+      `${path.basename(command)} failed with status ${result.status ?? result.signal}${diagnostic ? `: ${diagnostic.slice(-1200)}` : ''}`,
+    );
   }
   return result.stdout ?? Buffer.alloc(0);
 }
@@ -40,8 +44,8 @@ function output(command, args, options) {
 }
 
 function url({ port, database, user, password }) {
-  const credential = password === undefined ? `${encodeURIComponent(user)}@` :
-    `${encodeURIComponent(user)}:${encodeURIComponent(password)}@`;
+  const credential =
+    password === undefined ? `${encodeURIComponent(user)}@` : `${encodeURIComponent(user)}:${encodeURIComponent(password)}@`;
   return `postgres://${credential}127.0.0.1:${port}/${database}`;
 }
 
@@ -50,8 +54,13 @@ const literal = value => `'${String(value).replaceAll("'", "''")}'`;
 async function waitForDatabase(pool, label) {
   let lastCode = 'unknown';
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    try { await pool.query('SELECT 1'); return; }
-    catch (error) { lastCode = error.code ?? 'unknown'; await new Promise(resolve => setTimeout(resolve, 500)); }
+    try {
+      await pool.query('SELECT 1');
+      return;
+    } catch (error) {
+      lastCode = error.code ?? 'unknown';
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
   }
   throw new Error(`${label} did not become ready (${lastCode})`);
 }
@@ -60,11 +69,17 @@ async function sourceIdentity() {
   const sourceSha = output('git', ['rev-parse', 'HEAD']);
   const paths = [
     'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md',
-    'docs/architecture/DATABASE-DETAIL-CONTRACT.md', 'docs/architecture/DATA-MODEL.md',
-    'docs/requirements/REQUIREMENT-REGISTER.md', 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
-    'deploy/ansible/verify-postgres-roles.sql', 'deploy/backup/backup.sh',
-    'packages/api/package.json', 'packages/api/src/auth-schema.ts', 'packages/api/src/migrate-auth.ts',
-    'packages/persistence-postgres/package.json', 'packages/persistence-postgres/src/migrate.ts',
+    'docs/architecture/DATABASE-DETAIL-CONTRACT.md',
+    'docs/architecture/DATA-MODEL.md',
+    'docs/requirements/REQUIREMENT-REGISTER.md',
+    'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
+    'deploy/ansible/verify-postgres-roles.sql',
+    'deploy/backup/backup.sh',
+    'packages/api/package.json',
+    'packages/api/src/auth-schema.ts',
+    'packages/api/src/migrate-auth.ts',
+    'packages/persistence-postgres/package.json',
+    'packages/persistence-postgres/src/migrate.ts',
     'packages/persistence-postgres/src/migration-set.ts',
     'packages/persistence-postgres/tests/db-contract/Dockerfile',
     'packages/persistence-postgres/tests/db-contract/application-contract.sql',
@@ -74,13 +89,15 @@ async function sourceIdentity() {
     'packages/persistence-postgres/tests/db-contract/restore-proof.sh',
     'packages/persistence-postgres/tests/db-contract/run.mjs',
     'packages/persistence-postgres/tests/db-contract/toolchain.json',
-    'scripts/postgres-contract/contract-runner.mjs', 'pnpm-lock.yaml',
+    'scripts/postgres-contract/contract-runner.mjs',
+    'pnpm-lock.yaml',
   ];
   const migrations = await readdir(path.join(packageRoot, 'migrations'));
-  paths.push(...migrations.filter(name => /^\d+[-\w]*\.sql$/u.test(name)
-    ).map(name => `packages/persistence-postgres/migrations/${name}`));
-  return buildSourceIdentity({ sourceSha,
-    files: await Promise.all(paths.map(async file => ({ path: file, contents: await readFile(path.join(root, file)) }))) });
+  paths.push(...migrations.filter(name => /^\d+[-\w]*\.sql$/u.test(name)).map(name => `packages/persistence-postgres/migrations/${name}`));
+  return buildSourceIdentity({
+    sourceSha,
+    files: await Promise.all(paths.map(async file => ({ path: file, contents: await readFile(path.join(root, file)) }))),
+  });
 }
 
 async function catalog(pool) {
@@ -157,28 +174,35 @@ async function catalog(pool) {
       FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl,acldefault('f'::"char",p.proowner))) g
       WHERE n.nspname=ANY($1) ORDER BY n.nspname,p.proname,arguments,grantee,privilege`),
-    databaseGrants: (await pool.query(`SELECT CASE WHEN a.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END AS grantee,
+    databaseGrants: (
+      await pool.query(`SELECT CASE WHEN a.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END AS grantee,
         a.privilege_type AS privilege,a.is_grantable AS grantable
       FROM pg_database d CROSS JOIN LATERAL aclexplode(COALESCE(d.datacl,acldefault('d'::"char",d.datdba))) a
-      WHERE d.datname=current_database() ORDER BY grantee,privilege,grantable`)).rows,
+      WHERE d.datname=current_database() ORDER BY grantee,privilege,grantable`)
+    ).rows,
     defaultPrivileges: await q(`SELECT pg_get_userbyid(d.defaclrole) AS owner,COALESCE(n.nspname,'') AS schema,
         d.defaclobjtype AS object_type,CASE WHEN a.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END AS grantee,
         a.privilege_type AS privilege,a.is_grantable AS grantable
       FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid=d.defaclnamespace
       CROSS JOIN LATERAL aclexplode(d.defaclacl) a WHERE d.defaclnamespace=0 OR n.nspname=ANY($1)
       ORDER BY owner,schema,object_type,grantee,privilege,grantable`),
-    roles: (await pool.query(`SELECT rolname AS name,rolsuper AS superuser,rolinherit AS inherit,
+    roles: (
+      await pool.query(`SELECT rolname AS name,rolsuper AS superuser,rolinherit AS inherit,
         rolcreaterole AS create_role,rolcreatedb AS create_database,rolcanlogin AS can_login,
         rolreplication AS replication,rolbypassrls AS bypass_rls
-      FROM pg_roles WHERE rolname IN ('postgres','codexia','codexia_admin','codexia_auth_runtime') ORDER BY rolname`)).rows,
-    roleMemberships: (await pool.query(`SELECT parent.rolname AS role,member.rolname AS member,
+      FROM pg_roles WHERE rolname IN ('postgres','codexia','codexia_admin','codexia_auth_runtime') ORDER BY rolname`)
+    ).rows,
+    roleMemberships: (
+      await pool.query(`SELECT parent.rolname AS role,member.rolname AS member,
         m.admin_option AS admin_option,m.inherit_option AS inherit_option,m.set_option AS set_option
       FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid JOIN pg_roles member ON member.oid=m.member
       WHERE parent.rolname LIKE 'codexia%' OR member.rolname LIKE 'codexia%'
-      ORDER BY parent.rolname,member.rolname`)).rows,
+      ORDER BY parent.rolname,member.rolname`)
+    ).rows,
     extensions: await q(`SELECT e.extname AS name,e.extversion AS version,n.nspname AS schema
       FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace WHERE n.nspname=ANY($1) ORDER BY e.extname`),
-    migrationLedger: (await pool.query('SELECT version,btrim(checksum) AS checksum FROM public.codexia_schema_migrations ORDER BY version')).rows,
+    migrationLedger: (await pool.query('SELECT version,btrim(checksum) AS checksum FROM public.codexia_schema_migrations ORDER BY version'))
+      .rows,
   };
   return result;
 }
@@ -195,7 +219,7 @@ async function listFiles(directory, prefix = '') {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isSymbolicLink()) throw new Error(`Generated artifact contains an unexpected symlink: ${relative}`);
-    if (entry.isDirectory()) result.push(...await listFiles(path.join(directory, entry.name), relative));
+    if (entry.isDirectory()) result.push(...(await listFiles(path.join(directory, entry.name), relative)));
     else if (entry.isFile()) result.push(relative);
   }
   return result.sort((left, right) => left.localeCompare(right, 'en'));
@@ -213,7 +237,9 @@ async function encryptStream(command, args, agePath, recipient, destination, lab
   if (sourceResult[0] !== 0 || encryptionResult[0] !== 0) {
     const sourceMessage = Buffer.concat(producerErrors).toString('utf8').trim().slice(-400);
     const encryptionMessage = Buffer.concat(encryptorErrors).toString('utf8').trim().slice(-400);
-    throw new Error(`${label} stream failed (source=${sourceResult[0]}, age=${encryptionResult[0]}; ${sourceMessage}; ${encryptionMessage})`);
+    throw new Error(
+      `${label} stream failed (source=${sourceResult[0]}, age=${encryptionResult[0]}; ${sourceMessage}; ${encryptionMessage})`,
+    );
   }
 }
 
@@ -229,30 +255,50 @@ async function seedRestoreIdentity(applicationPool, authPool) {
     manuscript: '# DBV-007 synthetic manuscript\n\nOriginal revision for isolated restore verification.\n',
   };
   await applicationPool.query('INSERT INTO public.project(id,title) VALUES($1,$2)', [identity.projectId, identity.projectTitle]);
-  await applicationPool.query(`INSERT INTO public.document(project_id,id,kind,title,order_key)
-    VALUES($1,$2,'chapter',$3,'0001')`, [identity.projectId, identity.documentId, identity.documentTitle]);
-  await applicationPool.query(`INSERT INTO public.document_revision(project_id,document_id,id,markdown,sha256,author_id)
-    VALUES($1,$2,$3,$4,$5,$6)`, [identity.projectId, identity.documentId, identity.revisionId,
-    identity.manuscript, digest(identity.manuscript), identity.ownerId]);
-  await applicationPool.query('UPDATE public.document SET head_revision_id=$3 WHERE project_id=$1 AND id=$2',
-    [identity.projectId, identity.documentId, identity.revisionId]);
-  await authPool.query(`INSERT INTO codexia_auth."user"("id","name","email","emailVerified","createdAt","updatedAt")
-    VALUES($1,'Synthetic Codexia Owner',$2,true,clock_timestamp(),clock_timestamp())`, [identity.ownerId, identity.ownerEmail]);
+  await applicationPool.query(
+    `INSERT INTO public.document(project_id,id,kind,title,order_key)
+    VALUES($1,$2,'chapter',$3,'0001')`,
+    [identity.projectId, identity.documentId, identity.documentTitle],
+  );
+  await applicationPool.query(
+    `INSERT INTO public.document_revision(project_id,document_id,id,markdown,sha256,author_id)
+    VALUES($1,$2,$3,$4,$5,$6)`,
+    [identity.projectId, identity.documentId, identity.revisionId, identity.manuscript, digest(identity.manuscript), identity.ownerId],
+  );
+  await applicationPool.query('UPDATE public.document SET head_revision_id=$3 WHERE project_id=$1 AND id=$2', [
+    identity.projectId,
+    identity.documentId,
+    identity.revisionId,
+  ]);
+  await authPool.query(
+    `INSERT INTO codexia_auth."user"("id","name","email","emailVerified","createdAt","updatedAt")
+    VALUES($1,'Synthetic Codexia Owner',$2,true,clock_timestamp(),clock_timestamp())`,
+    [identity.ownerId, identity.ownerEmail],
+  );
   return identity;
 }
 
 async function verifyRestoreIdentity(pool, identity) {
-  const result = await pool.query(`SELECT p.title AS project_title,d.id::text AS document_id,d.title AS document_title,
+  const result = await pool.query(
+    `SELECT p.title AS project_title,d.id::text AS document_id,d.title AS document_title,
       d.head_revision_id::text AS head_revision_id,r.id::text AS revision_id,r.markdown AS revision_markdown,
       r.author_id,u.id AS owner_id,u.email AS owner_email
     FROM public.project p JOIN public.document d ON d.project_id=p.id
     JOIN public.document_revision r ON r.project_id=d.project_id AND r.document_id=d.id AND r.id=d.head_revision_id
-    JOIN codexia_auth."user" u ON u.id=r.author_id WHERE p.id=$1 AND d.id=$2`, [identity.projectId, identity.documentId]);
+    JOIN codexia_auth."user" u ON u.id=r.author_id WHERE p.id=$1 AND d.id=$2`,
+    [identity.projectId, identity.documentId],
+  );
   const row = result.rows[0];
   assert.deepEqual(row && { ...row }, {
-    project_title: identity.projectTitle, document_id: identity.documentId, document_title: identity.documentTitle,
-    head_revision_id: identity.revisionId, revision_id: identity.revisionId, revision_markdown: identity.manuscript,
-    author_id: identity.ownerId, owner_id: identity.ownerId, owner_email: identity.ownerEmail,
+    project_title: identity.projectTitle,
+    document_id: identity.documentId,
+    document_title: identity.documentTitle,
+    head_revision_id: identity.revisionId,
+    revision_id: identity.revisionId,
+    revision_markdown: identity.manuscript,
+    author_id: identity.ownerId,
+    owner_id: identity.ownerId,
+    owner_email: identity.ownerEmail,
   });
 }
 
@@ -266,7 +312,10 @@ async function assertDriftDetected({ adminPool, port, postgresPassword, applicat
       await pool.query('ALTER TABLE public.project ADD COLUMN unreviewed_contract_drift text');
       const changed = await catalog(pool);
       assert.throws(() => assertCatalogMatches(expected, changed), /pg_catalog differs/u);
-    } finally { await pool.end(); await adminPool.query(`DROP DATABASE ${name}`); }
+    } finally {
+      await pool.end();
+      await adminPool.query(`DROP DATABASE ${name}`);
+    }
   };
   const verifyLedger = async () => {
     const name = `codexia_ledger_drift_${randomBytes(3).toString('hex')}`;
@@ -275,14 +324,23 @@ async function assertDriftDetected({ adminPool, port, postgresPassword, applicat
     try {
       await pool.query(`UPDATE public.codexia_schema_migrations SET checksum=repeat('f',64)
         WHERE version=(SELECT min(version) FROM public.codexia_schema_migrations)`);
-      await assert.rejects(verifyPostgresSchema(url({ port, database: name, user: 'codexia', password: applicationPassword })), /has changed/u);
+      await assert.rejects(
+        verifyPostgresSchema(url({ port, database: name, user: 'codexia', password: applicationPassword })),
+        /has changed/u,
+      );
       const before = await pool.query(`SELECT count(*)::integer AS tables FROM pg_catalog.pg_class
         WHERE relnamespace='public'::regnamespace AND relkind IN ('r','p')`);
-      await assert.rejects(initializeFreshPostgresSchema(url({ port, database: name, user: 'codexia', password: applicationPassword })), /has changed/u);
+      await assert.rejects(
+        initializeFreshPostgresSchema(url({ port, database: name, user: 'codexia', password: applicationPassword })),
+        /has changed/u,
+      );
       const after = await pool.query(`SELECT count(*)::integer AS tables FROM pg_catalog.pg_class
         WHERE relnamespace='public'::regnamespace AND relkind IN ('r','p')`);
       assert.deepEqual(after.rows, before.rows, 'migration identity failure must not apply or remove schema objects');
-    } finally { await pool.end(); await adminPool.query(`DROP DATABASE ${name}`); }
+    } finally {
+      await pool.end();
+      await adminPool.query(`DROP DATABASE ${name}`);
+    }
   };
   const verifyAuth = async () => {
     const name = `codexia_auth_drift_${randomBytes(3).toString('hex')}`;
@@ -291,7 +349,10 @@ async function assertDriftDetected({ adminPool, port, postgresPassword, applicat
     try {
       await pool.query('ALTER TABLE codexia_auth."user" ADD COLUMN unreviewed_contract_drift text');
       await assert.rejects(verifyAuthSchema(pool), /schema requires explicit maintenance/u);
-    } finally { await pool.end(); await adminPool.query(`DROP DATABASE ${name}`); }
+    } finally {
+      await pool.end();
+      await adminPool.query(`DROP DATABASE ${name}`);
+    }
   };
   await verifyAlteredCatalog();
   await verifyLedger();
@@ -307,34 +368,54 @@ async function createPgtapDatabase({ adminPool, containerName, port, password })
     await pool.query('CREATE SCHEMA pgtap; CREATE EXTENSION pgtap WITH SCHEMA pgtap');
     const version = await pool.query("SELECT extversion FROM pg_extension WHERE extname='pgtap'");
     assert.equal(version.rows[0]?.extversion, toolchain.pgtap.version);
-  } finally { await pool.end(); }
+  } finally {
+    await pool.end();
+  }
   const sql = await readFile(path.join(contractDirectory, 'application-contract.sql'));
-  const result = invoke('docker', ['exec', '-i', containerName, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'codexia_contract'], { input: sql });
+  const result = invoke(
+    'docker',
+    ['exec', '-i', containerName, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'codexia_contract'],
+    { input: sql },
+  );
   return parseTapOutput(result.toString('utf8'));
 }
 
 async function prepareTblsReader({ adminPool, port, postgresPassword }) {
   const role = 'codexia_contract_reader';
   const readerPassword = secret();
-  await adminPool.query(`CREATE ROLE ${role} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${literal(readerPassword)}`);
+  await adminPool.query(
+    `CREATE ROLE ${role} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${literal(readerPassword)}`,
+  );
   await adminPool.query(`ALTER ROLE ${role} SET default_transaction_read_only = on`);
   await adminPool.query(`GRANT CONNECT ON DATABASE codexia TO ${role}`);
   const grantPool = new Pool({ connectionString: url({ port, database: 'codexia', user: 'postgres', password: postgresPassword }) });
   try {
     await grantPool.query(`GRANT USAGE ON SCHEMA public, codexia_auth TO ${role}`);
     await grantPool.query(`GRANT SELECT ON ALL TABLES IN SCHEMA public, codexia_auth TO ${role}`);
-  } finally { await grantPool.end(); }
+  } finally {
+    await grantPool.end();
+  }
   const readerUrl = url({ port, database: 'codexia', user: role, password: readerPassword });
   const readerPool = new Pool({ connectionString: readerUrl });
   try {
     const setting = await readerPool.query('SHOW default_transaction_read_only');
     assert.equal(setting.rows[0]?.default_transaction_read_only, 'on');
     await assert.rejects(readerPool.query('CREATE TABLE public.tbls_write_probe (id integer)'), /read-only transaction/u);
-  } finally { await readerPool.end(); }
+  } finally {
+    await readerPool.end();
+  }
   return readerUrl;
 }
 
-async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePath, sourceContainer, identity, expectedLedger, expectedAuthFingerprint }) {
+async function verifyEncryptedRestore({
+  tempDirectory,
+  evidenceDirectory,
+  agePath,
+  sourceContainer,
+  identity,
+  expectedLedger,
+  expectedAuthFingerprint,
+}) {
   const backup = path.join(evidenceDirectory, 'encrypted-backup-v2');
   const proof = path.join(evidenceDirectory, 'restore-proof');
   await mkdir(backup);
@@ -347,13 +428,25 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   const recipient = output(ageKeygen, ['-y', keyFile]);
   if (!/^age1[0-9a-z]+$/u.test(recipient)) throw new Error('age-keygen did not produce a synthetic recipient');
 
-  await encryptStream('docker', ['exec', sourceContainer, 'pg_dump', '-U', 'postgres', '-d', 'codexia', '-Fc'], agePath,
-    recipient, path.join(backup, 'database.dump.age'), 'database dump');
+  await encryptStream(
+    'docker',
+    ['exec', sourceContainer, 'pg_dump', '-U', 'postgres', '-d', 'codexia', '-Fc'],
+    agePath,
+    recipient,
+    path.join(backup, 'database.dump.age'),
+    'database dump',
+  );
   const historyDirectory = path.join(tempDirectory, 'history');
   const historyJobs = path.join(historyDirectory, 'jobs');
   await mkdir(historyJobs, { recursive: true });
-  const historyJson = JSON.stringify({ jobId: 'dbv007-contract-fixture', ownerId: identity.ownerId,
-    revisionId: identity.revisionId, status: 'completed', createdAt: '2026-01-01T00:00:00.000Z' }) + '\n';
+  const historyJson =
+    JSON.stringify({
+      jobId: 'dbv007-contract-fixture',
+      ownerId: identity.ownerId,
+      revisionId: identity.revisionId,
+      status: 'completed',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }) + '\n';
   const historyPath = path.join(historyJobs, 'synthetic-owner-history.json');
   await writeFile(historyPath, historyJson, { mode: 0o600 });
   const historyHash = digest(Buffer.from(`${digest(Buffer.from(historyJson))}  ./jobs/synthetic-owner-history.json\n`));
@@ -366,15 +459,17 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   assert.equal((await stat(historyArchive)).mode & 0o777, 0o600, 'temporary cleartext history archive must stay private');
   const archiveListing = output('tar', ['--numeric-owner', '-tvf', historyArchive]);
   const historyEntry = archiveListing.match(/^(-rw-------)\s+(1000\/1000)\s+.*jobs\/synthetic-owner-history\.json$/mu);
-  assert.ok(historyEntry,
-    'synthetic history must retain private mode 0600 and API UID/GID 1000');
-  await encryptStream('cat', [historyArchive], agePath, recipient,
-    path.join(backup, 'history.tar.age'), 'history archive');
+  assert.ok(historyEntry, 'synthetic history must retain private mode 0600 and API UID/GID 1000');
+  await encryptStream('cat', [historyArchive], agePath, recipient, path.join(backup, 'history.tar.age'), 'history archive');
   await rm(historyArchive);
 
-  const dbOutput = invoke('docker', ['exec', '-i', sourceContainer, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'codexia'], {
-    input: `SET TIME ZONE 'UTC';\nSET DateStyle TO ISO, YMD;\nSELECT format('SELECT %L; SELECT to_jsonb(t)::text FROM %I.%I t ORDER BY to_jsonb(t)::text COLLATE "C";', n.nspname || '.' || c.relname, n.nspname, c.relname)\nFROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace\nWHERE n.nspname IN ('public','codexia_auth') AND c.relkind IN ('r','p')\nORDER BY n.nspname, c.relname\n\\gexec\n`,
-  });
+  const dbOutput = invoke(
+    'docker',
+    ['exec', '-i', sourceContainer, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'codexia'],
+    {
+      input: `SET TIME ZONE 'UTC';\nSET DateStyle TO ISO, YMD;\nSELECT format('SELECT %L; SELECT to_jsonb(t)::text FROM %I.%I t ORDER BY to_jsonb(t)::text COLLATE "C";', n.nspname || '.' || c.relname, n.nspname, c.relname)\nFROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace\nWHERE n.nspname IN ('public','codexia_auth') AND c.relkind IN ('r','p')\nORDER BY n.nspname, c.relname\n\\gexec\n`,
+    },
+  );
   const databaseFingerprint = digest(dbOutput);
   invoke(agePath, ['-r', recipient, '-o', path.join(backup, 'manifest.age')], {
     input: Buffer.from(`codexia-backup/v2\n${databaseFingerprint}\n${historyHash}\n`),
@@ -392,10 +487,8 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   // proves the real restore drill rejects altered history after decryption.
   const negativeBackup = path.join(evidenceDirectory, 'tampered-history-backup-v2');
   await mkdir(negativeBackup);
-  await writeFile(path.join(negativeBackup, 'database.dump.age'), await readFile(path.join(backup, 'database.dump.age')),
-    { mode: 0o600 });
-  await writeFile(path.join(negativeBackup, 'manifest.age'), await readFile(path.join(backup, 'manifest.age')),
-    { mode: 0o600 });
+  await writeFile(path.join(negativeBackup, 'database.dump.age'), await readFile(path.join(backup, 'database.dump.age')), { mode: 0o600 });
+  await writeFile(path.join(negativeBackup, 'manifest.age'), await readFile(path.join(backup, 'manifest.age')), { mode: 0o600 });
   const negativeHistoryDirectory = path.join(tempDirectory, 'tampered-history');
   const negativeJobs = path.join(negativeHistoryDirectory, 'jobs');
   await mkdir(negativeJobs, { recursive: true });
@@ -403,14 +496,20 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   const negativeHistoryArchive = path.join(tempDirectory, 'tampered-history.tar');
   await writeFile(negativeHistoryArchive, Buffer.alloc(0), { flag: 'wx', mode: 0o600 });
   invoke('tar', ['--owner=1000', '--group=1000', '-C', negativeHistoryDirectory, '-cf', negativeHistoryArchive, '.']);
-  assert.equal((await stat(negativeHistoryArchive)).mode & 0o777, 0o600,
-    'temporary tampered cleartext history archive must stay private');
-  const negativeHistoryEntry = output('tar', ['--numeric-owner', '-tvf', negativeHistoryArchive])
-    .match(/^(-rw-------)\s+(1000\/1000)\s+.*jobs\/synthetic-owner-history\.json$/mu);
+  assert.equal((await stat(negativeHistoryArchive)).mode & 0o777, 0o600, 'temporary tampered cleartext history archive must stay private');
+  const negativeHistoryEntry = output('tar', ['--numeric-owner', '-tvf', negativeHistoryArchive]).match(
+    /^(-rw-------)\s+(1000\/1000)\s+.*jobs\/synthetic-owner-history\.json$/mu,
+  );
   assert.ok(negativeHistoryEntry, 'tampered negative must use the same private API UID/GID as the positive fixture');
   assert.deepEqual(negativeHistoryEntry.slice(1), historyEntry.slice(1));
-  await encryptStream('cat', [negativeHistoryArchive], agePath, recipient,
-    path.join(negativeBackup, 'history.tar.age'), 'tampered history archive');
+  await encryptStream(
+    'cat',
+    [negativeHistoryArchive],
+    agePath,
+    recipient,
+    path.join(negativeBackup, 'history.tar.age'),
+    'tampered history archive',
+  );
   await rm(negativeHistoryArchive);
   const negativeChecksums = [];
   for (const name of ['database.dump.age', 'history.tar.age', 'manifest.age']) {
@@ -423,8 +522,11 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   // no nested privileged engine, tar transfer or substituted executable.
   assert.equal(process.platform, 'linux', 'Isolated restore requires a local Linux Podman host');
   assert.notEqual(process.getuid(), 0, 'Isolated restore must run as an unprivileged user');
-  const env = { ...process.env, PATH: `${ageDirectory}:${process.env.PATH}`,
-    CODEXIA_PUSH_STATE_DIR: path.join(tempDirectory, 'restore-state') };
+  const env = {
+    ...process.env,
+    PATH: `${ageDirectory}:${process.env.PATH}`,
+    CODEXIA_PUSH_STATE_DIR: path.join(tempDirectory, 'restore-state'),
+  };
   delete env.CONTAINER_HOST;
   delete env.CONTAINER_CONNECTION;
   delete env.CONTAINER_SSHKEY;
@@ -437,48 +539,84 @@ async function verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePat
   const postgresId = output('docker', ['image', 'inspect', '--format', '{{.Id}}', pgImage]);
   invoke('podman', ['pull', pgImage], { env });
   const restoredImageId = output('podman', ['image', 'inspect', '--format', '{{.Id}}', pgImage], { env });
-  assert.equal(restoredImageId.replace(/^sha256:/u, ''), postgresId.replace(/^sha256:/u, ''),
-    'The restore engine must use the exact source PostgreSQL image config');
+  assert.equal(
+    restoredImageId.replace(/^sha256:/u, ''),
+    postgresId.replace(/^sha256:/u, ''),
+    'The restore engine must use the exact source PostgreSQL image config',
+  );
   const authSql = path.join(contractDirectory, 'restore-proof-auth.sql');
-  const identitySql = path.join(contractDirectory, 'restore-proof-identity.sql');
   const restoreScript = path.join(contractDirectory, 'restore-proof.sh');
-  const sourceAuthDefinitions = invoke('docker', ['exec', '-i', sourceContainer, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'codexia'], {
-    input: await readFile(authSql),
-  }).toString('utf8').trimEnd().split('\n');
-  assert.equal(`sha256:${digest(JSON.stringify(sourceAuthDefinitions))}`, expectedAuthFingerprint,
-    'restore proof query matches the API auth schema fingerprint source');
+  const sourceAuthDefinitions = invoke(
+    'docker',
+    ['exec', '-i', sourceContainer, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'codexia'],
+    {
+      input: await readFile(authSql),
+    },
+  )
+    .toString('utf8')
+    .trimEnd()
+    .split('\n');
+  assert.equal(
+    `sha256:${digest(JSON.stringify(sourceAuthDefinitions))}`,
+    expectedAuthFingerprint,
+    'restore proof query matches the API auth schema fingerprint source',
+  );
   const canonicalBackup = path.join(root, 'deploy/backup/backup.sh');
   const positiveLog = output('bash', [canonicalBackup, 'drill', backup, keyFile, '--approved'], { env });
   assert.match(positiveLog, /Isolated restore verified: database and history fingerprints match/u);
   await writeFile(path.join(proof, 'canonical-restore.txt'), `${positiveLog}\n`, { mode: 0o600 });
   invoke('bash', [restoreScript, backup, keyFile, proof, pgImage, restoredImageId, identity.projectId], { env });
-  const negative = spawnSync('bash', [canonicalBackup, 'drill', negativeBackup, keyFile, '--approved'],
-    { cwd: root, env, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+  const negative = spawnSync('bash', [canonicalBackup, 'drill', negativeBackup, keyFile, '--approved'], {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
+  });
   assert.equal(negative.error, undefined, 'Tampered history drill must execute');
   assert.equal(negative.status, 1, 'Tampered history restore must fail');
-  await writeFile(path.join(proof, 'tampered-history-rejection.txt'),
-    `${negative.stdout}\n${negative.stderr}`, { mode: 0o600 });
+  await writeFile(path.join(proof, 'tampered-history-rejection.txt'), `${negative.stdout}\n${negative.stderr}`, { mode: 0o600 });
   console.log(`Native rootless restore: ${podmanVersion}; elapsed ${((performance.now() - restoreStarted) / 1000).toFixed(3)}s`);
 
   const ledger = JSON.parse(await readFile(path.join(proof, 'migration-ledger.json'), 'utf8'));
-  assert.deepEqual(ledger, expectedLedger.map(row => [row.version, row.checksum]));
+  assert.deepEqual(
+    ledger,
+    expectedLedger.map(row => [row.version, row.checksum]),
+  );
   const definitions = (await readFile(path.join(proof, 'auth-definitions.txt'), 'utf8')).trimEnd().split('\n');
   const restoredAuthFingerprint = `sha256:${digest(JSON.stringify(definitions))}`;
   assert.deepEqual(definitions, sourceAuthDefinitions, 'restored auth schema definitions match the source');
   assert.equal(restoredAuthFingerprint, expectedAuthFingerprint);
   const restoredIdentity = JSON.parse(await readFile(path.join(proof, 'owner-identity.json'), 'utf8'));
   assert.deepEqual(restoredIdentity, {
-    project_title: identity.projectTitle, document_id: identity.documentId, document_title: identity.documentTitle,
-    head_revision_id: identity.revisionId, revision_id: identity.revisionId, revision_markdown: identity.manuscript,
-    author_id: identity.ownerId, owner_id: identity.ownerId, owner_email: identity.ownerEmail,
+    project_title: identity.projectTitle,
+    document_id: identity.documentId,
+    document_title: identity.documentTitle,
+    head_revision_id: identity.revisionId,
+    revision_id: identity.revisionId,
+    revision_markdown: identity.manuscript,
+    author_id: identity.ownerId,
+    owner_id: identity.ownerId,
+    owner_email: identity.ownerEmail,
   });
   const tamperedHistoryRejection = await readFile(path.join(proof, 'tampered-history-rejection.txt'), 'utf8');
-  assert.match(tamperedHistoryRejection, /Restored history fingerprint mismatch/u,
-    'the canonical restore drill must reject altered history with a valid ciphertext checksum list');
-  assert.doesNotMatch(tamperedHistoryRejection, /Permission denied|sha256sum:|cleanup failed/iu,
-    'tampered history rejection must come from its digest mismatch, not a reader permission failure');
-  return { databaseFingerprint, historyHash, artifactDigest, restoredAuthFingerprint, tamperedHistoryRejected: true,
-    podman: { version: podmanVersion, rootless: true, local: true, postgresImageId: restoredImageId } };
+  assert.match(
+    tamperedHistoryRejection,
+    /Restored history fingerprint mismatch/u,
+    'the canonical restore drill must reject altered history with a valid ciphertext checksum list',
+  );
+  assert.doesNotMatch(
+    tamperedHistoryRejection,
+    /Permission denied|sha256sum:|cleanup failed/iu,
+    'tampered history rejection must come from its digest mismatch, not a reader permission failure',
+  );
+  return {
+    databaseFingerprint,
+    historyHash,
+    artifactDigest,
+    restoredAuthFingerprint,
+    tamperedHistoryRejected: true,
+    podman: { version: podmanVersion, rootless: true, local: true, postgresImageId: restoredImageId },
+  };
 }
 
 async function main() {
@@ -519,11 +657,28 @@ async function main() {
     await chmod(agePath, 0o755);
     await chmod(path.join(ageDirectory, 'age/age-keygen'), 0o755);
 
-    invoke('docker', ['build', '--file', path.join(contractDirectory, 'Dockerfile'), '--tag', contractImage,
-      '--build-arg', `POSTGRES_IMAGE=${pgImage}`, '--build-arg', `PGTAP_VERSION=${toolchain.pgtap.version}`,
-      '--build-arg', `PGTAP_ARCHIVE_SHA256=${toolchain.pgtap.archiveSha256}`,
-      '--build-arg', `MAKE_VERSION=${toolchain.buildPackages.make}`, '--build-arg', `PATCH_VERSION=${toolchain.buildPackages.patch}`, '.'],
-    { maxBuffer: 4 * 1024 * 1024 });
+    invoke(
+      'docker',
+      [
+        'build',
+        '--file',
+        path.join(contractDirectory, 'Dockerfile'),
+        '--tag',
+        contractImage,
+        '--build-arg',
+        `POSTGRES_IMAGE=${pgImage}`,
+        '--build-arg',
+        `PGTAP_VERSION=${toolchain.pgtap.version}`,
+        '--build-arg',
+        `PGTAP_ARCHIVE_SHA256=${toolchain.pgtap.archiveSha256}`,
+        '--build-arg',
+        `MAKE_VERSION=${toolchain.buildPackages.make}`,
+        '--build-arg',
+        `PATCH_VERSION=${toolchain.buildPackages.patch}`,
+        '.',
+      ],
+      { maxBuffer: 4 * 1024 * 1024 },
+    );
     imageBuilt = true;
 
     stage = 'disposable PostgreSQL startup';
@@ -531,8 +686,19 @@ async function main() {
     const applicationPassword = secret();
     const administratorPassword = secret();
     const authPassword = secret();
-    output('docker', ['run', '-d', '--name', containerName, '--publish', '127.0.0.1::5432',
-      '--env', `POSTGRES_PASSWORD=${postgresPassword}`, '--env', 'POSTGRES_DB=postgres', contractImage]);
+    output('docker', [
+      'run',
+      '-d',
+      '--name',
+      containerName,
+      '--publish',
+      '127.0.0.1::5432',
+      '--env',
+      `POSTGRES_PASSWORD=${postgresPassword}`,
+      '--env',
+      'POSTGRES_DB=postgres',
+      contractImage,
+    ]);
     containerCreated = true;
     const hostPort = output('docker', ['port', containerName, '5432/tcp']).match(/:(\d+)$/u)?.[1];
     if (!hostPort) throw new Error('PostgreSQL contract container did not publish a loopback port');
@@ -540,9 +706,13 @@ async function main() {
     adminPool = new Pool({ connectionString: url({ port, database: 'postgres', user: 'postgres', password: postgresPassword }) });
     await waitForDatabase(adminPool, 'PostgreSQL contract database');
     await adminPool.query(`CREATE ROLE codexia_admin LOGIN SUPERUSER PASSWORD ${literal(administratorPassword)}`);
-    await adminPool.query(`CREATE ROLE codexia LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${literal(applicationPassword)}`);
+    await adminPool.query(
+      `CREATE ROLE codexia LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${literal(applicationPassword)}`,
+    );
     await adminPool.query('CREATE DATABASE codexia OWNER codexia');
-    await adminPool.query(`CREATE ROLE codexia_auth_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${literal(authPassword)}`);
+    await adminPool.query(
+      `CREATE ROLE codexia_auth_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${literal(authPassword)}`,
+    );
     const applicationUrl = url({ port, database: 'codexia', user: 'codexia', password: applicationPassword });
     const authUrl = url({ port, database: 'codexia', user: 'codexia_auth_runtime', password: authPassword });
     databaseAdminPool = new Pool({ connectionString: url({ port, database: 'codexia', user: 'postgres', password: postgresPassword }) });
@@ -566,10 +736,12 @@ async function main() {
     stage = 'official Better Auth migrations';
     const previousEnvironment = new Map(Object.keys(syntheticEnvironment).map(key => [key, process.env[key]]));
     Object.assign(process.env, syntheticEnvironment);
-    try { await migrateBetterAuth(readBetterAuthMigrationConfig(false)); }
-    finally {
+    try {
+      await migrateBetterAuth(readBetterAuthMigrationConfig(false));
+    } finally {
       for (const [key, value] of previousEnvironment) {
-        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
       }
     }
 
@@ -598,7 +770,19 @@ async function main() {
     invoke('docker', ['exec', '-i', containerName, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'codexia'], {
       input: await readFile(path.join(root, 'deploy/ansible/verify-postgres-roles.sql')),
     });
-    const postgresVersion = output('docker', ['exec', containerName, 'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'codexia', '-c', 'SHOW server_version']);
+    const postgresVersion = output('docker', [
+      'exec',
+      containerName,
+      'psql',
+      '-X',
+      '-qAt',
+      '-U',
+      'postgres',
+      '-d',
+      'codexia',
+      '-c',
+      'SHOW server_version',
+    ]);
     if (!postgresVersion.startsWith(`${toolchain.postgresMajor}.`)) throw new Error(`Expected PostgreSQL ${toolchain.postgresMajor}`);
     stage = 'pg_catalog contract comparison';
     catalogPool = new Pool({ connectionString: url({ port, database: 'codexia', user: 'postgres', password: postgresPassword }) });
@@ -622,46 +806,105 @@ async function main() {
     await mkdir(tblsOutput);
     stage = 'tbls data dictionary generation';
     const tblsReaderUrl = await prepareTblsReader({ adminPool, port, postgresPassword });
-    invoke(tblsPath, ['doc', `${tblsReaderUrl}?sslmode=disable`, tblsOutput,
-      '--force', '--er-format', 'mermaid', '--include', 'public.*', '--include', 'codexia_auth.*'],
-    { maxBuffer: 8 * 1024 * 1024 });
+    invoke(
+      tblsPath,
+      [
+        'doc',
+        `${tblsReaderUrl}?sslmode=disable`,
+        tblsOutput,
+        '--force',
+        '--er-format',
+        'mermaid',
+        '--include',
+        'public.*',
+        '--include',
+        'codexia_auth.*',
+      ],
+      { maxBuffer: 8 * 1024 * 1024 },
+    );
     stage = 'encrypted v2 isolated restore';
-    const restore = await verifyEncryptedRestore({ tempDirectory, evidenceDirectory, agePath, sourceContainer: containerName,
-      identity, expectedLedger: reviewedCatalog.migrationLedger, expectedAuthFingerprint: authFingerprint });
+    const restore = await verifyEncryptedRestore({
+      tempDirectory,
+      evidenceDirectory,
+      agePath,
+      sourceContainer: containerName,
+      identity,
+      expectedLedger: reviewedCatalog.migrationLedger,
+      expectedAuthFingerprint: authFingerprint,
+    });
 
     const catalogFingerprint = `sha256:${digest(JSON.stringify(installedCatalog))}`;
     const generatedTblsFiles = await listFiles(tblsOutput);
-    assert.ok(generatedTblsFiles.includes('README.md') && generatedTblsFiles.includes('public.project.md'),
-      'tbls must generate the data dictionary in the task artifact directory');
-    const generatedTblsIdentity = await Promise.all(generatedTblsFiles.map(async file => ({
-      path: file, sha256: digest(await readFile(path.join(tblsOutput, file))),
-    })));
+    assert.ok(
+      generatedTblsFiles.includes('README.md') && generatedTblsFiles.includes('public.project.md'),
+      'tbls must generate the data dictionary in the task artifact directory',
+    );
+    const generatedTblsIdentity = await Promise.all(
+      generatedTblsFiles.map(async file => ({
+        path: file,
+        sha256: digest(await readFile(path.join(tblsOutput, file))),
+      })),
+    );
     const tblsArtifactFingerprint = `sha256:${digest(JSON.stringify(generatedTblsIdentity))}`;
     const manifest = {
-      format: 'codexia-postgres-contract-evidence/v1', source,
-      runtime: { postgresVersion, postgresMajor: toolchain.postgresMajor,
+      format: 'codexia-postgres-contract-evidence/v1',
+      source,
+      runtime: {
+        postgresVersion,
+        postgresMajor: toolchain.postgresMajor,
         pgTap: { version: toolchain.pgtap.version, extensionVersion: toolchain.pgtap.version },
         tbls: { version: toolchain.tbls.version, archiveSha256: toolchain.tbls.archives[arch].sha256 },
         age: { version: toolchain.restoreDrill.age.version, archiveSha256: toolchain.restoreDrill.age.archives[arch].sha256 },
-        podman: restore.podman },
+        podman: restore.podman,
+      },
       schema: { migrationFingerprint, authFingerprint, catalogFingerprint, migrationLedger: reviewedCatalog.migrationLedger },
       tests: { pgTap, drift, tblsReadOnly: true, roleContractSql: 'deploy/ansible/verify-postgres-roles.sql' },
-      restore: { format: 'codexia-backup/v2', encrypted: true, isolatedTargetNetwork: 'none',
-        databaseFingerprint: restore.databaseFingerprint, historyFingerprint: restore.historyHash,
-        artifactSha256: restore.artifactDigest, authFingerprint: restore.restoredAuthFingerprint,
-        ownerIdentity: { ownerId: identity.ownerId, ownerEmail: identity.ownerEmail, projectId: identity.projectId,
-          documentId: identity.documentId, revisionId: identity.revisionId }, canonicalScript: 'deploy/backup/backup.sh' },
-      artifacts: { tbls: 'tbls/', tblsFileCount: generatedTblsFiles.length,
-        tblsFingerprint: tblsArtifactFingerprint, encryptedBackup: 'encrypted-backup-v2/',
-        tamperedHistoryBackup: 'tampered-history-backup-v2/', restoreProof: 'restore-proof/' },
+      restore: {
+        format: 'codexia-backup/v2',
+        encrypted: true,
+        isolatedTargetNetwork: 'none',
+        databaseFingerprint: restore.databaseFingerprint,
+        historyFingerprint: restore.historyHash,
+        artifactSha256: restore.artifactDigest,
+        authFingerprint: restore.restoredAuthFingerprint,
+        ownerIdentity: {
+          ownerId: identity.ownerId,
+          ownerEmail: identity.ownerEmail,
+          projectId: identity.projectId,
+          documentId: identity.documentId,
+          revisionId: identity.revisionId,
+        },
+        canonicalScript: 'deploy/backup/backup.sh',
+      },
+      artifacts: {
+        tbls: 'tbls/',
+        tblsFileCount: generatedTblsFiles.length,
+        tblsFingerprint: tblsArtifactFingerprint,
+        encryptedBackup: 'encrypted-backup-v2/',
+        tamperedHistoryBackup: 'tampered-history-backup-v2/',
+        restoreProof: 'restore-proof/',
+      },
     };
     const serialized = JSON.stringify(manifest, null, 2);
-    if (/postgres:\/\/|password|secret/iu.test(serialized)) throw new Error('Evidence manifest contains a forbidden connection or credential field');
-    await writeFile(path.join(tblsOutput, '_source-identity.json'), `${JSON.stringify({ source, migrationFingerprint,
-      authFingerprint, catalogFingerprint, postgresVersion,
-      generator: { name: 'tbls', version: toolchain.tbls.version, archiveSha256: toolchain.tbls.archives[arch].sha256 },
-      generatedFiles: { count: generatedTblsFiles.length, fingerprint: tblsArtifactFingerprint },
-    }, null, 2)}\n`, { flag: 'wx' });
+    if (/postgres:\/\/|password|secret/iu.test(serialized))
+      throw new Error('Evidence manifest contains a forbidden connection or credential field');
+    await writeFile(
+      path.join(tblsOutput, '_source-identity.json'),
+      `${JSON.stringify(
+        {
+          source,
+          migrationFingerprint,
+          authFingerprint,
+          catalogFingerprint,
+          postgresVersion,
+          generator: { name: 'tbls', version: toolchain.tbls.version, archiveSha256: toolchain.tbls.archives[arch].sha256 },
+          generatedFiles: { count: generatedTblsFiles.length, fingerprint: tblsArtifactFingerprint },
+        },
+        null,
+        2,
+      )}\n`,
+      { flag: 'wx' },
+    );
     await writeFile(path.join(evidenceDirectory, 'manifest.json'), `${serialized}\n`, { flag: 'wx' });
     console.log(`DB contract PASS: PostgreSQL ${toolchain.postgresMajor}; ${pgTap.executed} pgTAP assertions; ${catalogFingerprint}`);
     console.log(`Encrypted v2 restore PASS; evidence saved at ${path.relative(root, evidenceDirectory)}`);
