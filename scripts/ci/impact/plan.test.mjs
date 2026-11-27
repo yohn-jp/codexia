@@ -21,7 +21,8 @@ function matchesWorkflowPaths(patterns, files) {
 
 test('browser cache has a single trusted main-push writer without changing test coverage', async () => {
   const workflow = parse(readFileSync(new URL('../../../.github/workflows/verify.yml', import.meta.url), 'utf8'));
-  const browser = workflow.jobs.browser;
+  const profileWorkflow = parse(readFileSync(new URL('../../../.github/workflows/verify-profile.yml', import.meta.url), 'utf8'));
+  const browser = profileWorkflow.jobs.browser;
   const steps = browser.steps;
   const restore = steps.find(step => step.id === 'dependencies');
   const saves = steps.filter(step => step.uses?.startsWith('actions/cache/save@'));
@@ -35,15 +36,18 @@ test('browser cache has a single trusted main-push writer without changing test 
   assert.ok(steps.indexOf(save) > steps.findIndex(step => step.run?.startsWith('node scripts/ci/execution/group.mjs "browser-')),
     'A failed validation must not produce a new cache');
   assert.ok(steps.indexOf(save) < steps.findIndex(step => step.with?.name?.startsWith('ci-evidence-browser-')));
-  assert.equal(browser.strategy.matrix.include, '${{ fromJSON(needs.plan.outputs.browser) }}');
+  assert.equal(browser.strategy.matrix.include, '${{ fromJSON(inputs.browser) }}');
   const { createVerificationPlan } = await import('./plan.mjs');
   const main = createVerificationPlan({ files: ['docs/authoring.md'], event: 'push',
     sha: 'a'.repeat(40), base: 'b'.repeat(40) });
-  assert.ok(main.groups.includes('browser-full-reference'), 'Full main verification always has the cache writer');
+  const { verificationPlanOutputs } = await import('./plan.mjs');
+  const outputs = verificationPlanOutputs(main);
+  assert.ok(JSON.parse(outputs.browser_full).some(shard => shard.group === 'full-reference'), 'Full main verification always has the cache writer');
 });
 
 test('host dependencies are restore-only in Verify and cache mutation is scoped to trusted events', () => {
   const workflow = parse(readFileSync(new URL('../../../.github/workflows/verify.yml', import.meta.url), 'utf8'));
+  const profileWorkflow = parse(readFileSync(new URL('../../../.github/workflows/verify-profile.yml', import.meta.url), 'utf8'));
   const cache = parse(readFileSync(new URL('../../../.github/workflows/ci-dependency-cache.yml', import.meta.url), 'utf8'));
   const warm = cache.jobs.warm;
   const warmRestore = warm.steps.find(step => step.id === 'dependencies');
@@ -51,7 +55,7 @@ test('host dependencies are restore-only in Verify and cache mutation is scoped 
   assert.equal(warm.if, "github.event_name != 'pull_request_target' && github.ref == 'refs/heads/main'");
   assert.equal(warmSave.with.key, '${{ steps.dependencies.outputs.cache-primary-key }}');
   for (const job of ['unit', 'types', 'build']) {
-    const steps = workflow.jobs[job].steps;
+    const steps = (job === 'build' ? profileWorkflow : workflow).jobs[job].steps;
     const restore = steps.find(step => step.id === 'dependencies');
     assert.ok(restore.uses.startsWith('actions/cache/restore@'), job);
     assert.equal(restore.with.key, warmRestore.with.key, job);
@@ -66,9 +70,9 @@ test('host dependencies are restore-only in Verify and cache mutation is scoped 
   assert.match(cleanup.steps[0].run, /--ref "refs\/pull\/\$PR_NUMBER\/merge"/u);
   assert.equal(cleanup.steps[0].env.PR_NUMBER, '${{ github.event.pull_request.number }}');
   assert.match(workflow.jobs.unit.services.postgres.image, /matrix\.group != 'architecture' && matrix\.group != 'db'/u);
-  assert.equal(workflow.jobs.build.steps.find(step => step.id === 'dependencies').if, "matrix.profile == 'full'");
   assert.equal(workflow.jobs.unit.steps.find(step => step.id === 'dependencies').if, "matrix.group != 'architecture' && matrix.group != 'api' && matrix.group != 'db'");
-  assert.equal(workflow.jobs.browser.steps.find(step => step.id === 'dependencies').if, "matrix.profile == 'full'");
+  assert.equal(profileWorkflow.jobs.build.steps.find(step => step.id === 'dependencies').if, "inputs.profile == 'full'");
+  assert.equal(profileWorkflow.jobs.browser.steps.find(step => step.id === 'dependencies').if, "inputs.profile == 'full'");
   for (const name of ['plan', 'certification']) {
     const steps = workflow.jobs[name].steps;
     const checkout = steps.find(step => step.uses?.startsWith('actions/checkout@'));
@@ -561,15 +565,18 @@ test('OAuth browser acceptance is selected in both profile browser lanes', async
 
 test('UI review screenshot upload follows selected visual tasks in the browser matrix', async () => {
   const workflow = parse(readFileSync(new URL('../../../.github/workflows/verify.yml', import.meta.url), 'utf8'));
-  const upload = workflow.jobs.browser.steps.find(step => step.with?.name?.startsWith('ui-refinement-visual-'));
+  const profileWorkflow = parse(readFileSync(new URL('../../../.github/workflows/verify-profile.yml', import.meta.url), 'utf8'));
+  const upload = profileWorkflow.jobs.browser.steps.find(step => step.with?.name?.startsWith('ui-refinement-visual-'));
   const { verificationPlanOutputs } = await import('./plan.mjs');
 
   for (const [file, captureUiReview] of [['recent-activity', false], ['redesign-visual', true]]) {
     const selected = await plan([`tests/e2e/${file}.acceptance.spec.ts`]);
-    const browser = JSON.parse(verificationPlanOutputs(selected).browser);
-    assert.deepEqual(browser, ['core', 'full'].map(profile => ({
-      group: `${profile}-reference`, profile, captureUiReview,
-    })));
+    const outputs = verificationPlanOutputs(selected);
+    for (const profile of ['core', 'full']) {
+      assert.deepEqual(JSON.parse(outputs[`browser_${profile}`]), [{
+        group: `${profile}-reference`, profile, captureUiReview,
+      }]);
+    }
   }
   assert.equal(upload.if, 'always() && matrix.captureUiReview');
   assert.equal(upload.with['if-no-files-found'], 'error');

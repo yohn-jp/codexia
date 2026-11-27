@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { VERIFICATION_GROUPS } from '../impact/contract.mjs';
 import { planDigest, validateVerificationPlan } from '../impact/plan.mjs';
+import { normalizeVerificationJobs } from './job-name.mjs';
 
 export function assertPlanEvidence(plan, jobs, reports) {
   validateVerificationPlan(plan);
+  jobs = normalizeVerificationJobs(jobs);
   const names = new Set();
   const supplementalFullModelNames = new Set();
   for (const job of jobs) {
@@ -21,7 +23,8 @@ export function assertPlanEvidence(plan, jobs, reports) {
       assert.equal(job.status, 'completed', `Unfinished verification job: ${job.name}`);
       assert.equal(job.conclusion, 'success', `Verification job did not succeed: ${job.name}`);
     } else {
-      // GitHub can emit one skipped placeholder for an entirely unselected matrix.
+      // Historical supplemental jobs may be present only as skipped entries.
+      // They prove no task; selected obligations are checked below.
       assert.equal(job.conclusion, 'skipped', `Unexpected executed verification job: ${job.name}`);
     }
   }

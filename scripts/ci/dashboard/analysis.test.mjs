@@ -58,6 +58,41 @@ test('graph reads workflow job templates and needs, including matrix jobs', () =
   assert.throws(()=>readVerifyGraph('jobs:\n  plan:\n    name: plan\n'),/Unrecognized/u);
 });
 
+test('dashboard reconstructs nested profile dependencies for current and historical job names', () => {
+  const workflowSource = {
+    verify: [
+      'jobs:', '  plan:', '    name: plan',
+      '  profile_core:', '    name: profile-core', '    needs:', '      - plan',
+      '  profile_full:', '    name: profile-full', '    needs:', '      - plan',
+      '  certification:', '    name: certification', '    needs:', '      - plan',
+      '      - profile_core', '      - profile_full',
+    ].join('\n'),
+    profile: [
+      'jobs:', '  build:', '    name: build-${{ inputs.profile }}',
+      '  browser:', '    name: browser-${{ matrix.group }}', '    needs:', '      - build',
+    ].join('\n'),
+  };
+  const currentJobs = [
+    job(1,'plan',0,1,4),
+    job(2,'profile-core / build-core',4,6,18),
+    job(3,'profile-core / browser-core-writing',18,20,32),
+    job(4,'profile-full / build-full',4,6,24),
+    job(5,'profile-full / browser-full-ui-v1',24,26,45),
+    job(6,'certification',45,47,51),
+  ];
+  const currentChain = blockingChain(run(), currentJobs, workflowSource);
+  assert.equal(currentChain.verified, true);
+  assert.deepEqual(currentChain.names, [
+    'plan','profile-full / build-full','profile-full / browser-full-ui-v1','certification',
+  ]);
+  const historicalJobs = [
+    job(1,'plan',0,1,4), job(2,'build-full',4,6,18),
+    job(3,'browser-full-ui-v1',18,20,40), job(4,'certification',40,42,47),
+  ];
+  assert.deepEqual(blockingChain(run(), historicalJobs, workflowSource).names,
+    ['plan','browser-full-ui-v1','certification']);
+});
+
 test('observed dependency chain chooses latest completed prerequisite', () => {
   const chain = blockingChain(run(),jobs,graph);
   assert.equal(chain.verified,true);
@@ -269,11 +304,13 @@ test('bundled dashboard renders measured telemetry and copies source-bound diagn
     'diagnostics.mjs': 'text/javascript',
     'timing.mjs': 'text/javascript',
     'contract.mjs': 'text/javascript',
+    'job-name.mjs': 'text/javascript',
+    'verify.yml': 'text/plain',
+    'verify-profile.yml': 'text/plain',
   };
   await page.route('http://localhost/**', async route => {
     const path = new URL(route.request().url()).pathname;
     const name = path.split('/').pop();
-    if (path === '/ci/verify.yml') return route.fulfill({ body: graph, contentType: 'text/plain' });
     if (!Object.hasOwn(contentTypes, name)) return route.fulfill({ status: 404 });
     return route.fulfill({ body: await readFile(join(output, path.slice(1))), contentType: contentTypes[name] });
   });
