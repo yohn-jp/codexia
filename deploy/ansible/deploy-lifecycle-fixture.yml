@@ -6,10 +6,8 @@
       - codexia_service_user == 'codexia'
       - codexia_lifecycle_verification_file is string and codexia_lifecycle_verification_file is match('^/[^\r\n]+$')
       - codexia_lifecycle_candidate_key is string and codexia_lifecycle_candidate_key in ['head', 'prior', 'failed', 'app-update', 'auth-primary', 'auth-update', 'auth-failed']
-      - codexia_backup_destination is string and codexia_backup_destination is match('^/[^\r\n]+$')
-      - codexia_backup_recipient is string and codexia_backup_recipient is match('^age1[0-9a-z]+$')
       - not ansible_check_mode
-    fail_msg: Disposable lifecycle deployment requires the rootless codexia identity, verified image evidence and an isolated remote backup mount.
+    fail_msg: Disposable lifecycle deployment requires the rootless codexia identity, and verified image evidence.
 
 - name: Read the run-bound lifecycle image proof from the workflow workspace
   ansible.builtin.slurp:
@@ -54,15 +52,6 @@
 
 - name: Prepare shared push deployment state and helpers
   ansible.builtin.include_tasks: deploy-prepare.yml
-
-- name: Verify the isolated SSHFS destination before changing services
-  ansible.builtin.command:
-    argv: ["{{ home }}/.local/bin/codexia-backup", validate-destination, "{{ codexia_backup_destination }}"]
-  environment:
-    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-deploy"
-    HOME: "{{ home }}"
-    XDG_STATE_HOME: "{{ home }}/.local/state"
-  changed_when: false
 
 - name: Pull the immutable OCI digest into the disposable service account
   ansible.builtin.command:

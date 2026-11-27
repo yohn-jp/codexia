@@ -161,10 +161,8 @@
           - codexia_verified_main_sha is match('^[a-f0-9]{40}$')
           - codexia_deployed_ui_epoch is integer and codexia_deployed_ui_epoch > 0
           - codexia_deployment_certificate_file is string and codexia_deployment_certificate_file is match('^/[^\\r\\n]+$')
-          - codexia_backup_destination is string and codexia_backup_destination is match('^/[^\\r\\n]+$')
-          - codexia_backup_recipient is string and codexia_backup_recipient is match('^age1[0-9a-z]+$')
           - not ansible_check_mode
-        fail_msg: Push deployment requires the rootless service identity, certified image, exact-main provenance and protected backup inputs.
+        fail_msg: Push deployment requires the rootless service identity, certified image, and exact-main provenance.
       when: codexia_stage == 'deploy'
 
     - name: Deploy the certified image under a serialized host lock
