@@ -127,26 +127,58 @@ test('PR paths and completed-Verify release impact retain component build inputs
   }
 });
 
-test('[TEST-QUAL-001-001] disposable app lifecycle is not admitted by isolated workspace tests', () => {
+test('[TEST-QUAL-001-001] disposable app lifecycle admits only deployment-relevant PR inputs', () => {
   const workflow = parse(readFileSync(new URL('../../../.github/workflows/push-app-lifecycle.yml', import.meta.url), 'utf8'));
   const paths = workflow.on.pull_request.paths;
-  for (const path of [
+  assert.ok(Object.hasOwn(workflow.on, 'workflow_dispatch'));
+  assert.deepEqual(workflow.jobs.lifecycle.strategy.matrix.scenario, ['app', 'auth'],
+    'admitted PRs must preserve both independent state-transition lanes');
+  for (const file of [
+    'packages/api/src/server.ts',
+    'packages/api/src/better-auth.ts',
+    'packages/api/src/oauth-owner.ts',
+    'packages/api/src/owner-security.ts',
+    'packages/api/src/auth/authorize.ts',
+    'packages/persistence-postgres/migrations/0001-create.sql',
+    'packages/persistence-postgres/src/connection.ts',
+    'packages/persistence-contracts/src/owner.ts',
+    'packages/module-runtime/src/registry.ts',
+    'packages/core/package.json',
+    'modules/mcp/package.json',
+    'deploy/quadlet/codexia-api.container',
+    'deploy/ansible/deploy.yml',
+    'deploy/ansible/test-push-app-lifecycle.sh',
+    'deploy/backup/backup.sh',
+    'deploy/fixtures/sshfs-server/Dockerfile',
+    'scripts/deployment/lifecycle/app-update.mjs',
+    'scripts/verification/runtime/better-auth-fixture.sh',
+    'scripts/build/packaging/profile-package.mjs',
+    '.github/workflows/push-app-lifecycle.yml',
+    'Dockerfile.backend',
+    'pnpm-lock.yaml',
+  ]) assert.equal(matchesWorkflowPaths(paths, [file]), true, file);
+  for (const file of [
     'packages/persistence-postgres/tests/db-contract/runner.test.mjs',
     'packages/http-contract/test/fastify-persistence-registration.test.ts',
     'packages/core/src/snapshot-reuse.test.ts',
-    // Other compiled test sources in this contract still contribute to the final dist, not host state.
-    'modules/mcp/src/tool-catalog.test.ts',
-  ]) assert.equal(matchesWorkflowPaths(paths, [path]), false, path);
-  for (const path of [
-    'packages/api/src/server.ts',
+    'packages/api/src/better-auth.test.ts',
+    'packages/api/src/auth/tests/owner-contract.test.ts',
+    'packages/api/src/recent-activity-store.ts',
     'modules/mcp/src/tools.ts',
-    'deploy/quadlet/codexia-api.container',
-    'deploy/ansible/deploy.yml',
-    '.github/workflows/push-app-lifecycle.yml',
-  ]) assert.equal(matchesWorkflowPaths(paths, [path]), true, path);
+    'packages/core/src/formatter.ts',
+    'app/src/entries/desktop.tsx',
+    'deploy/backup/CONSOLE.md',
+    'deploy/ansible/AUTH-RUNTIME.md',
+    'docs/deployment/PUSH-DEPLOYMENT.md',
+    'docs/deployment/IAC.md',
+    '.github/workflows/verify.yml',
+    'scripts/deployment/admission/documentation.test.mjs',
+    'scripts/ci/impact/plan.mjs',
+    'scripts/ci/evidence/download-artifacts.test.mjs',
+  ]) assert.equal(matchesWorkflowPaths(paths, [file]), false, file);
   assert.equal(matchesWorkflowPaths(paths, [
-    'packages/core/src/snapshot-reuse.test.ts', 'deploy/quadlet/codexia-db.container',
-  ]), true, 'runtime input must not be suppressed by an unrelated test file');
+    'modules/mcp/src/tools.ts', 'deploy/quadlet/codexia-db.container',
+  ]), true, 'runtime transaction changes cannot be hidden in a mixed PR');
 });
 
 const plan = async (files, event = 'pull_request') => {

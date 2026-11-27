@@ -146,6 +146,18 @@ include packaging scripts, profile manifests, dependency locks, workflows and ac
 runtime inputs in the relevant closure. A package filename suffix is not by itself
 proof that a file is irrelevant: generated/test assets consumed by a build remain inputs.
 
+**PR workflow admission.** The full Repository Audit Pages portal is built/published on
+`main`; its non-publishing PR preview and integrated Chromium acceptance run only for
+changes to Pages-owned generators, renderers, direct evidence inputs and portal
+contracts, not every product/runtime/Verify change. Canonical requirements-trace
+validation remains in Verify for relevant PR changes. The disposable app lifecycle
+workflow runs on PRs touching transaction, host/Quadlet, backup, auth/bootstrap,
+PostgreSQL schema/connection or image packaging/admission inputs. Ordinary module
+feature or core logic changes retain Verify, backend artifact and browser proof but
+do not re-exercise the host state machine. A selected lifecycle run must still pass
+both independent `app` and `auth` scenarios with exact-source evidence; neither
+filter is a substitute for main certification or production-host acceptance.
+
 **Security scope implementation.** `scripts/ci/impact/security-admission.mjs`
 uses the exact PR merge result and its two verified parents to determine a
 CodeQL/Trivy net-change closure. The stable check jobs remain present, but

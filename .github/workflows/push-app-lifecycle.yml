@@ -1,84 +1,78 @@
 name: Push deployment app lifecycle
 on:
   workflow_dispatch:
+  # Disposable hosts validate the *deployment transaction*, not every backend
+  # feature change. Ordinary module/core work still has Verify, image and
+  # browser proof, while startup/auth/DB/packaging/host inputs retain both
+  # real-host acceptance scenarios. Explicit test/documentation exclusions
+  # do not discard emitted runtime sources from the production image.
   pull_request:
     branches: [main]
     paths:
-      - scripts/shared/python-env.sh
-      - Dockerfile.backend
-      - .dockerignore
-      - Dockerfile.backend.dockerignore
-      - deploy/backend/**
-      - deploy/fixtures/sshfs-server/**
-      - scripts/verification/artifacts/sshfs-fixture*.mjs
-      - packages/**
-      - modules/**
-      - '!modules/story/src/browser.tsx'
-      # Test-only files are not source-bound runtime or host-lifecycle inputs.
-      - '!modules/**/test/**'
-      - '!modules/**/tests/**'
-      - '!modules/**/*.test.*'
+      - 'scripts/shared/python-env.sh'
+      - 'Dockerfile.backend'
+      - '.dockerignore'
+      - 'Dockerfile.backend.dockerignore'
+      - 'deploy/backend/**'
+      - 'deploy/fixtures/sshfs-server/**'
+      - 'deploy/ansible/**'
+      - 'deploy/backup/**'
+      - 'deploy/postgres/**'
+      - 'deploy/quadlet/**'
+      - 'deploy/update-compatibility.json'
+      - 'profiles/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
+      - 'packages/*/package.json'
+      - 'modules/*/package.json'
+      # API service startup and owner/Better Auth/bootstrap transitions.
+      - 'packages/api/src/server.ts'
+      - 'packages/api/src/environment.ts'
+      - 'packages/api/src/*auth*.ts'
+      - 'packages/api/src/*oauth*.ts'
+      - 'packages/api/src/*owner*.ts'
+      - 'packages/api/src/*passkey*.ts'
+      - 'packages/api/src/*bootstrap*.ts'
+      - 'packages/api/src/*backup*.ts'
+      - 'packages/api/src/auth/**'
+      # DB writer/ledger behavior and persistence schema.
+      - 'packages/persistence-postgres/src/**'
+      - 'packages/persistence-postgres/migrations/**'
+      - 'packages/persistence-contracts/src/**'
+      - 'packages/module-runtime/src/**'
+      # Exact-source image selection and the production transaction.
+      - 'scripts/build/packaging/profile-*.mjs'
+      - 'scripts/verification/dependencies/runtime-package-closure.mjs'
+      - 'scripts/verification/runtime/backend-image.sh'
+      - 'scripts/verification/runtime/better-auth-fixture.sh'
+      - 'scripts/verification/artifacts/sshfs-fixture*.mjs'
+      - 'scripts/verification/artifacts/backend.mjs'
+      - 'scripts/release/backend/update-identity*.mjs'
+      - 'scripts/release/backend/verify-image-identity.mjs'
+      - 'scripts/release/backend/image-inspection.mjs'
+      - 'scripts/release/backend/verify-existing.mjs'
+      - 'scripts/release/components/policy.mjs'
+      - 'scripts/release/components/version*.mjs'
+      - 'scripts/release/components/record-model.mjs'
+      - 'scripts/deployment/admission/validate.mjs'
+      - 'scripts/deployment/admission/certificate.mjs'
+      - 'scripts/deployment/handoff/verify-push.mjs'
+      - 'scripts/deployment/lifecycle/app*.mjs'
+      - 'scripts/deployment/lifecycle/auth-oidc.mjs'
+      - 'scripts/ci/evidence/artifact-selection.mjs'
+      - 'scripts/ci/evidence/download-artifacts.mjs'
+      - 'scripts/ci/evidence/package.json'
+      - '.github/workflows/push-app-lifecycle.yml'
+      - '.github/workflows/backend-release.yml'
+      # Documentation and isolated tests cannot change this host lifecycle.
+      - '!deploy/**/*.md'
+      - '!deploy/**/*.test.*'
+      - '!packages/**/*.test.*'
       - '!packages/**/test/**'
       - '!packages/**/tests/**'
-      - '!packages/**/*.test.*'
-      - 'modules/**/src/**/test/**'
-      - 'modules/**/src/**/tests/**'
-      - 'packages/**/src/**/test/**'
-      - 'packages/**/src/**/tests/**'
-      # Build-emitted source and test files remain runtime package inputs.
-      - 'packages/api/src/**'
-      - 'packages/persistence-contracts/src/**'
-      - profiles/**
-      - package.json
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
-      - tsconfig.base.json
-      - deploy/postgres/**
-      - scripts/build/packaging/profile-build.mjs
-      - scripts/build/packaging/profile-package.mjs
-      - scripts/verification/dependencies/runtime-package-closure.mjs
-      - scripts/verification/runtime/backend-image.sh
-      - scripts/release/backend/update-identity*.mjs
-      - scripts/release/components/version*.mjs
-      - scripts/release/backend/verify-image-identity.mjs
-      - .github/workflows/push-app-lifecycle.yml
-      - .github/workflows/backend-release.yml
-      - deploy/ansible/site.yml
-      - deploy/ansible/host.yml
-      - deploy/ansible/host-validate.yml
-      - deploy/ansible/backup-*
-      - deploy/ansible/base-*.yml
-      - deploy/ansible/deploy*.yml
-      - deploy/ansible/auth-runtime*
-      - deploy/ansible/bootstrap-auth-registration.sh
-      - deploy/ansible/grant-passkey-owner.sh
-      - deploy/ansible/require-clean-api-target.sh
-      - deploy/ansible/test-push-*-lifecycle.sh
-      - deploy/ansible/push-deployment-recover.sh
-      - deploy/ansible/requirements.txt
-      - deploy/ansible/callback_plugins/**
-      - deploy/backup/**
-      - deploy/quadlet/**
-      - deploy/update-compatibility.json
-      - scripts/deployment/lifecycle/app*.mjs
-      - scripts/deployment/lifecycle/auth-oidc.mjs
-      - scripts/deployment/admission/contract.test.mjs
-      - scripts/deployment/admission/documentation.test.mjs
-      - scripts/verification/artifacts/backend.mjs
-      - scripts/ci/evidence/artifact-selection.mjs
-      - scripts/ci/evidence/download-artifacts*.mjs
-      - scripts/ci/evidence/package.json
-      - scripts/release/components/policy.mjs
-      - scripts/release/backend/image-inspection.mjs
-      - scripts/deployment/admission/validate.mjs
-      - scripts/deployment/admission/certificate.mjs
-      - scripts/deployment/handoff/verify-push.mjs
-      - scripts/deployment/handoff/verify-push.test.mjs
-      - scripts/release/backend/verify-existing.mjs
-      - scripts/release/backend/verify-existing.test.mjs
-      - scripts/release/components/record-model.mjs
-      - docs/deployment/PUSH-DEPLOYMENT.md
-      - docs/deployment/IAC.md
+      - '!scripts/**/*.test.mjs'
 permissions:
   contents: read
 concurrency:
