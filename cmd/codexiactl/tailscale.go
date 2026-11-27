@@ -328,9 +328,9 @@ func inspectTailnetWithApproval(ctx context.Context, client *ts.Client, local lo
 			}
 		}
 		if !allowCreate || o == nil {
-			return identity, needsAction("No exact GitHub Actions OIDC trust exists. Inspect "+wifTrustConsole+"; init can create a separate, scoped credential after approval. Existing credentials are not changed")
+			return identity, needsAction("No exact GitHub Actions OIDC trust exists. Inspect " + wifTrustConsole + "; init can create a separate, scoped credential after approval. Existing credentials are not changed")
 		}
-		o.Notice("A new credential will trust only "+wifSubject+", main-branch workflows, auth_keys and tag:ci; no existing credential will be modified.")
+		o.Notice("A new credential will trust only " + wifSubject + ", main-branch workflows, auth_keys and tag:ci; no existing credential will be modified.")
 		if err := requireApproval(o, "Create a separate minimal GitHub Actions OIDC trust credential in this Tailnet?"); err != nil {
 			return identity, err
 		}
@@ -347,17 +347,17 @@ func inspectTailnetWithApproval(ctx context.Context, client *ts.Client, local lo
 			return identity, tailnetAPIError("create approved scoped GitHub OIDC trust (requires federated_keys:write)", createErr)
 		}
 		if created == nil || !tailnetNodeID.MatchString(created.ID) {
-			return identity, refused("Tailscale returned no valid identity for the created OIDC credential; inspect "+wifTrustConsole+" before retrying")
+			return identity, refused("Tailscale returned no valid identity for the created OIDC credential; inspect " + wifTrustConsole + " before retrying")
 		}
 		verified, getErr := client.Keys().Get(ctx, created.ID)
 		if getErr != nil {
 			return identity, tailnetAPIError("verify newly created OIDC trust", getErr)
 		}
 		if verified == nil || !matchesWIF(*verified) {
-			return identity, refused("New OIDC credential is not an exact match. Inspect "+wifTrustConsole+" before retrying; do not create another credential")
+			return identity, refused("New OIDC credential is not an exact match. Inspect " + wifTrustConsole + " before retrying; do not create another credential")
 		}
 		keyID = created.ID
-		o.Notice("Created and reverified scoped Tailscale OIDC credential "+keyID+". Its audience is api.tailscale.com/"+keyID+".")
+		o.Notice("Created and reverified scoped Tailscale OIDC credential " + keyID + ". Its audience is api.tailscale.com/" + keyID + ".")
 	}
 	identity.ClientID = keyID
 	return identity, nil
@@ -422,7 +422,7 @@ func discoverTailnetWIF(ctx context.Context, client *ts.Client) (string, []strin
 			continue
 		}
 		if matching != "" {
-			return "", nil, refused("Multiple valid GitHub OIDC credentials match this deployment. Resolve the ambiguity in "+wifTrustConsole)
+			return "", nil, refused("Multiple valid GitHub OIDC credentials match this deployment. Resolve the ambiguity in " + wifTrustConsole)
 		}
 		matching = key.ID
 	}
