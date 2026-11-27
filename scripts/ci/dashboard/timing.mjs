@@ -1,5 +1,6 @@
 // Observational timing only; no certification or release authority.
 import { VERIFICATION_LEAF_JOBS } from '../impact/contract.mjs';
+import { normalizeVerificationJobName } from '../evidence/job-name.mjs';
 
 export function seconds(start, end) {
   const first = Date.parse(start ?? '');
@@ -34,7 +35,7 @@ export function summarizeCiTiming(run, jobs) {
   const gate = current.find(job => job.name === 'certification');
   const certificationElapsedSeconds = gate ? seconds(attemptStartedAt, gate.completed_at) : null;
   // A supplemental workflow call is not a dependency of Verify certification.
-  const leaf = current.filter(job => VERIFICATION_LEAF_JOBS.includes(job.name) &&
+  const leaf = current.filter(job => VERIFICATION_LEAF_JOBS.includes(normalizeVerificationJobName(job.name)) &&
     seconds(attemptStartedAt, job.completed_at) !== null && (!gate || seconds(job.completed_at, gate.started_at) !== null))
     .sort((a, b) => Date.parse(b.completed_at) - Date.parse(a.completed_at))[0];
   return {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { validateVerificationPlan } from '../impact/plan.mjs';
+import { normalizeVerificationJobs } from './job-name.mjs';
 
 /**
  * Select one artifact produced inside the latest successful job attempt window.
@@ -63,7 +64,8 @@ export function selectLatestJobArtifact(artifactName, jobName, artifacts, jobs, 
 export function selectLatestEvidenceArtifacts(planValue, artifacts, jobs, identity) {
   const plan = validateVerificationPlan(planValue);
   assert.equal(plan.sha, identity.sourceSha, 'Plan source SHA mismatch');
-  return plan.groups.map(group => selectLatestJobArtifact(`ci-evidence-${group}`, group, artifacts, jobs, identity));
+  const normalizedJobs = normalizeVerificationJobs(jobs);
+  return plan.groups.map(group => selectLatestJobArtifact(`ci-evidence-${group}`, group, artifacts, normalizedJobs, identity));
 }
 
 /**
@@ -83,6 +85,7 @@ export function selectLatestPlanArtifact(artifacts, jobs, identity) {
  * A fresh failed producer is never replaced by an older success.
  */
 export async function resolveProducerJobAttempts(jobs, run, listAttemptJobs, producerNames) {
+  jobs = normalizeVerificationJobs(jobs);
   assert.ok(Number.isSafeInteger(run.run_attempt) && run.run_attempt > 0, 'Invalid workflow run attempt');
   const producers = new Set(producerNames);
   const successful = jobs.filter(job => producers.has(job.name) && job.status === 'completed' && job.conclusion === 'success');
@@ -90,8 +93,7 @@ export async function resolveProducerJobAttempts(jobs, run, listAttemptJobs, pro
   assert.equal(typeof listAttemptJobs, 'function', 'Attempt history reader is required for producer attempt history');
   const windows = new Map();
   for (let attempt = 1; attempt <= run.run_attempt; attempt++) {
-    const history = await listAttemptJobs(run.id, attempt);
-    assert.ok(Array.isArray(history), 'Invalid producer attempt history');
+    const history = normalizeVerificationJobs(await listAttemptJobs(run.id, attempt));
     for (const job of successful) {
       const matches = history.filter(old => old.name === job.name && old.head_sha === job.head_sha &&
         String(old.run_id) === String(job.run_id) && old.status === job.status && old.conclusion === job.conclusion &&
