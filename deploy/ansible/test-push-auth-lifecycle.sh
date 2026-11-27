@@ -221,7 +221,6 @@ NODE
       "$tmp/auth-final.yml" >"$tmp/auth-existing-owner-setup.yml"
     cat >>"$tmp/auth-existing-owner-setup.yml" <<YAML
 codexia_owner_setup_install_intent: true
-codexia_owner_setup_age_recipient: "$backup_recipient"
 codexia_owner_setup_web_redirect_uris: ["$origin/desktop"]
 YAML
     local existing_owner_database existing_owner_runtime

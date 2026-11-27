@@ -130,7 +130,7 @@ def prepare(env: dict[str, str]) -> dict[str, str]:
             "codexia_oauth_owner_client_ids": profile["webClientId"] + "," + profile["iosClientId"],
             "codexia_owner_setup_web_redirect_uris": [profile["publicOrigin"] + profile["desktopCallbackPath"]],
         })
-    if operation == "owner-setup" or (operation == "bootstrap" and init_approved):
+    if operation == "owner-setup":
         recipient = required(env, "CODEXIA_OWNER_SETUP_AGE_RECIPIENT")
         if not re.fullmatch(r"age1[0-9a-z]+", recipient):
             raise InvalidBootstrapInput("Invalid owner handoff recipient")
