@@ -36,7 +36,7 @@ def command(args, allowed=(0,), stdin=None):
     return result.returncode, result.stdout.strip()
 
 
-# Both the read-only observer and the locked R6 admission bind Podman IDs.
+# The read-only observer and the locked owner and activation operations bind Podman IDs.
 # Lookup metadata only. Never request secret contents.
 BASE_SECRETS = ("codexia-tunnel-token", "codexia-postgres-admin-password", "codexia-postgres-app-password")
 AUTH_SECRETS = ("codexia-auth-database-url", "codexia-auth-secret", "codexia-oauth-introspection-client-secret")
@@ -53,7 +53,7 @@ def secret_identities():
     return hashes
 
 
-def verify_preserved_secrets(expected, lock_fd):
+def verify_secret_identities(expected, lock_fd):
     require(re.fullmatch(r"[a-f0-9]{64}", expected))
     lock = Path.home() / ".local/state/codexia-deploy/host.lock"
     actual = os.fstat(lock_fd)
@@ -295,6 +295,8 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
             # The marker is created only after the canonical prepare-activation
             # operation verifies owner and clients. Actual admission rechecks them.
             result["authState"] = "ready"
+            if intent is not None:
+                result["bootstrapIntent"] = intent
     else:
         result["authState"] = "recovery"
     return result
@@ -451,9 +453,9 @@ def observe():
 
 if __name__ == "__main__":
     try:
-        if sys.argv[1:2] == ["verify-preserved-secrets"]:
+        if sys.argv[1:2] == ["verify-secret-identities"]:
             require(len(sys.argv) == 3)
-            verify_preserved_secrets(sys.argv[2], 9)
+            verify_secret_identities(sys.argv[2], 9)
             sys.exit(0)
         require(len(sys.argv) == 1)
         result = observe()

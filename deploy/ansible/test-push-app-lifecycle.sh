@@ -182,8 +182,11 @@ codexia_service_uid: $fixture_uid
 codexia_service_home: /home/codexia
 codexia_lifecycle_verification_file: "$evidence"
 codexia_lifecycle_candidate_key: "$key"
-codexia_backup_destination: "$fixture_home/.local/state/codexia-backup-mount"
-codexia_backup_recipient: "$backup_recipient"
+$(if [[ "$approvals" == false ]]; then
+  printf 'codexia_backup_destination: "%s"
+codexia_backup_recipient: "%s"
+'     "$fixture_home/.local/state/codexia-backup-mount" "$backup_recipient"
+fi)
 codexia_initial_install_approved: $approvals
 codexia_database_initialization_approved: $approvals
 $(if [[ -n "$fault_path" ]]; then printf 'codexia_lifecycle_fault_path: "%s"\n' "$fault_path"; fi)
@@ -702,14 +705,9 @@ TRANSITION
 set_state first_activation IN_PROGRESS
 run_deploy "$initial_key" true
 observe_runtime first-activation "$initial_key"
-mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
-[[ "${#backup_artifacts[@]}" == 1 ]]
-backup_validation=$(rootless "$fixture_home/.local/bin/codexia-backup" validate-artifact "${backup_artifacts[0]}")
-backup_checksum=$(rootless sha256sum "${backup_artifacts[0]}/SHA256SUMS" | cut -d' ' -f1)
-node - "$report" "${backup_artifacts[0]}" "$backup_validation" "$backup_checksum" <<'BACKUP_EVIDENCE'
-const fs=require('node:fs');const [path,artifact,validation,checksum]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.backupEvidence={filesystem:'sshfs',remoteAlias:'codexia-backup-fixture',artifactPath:artifact,validatedBy:'deploy/backup/backup.sh validate-artifact',validation:validation.slice(0,300),sha256SumsFile:checksum,physicalIndependence:'NOT_PROVEN_BY_CI_FIXTURE'};r.states.backup_remote_filesystem={status:'PASS',detail:'canonical deploy transaction created and validated encrypted backup on isolated SSHFS server'};r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
-BACKUP_EVIDENCE
-set_state first_activation PASS 'fresh schema and API readiness verified on real rootless Podman and PostgreSQL'
+rootless test -z "$(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -print -quit)"
+rootless test ! -e "$fixture_home/.local/state/codexia-deploy/backup-admission-enabled"
+set_state first_activation PASS 'fresh schema and API readiness verified without backup inputs, artifacts or prior writer'
 
 run_deploy "$initial_key" false
 observe_runtime same-digest-reapply "$initial_key"
@@ -719,6 +717,14 @@ seed_database_sentinel
 run_deploy "$update_key" false
 observe_runtime compatible-update "$update_key"
 set_state compatible_update PASS "$initial_key to $update_key activated the verified digest as the sole healthy API writer"
+
+mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
+[[ "${#backup_artifacts[@]}" == 1 ]]
+backup_validation=$(rootless "$fixture_home/.local/bin/codexia-backup" validate-artifact "${backup_artifacts[0]}")
+backup_checksum=$(rootless sha256sum "${backup_artifacts[0]}/SHA256SUMS" | cut -d' ' -f1)
+node - "$report" "${backup_artifacts[0]}" "$backup_validation" "$backup_checksum" <<'BACKUP_EVIDENCE'
+const fs=require('node:fs');const [path,artifact,validation,checksum]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.backupEvidence={filesystem:'sshfs',remoteAlias:'codexia-backup-fixture',artifactPath:artifact,validatedBy:'deploy/backup/backup.sh validate-artifact',validation:validation.slice(0,300),sha256SumsFile:checksum,physicalIndependence:'NOT_PROVEN_BY_CI_FIXTURE'};r.states.backup_remote_filesystem={status:'PASS',detail:'canonical deploy transaction created and validated encrypted backup on isolated SSHFS server'};r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
+BACKUP_EVIDENCE
 
 source "$repo_root/deploy/ansible/test-push-backup-host-lifecycle.sh"
 verify_backup_host_lifecycle "$update_key" "$initial_key"

@@ -173,14 +173,19 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
   const observedAt = times.length ? new Date(Math.min(...times)).toISOString() : now.toISOString();
   const database = host?.database;
   const bootstrapIntent = database?.bootstrapIntent;
-  const emptyAuthResume = database?.emptyAuthSchema === true;
-  const bootstrapResume = intent === 'install' && state.H === 'ready' && state.D === 'compatible' &&
-    state.A === 'absent' && state.B === 'absent' && state.T === 'none' && bootstrapIntent &&
-    (emptyAuthResume || database.emptyAuthSchema === undefined) &&
+  const matchesFreshInstallation = bootstrapIntent &&
     typeof database.clusterId === 'string' && /^[1-9][0-9]{0,19}$/u.test(database.clusterId) &&
     typeof database.databaseOid === 'string' && /^[1-9][0-9]{0,9}$/u.test(database.databaseOid) &&
     bootstrapIntent.clusterId === database.clusterId && bootstrapIntent.databaseOid === database.databaseOid &&
     bootstrapIntent.image === targetIdentity.image;
+  if (intent === 'install' && state.B === 'absent' && state.A === 'ready' &&
+      state.F === 'compatible' && !matchesFreshInstallation) {
+    blockers.push('unverified-fresh-installation');
+  }
+  const emptyAuthResume = database?.emptyAuthSchema === true;
+  const bootstrapResume = intent === 'install' && state.H === 'ready' && state.D === 'compatible' &&
+    state.A === 'absent' && state.B === 'absent' && state.T === 'none' && matchesFreshInstallation &&
+    (emptyAuthResume || database.emptyAuthSchema === undefined);
   const observation = {
     state, observedAt, frontendAdmission, changeAxes: [...new Set(changeAxes)],
     ...(bootstrapResume ? { bootstrapResume: {
@@ -199,7 +204,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       transactionSha256: host ? digestEvidence(host.transaction) : null,
       infrastructureSha256: host ? digestEvidence({ state: host.H, topology: host.topology }) : null,
       // Only an authenticated preservation receipt can be supplied by the
-      // owning recovery/activation adapter. A request hash is not a receipt.
+      // owning recovery adapter. A request hash is not a receipt.
       backupSha256: hash(preservationReceipt),
     },
   };

@@ -4,7 +4,7 @@
 
 The sole backend delivery path is **GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet**. Cloudflare Tunnel remains application ingress, not the administration channel. No pull updater, polling timer, signed release channel, reverse-proxy selector or alternate writer controller is maintained.
 
-The canonical production tasks are in [Ansible](../../deploy/ansible/README.md) and the Quadlet definitions in [Quadlet](../../deploy/quadlet). The protected production workflow verifies a certified immutable Full GHCR digest and its provenance, serializes deployment under a rootless host lock, requires a verified encrypted backup and probes readiness. Pull-request validation receives no production credentials.
+The canonical production tasks are in [Ansible](../../deploy/ansible/README.md) and the Quadlet definitions in [Quadlet](../../deploy/quadlet). The protected production workflow verifies a certified immutable Full GHCR digest and its provenance, serializes deployment under a rootless host lock, requires a verified encrypted backup for compatible image changes and probes readiness. Pull-request validation receives no production credentials.
 
 ## VMから管理者登録までの責務
 
@@ -27,7 +27,7 @@ The canonical production tasks are in [Ansible](../../deploy/ansible/README.md) 
 | `secrets` | Initial protected Podman credential convergence |
 | `base` | Networks, persistent volumes, PostgreSQL and Tunnel Quadlets |
 | `auth-runtime` | Approved application schema initialization for a pristine database, Better Auth role, schema and protected runtime secrets |
-| `deploy` | Approved pristine-schema first activation or certified image update, encrypted backup, application health and rollback |
+| `deploy` | Approved pristine-schema first activation or certified image update, with verified encrypted backup for the update. Both verify application health and support rollback |
 | `deploy-lifecycle-fixture` | GitHub Actions disposable-host verification only; local `localhost` connection, run-bound source evidence and the shared deployment transaction, with production admission kept on `deploy` |
 | `restore-drill` | Isolated encrypted backup restoration and checksum verification |
 

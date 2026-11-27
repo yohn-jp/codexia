@@ -863,21 +863,9 @@
       "entrypoint": "deploy/ansible/site.yml",
       "mappingBasis": "derivable",
       "classification": "Candidate REQ-OPS-001 / REQ-OPS-002; source membership follows literal playbook includes; host execution remains unverified."
-    },
-    {
-      "id": "entry-verify-bootstrap-escrow",
-      "entrypoint": "deploy/ansible/verify-bootstrap-escrow.yml",
-      "mappingBasis": "derivable",
-      "classification": "Candidate REQ-OPS-001; source membership follows literal playbook includes; host execution remains unverified."
     }
   ],
   "ansibleOverrides": [
-    {
-      "id": "source-bootstrap-secret-escrow",
-      "path": "deploy/ansible/bootstrap-secret-escrow.yml",
-      "mappingBasis": "semantic",
-      "classification": "Candidate REQ-OPS-001; escrow source role remains unverified."
-    },
     {
       "id": "source-deploy-ssh-key",
       "path": "deploy/ansible/deploy-ssh-key.yml",
