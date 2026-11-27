@@ -147,11 +147,14 @@ flowchart TD
     ACCEPT -->|成立| ACTIVE["ACTIVE: 通常Console利用可能"]
     ACTIVE -->|純新規 / 保全未受入| CFG["所有者 / console/backups<br/>設定・検証・実行"]
     CFG --> STORE["VMの共通backup実行主体 → 独立保管先"]
-    STORE --> DRILL["復旧担当 / 独立ホスト<br/>復元試験・運用者受入"]
+    STORE -->|失敗| CFG
+    STORE -->|成功・初回または復元試験時| DRILL["復旧担当 / 独立ホスト<br/>復元試験・運用者受入"]
     DRILL -->|失敗| CFG
     DRILL -->|成功| USE["ACCEPTED: 通常運用"]
+    STORE -->|成功・受入済みの通常保全| USE
     ACTIVE -->|既に運用受入済み| USE
     USE -->|手動 / 承認済み定期保全| STORE
+    USE -->|独立復元試験| DRILL
     USE -->|互換release / 障害・復旧要求| REQ
     STOP -->|前提確定・再要求| OBS
 ```
