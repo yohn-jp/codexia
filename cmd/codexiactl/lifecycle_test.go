@@ -36,7 +36,17 @@ func TestInitialOperationFollowsObservedLifecycle(t *testing.T) {
 	if mutation, err := receipt.initialOperation(); err != nil || mutation != publishFrontend {
 		t.Fatalf("owner pending: got %v, %v", mutation, err)
 	}
-	receipt.Plan.Observation.State.A = "unprepared"
+	receipt.Plan.Observation.State.F = "incompatible"
+	receipt.Evidence.Edge.FrontendState = "running"
+	receipt.Evidence.Edge.Frontend = &frontendIdentity{SourceSHA: strings.Repeat("b", 40), Version: "1.2.3", Profile: "full", APIEpoch: 4}
+	if mutation, err := receipt.initialOperation(); err != nil || mutation != publishFrontend {
+		t.Fatalf("reviewed R5 must permit replacing old epoch frontend: %v, %v", mutation, err)
+	}
+	receipt.Evidence.Edge.Frontend = nil
+	if _, err := receipt.initialOperation(); err == nil {
+		t.Fatal("incompatible frontend cannot be replaced without positive live identity evidence")
+	}
+		receipt.Plan.Observation.State.A = "unprepared"
 	if _, err := receipt.initialOperation(); !errors.Is(err, errExistingOwner) {
 		t.Fatalf("existing Owner must stop: %v", err)
 	}
