@@ -130,7 +130,13 @@ func (g *githubControl) observeEnvironment(ctx context.Context, name string) (gi
 		env.ProtectionBlocker = protectionErr.Error()
 	}
 	variableErr := g.listVariables(ctx, name, env.Variables)
+	if variableErr != nil {
+		env.Variables = nil
+	}
 	secretErr := g.listSecrets(ctx, name, env)
+	if secretErr != nil {
+		env.Secrets, env.SecretUpdatedAt = nil, nil
+	}
 	return env, errors.Join(protectionErr, variableErr, secretErr)
 }
 
@@ -208,6 +214,9 @@ func (g *githubControl) listVariables(ctx context.Context, name string, variable
 		if err != nil {
 			return githubFailure("list Environment variables for "+name, resp, err)
 		}
+		if list == nil {
+			return errors.New("GitHub returned no Environment variable inventory")
+		}
 		for _, v := range list.Variables {
 			if v == nil || v.Name == "" {
 				return errors.New("GitHub returned invalid Environment variable metadata")
@@ -228,6 +237,9 @@ func (g *githubControl) listSecrets(ctx context.Context, name string, env github
 		list, resp, err := g.client.Actions.ListEnvSecrets(ctx, githubOwner, githubRepo, name, &github.ListOptions{Page: page, PerPage: 100})
 		if err != nil {
 			return githubFailure("list Environment secrets for "+name, resp, err)
+		}
+		if list == nil {
+			return errors.New("GitHub returned no Environment secret inventory")
 		}
 		for _, s := range list.Secrets {
 			key := strings.ToUpper(s.GetName())

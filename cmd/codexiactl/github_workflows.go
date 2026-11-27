@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/go-github/v93/github"
 )
@@ -29,6 +30,7 @@ var (
 )
 
 const githubArtifactMax = 4 << 20
+const githubBackendHandoffFile = "backend-deployment-handoff.yml"
 
 type githubRun struct {
 	Status, Conclusion string
@@ -40,6 +42,7 @@ type githubRunSummary struct {
 	File, Status, Conclusion, SHA string
 	Attempt                       int
 	DisplayTitle                  string `json:"-"`
+	CreatedAt, UpdatedAt          time.Time
 }
 
 func githubWorkflowPath(file string) string {
@@ -140,7 +143,11 @@ func (g *githubControl) Run(ctx context.Context, file, sha string, id int64) (gi
 }
 
 func githubRunBelongs(run *github.WorkflowRun, file string) bool {
-	return run.GetID() > 0 && run.GetRunAttempt() > 0 && run.GetEvent() == "workflow_dispatch" &&
+	return githubRunMatches(run, file, "workflow_dispatch")
+}
+
+func githubRunMatches(run *github.WorkflowRun, file, event string) bool {
+	return run.GetID() > 0 && run.GetRunAttempt() > 0 && run.GetEvent() == event &&
 		run.GetRepository().GetID() == githubRepoID && run.GetHeadRepository().GetID() == githubRepoID &&
 		run.GetHeadBranch() == "main" && run.GetPath() == githubWorkflowPath(file) && githubSHA.MatchString(run.GetHeadSHA())
 }
@@ -183,19 +190,54 @@ func (g *githubControl) Jobs(ctx context.Context, id int64, attempt int) (map[st
 func (g *githubControl) Recent(ctx context.Context) ([]githubRunSummary, error) {
 	var result []githubRunSummary
 	for _, file := range githubWorkflows {
-		list, resp, err := g.client.Actions.ListWorkflowRunsByFileName(ctx, githubOwner, githubRepo, file, &github.ListWorkflowRunsOptions{
-			Branch: "main", Event: "workflow_dispatch", ListOptions: github.ListOptions{PerPage: 30},
-		})
+		runs, err := g.recentWorkflowRuns(ctx, file, "workflow_dispatch")
 		if err != nil {
-			return result, githubFailure("list recent "+file+" runs", resp, err)
+			return result, err
 		}
-		for _, run := range list.WorkflowRuns {
-			if !githubRunBelongs(run, file) {
-				return result, errors.New("GitHub returned a workflow run for a different target")
-			}
-			result = append(result, githubRunSummary{ID: run.GetID(), File: file, Status: run.GetStatus(),
-				Conclusion: run.GetConclusion(), SHA: run.GetHeadSHA(), Attempt: run.GetRunAttempt(), DisplayTitle: run.GetDisplayTitle()})
+		result = append(result, runs...)
+	}
+	return result, nil
+}
+
+// StatusHistory also reads the canonical ordinary deploy lanes. Recent stays
+// scoped to CLI-dispatchable workflows for dispatch recovery and init.
+func (g *githubControl) StatusHistory(ctx context.Context) ([]githubRunSummary, error) {
+	result, err := g.Recent(ctx)
+	if err != nil {
+		return result, err
+	}
+	for _, workflow := range []struct{ file, event string }{
+		{frontendFile, "workflow_run"},
+		{githubBackendHandoffFile, "workflow_dispatch"},
+		{githubBackendHandoffFile, "workflow_run"},
+	} {
+		runs, err := g.recentWorkflowRuns(ctx, workflow.file, workflow.event)
+		if err != nil {
+			return result, err
 		}
+		result = append(result, runs...)
+	}
+	return result, nil
+}
+
+func (g *githubControl) recentWorkflowRuns(ctx context.Context, file, event string) ([]githubRunSummary, error) {
+	list, resp, err := g.client.Actions.ListWorkflowRunsByFileName(ctx, githubOwner, githubRepo, file, &github.ListWorkflowRunsOptions{
+		Branch: "main", Event: event, ListOptions: github.ListOptions{PerPage: 30},
+	})
+	if err != nil {
+		return nil, githubFailure("list recent "+file+" runs", resp, err)
+	}
+	if list == nil {
+		return nil, errors.New("GitHub did not return workflow history")
+	}
+	result := make([]githubRunSummary, 0, len(list.WorkflowRuns))
+	for _, run := range list.WorkflowRuns {
+		if !githubRunMatches(run, file, event) {
+			return nil, errors.New("GitHub returned a workflow run for a different target")
+		}
+		result = append(result, githubRunSummary{ID: run.GetID(), File: file, Status: run.GetStatus(),
+			Conclusion: run.GetConclusion(), SHA: run.GetHeadSHA(), Attempt: run.GetRunAttempt(),
+			DisplayTitle: run.GetDisplayTitle(), CreatedAt: run.GetCreatedAt().Time, UpdatedAt: run.GetUpdatedAt().Time})
 	}
 	return result, nil
 }
