@@ -43,6 +43,9 @@ test('CI evidence consumers install the frozen dependency before loading evidenc
     'publish-oci.yml': {
       'verify-source': 'node scripts/release/components/verify-source.mjs',
       publish: ['node scripts/release/components/verify-source.mjs', 'node scripts/verification/artifacts/unpublished-image.mjs'],
+    },
+    'publish-codexiactl.yml': {
+      'verify-source': 'node scripts/release/components/verify-source.mjs',
       release: 'node scripts/release/components/verify-source.mjs',
     },
     'push-app-lifecycle.yml': { lifecycle: 'bash deploy/ansible/test-push-app-lifecycle.sh' },
@@ -64,7 +67,7 @@ test('CI evidence consumers install the frozen dependency before loading evidenc
   }
 });
 
-test('the codexiactl binary is tested in Verify and only published by the certified tag workflow', () => {
+test('the CodexiaCTL binary is validated by Verify and independently released at a verified tag', () => {
   const sha = 'a'.repeat(40);
   const base = 'b'.repeat(40);
   for (const event of ['pull_request', 'push']) {
@@ -77,8 +80,11 @@ test('the codexiactl binary is tested in Verify and only published by the certif
   assert.equal(verify.with['go-version-file'], 'cmd/codexiactl/go.mod');
   assert.match(verify.if, /codexiactl-linux/u);
 
-  const publication = parse(readFileSync(new URL('../../../.github/workflows/publish-oci.yml', import.meta.url), 'utf8'));
-  assert.deepEqual(publication.on, { push: { tags: ['v*'] } });
+  const oci = parse(readFileSync(new URL('../../../.github/workflows/publish-oci.yml', import.meta.url), 'utf8'));
+  assert.deepEqual(oci.on, { push: { tags: ['v*', '!v0.1.*'] } });
+  assert.ok(oci.jobs.publish && !oci.jobs.codexiactl && !oci.jobs.release);
+  const publication = parse(readFileSync(new URL('../../../.github/workflows/publish-codexiactl.yml', import.meta.url), 'utf8'));
+  assert.deepEqual(publication.on, { workflow_dispatch: null });
   assert.equal(publication.jobs.codexiactl.needs, 'verify-source');
   assert.equal(publication.jobs.codexiactl.permissions.contents, 'read');
   assert.ok(publication.jobs.release.needs.includes('codexiactl'));
@@ -90,11 +96,18 @@ test('the codexiactl binary is tested in Verify and only published by the certif
   assert.equal(publication.jobs.release.steps[download].with['artifact-ids'], '${{ needs.codexiactl.outputs.artifact-id }}');
   assert.equal(publication.jobs.release.steps[download].with.name, undefined);
   assert.equal(publication.jobs.release.steps[download].with['digest-mismatch'], 'error');
-  assert.equal(publication.jobs.publish.needs, 'verify-source');
-  const setting = publication.jobs['verify-source'].steps.find(step => step.run === 'node scripts/release/components/codexiactl-release.mjs check-setting');
-  assert.equal(setting.env.CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN, '${{ secrets.CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN }}');
-  assert.equal(setting['continue-on-error'], undefined);
+  assert.ok(publication.jobs['verify-source'].steps.some(step => step.run === 'node scripts/release/components/verify-source.mjs'));
   assert.ok(publication.jobs.release.steps.some(step => step.run === 'node scripts/release/components/codexiactl-release.mjs reconcile'));
+  assert.ok(!JSON.stringify(publication).includes('CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN'));
+  assert.ok(!JSON.stringify(publication).includes('CODEXIA_RELEASE_TAG_TOKEN'));
+
+  const auto = parse(readFileSync(new URL('../../../.github/workflows/codexiactl-auto-release.yml', import.meta.url), 'utf8'));
+  assert.deepEqual(auto.on.workflow_run.workflows, ['Verify Codexia']);
+  assert.equal(auto.jobs.tag.permissions.contents, 'write');
+  assert.equal(auto.jobs.tag.permissions.actions, 'write');
+  assert.match(auto.jobs.tag.if, /conclusion == 'success'/u);
+  assert.match(auto.jobs.tag.steps.find(step => step.uses?.startsWith('actions/github-script@')).with.script,
+    /createWorkflowDispatch/u);
 });
 
 test('Biome selects shipped JS/TS changes and config, but not unrelated CI or native sources', () => {
