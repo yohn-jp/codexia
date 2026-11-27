@@ -270,7 +270,7 @@ func TestEveryProtectedTailnetWorkflowUsesTheApprovedCredentialAudience(t *testi
 			text := string(contents)
 			count := strings.Count(text, "uses: tailscale/github-action@")
 			if count == 0 || strings.Count(text,
-				"audience: ${{ format('api.tailscale.com/{0}', secrets.TS_OAUTH_CLIENT_ID) }}") != count {
+				"audience: ${{ format('api.tailscale.com/{0}', vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID) }}") != count {
 				t.Fatalf("%s must bind each OIDC audience to its protected TS_OAUTH_CLIENT_ID, actions=%d", name, count)
 			}
 		})
