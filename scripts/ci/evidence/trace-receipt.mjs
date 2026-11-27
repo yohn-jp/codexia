@@ -109,7 +109,7 @@ export function summarizeCertifiedBrowser({ expected, run, certification, produc
     const observations = report.tests;
     const counts = summarizeBrowserCoverage({ expected: report.expected, outcomes: observations.map(item => item.outcome) });
     for (const [key, value] of Object.entries(counts)) assert.equal(report[key], value, `Browser coverage ${key} count mismatch`);
-    assert.ok(counts.failed === 0 && counts.executed > 0, 'Browser coverage lacks a successful execution');
+    assert.ok(counts.failed === 0 && counts.notRun === 0 && counts.executed > 0, 'Browser coverage must execute all non-skipped cases successfully');
     const file = `tests/e2e/${shard.file}`;
     assert.ok(observations.every(item => item.file === file), 'Browser observations include a foreign file');
     const passedCaseIds = cases.filter(item => {
