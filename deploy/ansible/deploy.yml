@@ -1,5 +1,5 @@
 ---
-- name: Require immutable certified artifact and protected backup destination
+- name: Require immutable certified artifact
   ansible.builtin.assert:
     that:
       - codexia_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
@@ -8,12 +8,10 @@
       - codexia_verified_main_sha is match('^[a-f0-9]{40}$')
       - codexia_deployed_ui_epoch is integer and codexia_deployed_ui_epoch > 0
       - codexia_deployment_certificate_file is string and codexia_deployment_certificate_file is match('^/[^\r\n]+$')
-      - (codexia_expected_first_activation | default(none)) is mapping or (codexia_backup_destination is string and codexia_backup_destination is match('^/[^\r\n]+$'))
-      - (codexia_expected_first_activation | default(none)) is mapping or (codexia_backup_recipient is string and codexia_backup_recipient is match('^age1[0-9a-z]+$'))
       - ansible_facts.user_id == 'codexia'
       - not (codexia_lifecycle_fixture | default(false) | bool)
       - not ansible_check_mode
-    fail_msg: Deployment requires the codexia SSH identity, certified immutable Full digest, exact-main certificate, compatible deployed UI and protected off-VM backup inputs.
+    fail_msg: Deployment requires the codexia SSH identity, certified immutable Full digest, exact-main certificate, and compatible deployed UI.
 
 - name: Read the provenance certificate from the protected workflow runner
   ansible.builtin.slurp:

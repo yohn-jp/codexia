@@ -7,7 +7,7 @@
       - codexia_lifecycle_verification_file is string and codexia_lifecycle_verification_file is match('^/[^\r\n]+$')
       - codexia_lifecycle_candidate_key is string and codexia_lifecycle_candidate_key in ['head', 'prior', 'failed', 'app-update', 'auth-primary', 'auth-update', 'auth-failed']
       - not ansible_check_mode
-    fail_msg: Disposable lifecycle deployment requires the rootless codexia identity, verified image evidence.
+    fail_msg: Disposable lifecycle deployment requires the rootless codexia identity and verified image evidence.
 
 - name: Read the run-bound lifecycle image proof from the workflow workspace
   ansible.builtin.slurp:
@@ -150,16 +150,6 @@
       - codexia_database_initialization_approved | default(false) | bool
     fail_msg: First lifecycle activation requires explicit test-fixture approvals.
   when: codexia_current_container_exists.rc == 1
-
-- name: Verify the isolated SSHFS destination before changing services
-  ansible.builtin.command:
-    argv: ["{{ home }}/.local/bin/codexia-backup", validate-destination, "{{ codexia_backup_destination }}"]
-  environment:
-    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-deploy"
-    HOME: "{{ home }}"
-    XDG_STATE_HOME: "{{ home }}/.local/state"
-  changed_when: false
-  when: codexia_current_container_exists.rc == 0
 
 - name: Apply or recover the API Quadlet under the shared host lock
   ansible.builtin.include_tasks: deploy-transaction.yml

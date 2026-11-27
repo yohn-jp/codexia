@@ -5,29 +5,6 @@
   ansible.builtin.include_tasks: verify-deploy-base-runtime.yml
   when: not (codexia_lifecycle_fixture | default(false) | bool)
 
-- name: Create the private encrypted backup directory on the target host
-  ansible.builtin.file:
-    path: "{{ codexia_backup_destination }}"
-    state: directory
-    mode: '0700'
-  when:
-    - not (codexia_lifecycle_fixture | default(false) | bool)
-    - codexia_expected_first_activation is not defined
-
-- name: Verify the encrypted backup destination before pulling or stopping services
-  ansible.builtin.command:
-    argv:
-      - "{{ home }}/.local/bin/codexia-backup"
-      - validate-destination
-      - "{{ codexia_backup_destination }}"
-  environment:
-    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-deploy"
-    HOME: "{{ home }}"
-    XDG_STATE_HOME: "{{ home }}/.local/state"
-  register: codexia_backup_destination_check
-  changed_when: false
-  when: codexia_expected_first_activation is not defined and not (codexia_lifecycle_fixture | default(false) | bool)
-
 - name: Pull the exact certified OCI digest
   ansible.builtin.command:
     argv: [podman, pull, "{{ codexia_image }}"]
@@ -387,12 +364,7 @@
       api_wants_link="$wants_dir/codexia-api.service"
       tunnel_wants_link="$wants_dir/codexia-tunnel.service"
       candidate_unit={{ (home + '/.local/state/codexia-deploy/' + codexia_candidate_unit_filename) | quote }}
-      backup_program={{ (home + '/.local/bin/codexia-backup') | quote }}
-      backup_runner={{ (home + '/.local/bin/codexia-backup-runner') | quote }}
       backup_control={{ (home + '/.local/bin/codexia-backup-control') | quote }}
-      backup_settings={{ (home + '/.config/codexia-backup/executor.env') | quote }}
-      backup_destination={{ codexia_backup_destination | default('') | quote }}
-      backup_recipient={{ codexia_backup_recipient | default('') | quote }}
       candidate_image={{ codexia_image | quote }}
       candidate_identity={{ (codexia_candidate_identity_file.content | b64decode | from_json) | to_json | quote }}
       candidate_source_sha={{ codexia_source_sha | quote }}
@@ -636,23 +608,11 @@
         echo "UNCHANGED $candidate_image"
         exit 0
       fi
-      backup_admission_enabled=false
+      if [[ "$had_unit" == true ]] && ! "$backup_control" deploy-check; then
+        echo 'Off-VM backup admission failed; candidate was not applied' >&2
+        exit 1
+      fi
       if [[ "$had_unit" == true ]]; then
-        backup_admission_marker="$state_dir/backup-admission-enabled"
-        if [[ -e "$backup_settings" || -L "$backup_settings" ]]; then
-          if [[ ! -e "$backup_admission_marker" && ! -L "$backup_admission_marker" ]]; then
-            (umask 077; set -o noclobber; : > "$backup_admission_marker")
-            sync -f "$state_dir"
-          fi
-        fi
-        if [[ -e "$backup_admission_marker" || -L "$backup_admission_marker" ]]; then
-          [[ -f "$backup_admission_marker" && ! -L "$backup_admission_marker" && -O "$backup_admission_marker" &&
-             -f "$backup_settings" && ! -L "$backup_settings" ]] || {
-            echo 'Off-VM backup admission failed; candidate was not applied' >&2
-            exit 1
-          }
-          backup_admission_enabled=true
-        fi
         cp --preserve=mode,ownership "$active_unit" "$state_dir/rollback-api.container"
       fi
       tunnel_was_active=false
@@ -662,7 +622,7 @@
       fi
       backup_pending_id=''
       backup_run_id=''
-      if [[ "$backup_admission_enabled" == true ]]; then
+      if [[ "$had_unit" == true ]]; then
         backup_pending_id="$(cat /proc/sys/kernel/random/uuid)"
       fi
       if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" "$backup_pending_id" <<'NODE'
@@ -739,11 +699,9 @@
         exit 1
       }
       if [[ -n "$backup_pending_id" ]]; then
-        prior_digest=-
-        if [[ "$had_unit" == true ]]; then prior_digest="${current_image##*@}"; fi
         if ! backup_run_id="$("$backup_control" deploy-start "$backup_pending_id" "$prior_source_sha" \
-          "$prior_digest" "$candidate_source_sha" "${candidate_image##*@}")" ||
-          [[ "$backup_run_id" != "$backup_pending_id" && "$backup_run_id" != NONE ]]; then
+          "${current_image##*@}" "$candidate_source_sha" "${candidate_image##*@}")" ||
+          [[ "$backup_run_id" != "$backup_pending_id" ]]; then
           # The existing writer and activation links have not changed. Clear
           # the intent only after the protected store has reconciled the run.
           if "$backup_control" deploy-interrupted "$backup_pending_id"; then
@@ -752,7 +710,6 @@
           echo 'Off-VM backup admission failed; candidate was not applied' >&2
           exit 1
         fi
-        if [[ "$backup_run_id" == NONE ]]; then backup_run_id=''; fi
       fi
       # Record which links recovery owns before creating either one.
       install_wants_links
@@ -762,26 +719,17 @@
         exit 1
       fi
       if [[ "$had_unit" == true ]]; then
-        if ! backup_output="$("$backup_program" backup-locked "$backup_destination" "$backup_recipient" \
-          --approved --lock-file "$lock_file" --lock-fd 9)"; then
-          if [[ -n "$backup_run_id" ]]; then "$backup_control" deploy-fail "$backup_run_id" backup_failed || :; fi
+        if ! artifact="$("$backup_control" deploy-backup "$backup_run_id")"; then
+          "$backup_control" deploy-fail "$backup_run_id" backup_failed || :
           restore_previous || echo 'Previous API recovery failed after backup failure' >&2
           echo 'Encrypted backup failed; candidate was not applied' >&2
           exit 1
         fi
-        if [[ -n "$backup_run_id" ]]; then
-          if ! artifact="$("$backup_runner" artifact "$backup_destination" <<< "$backup_output")"; then
-            "$backup_control" deploy-fail "$backup_run_id" backup_failed || :
-            restore_previous || echo 'Previous API recovery failed after backup failure' >&2
-            echo 'Encrypted backup failed; candidate was not applied' >&2
-            exit 1
-          fi
-          mapfile -t artifact_fields <<< "$artifact"
-          if ! "$backup_control" deploy-finish "$backup_run_id" "${artifact_fields[0]}" "${artifact_fields[1]}"; then
-            restore_previous || echo 'Previous API recovery failed after off-VM backup verification' >&2
-            echo 'Off-VM backup admission failed; candidate was not applied' >&2
-            exit 1
-          fi
+        mapfile -t artifact_fields <<< "$artifact"
+        if ! "$backup_control" deploy-finish "$backup_run_id" "${artifact_fields[0]}" "${artifact_fields[1]}"; then
+          restore_previous || echo 'Previous API recovery failed after off-VM backup verification' >&2
+          echo 'Off-VM backup admission failed; candidate was not applied' >&2
+          exit 1
         fi
       fi
       if ! run_auth_cli /app/node_modules/@codexia/api/dist/verify-auth-clients.js; then

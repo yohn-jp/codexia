@@ -175,6 +175,9 @@ rootless_systemctl() { rootless /usr/bin/systemctl --user "$@"; }
 run_deploy() {
   local key=$1 approvals=${2:-false} fault_path=${3:-}
   local log_name=${4:-deploy-$key-$RANDOM}
+  if rootless_podman container exists codexia-api; then
+    backup_fixture_attempt "$key" "${5:-}"
+  fi
   cat > "$tmp/deploy-vars.yml" <<YAML
 codexia_stage: deploy-lifecycle-fixture
 codexia_service_user: codexia
@@ -182,11 +185,6 @@ codexia_service_uid: $fixture_uid
 codexia_service_home: /home/codexia
 codexia_lifecycle_verification_file: "$evidence"
 codexia_lifecycle_candidate_key: "$key"
-$(if [[ "$approvals" == false ]]; then
-  printf 'codexia_backup_destination: "%s"
-codexia_backup_recipient: "%s"
-'     "$fixture_home/.local/state/codexia-backup-mount" "$backup_recipient"
-fi)
 codexia_initial_install_approved: $approvals
 codexia_database_initialization_approved: $approvals
 $(if [[ -n "$fault_path" ]]; then printf 'codexia_lifecycle_fault_path: "%s"\n' "$fault_path"; fi)
@@ -687,7 +685,8 @@ INSERT INTO codexia_lifecycle_sentinel VALUES (1, 'preserved');
 SENTINEL_SQL
 }
 run_application_lifecycle() {
-  local initial_key update_key update_image failed_image
+  local initial_key update_key update_image failed_image backup_validation backup_checksum
+  local -a backup_artifacts=()
   if [[ "$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).transition.kind' "$evidence")" == test-only-digest ]]; then
     prepare_app_update
   fi
@@ -705,8 +704,9 @@ TRANSITION
 set_state first_activation IN_PROGRESS
 run_deploy "$initial_key" true
 observe_runtime first-activation "$initial_key"
-rootless test -z "$(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -print -quit)"
-rootless test ! -e "$fixture_home/.local/state/codexia-deploy/backup-admission-enabled"
+mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
+[[ "${#backup_artifacts[@]}" == 0 ]]
+rootless test ! -e "$fixture_home/.config/codexia-backup/executor.env"
 set_state first_activation PASS 'fresh schema and API readiness verified without backup inputs, artifacts or prior writer'
 
 run_deploy "$initial_key" false
@@ -714,6 +714,22 @@ observe_runtime same-digest-reapply "$initial_key"
 set_state same_digest_reapply PASS 'same immutable digest remained healthy with stable Quadlet and release record'
 
 seed_database_sentinel
+if run_deploy "$update_key" false '' deploy-executor-missing; then
+  echo 'An update reached candidate activation without protected backup settings' >&2
+  return 1
+fi
+grep -Fq 'Deployment transaction failed during off-VM backup admission' "$tmp/deploy-executor-missing.log"
+observe_runtime missing-executor "$initial_key"
+prepare_backup_console_fixture
+if run_deploy "$update_key" false '' deploy-console-unconfigured console-unconfigured; then
+  echo 'An update reached candidate activation before Console backup configuration' >&2
+  return 1
+fi
+grep -Fq 'Deployment transaction failed during off-VM backup admission' "$tmp/deploy-console-unconfigured.log"
+observe_runtime console-unconfigured "$initial_key"
+rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction.json"
+mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
+[[ "${#backup_artifacts[@]}" == 0 ]]
 run_deploy "$update_key" false
 observe_runtime compatible-update "$update_key"
 set_state compatible_update PASS "$initial_key to $update_key activated the verified digest as the sole healthy API writer"
@@ -726,7 +742,6 @@ node - "$report" "${backup_artifacts[0]}" "$backup_validation" "$backup_checksum
 const fs=require('node:fs');const [path,artifact,validation,checksum]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.backupEvidence={filesystem:'sshfs',remoteAlias:'codexia-backup-fixture',artifactPath:artifact,validatedBy:'deploy/backup/backup.sh validate-artifact',validation:validation.slice(0,300),sha256SumsFile:checksum,physicalIndependence:'NOT_PROVEN_BY_CI_FIXTURE'};r.states.backup_remote_filesystem={status:'PASS',detail:'canonical deploy transaction created and validated encrypted backup on isolated SSHFS server'};r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 BACKUP_EVIDENCE
 
-source "$repo_root/deploy/ansible/test-push-backup-host-lifecycle.sh"
 verify_backup_host_lifecycle "$update_key" "$initial_key"
 verify_s3_restore_lifecycle "$initial_key" "${backup_artifacts[0]}"
 
@@ -784,6 +799,7 @@ rootless test ! -e "$fixture_home/.local/state/codexia-deploy/deploy-transaction
 set_state durable_interruption_recovery PASS 'the next canonical invocation recovered and cleared the durable pending transaction'
 set_state database_volume_writer_quadlet_release_continuity PASS 'database sentinel, volume IDs, sole writer, Quadlet and release record were observed after transitions'
 }
+source "$repo_root/deploy/ansible/test-push-backup-host-lifecycle.sh"
 scenario_started=$(date +%s%3N)
 case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in
   app)

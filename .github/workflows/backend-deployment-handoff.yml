@@ -257,8 +257,6 @@ jobs:
           CODEXIA_SOURCE_SHA: ${{ needs.verify-handoff.outputs.producer-sha }}
           CODEXIA_PROFILE: full
           CODEXIA_DEPLOYED_UI_EPOCH: ${{ steps.live-ui.outputs.frontendApiEpoch }}
-          CODEXIA_BACKUP_DESTINATION: ${{ github.event_name != 'workflow_dispatch' && (vars.CODEXIA_BACKUP_DESTINATION || '/home/codexia/backups') || '' }}
-          CODEXIA_BACKUP_AGE_RECIPIENT: ${{ github.event_name != 'workflow_dispatch' && vars.CODEXIA_BACKUP_AGE_RECIPIENT || '' }}
           CODEXIA_INITIAL_INSTALL_APPROVED: ${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED || 'false' }}
           CODEXIA_DATABASE_INITIALIZATION_APPROVED: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED || 'false' }}
         run: |
@@ -268,10 +266,6 @@ jobs:
           [[ "$CODEXIA_VERIFIED_MAIN_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$CODEXIA_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$CODEXIA_DEPLOYED_UI_EPOCH" =~ ^[1-9][0-9]*$ ]]
-          if [[ "${CODEXIA_MANUAL_ACTIVATION:-false}" != true ]]; then
-            test -n "$CODEXIA_BACKUP_DESTINATION"
-            [[ "$CODEXIA_BACKUP_AGE_RECIPIENT" =~ ^age1[0-9a-z]+$ ]]
-          fi
           [[ "$CODEXIA_INITIAL_INSTALL_APPROVED" == true || "$CODEXIA_INITIAL_INSTALL_APPROVED" == false ]]
           [[ "$CODEXIA_DATABASE_INITIALIZATION_APPROVED" == true || "$CODEXIA_DATABASE_INITIALIZATION_APPROVED" == false ]]
           if [[ "${CODEXIA_MANUAL_ACTIVATION:-false}" == true ]]; then
@@ -311,9 +305,6 @@ jobs:
           };
           if (manual) {
             vars.codexia_expected_first_activation = JSON.parse(readFileSync(join(env.RUNNER_TEMP, 'codexia-first-activation.json'), 'utf8'));
-          } else {
-            vars.codexia_backup_destination = env.CODEXIA_BACKUP_DESTINATION;
-            vars.codexia_backup_recipient = env.CODEXIA_BACKUP_AGE_RECIPIENT;
           }
           process.stdout.write(JSON.stringify(vars));
           NODE

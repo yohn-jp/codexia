@@ -59,22 +59,60 @@ function invokeBackup(fixture, { activeUnits = '', approved = true, lockFile = f
   });
 }
 
-test('operator startup persists push admission before the console executor can activate a destination', async t => {
+test('update backup uses the private executor settings and inherited deployment lock', async t => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.directory, { recursive: true, force: true }));
   const config = path.join(fixture.home, '.config', 'codexia-backup');
-  const marker = path.join(fixture.stateDir, 'backup-admission-enabled');
+  const localBin = path.join(fixture.home, '.local/bin');
+  const entrypoint = path.join(config, 'backup-console-control.js');
+  const settings = path.join(config, 'executor.env');
+  const runId = '1485f702-eb68-4854-979d-fad9fd12d90d';
+  const digest = 'a'.repeat(64);
   await mkdir(config, { recursive: true, mode: 0o700 });
-  const control = path.join(config, 'backup-console-control.js');
-  await writeFile(path.join(config, 'executor.env'), 'CODEXIA_BACKUP_EXECUTOR_ENTRYPOINT=' + control + '\n', { mode: 0o600 });
-  await writeFile(control, 'throw new Error("Unexpected control command");\n');
-  await writeFile(path.join(config, 'backup-console-executor.js'),
-    'if (!require("node:fs").existsSync(' + JSON.stringify(marker) + ')) process.exit(2);\n');
-  const boot = spawnSync('bash', [backupControl], {
-    encoding: 'utf8', env: { ...process.env, HOME: fixture.home },
-  });
-  assert.equal(boot.status, 0, boot.stderr);
-  assert.equal(await readFile(marker, 'utf8'), '');
+  await mkdir(localBin, { recursive: true });
+  await symlink(backupRunner, path.join(localBin, 'codexia-backup-runner'));
+  await symlink(process.execPath, path.join(fixture.bin, 'node'));
+  await writeFile(entrypoint, 'throw new Error("Unexpected control command");\n');
+  await writeFile(settings, [
+    'CODEXIA_BACKUP_EXECUTOR_ENTRYPOINT=' + entrypoint,
+    'CODEXIA_BACKUP_DESTINATION=' + fixture.backupDestination,
+    'CODEXIA_BACKUP_AGE_RECIPIENT=age1private',
+  ].join('\n') + '\n', { mode: 0o600 });
+  await writeFile(path.join(localBin, 'codexia-backup'), [
+    '#!/bin/bash',
+    'set -eu',
+    'case "$1" in',
+    '  validate-destination) [[ "$2" == ' + shellQuote(fixture.backupDestination) + ' ]];;',
+    '  backup-locked)',
+    '    [[ "$2" == ' + shellQuote(fixture.backupDestination) + ' && "$3" == age1private ]]',
+    '    [[ "$4 $5 $6 $7 $8" == ' + shellQuote('--approved --lock-file ' + fixture.lockFile + ' --lock-fd 9') + ' ]]',
+    '    test -e /proc/self/fd/9 || exit 1',
+    '    flock --exclusive --nonblock 9',
+    '    [[ "${10}" == *-' + runId + ' ]]',
+    '    printf "Encrypted backup committed: %s/%s\nPublished checksum manifest sha256: %s\n" "$2" "${10}" ' + digest,
+    '    ;;',
+    '  validate-artifact) printf "%s\n" ' + digest + ';;',
+    '  *) exit 2;;',
+    'esac',
+  ].join('\n') + '\n', { mode: 0o700 });
+  const env = {
+    ...process.env, HOME: fixture.home, PATH: fixture.bin + ':' + process.env.PATH,
+    CODEXIA_BACKUP_DESTINATION: '/untrusted', CODEXIA_BACKUP_AGE_RECIPIENT: 'age1untrusted',
+  };
+  const invoke = command => spawnSync('bash', ['-c', command], { encoding: 'utf8', env });
+  const launcher = shellQuote(backupControl);
+  const validate = invoke(launcher + ' deploy-check');
+  assert.equal(validate.status, 0, validate.stderr);
+  assert.notEqual(invoke(launcher + ' deploy-backup ' + runId).status, 0);
+  const locked = invoke('exec 9>' + shellQuote(fixture.lockFile) + '; flock -nx 9 && ' + launcher + ' deploy-backup ' + runId);
+  assert.equal(locked.status, 0, locked.stderr);
+  const [artifact, manifest, end] = locked.stdout.split('\n');
+  assert.equal(path.dirname(artifact), fixture.backupDestination);
+  assert.match(path.basename(artifact), new RegExp('^codexia-[0-9]{8}T[0-9]{6}Z-' + runId + '$', 'u'));
+  assert.equal(manifest, digest);
+  assert.equal(end, '');
+  await chmod(settings, 0o644);
+  assert.notEqual(invoke(launcher + ' deploy-check').status, 0);
 });
 
 test('the protected run shares the deploy lock and recovers both services after SIGKILL', async t => {
