@@ -249,4 +249,7 @@ flowchart TD
 | DRILL_PASSED | 独立した復旧hostで実データ契約を満たす復号・復元を観測した別の証拠。REMOTE_VERIFIEDと混同しない |
 | DISABLED / DEGRADED | 既存のオフVM保全を削除しない。required保管先の停止は保護条件を検証し拒否する |
 
-本画面を開く前のブラウザー原稿draftは既存の離脱ガードで保護する。Desktop Webのキーボード・スクリーンリーダー・再認証・戻り先、連続操作/応答喪失をPlaywrightで確認する。iOS Nativeは実機/Simulatorで独立検証し、Mobile React 320px専用E2Eは要求しない。**現時点では画面・API・executorは未実装**。
+本画面を開く前のブラウザー原稿draftは既存の離脱ガードで保護する。Desktop Webのキーボード・スクリーンリーダー・再認証・戻り先、連続操作/応答喪失をPlaywrightで確認する。iOS Nativeは実機/Simulatorで独立検証し、Mobile React 320px専用E2Eは要求しない。
+
+バックアップ画面の操作は実装目標である。
+APIとexecutorの有効化はオペレーターが行う。[Backup console provisioning](../../deploy/backup/CONSOLE.md)
