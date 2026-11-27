@@ -21,6 +21,25 @@
 
 **競合解決:** ローカルstagingパスはVMの保護設定とし、GitHub Environmentのbackup入力にはしない。WebのS3設定でローカルパス/Ansible inventoryを上書きしない。既存の暗号化v2アーティファクトを一度だけ生成し、executorが**active revisionとして確定したS3設定**をバックアップ開始時に読み取って暗号文を遠隔保管する。設定変更は進行中のジョブに遡及適用せず、各run receiptに採用revisionを固定する。通常Backend更新時は、S3必須指定の場合、アップロード・再取得照合が完了するまでadmissionを成功としない。純新規の初回activationとは別である。S3接続失敗時に別の保存先へ暗黙フォールバックしない。
 
+### VM 内での executor 配備
+
+配備運用者は既存 Ansible と認定済み Full イメージから既存 executor を配備する。
+systemd の user service はこの executor を監視する。
+API、定期実行、R8 保全は既存の operation/run journal と共有 host lock の境界に従う。
+実行枠と定期スロットの取得は executor が担う。
+
+host executor の PostgreSQL 接続は、専用の private Unix socket を第一候補として隔離環境で検証する。
+専用 DB ログインと SCRAM を使用し、共有ディレクトリは PostgreSQL と承認済み host 実行主体に限定する。
+API コンテナは既存の内部 TCP 経路と専用 API ログインを使う。
+rootless Podman の UID 対応と実効権限、既存の管理コマンド、再起動後の動作が条件を満たさない場合に限り、loopback TCP を比較する。
+PostgreSQL のポートを外部に公開しない。
+
+DB 管理者は既存の運用 schema、DDL、role の所有を保持する。
+二つの専用ログインは、それぞれ既存の `codexia_backup_api` と `codexia_backup_executor` の実効権限に制限する。
+API には保護された policy と封印公開鍵、executor には必要な封印解除鍵と保管先へのアクセスを渡す。
+既存 ACTIVE 環境の配備再実行では role、鍵、設定と journal を維持し、不明な不一致を検出したら停止する。
+[配備の根拠と隔離環境での検証](../deployment/BACKUP-EXECUTOR-PROVISIONING-PROPOSAL.md)
+
 ## 受理するS3設定の契約
 
 インストールごとに**最大1つのactive S3 off-VM保存先**と、更新のためのdraftを許可する。複数destの同時組替え/自動複製は対象外。既存ローカルstagingは残す。
@@ -87,6 +106,16 @@ API/Tunnel quiesce        allowlisted HTTPS egress
 - writerをquiesceする必要があるmanual/scheduled backup中はAPI/Tunnelが一時停止し、Webはジョブ受付後に接続を失い得る。UIは保存済みrun IDを保持し、サービス復帰後に結果を再取得する。「接続が切れた＝失敗/成功」と推定しない。クライアントの原稿下書きと異なる。
 - interrupted/timeout時には、既存deploymentのロック・サービス復旧不変条件を維持。復旧と結果確認が済まない限りrunを`SUCCEEDED`にしない。副作用完了とAPI通知の順序を逆転させない。
 - 本番S3にuploadしたことをrestore可能性の唯一証拠にしない。**独立した復旧hostでのdrill receipt**、外部保護したage鍵/backup receipt/認証role/secretsの可用性を別々に照合する。
+
+### 復元した journal からの再開
+
+独立復元と照合の間は、復元先の executor を停止する。
+元の executor が停止または書込み経路から遮断されたことを確認し、共有 host lock の下で既存 journal を独立した復旧証拠と照合する。
+復元された `QUEUED`、`RUNNING`、結果不明の処理や期限切れの定期スロットは自動再実行しない。
+一致する独立 receipt で転送を確認できた場合は元の run に結果を記録し、独立復元の結果は別の証拠で記録する。
+外部の副作用を確認できない場合は結果不明の履歴を保持し、既存 journal に照合結果と判断を記録する。
+未解決の処理がなく、保存先、設定 revision、鍵、policy が有効なことを確認した後、worker の再開を許可する。
+以後の処理には新規の承認済み要求または次の適格な定期スロットを使う。
 
 ## 画面状態と表示
 

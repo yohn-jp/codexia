@@ -1,8 +1,7 @@
 # Backup Console executor provisioning and recovery
 
-**Status. Design proposal pending approval.** Backup operations owns this proposal. It is for deployment operators, recovery operators and reviewers of the VM runtime.
-It covers provisioning and recovery of the existing v2 backup executor under the approved lifecycle and Ansible delivery path.
-Backup format selection and the protected production recovery handoff have their own design decisions.
+**Status. Accepted design decision.** The [Backup Console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md) owns executor provisioning and recovery. This document records the accepted topology trial, implementation rationale and evidence criteria for deployment and recovery operators.
+It covers the existing v2 executor under the approved lifecycle and Ansible delivery path. The [Backup contract](BACKUP.md) owns the backup format and operational targets.
 [Backup Console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md) · [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) · [IaC](IAC.md)
 
 ## Current deployment gap
@@ -23,11 +22,11 @@ An installation must reach ACTIVE with no S3 configuration or recovery receipt. 
 Compare a private authenticated Unix socket first on a disposable rootless host.
 Use the existing Node `pg` driver for the socket connection, the existing TCP route for the API container, and an Ansible-owned directory exposed only to PostgreSQL and the host runtime.
 Have PostgreSQL apply effective SCRAM authentication to reachable local sessions and reject logins outside the approved boundary. Because PostgreSQL uses the same local HBA rules for every socket, test existing in-container admin commands with their protected credentials and verify that sharing a socket exposes no local `trust` rule.
-Choose a topology only after the fixture proves the effective UID mapping, socket access, login permissions and restart behavior. If the socket cannot meet those conditions, evaluate the loopback-only alternative under the same permission tests. [PostgreSQL socket settings](https://www.postgresql.org/docs/17/runtime-config-connection.html) · [PostgreSQL HBA rules](https://www.postgresql.org/docs/17/auth-pg-hba-conf.html) · [PostgreSQL password authentication](https://www.postgresql.org/docs/17/auth-password.html) · [Podman rootless network namespace](https://docs.podman.io/en/latest/markdown/podman-unshare.1.html)
+The approved order is to validate the private socket first. Verify the effective UID mapping, socket access, login permissions and restart behavior before activating it. Compare loopback-only TCP under the same permission tests only if the socket fails those conditions. PostgreSQL stays inaccessible from outside the VM. [PostgreSQL socket settings](https://www.postgresql.org/docs/17/runtime-config-connection.html) · [PostgreSQL HBA rules](https://www.postgresql.org/docs/17/auth-pg-hba-conf.html) · [PostgreSQL password authentication](https://www.postgresql.org/docs/17/auth-password.html) · [Podman rootless network namespace](https://docs.podman.io/en/latest/markdown/podman-unshare.1.html)
 
 ## Provisioning with the existing deployment authority
 
-| Responsibility | Proposed authority and access |
+| Responsibility | Authority and access |
 | --- | --- |
 | Install or adopt the runtime | Existing protected Ansible uses the certified Full image digest as the source of the executor and Node dependencies. It installs a verified private host release and atomically selects the active version. The deployment operator enables the existing launcher as a systemd user service; R8 invokes its fixed deploy operation under the same host lock. |
 | Own the operational schema and logins | The existing database administrator applies the reviewed schema or its approved upgrade and keeps ownership and DDL. The two dedicated login roles receive only `codexia_backup_api` and `codexia_backup_executor`, respectively. The ordinary app and Auth logins retain their own grants. |
@@ -38,7 +37,7 @@ Choose a topology only after the fixture proves the effective UID mapping, socke
 [Operator settings](../../deploy/backup/CONSOLE.md) · [Role grants](../../deploy/backup/operational-schema.sql) · [Role verification](../../deploy/backup/verify-console-roles.sql) · [Full image build](../../Dockerfile.backend)
 
 For a new VM, existing Ansible may prepare the local role, schema and runtime with backup jobs disabled. R4–R6 admission must work with no provider setup, age recipient or independent restore receipt. The deployment operator enables the runtime through the existing protected VM controls once local configuration is verified. After ACTIVE the owner selects the destination in Console, and the recovery operator verifies restore before routine production acceptance and R8 writer changes.
-For an existing ACTIVE installation, the proposal uses existing protected maintenance to add the runtime with the same image, ledger and owner. A needed API restart uses the existing host lock. Adopt the existing keys, roles, settings and queue records in place. Provisioning reruns preserve them or stop on an unexplained mismatch.
+For an existing ACTIVE installation, use existing protected maintenance to add the runtime with the same image, ledger and owner. A needed API restart uses the existing host lock. Adopt the existing keys, roles, settings and queue records in place. Provisioning reruns preserve them or stop on an unexplained mismatch.
 [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) · [Update flow](UPDATE-FLOW.md)
 
 systemd supervises the one service. The existing executor remains the owner of approved schedule windows and operation claims in PostgreSQL. For R8, the protected deployment command asks that same runtime to use the admitted Console revision and verifies the off-VM result.
@@ -50,7 +49,7 @@ The current v2 dump includes the operational schema when it exists. Because the 
 
 Keep the target executor stopped throughout independent restore and database verification. Before production restart, the deployment operator confirms that the original executor is stopped or fenced from the destination, including in a source-VM return. The recovery operator provides the selected backup identity and independently held transfer receipt for reconciliation. Use the protected operation under the existing host lock and the current PostgreSQL run journal.
 
-| Restored state | Proposed disposition |
+| Restored state | Disposition |
 | --- | --- |
 | Run represented by the selected v2 backup and matching independent receipt | Validate the original run ID, source and manifest digest before recording the verified transfer. Record independent restore through its separate proof. If the snapshot predates a manifest value, accept it only from the verified artifact and receipt bound to that same run. |
 | Other in-flight runs with no verified terminal result | Preserve the row as `UNKNOWN` with the recovery reason and observed evidence. Require the operator to resolve any ambiguous external effect before enabling the worker. |
@@ -60,7 +59,7 @@ Keep the target executor stopped throughout independent restore and database ver
 The operator records each disposition with the existing run or operation ID and the digest of its evidence under the same protected mutation authority. For a required destination, revalidate the current policy, revision, key and provider access before enabling jobs. Missing or conflicting evidence keeps the target worker stopped. The same restored row cannot authorize a second producer or upload. Recovery handoff approval uses independently verified material under the lifecycle contract.
 [Backup and recovery](BACKUP.md) · [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md)
 
-## Acceptance before selecting a topology
+## Acceptance for provisioning and recovery
 
 - A fresh install reaches ACTIVE and the owner can reach its normal Console before any provider credential, public age recipient or independent restore evidence is available. The operator provisions the backup runtime on a disposable new VM and an existing ACTIVE VM. Reapply provisioning and compare data, roles, keys and all pre-existing activity.
 - Verify the PostgreSQL endpoint from the selected worker boundary using the actual Node driver and dedicated DSN. Deny unauthenticated local connections, unauthorized local UIDs, API-container access to the host socket and executor credentials, and connections from other hosts. Verify least-privilege grants, every existing administrative socket client, private key isolation, runtime provenance, restart and reboot.
