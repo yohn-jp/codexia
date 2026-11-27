@@ -3,6 +3,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ModuleId, ModuleManifest } from "@codexia/contracts";
 import type { ModuleLoader, ModuleRuntimeOptions } from "@codexia/module-runtime";
 
+/** The CI group validates the same-run, same-source receipt before launching the shard. */
+export function hasRestoredBrowserProfile(profile: string): boolean {
+  return process.env.CI === "true" && process.env.CODEXIA_CI_PROFILE_RESTORE === "success" &&
+    process.env.CODEXIA_E2E_PROFILE === profile;
+}
+
 export async function browserServerProfile(profile: string, cacheDirectory: string): Promise<{
   profile: string;
   runtimeOptions?: ModuleRuntimeOptions;

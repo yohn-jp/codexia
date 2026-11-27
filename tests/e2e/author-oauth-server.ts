@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Locator, type Page } from "@playwright/test";
 import { startBetterAuthFixture, type BetterAuthFixture } from "../../packages/api/test/fixtures/better-auth-server.js";
-import { browserServerProfile } from "./browser-server-profile";
+import { browserServerProfile, hasRestoredBrowserProfile } from "./browser-server-profile";
 
 export type Shell = "desktop";
 export interface AuthorNavigation { path?: string; expectedView?: Locator; continueCurrentPage?: boolean }
@@ -67,6 +67,11 @@ export function buildAuthorBrowserAssets(
 ): void {
   const command = frontendSource ? "pnpm" : process.execPath;
   const args = frontendSource ? ["build:frontend"] : [preparedAuthorEntries ? "tests/e2e/build-prepared-author-views.mjs" : "app/scripts/build-views.mjs"];
+  // The CI browser group has already validated the producer receipt and restored
+  // the generated clients. OAuth settings still require a new isolated Vite build.
+  if (!frontendSource && hasRestoredBrowserProfile(profile)) {
+    args.push("--prepared");
+  }
   const started = performance.now();
   const build = spawnSync(command, args, {
     cwd: frontendSource ?? root,
