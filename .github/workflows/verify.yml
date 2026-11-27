@@ -150,7 +150,10 @@ jobs:
       CODEXIA_AUTH_TEST_DISPOSABLE: "1"
     services:
       postgres:
-        image: ${{ matrix.group != 'architecture' && matrix.group != 'db' && 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536' || '' }}
+        image: >-
+          ${{ matrix.group != 'architecture' && (matrix.group != 'db' ||
+          contains(fromJSON(needs.plan.outputs.plan).tasks, 'http-conformance') ||
+          contains(fromJSON(needs.plan.outputs.plan).tasks, 'mcp-conformance')) && 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536' || '' }}
         env:
           POSTGRES_DB: codexia_test
           POSTGRES_USER: codexia
@@ -208,15 +211,16 @@ jobs:
               pnpm --filter '@codexia/api...' --filter @codexia/app --filter @codexia/ci-evidence --fail-if-no-match install --frozen-lockfile --prefer-offline
               ;;
             db)
-              # Both tasks require the exact API dependency closure; the DB
-              # contract also builds it before its isolated rootless fixture.
+              # The DB contract and protocol fixtures use the shared API build.
               pnpm --filter '@codexia/api...' --filter @codexia/ci-evidence --fail-if-no-match install --frozen-lockfile --prefer-offline
               ;;
             core|modules) pnpm install --frozen-lockfile --prefer-offline ;;
             *) exit 2 ;;
           esac
       - name: Materialize pinned DB contract restore image
-        if: matrix.group == 'db'
+        id: db_contract_image
+        if: matrix.group == 'db' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'db-contract')
+        continue-on-error: true
         run: |
           set -euo pipefail
           image=$(node -p "require('./packages/persistence-postgres/tests/db-contract/toolchain.json').postgresImage")
@@ -255,7 +259,7 @@ jobs:
           path: ${{ runner.temp }}/ci-plan
       - uses: actions/setup-python@v6.1.0
         id: conformance_python
-        if: matrix.group == 'api' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'http-conformance')
+        if: matrix.group == 'db' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'http-conformance')
         continue-on-error: true
         with:
           python-version: '3.12'
@@ -274,7 +278,7 @@ jobs:
           echo 'CODEXIA_HTTP_CONFORMANCE_DATABASE_URL=postgres://codexia:codexia@127.0.0.1:5432/codexia_perf_http_conformance' >> "$GITHUB_ENV"
       - name: Prepare MCP conformance tools and their disposable database
         id: mcp_conformance_setup
-        if: matrix.group == 'api' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'mcp-conformance')
+        if: matrix.group == 'db' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'mcp-conformance')
         continue-on-error: true
         env:
           POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
@@ -293,6 +297,7 @@ jobs:
         env:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
+          CODEXIA_CI_DB_CONTRACT_IMAGE: ${{ steps.db_contract_image.outcome }}
           CODEXIA_CI_HTTP_CONFORMANCE_SETUP: ${{ steps.http_conformance_setup.outcome }}
           CODEXIA_CI_MCP_CONFORMANCE_SETUP: ${{ steps.mcp_conformance_setup.outcome }}
           CODEXIA_CI_CODEXIACTL_SETUP: ${{ steps.codexiactl_go.outcome }}

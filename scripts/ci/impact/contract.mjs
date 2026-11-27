@@ -57,10 +57,10 @@ export const VERIFICATION_TASKS = [
 export const VERIFICATION_GROUPS = {
   biome: ['biome-ci'],
   'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'core', 'http-contract', 'root'].map(id => `unit-${id}`),
-  // API integration and the rootless DB contract each own mutable fixtures.
-  // They execute on distinct runners instead of serial exclusive barriers.
-  'unit-api': ['unit-api', ...Object.keys(CONFORMANCE_TASKS)],
-  'unit-db': ['db-contract'],
+  // API unit tests and protocol proofs run on separate runners. The DB lane
+  // shares their API build prerequisites and serializes its isolated fixtures.
+  'unit-api': ['unit-api'],
+  'unit-db': ['db-contract', ...Object.keys(CONFORMANCE_TASKS)],
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
   'unit-architecture': ['architecture-g5', 'swift-linux', 'codexiactl-linux'],
   'types-sources': [...TYPECHECK_TARGETS.map(item => `typecheck-${item.id}`), 'safety'],

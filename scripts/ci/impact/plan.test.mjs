@@ -74,7 +74,8 @@ test('host dependencies are restore-only in Verify and cache mutation is scoped 
   assert.ok(cleanup.steps.every(step => !step.uses), 'Privileged cleanup must not checkout or run PR-controlled code');
   assert.match(cleanup.steps[0].run, /--ref "refs\/pull\/\$PR_NUMBER\/merge"/u);
   assert.equal(cleanup.steps[0].env.PR_NUMBER, '${{ github.event.pull_request.number }}');
-  assert.match(workflow.jobs.unit.services.postgres.image, /matrix\.group != 'architecture' && matrix\.group != 'db'/u);
+  assert.ok(workflow.jobs.unit.services.postgres.image.includes(
+    "matrix.group != 'architecture' && (matrix.group != 'db' || contains(fromJSON(needs.plan.outputs.plan).tasks, 'http-conformance') || contains(fromJSON(needs.plan.outputs.plan).tasks, 'mcp-conformance'))"));
   assert.equal(workflow.jobs.unit.steps.find(step => step.id === 'dependencies').if, "matrix.group != 'architecture' && matrix.group != 'api' && matrix.group != 'db'");
   assert.equal(profileWorkflow.jobs.build.steps.find(step => step.id === 'dependencies').if, "inputs.profile == 'full'");
   assert.equal(profileWorkflow.jobs.browser.steps.find(step => step.id === 'dependencies').if, "inputs.profile == 'full'");
@@ -154,12 +155,12 @@ const plan = async (files, event = 'pull_request') => {
   return createVerificationPlan({ files, event, sha: 'a'.repeat(40), base: 'b'.repeat(40) });
 };
 
-test('official conformance fixtures select their own task and share the API lane', async () => {
+test('official conformance fixtures select their own task and share the DB lane', async () => {
   for (const kind of ['http', 'mcp']) {
     const task = `${kind}-conformance`;
     const result = await plan([`tests/conformance/${kind}/run.mjs`]);
     assert.deepEqual(result.tasks, [task, 'coverage']);
-    assert.deepEqual(result.groups, ['unit-api', 'types-tests']);
+    assert.deepEqual(result.groups, ['unit-db', 'types-tests']);
     assert.equal(result.full_model_oci, false);
   }
   for (const file of ['packages/api/src/server.ts', 'packages/persistence-postgres/src/migrate.ts']) {
@@ -338,7 +339,7 @@ test('StrictDoc authority selects trace proof and the requirement register also 
       ? ['unit-core', 'unit-db', 'types-tests', 'types-trace']
       : uxAuthority ? ['unit-core', 'types-tests', 'types-trace']
         : architectureAuthority ? ['unit-architecture', 'types-tests', 'types-trace']
-          : toolingAcceptance ? ['unit-api', 'unit-db', 'types-tests', 'types-trace'] : ['types-tests', 'types-trace'], file);
+          : toolingAcceptance ? ['unit-db', 'types-tests', 'types-trace'] : ['types-tests', 'types-trace'], file);
   }
 });
 
