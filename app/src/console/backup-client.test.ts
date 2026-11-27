@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setOAuthAccessToken } from '../api-transport';
+import { getBackupConsoleStatusGetUrl } from '../generated/http/client';
 import { createBackupConsoleClient } from './backup-client';
 
 const runId = '0a000000-0000-4000-8000-000000000000';
 const requestId = '0b000000-0000-4000-8000-000000000000';
+
+test('the generated status route serializes the request ID only when it is supplied', () => {
+  assert.equal(getBackupConsoleStatusGetUrl(), '/api/console/backups/status');
+  assert.equal(getBackupConsoleStatusGetUrl({ requestId }), '/api/console/backups/status?requestId=' + requestId);
+});
 
 test('owner Console reconciles the exact request with same-origin cookie and no bearer', async () => {
   const requests: Array<{ url: string; init?: RequestInit }> = [];

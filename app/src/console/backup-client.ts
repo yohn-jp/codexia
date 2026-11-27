@@ -131,12 +131,7 @@ export function createBackupConsoleClient(fetcher: typeof fetch = fetch) {
   const idempotent = (requestId: string) => write({ 'Idempotency-Key': requestId });
   return {
     async status(requestId?: string, signal?: AbortSignal) {
-      const request = options(signal);
-      // The admitted Fastify handler supports requestId. The published TypeSpec
-      // operation still lacks that query parameter. Keep Orval as the route owner.
-      const lookup: typeof fetch = (input, init) =>
-        fetcher(String(input) + '?' + new URLSearchParams({ requestId: requestId ?? '' }), init);
-      return displayData(status, await backupConsoleStatusGet(requestId ? { ...request, fetcher: lookup } : request));
+      return displayData(status, await backupConsoleStatusGet(requestId === undefined ? undefined : { requestId }, options(signal)));
     },
     config: (signal?: AbortSignal) => backupConsoleConfigGet(options(signal)),
     saveDraft: (body: BackupDraftInput, revision: number) => backupConsoleConfigDraftPut(body, write({ 'If-Match': '"' + revision + '"' })),

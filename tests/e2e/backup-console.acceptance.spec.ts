@@ -16,7 +16,7 @@ const activation = {
   resultId: "00000000-0000-4000-8000-000000000005",
 };
 
-test("Backup Console displays fixture-backed evidence and reconciles the same probe after a reload", async ({ page }, testInfo) => {
+test("Backup Console displays fixture-backed evidence and recovers a lost probe response after a reload", async ({ page }, testInfo) => {
   const server = createServer((request, response) => {
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
     const asset = /^\/desktop\/assets\/([A-Za-z0-9_.-]+)$/u.exec(path)?.[1];
@@ -60,8 +60,9 @@ test("Backup Console displays fixture-backed evidence and reconciles the same pr
       });
     });
     let probe: { requestId: string; status: "QUEUED" | "PASSED" } | null = null;
-    let probeRequests = 0;
-    let probeAvailable = true;
+    const postedProbeIds: string[] = [];
+    const probeLookupIds: string[] = [];
+    let probeAvailable = false;
     const run = {
       runId, requestId: "00000000-0000-4000-8000-000000000003", revision, maintenanceWindowId: "fixture-window", phase: "complete", status: "REMOTE_VERIFIED",
       reasonCode: null, sourceSha: "a".repeat(40), imageDigest: "sha256:" + "b".repeat(64), candidateSourceSha: null, candidateImageDigest: null, manifestSha256: "c".repeat(64),
@@ -100,20 +101,30 @@ test("Backup Console displays fixture-backed evidence and reconciles the same pr
           await route.fulfill({ status: 403, json: { error: "BACKUP_OWNER_SESSION_REQUIRED", code: "BACKUP_OWNER_SESSION_REQUIRED" } });
         }
       } else if (path === "/api/console/backups/status") {
+        const requestId = url.searchParams.get("requestId");
+        let operation;
+        if (probe && requestId === probe.requestId) {
+          probeLookupIds.push(requestId);
+          if (!probeAvailable) return route.abort();
+          operation = { operationId: probeId, revision, phase: "probe", reasonCode: null, observedAt: now, ...probe };
+        } else if (requestId === activation.requestId) {
+          operation = {
+            operationId: activation.resultId, requestId, revision,
+            phase: "activate", status: "APPLIED", reasonCode: null, observedAt: now,
+          };
+        }
         await route.fulfill({ json: {
           enabled: false, status: "DISABLED", activeRevision: null, degraded: false, appliedAt: null, staging: "unknown",
-          lastVerifiedOffVmBackup: "unknown", restoreDrill: "unknown",
-          ...(url.searchParams.get("requestId") === activation.requestId ? { operation: {
-            operationId: activation.resultId, requestId: activation.requestId, revision,
-            phase: "activate", status: "APPLIED", reasonCode: null, observedAt: now,
-          } } : {}),
+          lastVerifiedOffVmBackup: "unknown", restoreDrill: "unknown", ...(operation ? { operation } : {}),
         } });
       } else if (path === "/api/console/backups/config/probes" && request.method() === "POST") {
         expect(request.headers()["x-codexia-csrf"]).toBe("1");
         expect(request.postDataJSON()).toEqual({ revision });
-        probeRequests += 1;
-        probe = { requestId: request.headers()["idempotency-key"]!, status: "QUEUED" };
-        await route.fulfill({ status: 202, json: { probeId, createdAt: now, state: "queued" } });
+        const requestId = request.headers()["idempotency-key"]!;
+        postedProbeIds.push(requestId);
+        probe = { requestId, status: "QUEUED" };
+        // Commit the fixture operation and drop the response before the browser learns the probe ID.
+        await route.abort();
       } else if (path === "/api/console/backups/config/probes/" + probeId && probe) {
         if (!probeAvailable) return route.abort();
         await route.fulfill({ json: { probeId, operationId: probeId, revision, phase: "probe", reasonCode: null, evidence: probe.status === "PASSED"
@@ -146,20 +157,22 @@ test("Backup Console displays fixture-backed evidence and reconciles the same pr
     const probeButton = page.getByRole("button", { name: "接続検証を要求" });
     await probeButton.focus();
     await page.keyboard.press("Enter");
-    await expect(page.getByText("受付済み", { exact: true })).toBeVisible();
+    await expect(page.getByText("受付結果未確認", { exact: true })).toBeVisible();
     await expect(page.getByText("この設定を適用済み", { exact: true })).toHaveCount(0);
-    expect(probeRequests).toBe(1);
+    expect(postedProbeIds).toHaveLength(1);
 
-    probeAvailable = false;
     await page.reload();
     await expect(page.getByRole("alert").getByText("接続または結果を確認できません。通信を確認して状態を再取得してください。")).toBeVisible();
-    expect(probeRequests).toBe(1);
-    if (!probe) throw new Error("Expected a submitted probe");
-    (probe as { status: "QUEUED" | "PASSED" }).status = "PASSED";
+    expect(postedProbeIds).toHaveLength(1);
     probeAvailable = true;
     await page.getByRole("button", { name: "状態を更新" }).click();
+    await expect(page.getByText("受付済み", { exact: true })).toBeVisible();
+    expect(probeLookupIds).toContain(postedProbeIds[0]);
+    if (!probe) throw new Error("Expected a submitted probe");
+    (probe as { status: "QUEUED" | "PASSED" }).status = "PASSED";
+    await page.getByRole("button", { name: "状態を更新" }).click();
     await expect(page.getByText("接続検証に合格", { exact: true })).toBeVisible();
-    expect(probeRequests).toBe(1);
+    expect(postedProbeIds).toHaveLength(1);
     await expect(page.getByText(requestedDays + " 日 / 世代数の指定なし", { exact: true })).toBeVisible();
     await expect(page.getByText("30 日", { exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("verification.png") });
