@@ -87,7 +87,7 @@ All workspaces use PostgreSQL as their canonical project, document, revision, Kn
 
 PostgreSQL uses the persistent `codexia-postgres` volume on an internal-only Podman network. Follow the [encrypted backup and isolated restore procedures](BACKUP.md) for the PostgreSQL database and `codexia-history` volume. The protected host transaction quiesces the writer and uses the canonical backup producer under the host lock. The operator retains an independent off-VM copy, verifies recovery on an isolated host, and maintains separate recovery material for database roles, secrets and keys.
 
-The [backup control plane](../../deploy/backup/CONSOLE.md) supports operator-provisioned S3-compatible destinations and the existing encrypted artifacts. The [owner backup screens](../design/ADMIN-SCREEN-FLOW.md) are an implementation target. Disaster-recovery acceptance requires verified transfer and readback at the actual storage destination and a restore drill on an independent host. [Backup acceptance](BACKUP.md#受入シナリオ)
+The [backup control plane](../../deploy/backup/CONSOLE.md) supports operator-provisioned S3-compatible destinations and the existing encrypted artifacts. The [owner backup screens](../design/ADMIN-SCREEN-FLOW.md) provide configuration, verification, backup requests, and evidence when the control plane is provisioned. Disaster-recovery acceptance requires verified transfer and readback at the actual storage destination and a restore drill on an independent host. [Backup acceptance](BACKUP.md#受入シナリオ)
 
 The `codexia-data` volume (`/data`) holds derived module caches that can be rebuilt. Retain the prior API image tag and origin UI image until rollback is rehearsed.
 

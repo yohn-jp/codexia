@@ -7,7 +7,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Browser E2E execution and optimization | [E2E execution](verification/E2E-EXECUTION.md) — Chromium target, migration gates, fixture/artifact reuse and measured optimization |
 | Documentation precedence and change governance | [Documentation authority](architecture/DOCUMENTATION-AUTHORITY.md) — canonical design-first governance |
 | Implementation workstreams, dependencies and acceptance | [Specification implementation contract](architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md) — workstream boundaries and integration gates, not proof of implementation |
-| Owner backup management | [Backup console contract](architecture/BACKUP-CONSOLE-CONTRACT.md) · [Backup screen flows](design/ADMIN-SCREEN-FLOW.md) — operator-provisioned API and executor, with owner screens as the implementation target |
+| Owner backup management | [Backup console contract](architecture/BACKUP-CONSOLE-CONTRACT.md) · [Backup screen flows](design/ADMIN-SCREEN-FLOW.md) — owner screens for configuration and evidence, backed by the operator-provisioned API and executor |
 | XState state-machine adoption | [XState v5 contract](design/XSTATE-STATE-MACHINE-CONTRACT.md) — save/recovery first, independent server/DB invariants retained |
 | External dependencies, current-version policy and selected libraries | [Library selection policy](architecture/DEPENDENCY-POLICY.md) — normative library-first choices, compatibility boundaries and adoption criteria |
 | Existing dependencies, declared versions and update constraints | [Dependency inventory](architecture/DEPENDENCY-INVENTORY.md) — direct dependencies, version constraints, update lag and coordinated upgrades |

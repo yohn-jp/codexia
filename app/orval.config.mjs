@@ -1,16 +1,30 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Explicit Desktop Web operation surface. Better Auth protocol endpoints and
-// target-only backup console operations intentionally remain on their owners.
+// Explicit Desktop Web operation surface. Better Auth protocol endpoints remain on their owner.
 // `auth_consent_context_post` stays with the official Better Auth client: its
 // oauth-provider plugin supplies the signed oauth_query continuation value.
+const backupConsoleOperationIds = [
+  'backup_console_config_activate_post',
+  'backup_console_config_disable_post',
+  'backup_console_config_draft_put',
+  'backup_console_config_get',
+  'backup_console_config_probe_get',
+  'backup_console_config_probes_post',
+  'backup_console_recovery_get',
+  'backup_console_run_get',
+  'backup_console_runs_get',
+  'backup_console_runs_post',
+  'backup_console_status_get',
+];
+
 export const operationIds = [
   'api_browser_version_get',
   'api_session_get',
   'api_version_get',
   'auth_list_consents_get',
   'auth_methods_get',
+  ...backupConsoleOperationIds,
   'inbox_item_read_post',
   'inbox_list_get',
   'inbox_read_all_post',
@@ -84,6 +98,7 @@ export const provisionalOperationIds = [
   'api_browser_version_get',
   'api_version_get',
   'auth_list_consents_get',
+  ...backupConsoleOperationIds,
   'job_get',
   'jobs_list_get',
   'persistence_anchor_mentions_post',
