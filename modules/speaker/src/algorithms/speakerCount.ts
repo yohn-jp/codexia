@@ -180,8 +180,7 @@ export function countVocativeMutualExclusionCensus(text: string, appearsEntities
     const vocativeMatch = sentence.trim().match(VOCATIVE_RE);
     if (!vocativeMatch?.[1]) continue;
     const addressed =
-      findMentions(mentionDict, vocativeMatch[1]).filter(id => candidateIds.has(id))[0] ??
-      matchEntityBySurface(vocativeMatch[1], candidates);
+      findMentions(mentionDict, vocativeMatch[1]).find(id => candidateIds.has(id)) ?? matchEntityBySurface(vocativeMatch[1], candidates);
     if (!addressed) continue;
     const others = findMentions(mentionDict, removeDialogueBrackets(sentence)).filter(id => candidateIds.has(id) && id !== addressed);
     for (const id of others) present.add(id);

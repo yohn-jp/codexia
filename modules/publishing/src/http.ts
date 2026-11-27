@@ -1,18 +1,18 @@
-import type { HttpContribution, ModuleActionContext } from "@codexia/contracts";
-import { grantIsActive, hashShareToken, constantTimeHashMatches, readShareGrants } from "./grants.js";
-import { loadPublishingSceneBodies, readPublishingProject, resolveShareScope, type PublishingScene } from "./project.js";
+import type { HttpContribution, ModuleActionContext } from '@codexia/contracts';
+import { constantTimeHashMatches, grantIsActive, hashShareToken, readShareGrants } from './grants.js';
+import { loadPublishingSceneBodies, type PublishingScene, readPublishingProject, resolveShareScope } from './project.js';
 
-const NOT_FOUND = { error: "Share link is unavailable" };
+const NOT_FOUND = { error: 'Share link is unavailable' };
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      "x-content-type-options": "nosniff",
-      "x-robots-tag": "noindex, nofollow",
-      "referrer-policy": "no-referrer",
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+      'x-robots-tag': 'noindex, nofollow',
+      'referrer-policy': 'no-referrer',
     },
   });
 }
@@ -25,14 +25,16 @@ function routeParts(request: Request): { token: string; sceneId?: string } | nul
   try {
     token = decodeURIComponent(match[1]);
     sceneId = match[2] ? decodeURIComponent(match[2]) : undefined;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
   if (token.length > 128 || !/^share_[A-Za-z0-9_-]{32,64}$/.test(token)) return null;
   return { token, ...(sceneId ? { sceneId } : {}) };
 }
 
-function activeGrant(grants: Awaited<ReturnType<typeof readShareGrants>>["grants"], token: string) {
+function activeGrant(grants: Awaited<ReturnType<typeof readShareGrants>>['grants'], token: string) {
   const hash = hashShareToken(token);
-  return grants.find((grant) => constantTimeHashMatches(grant.tokenHash, hash) && grantIsActive(grant));
+  return grants.find(grant => constantTimeHashMatches(grant.tokenHash, hash) && grantIsActive(grant));
 }
 
 function publicScene(scene: PublishingScene) {
@@ -40,15 +42,17 @@ function publicScene(scene: PublishingScene) {
 }
 
 function safeTree(project: Awaited<ReturnType<typeof readPublishingProject>>, scenes: PublishingScene[]) {
-  const allowed = new Set(scenes.map((scene) => scene.id));
-  return project.volumes.flatMap((volume) => {
-    const chapters = volume.chapters.flatMap((chapter) => {
-      const selected = chapter.scenes.filter((scene) => allowed.has(scene.id));
+  const allowed = new Set(scenes.map(scene => scene.id));
+  return project.volumes.flatMap(volume => {
+    const chapters = volume.chapters.flatMap(chapter => {
+      const selected = chapter.scenes.filter(scene => allowed.has(scene.id));
       if (!selected.length) return [];
-      return [{
-        chapter: { id: chapter.id, title: chapter.title },
-        scenes: selected.map(publicScene),
-      }];
+      return [
+        {
+          chapter: { id: chapter.id, title: chapter.title },
+          scenes: selected.map(publicScene),
+        },
+      ];
     });
     if (!chapters.length) return [];
     return [{ volume: { id: volume.id, title: volume.title }, chapters }];
@@ -63,7 +67,7 @@ async function readPublicShare(request: Request, context: ModuleActionContext): 
   if (!grant) return json(NOT_FOUND, 404);
   const scope = { kind: grant.scope.kind, id: grant.scope.id };
 
-  let project;
+  let project: Awaited<ReturnType<typeof readPublishingProject>>;
   let scopedScenes: PublishingScene[];
   try {
     project = await readPublishingProject(context.reader, { includeManuscripts: false });
@@ -73,7 +77,7 @@ async function readPublicShare(request: Request, context: ModuleActionContext): 
   }
 
   if (parts.sceneId) {
-    const scene = scopedScenes.find((item) => item.id === parts.sceneId);
+    const scene = scopedScenes.find(item => item.id === parts.sceneId);
     if (!scene) return json(NOT_FOUND, 404);
     try {
       await loadPublishingSceneBodies(context.reader, [scene]);
@@ -88,14 +92,14 @@ async function readPublicShare(request: Request, context: ModuleActionContext): 
     });
   }
 
-  const rootSceneIds = new Set((project.rootScenes ?? []).map((scene) => scene.id));
+  const rootSceneIds = new Set((project.rootScenes ?? []).map(scene => scene.id));
   return json({
     snapshot: { projectId: context.reader.snapshot.projectId, projectVersion: context.reader.snapshot.projectVersion },
     label: grant.label,
     scope,
     expiresAt: grant.expiresAt,
     sceneCount: scopedScenes.length,
-    rootScenes: scopedScenes.filter((scene) => rootSceneIds.has(scene.id)).map(publicScene),
+    rootScenes: scopedScenes.filter(scene => rootSceneIds.has(scene.id)).map(publicScene),
     tree: safeTree(project, scopedScenes),
   });
 }
@@ -103,7 +107,14 @@ async function readPublicShare(request: Request, context: ModuleActionContext): 
 export function createPublishingHttpContributions(): HttpContribution[] {
   const handle = (request: Request, context: ModuleActionContext) => readPublicShare(request, context);
   return [
-    { id: "publishing.http.public-share", path: "share/:token", methods: ["GET"], access: "public", effect: "read", handle },
-    { id: "publishing.http.public-share-scene", path: "share/:token/scenes/:sceneId", methods: ["GET"], access: "public", effect: "read", handle },
+    { id: 'publishing.http.public-share', path: 'share/:token', methods: ['GET'], access: 'public', effect: 'read', handle },
+    {
+      id: 'publishing.http.public-share-scene',
+      path: 'share/:token/scenes/:sceneId',
+      methods: ['GET'],
+      access: 'public',
+      effect: 'read',
+      handle,
+    },
   ];
 }
