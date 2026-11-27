@@ -74,7 +74,16 @@ test('handoff consumer verifies successful same-repository main publication befo
   assert.ok(afterEnablement.slice(freshnessIndex + 1).every(step => [
     "steps.freshness.outputs.current == 'true'",
     "github.event_name == 'workflow_dispatch' && steps.freshness.outputs.current == 'true'",
+    "github.event_name == 'workflow_run' && steps.freshness.outputs.current == 'true'",
   ].includes(step.if)), 'Stale or disabled deployments must not connect to the target or run Ansible');
+  const recheck = deploy.steps.find(step => step.run === 'node scripts/deployment/handoff/recheck-verify.mjs');
+  const ssh = deploy.steps.find(step => step.name === 'Connect to the Tailnet using GitHub OIDC');
+  assert.ok(recheck && ssh && deploy.steps.indexOf(recheck) > deploy.steps.indexOf(freshness) &&
+    deploy.steps.indexOf(recheck) < deploy.steps.indexOf(ssh) &&
+    deploy.steps.indexOf(recheck) < deploy.steps.indexOf(converge),
+  'the latest exact certified Verify attempt must be checked before privileged host access');
+  assert.equal(recheck.env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64,
+    '${{ needs.verify-handoff.outputs.deployment-certificate }}');
   const manualAdmission = deploy.steps.find(step => step.run?.includes('activate-backend.mjs admit'));
   assert.ok(manualAdmission && deploy.steps.indexOf(manualAdmission) < deploy.steps.indexOf(converge));
 });
@@ -136,7 +145,7 @@ test('backend release emits certificate files only after exact-source publish an
   assert.ok(recordIndex >= 0 && recordIndex < createIndex && createIndex < uploadIndex);
   assert.match(job.steps[createIndex].if, /steps\.freshness\.outputs\.affected == 'true'/u);
   assert.equal(job.steps[uploadIndex].with['if-no-files-found'], 'error');
-  assert.equal(job.steps[uploadIndex].with['retention-days'], 7);
+  assert.equal(job.steps[uploadIndex].with['retention-days'], 14);
   assert.match(job.steps[uploadIndex].with.name, /github\.run_attempt/u);
   assert.match(job.steps[uploadIndex].with.name, /github\.run_id/u);
   assert.ok(backend.on.pull_request.paths.includes('scripts/deployment/handoff/backend-contract.test.mjs'));
