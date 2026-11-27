@@ -57,12 +57,12 @@ flowchart TD
 
 ## 2.1 CLI 自身のリリース・更新ライフサイクル（正本）
 
-CLI の**配布**は本節が所有し、CLI を使う初回 VM 導入・R0–R8 は本書 §3 と [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) が所有する。CLI のバージョンと Backend/Frontend の配備バージョンを混同しない。CLI は常駐更新器ではなく、既存 VM の自動更新・再起動を行わない。
+CLI の**配布**は本節が所有し、CLI を使う初回 VM 導入・R0–R8 は本書 §3 と [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) が所有する。CLI のバージョンと Backend/Frontend の配備バージョンを混同しない。Backend は既存 `backend-release.yml` → `backend-deployment-handoff.yml` の自動認定・公開・互換更新経路、Frontend は `frontend-release.yml` を利用する。CTL のタグでは OCI や本番配備を起動しない。CLI は常駐更新器ではなく、既存 VM の自動更新・再起動を行わない。
 
-1. 開発者が `cmd/codexiactl/**`、`scripts/ci/execution/verify-codexiactl.sh`、CLI release component、または `.github/workflows/publish-oci.yml` を変更して PR を main に統合する。対象変更の定義は自動タグ付け Workflow と一致させる。ドキュメントだけの変更はリリースを要求しない。
+1. 開発者が `cmd/codexiactl/**`、`scripts/ci/execution/verify-codexiactl.sh`、CLI release component、または `.github/workflows/publish-codexiactl.yml` を変更して PR を main に統合する。対象変更の定義は自動タグ付け Workflow と一致させる。ドキュメントだけの変更はリリースを要求しない。
 2. `Verify Codexia` の main push 実行が成功した後、`.github/workflows/codexiactl-auto-release.yml` が成功 run の exact SHA と現行 main HEAD を照合する。変更のない main、失敗した認定、追い越された SHA は発行しない。比較不能・API 応答不完全なら安全停止する。
 3. 既存の `v0.1.x` タグから最大 patch を求め、次の未使用 `v0.1.(x+1)` を発行する。タグの再割当て、削除、既存バージョンの上書きは禁止。競合や API 応答喪失時は現存タグと SHA を再照合し、曖昧なら停止する。発行されたが公開に失敗した番号は再利用せず、修復した main の次の番号を使う。
-4. タグ push で既存 `Publish Codexia OCI` が起動する。既存の exact-source Verify 証明、Immutable Releases 設定、OCI core/full 公開、Linux amd64 CLI ビルド、provenance/attestation、SHA-256 manifest、Release asset の照合を**すべて**維持する。自動タグ作成の成功は公開成功を意味しない。CLI だけを独自の未認定経路で配布しない。
+4. タグ push で独立した `Publish CodexiaCTL`（`.github/workflows/publish-codexiactl.yml`）が起動する。exact-source Verify 証明、Immutable Releases 設定、Linux amd64 CLI ビルド、provenance/attestation、SHA-256 manifest、Release asset の照合を**すべて**維持する。OCI core/full の公開・本番配備は実行しない。自動タグ作成の成功は公開成功を意味しない。
 5. 正式公開後に運用者は immutable GitHub Release から `codexiactl-linux-amd64` と `codexiactl-linux-amd64.sha256` を取得し、SHA-256 と GitHub attestation/provenance を照合して通常ユーザーで配置する。初回導入は `version`、`doctor`、`init --plan`、`init` の順。更新時も認定済みバイナリに置き換えるだけで、既存 owner/DB/鍵を再初期化しない。
 
 ### 発行用認証と保護
