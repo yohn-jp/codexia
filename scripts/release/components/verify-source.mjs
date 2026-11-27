@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Read-only gates for tag and commit-addressed publication.
 import { execFileSync } from 'node:child_process';
-import { assertReleaseIdentity, assertVerificationJobs, verifiedSourceRun } from './policy.mjs';
+import { assertReleaseIdentity, assertRemoteReleaseTag, assertVerificationJobs, verifiedSourceRun } from './policy.mjs';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
@@ -18,15 +18,7 @@ if (commitRelease) {
 if(repository!=='yohn-jp/codexia') throw new Error('Release repository mismatch');
 const github=createGitHubOctokit({token});
 const [owner, repo] = repository.split('/');
-if (!commitRelease) {
-  let reference = (await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` })).data.object;
-  for (let depth = 0; reference?.type === 'tag' && depth < 8; depth++) {
-    if (!/^[a-f0-9]{40}$/.test(reference.sha ?? '')) throw new Error('Invalid annotated tag object');
-    reference = (await github.rest.git.getTag({ owner, repo, tag_sha: reference.sha })).data.object;
-  }
-  if (reference?.type !== 'commit') throw new Error('Release tag does not resolve to a commit');
-  assertReleaseIdentity(tag, expectedSha, reference.sha);
-}
+if (!commitRelease) await assertRemoteReleaseTag(github, { owner, repo, tag, sha: expectedSha });
 // The caller starts only after verification completed. One bounded read; no
 // 30-second polling loop and no idle runner while tests are still running.
 const exactId = process.env.CODEXIA_VERIFY_RUN_ID;

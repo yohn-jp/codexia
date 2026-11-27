@@ -38,6 +38,15 @@
         dest: "{{ owner_setup_home }}/.local/bin/codexia-preflight-observe"
         mode: '0700'
 
+    - name: Stage the canonical Owner setup operator for the local handoff
+      when: codexia_owner_setup_operation == 'owner-setup'
+      become: true
+      become_user: "{{ codexia_service_user }}"
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/owner-setup.sh"
+        dest: "{{ owner_setup_home }}/.local/bin/codexia-owner-setup"
+        mode: '0700'
+
     - name: Run the canonical operator operation under its host lock
       become: true
       become_user: "{{ codexia_service_user }}"

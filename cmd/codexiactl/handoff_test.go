@@ -1,0 +1,117 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"filippo.io/age"
+)
+
+type handoffTestOperator struct {
+	answer  string
+	approve bool
+	grant   []byte
+}
+
+func (o *handoffTestOperator) Ask(string) (string, error)    { return o.answer, nil }
+func (o *handoffTestOperator) Confirm(string) (bool, error)  { return o.approve, nil }
+func (o *handoffTestOperator) Secret(string) ([]byte, error) { panic("unexpected secret input") }
+func (o *handoffTestOperator) Notice(string)                 {}
+func (o *handoffTestOperator) writeGrant(grant []byte) error {
+	o.grant = append(o.grant, grant...)
+	return nil
+}
+
+func ageEnvelopeForTest(t *testing.T, recipient age.Recipient, payload string) []byte {
+	t.Helper()
+	var envelope bytes.Buffer
+	writer, err := age.Encrypt(&envelope, recipient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write([]byte(payload)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return envelope.Bytes()
+}
+
+func TestHandoffConfirmsExistingRecipientAndDoesNotReplaceIt(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipient := id.Recipient().String()
+	o := &handoffTestOperator{answer: "key-on-vm", approve: false}
+	if _, err := chooseHandoff(o, recipient); !errors.Is(err, errHandoffNeedsConsent) {
+		t.Fatalf("unconfirmed recipient got %v", err)
+	}
+	o.approve = true
+	handoff, err := chooseHandoff(o, recipient)
+	if err != nil || handoff.Recipient != recipient || handoff.Ephemeral() {
+		t.Fatalf("existing recipient was replaced, got %v", err)
+	}
+}
+
+func TestHandoffGrantChecksRecipientOriginAndExpiryBeforeTTY(t *testing.T) {
+	o := &handoffTestOperator{answer: "key-on-vm", approve: true}
+	handoff, err := chooseHandoff(o, "")
+	if err != nil || !handoff.Ephemeral() {
+		t.Fatalf("temporary key was not created: %v", err)
+	}
+	origin := "https://example.com"
+	now := time.Now()
+	key := strings.Repeat("a", 43)
+	other, _ := age.GenerateX25519Identity()
+	valid := fmt.Sprintf(`{"setupUrl":"%s/console/setup","key":"%s","expiresAt":%q}`,
+		origin, key, now.Add(time.Hour).UTC().Format(time.RFC3339))
+	foreign := ageEnvelopeForTest(t, other.Recipient(), valid)
+	query := ageEnvelopeForTest(t, handoff.identity.Recipient(), strings.Replace(valid, "console/setup", "console/setup?grant=bad", 1))
+	expired := ageEnvelopeForTest(t, handoff.identity.Recipient(), strings.Replace(valid, now.Add(time.Hour).UTC().Format(time.RFC3339), now.Add(-time.Hour).UTC().Format(time.RFC3339), 1))
+	for _, envelope := range [][]byte{foreign, query, expired} {
+		if err := handoff.showGrant(o, origin+"/console/setup", envelope, now); err == nil || len(o.grant) != 0 {
+			t.Fatal("unverified grant reached the TTY")
+		}
+	}
+	ciphertext := ageEnvelopeForTest(t, handoff.identity.Recipient(), valid)
+	if err := handoff.showGrant(o, origin+"/console/setup", ciphertext, now); err != nil || string(o.grant) != key {
+		t.Fatalf("verified grant did not reach the TTY, %v", err)
+	}
+	if err := handoff.showGrant(o, origin+"/console/setup", ciphertext, now); err == nil || string(o.grant) != key {
+		t.Fatal("a repeated grant reached the TTY")
+	}
+}
+
+func TestIndependentHandoffStagesCiphertextOnly(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipient := id.Recipient()
+	envelope := ageEnvelopeForTest(t, recipient, "sensitive payload")
+	home := t.TempDir()
+	if _, err := saveOwnerEnvelope(home, []byte("sensitive payload")); err == nil {
+		t.Fatal("accepted plaintext")
+	}
+	name, err := saveOwnerEnvelope(home, envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, ".codexiactl", name)
+	got, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(got, envelope) {
+		t.Fatal("staged handoff differs from the encrypted envelope")
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatal("staged handoff is not private")
+	}
+}

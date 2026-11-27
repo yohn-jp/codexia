@@ -1,4 +1,5 @@
 name: Codexia UI Static Assets
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Initial Frontend Preflight {0}', inputs.preflight_run_id) || '' }}
 on:
   workflow_dispatch:
     inputs:

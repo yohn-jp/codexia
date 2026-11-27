@@ -19,6 +19,12 @@
     dest: "{{ home }}/.local/bin/codexia-owner-setup"
     mode: '0700'
 
+- name: Stage the existing read-only observer for Owner handoff verification
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/preflight-observe.py"
+    dest: "{{ home }}/.local/bin/codexia-preflight-observe"
+    mode: '0700'
+
 - name: Initialize a verified new setup installation without issuing the grant
   vars:
     resume: "{{ codexia_expected_bootstrap_resume | default({}) }}"

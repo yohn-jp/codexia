@@ -125,6 +125,24 @@ export function assertReleaseIdentity(tag, expectedSha, actualSha) {
   }
 }
 
+/**
+ * Resolve lightweight and annotated release tags through the existing GitHub source authority.
+ * @param {{rest: {git: {
+ *   getRef(input: {owner: string, repo: string, ref: string}): Promise<{data: {object: {type: string, sha: string}}}>,
+ *   getTag(input: {owner: string, repo: string, tag_sha: string}): Promise<{data: {object: {type: string, sha: string}}}>
+ * }}}} github
+ * @param {{owner: string, repo: string, tag: string, sha: string}} release
+ */
+export async function assertRemoteReleaseTag(github, { owner, repo, tag, sha }) {
+  let reference = (await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` })).data.object;
+  for (let depth = 0; reference?.type === 'tag' && depth < 8; depth++) {
+    if (!/^[a-f0-9]{40}$/.test(reference.sha ?? '')) throw new Error('Invalid annotated tag object');
+    reference = (await github.rest.git.getTag({ owner, repo, tag_sha: reference.sha })).data.object;
+  }
+  if (reference?.type !== 'commit') throw new Error('Release tag does not resolve to a commit');
+  assertReleaseIdentity(tag, sha, reference.sha);
+}
+
 /** @param {Response} response */
 export async function assertImageTagAbsent(response) {
   if (response.status === 200) throw new Error('Existing OCI version tag is immutable; use a new version');

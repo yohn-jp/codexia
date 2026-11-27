@@ -1,4 +1,5 @@
 name: Protected production bootstrap
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Production bootstrap [{0}] Preflight {1}', inputs.mode, inputs.preflight_run_id || 'none') || 'Protected production bootstrap' }}
 on:
   workflow_dispatch:
     inputs:
@@ -309,6 +310,7 @@ jobs:
           CODEXIA_BOOTSTRAP_PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
           CODEXIA_BOOTSTRAP_PREFLIGHT_ATTEMPT: ${{ steps.preflight.outputs.attempt }}
           CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED: ${{ inputs.mode == 'bootstrap' && inputs.initialize_database && vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED == 'true' }}
+          CODEXIA_BOOTSTRAP_AUTH_CONTINUATION_APPROVED: ${{ inputs.mode == 'bootstrap' && !inputs.initialize_database && vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED == 'true' }}
         run: node scripts/deployment/preflight/run.mjs bootstrap-admission
       - name: Execute only the admitted R4 or R5 operation through Ansible
         if: inputs.mode != 'preflight'

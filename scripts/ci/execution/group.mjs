@@ -84,13 +84,16 @@ async function executeTaskInContext(task, index, scope) {
   if (conformanceSetup.has(task) && process.env.GITHUB_ACTIONS === 'true' && conformanceSetup.get(task) !== 'success') {
     error ??= 'Official tool or disposable database setup did not complete';
   }
+  if (task === 'codexiactl-linux' && process.env.GITHUB_ACTIONS === 'true' && process.env.CODEXIA_CI_CODEXIACTL_SETUP !== 'success') {
+    error ??= 'Pinned Go toolchain setup did not complete';
+  }
   let blocked = Boolean(error || (task === 'audit-core' && completed.get('build-core')?.status !== 'passed' && tasks.includes('build-core')));
   if (blocked && !error) error = 'Core build prerequisite failed';
   let inputProof;
   if (!blocked) {
     try {
       if (task === 'biome-ci') await run(process.execPath, ['scripts/ci/biome/check.mjs'], { CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
-      else if (task === 'swift-linux') {
+      else if (task === 'swift-linux' || task === 'codexiactl-linux') {
         const { executable, arguments: args } = taskInvocation(task);
         await run(executable, args);
       }

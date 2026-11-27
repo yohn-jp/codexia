@@ -48,7 +48,7 @@ export const VERIFICATION_TASKS = [
   ...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`),
   'safety', 'build-core', 'build-full', 'audit-core', 'oci-core', 'oci-full',
   ...PROFILES.flatMap(profile => BROWSER_SHARDS.map(({ id }) => `browser-${profile}-${id}`)),
-  'coverage', 'biome-ci', 'architecture-g5', 'requirements-trace', 'swift-linux',
+  'coverage', 'biome-ci', 'architecture-g5', 'requirements-trace', 'swift-linux', 'codexiactl-linux',
 ];
 // Execution groups batch work without removing any validation obligation.
 // All three browser lanes use Chromium; UI acceptance keeps its dedicated lane.
@@ -62,7 +62,7 @@ export const VERIFICATION_GROUPS = {
   'unit-api': ['unit-api', ...Object.keys(CONFORMANCE_TASKS)],
   'unit-db': ['db-contract'],
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
-  'unit-architecture': ['architecture-g5', 'swift-linux'],
+  'unit-architecture': ['architecture-g5', 'swift-linux', 'codexiactl-linux'],
   'types-sources': [...TYPECHECK_TARGETS.map(item => `typecheck-${item.id}`), 'safety'],
   'types-tests': [...TEST_TYPECHECK_SCOPES.map(id => `test-types-${id}`), 'coverage'],
   'types-trace': ['requirements-trace'],

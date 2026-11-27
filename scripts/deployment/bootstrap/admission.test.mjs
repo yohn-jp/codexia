@@ -201,6 +201,12 @@ test('Preflight and R4 restart interrupted schema initialization only with exact
   assert.deepEqual(admitBootstrap({ ...input, mode: 'bootstrap', initializeDatabase: true }), {
     route: 'R4', stages: ['auth-runtime'], installIntent: true,
   });
+  assert.deepEqual(admitBootstrap({ ...input, mode: 'bootstrap', resumeAuthOnly: true }), {
+    route: 'R4', stages: ['auth-runtime'], installIntent: true,
+  });
+  assert.throws(() => admitBootstrap({
+    ...input, mode: 'bootstrap', resumeAuthOnly: true, initializeDatabase: true,
+  }), /no database initialization request/u);
   const altered = structuredClone(input);
   altered.plan.observation.bootstrapResume.checkpoint = 'auth-schema-with-tables';
   assert.throws(() => admitBootstrap({ ...altered, mode: 'bootstrap', initializeDatabase: true }), /altered|Invalid/u);
