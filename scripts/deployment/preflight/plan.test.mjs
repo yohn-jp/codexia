@@ -93,7 +93,9 @@ const baseline = () => ({
 });
 
 test('adoption of an existing Better Auth owner demands independent preservation evidence', () => {
-  const input = { ...baseline(), intent: 'adopt' };
+  const input = { ...baseline(), intent: 'adopt', observation: {
+    ...baseline().observation, binding: { ...baseline().observation.binding, backupSha256: null },
+  } };
   const withoutProof = createDeploymentPlan(input);
   assert.equal(withoutProof.plan.candidateRoute, 'R6');
   assert.ok(withoutProof.plan.blockers.includes('missing-preservation-evidence'));
