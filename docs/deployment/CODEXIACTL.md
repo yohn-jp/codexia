@@ -48,9 +48,9 @@ flowchart TD
 | コマンド | 入力・動作 | 終了条件 |
 | --- | --- | --- |
 | `codexiactl init` | 対話 TTY 必須。§3 の順序で現況を観測し、不足分だけ承認の下で整備して初回導入を進める。再実行が再開操作を兼ねる | R5 の登録専用 API と Frontend の稼働、Owner Setup Grant の安全な引き渡しを確認して終了。既存 Owner には再発行しない |
-| `codexiactl init --plan` | ローカル読取りと外部読取り・必要な一時認証のみ。変更予定・資格不足・利用する Workflow と承認を表示。秘密値は出さない | 計画の提示。VM・GitHub・Tailscale・Cloudflare の構成変更や deploy dispatch はしない |
+| `codexiactl init --plan` | ローカル読取りと外部読取り・必要な一時認証のみ。GitHub保護、OIDCの不一致、Cloudflare、変更予定・資格不足・利用するWorkflowと承認を提示。秘密値は出さず、独立した読取りは前段の失敗後も継続する | 計画の提示。VM・GitHub・Tailscale・Cloudflare の構成変更や deploy dispatch はしない |
 | `codexiactl status [--json]` | 観測済み VM/外部 identity、Environment 設定の存在、最新対象 run、R 状態、ACTIVE/ACCEPTED、通常更新可否を読取り | 観測結果。未観測・不明・到達不能を成功としない |
-| `codexiactl doctor [--json]` | 同じ観測を使い、OS/sudo/SSH、Tailnet/ACL、GitHub 権限と認定、Edge、設定欠落を診断。保護 preflight は既存の読取り専用 Workflow を明示承認の下で起動する `init` から利用する | 阻害要因、原因の証拠、次に解決すべき操作。構成変更なし |
+| `codexiactl doctor [--json]` | 同じ観測を使い、OS/sudo/SSH、Tailnet/ACL、GitHub 権限と認定、Edge、設定欠落を診断。human-readable表示はWorkflowごと最新のRunだけに抑え、全取得履歴はJSON・fail-closed証跡で保持する。保護preflightは既存の読取り専用Workflowを明示承認の下で起動する `init` から利用する | 阻害要因とその修復先、実行に必要な承認。構成変更なし |
 | `codexiactl version` / `help` | バージョン・source・仕様と利用法を表示 | 外部接続・認証なし |
 
 `--json` は読取り結果に限定し、スキーマ版、対象、観測時刻、状態、blockers、run IDs、証拠参照を含む。秘密、grant、OAuth code、認証用 URL の query、トークンレスポンスを含めない。機械出力は stdout、診断は stderr。初回対話を stdin から無条件に自動承認する `--yes`、`--force`、任意 command 実行、秘密の command-line 引数、隠れた非対話モードは提供しない。ユーザー中断を除き終了コードは 0（要求した段階の成立）、1（失敗または不明）、2（不足・承認待ちで安全停止）、3（対象/状態の不整合・拒否）とする。中断は 130。ACTIVE と ACCEPTED は結果に必ず区別して表示する。
@@ -122,7 +122,9 @@ GitHub REST API から repository ID、default/main、Environment と保護、br
 
 `tailscale status --json` と公式 CLI で既存 node の状態、Tailnet、node ID、アドレス、承認状態を確認する。すでに正しい Tailnet に接続していれば再ログイン・タグ付替えを行わない。未接続時は公式 `tailscale up` のブラウザー認証 URL を運用者に提示し、必要な device approval を待つ。既存 SSH 接続を失う変更、DNS/route/exit node のリセット、Tailscale SSH への変更を暗黙に行わない。Codexia は従来の OpenSSH over Tailscale を使用する。node のログインは Tailnet 管理 API の認証ではない。
 
-管理 API は既存の scoped trust credential または運用者が公式 admin console で取得した期限付き API access token を非表示入力で受け取る。管理 API 用の汎用 CLI Device Flow が使えるとは仮定しない。CLI が必要な公式画面・権限を示し、node/keys/policy を読取り、既存の federated identity の issuer（GitHub Actions）、audience、repository/workflow/main/Environment の claim 条件、`auth_keys` scope、`tag:ci` を照合する。通常 CI は現行の WIF と短命な ephemeral node を利用し、管理 API token や長命 auth key を Actions に渡さない。既存 client ID/audience を再利用する。新規 WIF が必要な場合に限り、`federated_keys` 権限を持つ公式 API または管理画面で作成し、差分と信頼条件を承認する。policy の変更は既存 policy 管理権限に従い、必要な node/tag への TCP/22 のみ許可する。共有 Tailnet の ACL 全体の置換、既存タグへの広範な権限追加、SSH の公開はしない。GitHub の保護 runner から実接続して初めて CI 到達性を確認する。
+管理 API は既存の scoped trust credential または運用者が公式 admin console で取得した期限付き API access token を非表示入力で受け取る。管理 API 用の汎用 CLI Device Flow が使えるとは仮定しない。CLI は管理 API 認証と対象 VM の Tailscale node 認証を区別し、目的と権限を入力前に表示する。read-only の `doctor` と `init --plan` は node/keys/policy を読み取り、既存の federated identity の issuer（GitHub Actions）、audience、immutable repository subject、workflow/main/Environment claims、`auth_keys` だけの scope、`tag:ci` を個別に照合し、不一致の設定名と必要な値を表示する。GitHub immutable OIDC subject は `repo:yohn-jp@299811358/codexia@1450072993:environment:codexia-*` を許可し、`ref=refs/heads/main` と `workflow_ref=yohn-jp/codexia/.github/workflows/*@refs/heads/main` で限定する。現行の `codexia-production` だけに限定した既存 Credential や `all` scope は自動許可せず、既存 Credential の変更・削除もしない。
+
+既存の適合 WIF がない場合、`init` のみが設定内容を表示して別承認を求め、`federated_keys (write)` のある一時管理 API token を使って最小権限の新規 Federated Identity を作成し、再取得して完全一致を検証できる。書込み失敗または API 応答喪失時は再観測してから判断し、既存設定を修正・削除・無断再作成しない。通常 CI は WIF の短命な ephemeral node を使用し、管理 API token や長命 auth key を Actions に渡さない。Workflow の audience は同じ保護 Environment の公開 `vars.TS_OAUTH_CLIENT_ID` から `api.tailscale.com/<client-id>` を導出し、固定IDにはしない。新しい導入ではCLIがこの公開Client IDを両EnvironmentのVariableとして登録する。既存の `secrets.TS_OAUTH_CLIENT_ID` は、移行前の本番Workflowを壊さないためにVariable未登録の場合だけフォールバックとして利用し、CLIは読み取れないSecretの既存値を推測・上書きしない。新VariableとOIDC信頼が実動作で検証できた後に、既存Secretの廃止を別途明示承認する。policy の変更は既存 policy 管理権限に従い、必要な node/tag への TCP/22 のみ許可する。共有 Tailnet の ACL 全体の置換、既存タグへの広範な権限追加、SSH の公開はしない。GitHub の保護 runner から実接続して初めて CI 到達性を確認する。
 
 ### 4.3 Cloudflare（管理認証、配備用資格、製品 Access を分離）
 
@@ -150,7 +152,7 @@ R5 の既存 owner-setup grant と age 暗号化 handoff を利用し、CLI は 
 | 独立した sudo 管理者 | V: CODEXIA_BOOTSTRAP_SSH_USER | bootstrap のみ。対象 UID、sudo -n、既存 SSH 接続を検証 |
 | bootstrap SSH Ed25519 identity | S: CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY | bootstrap のみ |
 | runtime SSH Ed25519 identity | S: CODEXIA_DEPLOY_SSH_PRIVATE_KEY | production のみ。R4 の既存 runtime identity stage が公開鍵を対象 service account に登録 |
-| Tailscale WIF | S: TS_OAUTH_CLIENT_ID（現行入力名） | 両保護 Environment。client ID は同じ信頼のものを使う。audience と tag は現行 Workflow と照合し、固定設定が異なる場合に無断上書きせず PR で修正 |
+| Tailscale WIF | V: TS_OAUTH_CLIENT_ID（公開Client ID） | 両保護 EnvironmentのVariableとして同じScoped WIF Client IDを登録。旧 `secrets.TS_OAUTH_CLIENT_ID` はVariable未登録のWorkflowのみ互換フォールバック。audienceはそのClient IDから導出し、secret値の無断上書きや固定IDによる拘束をしない |
 | Cloudflare account/zone/tunnel/policy IDs、teamName、public protocol 状態 | V: CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET | 両保護 Environment。公式観測から生成。Git の公開設定と照合 |
 | 限定 Cloudflare read credential | S: CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN | 両保護 Environment |
 | CI Access probe identity | S: CODEXIA_ACCESS_CLIENT_ID / CODEXIA_ACCESS_CLIENT_SECRET | 両保護 Environment。author 権限を与えない |

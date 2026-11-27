@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -56,9 +57,15 @@ func readOnly(ctx context.Context, i invocation, stdout, stderr io.Writer) int {
 		}
 		for _, blocker := range status.Blockers {
 			fmt.Fprintln(stdout, "Blocker:", blocker)
+			if guidance := blockerGuidance(blocker); guidance != "" {
+				fmt.Fprintln(stdout, "  Next:", guidance)
+			}
 		}
-		for _, run := range status.Runs {
-			fmt.Fprintln(stdout, run.Workflow, run.Status, run.Conclusion, runLink(run.ID))
+		if len(status.Runs) > 0 {
+			fmt.Fprintln(stdout, "Latest recorded workflow per lane (history available with --json):")
+		}
+		for _, run := range latestWorkflowSummary(status.Runs) {
+			fmt.Fprintln(stdout, " ", run.Workflow, run.Status, run.Conclusion, runLink(run.ID))
 		}
 	}
 	return reportError(ctx, stderr, err)
@@ -78,6 +85,9 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 	}
 	defer tty.Close()
 	tty.bindContext(ctx)
+	if i.command == "doctor" || i.plan {
+		tty.Notice("READ-ONLY INSPECTION: no VM, Tailnet, Cloudflare, or GitHub settings will be changed. Provider credentials are requested only for temporary API reads and are not stored. Decline a provider to stop safely.")
+	}
 	gh, err := githubLogin(ctx, tty, githubAppClientID)
 	if err != nil {
 		report.Blockers = append(report.Blockers, "github-authentication-unverified")
@@ -126,6 +136,59 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 	return nil
 }
 
+// Status retains all fetched evidence for fail-closed lifecycle checks. A human
+// gets one recent run per workflow instead of dozens of irrelevant older runs.
+func latestWorkflowSummary(runs []observedRun) []observedRun {
+	seen := make(map[string]bool)
+	var result []observedRun
+	for _, run := range runs {
+		if seen[run.Workflow] {
+			continue
+		}
+		seen[run.Workflow] = true
+		result = append(result, run)
+	}
+	return result
+}
+
+func blockerGuidance(blocker string) string {
+	switch blocker {
+	case "interactive-authentication-required":
+		return "Reconnect to the target VM over a real interactive SSH terminal (ssh -t), not a pipe or CI stdin. Read-only provider access is authenticated through /dev/tty."
+	case "github-authentication-unverified":
+		return "Use the official GitHub App Device Flow when provisioned, or a one-day fine-grained PAT restricted to this Codexia repository. The temporary PAT needs Contents read, Actions write, Environments write and Metadata read; no token belongs in the CI Secrets."
+	case "independent-restore-acceptance-unverified":
+		return "The app can be ACTIVE, but ACCEPTED requires independent verified backup restoration and protected recovery evidence. Use the existing Backup and Restore runbooks; a green CI job is insufficient."
+	case "live-deployment-state-unverified":
+		return "The latest signed Preflight did not prove a known Bootstrap/Activation/ACTIVE state. Review the exact plan and live VM evidence before issuing a new deployment; do not initialize an unknown DB."
+	case "github-environment-or-permission-unverified":
+		return "Settings > Environments: for codexia-bootstrap and codexia-production, require a separate reviewer, prevent self-review, and restrict deployment branches to main. Verify the PAT has Environments read/write. https://github.com/yohn-jp/codexia/settings/environments"
+	case "latest-target-lifecycle-evidence-unavailable":
+		return "No current, exact-main Preflight receipt is proven for this VM. A first installation needs init to request a fresh protected Preflight; an existing installation needs operator recovery evidence. Older successful runs do not authorize changes."
+	case "tailnet-identity-or-policy-unverified":
+		return "Review the exact OIDC subject, auth_keys-only scope, tag:ci and main-workflow claims at " + wifTrustConsole + ". For a missing credential, init can offer a separate, scoped one after approval; doctor and --plan never create it."
+	case "ssh-host-pin-unverified":
+		return "Compare the VM's SSH host key fingerprint with the independent SSH client/provider console; never disable strict host-key verification."
+	case "cloudflare-edge-unverified", "edge-initial-install-unverified":
+		return "Inspect the account, zone, Tunnel, Access and Worker for the configured production origin. Changes to Terraform-owned resources must use the existing IaC path."
+	case "protected-inputs-missing":
+		return "Missing GitHub Environment inputs are reported before any write. Run init only after reviewing the target and supplying the approved, minimum-scope provider credentials."
+	case "existing-protected-input-mismatch":
+		return "The live target differs from existing protected GitHub inputs. Do not overwrite them automatically; reconcile the owning environment first."
+	case "protected-input-inventory-unavailable":
+		return "GitHub returned no complete secret/variable inventory. Restore the read permissions before planning changes."
+	case "newer-or-unresolved-protected-deployment-activity":
+		return "A newer protected operation may have changed the VM. Confirm the latest run, then request a fresh Preflight with init."
+	case "workflow-observation-unavailable":
+		return "Check GitHub Actions read permission and API availability for the target repository."
+	case "canonical-source-unverified":
+		return "Verify the exact-release source and current protected workflow contract before running init."
+	case "target-vm-unverified":
+		return "Run from an independently authenticated non-root SSH terminal on the supported Ubuntu x86-64 target."
+	}
+	return ""
+}
+
 func reportProtectedInputs(snapshot githubSnapshot, report *statusReport) {
 	report.ProtectedInputs = make(map[string]bool)
 	for _, item := range protectedSecrets() {
@@ -133,7 +196,9 @@ func reportProtectedInputs(snapshot githubSnapshot, report *statusReport) {
 			report.ProtectedInputs[item.environment+"/"+item.name] = inventory[item.name]
 		}
 	}
-	for _, item := range protectedVariables("", "", "", "") {
+	for _, item := range append(protectedVariables("", "", "", ""),
+		environmentInput{bootstrapEnvironment, wifClientIDInput, ""},
+		environmentInput{productionEnvironment, wifClientIDInput, ""}) {
 		if inventory := selectEnvironment(snapshot, item.environment).Variables; inventory != nil {
 			_, report.ProtectedInputs[item.environment+"/"+item.name] = inventory[item.name]
 		}
@@ -150,26 +215,43 @@ func reportProtectedInputs(snapshot githubSnapshot, report *statusReport) {
 }
 
 func inspectProviders(ctx context.Context, o operator, vm vmObservation, snapshot githubSnapshot, settings productionContract, report *statusReport) error {
-	tailnet, err := prepareTailnet(ctx, o, vm, true)
-	if err != nil {
+	var failures []error
+	tailnet, tailErr := prepareTailnet(ctx, o, vm, true)
+	if tailErr != nil {
 		report.Blockers = append(report.Blockers, "tailnet-identity-or-policy-unverified")
-		return err
+		o.Notice("Tailscale check: " + tailErr.Error())
+		failures = append(failures, tailErr)
+	} else {
+		report.TailnetAddress = tailnet.Address
 	}
-	report.TailnetAddress = tailnet.Address
-	pin, err := vm.ConfirmPin(o, tailnet.Address)
-	if err != nil {
-		report.Blockers = append(report.Blockers, "ssh-host-pin-unverified")
-		return err
+	var pin string
+	if tailErr == nil {
+		var pinErr error
+		pin, pinErr = vm.ConfirmPin(o, tailnet.Address)
+		if pinErr != nil {
+			report.Blockers = append(report.Blockers, "ssh-host-pin-unverified")
+			o.Notice("SSH identity check: " + pinErr.Error())
+			failures = append(failures, pinErr)
+		}
 	}
-	edge, err := observeCloudflare(ctx, o, settings.PublicOrigin)
-	if err != nil {
+	// Cloudflare discovery is independent of a failed Tailscale trust check.
+	// Continue gathering read-only evidence instead of requiring another doctor
+	// invocation merely to discover the next missing prerequisite.
+	edge, edgeErr := observeCloudflare(ctx, o, settings.PublicOrigin)
+	if edgeErr != nil {
 		report.Blockers = append(report.Blockers, "cloudflare-edge-unverified")
-		return err
+		o.Notice("Cloudflare check: " + edgeErr.Error())
+		failures = append(failures, edgeErr)
+	} else {
+		defer edge.Close()
+		if verifyErr := verifyInitialEdge(ctx, vm, edge); verifyErr != nil {
+			report.Blockers = append(report.Blockers, "edge-initial-install-unverified")
+			o.Notice("Cloudflare edge check: " + verifyErr.Error())
+			failures = append(failures, verifyErr)
+		}
 	}
-	defer edge.Close()
-	if err := verifyInitialEdge(ctx, vm, edge); err != nil {
-		report.Blockers = append(report.Blockers, "edge-initial-install-unverified")
-		return err
+	if len(failures) != 0 {
+		return errors.Join(failures...)
 	}
 	if snapshot.Bootstrap.Variables == nil || snapshot.Production.Variables == nil ||
 		snapshot.Bootstrap.Secrets == nil || snapshot.Production.Secrets == nil {

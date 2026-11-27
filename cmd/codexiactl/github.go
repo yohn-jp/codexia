@@ -148,7 +148,7 @@ func (g *githubControl) requireProtection(ctx context.Context, name string) erro
 	if githubIndependentReview(env) {
 		return g.requireMainOnly(ctx, name, env.GetDeploymentBranchPolicy())
 	}
-	return fmt.Errorf("%w: %s must require an independent reviewer and prevent self-review (https://github.com/yohn-jp/codexia/settings/environments)", errGitHubProtection, name)
+	return fmt.Errorf("%w: %s has no enforceable independent approval. Open https://github.com/yohn-jp/codexia/settings/environments, select %s, set Required reviewers to another trusted GitHub account (not the operator), enable Prevent self-review, and keep deployment branches restricted to main. The CLI never disables approval to proceed", errGitHubProtection, name, name)
 }
 
 func (g *githubControl) environment(ctx context.Context, name string) (*github.Environment, error) {
@@ -190,7 +190,7 @@ func githubIndependentReview(env *github.Environment) bool {
 }
 
 func (g *githubControl) requireMainOnly(ctx context.Context, name string, policy *github.BranchPolicy) error {
-	protectionErr := fmt.Errorf("%w: %s must permit only the main branch and no tags (https://github.com/yohn-jp/codexia/settings/environments)", errGitHubProtection, name)
+	protectionErr := fmt.Errorf("%w: %s must use Selected branches and tags with exactly one rule: branch main (no tags). Configure this at https://github.com/yohn-jp/codexia/settings/environments before retrying", errGitHubProtection, name)
 	if !policy.GetCustomBranchPolicies() || policy.GetProtectedBranches() {
 		return protectionErr
 	}
@@ -254,7 +254,7 @@ func (g *githubControl) listSecrets(ctx context.Context, name string, env github
 	return nil
 }
 
-var githubCommonVariables = map[string]bool{"CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET": true}
+var githubCommonVariables = map[string]bool{"CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET": true, wifClientIDInput: true}
 var githubBootstrapVariables = map[string]bool{
 	"CODEXIA_BOOTSTRAP_HOST": true, "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS": true,
 	"CODEXIA_BOOTSTRAP_SSH_USER": true, "CODEXIA_OWNER_SETUP_AGE_RECIPIENT": true,

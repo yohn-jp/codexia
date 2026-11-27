@@ -37,7 +37,9 @@ test('production deployment consumes the verified Full digest and provenance cer
 
   const tailscale = deploy.steps.find(step => step.uses === 'tailscale/github-action@v4');
   assert.ok(tailscale, 'production deployment must establish the Tailnet connection');
-  assert.equal(tailscale.with['oauth-client-id'], '${{ secrets.TS_OAUTH_CLIENT_ID }}');
+  assert.equal(tailscale.with['oauth-client-id'], '${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}');
+  assert.equal(tailscale.with.audience,
+    "${{ format('api.tailscale.com/{0}', vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID) }}");
 
   const ssh = deploy.steps.find(step => step.name === 'Prepare pinned SSH identity');
   assert.ok(ssh, 'production deployment must prepare its dedicated SSH key and pinned host key');

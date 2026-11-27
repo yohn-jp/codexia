@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -94,15 +97,119 @@ func TestTailscaleWIFRejectsBroadOrIncompleteClaims(t *testing.T) {
 
 func validWIFKey(id string) ts.Key {
 	return ts.Key{
-		ID: id, KeyType: "federated", Audience: wifAudience,
-		Issuer:  "https://token.actions.githubusercontent.com",
-		Subject: "repo:yohn-jp/codexia:environment:codexia-*",
+		ID: id, KeyType: "federated", Audience: "api.tailscale.com/" + id,
+		Issuer:  wifIssuer,
+		Subject: wifSubject,
 		Scopes:  []string{"auth_keys"}, Tags: []string{"tag:ci"},
 		CustomClaimRules: map[string]string{
 			"ref":          "refs/heads/main",
 			"repository":   "yohn-jp/codexia",
 			"workflow_ref": "yohn-jp/codexia/.github/workflows/*@refs/heads/main",
 		},
+	}
+}
+
+func TestTailscaleWIFReportsExactReconciliationActions(t *testing.T) {
+	key := validWIFKey("legacy-id")
+	key.Subject = "repo:yohn-jp@299811358/codexia@1450072993:environment:codexia-production"
+	key.Scopes = []string{"all"}
+	key.CustomClaimRules = nil
+	problems := strings.Join(wifProblems(key), "\n")
+	for _, expected := range []string{"subject must be", "immutable owner/repository", "scopes must contain only auth_keys", "custom claim ref", "custom claim workflow_ref"} {
+		if !strings.Contains(problems, expected) {
+			t.Errorf("missing actionable WIF mismatch %q in %q", expected, problems)
+		}
+	}
+	if matchesWIF(key) {
+		t.Fatal("legacy broad OIDC credential bypassed scoped trust")
+	}
+}
+
+type wifApprovalOperator struct {
+	approve bool
+	notices []string
+}
+
+func (o *wifApprovalOperator) Confirm(string) (bool, error)  { return o.approve, nil }
+func (o *wifApprovalOperator) Ask(string) (string, error)    { return "", nil }
+func (o *wifApprovalOperator) Secret(string) ([]byte, error) { return nil, nil }
+func (o *wifApprovalOperator) Notice(message string)         { o.notices = append(o.notices, message) }
+
+func TestTailnetCreatesOnlySeparatelyApprovedScopedOIDCTrust(t *testing.T) {
+	const network = "tnOwner"
+	const address = "100.64.20.10"
+	var created atomic.Int32
+	legacy := validWIFKey("old-wide-key")
+	legacy.Subject = "repo:yohn-jp@299811358/codexia@1450072993:environment:codexia-production"
+	legacy.Scopes = []string{"all"}
+	legacy.CustomClaimRules = nil
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/devices":
+			fmt.Fprintf(w, `{"devices":[{"addresses":[%q],"nodeId":"nVM","authorized":true,"connectedToControl":true,"nodeKey":"nodekey:%s","name":"codexia.example.ts.net","os":"linux"}]}`, address, strings.Repeat("a", 64))
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/keys" && r.Method == http.MethodGet:
+			fmt.Fprint(w, `{"keys":[{"id":"old-wide-key"}]}`)
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/keys/old-wide-key":
+			_ = json.NewEncoder(w).Encode(legacy)
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/keys" && r.Method == http.MethodPost:
+			var request struct {
+				Subject          string            `json:"subject"`
+				Issuer           string            `json:"issuer"`
+				Scopes           []string          `json:"scopes"`
+				Tags             []string          `json:"tags"`
+				CustomClaimRules map[string]string `json:"customClaimRules"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil ||
+				request.Subject != wifSubject || request.Issuer != wifIssuer ||
+				!matchesWIF(validWIFKey("new-scoped-key")) || !slices.Equal(request.Scopes, []string{"auth_keys"}) ||
+				!slices.Equal(request.Tags, []string{"tag:ci"}) ||
+				request.CustomClaimRules["ref"] != "refs/heads/main" ||
+				request.CustomClaimRules["workflow_ref"] != "yohn-jp/codexia/.github/workflows/*@refs/heads/main" {
+				t.Errorf("unexpected scoped WIF creation request: %+v (%v)", request, err)
+			}
+			created.Add(1)
+			_ = json.NewEncoder(w).Encode(validWIFKey("new-scoped-key"))
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/keys/new-scoped-key":
+			_ = json.NewEncoder(w).Encode(validWIFKey("new-scoped-key"))
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/acl":
+			fmt.Fprint(w, `{"grants":[{"src":["tag:ci"],"dst":["100.64.20.10"],"ip":["tcp:22"]}]}`)
+		case r.URL.Path == "/api/v2/tailnet/"+network+"/acl/validate":
+			// The official API acknowledges a passing ACL test with an empty 200 OK response.
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	base, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &ts.Client{BaseURL: base, Tailnet: network}
+	local := localTailnet{BackendState: "Running",
+		CurrentTailnet: &localTailnetIdentity{Name: "example", StableID: network},
+		Self: &localTailnetNode{ID: "nVM", PublicKey: "nodekey:" + strings.Repeat("a", 64),
+			DNSName: "codexia.example.ts.net.", TailscaleIPs: []string{address}}}
+	if _, err := inspectTailnet(context.Background(), client, local); err == nil {
+		t.Fatal("read-only inspection accepted broad legacy WIF")
+	}
+	declined := &wifApprovalOperator{}
+	if _, err := inspectTailnetWithApproval(context.Background(), client, local, declined, true); err == nil {
+		t.Fatal("declined WIF creation was not stopped")
+	}
+	if created.Load() != 0 {
+		t.Fatal("WIF was created without separate approval")
+	}
+	approved := &wifApprovalOperator{approve: true}
+	got, err := inspectTailnetWithApproval(context.Background(), client, local, approved, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ClientID != "new-scoped-key" || created.Load() != 1 {
+		t.Fatalf("unexpected WIF creation outcome: %+v, count %d", got, created.Load())
+	}
+	if !strings.Contains(strings.Join(approved.notices, "\n"), "scopes must contain only auth_keys") {
+		t.Fatal("existing broad WIF mismatch was not explained before approval")
 	}
 }
 
@@ -151,5 +258,27 @@ func TestTailscaleErrorsDoNotExposeProviderResponses(t *testing.T) {
 	})
 	if strings.Contains(err.Error(), token) || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("provider response was not sanitized: %v", err)
+	}
+}
+
+func TestEveryProtectedTailnetWorkflowUsesTheApprovedCredentialAudience(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{
+		"production-bootstrap.yml", "production-preflight.yml",
+		"frontend-release.yml", "backend-deployment-handoff.yml",
+		"tailscale-connectivity.yml",
+	} {
+		t.Run(name, func(t *testing.T) {
+			contents, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(contents)
+			count := strings.Count(text, "uses: tailscale/github-action@")
+			if count == 0 || strings.Count(text,
+				"audience: ${{ format('api.tailscale.com/{0}', vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID) }}") != count {
+				t.Fatalf("%s must bind each OIDC audience to its protected TS_OAUTH_CLIENT_ID, actions=%d", name, count)
+			}
+		})
 	}
 }
