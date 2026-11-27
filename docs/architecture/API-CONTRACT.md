@@ -68,7 +68,7 @@ IDは重複させず、表示名や説明を変えるときも維持する。
 | API-PERSIST-003 | POST /api/v1/persistence/projects | OWNER-API | packages/api/src/persistence-routes.ts | 部分定義 |
 | API-PERSIST-004 | POST /api/v1/persistence/import | OWNER-API | packages/api/src/persistence-routes.ts、work-archive.ts | INCOMPLETE |
 | API-PERSIST-005 | GET/PATCH /api/v1/persistence/projects/:p、GET .../:p/archive | OWNER-API | packages/api/src/persistence-routes.ts | INCOMPLETE（path別IDを展開） |
-| persistence_project_open_export_get | GET /api/v1/persistence/projects/:p/open-export | OWNER-API | [離脱用 ZIP の実装契約](OPEN-WORK-EXPORT-CONTRACT.md) | TARGET |
+| persistence_project_open_export_get | GET /api/v1/persistence/projects/:p/open-export | OWNER-API | [離脱用 ZIP の実装契約](OPEN-WORK-EXPORT-CONTRACT.md) | PARTIAL（実装済み、Windows・非本番 Tunnel 受入未完了） |
 | API-PERSIST-006 | GET/POST /api/v1/persistence/projects/:p/documents | OWNER-API | packages/api/src/persistence-routes.ts | INCOMPLETE |
 | API-PERSIST-007 | GET/PATCH/DELETE /api/v1/persistence/projects/:p/documents/:d、PATCH .../:d/metadata | OWNER-API | packages/api/src/persistence-routes.ts | 部分定義（path別IDを展開） |
 | API-PERSIST-008 | GET .../documents/:d/revisions、POST .../documents/:d/restore | OWNER-API | packages/api/src/persistence-routes.ts | INCOMPLETE |
