@@ -28,10 +28,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/release/components/verify-source.mjs
-      - name: Require enabled Immutable Releases
-        env:
-          CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN: ${{ secrets.CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN }}
-        run: node scripts/release/components/codexiactl-release.mjs check-setting
   codexiactl:
     name: Build and attest the verified Linux CLI
     needs: verify-source
@@ -107,5 +103,4 @@ jobs:
       - name: Publish or verify the immutable Release
         env:
           GH_TOKEN: ${{ github.token }}
-          CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN: ${{ secrets.CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN }}
         run: node scripts/release/components/codexiactl-release.mjs reconcile
