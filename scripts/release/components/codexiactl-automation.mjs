@@ -76,21 +76,21 @@ export async function releaseVerifiedCodexiactl({ github, context, core, sha, gi
 
   const tags = await github.paginate(github.rest.repos.listTags, {owner, repo, per_page: 100});
   const last = latestCodexiactlTag(tags);
+  let resumedPrior = false;
   if (last) {
-    // Retain one tag per source and make dispatch loss resumable.
-    if (last.sha === sha) {
-      const published = await existingRelease(github, owner, repo, last.name);
-      if (published) {
-        assertPublishedCodexiactlRelease(published, last.name);
-        core.info('Already published immutable CLI Release ' + last.name);
-        return 'published';
-      }
+    // A tag can exist without its Release after a lost dispatch. Reconcile it
+    // even when unrelated later main commits have already been certified.
+    const published = await existingRelease(github, owner, repo, last.name);
+    if (published) {
+      assertPublishedCodexiactlRelease(published, last.name);
+    } else {
       await github.rest.actions.createWorkflowDispatch({
         owner, repo, workflow_id: 'publish-codexiactl.yml', ref: last.name,
       });
       core.notice('Resumed CLI publication for existing verified tag ' + last.name);
-      return 'resumed';
+      resumedPrior = true;
     }
+    if (last.sha === sha) return resumedPrior ? 'resumed' : 'published';
     assert.equal(git('merge-base', '--is-ancestor', last.sha, sha), '',
       'CLI release tag is not an ancestor of verified main');
     // Compare the entire interval since the last CLI tag, not just the last
@@ -98,7 +98,7 @@ export async function releaseVerifiedCodexiactl({ github, context, core, sha, gi
     const diff = git('diff', '--name-only', '--no-renames', '-z', last.sha, sha, '--');
     if (!diff.split('\0').filter(Boolean).some(isCodexiactlReleaseInput)) {
       core.info('No net CodexiaCTL change since ' + last.name);
-      return 'unaffected';
+      return resumedPrior ? 'resumed' : 'unaffected';
     }
   }
   // No prior CLI tag: publish the initial verified binary regardless of the
