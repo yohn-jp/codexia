@@ -271,8 +271,8 @@ func TestEveryProtectedTailnetWorkflowUsesTheApprovedCredentialAudience(t *testi
 		t.Run(name, func(t *testing.T) {
 			contents, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", name))
 			if err != nil {
-		t.Fatal(err)
-	}
+				t.Fatal(err)
+			}
 			text := string(contents)
 			count := strings.Count(text, "uses: tailscale/github-action@")
 			if count == 0 || strings.Count(text,
