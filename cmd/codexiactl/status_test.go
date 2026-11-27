@@ -129,3 +129,28 @@ func TestStatusForbiddenVariableListingLeavesGateAndInventoryUnknown(t *testing.
 			env.Variables, report.OrdinaryUpdate, hasVisibleVariable, hasVisibleSecret)
 	}
 }
+
+func TestDoctorReportsActionableBlockersWithoutDumpingWorkflowHistory(t *testing.T) {
+	t.Parallel()
+	runs := []observedRun{
+		{ID: 15, Workflow: "production-preflight.yml", Conclusion: "failure"},
+		{ID: 14, Workflow: "production-preflight.yml", Conclusion: "success"},
+		{ID: 12, Workflow: "frontend-release.yml", Conclusion: "failure"},
+		{ID: 11, Workflow: "frontend-release.yml", Conclusion: "success"},
+		{ID: 10, Workflow: "backend-deployment-handoff.yml", Conclusion: "failure"},
+	}
+	recent := latestWorkflowSummary(runs)
+	if len(recent) != 3 || recent[0].ID != 15 || recent[1].ID != 12 || recent[2].ID != 10 {
+		t.Fatalf("expected one most recent run per workflow, got %#v", recent)
+	}
+	for _, code := range []string{
+		"github-environment-or-permission-unverified",
+		"tailnet-identity-or-policy-unverified",
+		"latest-target-lifecycle-evidence-unavailable",
+		"cloudflare-edge-unverified",
+	} {
+		if blockerGuidance(code) == "" {
+			t.Fatalf("no user-facing remediation for %s", code)
+		}
+	}
+}
