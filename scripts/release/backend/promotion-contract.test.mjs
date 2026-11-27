@@ -21,6 +21,24 @@ test('backend promotion resolver and publisher checkouts include full merge hist
   }
 });
 
+test('a publish-only rerun downloads the retained promotion job artifact by ID', () => {
+  const promotion = workflow.jobs.promotion;
+  const artifacts = promotion.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
+  assert.ok(artifacts);
+  assert.equal(promotion.outputs['handoff-artifact-id'], '${{ steps.' + artifacts.id + '.outputs.artifact-id }}');
+  assert.match(promotion.outputs.promoted, /steps\.handoff\.outputs\.artifact-id != ''/u,
+    'Missing artifact ID must select the exact-main build instead of downloading every artifact');
+
+  const publishSteps = workflow.jobs.publish.steps;
+  const download = publishSteps.find(step => step.uses?.startsWith('actions/download-artifact@'));
+  assert.ok(download);
+  assert.equal(download.with['artifact-ids'], '${{ needs.promotion.outputs.handoff-artifact-id }}');
+  assert.equal(download.with.name, undefined, 'The publisher attempt cannot select the producer artifact');
+  assert.equal(download.with['digest-mismatch'], 'error');
+  const recheck = publishSteps.findIndex(step => step.run?.includes('scripts/deployment/handoff/verify-promotion.mjs'));
+  assert.ok(publishSteps.indexOf(download) < recheck && recheck < publishSteps.findIndex(step => step.id === 'push-image'));
+});
+
 test('backend publication requires a still-eligible component source before registry writes', () => {
   assert.equal(workflow.env.CODEXIA_SOURCE_SHA, '${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}');
   const steps = workflow.jobs.publish.steps;
