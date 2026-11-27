@@ -59,8 +59,8 @@ import {
   type LinkAssertionEvidenceCommand,
   type MentionLink,
   type ModuleRecord,
-  type OpenWorkExportRows,
   NLP_FEATURE_SETTINGS_CHANGESET_SOURCE,
+  type OpenWorkExportRows,
   type Persistence,
   PersistenceError,
   type PersistenceReader,
@@ -3011,12 +3011,32 @@ export class PostgresPersistence implements Persistence {
     }
   }
 
+  private async acquireReadClient(signal: AbortSignal): Promise<PoolClient> {
+    let onAbort: (() => void) | undefined;
+    const stop = new Promise<never>((_, reject) => {
+      onAbort = () => reject(signal.reason);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    const acquire = this.acquireClient().then(client => {
+      if (signal.aborted) {
+        client.release();
+        signal.throwIfAborted();
+      }
+      return client;
+    });
+    try {
+      return await Promise.race([acquire, stop]);
+    } finally {
+      if (onAbort) signal.removeEventListener('abort', onAbort);
+    }
+  }
+
   async read<T>(
     work: (reader: PersistenceReader) => Promise<T>,
     options?: { signal: AbortSignal; statementTimeoutMs: number },
   ): Promise<T> {
     options?.signal.throwIfAborted();
-    const client = await this.acquireClient();
+    const client = options ? await this.acquireReadClient(options.signal) : await this.acquireClient();
     let released = false;
     const onAbort = () => {
       released = true;

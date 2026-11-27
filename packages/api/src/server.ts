@@ -91,11 +91,11 @@ import {
 } from '@codexia/module-runtime';
 import { assertCurrentJobHistory, type JobEvent, JobHistoryError, JobHistoryStore } from './job-history-store.js';
 import { createNativeKnowledgeActions } from './native-knowledge-actions.js';
-import { handlePersistenceOperation } from './persistence-routes.js';
 import { generateOpenWorkZip, OPEN_WORK_EXPORT_GENERATE_MS, OPEN_WORK_EXPORT_SEND_MS } from './open-work-export.js';
-import { WorkArchiveError } from './work-archive.js';
+import { handlePersistenceOperation } from './persistence-routes.js';
 import { compareProjectPageKeys, decodeProjectPageCursor, encodeProjectPageCursor } from './project-pagination.js';
 import { RecentActivityStore } from './recent-activity-store.js';
+import { WorkArchiveError } from './work-archive.js';
 
 // The installed protocol handler owns these endpoints and their wire schemas.
 const BETTER_AUTH_HTTP_ROUTES = [
@@ -2953,6 +2953,9 @@ export function createServer(options: ApiServerOptions): Server {
       }
     }
   };
+  const streamingPersistenceHandlers: Partial<Record<string, Handler>> = {
+    persistence_project_open_export_get: openWorkExport,
+  };
   for (const route of httpContract.routes) {
     if (route.contractStatus === 'target' || ownerSetupOnly.has(route.operationId) || authAdapters.has(route.operationId)) continue;
     if (
@@ -2974,9 +2977,7 @@ export function createServer(options: ApiServerOptions): Server {
       policy === 'mcp'
         ? standaloneMcp
         : policy === 'persistence'
-          ? route.operationId === 'persistence_project_open_export_get'
-            ? openWorkExport
-            : persistenceHandler(route)
+          ? (streamingPersistenceHandlers[route.operationId] ?? persistenceHandler(route))
           : (handlers[route.operationId] ?? (route.method === 'HEAD' ? handlers[route.operationId.replace(/_head$/u, '_get')] : undefined));
     if (!handler) throw new Error(`No handler registered for ${route.operationId}`);
     register(app, route.method, route.url, handler, route, policy);

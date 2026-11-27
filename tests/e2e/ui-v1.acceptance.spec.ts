@@ -934,7 +934,7 @@ test("optional terminology cancels work at pagehide and resumes at pageshow", { 
   }
 });
 
-test("desktop author can download a portable work and import it without replacing the source", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
+test("[TEST-DATA-006-004] desktop author can download a portable work and import it without replacing the source", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page);
   const transfer = page.locator("details").filter({ has: page.locator("summary", { hasText: "作品のエクスポート・インポート" }) });
   await transfer.locator("summary").click();

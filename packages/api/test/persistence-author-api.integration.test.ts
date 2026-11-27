@@ -153,7 +153,7 @@ async function startAuthorApi(t: TestContext) {
   return { base, ownerHeaders, persistence, fixture };
 }
 
-test('authenticated PostgreSQL API saves, replays, follows Evidence, conflicts and restores', async t => {
+test('[TEST-DATA-006-003] authenticated PostgreSQL API saves, replays, follows Evidence, conflicts and restores', async t => {
   const { base, ownerHeaders, persistence, fixture } = await startAuthorApi(t);
   await exercisePublicApiAdapter(base, await fixture.issueOwnerAccessToken());
   const unauthorized = await fetch(`${base}/api/v1/persistence/projects`);

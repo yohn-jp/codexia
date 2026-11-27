@@ -127,10 +127,10 @@ function contributionOperations(source, prefix) {
 
 test('current and target OpenAPI operations match the independent inventory', () => {
   const keys = assertAdmittedOperations(contract);
-  assert.equal(keys.length, 115);
-  assert.equal(inventory.current.length, 115);
+  assert.equal(keys.length, 116);
+  assert.equal(inventory.current.length, 116);
   assert.equal(inventory.target.length, 0);
-  assert.equal(new Set(keys.map(key => key.slice(key.indexOf(' ') + 1))).size, 90);
+  assert.equal(new Set(keys.map(key => key.slice(key.indexOf(' ') + 1))).size, 91);
 });
 
 test('inventory mismatch gate detects missing, extra, and duplicate method/path operations', () => {
@@ -250,7 +250,12 @@ test('MCP and publishing contribution methods and paths match OpenAPI', () => {
 
 test('generated persistence registrations resolve to independently declared handlers', () => {
   const source = readFileSync(path.resolve(repositoryRoot, 'packages', 'api', 'src', 'persistence-routes.ts'), 'utf8');
-  const ids = [...source.matchAll(/^ {2}(persistence_[a-z0-9_]+): async\b/gmu)].map(match => match[1]);
+  const server = readFileSync(path.resolve(repositoryRoot, 'packages/api/src/server.ts'), 'utf8');
+  const jsonIds = [...source.matchAll(/^ {2}(persistence_[a-z0-9_]+): async\b/gmu)].map(match => match[1]);
+  const streaming = /const streamingPersistenceHandlers:[^\n]+ = \{(?<handlers>[^}]+)\}/u.exec(server)?.groups?.handlers;
+  assert.ok(streaming, 'streaming persistence routes must declare their raw response handlers');
+  const streamingIds = [...streaming.matchAll(/^ {4}(persistence_[a-z0-9_]+): [A-Za-z][A-Za-z0-9_]*,$/gmu)].map(match => match[1]);
+  const ids = [...jsonIds, ...streamingIds];
   const persistenceRoutes = JSON.parse(
     readFileSync(path.resolve(repositoryRoot, 'packages/api/src/generated/http-contract.json'), 'utf8'),
   ).routes.filter(route => route.url.startsWith('/api/v1/persistence/') && route.contractStatus !== 'target');
@@ -259,7 +264,11 @@ test('generated persistence registrations resolve to independently declared hand
   assert.equal(new Set(ids).size, ids.length, 'persistence handler operationIds must be unique');
   assert.match(source, /const handler = handlers\[operationId\]/u, 'persistence handlers must resolve by generated operationId');
   assert.match(source, /Unknown persistence operation \$\{operationId\}/u, 'unknown operationIds must fail closed');
-  const server = readFileSync(path.resolve(repositoryRoot, 'packages/api/src/server.ts'), 'utf8');
+  assert.match(
+    server,
+    /streamingPersistenceHandlers\[route\.operationId\]/u,
+    'Fastify registrations must resolve streaming handlers by the generated operationId',
+  );
   assert.match(
     server,
     /handlePersistenceOperation\(route\.operationId/u,

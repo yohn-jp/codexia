@@ -63,7 +63,7 @@ const MAX_OPEN_EXPORT_BYTES = 128 * 1024 * 1024;
 
 async function downloadOpenWorkExport(projectId: string, signal?: AbortSignal): Promise<Blob> {
   const response = (await persistenceProjectOpenExportGet(projectId, {
-    signal,
+    ...apiOptions(signal),
     responseMode: 'raw',
     headers: { Accept: 'application/zip' },
   })) as unknown as Response;

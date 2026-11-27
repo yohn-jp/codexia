@@ -1956,13 +1956,20 @@ export function PersistenceWorkspace({
       if (controller.signal.aborted) {
         setWorkTransferStatus('ZIP の受信を中止しました。');
       } else {
-        const message =
-          error instanceof ApiError && error.status === 413
-            ? '上限を超えたため、離脱用 ZIP を作成できませんでした。'
-            : error instanceof ApiError && error.status === 404
-              ? 'この作品の離脱用 ZIP を取得できません。'
-              : '離脱用 ZIP の受信を完了できませんでした。もう一度お試しください。';
-        setPageError(message);
+        switch (error instanceof ApiError ? error.status : null) {
+          case 401:
+          case 403:
+            setPageError('認証を確認できませんでした。再認証後に離脱用 ZIP の取得をお試しください。');
+            break;
+          case 404:
+            setPageError('この作品の離脱用 ZIP を取得できません。');
+            break;
+          case 413:
+            setPageError('上限を超えたため、離脱用 ZIP を作成できませんでした。');
+            break;
+          default:
+            setPageError('離脱用 ZIP の受信を完了できませんでした。もう一度お試しください。');
+        }
       }
     } finally {
       openWorkExportAbort.current = null;

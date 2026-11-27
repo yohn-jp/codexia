@@ -69,7 +69,7 @@ APIは認証と作品へのアクセス権限を確認します。ブラウザ�
 
 ## 離脱用オープンエクスポート契約（REQ-DATA-006）
 
-**種別: 採用済みの規範的設計。実装と実測は未完了。** 本節は作者がCodexiaから離脱する場合の作品データ取得を所有する。対象読者は作者・開発者。上記 `codexia-work/v1` は現行のバージョン付きJSON交換（新規作品へのimportを含む）として区別する。運用DR、SQL/DB dump、ZIP import、専用viewer、EPUB/DOCX出版形式の拡張はこの決定の対象外。運用DRは [Backup](deployment/BACKUP.md)、永続データ境界は [Data model](architecture/DATA-MODEL.md) が所有する。
+**種別: 採用済みの規範的設計。Windows と非本番 Cloudflare Tunnel での受入計測を要する。** 本節は作者がCodexiaから離脱する場合の作品データ取得を所有する。対象読者は作者・開発者。上記 `codexia-work/v1` は現行のバージョン付きJSON交換（新規作品へのimportを含む）として区別する。運用DR、SQL/DB dump、ZIP import、専用viewer、EPUB/DOCX出版形式の拡張はこの決定の対象外。運用DRは [Backup](deployment/BACKUP.md)、永続データ境界は [Data model](architecture/DATA-MODEL.md) が所有する。
 
 [離脱用 ZIP の実装契約](architecture/OPEN-WORK-EXPORT-CONTRACT.md) に HTTP、認可、画面および資源管理の詳細を定める。
 
