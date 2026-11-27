@@ -2,7 +2,22 @@
 
 **詳細画面設計:** [全画面・ボタン台帳](SCREEN-CONTROL-CATALOG.md)、[画面状態遷移図](SCREEN-STATE-ATLAS.md)、[URL/API認可設計](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md) が初回SETUP、owner-session管理、OIDC/OAuth、運用プレーンの権限を区別する。
 
-**種別: 正本・規範的設計。** 管理者の識別情報、Passkey、セッション、外部 IdP と OAuth を管理する画面・操作の責任を定義する。管理画面という語は **(1) 作者本人の認証・セキュリティ UI** と **(2) VM・リリース・Cloudflare 運用** を混同しないために使い分ける。**合意済み目標:** 作者の認証・セキュリティを扱う管理コンソールは Cloudflare Workers Static Assets の `/console` に置き、`/console/setup` を初回登録の入口とする。独立したインフラ運用コンソールや第二の認証基盤は設けない。現在のDesktop Webでは認証・セキュリティUIをdialogとして提供し、`/console`への移行は未実施である。旧Mobile React設定UIは製品導線から撤去済み。Desktop Webが現在の作者用製品で、SwiftUI Native iOSは受入未完了・開発凍結中の採用目標である。Nativeの本人認証・設定UIは[iOS SwiftUI正本](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)に従い独立して実装する。Desktop Web の `/console/security` は Passkey とセッションを管理する。`/console/identity` は外部 IdP の設定状態と保存済み OAuth 同意を参照する。**追加決定:** バックアップ先の指定・接続検証・実行履歴確認は、ownerが `/console/backups` から行う。特権VM操作・本番復元は従来どおり運用プレーンに留める。詳細は [Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md)。権限の正本は [API 認証・認可](../architecture/API-AUTHN-AUTHZ.md)、全体の正本は [システム基本設計](../architecture/SYSTEM-DESIGN.md)。
+**種別は正本および規範的設計。** 管理者の識別情報、Passkey、セッション、外部 IdP と OAuth を管理する画面と操作の責務を定める。
+作者本人の認証とセキュリティを扱う管理コンソールは Cloudflare Workers Static Assets の `/console` に置き、`/console/setup` を初回登録の入口とする。
+VM、リリース、Cloudflare の運用は独立した運用プレーンが担い、管理コンソールは既存の認証基盤を使う。[API 認証・認可](../architecture/API-AUTHN-AUTHZ.md) ／ [システム基本設計](../architecture/SYSTEM-DESIGN.md)
+
+Desktop Web は管理トップと初回登録を実装している。
+`/console/security` で Passkey とセッションを管理し、`/console/identity` で外部 IdP の設定状態を確認し、保存済み OAuth 同意を参照または取り消せる。
+原稿 Shell の認証とセキュリティのダイアログからも本人操作を利用できる。
+所有者による OIDC 設定の登録、検証、有効化は採用目標である。[Owner OIDC 契約](../architecture/OWNER-OIDC-MANAGEMENT-CONTRACT.md)
+
+バックアップ先の指定、接続検証、実行履歴の参照には `/console/backups` を使う。
+実 S3 保管と独立復旧の受入は運用環境ごとに確認する。
+特権 VM 操作と本番復元は運用プレーンが担う。[Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md)
+
+作者用製品は Desktop Web である。
+SwiftUI Native iOS は開発凍結中の採用目標で、実機受入を要する。
+旧 Mobile React 設定 UI は製品導線から撤去済みであり、Native の本人認証と設定画面は独立して実装する。[iOS SwiftUI 正本](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)
 
 ## 本人のセキュリティ管理画面（現在提供する範囲）
 
@@ -46,9 +61,12 @@ flowchart TD
 
 変更には **要求前の本人認証・owner 確認 → 対象識別 → 確認 → サーバー書込結果 → 最新一覧の再取得** を必須とする。一覧の取得失敗を操作失敗と同一視せず、「書込は成功、一覧更新は失敗」を区別する。書込の応答を確認できない場合は同じ一覧を再取得し、利用者に現在の状態を示す。最後の Passkey 削除や現在のセッション個別 revoke は UI 側でも抑止するが、API 側でも同じ権限・安全条件を検証する。
 
-## 外部 IdP / OAuth クライアントの管理（採用済み設計目標）
+## 外部 IdP と OAuth クライアントの管理
 
-以下は [API 認証・認可](../architecture/API-AUTHN-AUTHZ.md) に定める IdP 管理と OAuth 同意管理の**目標仕様**である。`/console/identity` と原稿 Shell の設定では、運用者設定の有無と所有者リンクの未確認状態を区別し、保存済みの OAuth 同意をクライアント ID と scope で参照できる。アプリへの同意は専用認可経路 `/oauth/consent` で行う。
+`/console/identity` と原稿 Shell の設定は、運用者による設定の有無と、所有者との連携が未確認の状態を区別する。
+保存済み OAuth 同意はクライアント ID と scope で参照でき、対象の確認と Passkey での再認証を経て取り消せる。
+アプリへの同意は専用認可経路 `/oauth/consent` で行う。
+図の IdP 変更経路は採用目標を示す。[API 認証・認可](../architecture/API-AUTHN-AUTHZ.md)
 
 ```mermaid
 flowchart TD
@@ -66,7 +84,7 @@ flowchart TD
     DISABLE -->|owner復旧経路保持| CONFIRM["再認証 + 確認 → 無効化"]
     BLOCK --> IDP
     CONFIRM --> IDP
-    OWNER --> OAUTH["OAuth クライアント/同意管理（目標）"]
+    OWNER --> OAUTH["OAuth クライアント/同意管理"]
     OAUTH --> REVOKE["対象 client・scope・grant を確認<br/>明示 revoke"]
     REVOKE --> OAUTH
 ```
@@ -101,9 +119,9 @@ flowchart LR
 | 管理操作中に原稿の未保存変更 | 元の journal と editor を保護してから遷移 | 入力・作者 scope |
 | 公開経路・VM 操作で障害 | Web UI に迂回権限を与えず、管理プレーンの停止/復旧手順へ | 既存サービスとバックアップ |
 
-**受入条件:** Desktop Webの実ブラウザーとiOS Nativeの実機で、各設定・本人操作、owner/non-owner、Passkey 登録/名称変更/最後の1個削除拒否、別セッション revoke、認証失効・ネットワーク障害、元の原稿への安全な復帰を確認する。外部 IdP / OAuth 管理は実装後に別途 E2E と本人同一性・CSRF・権限拒否を検証する。Web に運用コンソールがないことは欠落ではなく信頼境界の決定である。
+**受入条件:** Desktop Webの実ブラウザーとiOS Nativeの実機で、各設定・本人操作、owner/non-owner、Passkey 登録/名称変更/最後の1個削除拒否、別セッション revoke、認証失効・ネットワーク障害、元の原稿への安全な復帰を確認する。外部 IdP と OAuth 管理は別途 E2E と本人同一性・CSRF・権限拒否を検証する。Web に運用コンソールがないことは欠落ではなく信頼境界の決定である。
 
-## 管理コンソールのルート・認可と情報設計（合意済み目標）
+## 管理コンソールのルート・認可と情報設計
 
 | URL | 画面責務 | 表示・操作の前提 |
 | --- | --- | --- |
@@ -111,11 +129,11 @@ flowchart LR
 | `/console/setup` | **初回所有者だけ**の登録ウィザード。セットアップの状態確認、初期登録キー入力、Passkey作成、登録完了 | 正本DBが新規構築を承認済み・owner未登録・期限内の一回限りのキー |
 | `/console/security` | Passkey一覧、追加・名称変更・削除、セッション一覧と終了、再認証 | owner session。危険操作はfresh reauthentication |
 | `/console/identity` | OIDCの登録・検証・有効化、OAuthクライアント・同意の参照／許可された取消し | owner sessionと操作ごとの認可。現在のIdP変更UIは未実装 |
-| `/console/backups` | S3バックアップ設定状態、検証済み保全点、手動ジョブ要求、運用状態 | owner session。操作ごとにfresh reauthentication。目標・未実装 |
-| `/console/backups/destination` | S3互換接続先・暗号化済資格情報のwrite-only設定、検証、有効化 | owner session＋検証/active revision。目標・未実装 |
-| `/console/backups/verification` | draftのS3疎通probeと適用結果を照合 | owner session。202受領は検証成功ではない。目標・未実装 |
-| `/console/backups/history` | 各実行と遠隔保全receipt、復旧演習結果への導線 | owner session。復元ボタンは提供しない。目標・未実装 |
-| `/console/backups/recovery` | 隔離復元証拠と保護された運用復旧手順を表示 | owner session。実本番復元はOPERATORだけ。目標・未実装 |
+| `/console/backups` | S3バックアップ設定状態、検証済み保全点、手動ジョブ要求、運用状態 | owner session。操作ごとにfresh reauthentication |
+| `/console/backups/destination` | S3互換接続先・暗号化済資格情報のwrite-only設定、検証、有効化 | owner session＋検証/active revision |
+| `/console/backups/verification` | draftのS3疎通probeと適用結果を照合 | owner session。202 は要求の受付を示す |
+| `/console/backups/history` | 各実行と遠隔保全receipt、復旧演習結果への導線 | owner session。復元ボタンは提供しない |
+| `/console/backups/recovery` | 隔離復元証拠と保護された運用復旧手順を表示 | owner session。実本番復元はOPERATORだけ |
 | `/oauth/consent` | OAuthの同意。管理コンソールから**独立**した認可画面 | 既存のBetter Auth/OAuthプロトコル |
 
 静的UIは既存の**Cloudflare Workers Static Assets**で提供し、`/console/*` は同一のWeb UIのルートとして管理する。登録状態、初期キー検証、owner確定、Passkey ceremonyはCloudflare Workersでなく、Cloudflare Tunnel経由の**VM上のFastify + Better Auth / `codexia_auth`**が権威を持つ。**セットアップキーはインフラ権限でも通常のAPI bearerでもない**。Cloudflare AccessはUI入口の保護策として別途承認・検証し、owner権限の根拠としない。
@@ -199,11 +217,11 @@ flowchart TD
 
 ### 管理トップと日常的な設定変更のUX
 
-`/console` は初回登録を終えたownerだけのホームであり、**セキュリティ**（Passkey・セッション）、**連携ID**（OIDC）、**アプリのアクセス**（OAuthクライアント・同意）、**バックアップ**（S3保管先・検証・保全履歴）の四つの操作群を区別する。Webは現在のDesktop dialogを`/console`へ移行する。旧Mobile React設定の再利用は要求しない。iOS NativeはSwiftUI独立UIと同じAPI契約を使用し、別の認証DB・権限正本を作らない。危険操作は対象を明示して確認、fresh reauthentication、サーバー書込結果、再取得の順とする。失敗後も最後の本人認証手段を維持する。
+`/console` は初回登録を終えたownerだけのホームであり、**セキュリティ**（Passkey・セッション）、**連携ID**（OIDC）、**アプリのアクセス**（OAuthクライアント・同意）、**バックアップ**（S3保管先・検証・保全履歴）の四つの操作群を区別する。旧Mobile React設定の再利用は要求しない。iOS NativeはSwiftUI独立UIと同じAPI契約を使用し、別の認証DB・権限正本を作らない。危険操作は対象を明示して確認、fresh reauthentication、サーバー書込結果、再取得の順とする。失敗後も最後の本人認証手段を維持する。
 
-既存のDesktop Webの「認証・セキュリティ」入口は、実装移行後は`/console/security`への案内を正規導線とし、ログイン/戻り先は同一origin内の安全な既知ルートのみ許す。現在Desktopはdialogであり、Mobile settings routeは撤去済みである。`/console`へ切り替えたと主張しない。
+Desktop Web の本人管理への正規導線は `/console/security` とし、ログインと戻り先には同一 origin 内の安全な既知ルートのみを許可する。
 
-## 新設コンソールの受入条件（実装後に検証）
+## 管理コンソールの受入条件
 
 - Workersの`/console`、`/console/setup`、`/console/security`、`/console/identity`はDesktop Webで直接訪問・再読込でき、SPAの404にならない。iOS Nativeは別の画面/認証導線で実機受入を行い、Mobile React WebとのURL互換を要求しない。
 - 新規DBではキー検証からPasskey確定、登録後の同一キー拒否、API応答不明からの状態照合、本人の通常ログインまで実ブラウザーで確認する。
@@ -211,7 +229,7 @@ flowchart TD
 - セキュリティ設定はログイン維持・再認証・最後のPasskey削除拒否・セッション失効・原稿へ戻る際の下書き保護を通す。
 - Cloudflare Access、Tunnel、Workers、独立VM・復旧ホストについて、必要な経路での公開/拒否を**実測**する。本文書の図だけでは本番受入としない。
 
-## バックアップ保管先と履歴の管理画面（`/console/backups`、採用済み目標）
+## バックアップ保管先と履歴の管理画面（`/console/backups`）
 
 **目的:** ownerがSSHや環境変数の手入力を行わず、**保護済みのS3保存先をUIから指定し、接続を検証して有効化**できること。保全完了・復旧可能性を推測せず、ジョブ結果と証拠を区別する。画面ID `CON-30`〜`CON-34`、control ID、実認可は [Screen catalog](SCREEN-CONTROL-CATALOG.md)、[State Atlas](SCREEN-STATE-ATLAS.md)、[Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md) が正本。
 
@@ -251,5 +269,6 @@ flowchart TD
 
 本画面を開く前のブラウザー原稿draftは既存の離脱ガードで保護する。Desktop Webのキーボード・スクリーンリーダー・再認証・戻り先、連続操作/応答喪失をPlaywrightで確認する。iOS Nativeは実機/Simulatorで独立検証し、Mobile React 320px専用E2Eは要求しない。
 
-バックアップ画面の操作は実装目標である。
-APIとexecutorの有効化はオペレーターが行う。[Backup console provisioning](../../deploy/backup/CONSOLE.md)
+Desktop Web は設定、接続検証と有効化、手動ジョブの要求、実行履歴と復旧証拠の表示に対応する。
+API と executor の有効化はオペレーターが行う。
+遠隔保全と独立復旧の受入は、実際の保管先と復旧ホストで確認する。[Backup console provisioning](../../deploy/backup/CONSOLE.md)

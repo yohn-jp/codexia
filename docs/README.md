@@ -26,13 +26,13 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Complete screen, control and user journey catalog | [Screen control catalog](design/SCREEN-CONTROL-CATALOG.md) — route/CTA/error/authorization traceability |
 | Individual screen state diagrams | [Screen State Atlas](design/SCREEN-STATE-ATLAS.md) — all logical screen transitions and recovery paths |
 | Abstract UX journey exploration and design/implementation comparison | [UX Simulator contract](design/UX-SIMULATOR-CONTRACT.md) — derived from design authorities and canonical product sources, generic renderer, no duplicate screens or behavior, independent product acceptance |
-| GitHub Pages feature inventory and publication boundaries | [Pages inventory](verification/PAGES-FUNCTION-INVENTORY.md) — observed routes, sources, limitations, gaps, live deployment not verified |
-| Development Pages unified portal and screen navigation | [Pages sitemap and UX proposal](design/DEVELOPMENT-PAGES-UX.md) — proposed homepage, Graphify improvements and six task-flow diagrams; not implemented |
+| GitHub Pages feature inventory and publication boundaries | [Pages inventory](verification/PAGES-FUNCTION-INVENTORY.md) — generated routes, data sources and publication requirements |
+| Development Pages unified portal and screen navigation | [Pages sitemap and UX design](design/DEVELOPMENT-PAGES-UX.md) — portal and shared navigation design; see the Pages inventory for generated features |
 | Graphical, source-bound diagrams | [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/) · [viewer and verification](verification/ARCHITECTURE-ATLAS.md) — SVG diagram viewer, built and validated by Repository Audit Pages |
 | Overall architecture and trust boundaries | [System design](architecture/SYSTEM-DESIGN.md) — canonical system design |
 | PostgreSQL domain and schema invariants | [Data model](architecture/DATA-MODEL.md) — canonical domain design |
 | User screen navigation and recovery | [User screen flows](design/USER-SCREEN-FLOW.md) — canonical state transitions |
-| Owner security management and admin boundaries | [Admin screen flows](design/ADMIN-SCREEN-FLOW.md) — canonical `/console`, `/console/setup`, `/console/security`, `/console/identity` routing and state transitions (target, not implemented) |
+| Owner security management and admin boundaries | [Admin screen flows](design/ADMIN-SCREEN-FLOW.md) — Desktop Web Console, owner enrollment, Passkey and session management, and saved OAuth grant revocation. Owner-managed OIDC remains a design target. Backup operations require operator provisioning and separate deployment acceptance. |
 | Production deployment lifecycle and route selection | [Deployment lifecycle](deployment/DEPLOYMENT-LIFECYCLE.md) — normative state classification, initial pair activation, compatible updates, maintenance/recovery and shared acceptance |
 | SSH-side initial deployment CLI | [codexiactl](deployment/CODEXIACTL.md) — normative command, provider authentication, setup/dispatch, resume and acceptance contract |
 | Pristine VM, one-time setup key, first owner and recovery | [Initial deployment flows](deployment/INITIAL-DEPLOYMENT-FLOW.md) — SSH-ready VM, Ansible, Workers setup-only/API, protected activation and existing-owner restore contract |
@@ -87,7 +87,7 @@ These maintained documents supplement the topic owners above. The classification
 | --- | --- | --- |
 | Governance | [Agent governance](../AGENTS.md) · [Security reporting](../SECURITY.md) | Contributing and disclosure policy; not a second architecture |
 | Product brief | [Product purpose](../app/PRODUCT.md) | Product intent and accepted UX context |
-| Native SwiftUI implementation | [iOS SwiftUI architecture](architecture/IOS-SWIFTUI-ARCHITECTURE.md) | Normative target, currently unimplemented |
+| Native SwiftUI implementation | [iOS SwiftUI architecture](architecture/IOS-SWIFTUI-ARCHITECTURE.md) | Normative design with a partial native implementation. Development and automatic Xcode validation are paused. Physical-device acceptance remains required. |
 | Authentication provisioning | [Better Auth runbook](../deploy/ansible/AUTH-RUNTIME.md) | Operational procedure |
 | Base deployment | [Ansible deployment](../deploy/ansible/README.md) · [Base runtime](../deploy/ansible/BASE-RUNTIME.md) · [Base secrets](../deploy/ansible/BASE-SECRETS.md) | Operational procedures, subordinate to deployment design |
 | Edge configuration | [Cloudflare Access policy migration](../deploy/cloudflare/terraform/ACCESS-POLICY-MIGRATION.md) | Operational procedure |

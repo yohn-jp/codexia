@@ -6,8 +6,8 @@
 
 | 利用者 | 目的 | 許可する作業面 | 絶対に到達させない操作 |
 | --- | --- | --- | --- |
-| 作者（owner） | 続きを書く、構成・知識・提案の管理、公開、認証器管理 | Desktop React Web/iOS Native SwiftUI、OAuth、本人管理`/console`目標 | 管理画面からVM・SSH・DB credentialへ直接アクセス |
-| 初回所有者（未登録） | 新規構築されたサービスで最初のPasskeyを登録 | `/console/setup` **目標のみ** | 作品の閲覧/編集、owner sessionへの偽装、復旧DBで新規owner |
+| 作者（owner） | 続きを書く、構成・知識・提案の管理、公開、認証器管理 | Desktop React Web、OAuth、本人管理 `/console`。iOS Native SwiftUI は採用目標 | 管理画面からVM・SSH・DB credentialへ直接アクセス |
+| 初回所有者（未登録） | 新規構築されたサービスで最初のPasskeyを登録 | `/console/setup` | 作品の閲覧/編集、owner sessionへの偽装、復旧DBで新規owner |
 | 公開読者 | 共有された内容を読む | `/r/:module/:project/:slug`のみ | 非公開原稿/設定/履歴、書込、作者登録 |
 | 外部AI/MCP | 許可された作品を参照・解析して提案 | `/mcp`と登録済みtool。**Web画面は不要** | 作者の変更承認/適用、直接persistence、資格情報 |
 | 運用者 | 初期VM構築、証明済み更新、特権バックアップ/本番復旧 | 保護済みGitHub Actions/Tailscale SSH/Ansible。**作者用Web UIからはS3保存先の指定・検証・保全要求/結果の参照のみ** | WebにVM/IAM権限や復号秘密鍵を渡すこと、導入キーでSSH認証 |
@@ -19,7 +19,7 @@
 画面IDは [情報設計](INFORMATION-ARCHITECTURE.md) の従来カタログと整合させる。特に **WRT-02＝Revision履歴、REV-01＝提案一覧、REV-02＝提案詳細**。CFG-01は表示設定（DISPLAY-01）と本人セキュリティ設定（PREF-01）を束ねる概念的なカテゴリであり、別のデータ正本やURLを作らない。KNO-03の局所グラフは情報設計で検討された**未採用提案**として明示し、実装済みの関係一覧/詳細に見せかけない。
 
 
-**画面IDは安定した論理識別子。** 【実装】は現行Desktop React Web実装の状態であり、iOS Nativeの実装・受入を意味しない。【目標】は採用済みで未受入。iOSの開発と自動Xcode検証は一時停止中で、実機受入は延期（免除ではない）。旧Mobile Web `/mobile/`/Ionic authoring shellは製品導線から撤去済みで、対応・互換性の約束はない。iOS Nativeの表示は[SwiftUI正本](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)に従い論理IDのみ共通化する。
+**画面IDは安定した論理識別子。** 【実装】は Desktop Web の画面実装を示す。採用目標の実装範囲は各行に記す。Console の Cloudflare と VM での受入、および Native iOS の実機受入には、それぞれの環境での証拠を要する。iOSの開発と自動Xcode検証は一時停止中で、実機受入は延期中。旧Mobile Web `/mobile/`/Ionic authoring shellは製品導線から撤去済みで、対応・互換性の約束はない。iOS Nativeの表示は[SwiftUI正本](../architecture/IOS-SWIFTUI-ARCHITECTURE.md)に従い論理IDのみ共通化する。
 
 | 画面ID | 入口・表示形態 | principal | 主タスクと通常の戻り先 | 種別 |
 | --- | --- | --- | --- | --- |
@@ -40,21 +40,21 @@
 | TOOL-01 | Workspaceの`module:*`可変panel | OWNER-API、MCPは独立tool側 | Moduleのread/compute/proposeと非同期job→同じ作品 | 実装 |
 | JOB-01 | ヘッダーの受信箱/ジョブdialog | OWNER-API | 通知とjob確認/既読 → 元の作業 | 実装 |
 | DISPLAY-01 | Theme、組版、Workspace配置 | 本人のbrowser UI state | 見た目・レイアウト変更→元の作業。原稿は無変更 | 実装 |
-| PREF-01 | Desktop認証dialog→`/console/security`目標・iOS Native設定 | OWNER-SESSION（実APIはowner確認） | Passkey/セッション→元の作業 | Desktop実装・iOS未受入 |
+| PREF-01 | Desktop 認証ダイアログと `/console/security`、iOS Native 設定 | OWNER-SESSION（実APIはowner確認） | Passkey/セッション→元の作業 | Desktop実装・iOS未受入 |
 | PUB-01 | `/r/:module/:project/:slug` | SHARE-READER | 許された公開版の読書→公開画面内で終了 | 実装 |
-| CON-00 | `/console` | OWNER-SESSION | 認証状況・各管理項目へのハブ | 目標 |
-| CON-01 | `/console/setup`開始・登録キー入力 | SETUP | 状態確認、キー認可→CON-02 | 目標 |
-| CON-02 | `/console/setup` Passkey ceremony/確認 | SETUP | WebAuthn、owner一意確定→CON-03 | 目標 |
-| CON-03 | `/console/setup` client登録と公開待ち | SETUPのread-only状態（本人作成後は本人session） | 準備確認→通常owner login | 目標 |
+| CON-00 | `/console` | OWNER-SESSION | 認証状況・各管理項目へのハブ | Desktop Web 実装 |
+| CON-01 | `/console/setup`開始・登録キー入力 | SETUP | 状態確認、キー認可→CON-02 | Desktop Web 実装 |
+| CON-02 | `/console/setup` Passkey ceremony/確認 | SETUP | WebAuthn、owner一意確定→CON-03 | Desktop Web 実装 |
+| CON-03 | `/console/setup` client登録と公開待ち | SETUPのread-only状態（本人作成後は本人session） | 準備確認→通常owner login | Desktop Web 実装 |
 | CON-10 | `/console/security` Passkey管理 | OWNER-SESSION＋fresh確認 | 追加・改名・削除、現在の認証手段維持→CON-00 | Desktop Web 実装 |
 | CON-11 | `/console/security` session管理 | OWNER-SESSION＋fresh確認（操作による） | 他端末終了、全他セッション終了→CON-00 | Desktop Web 実装 |
 | CON-20 | `/console/identity` OIDC管理 | OWNER-SESSION＋fresh確認 | issuer/client登録・検証・リンク・有効化/無効化→CON-00 | 運用者設定状態の参照を実装。管理操作は目標 |
-| CON-21 | `/console/identity` OAuth client/grants | OWNER-SESSION＋object/scope認可 | クライアント・同意の参照/許可された失効→CON-00 | 保存済み同意の参照を実装。grant失効は目標 |
-| CON-30 | `/console/backups` | OWNER-SESSION | S3保存先/適用状態・off-VM保全・復旧検証の状態→各バックアップ画面 | 目標・未実装 |
-| CON-31 | `/console/backups/destination` | OWNER-SESSION＋fresh（secret/active変更時） | S3 provider/endpoint/bucket/prefix/credential（write-only）を編集→CON-32 | 目標・未実装 |
-| CON-32 | `/console/backups/verification` | OWNER-SESSION＋fresh（activate時） | probe→revision照合→activeの適用結果再取得→CON-30 | 目標・未実装 |
-| CON-33 | `/console/backups/history` | OWNER-SESSION | backup run/暗号文receiptと失敗・未確認を表示→CON-30/34 | 目標・未実装 |
-| CON-34 | `/console/backups/recovery` | OWNER-SESSIONのread-only | 隔離restore drillの証拠、OPERATOR復旧手順への説明。実本番復元はしない | 目標・未実装 |
+| CON-21 | `/console/identity` OAuth client/grants | OWNER-SESSION＋object/scope認可 | クライアント・同意の参照/許可された失効→CON-00 | Desktop Web で保存済み同意の参照と取消しを実装 |
+| CON-30 | `/console/backups` | OWNER-SESSION | S3保存先/適用状態・off-VM保全・復旧検証の状態→各バックアップ画面 | Desktop Web 実装、運用受入は別 |
+| CON-31 | `/console/backups/destination` | OWNER-SESSION＋fresh（secret/active変更時） | S3 provider/endpoint/bucket/prefix/credential（write-only）を編集→CON-32 | Desktop Web 実装、運用受入は別 |
+| CON-32 | `/console/backups/verification` | OWNER-SESSION＋fresh（activate時） | probe→revision照合→activeの適用結果再取得→CON-30 | Desktop Web 実装、運用受入は別 |
+| CON-33 | `/console/backups/history` | OWNER-SESSION | backup run/暗号文receiptと失敗・未確認を表示→CON-30/34 | Desktop Web 実装、運用受入は別 |
+| CON-34 | `/console/backups/recovery` | OWNER-SESSIONのread-only | 隔離restore drillの証拠、OPERATOR復旧手順への説明。実本番復元はしない | Desktop Web 実装、運用受入は別 |
 | OPS-01 | Webではなくprotected workflow/SSH | OPERATOR | VM構築・更新・**本番**復旧（設計はデプロイ文書に委任）。保管先設定はCON-30〜34のowner UI、実際のhost backup/restoreはprotected executor/operator | 実装/目標分離 |
 
 **iOS採用目標は独立したSwiftUI画面とUIKit/TextKit 2編集面。** Core/API、作品、Revision、receipt/回復契約を共有するがReact/Ionic部品を共有しない。OAuthはsystem authentication、refresh tokenはKeychainに置き、第二原稿DBは作らない。SwiftUI sourceは存在するが、未完了の実装・受入は開発凍結中。Capacitor/Ionic Web authoringは旧実装であり、current iOS SwiftUI appの実装根拠ではない。

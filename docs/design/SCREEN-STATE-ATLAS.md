@@ -1,6 +1,6 @@
 # 全画面の状態遷移図（Screen State Atlas）
 
-**種別: 規範的な画面状態遷移設計。** [全画面・ボタン台帳](SCREEN-CONTROL-CATALOG.md)にある論理画面IDとコントロールを状態遷移図へ対応させる。各図のURL/permissionは [URL・API認可](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md) を正本とする。**図は業務仕様であり、画面が既に稼働している証拠ではない。** 【目標】の`/console/*`とsetup-only APIを現行実装と区別する。
+**種別: 規範的な画面状態遷移設計。** [全画面・ボタン台帳](SCREEN-CONTROL-CATALOG.md)にある論理画面IDとコントロールを状態遷移図へ対応させる。各図のURL/permissionは [URL・API認可](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md) を正本とする。各見出しは画面の実装範囲や採用状態を示す。稼働環境での受入には、図に示す操作を対象環境で確認した証拠を要する。
 
 読み方: 四角は画面/状態、ひし形は認証・入力・保存の分岐、矢印は実操作やサーバー結果による遷移。例外時は元の作業・下書き・認可の境界を保ち、隠れた別の書込経路へ転換しない。各画面のボタン名は `CTRL ID` を参照。共通の操作禁止/403/409/失敗の契約は台帳に委任し、各図ではその画面特有の戻り先を記載する。
 
@@ -301,7 +301,7 @@ flowchart TD
     VIEW -->|閉じる| END["公開画面を終了"]
 ```
 
-## CON-00 — 管理コンソールHome【目標】
+## CON-00 — 管理コンソールHome【Desktop Web 実装】
 
 ```mermaid
 flowchart TD
@@ -319,7 +319,7 @@ flowchart TD
     IDENTITY --> HOME
 ```
 
-## CON-01・CON-02・CON-03 — 初回登録ウィザード【目標】
+## CON-01・CON-02・CON-03 — 初回登録ウィザード【Desktop Web 実装】
 
 ```mermaid
 flowchart TD
@@ -338,7 +338,7 @@ flowchart TD
     READY -->|配備・認証成功| LOGIN["通常のownerログインへ"]
 ```
 
-## CON-10 — Passkey管理【目標】
+## CON-10 — Passkey管理【Desktop Web 実装】
 
 ```mermaid
 flowchart TD
@@ -359,7 +359,7 @@ flowchart TD
     RETRY --> LIST
 ```
 
-## CON-11 — セッション管理【目標】
+## CON-11 — セッション管理【Desktop Web 実装】
 
 ```mermaid
 flowchart TD
@@ -376,7 +376,10 @@ flowchart TD
     RETRY --> LOAD
 ```
 
-## CON-20・CON-21 — OIDCとOAuth client/同意【目標】
+## CON-20・CON-21 — OIDCとOAuth client/同意【部分導入】
+
+Desktop Web は、運用者による OIDC 設定の状態と保存済み OAuth 同意を表示し、Passkey での再認証後に対象の同意を取り消せる。
+所有者による OIDC の登録、検証、有効化は採用目標である。[Owner OIDC 契約](../architecture/OWNER-OIDC-MANAGEMENT-CONTRACT.md)
 
 ```mermaid
 flowchart TD
@@ -397,7 +400,10 @@ flowchart TD
     MCP --> MENU
 ```
 
-## CON-30 — バックアップ管理トップ【目標・未実装】
+## CON-30 — バックアップ管理トップ【Desktop Web 実装】
+
+CON-30〜34 の操作はオペレーターが有効化した API と executor を使う。
+実 S3 保管と独立復旧の受入は、配備環境ごとの証拠で判定する。[Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md)
 
 ```mermaid
 flowchart TD
@@ -418,7 +424,7 @@ flowchart TD
     REC --> FETCH
 ```
 
-## CON-31・CON-32 — S3設定・接続検証・有効化【目標・未実装】
+## CON-31・CON-32 — S3設定・接続検証・有効化【Desktop Web 実装】
 
 ```mermaid
 stateDiagram-v2
@@ -443,7 +449,7 @@ stateDiagram-v2
 
 draft保存・probe成功・202受理のどれも遠隔暗号文の保全済み証拠にはならない。資格情報はAPIへwrite-only送信され、再取得した応答に含まれない。起動時のlocal staging、age受取公開鍵、VM/IAM管理権限はUIから変更不可。検証用S3 probeと実backup objectは一意のprefix/IDで区別する。
 
-## CON-33・CON-34 — バックアップ履歴・隔離復旧証拠【目標・未実装】
+## CON-33・CON-34 — バックアップ履歴・隔離復旧証拠【Desktop Web 実装】
 
 ```mermaid
 flowchart TD
@@ -503,6 +509,6 @@ flowchart TD
 ## Diagram/Control/APIの受入契約
 
 - **必須の一致:** 画面ID、CTR ID、要求principal、method、遷移先、失敗時の保護先が [ボタン台帳](SCREEN-CONTROL-CATALOG.md) と [URL/API認可](../architecture/ROUTE-AUTHORIZATION-CONTRACT.md) に矛盾しないこと。
-- **未実装の画面:** `/console/*`、setup-only認可API、鍵配送、OIDC設定管理は *NOT_IMPLEMENTED* と明記し、画面遷移図をもって稼働を主張しない。Web/VM/Cloudflareの本番受入は別に必要。
+- **実装状況と受入:** 所有者による OIDC 設定は採用目標である。管理コンソールと初回登録の稼働は、Web、VM、Cloudflare の対象環境で確認する。初期登録キーの発行と配送の詳細は [初期デプロイ遷移](../deployment/INITIAL-DEPLOYMENT-FLOW.md) を参照する。
 - **必須の可視化:** AtlasはこのMarkdownのMermaid定義からSVGを生成し、生成全件の構文・実ブラウザー読み込み・個別リンクを検証する。HTML側に同じ状態グラフを二重ハードコードしない。
 - **異常系:** 401/403、別project、404、競合409/412、通信断、local draft容量不足、応答不明、Passkeyキャンセル、setupの二重消費、無効な公開linkで、UIとDBの実状態を観測する。
