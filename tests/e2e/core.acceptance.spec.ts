@@ -395,7 +395,7 @@ test("replaying a saved operation after a newer remote revision shows the curren
   expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
 });
 
-test("[TEST-UI-002-001] a lost save response survives newer input, reloads, and rebases the newer draft after acknowledgement", async ({ page, authorizeAuthor }) => {
+test("[TEST-UI-002-001] [TEST-UI-006-002] a lost save response survives newer input, reloads, and rebases the newer draft after acknowledgement", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);
   const submitted = "Submitted B before newer input.";
   const newer = "Newer C entered while B was saving.";

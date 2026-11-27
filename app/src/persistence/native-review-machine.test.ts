@@ -142,7 +142,7 @@ test('a detail read failure keeps the newly fetched list available', async () =>
   actor.stop();
 });
 
-test('a version conflict blocks another mutation until a fresh detail is loaded', async () => {
+test('[TEST-UI-006-003] a version conflict blocks another mutation until a fresh detail is loaded', async () => {
   const conflict = Object.assign(new Error('stale version'), { status: 412 });
   const { actor, calls, load } = harness({
     async apply(projectId, id, version) {
