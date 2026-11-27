@@ -1554,7 +1554,7 @@ Verifies owner-session admission, credential isolation, revision handling, and e
 **Conformance status**: PARTIAL
 **Applicability**: CURRENT
 **Design owner**: [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Backup](../deployment/BACKUP.md)
-**Implementation identifiers**: registerBackupConsole; BackupConsoleStore; BackupConsoleExecutor; backup.sh (BKC-008〜010)
+**Implementation identifiers**: registerBackupConsole; BackupConsoleStore; BackupConsoleExecutor; deploy/backup/backup.sh (BKC-008〜010)
 **Verification identifiers**: packages/api/test/backup-console.integration.test.ts
 **Test IDs**: TEST-OPS-005-001
 **Exact-run reference**: NOT_RUN
@@ -1578,7 +1578,7 @@ ownerが手動保全を要求してrun/暗号文/独立復旧証拠を区別し�
 **MID**: fe1292405731f817303d8340e74e674e
 **UID**: OBL-REQ-OPS-005-O01
 **Design reference**: [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.md)、[Backup](../deployment/BACKUP.md)
-**Implementation identifiers**: registerBackupConsole; BackupConsoleStore; BackupConsoleExecutor; backup.sh (BKC-008〜010)
+**Implementation identifiers**: registerBackupConsole; BackupConsoleStore; BackupConsoleExecutor; deploy/backup/backup.sh (BKC-008〜010)
 **Surface identifiers**: routeId=POST /api/console/backups/runs; routeId=GET /api/console/backups/runs; routeId=GET /api/console/backups/runs/{runId}; routeId=GET /api/console/backups/recovery
 **Test IDs**: TEST-OPS-005-001
 **Exact-run reference**: NOT_RUN
