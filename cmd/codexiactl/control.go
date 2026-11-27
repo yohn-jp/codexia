@@ -16,12 +16,12 @@ const (
 	ownerRecipient     = "CODEXIA_OWNER_SETUP_AGE_RECIPIENT"
 	bootstrapSSHSecret = "CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY"
 	runtimeSSHSecret   = "CODEXIA_DEPLOY_SSH_PRIVATE_KEY"
-	wifSecret          = "TS_OAUTH_CLIENT_ID"
+	wifClientIDInput   = "TS_OAUTH_CLIENT_ID"
 	edgeTarget         = "CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"
 )
 
 var commonSecrets = []string{
-	wifSecret, "CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN", "CODEXIA_ACCESS_CLIENT_ID", "CODEXIA_ACCESS_CLIENT_SECRET",
+	"CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN", "CODEXIA_ACCESS_CLIENT_ID", "CODEXIA_ACCESS_CLIENT_SECRET",
 }
 
 type environmentInput struct {
@@ -44,6 +44,9 @@ func protectedVariables(address, pin, user, target string) []environmentInput {
 func observedProtectedVariables(snapshot githubSnapshot, vm vmObservation, tailnet tailnetObservation,
 	pin, edge string) ([]environmentInput, error) {
 	values := protectedVariables(tailnet.Address, pin, vm.User, edge)
+	values = append(values,
+		environmentInput{bootstrapEnvironment, wifClientIDInput, tailnet.ClientID},
+		environmentInput{productionEnvironment, wifClientIDInput, tailnet.ClientID})
 	for _, pair := range []struct{ host, known int }{{0, 1}, {4, 5}} {
 		env := selectEnvironment(snapshot, values[pair.host].environment)
 		host := env.Variables[values[pair.host].name]
@@ -199,10 +202,6 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 			err = putMissingSecret(ctx, c, control, input, private)
 			clear(private)
 			if err != nil {
-				return err
-			}
-		case wifSecret:
-			if err := putMissingSecret(ctx, c, control, input, []byte(tailnet.ClientID)); err != nil {
 				return err
 			}
 		default:
