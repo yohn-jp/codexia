@@ -86,6 +86,7 @@ test('certification materializes only the selected plan and reports for one or m
   await fixture(6, artifact.name, 'report.json', browserGroup, { 'browser-full-ui-v1/browser-coverage.json': browserCoverage });
   await fixture(7, artifact.name, 'report.json', browserGroup);
   assert.deepEqual(await readBrowserArtifact(archives.get(6), browserGroup.group), { group: browserGroup, reports: [browserCoverage] });
+  await assert.rejects(extractJsonEntry(archives.get(6), 'browser-full-ui-v1/browser-coverage.json'), /Invalid evidence filename/);
   await assert.rejects(readBrowserArtifact(archives.get(7), browserGroup.group), /missing required json entry/iu);
   await assert.rejects(readBrowserArtifact(archives.get(6), 'browser-full-writing'), /browser evidence group mismatch/iu);
   const requestedIds = [];
