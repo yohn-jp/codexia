@@ -36,7 +36,7 @@ test('keeps the verified frontend source distinct from a later release workflow 
   const result = await discoverPublication('frontend', f.readers);
   assert.deepEqual(result, { runId: 41, artifactId: 42, artifactDigest: 'd'.repeat(64), verifyRunId: 43 });
   f.readers.currentSource = (_, sha) => sha === head;
-  await assert.rejects(discoverPublication('frontend', f.readers), /No certified frontend artifact/u);
+  await assert.rejects(discoverPublication('frontend', f.readers), /Missing or ambiguous certified UI archive/u);
 });
 
 test('rejects superseded source, ambiguous jobs, expired artifacts and non-main origin', async () => {
