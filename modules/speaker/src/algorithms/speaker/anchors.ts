@@ -1,9 +1,9 @@
-import type { ClusterTrailCollector } from "../clusterAssignmentTrail.js";
-import type { SpeakerAttribution } from "../speakerAttribution.js";
-import { removeDialogueBrackets } from "../styleFingerprint.js";
-import type { Entity } from "../types.js";
-import type { DialogueRecord } from "./types.js";
-import { ATTRIBUTION_VERB_RE, BACK_REFERENCE_RE } from "./types.js";
+import type { ClusterTrailCollector } from '../clusterAssignmentTrail.js';
+import type { SpeakerAttribution } from '../speakerAttribution.js';
+import { removeDialogueBrackets } from '../styleFingerprint.js';
+import type { Entity } from '../types.js';
+import type { DialogueRecord } from './types.js';
+import { ATTRIBUTION_VERB_RE, BACK_REFERENCE_RE } from './types.js';
 
 /**
  * パーティションの硬い entity アンカーにするか。
@@ -12,23 +12,21 @@ import { ATTRIBUTION_VERB_RE, BACK_REFERENCE_RE } from "./types.js";
  */
 function isPartitionEntityAnchor(attribution: SpeakerAttribution): boolean {
   if (attribution.speakerEntityId === null) return false;
-  return attribution.confidence !== "low";
+  return attribution.confidence !== 'low';
 }
 
 export function applyEntityAnchors(records: DialogueRecord[], result: SpeakerAttribution[]): void {
   const entityToKey = new Map<string, string>();
   for (const record of records) {
     const attribution = result[record.attributionIndex];
-    const entityId = isPartitionEntityAnchor(attribution)
-      ? attribution.speakerEntityId
-      : record.strongEntityId;
+    const entityId = isPartitionEntityAnchor(attribution) ? attribution.speakerEntityId : record.strongEntityId;
     if (entityId === null) continue;
     const existing = entityToKey.get(entityId);
     if (existing) {
       record.key = existing;
       continue;
     }
-    const key = record.key?.startsWith("entity:") ? record.key : `entity:${entityId}`;
+    const key = record.key?.startsWith('entity:') ? record.key : `entity:${entityId}`;
     entityToKey.set(entityId, key);
     record.key = key;
   }
@@ -55,34 +53,32 @@ export function promoteStrongHintEntities(
   candidates: Entity[],
   trail?: ClusterTrailCollector,
 ): void {
-  const candidateIds = new Set(candidates.map((candidate) => candidate.id));
+  const candidateIds = new Set(candidates.map(candidate => candidate.id));
   for (const record of records) {
     const attribution = result[record.attributionIndex];
     if (attribution.speakerEntityId !== null) continue;
-    const entityId = record.strongEntityId ?? keyEntityId(record.key ?? "");
+    const entityId = record.strongEntityId ?? keyEntityId(record.key ?? '');
     if (!entityId || !candidateIds.has(entityId)) continue;
     attribution.speakerEntityId = entityId;
-    if (attribution.reason === "none") {
-      attribution.reason = "strong-hint";
-      attribution.confidence = "low";
+    if (attribution.reason === 'none') {
+      attribution.reason = 'strong-hint';
+      attribution.confidence = 'low';
     }
     trail?.push(result[record.attributionIndex].sentenceIndex, {
-      code: "promote-strong-hint",
+      code: 'promote-strong-hint',
       detail: entityId,
     });
   }
 }
 
 export function keyEntityId(key: string): string | null {
-  return key.startsWith("entity:") ? key.slice("entity:".length) : null;
+  return key.startsWith('entity:') ? key.slice('entity:'.length) : null;
 }
 
 function entityTerms(entity: Entity): string[] {
-  const rawTitles = Array.isArray(entity.raw.titles)
-    ? entity.raw.titles.filter((value): value is string => typeof value === "string")
-    : [];
+  const rawTitles = Array.isArray(entity.raw.titles) ? entity.raw.titles.filter((value): value is string => typeof value === 'string') : [];
   return [entity.name, ...(entity.aliases ?? []), ...rawTitles].filter(
-    (value): value is string => typeof value === "string" && value.length > 0,
+    (value): value is string => typeof value === 'string' && value.length > 0,
   );
 }
 
@@ -97,11 +93,7 @@ export function nearestMention(text: string, candidates: Entity[]): Entity | nul
   return best?.entity ?? null;
 }
 
-export function findStrongEntity(
-  narration: string,
-  candidates: Entity[],
-  backwardOnly: boolean,
-): string | null {
+export function findStrongEntity(narration: string, candidates: Entity[], backwardOnly: boolean): string | null {
   if (!ATTRIBUTION_VERB_RE.test(narration)) return null;
   const backward = BACK_REFERENCE_RE.test(narration);
   if (backwardOnly !== backward) return null;
@@ -119,11 +111,7 @@ export function findVocativeEntity(dialogue: string, candidates: Entity[]): stri
   for (const entity of candidates) {
     for (const term of entityTerms(entity)) {
       const addressed =
-        prefix === term ||
-        prefix === `${term}さん` ||
-        prefix === `${term}様` ||
-        prefix === `${term}殿` ||
-        prefix.endsWith(term);
+        prefix === term || prefix === `${term}さん` || prefix === `${term}様` || prefix === `${term}殿` || prefix.endsWith(term);
       if (addressed) return entity.id;
     }
   }

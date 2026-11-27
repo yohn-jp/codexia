@@ -7,7 +7,7 @@ export {
   consolidateEntityClusters,
   ensureAllClusterIds,
   expandClustersToN,
-} from "./speaker/assign.js";
-export { clusterUnattributedDialogues } from "./speaker/heuristics.js";
-export { partitionDialoguesIntoN } from "./speaker/partition.js";
-export { type PartitionContext, speakerClusterId } from "./speaker/types.js";
+} from './speaker/assign.js';
+export { clusterUnattributedDialogues } from './speaker/heuristics.js';
+export { partitionDialoguesIntoN } from './speaker/partition.js';
+export { type PartitionContext, speakerClusterId } from './speaker/types.js';
