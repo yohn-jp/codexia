@@ -252,7 +252,7 @@ function taskProducerRecipe(task, swiftToolchain) {
   if (task === 'db-contract') {
     const toolchain = DB_CONTRACT_TOOLCHAIN;
     const archive = entry => `${entry.url}#sha256=${entry.sha256}`;
-    external.push(toolchain.postgresImage, toolchain.restoreDrill.podmanImage,
+    external.push(toolchain.postgresImage, 'podman:ubuntu-24.04-host',
       `${toolchain.pgtap.archiveUrl}#sha256=${toolchain.pgtap.archiveSha256}`,
       ...Object.values(toolchain.tbls.archives).map(archive),
       ...Object.values(toolchain.restoreDrill.age.archives).map(archive));

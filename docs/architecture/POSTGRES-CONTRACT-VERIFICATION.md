@@ -79,7 +79,7 @@ SQL migrationを「設計書より上位」にしない。SQLは**承認済み�
 
 - CIへの新しい検証は [CI/CD](../verification/CI-CD.md) の既存verification task inventory/impact selectionを通して追加する。新しい独立したfull-workflowを乱立させない。
 - schema単独の軽い構造検証、実DB操作の中間層、隔離復元の高コストな受入を分ける。未実行の層をgreenと報告しない。
-- PostgreSQL/pgTAPバイナリとimage digestのpin、schemaとtest sourceのexact-source証明、run/job/attempt/artifact digestを受入の一部にする。
+- PostgreSQL/pgTAPバイナリとimage digestのpin、schemaとtest sourceのexact-source証明、run/job/attempt/artifact digestを受入の一部にする。DBV-007は使い捨てLinux runnerのローカルrootless Podmanを直接利用し、別のDocker内Podmanイメージ・特権コンテナ・イメージtar転送は要求しない。実際のPodman versionとrootless/local状態を証跡に残し、認定は既存runner identityとsource-bound入力を照合する。source DBは既存Dockerで生成し、復元先はPodmanの別コンテナ・volume・network noneを使う。PostgreSQLの固定digestと実イメージIDを照合し、他の資源に触れず、正規drillの正常/改変拒否・復元データ照合と資源cleanupを維持する。
 - schema変更PRには必ず**新旧DDL差分、破壊的変更、データ移行とバックアップ計画、関連API/MCP/UI contract、テスト、restore結果**を含める。
 - 新規版のPostgreSQLまたはpgTAPを採用する場合は、既定migration fingerprintを無言で置換しない。role/trigger/SQLの動作を再確認する。
 
