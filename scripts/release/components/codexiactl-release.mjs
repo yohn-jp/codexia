@@ -137,7 +137,7 @@ async function main() {
       }
     },
     verifyBuildProvenance: () => githubCLI('CLI build provenance verification failed', [
-      'attestation', 'verify', assets[0].file, '--signer-workflow', `${repository}/.github/workflows/publish-oci.yml`,
+      'attestation', 'verify', assets[0].file, '--signer-workflow', `${repository}/.github/workflows/publish-codexiactl.yml`,
       '--source-ref', env.GITHUB_REF, '--source-digest', sha, '--deny-self-hosted-runners',
     ]),
     verifyReleaseAsset: asset => githubCLI(`Immutable Release attestation could not verify ${asset.name}`, [
