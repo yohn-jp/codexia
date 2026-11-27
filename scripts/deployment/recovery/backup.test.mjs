@@ -431,7 +431,7 @@ test('fingerprint-locked returns canonical hashes only with the quiesced host lo
   }
 });
 
-test('restore drill verifies fingerprints before success evidence or candidate-ledger proof', async () => {
+test('[TEST-OPS-003-001] restore drill verifies fingerprints before success evidence or candidate-ledger proof', async () => {
   const fixture = await createFixture();
   try {
     const archive = fixture.backupDestination;

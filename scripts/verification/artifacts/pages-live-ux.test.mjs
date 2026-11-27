@@ -6,7 +6,7 @@ import { verifyLiveUx } from './pages-live-ux.mjs';
 const base = 'https://yohn-jp.github.io/codexia/';
 const sourceSha = 'a'.repeat(40);
 
-test('live Pages proof checks public response revision, route and snapshot bytes', async () => {
+test('[TEST-TRC-07-002] live Pages proof checks public response revision, route and snapshot bytes', async () => {
   const snapshot = JSON.stringify({ sourceSha });
   const html = '<title>UX Simulator · Codexia</title>';
   const traceHtml = '<title>Implementation Traceability · Codexia</title>';

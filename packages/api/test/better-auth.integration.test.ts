@@ -51,7 +51,7 @@ async function apiRequest(input: RequestInfo | URL, init: RequestInit = {}): Pro
   });
 }
 
-test('Better Auth PKCE MCP client lists and invokes tools through central OAuth admission', async t => {
+test('[TEST-MCPV-004-003] Better Auth PKCE MCP client lists and invokes tools through central OAuth admission', async t => {
   const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
   assert.equal(
     process.env.CODEXIA_AUTH_TEST_DISPOSABLE,

@@ -64,7 +64,7 @@ test('R4 refuses unapproved initialization, wrong approvals, drift and stale fre
   }), /Stale/);
 });
 
-test('R5 separates enrollment start from preparation, and rejects existing owner reissuance', () => {
+test('[TEST-OPS-001-001] R5 separates enrollment start from preparation, and rejects existing owner reissuance', () => {
   const pending = fixture({ H: 'ready', D: 'compatible', A: 'pending' });
   const enrolled = fixture({ H: 'ready', D: 'compatible', A: 'unprepared', B: 'setup' });
   assert.deepEqual(admitBootstrap({ ...pending, mode: 'owner-setup' }), {

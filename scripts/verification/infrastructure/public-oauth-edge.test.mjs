@@ -64,7 +64,7 @@ function fixtureFetch(overrides = {}) {
   return { calls, fetchImpl };
 }
 
-test('public OAuth edge probe checks protocol metadata, MCP challenge, API denial and retained UI Access', async () => {
+test('[TEST-EXT-001-001] public OAuth edge probe checks protocol metadata, MCP challenge, API denial and retained UI Access', async () => {
   const { calls, fetchImpl } = fixtureFetch();
   const result = await probePublicOAuthEdge({ origin, fetchImpl });
   assert.deepEqual(result, {

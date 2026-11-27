@@ -6,6 +6,7 @@ import path from 'node:path';
 import { CONFORMANCE_TASKS, VERIFICATION_GROUPS, requiredBuildProfile, isFastifyGenerationInput, isOpenApiGenerationInput } from '../impact/contract.mjs';
 import { browserRuntimeRequirements } from '../browser/image-digests.mjs';
 import { THREAGILE_IMAGE } from '../../architecture/constants.mjs';
+import { isTraceTestSource } from '../../strictdoc/test-source-path.mjs';
 
 const sha256 = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const testFilePattern = /\.(?:test|spec)\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx)$/u;
@@ -99,6 +100,7 @@ const requirementsTraceSurfaces = new Set(REQUIREMENTS_TRACE_SURFACE_FILES);
 
 export function isRequirementsTraceInput(file) {
   return requirementsTraceDocuments.has(file) || requirementsTraceSurfaces.has(file) || isFastifyGenerationInput(file) ||
+    isTraceTestSource(file) ||
     (file.startsWith('ios/') && /\.swift$/u.test(file)) ||
     (file.startsWith('deploy/ansible/') && /\.ya?ml$/u.test(file)) ||
     (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf')) ||

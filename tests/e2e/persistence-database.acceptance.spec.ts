@@ -1643,7 +1643,7 @@ preparedAuthorTest("replays ambiguous project and document creates with retained
 });
 
 
-test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page, authorizeAuthor }) => {
+test("[TEST-DATA-001-001] Git store selector cannot bypass PostgreSQL-only authoring", async ({ page, authorizeAuthor }) => {
   await page.route("**/api/v1/persistence/status", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ available: false, provider: null }) });
   });

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { buildObligationTrace } from './obligation-trace.mjs';
 
 const requirement = { UID: 'REQ-API-002', 'Test IDs': 'TEST-API-001' };
-const scenario = { UID: 'TEST-API-001', 'Case name': 'rejects stale revision', RELATIONS: [{ TYPE: 'Parent', VALUE: 'REQ-API-002' }] };
+const scenario = { UID: 'TEST-API-001', RELATIONS: [{ TYPE: 'Parent', VALUE: 'REQ-API-002' }] };
 const obligation = {
   UID: 'OBL-REQ-API-002-O01',
   MID: createHash('sha256').update('OBL-REQ-API-002-O01', 'utf8').digest('hex').slice(0, 32),
@@ -16,7 +16,7 @@ const obligation = {
   'Exact-run reference': 'NOT_RUN',
   RELATIONS: [
     { TYPE: 'Parent', VALUE: 'REQ-API-002' },
-    { TYPE: 'File', VALUE: 'packages/api/src/persistence-routes.ts', LINE_RANGE: '12, 19' },
+    { TYPE: 'File', VALUE: 'packages/api/src/persistence-routes.ts' },
   ],
 };
 const candidate = {
@@ -29,7 +29,7 @@ test('projects explicit obligation links and retains missing trace stages as gap
   const result = buildObligationTrace({ requirements: [requirement], obligations: [obligation], scenarios: [scenario] });
   assert.deepEqual(result.violations, []);
   assert.equal(result.rows[0].requirementId, 'REQ-API-002');
-  assert.equal(result.rows[0].sourceRefs[0].range, '12, 19');
+  assert.equal(result.rows[0].sourceRefs[0].path, 'packages/api/src/persistence-routes.ts');
   assert.deepEqual(result.rows[0].implementationIdentifiers, ['API-PERSIST-007']);
   assert.deepEqual(result.rows[0].surfaceIdentifiers, [{ kind: 'httpOperation', id: 'PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}' }]);
   assert.equal(result.rows[0].status, 'MAPPED_UNVERIFIED');
@@ -83,7 +83,7 @@ test('fault injection rejects malformed exact-source evidence and unsafe source 
       'Exact-run reference': 'https://github.com/foreign/repo/actions/runs/1',
       RELATIONS: [
         { TYPE: 'Parent', VALUE: 'REQ-API-002' },
-        { TYPE: 'File', VALUE: '../outside.ts', LINE_RANGE: '1, 1' },
+        { TYPE: 'File', VALUE: '../outside.ts' },
       ],
     }], scenarios: [scenario], repositoryRoot: '/repo',
     runEvidence: [{ ...candidate, repository: 'attacker/repo' }], expectedRepository: 'yohn-jp/codexia',
@@ -106,7 +106,7 @@ test('fault injection rejects stale, foreign, duplicated, and unrelated run evid
   assert.match(violations, /incomplete or invalid exact-source run evidence/);
 });
 
-test('passing observed UI case cannot promote an explicitly unimplemented requirement', () => {
+test('[TEST-TRC-06-001] passing observed UI case cannot promote an explicitly unimplemented requirement', () => {
   const unimplemented = {
     ...requirement, UID: 'REQ-UI-006', 'Test IDs': 'TEST-UI-006-001',
     'Conformance status': 'UNMAPPED', Applicability: 'FUTURE_TARGET',

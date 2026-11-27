@@ -46,7 +46,7 @@ test('exports the certified trace artifact identity and the cases observed in it
   });
 });
 
-test('rejects foreign artifacts, stale source, skipped certification, mismatched attempts and skipped required cases', () => {
+test('[TEST-TRC-05-004] rejects foreign artifacts, stale source, skipped certification, mismatched attempts and skipped required cases', () => {
   const foreign = { ...selected, workflow_run: { ...selected.workflow_run, repository_id: 99 } };
   assert.throws(() => summarizeCertifiedTrace({ ...inputs, selected: foreign }), /artifact repository/iu);
   const wrongRun = { ...selected, workflow_run: { ...selected.workflow_run, id: run.id + 1 } };

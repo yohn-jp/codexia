@@ -128,6 +128,25 @@ test('typed iOS and IaC identifiers reverse-map without certifying implementatio
   assert.ok(result.rows.every(row => row.exactRuns.length === 0));
 });
 
+test('derivable Ansible source groups remain navigation metadata, not semantic obligation links', () => {
+  const result = buildReverseTrace({
+    discovered: [{
+      kind: 'ansibleSource', id: 'deploy/ansible/deploy-prepare.yml',
+      source: { path: 'deploy/ansible/deploy-prepare.yml' }, provenance: 'Ansible task include',
+      inventoryGroups: ['ansible-site'],
+      inventoryClassification: 'Candidate REQ-OPS-001 / REQ-OPS-002; derived from the site playbook include graph.',
+      candidateRequirementIds: ['REQ-OPS-001', 'REQ-OPS-002'],
+      mappingBasis: 'derivable',
+    }],
+    inventory: { classifications: [] },
+  });
+  assert.equal(result.rows[0].status, 'UNMAPPED');
+  assert.equal(result.rows[0].requirementId, undefined);
+  assert.equal(result.rows[0].mappingBasis, 'derivable');
+  assert.deepEqual(result.rows[0].inventoryGroups, ['ansible-site']);
+  assert.deepEqual(result.rows[0].candidateRequirementIds, ['REQ-OPS-001', 'REQ-OPS-002']);
+});
+
 test('rejects a typed implementation reference with no independently discovered surface', () => {
   const result = buildReverseTrace({
     discovered: [],

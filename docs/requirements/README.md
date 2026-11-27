@@ -32,9 +32,9 @@
 - 要求ID: `REQ-<領域>-NNN`（例: `REQ-DATA-001`）。IDは安定・一意・永久欠番。改名・移動・分割でも既存IDを再利用しない。
 - 設計ID: 既存の `S-xx`、`SCREEN-xx`、`CTRL-xx`、`IF-xx` などは所有文書が管理する。新規設計IDは、その文書内で一意とする。画面IDは既存台帳の実値に従う。
 - API Operation ID: `API-...`、DB object ID: `DB-...`、外部IF ID: `EXT-...`。IDの見かけだけの統一のため、既存の物理名・URL・テーブル名を改名しない。
-- テストID: `TEST-...` は検証**シナリオ**のID。実行ファイル・テストケース名・行番号と別に記録する。
+- テストID: `TEST-...` は検証**シナリオ**の安定ID。ネイティブなテスト登録の文字列リテラルに `[TEST-...]` prefix を付け、AST discovery がsource path、行、表示名を派生する。Requirement RegisterではobligationとのTEST-ID relationだけを編集し、case name、TEST nodeのFile relation、source行番号を手入力しない。
 - 要求は独立した合否判定が可能な単位まで分割する。失敗・拒否・回復が独立に重要なら別 obligation として分ける。
-- パスだけでは不十分。実装参照にはパスと関数・export・ルート・DDLオブジェクトなどの安定識別子を書く。行番号・commit SHAは補助情報であり、唯一の識別子にしない。
+- パスだけでは不十分。実装参照にはパスと関数・export・ルート・DDLオブジェクトなどの安定識別子を書く。行番号・commit SHAは生成時の補助情報であり、Requirement Registerへ手入力しない。
 - 多対多を許す。複数設計・実装・テストにまたがる要求を、都合よく一つの実装に帰属させない。
 - 認証・認可、保存、復旧、owner承認等の横断要求は、共通 admission だけでなく**実際の入口／呼出経路ごとの適用**を追跡する。
 
@@ -59,4 +59,4 @@
 
 ## 現段階での完了範囲
 
-StrictDoc 0.32.1による要求HTML/JSON生成、REQ-IDとsource relationの検査、独立source scanに基づくboundedなHTTP/MCP/DB/Desktop UI/Native iOS/IaC reverse inventory、Node fault-injection、Playwright static-page checkを既存CIとRepository Audit Pagesへ統合する。source参照、意味的適合、TEST-IDの存在、exact-source実行証拠を分けて表示し、未対応の要求・surface・検証義務を生成された残件として保持する。動的route/tool、全migration/live catalog、実画面/実機挙動、適用済みIaC/host状態の未観測範囲は引き続きPARTIALまたはBLOCKEDとして扱う。
+StrictDoc 0.32.1による要求HTML/JSON生成、REQ-IDとsource relationの検査、独立source scanに基づくboundedなHTTP/MCP/DB/Desktop UI/Native iOS/IaC reverse inventory、ASTによるテスト登録の静的discovery、Node fault-injection、Playwright static-page checkを既存CIとRepository Audit Pagesへ統合する。discoveryは実行されなかったテストも登録から列挙し、実行観測とは別に扱う。discovery対象のテストsourceだけを変更したPRも既存の`requirements-trace` taskを選択する。source参照、意味的適合、TEST-IDの存在、exact-source実行証拠を分けて表示し、未対応の要求・surface・検証義務を生成された残件として保持する。動的route/tool、全migration/live catalog、実画面/実機挙動、適用済みIaC/host状態の未観測範囲は引き続きPARTIALまたはBLOCKEDとして扱う。

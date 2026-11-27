@@ -94,7 +94,7 @@ async function openProjectCreator(page: Page) {
   return outline.getByLabel("作品名");
 }
 
-test("desktop native author review keeps approval separate from apply and preserves the manuscript", async ({ page, authorizeAuthor }) => {
+test("[TEST-CORE-002-001] desktop native author review keeps approval separate from apply and preserves the manuscript", async ({ page, authorizeAuthor }) => {
   expect(databaseUrl, "native review browser checks require the disposable PostgreSQL fixture").toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 900 });
   const { project, scene, author } = await createOAuthWritingFixture(authorizeAuthor, page, "desktop", "Native review desktop", originalMarkdown);

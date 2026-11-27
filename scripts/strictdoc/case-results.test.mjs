@@ -24,37 +24,25 @@ test('reports actual Node case outcomes without treating skips or TODOs as passi
   ]);
 });
 
-test('matches a TEST ID only to one execution of the exact case in its declared source range', () => {
-  const makeScenario = (uid, name) => ({
-    UID: uid,
-    'Case name': name,
-    RELATIONS: [{ TYPE: 'File', VALUE: 'scripts/check.test.mjs', LINE_RANGE: '5, 10' }],
-  });
-  const cases = ['pass', 'skip', 'duplicate', 'duplicate', 'wrong line', 'wrong file'].map((name, i) => ({
-    name, file: i === 5 ? 'scripts/other.test.mjs' : 'scripts/check.test.mjs',
-    line: i === 4 ? 11 : 8, result: i === 1 ? 'SKIPPED' : 'PASSED',
+test('matches a TEST ID only to one execution of the registered case', () => {
+  const sources = new Map(['pass', 'skip', 'duplicate', 'wrong line', 'wrong file', 'absent'].map((title, i) => {
+    const id = `TEST-TRACE-00${i}`;
+    return [id, { name: `[${id}] ${title}`, file: 'scripts/check.test.mjs', line: 8 }];
   }));
-  const scenarios = ['pass', 'skip', 'duplicate', 'wrong line', 'wrong file', 'absent']
-    .map((name, i) => makeScenario(`TEST-${i}`, name));
-  assert.deepEqual(associateTraceCases(scenarios, cases).map(({ testId, result }) => [testId, result]), [
-    ['TEST-0', 'PASSED'], ['TEST-1', 'SKIPPED'], ['TEST-2', 'AMBIGUOUS'],
-    ['TEST-3', 'NOT_RUN'], ['TEST-4', 'NOT_RUN'], ['TEST-5', 'NOT_RUN'],
-  ]);
-});
+  const cases = [...sources.values()].slice(0, 5).map(item => ({ ...item, result: 'PASSED' }));
+  cases[1].result = 'SKIPPED';
+  cases[3].line += 1;
+  cases[4].file = 'scripts/other.test.mjs';
+  cases.push({ ...cases[2] });
+  cases.push({ name: 'absent', file: 'scripts/check.test.mjs', line: 8, result: 'PASSED' });
 
-test('preserves declared test source details when execution is absent or ambiguous', () => {
-  const scenarios = [
-    { UID: 'TEST-ABSENT-001', 'Case name': 'not run case', RELATIONS: [{ TYPE: 'File', VALUE: 'tests/not-run.test.mjs', LINE_RANGE: '15, 21' }] },
-    { UID: 'TEST-AMBIGUOUS-001', 'Case name': 'duplicate case', RELATIONS: [{ TYPE: 'File', PATH: 'tests/duplicate.test.mjs', LINE_RANGE: '30, 38' }] },
-  ];
-  const result = associateTraceCases(scenarios, [
-    { name: 'duplicate case', file: 'tests/duplicate.test.mjs', line: 32, result: 'PASSED' },
-    { name: 'duplicate case', file: 'tests/duplicate.test.mjs', line: 36, result: 'PASSED' },
-  ]);
-
-  assert.deepEqual(result.map(({ testId, name, sourceRefs, result: status }) => ({ testId, name, sourceRefs, result: status })), [
-    { testId: 'TEST-ABSENT-001', name: 'not run case', sourceRefs: [{ path: 'tests/not-run.test.mjs', range: '15, 21' }], result: 'NOT_RUN' },
-    { testId: 'TEST-AMBIGUOUS-001', name: 'duplicate case', sourceRefs: [{ path: 'tests/duplicate.test.mjs', range: '30, 38' }], result: 'AMBIGUOUS' },
+  assert.deepEqual(associateTraceCases(sources, cases).map(({ testId, result, sourceRefs }) => [testId, result, sourceRefs]), [
+    ['TEST-TRACE-000', 'PASSED', [{ path: 'scripts/check.test.mjs', line: 8 }]],
+    ['TEST-TRACE-001', 'SKIPPED', [{ path: 'scripts/check.test.mjs', line: 8 }]],
+    ['TEST-TRACE-002', 'AMBIGUOUS', [{ path: 'scripts/check.test.mjs', line: 8 }]],
+    ['TEST-TRACE-003', 'NOT_RUN', [{ path: 'scripts/check.test.mjs', line: 8 }]],
+    ['TEST-TRACE-004', 'NOT_RUN', [{ path: 'scripts/check.test.mjs', line: 8 }]],
+    ['TEST-TRACE-005', 'NOT_RUN', [{ path: 'scripts/check.test.mjs', line: 8 }]],
   ]);
 });
 

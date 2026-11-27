@@ -226,7 +226,7 @@ test("legacy draft import reports a rejected composition flush and keeps its sou
   await editor(page).dispatchEvent("compositionend", { data: "日本語" });
 });
 
-test("legacy draft composition cannot write old scene text into a newly selected scene", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
+test("[TEST-UI-004-001] legacy draft composition cannot write old scene text into a newly selected scene", { tag: "@author-desktop" }, async ({ page, authorizeAuthor }) => {
   const { second } = await createOAuthWritingFixture(authorizeAuthor, page); await seedLegacy(page); await previewLegacy(page);
   await editor(page).dispatchEvent("compositionstart", { data: "にほんご" });
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
@@ -235,7 +235,7 @@ test("legacy draft composition cannot write old scene text into a newly selected
   await expect(editor(page)).toContainText("最初の本文。"); expect(await sourceExists(page)).toBe(true);
 });
 
-test("the launcher opens Desktop for new and legacy choices and rejects retired Mobile routes", async ({ page, authorServer }) => {
+test("[TEST-UI-001-001] the launcher opens Desktop for new and legacy choices and rejects retired Mobile routes", async ({ page, authorServer }) => {
   const origin = authorServer.apiOrigin;
   for (const route of ["/mobile", "/mobile/", "/mobile/projects/p/scenes/s"]) {
     const response = await page.request.get(new URL(route, origin).href, { maxRedirects: 0 });

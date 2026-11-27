@@ -22,6 +22,10 @@
 
 **Authoring形式:** StrictDoc 0.32.1の拡張Markdown exportを実測した。Grammarは`REQUIREMENT`と`TEST` nodeを定義し、CIは同一sourceから2回HTML/JSONを生成し、HTMLの検索timestamp、確認済みのMarkdown document MID、およびStrictDoc検索indexのkey順と、生成元Python `set`に由来するdocument membership配列順だけを正規化する。membershipの値と他の出力は比較に残す。別のStrictDoc versionやMarkdown機能を使う場合は再評価する。
 
+TEST nodeには、`Execution scope`として`TRACE_NODE`、`TRACE_BROWSER`、`PRODUCT`のいずれかを記録する。テスト実装のネイティブ登録には、安定したTEST-IDを文字列リテラルの`[TEST-ID]` prefixとして置く。AST discoveryは登録からID、source path、行、表示名を導出する。複数の独立したTEST-IDを一つのテストケースが検証する場合は、登録タイトルの先頭に異なるID prefixを連続して置き、各IDを同じsource registrationへ結ぶ。Requirement RegisterのTEST nodeには`Case name`や`File` relationを複製せず、source位置を手入力しない。
+
+AST discoveryは静的な登録を列挙し、実行結果とは別の情報として扱う。discovery対象のテストsourceを変更したPRは既存の`requirements-trace` taskを選択する。テストをStrictDoc trace taskの実行対象から移動しても、登録に付いたExecution scopeからsource fileを再発見して同じsuiteへ含める。`TRACE_NODE`と`TRACE_BROWSER`はStrictDoc trace taskで実行し、`PRODUCT`は通常の製品検証taskで実行する。trace taskで実行しない`PRODUCT`の結果を`NOT_RUN`から昇格しない。
+
 現在の要求nodeは`REQUIREMENT-REGISTER.md`に記録し、StrictDoc grammarとJSON exportをCIで検査する。以下は簡略化した構造例:
 
 ~~~markdown
@@ -48,7 +52,7 @@
 | verified-by | TEST-ID → exact-source evidence | GitHub Actions run/job/attempt/artifact/digest（実行済みである場合のみ） |
 | reverse-trace | code/test/route/object → REQ | 意味が不明なコード・旧compatibility・無関係テストを見つける |
 
-StrictDocが直接扱えるsource-file/range relationを優先し、正本内に**対象パス、変更に追随可能な実装識別子、補助として行範囲**を記録する。TypeScript symbolをAST解析で自動同定できることは前提にしない。ファイル関係しか証明できない場合は、ファイル全体のリンクを個々の義務の実装証明とみなさない。
+正本には対象ファイルと変更に追随可能な実装識別子を記録し、行番号は生成時に導出する。実装relationはsource file scopeと既存の関数・export・route・DDL object等の意味的識別子を保持し、手入力の`Lines`属性を持たない。ファイル関係だけで個々の義務を実装済みとみなさない。
 
 外部のOpenAPI Operation ID、MCP tool名、SQL table/trigger、Terraform resource、CI taskなどへは、主に契約ファイル/owner内の一意のID・安定したGitのsource pathへ参照を作る。存在するコードを自動的に要求へ採用しない。
 
@@ -58,7 +62,7 @@ StrictDocが直接扱えるsource-file/range relationを優先し、正本内に
 
 - 成功証拠: 発行したsource SHA、workflow run ID、attempt、task profile、独立したテストID、結果、検査環境、artifact digest。
 - 不成功・未実行: FAILED / BLOCKED / NOT_RUNを失わず管理。CIのtask skipをPASSに変えない。
-- test report: StrictDoc公式の自動JUnit ingestは限られた実装言語の形式に対応し実験的。Node/PlaywrightのJUnitを認識するために**拡張子だけを偽装しない**。公式対応と照合できない場合は、標準のGitHub Actions run/artifact URLへの関係を使う。
+- test report: Node/Playwrightの実行観測は既存のreporterとexact-source証拠認定を使う。StrictDocの標準JUnit ingestを前提にせず、登録discoveryと実行観測をTEST-IDおよびsource identityで結ぶ。
 - 公開: 必要なsummaryだけを静的HTMLへ掲載し、非公開のtoken、作者原稿、API cookie、内部VM情報、privileged CI artifactを配布しない。
 
 ## 導入ゲートと現状
@@ -67,9 +71,9 @@ StrictDocが直接扱えるsource-file/range relationを優先し、正本内に
 | --- | --- | --- |
 | TRC-01 | 登録済み全REQ-IDを一度だけ変換 | **LOCAL_PASS**: main baselineの33 IDをStrictDoc requirement nodeと照合し、欠落・重複・余分なIDを検査 |
 | TRC-02 | Markdown parse→HTML/JSON→同一入力から再生成 | **LOCAL_PASS**: StrictDoc 0.32.1のHTML/JSONを2回生成し比較。HTML検索timestamp、確認済みMarkdown document MID、検索index key順とunordered membership順のみを正規化し、membership値と他の出力を保持 |
-| TRC-03 | REQ→設計→実装surface→obligation | **PARTIAL**: File relationのpath/rangeと明示したtyped surface identifierを検査する。生成Fastify routeのOperation ID、test caseの宣言名・source/rangeを保持する。意味的な実装適合、全obligationに対するsymbol AST coverageは未証明 |
-| TRC-04 | 実装側の逆引き | **PARTIAL**: bounded scanからHTTP method/path、MCP tool、DB object、Desktop UI control、Native iOS SwiftUI view、Terraform resource、Ansible source、GitHub Actions workflow定義を `reverseTrace` に記録する。workflow定義は実行済みjob/runを意味しない。surface inventoryの分類と候補REQはaccepted relationと分離し、未分類・対応未接続surfaceも表示する。動的登録、全migration/live DB、実画面・実機挙動、適用済みIaC、host実行、隔離復元は静的source scanでは証明しない。 |
-| TRC-05 | TEST→CI exact source evidence | 登録ケースの宣言名・source path・行範囲を実行結果と照合する。Pages は同一 SHA の Verify 認定を確認できたケースに run・attempt・artifact ID・digest を表示する。証拠を取得できないケースは未検証として残す。 |
+| TRC-03 | REQ→設計→実装surface→obligation | **PARTIAL**: File relationのpathと明示したtyped surface identifierを検査する。生成Fastify routeのOperation IDと、AST discoveryによるTEST-ID・登録source・行・表示名を保持する。意味的な実装適合、全obligationに対するsymbol AST coverageは未証明 |
+| TRC-04 | 実装側の逆引き | **PARTIAL**: bounded scanからHTTP method/path、MCP tool、DB object、Desktop UI control、Native iOS SwiftUI view、Terraform resource、Ansible source、GitHub Actions workflow定義を `reverseTrace` に記録する。Ansibleはsource YAMLすべてをsurfaceとして列挙し、4つの宣言済みentrypointとliteral `include_tasks` / `import_tasks`の到達関係からplaybook群を導出する。4件の最小path-specific candidate overrideはexample inventoryと、REQ-OPS-001候補に分類する3つのaccess/bootstrap secret sourceに限る。group IDとcandidate REQはnavigation metadataに限りobligation relationや実行証拠を作らない。孤立YAML、未解決・動的include、不正root、未分類entrypoint/overrideはgateを失敗させる。workflow定義は実行済みjob/runを意味しない。surface inventoryの分類と候補REQはaccepted relationと分離し、未分類・対応未接続surfaceも表示する。動的登録、全migration/live DB、実画面・実機挙動、適用済みIaC、host実行、隔離復元は静的source scanでは証明しない。 |
+| TRC-05 | TEST→CI exact source evidence | `[TEST-ID]`付きネイティブ登録から静的に列挙したTEST-IDとsource identityを実行観測と照合する。照合キーはTEST-IDとdiscovery済みsourceであり、テスト表示名の変更や、trace taskで走らなかったケースの消失に依存しない。Pagesは同一SHAのVerify認定を確認できたケースにrun・attempt・artifact ID・digestを表示する。証拠を取得できないケースは未検証として残す。 |
 | TRC-06 | 重複UID・切れた参照・inventory欠落・不正MIDへの故障注入 | **LOCAL_PASS**: `verify.test.mjs`の負例を実行。legacy product behaviorの適合試験とは区別 |
 | TRC-07 | Repository Audit Pagesに静的サイトを公開 | StrictDoc HTML/JSONと `/requirements/traceability/` のstatus HTML/JSONを既存の唯一のpublisherが生成する。PR artifactをChromiumで検査し、mainの同じpublisherが公開する。公開URLとsource SHAが一致するまで `PENDING_PAGES_PUBLISH` を維持する。 |
 
@@ -85,9 +89,11 @@ dashboardの検索とarea/status/surface type filterはURL queryへ反映する�
 
 ## 個別義務trace projection
 
-`scripts/strictdoc/obligation-trace.mjs` は、StrictDoc nodeと実行観測値から要求→個別義務→設計→source/file/range→TEST-ID→exact-source run referenceを投影する補助APIである。入力にないrelationは推測せず、各欠落を`gaps`へ残す。要求の適合状態を認定せず、行の状態は最大でも`MAPPED_UNVERIFIED`であり、実行候補をVERIFIEDへ昇格しない。
+`scripts/strictdoc/obligation-trace.mjs` は、StrictDoc node、ASTで発見したテスト登録、実行観測値から要求→個別義務→設計→source fileと意味的識別子→TEST-ID→exact-source run referenceを投影する補助APIである。入力にないrelationは推測せず、各欠落を`gaps`へ残す。要求の適合状態を認定せず、行の状態は最大でも`MAPPED_UNVERIFIED`であり、実行候補をVERIFIEDへ昇格しない。
 
-個別義務nodeは`OBL-<REQ-ID>-O01` UID、`Parent` relationからREQ-ID、`Design reference`文字列から設計アンカー、`Test IDs`から明示TEST-IDを受け取る。source anchorは既存StrictDoc `File` relationの`VALUE`と任意の`LINE_RANGE`を使用する。既存TEST nodeは現在のREQ ParentとCase name/File relationを維持し、義務node側の`Test IDs`がその義務との対応を示す。Junit、AST symbol coverage、試験名の類似度から対応づけを作らない。
+個別義務nodeは`OBL-<REQ-ID>-O01` UID、`Parent` relationからREQ-ID、`Design reference`文字列から設計アンカー、`Test IDs`から明示TEST-IDを受け取る。実装relationはFile pathと既存の意味的識別子を保持し、手入力の`Lines`を持たない。TEST nodeはREQ `Parent` relationと`Execution scope`を持ち、source path、行、表示名はネイティブ登録のAST discoveryから導出する。TEST nodeに`Case name`や`File` relationを複製しない。義務node側の`Test IDs`がその義務との対応を示す。名前の類似度や実行されたcaseだけからTEST-ID relationを推定しない。
+
+discoveryはliteral `[TEST-ID]` prefixのあるネイティブ登録を静的に列挙する。trace taskは`TRACE_NODE`と`TRACE_BROWSER`に属する発見済みsource fileに加え、既存の固定補助suiteを実行する。`PRODUCT` suiteは製品検証taskに属し、trace taskが未実行結果をPASSに変えない。実行時reporterはTEST-IDとdiscovery済みsource identityで観測を対応づける。未検出・曖昧・未実行の登録はgapまたは個別の未実行状態として残す。
 
 APIの`runEvidence`は観測済みcase execution候補であり、各値は`testId`, canonical `url`, `repository`, `sourceSha`, `runId`, `attempt`, `job`, `task`, `result`を含む。呼出側は`expectedRepository`と`expectedSourceSha`を指定する。run URL、repository、source SHAの不一致や識別情報不足は違反となる。まだartifact upload前のrunも記録できるためartifact ID/digestはこの候補データに含めない。既存 Verify の certification job が実行と成果物を認定する。Pages は認定済み run と ZIP の identity を照合して、公開用の要約を生成する。台帳の `Exact-run reference` は `NOT_RUN` を保持し、実行結果は生成レポートから参照する。
 
