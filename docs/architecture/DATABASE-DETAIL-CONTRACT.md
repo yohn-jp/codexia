@@ -83,6 +83,7 @@ indexの存在、定義、重複、選択度、実クエリ計画は別々に検
 
 ## 変更・逸脱の扱いとツール検討の境界
 
+- REQ-DATA-005 の物理定義、権限境界、移行方法の候補は [サーバー永続状態の PostgreSQL 移行案](POSTGRESQL-SERVER-STATE-PROPOSAL.md) を参照。承認後に本契約へ反映する。
 - 新テーブル/列の採否は論理設計、物理定義、migration計画、既存データ互換、rollback/restore、必要なAPI・MCP・UI・テストを一体でレビューする。
 - **採用済みの検証経路:** [PostgreSQL contract verification](POSTGRES-CONTRACT-VERIFICATION.md) に従い、使い捨て DB に正規 SQL を適用する。pgTAP と pg_catalog で物理 schema を照合し、tbls で可視化を生成する。対象コミットの検証結果は対応する CI 証拠で確認する。
 - ERDとデータ辞書はこの規範契約とSQLを適用した実DBから生成・照合する派生物であり、新しい独立DB正本としない。
