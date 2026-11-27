@@ -1258,7 +1258,7 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
 **UID**: OBL-REQ-OPS-001-O01
 **Design reference**: [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.md)
 **Implementation identifiers**: deploy/ansible/site.yml
-**Surface identifiers**: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/bootstrap-secret-escrow.yml; ansibleSource=deploy/ansible/deploy-ssh-key.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/managed-bootstrap-secrets.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/verify-base-tunnel-container.yml; ansibleSource=deploy/ansible/verify-bootstrap-escrow.yml; ciWorkflow=.github/workflows/bootstrap-recovery.yml; ciWorkflow=.github/workflows/initial-preservation.yml
+**Surface identifiers**: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/deploy-ssh-key.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/managed-bootstrap-secrets.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/verify-base-tunnel-container.yml
 **Test IDs**: TEST-OPS-001-001
 **Exact-run reference**: NOT_RUN
 **Comment**: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1313,19 +1313,7 @@ OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を�
   **Path**: deploy/ansible/verify-base-tunnel-container.yml
 
 - **Type**: File
-  **Path**: deploy/ansible/bootstrap-secret-escrow.yml
-
-- **Type**: File
   **Path**: deploy/ansible/managed-bootstrap-secrets.yml
-
-- **Type**: File
-  **Path**: deploy/ansible/verify-bootstrap-escrow.yml
-
-- **Type**: File
-  **Path**: .github/workflows/bootstrap-recovery.yml
-
-- **Type**: File
-  **Path**: .github/workflows/initial-preservation.yml
 
 ## REQ-OPS-002
 

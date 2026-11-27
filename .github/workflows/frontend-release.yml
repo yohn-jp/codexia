@@ -474,17 +474,6 @@ jobs:
         env:
           CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.runtime.outputs.host }}
         run: node scripts/deployment/preflight/run.mjs host
-      - name: Confirm independent recovery of the current VM credentials
-        env:
-          CODEXIA_BOOTSTRAP_ESCROW_PROFILE: ${{ vars.CODEXIA_BOOTSTRAP_ESCROW_PROFILE }}
-          CODEXIA_BOOTSTRAP_ESCROW_RECIPIENT: ${{ vars.CODEXIA_BOOTSTRAP_ESCROW_RECIPIENT }}
-          CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL: ${{ secrets.CODEXIA_BOOTSTRAP_ESCROW_CREDENTIAL }}
-        run: |
-          set -euo pipefail
-          bash deploy/backup/install-s3-runtime.sh "$RUNNER_TEMP/bootstrap-s3"
-          CODEXIA_BOOTSTRAP_ESCROW_HOST_ID=$(jq -er '.host.hostId | select(test("^[a-f0-9]{64}$"))' "$RUNNER_TEMP/codexia-lifecycle-host.json")
-          export CODEXIA_BOOTSTRAP_ESCROW_HOST_ID
-          ansible-playbook -i "$RUNNER_TEMP/codexia-preflight-inventory.yml" deploy/ansible/verify-bootstrap-escrow.yml
       - name: Admit reviewed R5 and publish the canonical frontend
         env:
           GH_TOKEN: ${{ github.token }}

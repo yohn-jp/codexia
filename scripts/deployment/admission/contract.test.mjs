@@ -147,6 +147,7 @@ test('the convergence step forwards the certified identity, private certificate 
   rmSync(invocation, { force: true });
   const manual = {
     ...admitted, CODEXIA_MANUAL_ACTIVATION: 'true', CODEXIA_DATABASE_INITIALIZATION_APPROVED: 'true',
+    CODEXIA_BACKUP_DESTINATION: '', CODEXIA_BACKUP_AGE_RECIPIENT: '',
     GITHUB_SHA: 'd'.repeat(40), GITHUB_REPOSITORY: 'yohn-jp/codexia',
   };
   writeFileSync(path.join(bin, 'gh'), '#!/bin/bash\nprintf "%s\\n" "$GITHUB_SHA"\n', { mode: 0o700 });
@@ -164,6 +165,8 @@ test('the convergence step forwards the certified identity, private certificate 
   assert.equal(result.status, 0, result.stderr);
   const vars = JSON.parse(readFileSync(path.join(directory, 'codexia-deploy-vars.json'), 'utf8'));
   assert.deepEqual(vars.codexia_expected_first_activation, binding);
+  assert.equal(vars.codexia_backup_destination, undefined);
+  assert.equal(vars.codexia_backup_recipient, undefined);
   assert.equal(vars.codexia_initial_install_approved, true);
   assert.equal(vars.codexia_database_initialization_approved, true);
 });
@@ -267,6 +270,35 @@ test('locked production admission refuses a clean API slot without the approved 
     assert.equal(result.status, expected, result.stderr);
     if (expected) assert.match(result.stderr, /first activation requires an approved R6 plan/u);
   }
+});
+
+test('locked fresh activation requires the installation marker to bind the database and candidate', t => {
+  const { cmd: shell } = transactionTasks.find(task =>
+    task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'];
+  const start = shell.indexOf('for marker in owner-setup.installation');
+  const end = shell.indexOf('live_runtime=', start);
+  assert.ok(start > shell.indexOf('flock --exclusive --nonblock 9') && end > start);
+  const gate = shell.slice(start, end)
+    .replace(/\{\{ .*owner-setup\.container.* \}\}/u, '"$FIXTURE/owner-setup.container"');
+  const fixture = mkdtempSync(path.join(tmpdir(), 'codexia-fresh-intent-'));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const image = 'ghcr.io/yohn-jp/codexia-backend@sha256:' + 'a'.repeat(64);
+  for (const [name, value] of [
+    ['owner-setup.installation', '123'],
+    ['owner-setup.promoted', 'activation-ready'],
+    ['owner-setup.container', 'Image=' + image],
+  ]) writeFileSync(path.join(fixture, name), value + '\n', { mode: 0o600 });
+  const intent = path.join(fixture, 'owner-setup.intent');
+  const verify = () => spawnSync('bash', ['-c', [
+    'set -eu', 'state_dir="$FIXTURE"; approved_cluster=123; approved_database=456; candidate_image="$IMAGE"',
+    'stale_admission(){ echo "$1" >&2; exit 1; }', gate,
+  ].join('\n')], { env: { ...process.env, FIXTURE: fixture, IMAGE: image }, encoding: 'utf8' });
+  assert.match(verify().stderr, /prepared owner markers are unavailable/u);
+  writeFileSync(intent, '123:789:' + image + '\n', { mode: 0o600 });
+  assert.match(verify().stderr, /fresh installation identity changed/u);
+  writeFileSync(intent, '123:456:' + image + '\n', { mode: 0o600 });
+  const approved = verify();
+  assert.equal(approved.status, 0, approved.stderr);
 });
 
 test('first activation checks the real transaction window at readiness and rolls back before publication', t => {

@@ -98,14 +98,13 @@
         - codexia_deploy_ssh_public_key is defined
         - codexia_host_approved | default(false) | bool
 
-    - name: Converge managed credentials and escrow on every admitted R4 run
+    - name: Converge managed credentials on every admitted R4 run
       when: codexia_stage == 'bootstrap' and codexia_managed_bootstrap_secrets | default(false)
       become: true
       become_user: "{{ codexia_service_user }}"
       environment: "{{ service_runtime_env }}"
       block:
         - ansible.builtin.include_tasks: managed-bootstrap-secrets.yml
-        - ansible.builtin.include_tasks: bootstrap-secret-escrow.yml
 
     - name: Install only explicitly authorized base credentials
       ansible.builtin.include_tasks:

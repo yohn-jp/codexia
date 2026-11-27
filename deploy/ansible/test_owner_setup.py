@@ -183,20 +183,22 @@ esac
         self.assertEqual(self.trace.read_text().splitlines(), ["clean", "clean", "ledger", "migrated"])
         self.assertEqual(marker.read_text(), "123\n")
 
-    def test_replaced_credential_after_restore_check_blocks_grant_under_the_lock(self):
+    def test_protected_owner_operation_revalidates_observed_credentials_under_host_lock(self):
         self.private_file(self.state / "owner-setup.intent", f"123:456:{IMAGE}\n")
-        self.environment["CODEXIA_OWNER_SETUP_ESCROW_IDS_SHA256"] = "a" * 64
+        self.environment["CODEXIA_OWNER_SETUP_EXPECTED_SECRET_SET_SHA256"] = "a" * 64
+        observer = self.home / ".local/bin/codexia-preflight-observe"
+        observer.write_text('#!/bin/bash\n'
+                            '[[ "$1" == verify-secret-identities && "$2" == "$FIXTURE_SECRET_SET" ]] && '
+                            '[[ /proc/$$/fd/9 -ef "$HOME/.local/state/codexia-deploy/host.lock" ]]\n')
+        observer.chmod(0o700)
+        self.environment["FIXTURE_SECRET_SET"] = "b" * 64
         denied = self.run_setup("--converge", "NEW_APPROVED", "age1fixture")
-        self.assertIn("Escrow identity changed", denied.stderr)
         self.assertNotEqual(denied.returncode, 0)
-        self.assertFalse(self.trace.exists())
-        names = ["codexia-postgres-admin-password", "codexia-postgres-app-password", "codexia-auth-database-url",
-                 "codexia-auth-secret", "codexia-oauth-introspection-client-secret", "codexia-tunnel-token"]
-        identity = "".join(f"{name} {name}-id\n" for name in sorted(names))
-        self.environment["CODEXIA_OWNER_SETUP_ESCROW_IDS_SHA256"] = hashlib.sha256(identity.encode()).hexdigest()
+        self.assertIn("Podman credential identities changed after approval", denied.stderr)
+        self.assertFalse((self.state / "owner-setup.age").exists())
+        self.environment["FIXTURE_SECRET_SET"] = "a" * 64
         allowed = self.run_setup("--converge", "NEW_APPROVED", "age1fixture")
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
-        self.assertIn("issued", self.trace.read_text())
 
     def test_initialized_schema_with_matching_intent_can_issue_only_first_grant(self):
         self.private_file(self.state / "owner-setup.intent", f"123:456:{IMAGE}\n")

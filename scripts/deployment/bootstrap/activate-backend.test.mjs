@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { digestEvidence } from '../preflight/evidence-digest.mjs';
 import { createDeploymentPlan } from '../preflight/plan.mjs';
 import { admitBackendActivation, assertManualActivationSource } from './activate-backend.mjs';
 
@@ -30,7 +31,7 @@ test('manual activation keeps a still-current certified Backend on the reviewed 
   assert.throws(() => assertManualActivationSource(certified, reviewed, reviewed, git(certified, [])), /checkout/);
 });
 
-function fixture(state = {}, binding = {}) {
+function fixture(state = {}, binding = {}, intent = 'install') {
   const current = createDeploymentPlan({
     observation: {
       state: { M: 'ready', H: 'ready', D: 'compatible', A: 'ready', B: 'absent', F: 'compatible', T: 'none', ...state },
@@ -38,32 +39,36 @@ function fixture(state = {}, binding = {}) {
       binding: {
         environment: 'codexia-production', hostPinSha256: hash, hostId: hash, databaseSha256: hash, authSha256: hash,
         backendSha256: hash, frontendSha256: hash, ingressSha256: hash, transactionSha256: hash,
-        infrastructureSha256: hash, backupSha256: hash, ...binding,
+        infrastructureSha256: hash, backupSha256: null, ...binding,
       },
     },
     target: { backendCertificateSha256: hash, frontendArtifactSha256: hash, identitySha256: hash },
-    intent: 'install', window, now,
+    intent, window, now,
   });
   const { plan, planSha256 } = current;
   return {
     current: plan, now, flags,
     deployment: { plan, planSha256, approval: { planSha256, grants: ['first-install', 'database-use', 'publication'] } },
-    host: { hostId: hash, database: { clusterId: '123', databaseOid: '456', settingsSha256: hash,
+    host: { hostId: hash, topology: { secretHashes: { 'codexia-auth-secret': hash } }, database: { clusterId: '123', databaseOid: '456', settingsSha256: hash,
       ownerBindingSha256: 'sha256:' + hash } },
   };
 }
 
-test('R6 admits only a preserved clean first Backend with a compatible live Frontend', () => {
+test('R6 admits only a clean first Backend with a compatible live Frontend', () => {
   assert.deepEqual(admitBackendActivation(fixture()), {
     hostId: hash, clusterId: '123', databaseOid: '456', settingsSha256: hash,
     ownerBindingSha256: 'sha256:' + hash,
+    secretSetSha256: digestEvidence(fixture().host.topology.secretHashes),
     notBeforeMs: Date.parse(window.notBefore), notAfterMs: Date.parse(window.notAfter),
   });
   for (const F of ['absent', 'incompatible', 'fault', 'unknown']) {
     assert.throws(() => admitBackendActivation(fixture({ F })), /compatible deployed Frontend/);
   }
   assert.throws(() => admitBackendActivation(fixture({ B: 'compatible' })), /compatible deployed Frontend/);
-  assert.throws(() => admitBackendActivation(fixture({}, { backupSha256: null })), /blocked or altered/);
+  assert.throws(() => admitBackendActivation(fixture({}, {}, 'adopt')), /compatible deployed Frontend/);
+  const unobserved = fixture();
+  delete unobserved.host.topology;
+  assert.throws(() => admitBackendActivation(unobserved), /observed Podman credential identities/);
 });
 
 test('R6 rejects missing approvals, stale binding and mismatched source', () => {

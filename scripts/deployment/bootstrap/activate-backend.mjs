@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { selectReleaseSource } from '../../release/components/source-gate.mjs';
 import { createHandoffDeploymentOutputs, verifyLifecycleBackendPublication } from '../handoff/verify-push.mjs';
 import { assertDeploymentPlanApproval, assertDeploymentPlanBinding } from '../preflight/plan.mjs';
+import { digestEvidence } from '../preflight/evidence-digest.mjs';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 
 const hash = /^[a-f0-9]{64}$/u;
@@ -19,7 +20,7 @@ export function assertManualActivationSource(certified, dispatch, liveMain, git)
 
 function assertBackendOnly(plan) {
   const state = plan?.observation?.state;
-  assert.ok(plan?.candidateRoute === 'R6' && state?.B === 'absent' && state.F === 'compatible',
+  assert.ok(plan?.candidateRoute === 'R6' && plan.intent === 'install' && state?.B === 'absent' && state.F === 'compatible',
     'Backend-only first activation requires R6 with a clean API slot and compatible deployed Frontend');
 }
 
@@ -34,7 +35,12 @@ export function admitBackendActivation({ deployment, current, host, flags, now =
     /^[1-9][0-9]{0,19}$/u.test(clusterId) && /^[1-9][0-9]{0,9}$/u.test(databaseOid) &&
     /^sha256:[a-f0-9]{64}$/u.test(ownerBindingSha256) && hash.test(settingsSha256),
   'First activation requires the exact host, PostgreSQL database and prepared owner settings');
+  const { secretHashes } = host.topology ?? {};
+  assert.ok(secretHashes && Object.values(secretHashes).length > 0 &&
+    Object.values(secretHashes).every(value => hash.test(value)),
+    'First activation requires observed Podman credential identities');
   return { hostId: host.hostId, clusterId, databaseOid, ownerBindingSha256, settingsSha256,
+    secretSetSha256: digestEvidence(secretHashes),
     notBeforeMs: Date.parse(plan.window.notBefore), notAfterMs: Date.parse(plan.window.notAfter) };
 }
 
@@ -74,7 +80,6 @@ async function main(stage, env) {
   assert.equal(env.CODEXIA_FIRST_ACTIVATION_APPROVAL, 'ACTIVATE_CODEXIA_BACKEND');
   const { createDeploymentEdge } = await import('../../release/frontend/initial-publication.mjs');
   const { planFromObservations } = await import('../preflight/observe.mjs');
-  const { findPreservationEvidence } = await import('../preflight/preservation.mjs');
   const releases = await readLifecycleCandidate(request);
   assert.deepEqual(releases.candidateBackend, JSON.parse(Buffer.from(env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, 'base64')),
     'Reverified backend certificate differs from the verified deployment handoff');
@@ -85,18 +90,15 @@ async function main(stage, env) {
     origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
     readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN,
   }).observeLifecycle({ backendExpected: host.backend.state === 'running' });
-  const preservationReceipt = await findPreservationEvidence(host);
-  assert.ok(preservationReceipt, 'First activation requires an independent restore for this prepared database');
   const { plan: current } = planFromObservations({ host, edge, hostPinSha256, ...releases,
-    intent: request.intent, window: request.window,
-    preservationReceipt });
+    intent: request.intent, window: request.window });
+  assert.equal(host.database.setupImage, releases.candidateBackend.image,
+    'First activation must use the certified owner setup image');
   const evidence = admitBackendActivation({ deployment, current, host, flags: {
     initialInstall: env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
     databaseUse: env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
   } });
-  await writeFile(join(env.RUNNER_TEMP, 'codexia-first-activation.json'), JSON.stringify({ ...evidence, secretSetSha256: preservationReceipt.secretSetSha256,
-    databaseFingerprint: preservationReceipt.databaseFingerprint,
-    historyFingerprint: preservationReceipt.historyFingerprint }) + '\n',
+  await writeFile(join(env.RUNNER_TEMP, 'codexia-first-activation.json'), JSON.stringify(evidence) + '\n',
     { flag: 'wx', mode: 0o600 });
   console.log('Protected R6 Backend-only activation admitted against the deployed Frontend.');
 }
