@@ -62,7 +62,7 @@ test('a missing fresh owner proof never reaches the revoke API', async () => {
   actor.stop();
 });
 
-test('an unconfirmed revoke is classified from the refreshed server identity', async () => {
+test('[TEST-UI-006-006] an unconfirmed revoke is classified from the refreshed server identity', async () => {
   const actor = createActor(
     createOwnerGrantRevocationMachine({
       reauthenticate: async () => undefined,

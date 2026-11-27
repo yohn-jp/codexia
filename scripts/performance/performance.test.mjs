@@ -180,6 +180,26 @@ test('worker timeout retains completed evidence without claiming completion', as
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('browser API latency separates successful responses from rejection and failure responses', async () => {
+  const { summarizeBrowser } = await import('./summarize.mjs');
+  const save = '/api/v1/persistence/projects/fixture/documents/scene';
+  const absent = '/api/v1/persistence/projects/absent';
+  const result = summarizeBrowser({
+    server: { requests: [
+      { method: 'PUT', path: save, status: 200, ms: 16, responseBytes: 500 },
+      { method: 'PUT', path: save, status: 409, ms: 4, responseBytes: 200 },
+      { method: 'PUT', path: save, status: 500, ms: 91, responseBytes: 48 },
+      { method: 'GET', path: absent, status: 404, ms: 2, responseBytes: 30 },
+    ] },
+  });
+  assert.deepEqual(result.api['PUT ' + save].ms, { n: 1, p50: 16, p95: 16, p99: 16, max: 16 });
+  assert.deepEqual(result.api['PUT ' + save].statusCounts, { 200: 1, 409: 1, 500: 1 });
+  assert.equal(result.api['PUT ' + save].nonSuccessMsByStatus[409].p95, 4);
+  assert.equal(result.api['PUT ' + save].nonSuccessMsByStatus[500].p95, 91);
+  assert.equal(result.api['GET ' + absent].ms.n, 0);
+  assert.equal(result.api['GET ' + absent].nonSuccessMsByStatus[404].p95, 2);
+});
+
 test('browser summaries distinguish completed strict writes from pending or aborted transactions', async () => {
   const { summarizeBrowser } = await import('./summarize.mjs');
   const browser = { inputs: [{ type: 'keydown', key: 'a', start: 2, frameMs: 12 }], reactCommits: [], longTasks: [],

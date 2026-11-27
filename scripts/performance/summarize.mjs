@@ -95,11 +95,17 @@ export function summarizeBrowser(report) {
     server: server && { counts: server.counts, cpu: server.cpu, memory: server.memory, usage: server.usage, io: server.io },
     requestCount: report.requests?.length, apiRequestCount: report.requests?.filter(row => row.path.startsWith('/api/')).length,
     streamingRequests: report.requests?.filter(row => row.streaming),
-    api: Object.fromEntries([...new Set(api.map(row => `${row.method} ${row.path}`))].map(key => {
-      const rows = api.filter(row => `${row.method} ${row.path}` === key);
-      return [key, { ms: distribution(rows.map(row => row.ms)), statusCounts: rows.reduce((counts, row) => {
-        counts[row.status] = (counts[row.status] ?? 0) + 1; return counts;
-      }, {}), responseBytes: distribution(rows.map(row => row.responseBytes)) }];
+    api: Object.fromEntries(Object.entries(Object.groupBy(api, row => `${row.method} ${row.path}`)).map(([key, rows]) => {
+      const isSuccess = status => status >= 200 && status < 300;
+      const byStatus = Object.entries(Object.groupBy(rows, row => row.status));
+      return [key, {
+        ms: distribution(rows.filter(row => isSuccess(row.status)).map(row => row.ms)),
+        statusCounts: Object.fromEntries(byStatus.map(([status, samples]) => [status, samples.length])),
+        nonSuccessMsByStatus: Object.fromEntries(byStatus
+          .filter(([status]) => !isSuccess(Number(status)))
+          .map(([status, samples]) => [status, distribution(samples.map(row => row.ms))])),
+        responseBytes: distribution(rows.map(row => row.responseBytes)),
+      }];
     })),
     notMeasured: report.notMeasured };
 }

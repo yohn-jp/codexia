@@ -18,17 +18,17 @@ function harness(overrides: Partial<NativeReviewServices> = {}, initialChangeSet
     async load() {
       return { changeSets: [currentChangeSet], coreReviews: [] };
     },
-    async approve(projectId, id, version) {
+    async approve(_projectId, _id, version) {
       calls.push({ action: 'approve', version });
       currentChangeSet = { ...currentChangeSet, status: 'approved' };
       return { changeSet: currentChangeSet };
     },
-    async reject(projectId, id, version) {
+    async reject(_projectId, _id, version) {
       calls.push({ action: 'reject', version });
       currentChangeSet = { ...currentChangeSet, status: 'rejected' };
       return { changeSet: currentChangeSet };
     },
-    async apply(projectId, id, version) {
+    async apply(_projectId, _id, version) {
       calls.push({ action: 'apply', version });
       currentChangeSet = { ...currentChangeSet, status: 'applied' };
       return { changeSet: currentChangeSet, results: [], replayed: false };
@@ -70,7 +70,7 @@ test('apply is rejected unless the observed ChangeSet is approved', async () => 
 test('a lost apply response remains unknown and retries the same version', async () => {
   let attempts = 0;
   const { actor, calls, load } = harness({
-    async apply(projectId, id, version) {
+    async apply(_projectId, _id, version) {
       calls.push({ action: 'apply', version });
       if (++attempts === 1) throw new Error('response lost');
       throw new Error('response lost again');
@@ -109,18 +109,21 @@ test('approval and rejection are available only from proposed state', async () =
 
 test('a failed feed refresh preserves the last native ChangeSet list', async () => {
   let fail = false;
-  const { actor } = harness({
+  const { actor, calls, load } = harness({
     async load() {
       if (fail) throw new Error('feed unavailable');
       return { changeSets: [changeSet], coreReviews: [] };
     },
   });
-  actor.send({ type: 'LOAD.REQUESTED', canWrite: false, showCoreReviews: false });
-  await waitFor(actor, snapshot => snapshot.matches('idle') && snapshot.context.changeSets.length === 1, { timeout: 1_000 });
+  await load();
   fail = true;
-  actor.send({ type: 'LOAD.REQUESTED', canWrite: false, showCoreReviews: false });
-  await waitFor(actor, snapshot => snapshot.matches('idle') && snapshot.context.message === 'feed unavailable', { timeout: 1_000 });
-  assert.deepEqual(actor.getSnapshot().context.changeSets, [changeSet]);
+  actor.send({ type: 'LOAD.REQUESTED' });
+  const failed = await waitFor(actor, snapshot => snapshot.context.message === 'feed unavailable', { timeout: 1_000 });
+  actor.send({ type: 'ACTION', action: 'apply' });
+
+  assert.deepEqual(calls, []);
+  assert.equal(failed.matches('readFailed'), true);
+  assert.deepEqual(failed.context.changeSets, [changeSet]);
   actor.stop();
 });
 
@@ -135,17 +138,19 @@ test('a detail read failure keeps the newly fetched list available', async () =>
     },
   });
   actor.send({ type: 'LOAD.REQUESTED', canWrite: false, showCoreReviews: false });
-  await waitFor(actor, snapshot => snapshot.matches('idle') && snapshot.context.message === 'detail unavailable', { timeout: 1_000 });
+  await waitFor(actor, snapshot => snapshot.matches('readFailed') && snapshot.context.message === 'detail unavailable', {
+    timeout: 1_000,
+  });
   assert.deepEqual(actor.getSnapshot().context.changeSets, [fresh]);
   assert.equal(actor.getSnapshot().context.selectedId, fresh.id);
   assert.equal(actor.getSnapshot().context.detail, null);
   actor.stop();
 });
 
-test('a version conflict blocks another mutation until a fresh detail is loaded', async () => {
+test('[TEST-UI-006-003] a version conflict blocks another mutation until a fresh detail is loaded', async () => {
   const conflict = Object.assign(new Error('stale version'), { status: 412 });
   const { actor, calls, load } = harness({
-    async apply(projectId, id, version) {
+    async apply(_projectId, _id, version) {
       calls.push({ action: 'apply', version });
       throw conflict;
     },
@@ -168,7 +173,7 @@ test('a forbidden mutation is not confirmed by a concurrent applied status', asy
     receipt: { changeSet: { ...changeSet, status: 'applied' }, results: [], replayed: false },
   } as unknown as NativeReviewDetail;
   const { actor, calls, load } = harness({
-    async apply(projectId, id, version) {
+    async apply(_projectId, _id, version) {
       calls.push({ action: 'apply', version });
       throw denied;
     },
@@ -312,4 +317,31 @@ test('a later detail refresh emits the recovered apply outcome once', async () =
   const reselected = await waitFor(actor, snapshot => snapshot.context.detail?.receipt === receipt, { timeout: 1_000 });
   assert.equal(reselected.context.outcomeSequence, refreshed.context.outcomeSequence);
   actor.stop();
+});
+
+test('an expired session during feed refresh blocks mutation on the previously loaded proposal', async () => {
+  let expired = false;
+  const { actor, calls, load } = harness({
+    async load() {
+      if (expired) throw Object.assign(new Error('Session expired'), { status: 401 });
+      return { changeSets: [changeSet], coreReviews: [] };
+    },
+  });
+  try {
+    await load();
+    expired = true;
+    actor.send({ type: 'LOAD.REQUESTED' });
+    const failed = await waitFor(actor, snapshot => Boolean(snapshot.context.message), { timeout: 1_000 });
+
+    actor.send({ type: 'ACTION', action: 'apply' });
+    assert.deepEqual(calls, []);
+    assert.equal(failed.matches('unauthorized'), true);
+
+    expired = false;
+    await load();
+    actor.send({ type: 'ACTION', action: 'apply' });
+    assert.deepEqual(calls, [{ action: 'apply', version: 7 }]);
+  } finally {
+    actor.stop();
+  }
 });

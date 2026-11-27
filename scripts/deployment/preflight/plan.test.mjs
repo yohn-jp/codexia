@@ -30,6 +30,8 @@ test('lifecycle route table preserves absence, recovery and ordinary admission',
     [{ B: 'absent', F: 'absent' }, 'install', 'not-applicable', 'R0'],
     [{ B: 'absent', F: 'incompatible' }, 'install', 'denied', 'R0'],
     [{ B: 'absent' }, 'install', 'allowed', 'R6'],
+    [{ B: 'absent' }, 'adopt', 'allowed', 'R0'],
+    [{ B: 'absent' }, 'update', 'allowed', 'R0'],
     [{ B: 'incompatible' }, 'update', 'denied', 'R0'],
     [{ F: 'absent' }, 'update', 'not-applicable', 'R0'],
     [{ F: 'incompatible' }, 'update', 'denied', 'R0'],
@@ -62,7 +64,7 @@ test('every combination of observation axes has exactly one route or safe stop',
         else if (state.T !== 'none') assert.equal(result, 'R1');
         else if (state.D === 'lost') assert.equal(result, intent === 'restore' ? 'R2' : 'R0');
         else if (Object.values(state).includes('unknown')) assert.equal(result, 'R0');
-        if (result === 'R5') assert.equal(intent, 'install');
+        if (result === 'R5' || result === 'R6') assert.equal(intent, 'install');
         if (result === 'R8') {
           assert.equal(state.B, 'compatible');
           assert.equal(admission, 'allowed');
@@ -111,7 +113,7 @@ test('incompatible installed states and missing frontend stop without mutation a
   }
 });
 
-test('first activation keeps exact evidence, preservation and freshness requirements', () => {
+test('first activation keeps exact evidence and freshness requirements without a backup receipt', () => {
   const input = baseline();
   const { plan, planSha256 } = createDeploymentPlan(input);
   assert.equal(plan.candidateRoute, 'R6');
@@ -121,7 +123,21 @@ test('first activation keeps exact evidence, preservation and freshness requirem
   assert.match(planSha256, /^[a-f0-9]{64}$/u);
   const missing = baseline();
   missing.observation.binding.backupSha256 = null;
-  assert.ok(createDeploymentPlan(missing).plan.blockers.includes('missing-preservation-evidence'));
+  const fresh = createDeploymentPlan(missing).plan;
+  assert.deepEqual(fresh.blockers, ['approval-required']);
+  assert.equal(fresh.requiresPreservation, false);
+  for (const [state, intent, route] of [
+    [{ B: 'absent', H: 'partial' }, 'adopt', 'R4'],
+    [{ B: 'absent', H: 'partial' }, 'install', 'R4'],
+    [{ D: 'lost' }, 'restore', 'R2'],
+    [{ H: 'drift' }, 'maintenance', 'R3'],
+  ]) {
+    const { plan: protectedPlan } = createDeploymentPlan({ ...missing, intent,
+      observation: { ...missing.observation, state: { ...ready, ...state } } });
+    assert.equal(protectedPlan.candidateRoute, route);
+    assert.equal(protectedPlan.requiresPreservation, true);
+    assert.ok(protectedPlan.blockers.includes('missing-preservation-evidence'));
+  }
   assert.throws(() => createDeploymentPlan({ ...input, now: new Date('2026-11-24T04:06:00.000Z') }), /Stale/);
   assert.throws(() => createDeploymentPlan({ ...input, target: { ...input.target, token: 'secret' } }), /candidate evidence/);
 });

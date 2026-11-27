@@ -79,11 +79,6 @@ case "$operation" in
       die 'Push backup requires explicit approval and the canonical host lock'
     verify_lock_descriptor "$6" "$8"
     ;;
-  fingerprint-locked)
-    [[ $# == 6 && "$2" == --approved && "$3" == --lock-file && "$4" == "$lock_file" && "$5" == --lock-fd ]] ||
-      die 'Fingerprinting requires explicit approval and the inherited canonical host lock'
-    verify_lock_descriptor "$4" "$6"
-    ;;
   drill)
     mkdir -p "$STATE_DIR"
     exec 9>"$lock_file"
@@ -333,14 +328,6 @@ case "${1:-}" in
     backup_directory "$2"
     [[ "$3" =~ ^age1[0-9a-z]+$ ]] || die 'Provide an age public recipient, not a private key'
     backup_artifact "$2" "$3" "${10:-}"
-    ;;
-  fingerprint-locked)
-    require_quiesced
-    podman volume exists codexia-history || die 'History volume absent'
-    database_hash="$(db_fingerprint codexia-db codexia_admin)" || die 'Could not retrieve database fingerprint'
-    history_hash="$(history_fingerprint codexia-history)" || die 'Could not retrieve history fingerprint'
-    require_quiesced
-    printf '{"databaseFingerprint":"%s","historyFingerprint":"%s"}\n' "$database_hash" "$history_hash"
     ;;
   drill)
     [[ ( $# == 4 || $# == 8 || $# == 13 ) && "$4" == --approved && "$2" == /* && -d "$2" && ! -L "$2" && "$3" == /* && -f "$3" && ! -L "$3" && -r "$3" ]] ||

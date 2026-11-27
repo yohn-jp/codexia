@@ -395,7 +395,7 @@ test("replaying a saved operation after a newer remote revision shows the curren
   expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
 });
 
-test("[TEST-UI-002-001] a lost save response survives newer input, reloads, and rebases the newer draft after acknowledgement", async ({ page, authorizeAuthor }) => {
+test("[TEST-UI-002-001] [TEST-UI-006-002] a lost save response survives newer input, reloads, and rebases the newer draft after acknowledgement", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);
   const submitted = "Submitted B before newer input.";
   const newer = "Newer C entered while B was saving.";
@@ -651,10 +651,12 @@ test("browser recovery is author-scoped and foreign records remain untouched", a
 test("one malformed legacy key does not hide later recoverable PostgreSQL drafts", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
   try {
-    await editor(page).fill("Valid protected draft after malformed entry.");
-    await expect.poll(async () => (await drafts(page)).some((d) => d.markdown === "Valid protected draft after malformed entry.")).toBe(true);
+    const markdown = "Valid protected draft after malformed entry.";
+    await replaceEditor(page, markdown);
+    await expectEditor(page, markdown);
+    await expect.poll(async () => (await drafts(page)).some((draft) => draft.markdown === markdown)).toBe(true);
     await writeRecords(page, [{ key: "malformed-legacy-key", version: 0, markdown: "Untrusted legacy content" }]);
-    await reopen(page, f); await expectEditor(page, "Valid protected draft after malformed entry.");
+    await reopen(page, f); await expectEditor(page, markdown);
     expect((await drafts(page)).some((d) => d.key === "malformed-legacy-key")).toBe(true);
   } finally { gate.release(); }
 });
@@ -1520,7 +1522,9 @@ test("Desktop publishing preserves proposal, scope, expiration, reader isolation
     const shortExpiryUrl = new URL(`/r/publishing/${projectId}/${shortExpiryAction.data.token}`, publicReaderOrigin.origin);
     const shortExpiryBase = `${origin}/api/public/projects/${projectId}/modules/publishing/share/${encodeURIComponent(shortExpiryAction.data.token)}`;
     expect((await readerContext.request.get(shortExpiryBase)).ok()).toBe(true);
-    await page.waitForTimeout(Math.max(0, Date.parse(shortExpiryAction.data.share.expiresAt) - Date.now() + 100));
+    await expect
+      .poll(async () => (await readerContext.request.get(shortExpiryBase)).status(), { timeout: 30_000 })
+      .toBe(404);
     await readerPage.goto(shortExpiryUrl.toString());
     await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
     const expiredListResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.list`, {
