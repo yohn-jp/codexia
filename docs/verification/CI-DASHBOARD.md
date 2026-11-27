@@ -26,6 +26,7 @@ The selected revision can be shared through `?pr=<number>&sha=<executed-sha>` wh
 ## Bottleneck attribution (first-attempt successful Verify only)
 
 - The **last canonical validation leaf** is the latest finished required validation job preceding successful `certification`. Its observed dependency ancestry is derived from the exact published Verify needs graph, not inferred from bar lengths alone.
+- Profile validation is called through `profile-core` and `profile-full`; each reusable call owns its `build-<profile>` job and corresponding `browser-<group>` matrix. Interpret the matching Build → Browser dependency within that call as the artifact producer edge. The two profile calls are independent siblings under Plan, and Certification waits for both calls and the other required lanes. Job names remain the validation identities; a reusable workflow call or matrix display name does not replace the canonical task inventory.
 - **Runner queue** is the recorded job creation-to-start interval. **Before validation** is the job start to `Run selected validations` step start; it may include VM/container provisioning, checkout, dependency installation, artifact restoration and runtime checks. It is **not** a pure image pull or startup measurement.
 - **Container initialization** is the `Initialize containers` step duration when GitHub provides it. **Validation** is only the duration of `Run selected validations`; it includes all tasks scheduled by `group.mjs` and is not a sum of per-task execution times. **After validation** is the interval from that step's end to the job's end.
 - **Runner-up gap** is the observed finish-time difference between the last canonical validation leaf and the second-latest one. **Near finish** lists other leaves within 15 seconds of that finish. The gap is not guaranteed time saved by optimizing one job: shared resource contention and reruns can alter the result.
@@ -74,7 +75,7 @@ speedup predictions.
 | Verify certification | Certification job completion minus attempt boundary. Separate from whole Verify workflow elapsed. |
 | Runner time | Sum of current-attempt job execution intervals, excluding skipped/carried jobs. Not billed minutes. |
 | Queue intervals | Sum of recorded job creation-to-start intervals. Does not isolate runner capacity, dependency waiting or network pulls. |
-| Blocking chain | Walk the current Verify YAML needs graph backwards from successful certification, selecting each latest completed predecessor. The DAG comes from the workflow file; dynamic job names are matched to its templates. |
+| Blocking chain | Walk the current Verify and reusable profile workflow needs graphs backwards from successful certification, selecting each latest completed predecessor. The DAG comes from those workflow files; reusable call identities and dynamic matrix job names are matched to their templates. |
 | Longest steps | API step start-to-end intervals. Install/container phases are not pure download timings. |
 | History p50 / p90 | Nearest-rank of **inspected** complete initial-attempt PR/source groups containing Verify; uninspected, incomplete or Verify-less groups are excluded. Not normalized for full/affected plans, runner/image, cache or missing external checks. |
 
@@ -85,7 +86,7 @@ The inventory does **not** establish all required checks: API history retention,
 ## Optimization procedure
 
 1. Compare at least three matched successful **full-plan** runs for the same tested source classes, profiles, toolchain, runner/image and cache state where feasible.
-2. Break down plan, dependency install, producer build, browser test, queue intervals and certification. Confirm whether a candidate is on the observed blocking chain.
+2. Break down plan, dependency install, each profile Build, same-profile Browser matrix, artifact transfer/restoration, queue intervals and certification. Confirm whether a candidate is on the observed blocking chain.
 3. Change only a demonstrated bottleneck without weakening per-task proofs, exact-source certification, browser coverage, PostgreSQL isolation or producer identity.
 4. Re-measure equivalent runs and compare **both** gate completion and runner seconds. A faster job outside the gate is not necessarily a faster PR.
 5. Compare Xcode/ARM and Intel only using equivalent work, not hardware specifications. Xcode 27 is native iOS packaging, not a replacement for Ubuntu browser certification.
