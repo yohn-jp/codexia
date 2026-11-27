@@ -188,7 +188,9 @@ func reportProtectedInputs(snapshot githubSnapshot, report *statusReport) {
 			report.ProtectedInputs[item.environment+"/"+item.name] = inventory[item.name]
 		}
 	}
-	for _, item := range protectedVariables("", "", "", "") {
+	for _, item := range append(protectedVariables("", "", "", ""),
+		environmentInput{bootstrapEnvironment, wifClientIDInput, ""},
+		environmentInput{productionEnvironment, wifClientIDInput, ""}) {
 		if inventory := selectEnvironment(snapshot, item.environment).Variables; inventory != nil {
 			_, report.ProtectedInputs[item.environment+"/"+item.name] = inventory[item.name]
 		}
