@@ -4460,7 +4460,6 @@ export function PersistenceWorkspace({
           document.body,
         )}
       <DesktopShell
-        mode={mode}
         header={
           <>
             <h1>Database workspace</h1>
@@ -4493,9 +4492,6 @@ export function PersistenceWorkspace({
         }
         documentTitle={active?.document.title}
         documentContext={writingContext}
-        library={library}
-        editor={editor}
-        tools={knowledge}
         status={loading && <p role="status">PostgreSQLの状態を読み込んでいます。</p>}
         workspaceScope={`postgres:${authorScope}`}
         panels={panels}

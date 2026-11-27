@@ -4,7 +4,7 @@
 
 ## 位置付け
 
-[情報設計](INFORMATION-ARCHITECTURE.md) と [UX contract](UX-CONTRACT.md) を具体化する再設計提案。React、CodeMirror、Radix、既存Workspaceと共通authoring coordinatorを維持する。
+[情報設計](INFORMATION-ARCHITECTURE.md) と [UX contract](UX-CONTRACT.md) を具体化する再設計提案。React、CodeMirror、既存Workspaceと共通authoring coordinatorを維持する。
 
 ## 作業面の構成
 
