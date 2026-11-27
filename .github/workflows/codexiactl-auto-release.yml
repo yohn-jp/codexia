@@ -1,0 +1,68 @@
+name: Auto release CodexiaCTL
+on:
+  workflow_run:
+    workflows: ['Verify Codexia']
+    types: [completed]
+permissions:
+  contents: read
+concurrency:
+  group: codexiactl-auto-release
+  cancel-in-progress: false
+jobs:
+  tag:
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Publish next immutable v0.1.x tag for changed CLI
+        uses: actions/github-script@v8
+        env:
+          RELEASE_TAG_TOKEN: ${{ secrets.CODEXIA_RELEASE_TAG_TOKEN }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+        with:
+          github-token: ${{ secrets.CODEXIA_RELEASE_TAG_TOKEN }}
+          script: |
+            const {owner, repo} = context.repo;
+            const sha = process.env.VERIFIED_SHA;
+            if (!process.env.RELEASE_TAG_TOKEN) {
+              throw new Error('CODEXIA_RELEASE_TAG_TOKEN is required (scoped Contents: write; workflow-triggering credential)');
+            }
+            if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Invalid verified SHA');
+            const main = await github.rest.repos.getBranch({owner, repo, branch: 'main'});
+            if (main.data.commit.sha !== sha) {
+              core.info('Superseded main verification: no tag');
+              return;
+            }
+            const commit = await github.rest.repos.getCommit({owner, repo, ref: sha});
+            if (commit.data.parents.length !== 1 && commit.data.parents.length !== 2) {
+              throw new Error('Unexpected commit parent count; review manually');
+            }
+            const parent = commit.data.parents[0].sha;
+            // Compare responses are not a simple paginated array in Octokit; inspect the
+            // complete compare response and reject truncated changes.
+            const diff = await github.rest.repos.compareCommitsWithBasehead({
+              owner, repo, basehead: `${parent}...${sha}`, per_page: 100
+            });
+            if (diff.data.total_commits > 250 || diff.data.files.length >= 100) {
+              throw new Error('Comparison too large; manual release review required');
+            }
+            const cliPath = p => p.startsWith('cmd/codexiactl/') ||
+              p === 'scripts/ci/execution/verify-codexiactl.sh' ||
+              p.startsWith('scripts/release/components/codexiactl-release') ||
+              p === '.github/workflows/publish-oci.yml';
+            if (!diff.data.files.some(f => cliPath(f.filename))) {
+              core.info('No CodexiaCTL changes: no release');
+              return;
+            }
+            const tags = await github.paginate(github.rest.repos.listTags, {owner, repo, per_page: 100});
+            const versions = tags.map(t => /^v0\\.1\\.(\\d+)$/.exec(t.name))
+              .filter(Boolean).map(m => Number(m[1]));
+            const next = Math.max(0, ...versions) + 1;
+            if (!Number.isSafeInteger(next)) throw new Error('Invalid release sequence');
+            const tag = `v0.1.${next}`;
+            await github.rest.git.createRef({owner, repo, ref: `refs/tags/${tag}`, sha});
+            core.notice(`Created ${tag} at verified ${sha}; tag push triggers Publish Codexia OCI`);
