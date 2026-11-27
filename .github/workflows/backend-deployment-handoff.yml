@@ -257,8 +257,8 @@ jobs:
           CODEXIA_SOURCE_SHA: ${{ needs.verify-handoff.outputs.producer-sha }}
           CODEXIA_PROFILE: full
           CODEXIA_DEPLOYED_UI_EPOCH: ${{ steps.live-ui.outputs.frontendApiEpoch }}
-          CODEXIA_BACKUP_DESTINATION: ${{ vars.CODEXIA_BACKUP_DESTINATION || '/home/codexia/backups' }}
-          CODEXIA_BACKUP_AGE_RECIPIENT: ${{ vars.CODEXIA_BACKUP_AGE_RECIPIENT }}
+          CODEXIA_BACKUP_DESTINATION: ${{ github.event_name != 'workflow_dispatch' && (vars.CODEXIA_BACKUP_DESTINATION || '/home/codexia/backups') || '' }}
+          CODEXIA_BACKUP_AGE_RECIPIENT: ${{ github.event_name != 'workflow_dispatch' && vars.CODEXIA_BACKUP_AGE_RECIPIENT || '' }}
           CODEXIA_INITIAL_INSTALL_APPROVED: ${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED || 'false' }}
           CODEXIA_DATABASE_INITIALIZATION_APPROVED: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED || 'false' }}
         run: |
@@ -268,8 +268,10 @@ jobs:
           [[ "$CODEXIA_VERIFIED_MAIN_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$CODEXIA_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$CODEXIA_DEPLOYED_UI_EPOCH" =~ ^[1-9][0-9]*$ ]]
-          test -n "$CODEXIA_BACKUP_DESTINATION"
-          [[ "$CODEXIA_BACKUP_AGE_RECIPIENT" =~ ^age1[0-9a-z]+$ ]]
+          if [[ "${CODEXIA_MANUAL_ACTIVATION:-false}" != true ]]; then
+            test -n "$CODEXIA_BACKUP_DESTINATION"
+            [[ "$CODEXIA_BACKUP_AGE_RECIPIENT" =~ ^age1[0-9a-z]+$ ]]
+          fi
           [[ "$CODEXIA_INITIAL_INSTALL_APPROVED" == true || "$CODEXIA_INITIAL_INSTALL_APPROVED" == false ]]
           [[ "$CODEXIA_DATABASE_INITIALIZATION_APPROVED" == true || "$CODEXIA_DATABASE_INITIALIZATION_APPROVED" == false ]]
           if [[ "${CODEXIA_MANUAL_ACTIVATION:-false}" == true ]]; then
@@ -304,13 +306,14 @@ jobs:
             codexia_verified_main_sha: env.CODEXIA_VERIFIED_MAIN_SHA,
             codexia_deployed_ui_epoch: Number(env.CODEXIA_DEPLOYED_UI_EPOCH),
             codexia_deployment_certificate_file: env.CODEXIA_DEPLOYMENT_CERTIFICATE_FILE,
-            codexia_backup_destination: env.CODEXIA_BACKUP_DESTINATION,
-            codexia_backup_recipient: env.CODEXIA_BACKUP_AGE_RECIPIENT,
             codexia_initial_install_approved: manual && env.CODEXIA_INITIAL_INSTALL_APPROVED === 'true',
             codexia_database_initialization_approved: manual && env.CODEXIA_DATABASE_INITIALIZATION_APPROVED === 'true',
           };
           if (manual) {
             vars.codexia_expected_first_activation = JSON.parse(readFileSync(join(env.RUNNER_TEMP, 'codexia-first-activation.json'), 'utf8'));
+          } else {
+            vars.codexia_backup_destination = env.CODEXIA_BACKUP_DESTINATION;
+            vars.codexia_backup_recipient = env.CODEXIA_BACKUP_AGE_RECIPIENT;
           }
           process.stdout.write(JSON.stringify(vars));
           NODE

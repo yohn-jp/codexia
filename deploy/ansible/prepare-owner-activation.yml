@@ -25,19 +25,18 @@
           - codexia_owner_setup_expected_web_redirect_uris is sequence and codexia_owner_setup_expected_web_redirect_uris is not string
           - codexia_owner_setup_expected_web_redirect_uris | length > 0
           - codexia_expected_owner_setup_checkpoint is mapping
+          - codexia_expected_owner_secret_set_sha256 is match('^[a-f0-9]{64}$')
           - codexia_owner_setup_operation != 'owner-setup' or codexia_owner_setup_edge_approved | default(false) is sameas true
           - codexia_owner_setup_operation != 'owner-setup' or codexia_owner_setup_age_recipient is match('^age1[0-9a-z]+$')
         fail_msg: Owner handoff requires the pinned rootless account, certified Full image and protected enrollment approval.
 
-    - name: Check the independently recovered credential generation before owner mutation
-      ansible.builtin.include_tasks:
-        file: bootstrap-secret-escrow.yml
-        apply:
-          become: true
-          become_user: "{{ codexia_service_user }}"
-          environment:
-            HOME: "{{ owner_setup_home }}"
-            XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid }}"
+    - name: Stage the read-only observer for the locked owner operation
+      become: true
+      become_user: "{{ codexia_service_user }}"
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/preflight-observe.py"
+        dest: "{{ owner_setup_home }}/.local/bin/codexia-preflight-observe"
+        mode: '0700'
 
     - name: Run the canonical operator operation under its host lock
       become: true
@@ -49,10 +48,10 @@
         XDG_STATE_HOME: "{{ owner_setup_home }}/.local/state"
         XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid }}"
         DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ codexia_service_uid }}/bus"
-        CODEXIA_OWNER_SETUP_ESCROW_IDS_SHA256: "{{ (bootstrap_escrow_snapshot.stdout | from_json).idsSha256 }}"
         CODEXIA_OWNER_SETUP_EXPECTED_ORIGIN: "{{ codexia_owner_setup_expected_origin }}"
         CODEXIA_OWNER_SETUP_EXPECTED_WEB_CLIENT_ID: "{{ codexia_owner_setup_expected_web_client_id }}"
         CODEXIA_OWNER_SETUP_EXPECTED_WEB_REDIRECT_URIS: "{{ codexia_owner_setup_expected_web_redirect_uris | join(',') }}"
+        CODEXIA_OWNER_SETUP_EXPECTED_SECRET_SET_SHA256: "{{ codexia_expected_owner_secret_set_sha256 }}"
         CODEXIA_OWNER_SETUP_EXPECTED_CHECKPOINT: "{{ codexia_expected_owner_setup_checkpoint | to_json }}"
       ansible.builtin.command:
         argv: "{{ ['bash', '-c', lookup('ansible.builtin.file', playbook_dir + '/owner-setup.sh'), 'codexia-owner-setup'] + owner_setup_operations[codexia_owner_setup_operation] }}"

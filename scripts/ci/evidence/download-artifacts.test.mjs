@@ -371,15 +371,3 @@ test('artifact extraction rejects a parent path in an unmaterialized entry', asy
   await assert.rejects(extractArtifactFiles(archive, path.join(directory, 'out')), /unsafe|filename|path/i);
   await assert.rejects(readFile(path.join(directory, 'fixture.txt')), { code: 'ENOENT' });
 });
-
-test('initial preservation receipt is extracted from a real ZIP without widening arbitrary entry access', async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'codexia-preservation-zip-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const receipt = { format: 'codexia-initial-preservation/v1', sourceSha: identity.sourceSha, runId: 123, attempt: 1 };
-  await writeFile(path.join(dir, 'preservation.json'), JSON.stringify(receipt));
-  await writeFile(path.join(dir, 'unapproved.json'), '{}');
-  execFileSync('zip', ['-q', 'artifact.zip', 'preservation.json', 'unapproved.json'], { cwd: dir });
-  const archive = await readFile(path.join(dir, 'artifact.zip'));
-  assert.deepEqual(JSON.parse(await extractJsonEntry(archive, 'preservation.json')), receipt);
-  await assert.rejects(extractJsonEntry(archive, 'unapproved.json'), /Invalid evidence filename/);
-});

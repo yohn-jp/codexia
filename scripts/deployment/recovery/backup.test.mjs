@@ -409,27 +409,6 @@ test('push backup rejects a locked file other than the canonical host lock', asy
   }
 });
 
-test('fingerprint-locked returns canonical hashes only with the quiesced host lock', async () => {
-  const fixture = await createFixture();
-  try {
-    await writeFile(path.join(fixture.bin, 'podman'), '#!/bin/sh\ncase "$1" in\n  exec) printf database;;\n  run) printf history;;\n  volume) exit 0;;\n  *) exit 1;;\nesac\n');
-    const args = [backupProgram, 'fingerprint-locked', '--approved', '--lock-file', fixture.lockFile, '--lock-fd', '9'];
-    const launch = `exec 9>${shellQuote(fixture.lockFile)}; flock --exclusive --nonblock 9; exec ${args.map(shellQuote).join(' ')}`;
-    const env = { ...process.env, HOME: fixture.home, XDG_STATE_HOME: path.join(fixture.home, '.local/state'), PATH: `${fixture.bin}:${process.env.PATH}` };
-    const verified = spawnSync('bash', ['-c', launch], { encoding: 'utf8', env });
-    assert.equal(verified.status, 0, verified.stderr);
-    const digest = input => createHash('sha256').update(input).digest('hex');
-    assert.deepEqual(JSON.parse(verified.stdout), { databaseFingerprint: digest('database'), historyFingerprint: digest('history') });
-    const missingLock = spawnSync('bash', args, { encoding: 'utf8', env });
-    assert.notEqual(missingLock.status, 0);
-    assert.match(missingLock.stderr, /lock descriptor/u);
-    const activeApi = spawnSync('bash', ['-c', launch], { encoding: 'utf8', env: { ...env, CODEXIA_TEST_ACTIVE_UNITS: 'codexia-api.service' } });
-    assert.notEqual(activeApi.status, 0);
-    assert.match(activeApi.stderr, /inactive systemd unit/u);
-  } finally {
-    await rm(fixture.directory, { recursive: true, force: true });
-  }
-});
 
 test('[TEST-OPS-003-001] restore drill verifies fingerprints before success evidence or candidate-ledger proof', async () => {
   const fixture = await createFixture();

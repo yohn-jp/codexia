@@ -249,7 +249,7 @@ export async function extractArtifactFiles(bytes, destination, {maxArchive = MAX
 const TRACE_REPORT_ENTRY = 'requirements-trace/strictdoc/trace-report.json';
 
 async function extractJsonEntries(bytes, filenames) {
-  const permitted = ['ci-plan.json', 'report.json', 'profile-build.json', 'native-report.json', 'preservation.json', TRACE_REPORT_ENTRY];
+  const permitted = ['ci-plan.json', 'report.json', 'profile-build.json', 'native-report.json', TRACE_REPORT_ENTRY];
   assert.ok(filenames.every(filename => permitted.includes(filename)), 'Invalid evidence filename');
   return readArtifactJsonEntries(bytes, filenames);
 }

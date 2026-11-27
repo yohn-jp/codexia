@@ -29,7 +29,7 @@ On the VM, the rootless service operator can inspect nonsecret setup state and i
 ~/.local/bin/codexia-owner-setup --replace-explicitly-approved <reviewed-full-image-digest> <previous-grant-id> <owner-age-recipient>
 ```
 
-After the owner registers a Passkey, run protected Bootstrap mode `prepare-activation`. It uses the existing `--prepare-activation` operator command to verify the enrolled owner and approved clients, stop the setup-only API and Tunnel, and derive the normal runtime owner subject from PostgreSQL. A retry after the settings were written verifies the same owner and clients against the live database before marking the clean slot ready. The protected first deployment still checks compatibility, encrypted backup and approvals. Retain the same already-published normal frontend and canonical routes. Clear the temporary enrollment approval after preparation.
+After the owner registers a Passkey, run protected Bootstrap mode `prepare-activation`. It uses the existing `--prepare-activation` operator command to verify the enrolled owner and approved clients, stop the setup-only API and Tunnel, and derive the normal runtime owner subject from PostgreSQL. A retry after the settings were written verifies the same owner and clients against the live database before marking the clean slot ready. The protected fresh R6 deployment checks compatibility, the confirmed installation intent, and separate approvals. Existing-data recovery requires independent preservation before activation. Retain the same already-published normal frontend and canonical routes. Clear the temporary enrollment approval after preparation.
 
 ## Legacy initial owner and OAuth client registration
 
