@@ -27,13 +27,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const serviceUID = 1001
-const maxAuthorizedKeys = 1024 * 1024
+const (
+	serviceUID        = 1001
+	maxAuthorizedKeys = 1024 * 1024
+)
 
-var unixUsername = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
-var machineIDPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
-var tailnetIPv4 = netip.MustParsePrefix("100.64.0.0/10")
-var tailnetIPv6 = netip.MustParsePrefix("fd7a:115c:a1e0::/48")
+var (
+	unixUsername     = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+	machineIDPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
+)
 
 type vmObservation struct {
 	User            string
@@ -214,7 +216,7 @@ func supportedAuthorizedKeys(config []string, home string) string {
 func commandOutput(ctx context.Context, path string, args ...string) ([]byte, error) {
 	bounded, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	return exec.CommandContext(bounded, path, args...).Output()
+	return exec.CommandContext(bounded, path, args...).Output() //nolint:gosec // Callers supply fixed absolute binaries and pass sshd-derived values as individual arguments.
 }
 
 func (vm vmObservation) ConfirmPin(o operator, address string) (string, error) {
@@ -264,13 +266,12 @@ func (vm vmObservation) confirmHostFingerprint(o operator) (string, error) {
 }
 
 func (vm vmObservation) pinForFingerprint(address, fingerprint string) (string, error) {
-	ip, err := netip.ParseAddr(address)
-	if err != nil || !isTailnetAddress(ip) {
-		return "", errors.New("the OpenSSH pin requires an observed Tailscale VM address")
+	if !validDNSHostname(address) {
+		return "", errors.New("the OpenSSH pin requires the verified Cloudflare management hostname")
 	}
 	for _, key := range vm.hostKeys {
 		if ssh.FingerprintSHA256(key) == fingerprint {
-			return ip.String() + " " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))), nil
+			return address + " " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))), nil
 		}
 	}
 	return "", refused("independently verified fingerprint does not match an effective VM OpenSSH host key")
@@ -289,8 +290,11 @@ func (vm vmObservation) verifyKnownHosts(host, pins string) error {
 			return errors.New("the existing protected SSH pin is malformed")
 		}
 		remaining = rest
-		if !slices.ContainsFunc(hosts, func(pattern string) bool { return strings.EqualFold(pattern, host) }) {
+		if !slices.Contains(hosts, host) {
 			continue
+		}
+		if len(hosts) != 1 {
+			return errors.New("the existing SSH pin includes additional host aliases outside the Cloudflare management ingress")
 		}
 		localKey := slices.ContainsFunc(vm.hostKeys, func(local ssh.PublicKey) bool {
 			return bytes.Equal(local.Marshal(), key.Marshal())
@@ -304,10 +308,6 @@ func (vm vmObservation) verifyKnownHosts(host, pins string) error {
 		return errors.New("no existing protected SSH pin binds the observed VM address to an effective host key")
 	}
 	return nil
-}
-
-func isTailnetAddress(ip netip.Addr) bool {
-	return ip.Zone() == "" && (tailnetIPv4.Contains(ip) || tailnetIPv6.Contains(ip))
 }
 
 func newSSHIdentity() ([]byte, string, error) {
@@ -353,7 +353,7 @@ func (vm vmObservation) BootstrapKeyInstalled(public string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	content, err := readAuthorizedKeys(context.Background(), file, vm.uid, unix.LOCK_SH)
 	if err != nil {
 		return false, err
@@ -370,7 +370,7 @@ func installAuthorizedKey(ctx context.Context, home, path, public string, uid in
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	original, err := readAuthorizedKeys(ctx, file, uid, unix.LOCK_EX)
 	if err != nil {
 		return err
@@ -406,7 +406,7 @@ func openAuthorizedKeys(home string, uid int, create bool) (*os.File, error) {
 	if err != nil {
 		return nil, errors.New("the administrator home must be owned by the administrator and have secure directory permissions")
 	}
-	defer unix.Close(homeFD)
+	defer func() { _ = unix.Close(homeFD) }()
 	dirFD, err := openOwnedDirectory(homeFD, ".ssh", uid)
 	if errors.Is(err, unix.ENOENT) {
 		if !create {
@@ -420,7 +420,7 @@ func openAuthorizedKeys(home string, uid int, create bool) (*os.File, error) {
 	if err != nil {
 		return nil, errors.New("administrator .ssh must be a real, securely owned directory")
 	}
-	defer unix.Close(dirFD)
+	defer func() { _ = unix.Close(dirFD) }()
 
 	flags := unix.O_NOFOLLOW | unix.O_CLOEXEC | unix.O_NONBLOCK
 	if create {
@@ -460,7 +460,7 @@ func openOwnedDirectory(parent int, path string, uid int) (int, error) {
 	}
 	var info unix.Stat_t
 	if err := unix.Fstat(fd, &info); err != nil || int(info.Uid) != uid || info.Mode&0o022 != 0 {
-		unix.Close(fd)
+		_ = unix.Close(fd)
 		return -1, errors.New("unsafe SSH directory permissions or ownership")
 	}
 	return fd, nil

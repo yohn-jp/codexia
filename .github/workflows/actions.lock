@@ -14,7 +14,6 @@ workflows:
         - 'actions/download-artifact@v8.0.2'
         - 'actions/setup-node@v7.1.0'
         - 'docker/login-action@v4.8.0'
-        - 'tailscale/github-action@v4'
     '.github/workflows/backend-handoff-revalidate.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-node@v7.1.0'
@@ -40,15 +39,12 @@ workflows:
     '.github/workflows/deployment-config.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-node@v7.1.0'
-        - 'hashicorp/setup-terraform@v4.0.1'
     '.github/workflows/frontend-release.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/download-artifact@v8.0.2'
         - 'actions/setup-node@v7.1.0'
         - 'actions/upload-artifact@v7.0.2'
         - 'docker/login-action@v4.8.0'
-        - 'hashicorp/setup-terraform@v4.0.1'
-        - 'tailscale/github-action@v4'
     '.github/workflows/full-model-oci-acceptance.yml':
         - 'actions/cache@v6.1.0'
         - 'actions/checkout@v7.0.1'
@@ -80,14 +76,12 @@ workflows:
         - 'actions/download-artifact@v8.0.2'
         - 'actions/setup-node@v7.1.0'
         - 'docker/login-action@v4.8.0'
-        - 'tailscale/github-action@v4'
     '.github/workflows/production-preflight.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/download-artifact@v8.0.2'
         - 'actions/setup-node@v7.1.0'
         - 'actions/upload-artifact@v7.0.2'
         - 'docker/login-action@v4.8.0'
-        - 'tailscale/github-action@v4'
     '.github/workflows/publish-codexiactl.yml':
         - 'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6'
         - 'actions/checkout@v7.0.1'
@@ -123,9 +117,6 @@ workflows:
         - 'actions/setup-python@v7.1.0'
         - 'actions/upload-artifact@v7.0.2'
         - 'actions/upload-pages-artifact@v5.0.0'
-    '.github/workflows/tailscale-connectivity.yml':
-        - 'actions/checkout@v7.0.1'
-        - 'tailscale/github-action@v4'
     '.github/workflows/verify-profile.yml':
         - 'actions/cache@v6.1.0'
         - 'actions/checkout@v7.0.1'
@@ -235,13 +226,3 @@ dependencies:
         commit: 'sha1-915412ff23e8b7659517e607487dbeae018f2934'
         owner_id: 9919
         repo_id: 259445878
-    'hashicorp/setup-terraform@v4.0.1':
-        ref: 'v4.0.1'
-        commit: 'sha1-dfe3c3f87815947d99a8997f908cb6525fc44e9e'
-        owner_id: 761456
-        repo_id: 258271226
-    'tailscale/github-action@v4':
-        ref: 'v4'
-        commit: 'sha1-064b10558093f38325e838ddea35486bdc6b1d5c'
-        owner_id: 48932923
-        repo_id: 360548653

@@ -4,7 +4,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -38,14 +40,17 @@ class OwnerSetupTests(unittest.TestCase):
         self.private_file(self.state / "owner-setup.intent", f"yohn-jp/codexia:401:502:123:456:{IMAGE}\n")
         self.unit = self.units / "codexia-api.container"
         self.trace = self.home / "trace"
+        self.gate_state = self.home / "gate-state"
+        self.gate_state.write_text("closed\n")
         self.environment = {
             **os.environ, "CODEXIA_IMAGE_REPOSITORY": "ghcr.io/yohn-jp/codexia-backend",
             "CODEXIA_TARGET_REPOSITORY": "yohn-jp/codexia", "CODEXIA_TARGET_REPOSITORY_ID": "401",
-            "CODEXIA_TARGET_OWNER_ID": "502", "HOME": str(self.home), "PATH": f"{self.bin}:/usr/bin:/bin",
+            "CODEXIA_TARGET_OWNER_ID": "502", "HOME": str(self.home),
+            "PATH": f"{self.bin}:/usr/bin:/bin:{os.environ.get('PATH', '')}",
             "TRACE": str(self.trace), "OWNER": OWNER, "DESCRIPTION": json.dumps({"state": "BLOCKED"}),
-            "GRANT_BINDING": BINDING,
+            "GRANT_BINDING": BINDING, "GATE_STATE_FILE": str(self.gate_state),
         }
-        self.executable("podman", r'''#!/bin/bash
+        self.executable("podman", r'''#!/usr/bin/env bash
 set -eu
 case "$1" in
     secret)
@@ -85,13 +90,11 @@ case "$1" in
     *) exit 70 ;;
 esac
 ''')
-        self.executable("age", '#!/bin/bash\ncat >/dev/null\n'
+        self.executable("age", '#!/usr/bin/env bash\ncat >/dev/null\n'
                         'case "$3" in\nage1fixture) printf %s encrypted-fixture ;;\n'
                         'age1other) printf %s encrypted-other-fixture ;;\n*) exit 72 ;;\nesac\n')
-        self.executable("python3", '#!/bin/bash\n'
-                        'if [[ "$1" == -c && "$2" == *http.client.HTTPConnection* ]]; then exit 0; fi\n'
-                        'exec /usr/bin/python3 "$@"\n')
-        self.executable("codexia-preflight-observe", f'''#!/usr/bin/python3
+        self.executable("python3", f'#!/usr/bin/env bash\nexec {sys.executable!r} "$@"\n')
+        self.executable("codexia-preflight-observe", f'''#!/usr/bin/env python3
 import importlib.util
 import os
 from pathlib import Path
@@ -110,9 +113,18 @@ try:
 except (ValueError, OSError):
     sys.exit(1)
 ''')
-        self.executable("systemctl", '#!/bin/bash\necho "$*" >>"$TRACE"\n'
-                        'if [[ "$2" == show ]]; then printf "%s\\n" "${TUNNEL_STATE:-inactive}"; fi\n')
-        self.executable("codexia-require-clean-api-target", '#!/bin/bash\necho clean >>"$TRACE"\n')
+        self.executable("systemctl", '#!/usr/bin/env bash\necho "$*" >>"$TRACE"\n'
+                        'if [[ "$*" == "is-active codexia-cloudflared.service" ]]; then echo active; fi\n')
+        self.executable("curl", '#!/usr/bin/env bash\necho "curl $*" >>"$TRACE"\nprintf 200\n')
+        self.executable("sudo", '#!/usr/bin/env bash\necho "sudo $*" >>"$TRACE"\n'
+                        '[[ "$1" == -n && "$2" == /usr/local/sbin/codexia-api-gate ]] || exit 90\n'
+                        'case "$3" in\n'
+                        ' status) cat "$GATE_STATE_FILE";;\n'
+                        ' close) printf "closed\\n" >"$GATE_STATE_FILE";;\n'
+                        ' open) printf "open\\n" >"$GATE_STATE_FILE";;\n'
+                        ' *) exit 91;;\n'
+                        'esac\n')
+        self.executable("codexia-require-clean-api-target", '#!/usr/bin/env bash\necho clean >>"$TRACE"\n')
 
     def executable(self, name, content):
         path = self.bin / name
@@ -138,7 +150,7 @@ except (ValueError, OSError):
         }))
 
     def test_locked_application_resume_rejects_changed_binding_or_ledger(self):
-        self.executable("podman", r'''#!/bin/bash
+        self.executable("podman", r'''#!/usr/bin/env bash
 set -eu
 case "$1" in
     exec)
@@ -186,11 +198,11 @@ esac
 
     def test_empty_auth_resume_rechecks_catalog_under_the_lock_before_migrating(self):
         self.executable("codexia-auth-runtime-bootstrap", AUTH_BOOTSTRAP.read_text())
-        self.executable("codexia-require-clean-api-target", '''#!/bin/bash
+        self.executable("codexia-require-clean-api-target", '''#!/usr/bin/env bash
 if flock --exclusive --nonblock "$HOME/.local/state/codexia-deploy/host.lock" true; then exit 75; fi
 echo clean >>"$TRACE"
 ''')
-        self.executable("podman", r'''#!/bin/bash
+        self.executable("podman", r'''#!/usr/bin/env bash
 set -eu
 case "$1" in
     exec)
@@ -236,7 +248,7 @@ esac
         self.private_file(self.state / "owner-setup.intent", f"yohn-jp/codexia:401:502:123:456:{IMAGE}\n")
         self.environment["CODEXIA_OWNER_SETUP_EXPECTED_SECRET_SET_SHA256"] = "a" * 64
         observer = self.home / ".local/bin/codexia-preflight-observe"
-        observer.write_text('#!/bin/bash\n'
+        observer.write_text('#!/usr/bin/env bash\n'
                             '[[ "$1" == verify-secret-identities && "$2" == "$FIXTURE_SECRET_SET" ]] && '
                             '[[ /proc/$$/fd/9 -ef "$HOME/.local/state/codexia-deploy/host.lock" ]]\n')
         observer.chmod(0o700)
@@ -310,9 +322,9 @@ esac
         self.assertEqual(issued.returncode, 0, issued.stderr)
         receipt = self.state / "owner-setup.age.receipt.json"
         original_receipt = receipt.read_bytes()
-        self.executable("mv", '#!/bin/bash\n'
+        self.executable("mv", '#!/usr/bin/env bash\n'
                         'if [[ "${*: -1}" == */owner-setup.age.receipt.json ]]; then exit 1; fi\n'
-                        'exec /usr/bin/mv "$@"\n')
+                        f'exec {shutil.which("mv")!r} "$@"\n')
         self.environment["GRANT_BINDING"] = "c" * 64
         replacement = self.run_setup("--replace-explicitly-approved", OWNER, "age1other")
         self.assertNotEqual(replacement.returncode, 0)
@@ -323,7 +335,7 @@ esac
         self.assertNotEqual(delivery.returncode, 0)
         self.assertEqual(delivery.stdout, "")
 
-    def test_replaced_grant_requires_a_fresh_r5_approval_before_tunnel_start(self):
+    def test_replaced_grant_requires_a_fresh_r5_approval_before_gate_open(self):
         self.environment["DESCRIPTION"] = json.dumps({"state": "SETUP_PENDING", "grantId": OWNER})
         self.environment["GRANT_BINDING"] = "b" * 64
         self.bound_handoff()
@@ -342,7 +354,7 @@ esac
         self.environment["CODEXIA_OWNER_SETUP_EXPECTED_CHECKPOINT"] = json.dumps(expected)
         result = self.run_setup("--converge", "NEW_APPROVED", "age1fixture")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("--user start codexia-tunnel.service", self.trace.read_text())
+        self.assertIn("sudo -n /usr/local/sbin/codexia-api-gate open", self.trace.read_text())
 
     def test_prepare_requires_reapproval_if_subject_settings_committed_after_preflight(self):
         self.environment["GRANT_BINDING"] = "a" * 64
@@ -363,15 +375,18 @@ esac
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("verified", self.trace.read_text())
 
-    def test_setup_readiness_verification_precedes_tunnel_start(self):
+    def test_setup_readiness_verification_precedes_gate_open(self):
         self.environment["DESCRIPTION"] = json.dumps({"state": "SETUP_PENDING", "grantId": OWNER})
         self.bound_handoff()
         self.environment["PROBE_STATUS"] = "1"
         result = self.run_setup("--converge", "OBSERVE_ONLY", "age1fixture")
         self.assertNotEqual(result.returncode, 0)
         commands = self.trace.read_text().splitlines()
-        self.assertEqual(commands[-3:], ["--user start codexia-api.service", "probe", "--user stop codexia-api.service"])
-        self.assertNotIn("--user start codexia-tunnel.service", commands)
+        self.assertLess(commands.index("--user start codexia-api.service"), commands.index("probe"))
+        self.assertLess(commands.index("probe"), commands.index("sudo -n /usr/local/sbin/codexia-api-gate close"))
+        self.assertLess(commands.index("sudo -n /usr/local/sbin/codexia-api-gate close"),
+                        commands.index("--user stop codexia-api.service"))
+        self.assertNotIn("sudo -n /usr/local/sbin/codexia-api-gate open", commands)
 
     def test_staged_public_config_must_match_certified_frontend(self):
         self.environment.update({
@@ -423,8 +438,8 @@ esac
         self.assertIn("verified", self.trace.read_text())
         self.assertNotIn("prepared", self.trace.read_text())
 
-    def test_prepare_does_not_mark_ready_while_tunnel_without_setup_unit_is_active(self):
-        self.environment["TUNNEL_STATE"] = "active"
+    def test_prepare_does_not_mark_ready_while_publication_gate_is_open(self):
+        self.gate_state.write_text("open\n")
         result = self.run_setup("--prepare-activation")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.state / "owner-setup.promoted").exists())
@@ -435,7 +450,8 @@ esac
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.unit.exists())
         commands = self.trace.read_text().splitlines()
-        self.assertLess(commands.index("--user stop codexia-tunnel.service codexia-api.service"), commands.index("clean"))
+        self.assertLess(commands.index("sudo -n /usr/local/sbin/codexia-api-gate close"), commands.index("--user stop codexia-api.service"))
+        self.assertLess(commands.index("--user stop codexia-api.service"), commands.index("clean"))
         self.assertIn(f"CODEXIA_OAUTH_OWNER_SUBJECT={OWNER}", self.runtime.read_text())
 
 

@@ -6,7 +6,7 @@ flowchart LR
     MANAGEMENT --> ANS["Ansible desired state + host lock"]
     ANS --> POD["Rootless Podman Quadlet"]
     POD --> PG[("Preserved PostgreSQL volumes")]
-    TF["Cloudflare Terraform / distinct Access policies"] --> EDGE["Shared Tunnel product ingress"]
-    TF --> MANAGEMENT
+    CTL["Approved CodexiaCTL init / official cf Device Flow"] --> EDGE["Shared Tunnel product ingress"]
+    CTL --> MANAGEMENT
     EDGE --> PUBLICATION["Independent product publication gate"]
     PUBLICATION --> POD

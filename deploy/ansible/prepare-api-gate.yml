@@ -1,0 +1,334 @@
+---
+- name: Require the CTL-installed management Tunnel service unit
+  become: true
+  become_user: root
+  ansible.builtin.stat:
+    path: /etc/systemd/system/codexia-cloudflared.service
+    follow: false
+    checksum_algorithm: sha256
+    get_mime: false
+    get_attributes: false
+  register: base_runtime_cloudflared_unit
+
+- name: Require the CTL-installed management Tunnel unit to match the canonical source
+  ansible.builtin.assert:
+    that:
+      - base_runtime_cloudflared_unit.stat.exists
+      - base_runtime_cloudflared_unit.stat.isreg | default(false)
+      - not (base_runtime_cloudflared_unit.stat.islnk | default(false))
+      - base_runtime_cloudflared_unit.stat.pw_name == 'root'
+      - base_runtime_cloudflared_unit.stat.gr_name == 'root'
+      - base_runtime_cloudflared_unit.stat.mode == '0644'
+      - base_runtime_cloudflared_unit.stat.checksum == (lookup('ansible.builtin.file', repo_root + '/cmd/codexiactl/assets/codexia-cloudflared.service', rstrip=false) | hash('sha256'))
+    fail_msg: Codexia management Tunnel unit is missing or differs from the CTL source; publication remains unchanged.
+
+- name: Verify the installed management cloudflared binary version
+  become: true
+  become_user: root
+  ansible.builtin.command:
+    argv: [/usr/bin/cloudflared, version]
+  register: base_runtime_cloudflared_version
+  changed_when: false
+  failed_when: >-
+    base_runtime_cloudflared_version.rc != 0 or
+    base_runtime_cloudflared_version.stdout is not match('^cloudflared version 2026\\.11\\.0(?: |$)')
+
+- name: Require the independently managed Tunnel connector to remain active
+  become: true
+  become_user: root
+  ansible.builtin.command:
+    argv: [systemctl, is-active, codexia-cloudflared.service]
+  register: base_runtime_cloudflared_active
+  changed_when: false
+  failed_when: base_runtime_cloudflared_active.rc != 0 or base_runtime_cloudflared_active.stdout != 'active'
+
+- name: Verify the management Tunnel readiness endpoint
+  ansible.builtin.uri:
+    url: http://127.0.0.1:2000/ready
+    method: GET
+    status_code: 200
+    return_content: false
+    use_proxy: false
+  register: base_runtime_cloudflared_ready
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: base_runtime_cloudflared_ready.status == 200
+
+- name: Require the system socket proxy binary
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/systemd-socket-proxyd
+    follow: false
+  register: base_runtime_socket_proxyd
+  changed_when: false
+  failed_when: not base_runtime_socket_proxyd.stat.exists or not base_runtime_socket_proxyd.stat.executable
+
+- name: Inspect existing system gate units without following links
+  become: true
+  become_user: root
+  ansible.builtin.stat:
+    path: "/usr/local/lib/systemd/system/{{ item }}"
+    follow: false
+    checksum_algorithm: sha256
+    get_mime: false
+    get_attributes: false
+  loop:
+    - codexia-api.socket
+    - codexia-api-gate.service
+  register: base_runtime_gate_units
+  changed_when: false
+
+- name: Refuse symlinked, special, or drifted system gate units
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or ((item.stat.isreg | default(false)) and not (item.stat.islnk | default(false)))
+      - not item.stat.exists or item.stat.checksum == (lookup('ansible.builtin.file', repo_root + '/deploy/systemd/' + item.item, rstrip=false) | hash('sha256'))
+      - not item.stat.exists or item.stat.pw_name == 'root'
+      - not item.stat.exists or item.stat.gr_name == 'root'
+      - not item.stat.exists or item.stat.mode == '0644'
+    fail_msg: Existing Codexia gate unit differs from the reviewed source; no system unit was overwritten.
+  loop: "{{ base_runtime_gate_units.results }}"
+
+- name: Inspect the existing root gate helper without following links
+  become: true
+  become_user: root
+  ansible.builtin.stat:
+    path: /usr/local/sbin/codexia-api-gate
+    follow: false
+    checksum_algorithm: sha256
+    get_mime: false
+    get_attributes: false
+  register: base_runtime_gate_helper
+  changed_when: false
+
+- name: Refuse a symlinked, special, or drifted root gate helper
+  ansible.builtin.assert:
+    that:
+      - not base_runtime_gate_helper.stat.exists or ((base_runtime_gate_helper.stat.isreg | default(false)) and not (base_runtime_gate_helper.stat.islnk | default(false)))
+      - not base_runtime_gate_helper.stat.exists or base_runtime_gate_helper.stat.checksum == (lookup('ansible.builtin.file', repo_root + '/deploy/ansible/codexia-api-gate', rstrip=false) | hash('sha256'))
+      - not base_runtime_gate_helper.stat.exists or base_runtime_gate_helper.stat.pw_name == 'root'
+      - not base_runtime_gate_helper.stat.exists or base_runtime_gate_helper.stat.gr_name == 'root'
+      - not base_runtime_gate_helper.stat.exists or base_runtime_gate_helper.stat.mode == '0755'
+    fail_msg: Existing Codexia gate helper differs from the reviewed source; it was not overwritten.
+
+- name: Inspect the existing gate sudoers policy without following links
+  become: true
+  become_user: root
+  ansible.builtin.stat:
+    path: /etc/sudoers.d/codexia-api-gate
+    follow: false
+    checksum_algorithm: sha256
+    get_mime: false
+    get_attributes: false
+  register: base_runtime_gate_sudoers
+  changed_when: false
+
+- name: Refuse a symlinked, special, or drifted gate sudoers policy
+  ansible.builtin.assert:
+    that:
+      - not base_runtime_gate_sudoers.stat.exists or ((base_runtime_gate_sudoers.stat.isreg | default(false)) and not (base_runtime_gate_sudoers.stat.islnk | default(false)))
+      - not base_runtime_gate_sudoers.stat.exists or base_runtime_gate_sudoers.stat.checksum == (lookup('ansible.builtin.template', repo_root + '/deploy/ansible/codexia-api-gate.sudoers.j2') | hash('sha256'))
+      - not base_runtime_gate_sudoers.stat.exists or base_runtime_gate_sudoers.stat.pw_name == 'root'
+      - not base_runtime_gate_sudoers.stat.exists or base_runtime_gate_sudoers.stat.gr_name == 'root'
+      - not base_runtime_gate_sudoers.stat.exists or base_runtime_gate_sudoers.stat.mode == '0440'
+    fail_msg: Existing Codexia gate sudoers policy differs from the reviewed source; it was not overwritten.
+
+- name: Observe the API runtime before initializing the gate
+  ansible.builtin.command:
+    argv: [podman, container, exists, codexia-api]
+  register: base_runtime_api_container
+  changed_when: false
+  failed_when: base_runtime_api_container.rc not in [0, 1]
+
+- name: Observe the API user service before initializing the gate
+  ansible.builtin.command:
+    argv: [systemctl, --user, is-active, codexia-api.service]
+  register: base_runtime_api_service
+  changed_when: false
+  failed_when: base_runtime_api_service.rc not in [0, 3, 4]
+
+- name: Require API container and service identity to agree before gate convergence
+  ansible.builtin.assert:
+    that:
+      - (base_runtime_api_container.rc == 0 and base_runtime_api_service.rc == 0) or
+        (base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0)
+    fail_msg: Existing API container and generated systemd unit disagree; publication gate state is unchanged.
+
+- name: Require the full canonical gate installation for an existing API
+  ansible.builtin.assert:
+    that:
+      - base_runtime_gate_units.results | selectattr('stat.exists', 'equalto', true) | list | length == 2
+      - base_runtime_gate_helper.stat.exists
+      - base_runtime_gate_sudoers.stat.exists
+    fail_msg: An existing API requires its canonical publication gate; no gate unit or permission was changed.
+  when: base_runtime_api_container.rc == 0
+
+- name: Ensure the system gate unit directory exists
+  become: true
+  become_user: root
+  ansible.builtin.file:
+    path: /usr/local/lib/systemd/system
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the fixed system gate units without replacing existing definitions
+  become: true
+  become_user: root
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/systemd/{{ item }}"
+    dest: "/usr/local/lib/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+    force: false
+  loop:
+    - codexia-api.socket
+    - codexia-api-gate.service
+  register: base_runtime_gate_unit_install
+
+- name: Install the root-owned fixed-verb gate controller without replacement
+  become: true
+  become_user: root
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/codexia-api-gate"
+    dest: /usr/local/sbin/codexia-api-gate
+    owner: root
+    group: root
+    mode: '0755'
+    force: false
+  register: base_runtime_gate_helper_install
+
+- name: Install the exact gate systemctl sudoers rules
+  become: true
+  become_user: root
+  ansible.builtin.template:
+    src: "{{ repo_root }}/deploy/ansible/codexia-api-gate.sudoers.j2"
+    dest: /etc/sudoers.d/codexia-api-gate
+    owner: root
+    group: root
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s
+  register: base_runtime_gate_sudoers_install
+
+- name: Reload systemd after installing changed gate units
+  become: true
+  become_user: root
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    scope: system
+  when: >-
+    (base_runtime_gate_unit_install.results | selectattr('changed', 'equalto', true) | list | length > 0) or
+    base_runtime_gate_helper_install.changed or base_runtime_gate_sudoers_install.changed
+
+- name: Inspect the lifecycle host lock before initializing an API-less gate
+  ansible.builtin.stat:
+    path: "{{ home }}/.local/state/codexia-deploy/host.lock"
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: base_runtime_fresh_gate_host_lock
+  changed_when: false
+  when: base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0
+
+- name: Create the canonical lifecycle lock only when the fresh target has none
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - |
+        import os
+        import stat
+        from pathlib import Path
+
+        state = Path.home() / ".local/state/codexia-deploy"
+        state.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = state.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+            raise SystemExit("Unsafe lifecycle state directory")
+        fd = os.open(state / "host.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+                raise SystemExit("Unsafe lifecycle lock")
+        finally:
+            os.close(fd)
+  when: base_runtime_fresh_gate_host_lock is not skipped and not base_runtime_fresh_gate_host_lock.stat.exists
+
+- name: Require the lifecycle host lock to be a private regular file
+  ansible.builtin.assert:
+    that:
+      - base_runtime_fresh_gate_host_lock.stat.exists
+      - base_runtime_fresh_gate_host_lock.stat.isreg | default(false)
+      - not (base_runtime_fresh_gate_host_lock.stat.islnk | default(false))
+      - base_runtime_fresh_gate_host_lock.stat.pw_name == codexia_service_user
+      - base_runtime_fresh_gate_host_lock.stat.mode == '0600'
+    fail_msg: Fresh publication-gate initialization requires the existing lifecycle host lock; no new lock authority is created.
+  when: base_runtime_fresh_gate_host_lock is not skipped and base_runtime_fresh_gate_host_lock.stat.exists
+
+- name: Close or recover an API-less publication gate under the lifecycle host lock
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/flock
+      - --exclusive
+      - --nonblock
+      - "{{ home }}/.local/state/codexia-deploy/host.lock"
+      - /bin/bash
+      - -eu
+      - -c
+      - |
+        container_rc=0
+        podman container exists codexia-api || container_rc=$?
+        [[ "$container_rc" == 1 ]] || {
+          echo 'Could not prove API container absence under the lifecycle lock' >&2
+          exit 1
+        }
+        unit_rc=0
+        api_state="$(systemctl --user show --property=LoadState,ActiveState codexia-api.service)" || unit_rc=$?
+        if [[ "$unit_rc" != 0 && "$unit_rc" != 4 ]] ||
+           ! grep -Fxq 'ActiveState=inactive' <<< "$api_state" ||
+           ! grep -Eq '^LoadState=(loaded|masked|not-found)$' <<< "$api_state"; then
+          echo 'API unit appeared or has an ambiguous state under the lifecycle lock' >&2
+          exit 1
+        fi
+        gate_status="$(sudo -n /usr/local/sbin/codexia-api-gate status 2>/dev/null)" || gate_status=
+        [[ "$gate_status" != closed ]] || exit 0
+        state="$HOME/.local/state/codexia-deploy"
+        for pending in deploy-transaction.json deploy-transaction.json.tmp deployed-release.json deployed-release.json.tmp \
+          rollback-api.container rollback-release.json cutover-transaction.json backup-transaction owner-setup.intent; do
+          if [[ -e "$state/$pending" || -L "$state/$pending" ]]; then
+            echo 'Recorded host state requires its existing recovery path before base convergence' >&2
+            exit 1
+          fi
+        done
+        case "$gate_status" in
+          open) ;;
+          '')
+            socket_state="$(systemctl show --property=ActiveState,UnitFileState codexia-api.socket)"
+            proxy_state="$(systemctl show --property=ActiveState,UnitFileState codexia-api-gate.service)"
+            if ! grep -Eq '^ActiveState=(inactive|active)$' <<< "$socket_state" ||
+               ! grep -Eq '^UnitFileState=(disabled|masked)$' <<< "$socket_state" ||
+               ! grep -Eq '^ActiveState=(inactive|active)$' <<< "$proxy_state" ||
+               ! grep -Eq '^UnitFileState=(static|masked)$' <<< "$proxy_state"; then
+              echo 'Publication gate is ambiguous; resolve it under the protected host recovery procedure' >&2
+              exit 1
+            fi
+            ;;
+          *) echo 'Invalid publication gate status' >&2; exit 1 ;;
+        esac
+        sudo -n /usr/local/sbin/codexia-api-gate close
+        [[ "$(sudo -n /usr/local/sbin/codexia-api-gate status)" == closed ]]
+        printf '%s\n' GATE_CLOSED
+  register: base_runtime_api_less_gate
+  changed_when: "'GATE_CLOSED' in base_runtime_api_less_gate.stdout_lines"
+  when: base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0
+
+- name: Require an existing API target to keep a coherent gate state
+  ansible.builtin.command:
+    argv: [sudo, -n, /usr/local/sbin/codexia-api-gate, status]
+  register: base_runtime_active_gate
+  changed_when: false
+  failed_when: base_runtime_active_gate.rc != 0 or base_runtime_active_gate.stdout not in ['open', 'closed']
+  when: base_runtime_api_container.rc == 0 and base_runtime_api_service.rc == 0

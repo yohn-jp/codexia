@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -70,12 +70,22 @@ export async function readLifecycleHost({ inventory, targetHost, sshDirectory = 
     assert.ok(query);
     const quadlets = {};
     for (const name of ['codexia.network','codexia-data.network','codexia-postgres.volume',
-      'codexia-data.volume','codexia-history.volume','codexia-db.container','codexia-tunnel.container']) {
+      'codexia-data.volume','codexia-history.volume','codexia-db.container','codexia-api.container']) {
       quadlets[name] = createHash('sha256').update(await readFile(new URL('../../../deploy/quadlet/' + name, import.meta.url))).digest('hex');
+    }
+    const systemUnits = {};
+    const systemUnitSources = {
+      'codexia-api.socket': '../../../deploy/systemd/codexia-api.socket',
+      'codexia-api-gate.service': '../../../deploy/systemd/codexia-api-gate.service',
+      'codexia-cloudflared.service': '../../../cmd/codexiactl/assets/codexia-cloudflared.service',
+    };
+    for (const [name, source] of Object.entries(systemUnitSources)) {
+      systemUnits[name] = createHash('sha256').update(await readFile(new URL(source, import.meta.url))).digest('hex');
     }
     await writeFile(vars, JSON.stringify({
       codexia_preflight_observation_file: out, codexia_preflight_auth_schema_query: query,
-      codexia_preflight_quadlets: quadlets, codexia_preflight_recovery: recovery,
+      codexia_preflight_quadlets: quadlets, codexia_preflight_system_units: systemUnits,
+      codexia_preflight_recovery: recovery,
        codexia_preflight_adoption: adoption,
     }), { mode: 0o600, flag: 'wx' });
     await run('ansible-playbook', ['-i', inventory,
@@ -184,7 +194,18 @@ async function planObservation({ bootstrapMode } = {}) {
     const config = protectedCloudflareTarget(env);
     const edgeReader = bootstrapMode === 'publish-frontend'
       ? createDeploymentEdge({ ...config, origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
-        readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN, workerToken: env.CLOUDFLARE_API_TOKEN })
+        readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN, workerToken: env.CLOUDFLARE_API_TOKEN,
+        // Called only when the approved R5 operation stages the first Worker version.
+        async readInitialWorkerAssets(artifactDigest) {
+          assert.equal(artifactDigest, 'sha256:' + candidateFrontend.artifactDigest);
+          const { verifyLifecycleFrontendArtifact } = await import('../../verification/artifacts/frontend.mjs');
+          const { assets, ...receipt } = await verifyLifecycleFrontendArtifact(request.frontend, {
+            expectedEpoch: candidateBackend.identity.apiEpoch, readPublicAssets: true,
+          });
+          assert.deepEqual(receipt, candidateFrontend, 'The certified frontend artifact receipt changed before upload');
+          return assets;
+        },
+      })
       : deploymentEdgeFromEnvironment(env);
     let edge = null;
     try {
@@ -234,9 +255,6 @@ async function planObservation({ bootstrapMode } = {}) {
         initializeDatabase: env.CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED === 'true',
         resumeAuthOnly: authContinuation,
       });
-      if (bootstrapMode === 'bootstrap' && !host.topology?.secrets?.['codexia-tunnel-token']) {
-        await access(join(env.RUNNER_TEMP, 'codexia-bootstrap/control/tunnel-token'));
-      }
       if (bootstrapMode === 'publish-frontend') {
         assert.equal(env.CODEXIA_INITIAL_FRONTEND_APPROVAL, 'PUBLISH_INITIAL_FRONTEND');
         assert.equal(request.intent, 'install');

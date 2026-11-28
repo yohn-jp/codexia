@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -9,6 +9,73 @@ import { test } from 'node:test';
 const repositoryBinding = { repository: 'yohn-jp/codexia', repositoryId: 401, ownerId: 502 };
 
 const recoveryScript = new URL('../../../deploy/ansible/push-deployment-recover.sh', import.meta.url);
+
+test('publication closure persists the reboot fence before either live unit stops', t => {
+  const root = mkdtempSync(path.join(tmpdir(), 'codexia-gate-fence-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const bin = path.join(root, 'bin');
+  const units = path.join(root, 'usr/local/lib/systemd/system');
+  const socket = 'codexia-api.socket';
+  const proxy = 'codexia-api-gate.service';
+  mkdirSync(bin);
+  mkdirSync(units, { recursive: true });
+  for (const unit of [socket, proxy]) {
+    copyFileSync(new URL('../../../deploy/systemd/' + unit, import.meta.url), path.join(units, unit));
+    writeFileSync(path.join(root, unit + '.active'), 'active\n');
+  }
+  const realSystemctl = (...args) => spawnSync('/usr/bin/systemctl', ['--root=' + root, ...args], { encoding: 'utf8' });
+  for (const args of [['enable', socket], ['--runtime', 'enable', socket]]) {
+    const enabled = realSystemctl(...args);
+    assert.equal(enabled.status, 0, enabled.stderr);
+  }
+  const command = (name, body) => writeFileSync(path.join(bin, name), '#!/bin/sh\nset -eu\n' + body, { mode: 0o700 });
+  command('id', 'echo 0\n');
+  command('systemctl', `printf '%s\\n' "$*" >> "$FIXTURE_ROOT/trace"
+case "$1" in
+  show)
+    case "$2" in
+      --property=ActiveState) cat "$FIXTURE_ROOT/$4.active";;
+      --property=UnitFileState) /usr/bin/systemctl --root="$FIXTURE_ROOT" is-enabled "$4" || true;;
+      *) exit 90;;
+    esac;;
+  mask)
+    if [ "$2" = $FIXTURE_FAILED_UNIT ]; then exit 91; fi
+    /usr/bin/systemctl --root="$FIXTURE_ROOT" "$@" >&2;;
+  disable) /usr/bin/systemctl --root="$FIXTURE_ROOT" "$@" >&2;;
+  stop)
+    test -f "$FIXTURE_ROOT/synced"
+    test "$(readlink "$FIXTURE_ROOT/etc/systemd/system/$FIXTURE_SOCKET")" = /dev/null
+    test "$(readlink "$FIXTURE_ROOT/etc/systemd/system/$FIXTURE_PROXY")" = /dev/null
+    echo inactive > "$FIXTURE_ROOT/$2.active";;
+  *) exit 92;;
+esac
+`);
+  command('sync', `printf '%s\\n' sync >> "$FIXTURE_ROOT/trace"
+test "$(readlink "$FIXTURE_ROOT/etc/systemd/system/$FIXTURE_SOCKET")" = /dev/null
+test "$(readlink "$FIXTURE_ROOT/etc/systemd/system/$FIXTURE_PROXY")" = /dev/null
+test ! -L "$FIXTURE_ROOT/etc/systemd/system/sockets.target.wants/$FIXTURE_SOCKET"
+test ! -L "$FIXTURE_ROOT/run/systemd/system/sockets.target.wants/$FIXTURE_SOCKET"
+/usr/bin/sync -f "$FIXTURE_ROOT/etc/systemd/system"
+touch "$FIXTURE_ROOT/synced"
+`);
+  const source = readFileSync(new URL('../../../deploy/ansible/codexia-api-gate', import.meta.url), 'utf8');
+  const gate = source.replace('readonly systemctl=/usr/bin/systemctl', 'readonly systemctl=systemctl');
+  const invoke = (failedUnit = '') => spawnSync('bash', ['-c', gate, 'codexia-api-gate', 'close'], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: bin + ':' + process.env.PATH, FIXTURE_ROOT: root,
+      FIXTURE_FAILED_UNIT: failedUnit, FIXTURE_SOCKET: socket, FIXTURE_PROXY: proxy },
+  });
+  const partial = invoke(proxy);
+  assert.notEqual(partial.status, 0);
+  assert.equal(realSystemctl('is-enabled', socket).stdout.trim(), 'masked');
+  assert.equal(realSystemctl('is-enabled', proxy).stdout.trim(), 'static');
+  assert.doesNotMatch(readFileSync(path.join(root, 'trace'), 'utf8'), /^stop /mu);
+  const resumed = invoke();
+  assert.equal(resumed.status, 0, resumed.stderr);
+  assert.equal(realSystemctl('is-enabled', socket).stdout.trim(), 'masked');
+  assert.equal(realSystemctl('is-enabled', proxy).stdout.trim(), 'masked');
+  assert.match(readFileSync(path.join(root, 'trace'), 'utf8'), /sync\n[\s\S]*stop codexia-api\.socket\nstop codexia-api-gate\.service/u);
+});
 
 function fixture({ phase = 'pending', health = 'healthy' } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'codexia-push-recovery-'));
@@ -45,13 +112,13 @@ function fixture({ phase = 'pending', health = 'healthy' } = {}) {
   writeFileSync(path.join(stateDir, 'rollback-release.json'), JSON.stringify(previous.record) + '\n');
   writeFileSync(path.join(stateDir, 'host.lock'), '');
   writeFileSync(path.join(stateDir, 'deploy-transaction.json'), JSON.stringify({
-    format: 'codexia-deploy-transaction/v1',
+    format: 'codexia-deploy-transaction/v2',
     ...repositoryBinding,
     phase,
     hadUnit: true,
-    tunnelWasActive: true,
+    gateWasOpen: true,
     apiLinkCreated: false,
-    tunnelLinkCreated: false,
+    gateHeldForActivation: false,
     releasePresent: true,
     ...(phase === 'committed' && {
       candidateImage,
@@ -64,11 +131,7 @@ case "$*" in
   "--user show --property=LoadState --value codexia-api.service")
     [ "${'$'}{CODEXIA_TEST_SHOW_FAIL:-false}" = false ] || exit 1
     printf "%s\\n" "$CODEXIA_TEST_API_LOAD_STATE" ;;
-  "--user show --property=LoadState --value codexia-tunnel.service")
-    [ "${'$'}{CODEXIA_TEST_SHOW_FAIL:-false}" = false ] || exit 1
-    printf "%s\\n" "$CODEXIA_TEST_TUNNEL_LOAD_STATE" ;;
-  "--user show --property=ActiveState --value codexia-tunnel.service")
-    printf "%s\\n" inactive ;;
+  "--user show --property=ActiveState --value codexia-api.service") printf 'inactive\\n' ;;
   "--user show --property=SourcePath --value codexia-api.service")
     printf "%s\\n" "$CODEXIA_TEST_API_SOURCE_PATH" ;;
   "--user is-active --quiet codexia-api.service")
@@ -78,6 +141,22 @@ case "$*" in
   "--user stop codexia-api.service")
     [ "${'$'}{CODEXIA_TEST_STOP_FAIL:-false}" = false ] || exit 1 ;;
 esac
+`);
+  const gateStateFile = path.join(root, 'gate-state');
+  writeFileSync(gateStateFile, 'open\n');
+  writeFileSync(path.join(mockBin, 'sudo'), `#!/bin/sh
+printf "sudo %s\\n" "$*" >> "$CODEXIA_TEST_LOG"
+[ "$1" = -n ] && [ "$2" = /usr/local/sbin/codexia-api-gate ] || exit 90
+case "$3" in
+  status) if grep -qx partial "$CODEXIA_TEST_GATE_STATE_FILE"; then exit 1; fi; cat "$CODEXIA_TEST_GATE_STATE_FILE";;
+  close) [ "${'$'}{CODEXIA_TEST_GATE_CLOSE_FAIL:-false}" = false ] || exit 1; printf 'closed\\n' > "$CODEXIA_TEST_GATE_STATE_FILE";;
+  open) printf 'open\\n' > "$CODEXIA_TEST_GATE_STATE_FILE";;
+  *) exit 91;;
+esac
+`);
+  writeFileSync(path.join(mockBin, 'curl'), `#!/bin/sh
+printf "curl %s\\n" "$*" >> "$CODEXIA_TEST_LOG"
+printf '200'
 `);
   writeFileSync(path.join(mockBin, 'podman'), `#!/bin/sh
 printf "podman %s\\n" "$*" >> "$CODEXIA_TEST_LOG"
@@ -92,6 +171,8 @@ esac
   writeFileSync(path.join(mockBin, 'sleep'), '#!/bin/sh\nexit 0\n');
   chmodSync(path.join(mockBin, 'systemctl'), 0o755);
   chmodSync(path.join(mockBin, 'podman'), 0o755);
+  chmodSync(path.join(mockBin, 'sudo'), 0o755);
+  chmodSync(path.join(mockBin, 'curl'), 0o755);
   chmodSync(path.join(mockBin, 'sleep'), 0o755);
   return {
     root,
@@ -109,12 +190,12 @@ esac
       CODEXIA_PUSH_STATE_DIR: stateDir,
       CODEXIA_PUSH_QUADLET_DIR: quadletDir,
       CODEXIA_TEST_LOG: logFile,
+      CODEXIA_TEST_GATE_STATE_FILE: gateStateFile,
       CODEXIA_TEST_HEALTH: health,
       CODEXIA_TEST_RUNNING_IMAGE: phase === 'committed' ? candidateImage : previousImage,
       CODEXIA_TEST_API_SOURCE_PATH: path.join(quadletDir, 'codexia-api.container'),
       CODEXIA_TEST_API_ACTIVE: String(phase === 'committed'),
       CODEXIA_TEST_API_LOAD_STATE: 'loaded',
-      CODEXIA_TEST_TUNNEL_LOAD_STATE: 'loaded',
       CODEXIA_TEST_API_CONTAINER: 'present',
       CODEXIA_TEST_API_RUNNING: String(phase === 'committed'),
       CODEXIA_TEST_PREVIOUS_IMAGE: previousImage,
@@ -138,10 +219,32 @@ test('interrupted deployment restores the exact previous unit and release before
     assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), target.previous.record);
     assert.equal(existsSync(path.join(target.stateDir, 'deploy-transaction.json')), false, 'pending intent must be removed only after recovery');
     const calls = readFileSync(target.logFile, 'utf8');
-    assert.match(calls, /systemctl --user stop codexia-tunnel\.service/u);
+    assert.match(calls, /sudo -n \/usr\/local\/sbin\/codexia-api-gate close/u);
     assert.match(calls, /systemctl --user start codexia-api\.service/u);
-    assert.match(calls, /systemctl --user start codexia-tunnel\.service/u);
+    assert.match(calls, /sudo -n \/usr\/local\/sbin\/codexia-api-gate open/u);
     assert.match(calls, /podman inspect/u);
+  } finally {
+    rmSync(target.root, { recursive: true, force: true });
+  }
+});
+
+test('legacy v1 Tunnel transaction fails closed with owner recovery instructions', () => {
+  const target = fixture();
+  try {
+    const intentPath = path.join(target.stateDir, 'deploy-transaction.json');
+    const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
+    writeFileSync(intentPath, JSON.stringify({
+      ...intent,
+      format: 'codexia-deploy-transaction/v1',
+      tunnelWasActive: true,
+      tunnelLinkCreated: false,
+    }));
+    const before = readFileSync(intentPath, 'utf8');
+    const result = runRecovery(target);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /exact prior source revision that wrote this pending v1 journal/u);
+    assert.equal(readFileSync(intentPath, 'utf8'), before);
+    assert.equal(existsSync(target.logFile), false, 'legacy journal rejection happens before service changes');
   } finally {
     rmSync(target.root, { recursive: true, force: true });
   }
@@ -171,7 +274,7 @@ test('failed API stop keeps the interrupted transaction and does not claim recov
     assert.ok(existsSync(path.join(target.stateDir, 'deploy-transaction.json')));
     assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8').includes(target.env.CODEXIA_TEST_CANDIDATE_IMAGE), true);
     assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), target.candidate.record);
-    assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /start codexia-tunnel\.service/u);
+    assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /publication gate open/u);
   } finally {
     rmSync(target.root, { recursive: true, force: true });
   }
@@ -181,13 +284,13 @@ test('recovery before first API unit installation does not require a nonexistent
   const target = fixture();
   const intentPath = path.join(target.stateDir, 'deploy-transaction.json');
   const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
-  writeFileSync(intentPath, JSON.stringify({ ...intent, hadUnit: false, tunnelWasActive: false, releasePresent: false }));
+  writeFileSync(intentPath, JSON.stringify({ ...intent, hadUnit: false, gateWasOpen: false, gateHeldForActivation: false, releasePresent: false }));
   writeFileSync(path.join(target.stateDir, 'deployed-release.json.tmp'), 'partial');
   rmSync(path.join(target.stateDir, 'rollback-api.container'));
   rmSync(path.join(target.stateDir, 'rollback-release.json'));
   target.env.CODEXIA_TEST_API_LOAD_STATE = 'not-found';
-  target.env.CODEXIA_TEST_TUNNEL_LOAD_STATE = 'not-found';
   target.env.CODEXIA_TEST_API_CONTAINER = 'absent';
+  writeFileSync(target.env.CODEXIA_TEST_GATE_STATE_FILE, 'closed\n');
   try {
     const result = runRecovery(target);
     assert.equal(result.status, 0, result.stderr);
@@ -201,23 +304,27 @@ test('recovery before first API unit installation does not require a nonexistent
   }
 });
 
-test('interrupted R3 keeps the Tunnel fenced until the unpublished API is removed', () => {
+test('interrupted R3 completes partial publication closure before removing the unpublished API', () => {
   const target = fixture();
   const intentPath = path.join(target.stateDir, 'deploy-transaction.json');
   const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
   writeFileSync(intentPath, JSON.stringify({
-    ...intent, hadUnit: false, tunnelWasActive: false, releasePresent: false,
+    ...intent, hadUnit: false, gateWasOpen: false, gateHeldForActivation: true, releasePresent: false,
     recoveryOperationId: 'restore-one', recoveryEvidenceSha256: 'c'.repeat(64),
   }));
-  target.env.CODEXIA_TEST_TUNNEL_LOAD_STATE = 'masked';
+  writeFileSync(target.env.CODEXIA_TEST_GATE_STATE_FILE, 'partial\n');
   try {
+    const blocked = runRecovery({ ...target, env: { ...target.env, CODEXIA_TEST_GATE_CLOSE_FAIL: 'true' } });
+    assert.notEqual(blocked.status, 0);
+    assert.equal(existsSync(intentPath), true);
+    assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /stop codexia-api\.service/u);
     const result = runRecovery(target);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(existsSync(intentPath), false);
     assert.equal(existsSync(path.join(target.quadletDir, 'codexia-api.container')), false);
     const calls = readFileSync(target.logFile, 'utf8');
-    assert.match(calls, /stop codexia-api\.service[\s\S]*daemon-reload[\s\S]*unmask codexia-tunnel\.service/u);
-    assert.doesNotMatch(calls, /start codexia-tunnel\.service/u);
+    assert.match(calls, /codexia-api-gate close[\s\S]*stop codexia-api\.service[\s\S]*daemon-reload/u);
+    assert.doesNotMatch(calls, /codexia-api-gate open/u);
   } finally {
     rmSync(target.root, { recursive: true, force: true });
   }
@@ -227,12 +334,12 @@ test('missing API unit with a running container keeps recovery intent and does n
   const target = fixture();
   const intentPath = path.join(target.stateDir, 'deploy-transaction.json');
   const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
-  writeFileSync(intentPath, JSON.stringify({ ...intent, hadUnit: false, tunnelWasActive: false, releasePresent: false }));
+  writeFileSync(intentPath, JSON.stringify({ ...intent, hadUnit: false, gateWasOpen: false, gateHeldForActivation: false, releasePresent: false }));
   rmSync(path.join(target.stateDir, 'rollback-api.container'));
   rmSync(path.join(target.stateDir, 'rollback-release.json'));
   target.env.CODEXIA_TEST_API_LOAD_STATE = 'not-found';
-  target.env.CODEXIA_TEST_TUNNEL_LOAD_STATE = 'not-found';
   target.env.CODEXIA_TEST_API_RUNNING = 'true';
+  writeFileSync(target.env.CODEXIA_TEST_GATE_STATE_FILE, 'closed\n');
   try {
     const result = runRecovery(target);
     assert.equal(result.status, 1);
@@ -250,7 +357,7 @@ test('systemd load-state lookup failure keeps recovery intent', () => {
   try {
     const result = runRecovery(target);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /Could not stop and verify the application Tunnel/u);
+    assert.match(result.stderr, /Could not inspect systemd load state for codexia-api.service/u);
     assert.ok(existsSync(path.join(target.stateDir, 'deploy-transaction.json')));
   } finally {
     rmSync(target.root, { recursive: true, force: true });
@@ -266,7 +373,7 @@ test('healthy candidate image cannot satisfy prior release recovery', () => {
     assert.match(result.stderr, /does not match the recorded prior release/u);
     assert.ok(existsSync(path.join(target.stateDir, 'deploy-transaction.json')));
     assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), target.candidate.record);
-    assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /start codexia-tunnel\.service/u);
+    assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /codexia-api-gate open/u);
   } finally {
     rmSync(target.root, { recursive: true, force: true });
   }
@@ -305,7 +412,7 @@ test('older pending token deployment is preserved for recovery with its original
     const before = files.map(file => readFileSync(file));
     const result = runRecovery(target);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /Recover older deployments using their recording release/u);
+    assert.match(result.stderr, /Invalid deployment transaction or prior release snapshot/u);
     assert.deepEqual(files.map(file => readFileSync(file)), before);
     assert.equal(existsSync(target.logFile), false, 'no service or container command may run');
   } finally {
@@ -386,7 +493,7 @@ test('committed recovery retains its evidence when the live release cannot be re
       const intentPath = path.join(stateDir, 'deploy-transaction.json');
       const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
       writeFileSync(intentPath, JSON.stringify({
-        ...intent, hadUnit: false, tunnelWasActive: false, releasePresent: false,
+        ...intent, hadUnit: false, gateWasOpen: false, gateHeldForActivation: true, releasePresent: false,
         recoveryOperationId: 'restore-one', recoveryEvidenceSha256: 'c'.repeat(64),
       }));
       writeFileSync(path.join(stateDir, 'deployed-release.json'), JSON.stringify({

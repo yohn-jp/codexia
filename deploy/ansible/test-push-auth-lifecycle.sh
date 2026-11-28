@@ -243,7 +243,7 @@ YAML
   grep -Eq 'localhost[[:space:]]*:.*changed=0([[:space:]]|$)' "$tmp/bootstrap-reapply.log"
   [[ "$(observe_auth_database)" == "$before_reapply" ]]
   rootless grep -Fxq "restrict $deploy_public_key" "$fixture_home/.ssh/authorized_keys"
-  disable_fixture_tunnel
+  assert_fixture_management_continues
 
   database_before=$(observe_auth_database)
   [[ "$database_before" != *'no auth role'* && "$database_before" != *'no auth schema'* && "$database_before" != *'no application ledger'* ]]
@@ -287,11 +287,6 @@ YAML
   set_state better_auth_activation PASS 'isolated HTTPS registration, discovery and protected owner session verified'
 
   prior=$(release_checksums)
-  # Base normally owns the canonical Tunnel unit. Stage the fixture's reviewed
-  # definition again without connecting to the external provider.
-  sudo install -o codexia -g codexia -m 0600 "$repo_root/deploy/quadlet/codexia-tunnel.container" \
-    "$fixture_home/.config/containers/systemd/codexia-tunnel.container"
-  rootless_systemctl daemon-reload
   local running_before secrets_before
   running_before=$(rootless_podman inspect --format '{{.Id}} {{.State.StartedAt}}' codexia-db codexia-api)
   secrets_before=$(rootless_podman secret ls --format '{{.Name}} {{.ID}}' | sort)
@@ -304,8 +299,8 @@ YAML
   [[ "$(rootless_podman secret ls --format '{{.Name}} {{.ID}}' | sort)" == "$secrets_before" ]]
   [[ "$(observe_auth_database)" == "$database_before" ]]
   [[ "$(release_checksums)" == "$prior" && "$(observe_auth "$primary_image")" == "$proof" ]]
-  [[ "$(rootless_systemctl show --property=ActiveState --value codexia-tunnel.service)" == inactive ]]
-  disable_fixture_tunnel
+  [[ "$(rootless sudo -n /usr/local/sbin/codexia-api-gate status)" == open ]]
+  assert_fixture_management_continues
 
   run_deploy auth-primary false '' auth-same-digest
   [[ "$(release_checksums)" == "$prior" && "$(observe_auth "$primary_image")" == "$proof" ]]

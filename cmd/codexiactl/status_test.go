@@ -10,6 +10,24 @@ import (
 	"time"
 )
 
+func TestStatusJSONVersionReportsCloudflareManagementHostname(t *testing.T) {
+	t.Parallel()
+	encoded, err := json.Marshal(statusReport{SchemaVersion: 2, ManagementHostname: "codexia-ssh.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document["schemaVersion"] != float64(2) || document["managementHostname"] != "codexia-ssh.example.test" {
+		t.Fatalf("status schema does not expose its Cloudflare management hostname: %s", encoded)
+	}
+	if _, old := document["tailnetAddress"]; old {
+		t.Fatalf("status schema still exposes a retired tailnet field: %s", encoded)
+	}
+}
+
 func TestStatusDoesNotUseSuccessBeforeNewerFailureOrDeployment(t *testing.T) {
 	t.Parallel()
 	const host = "fixture-host"
@@ -17,14 +35,20 @@ func TestStatusDoesNotUseSuccessBeforeNewerFailureOrDeployment(t *testing.T) {
 	now := time.Date(2026, 11, 27, 10, 0, 0, 0, time.UTC)
 	observed := now.Add(-time.Minute)
 	receipt := statusFixtureReceipt(host, origin, observed)
-	older := githubRunSummary{ID: 41, File: preflightFile, SHA: githubTestSHA, Status: "completed", Conclusion: "success",
-		CreatedAt: observed.Add(-time.Minute), UpdatedAt: observed.Add(5 * time.Second)}
-	newerFailed := githubRunSummary{ID: 42, File: preflightFile, SHA: githubTestSHA, Status: "completed", Conclusion: "failure",
-		CreatedAt: observed.Add(30 * time.Second), UpdatedAt: observed.Add(40 * time.Second)}
+	older := githubRunSummary{
+		ID: 41, File: preflightFile, SHA: githubTestSHA, Status: "completed", Conclusion: "success",
+		CreatedAt: observed.Add(-time.Minute), UpdatedAt: observed.Add(5 * time.Second),
+	}
+	newerFailed := githubRunSummary{
+		ID: 42, File: preflightFile, SHA: githubTestSHA, Status: "completed", Conclusion: "failure",
+		CreatedAt: observed.Add(30 * time.Second), UpdatedAt: observed.Add(40 * time.Second),
+	}
 	newerDispatchFailedFirst := newerFailed
 	newerDispatchFailedFirst.CreatedAt, newerDispatchFailedFirst.UpdatedAt = observed.Add(time.Second), observed.Add(2*time.Second)
-	newerMutation := githubRunSummary{ID: 43, File: "backend-deployment-handoff.yml", Status: "completed", Conclusion: "failure",
-		CreatedAt: observed.Add(30 * time.Second), UpdatedAt: observed.Add(40 * time.Second)}
+	newerMutation := githubRunSummary{
+		ID: 43, File: "backend-deployment-handoff.yml", Status: "completed", Conclusion: "failure",
+		CreatedAt: observed.Add(30 * time.Second), UpdatedAt: observed.Add(40 * time.Second),
+	}
 	for _, tc := range []struct {
 		name         string
 		runs         []githubRunSummary
@@ -151,14 +175,20 @@ func TestDoctorReportsActionableBlockersWithoutDumpingWorkflowHistory(t *testing
 		"interactive-authentication-required",
 		"github-authentication-unverified",
 		"github-environment-or-permission-unverified",
-		"tailnet-identity-or-policy-unverified",
 		"latest-target-lifecycle-evidence-unavailable",
 		"cloudflare-edge-unverified",
+		"cloudflare-connector-install-required",
 		"independent-restore-acceptance-unverified",
 		"live-deployment-state-unverified",
 	} {
 		if blockerGuidance(code) == "" {
 			t.Fatalf("no user-facing remediation for %s", code)
+		}
+	}
+	guidance := blockerGuidance("existing-protected-input-mismatch")
+	for _, required := range []string{"management hostname", "host pin", "Review the exact values", "approved migration"} {
+		if !strings.Contains(guidance, required) {
+			t.Errorf("protected-input guidance does not identify %q: %s", required, guidance)
 		}
 	}
 }

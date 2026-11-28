@@ -30,6 +30,10 @@ export const CODEXIACTL_SPECIFICATIONS = Object.freeze([
   'docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc',
   'docs/deployment/BACKUP-CONSOLE-OPERATIONS.sdoc',
   'docs/deployment/ACCESS-POLICY-MIGRATION.sdoc',
+  'docs/architecture/DEPENDENCY-INVENTORY.sdoc',
+  'docs/architecture/DEPENDENCY-POLICY.sdoc',
+  'docs/verification/CI-CD.sdoc',
+  'docs/verification/TEST-ARCHITECTURE-OPTIMIZATION.sdoc',
 ]);
 const codexiactlSpecifications = new Set(CODEXIACTL_SPECIFICATIONS);
 export function isNativeSpecification(file) {
@@ -67,6 +71,11 @@ export const REQUIREMENTS_TRACE_SURFACE_FILES = Object.freeze([
   'deploy/ansible/restore-drill.yml',
   'deploy/backup/backup.sh',
   'deploy/backup/s3_transfer.py',
+  'deploy/cloudflare/identity-probes.json',
+  'deploy/cloudflare/public-protocol-paths.json',
+  'deploy/cloudflare/ui-routes.json',
+  'cmd/codexiactl/cloudflare_managed_edge.go',
+  'cmd/codexiactl/cloudflare_deployment_contract_test.go',
   'packages/http-contract/openapi/codexia.openapi.yaml',
   'packages/http-contract/scripts/generate-fastify.mjs',
   'packages/api/src/generated/http-contract.json',
@@ -84,7 +93,6 @@ export function isRequirementsTraceInput(file) {
     isTraceTestSource(file) ||
     (file.startsWith('ios/') && /\.swift$/u.test(file)) ||
     (file.startsWith('deploy/ansible/') && /\.ya?ml$/u.test(file)) ||
-    (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf')) ||
     (/^app\/src\/.*\.[jt]sx?$/u.test(file) && !/\.test\./u.test(file));
 }
 
@@ -107,6 +115,7 @@ const DB_CONTRACT_TOOLCHAIN = JSON.parse(readFileSync(new URL('../../../packages
 const POSTGRES_CI_IMAGE = DB_CONTRACT_TOOLCHAIN.postgresImage;
 const SWIFT_LINUX_TOOLCHAIN_PATH = 'scripts/ios/swift-linux-toolchain.json';
 const CODEXIACTL_GO_MODULE = 'cmd/codexiactl/go.mod';
+const CODEXIACTL_QUALITY_TOOLCHAIN = 'cmd/codexiactl/quality-toolchain.json';
 const swiftTestPath = /^ios\/(?:CodexiaEditor|CodexiaTransport)\/Tests\//u;
 const swiftDependencyPath = /^ios\/(?:CodexiaEditor|CodexiaTransport)\/Package\.(?:swift|resolved)$/u;
 
@@ -222,7 +231,7 @@ function taskEnvironment(task, group, runtime) {
     imageOS: runtime.imageOS ?? null, imageVersion: runtime.imageVersion ?? null }, env };
 }
 
-function taskProducerRecipe(task, swiftToolchain, goVersion) {
+function taskProducerRecipe(task, swiftToolchain, goToolchain) {
   const group = taskGroup(task);
   const prerequisites = [];
   const profile = requiredBuildProfile(group);
@@ -248,7 +257,7 @@ function taskProducerRecipe(task, swiftToolchain, goVersion) {
   if (task.startsWith('oci-')) external.push('docker:ubuntu-24.04-host');
   if (task === 'architecture-g5') external.push(THREAGILE_IMAGE);
   if (swiftToolchain) external.push(`${swiftToolchain.url}#sha256=${swiftToolchain.sha256}`);
-  if (goVersion) external.push(`go:${goVersion}`);
+  if (goToolchain) external.push(`go:${goToolchain.version}`, `golangci-lint:${goToolchain.golangciLint.version}#sha256=${goToolchain.golangciLint.sha256}`);
   return { group, task, prerequisites: [...new Set(prerequisites)].sort(), external,
     runnerClass: group.startsWith('browser-') ? 'pinned-playwright-container' : 'ubuntu-24.04' };
 }
@@ -257,6 +266,15 @@ function readGit(root, ...args) {
   return execFileSync('git', ['-c', `safe.directory=${root}`, ...args], {
     cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
   });
+}
+
+function readGoToolchain(root, sha) {
+  const version = /^go (\d+\.\d+\.\d+)$/mu.exec(readGit(root, 'show', sha + ':' + CODEXIACTL_GO_MODULE))?.[1];
+  assert.ok(version, 'codexiactl requires a pinned Go toolchain');
+  const { golangciLint } = JSON.parse(readGit(root, 'show', sha + ':' + CODEXIACTL_QUALITY_TOOLCHAIN));
+  assert.match(golangciLint?.version ?? '', /^\d+\.\d+\.\d+$/u, 'codexiactl requires a stable golangci-lint release');
+  assert.match(golangciLint?.sha256 ?? '', /^[a-f0-9]{64}$/u, 'codexiactl requires the golangci-lint archive SHA-256');
+  return { version, golangciLint };
 }
 
 function treeEntries(root, sha) {
@@ -312,14 +330,13 @@ export function captureTaskInputSource({ root, sha, runtime }) {
     const swift = task === 'swift-linux';
     const swiftToolchain = swift ? JSON.parse(readGit(root, 'show', sha + ':' + SWIFT_LINUX_TOOLCHAIN_PATH)) : null;
     const go = task === 'codexiactl-linux';
-    const goVersion = go ? /^go (\d+\.\d+\.\d+)$/mu.exec(readGit(root, 'show', sha + ':' + CODEXIACTL_GO_MODULE))?.[1] : null;
-    if (go) assert.ok(goVersion, 'codexiactl requires a pinned Go toolchain');
+    const goToolchain = go ? readGoToolchain(root, sha) : null;
     const tests = sha256(entries(executable.filter(({ file }) => {
       if (go) return /^cmd\/codexiactl\/.*_test\.go$/u.test(file);
       return swift ? swiftTestPath.test(file) : testFilePattern.test(file);
     })));
     const dependencies = sha256(entries(executable.filter(({ file }) => {
-      if (go) return /^cmd\/codexiactl\/go\.(?:mod|sum)$/u.test(file);
+      if (go) return /^cmd\/codexiactl\/go\.(?:mod|sum)$/u.test(file) || file === CODEXIACTL_QUALITY_TOOLCHAIN;
       return swift ? swiftDependencyPath.test(file) || (isOpenApiGenerationInput(file) && dependencyPath(file)) : dependencyPath(file);
     })));
     const normalizedInvocations = Array.isArray(invocations) ? invocations : [invocations];
@@ -327,10 +344,10 @@ export function captureTaskInputSource({ root, sha, runtime }) {
       executable: invocation.executable === runtime.execPath ? 'node' : invocation.executable }));
     return {
       source, tests, dependencies, environment: sha256(taskEnvironment(task, group, runtime)),
-      toolchain: swiftToolchain ? sha256({ toolchain, swift: swiftToolchain }) : goVersion ? sha256({ toolchain, go: goVersion }) : toolchain,
+      toolchain: swiftToolchain ? sha256({ toolchain, swift: swiftToolchain }) : goToolchain ? sha256({ toolchain, go: goToolchain }) : toolchain,
       recipe: sha256({ task, group, workflowJob: taskWorkflowJob(task), invocation: canonicalInvocations,
         groupPreparation: 'scripts/ci/execution/workspace.mjs prepare selected-group', concurrencyLimit: 2 }),
-      producers: sha256({ ...taskProducerRecipe(task, swiftToolchain, goVersion), ...(workspaceInputs ? { workspaceInputs } : {}) }),
+      producers: sha256({ ...taskProducerRecipe(task, swiftToolchain, goToolchain), ...(workspaceInputs ? { workspaceInputs } : {}) }),
     };
   };
 }

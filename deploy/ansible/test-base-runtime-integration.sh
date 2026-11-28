@@ -42,7 +42,6 @@ systemctl --user show --property=Version >/dev/null
 printf '%s\n' 'Base rootless systemd manager verified.'
 
 quadlet_dir="$service_home/.config/containers/systemd"
-as_service test ! -e "$service_home/unexpected-tunnel-mount"
 for container in codexia-db codexia-tunnel codexia-api; do
   rc=0; podman container exists "$container" || rc=$?
   test "$rc" = 1
@@ -56,17 +55,20 @@ for volume in codexia-data codexia-history; do
   test "$rc" = 1
 done
 podman volume exists codexia-postgres
-for secret in codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password; do
+for secret in codexia-postgres-admin-password codexia-postgres-app-password; do
   podman secret exists "$secret"
 done
+rc=0; podman secret exists codexia-tunnel-token || rc=$?
+test "$rc" = 1
 test ! -e /etc/codexia
-for file in codexia.network codexia-data.network codexia-postgres.volume codexia-data.volume codexia-history.volume codexia-db.container codexia-tunnel.container; do
+for file in codexia.network codexia-data.network codexia-postgres.volume codexia-data.volume codexia-history.volume codexia-db.container; do
   as_service test ! -e "$quadlet_dir/$file"
 done
 printf '%s\n' 'Base initial runtime resource checks passed.'
 
 tmp=$(mktemp -d /tmp/codexia-base-runtime.XXXXXX)
-tunnel_quadlet_saved="$service_home/.codexia-tunnel.container.saved-$service_uid-$$"
+repo_root=$(pwd)
+source "$repo_root/deploy/ansible/test-publication-gate-fixture.sh"
 generator_probe_dir=/run/systemd/user-generators
 generator_probe_path="$generator_probe_dir/podman-user-generator"
 generator_probe_log="/run/codexia-base-generator-environment-$service_uid-$$.log"
@@ -82,19 +84,16 @@ cleanup() {
   local cleanup_status=0
   trap - EXIT
   set +e
-  systemctl --user stop codexia-tunnel.service codexia-db.service >/dev/null 2>&1 || true
-  podman rm -f codexia-tunnel codexia-db >/dev/null 2>&1 || true
-  if [[ -e "$tunnel_quadlet_saved" || -L "$tunnel_quadlet_saved" ]]; then
-    as_service mv -- "$tunnel_quadlet_saved" "$quadlet_dir/codexia-tunnel.container" || cleanup_status=1
-  fi
+  cleanup_fixture_management || cleanup_status=1
+  systemctl --user stop codexia-db.service >/dev/null 2>&1 || true
+  podman rm -f codexia-db >/dev/null 2>&1 || true
   as_service rm -f \
     "$quadlet_dir/codexia.network" \
     "$quadlet_dir/codexia-data.network" \
     "$quadlet_dir/codexia-postgres.volume" \
     "$quadlet_dir/codexia-data.volume" \
     "$quadlet_dir/codexia-history.volume" \
-    "$quadlet_dir/codexia-db.container" \
-    "$quadlet_dir/codexia-tunnel.container" || cleanup_status=1
+    "$quadlet_dir/codexia-db.container" || cleanup_status=1
   if [[ "$generator_probe_installed" == true ]]; then
     sudo rm -f -- "$generator_probe_path" || cleanup_status=1
     generator_probe_installed=false
@@ -117,15 +116,12 @@ cleanup() {
     as_service rmdir -- "$db_verifier_bin" || cleanup_status=1
   fi
   systemctl --user daemon-reload >/dev/null 2>&1 || true
-  systemctl --user reset-failed codexia-tunnel.service codexia-db.service >/dev/null 2>&1 || true
+  systemctl --user reset-failed codexia-db.service >/dev/null 2>&1 || true
   podman network rm codexia-data codexia >/dev/null 2>&1 || true
   podman volume rm codexia-postgres codexia-data codexia-history >/dev/null 2>&1 || true
   podman secret rm \
-    codexia-tunnel-token \
-    codexia-tunnel-token-wrong \
     codexia-postgres-admin-password \
     codexia-postgres-app-password >/dev/null 2>&1 || true
-  as_service rm -rf "$service_home/unexpected-tunnel-mount" >/dev/null 2>&1 || true
   sudo rm -f /etc/codexia/postgres/010-create-app-role.sh || cleanup_status=1
   sudo rmdir /etc/codexia/postgres /etc/codexia 2>/dev/null || true
   if [[ "$tmp" == /tmp/codexia-base-runtime.* && -d "$tmp" && ! -L "$tmp" ]]; then sudo rm -rf -- "$tmp" || cleanup_status=1; fi
@@ -161,7 +157,6 @@ systemctl --user show-environment | grep -Fxq "XDG_CONFIG_HOME=$service_home/.co
 systemctl --user show-environment | grep -Fxq "XDG_RUNTIME_DIR=/run/user/$service_uid"
 printf '%s\n' 'Base fixture manager XDG environment verified after systemd environment generation.'
 
-repo_root=$(pwd)
 cat > "$tmp/base-inventory.yml" <<YAML
 all:
   children:
@@ -373,6 +368,13 @@ for network in codexia codexia-data; do
 done
 sed -i 's/codexia_database_initialization_approved: false/codexia_database_initialization_approved: true/' "$tmp/base-inventory.yml"
 
+if apply_base > "$tmp/management-missing.log" 2>&1; then
+  echo 'Base convergence accepted a host without its canonical management connector' >&2
+  exit 1
+fi
+grep -Fq 'management Tunnel unit is missing or differs' "$tmp/management-missing.log"
+start_fixture_management "$repo_root" "$tmp"
+
 if ! apply_base > "$tmp/first.log" 2>&1; then
   cat "$tmp/first.log" >&2
   diagnose_missing_database_unit
@@ -381,28 +383,19 @@ fi
 grep -Eq 'changed=[1-9]' "$tmp/first.log"
 apply_base > "$tmp/second.log" || { cat "$tmp/second.log"; exit 1; }
 grep -q 'changed=0' "$tmp/second.log"
-# The base stage must load the newly installed Tunnel unit itself while
-# leaving both the Tunnel container and service stopped.
-test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
-test "$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" = inactive
-rc=0; podman container exists codexia-tunnel || rc=$?
-test "$rc" = 1
-
-# Recover a generated-unit cache miss while the canonical Quadlet file is
-# already unchanged: the base stage must reload because the unit is not found.
-if [[ -e "$tunnel_quadlet_saved" || -L "$tunnel_quadlet_saved" ]]; then
-  echo "Refusing to replace an existing Tunnel Quadlet recovery file: $tunnel_quadlet_saved" >&2
+verify_fixture_publication_gate "$service_user"
+# A process interrupted after masking only the listener can recover on rerun.
+sudo systemctl unmask codexia-api-gate.service
+if as_service sudo -n /usr/local/sbin/codexia-api-gate status >/dev/null 2>&1; then
+  echo 'A partially masked gate reported a canonical state' >&2
   exit 1
 fi
-as_service mv "$quadlet_dir/codexia-tunnel.container" "$tunnel_quadlet_saved"
-as_service systemctl --user daemon-reload
-rc=0; systemctl --user is-active codexia-tunnel.service >/dev/null 2>&1 || rc=$?
-test "$rc" = 4
-as_service mv "$tunnel_quadlet_saved" "$quadlet_dir/codexia-tunnel.container"
-apply_base > "$tmp/tunnel-unit-recovery.log" || { cat "$tmp/tunnel-unit-recovery.log"; exit 1; }
-grep -q 'changed=0' "$tmp/tunnel-unit-recovery.log"
-test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
-test "$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" = inactive
+apply_base > "$tmp/partial-gate-recovery.log" || { cat "$tmp/partial-gate-recovery.log"; exit 1; }
+test "$(as_service sudo -n /usr/local/sbin/codexia-api-gate status)" = closed
+assert_fixture_management_continues
+as_service test ! -e "$quadlet_dir/codexia-tunnel.container"
+rc=0; podman container exists codexia-tunnel || rc=$?
+test "$rc" = 1
 
 # Keep the real container inspection and fault only the selected identity
 # lookup to simulate a credential record replaced since container creation.
@@ -476,87 +469,9 @@ podman inspect --format '{{json .Mounts}}' codexia-db | jq -e '[.[] | select(.De
 podman inspect --format '{{json .Config.Env}}' codexia-db | jq -e 'index("PGDATA=/var/lib/postgresql/data/pgdata") != null and index("POSTGRES_DB=codexia") != null and index("POSTGRES_USER=codexia_admin") != null and index("POSTGRES_PASSWORD_FILE=/run/secrets/admin-password") != null' >/dev/null
 podman exec codexia-db pg_isready -U codexia -d codexia >/dev/null
 
-# Existing Tunnel adoption checks inspect actual Podman state before any host mutation.
-tunnel_image=$(quadlet_image codexia-tunnel.container)
-podman pull "$tunnel_image" >/dev/null
-cat > "$tmp/verify-tunnel.yml" <<YAML
----
-- hosts: localhost
-  connection: local
-  gather_facts: false
-  become: true
-  become_user: $service_user
-  environment:
-    HOME: "$service_home"
-    XDG_CONFIG_HOME: "$service_home/.config"
-    XDG_RUNTIME_DIR: "/run/user/$service_uid"
-    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/$service_uid/bus"
-  tasks:
-    - ansible.builtin.include_tasks: "$repo_root/deploy/ansible/verify-base-tunnel-container.yml"
-YAML
-verify_tunnel() {
-  "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/verify-tunnel.yml"
-}
-expect_tunnel_drift_rejection() {
-  if verify_tunnel > "$tmp/tunnel-runtime-drift.log" 2>&1; then
-    echo 'Tunnel adoption accepted noncanonical runtime state' >&2
-    exit 1
-  fi
-  if ! grep -q 'Existing Tunnel image, private network, loopback-only port' "$tmp/tunnel-runtime-drift.log"; then
-    echo 'Tunnel runtime drift failed for an unexpected reason; captured Ansible output follows:' >&2
-    cat "$tmp/tunnel-runtime-drift.log" >&2
-    exit 1
-  fi
-}
-create_tunnel_fixture() {
-  podman create --name codexia-tunnel "$@" --secret "${tunnel_fixture_secret:-codexia-tunnel-token}",type=mount,target=/run/secrets/token --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m "$tunnel_image" tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token >/dev/null
-  printf 'Tunnel fixture secret identities: '
-  podman inspect --format '{{json .Config.Secrets}}' codexia-tunnel | jq -c 'if type == "array" then map({Name}) else . end'
-  printf 'Tunnel fixture secret mount arguments: '
-  podman inspect --format '{{json .Config.CreateCommand}}' codexia-tunnel | jq -c 'if type == "array" then [range(0; length) as $i | select(.[ $i ] == "--secret" or (.[ $i ] | startswith("--secret="))) | .[$i], .[$i + 1]] else . end'
-  printf 'Tunnel fixture secret mount metadata: '
-  podman inspect --format '{{json .Mounts}}' codexia-tunnel | jq -c 'if type == "array" then map({Type,Name,Destination,RW}) else . end'
-}
-create_bind_tunnel_fixture() {
-  podman create --name codexia-tunnel "$@" --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m "$tunnel_image" tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token >/dev/null
-}
-create_tunnel_fixture --network codexia-data --publish 127.0.0.1:2000:2000/tcp
-expect_tunnel_drift_rejection
-podman rm codexia-tunnel >/dev/null
-create_tunnel_fixture --network codexia --publish 0.0.0.0:2000:2000/tcp
-expect_tunnel_drift_rejection
-podman rm codexia-tunnel >/dev/null
-printf 'wrong-tunnel-token' | podman secret create codexia-tunnel-token-wrong - >/dev/null
-tunnel_fixture_secret=codexia-tunnel-token-wrong
-create_tunnel_fixture --network codexia --publish 127.0.0.1:2000:2000/tcp
-expect_tunnel_drift_rejection
-podman rm codexia-tunnel >/dev/null
-podman secret rm codexia-tunnel-token-wrong >/dev/null
-tunnel_fixture_secret=codexia-tunnel-token
-as_service mkdir -p "$service_home/unexpected-tunnel-mount"
-create_bind_tunnel_fixture --network codexia --publish 127.0.0.1:2000:2000/tcp --volume "$service_home/unexpected-tunnel-mount:/run/secrets/token:ro"
-expect_tunnel_drift_rejection
-podman rm codexia-tunnel >/dev/null
-create_tunnel_fixture --network codexia --publish 127.0.0.1:2000:2000/tcp --volume "$service_home/unexpected-tunnel-mount:/unexpected:ro"
-expect_tunnel_drift_rejection
-podman rm codexia-tunnel >/dev/null
-create_tunnel_fixture --network codexia --publish 127.0.0.1:2000:2000/tcp
-verify_tunnel > "$tmp/tunnel-runtime-canonical.log" || { cat "$tmp/tunnel-runtime-canonical.log"; exit 1; }
-podman rm codexia-tunnel >/dev/null
-as_service rmdir "$service_home/unexpected-tunnel-mount"
-
-# Rechecking the loaded unit after the adoption fixtures must not start it.
-test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
-test "$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" = inactive
-rc=0; podman container exists codexia-tunnel || rc=$?
-test "$rc" = 1
+# Independent management remains available after the database adoption checks.
+assert_fixture_management_continues
 test "$(podman inspect --format '{{json .HostConfig.PortBindings}}' codexia-db | jq -c 'if . == null then {} else . end')" = '{}'
-
-api_requires=$(systemctl --user show --property=Requires --value codexia-tunnel.service)
-api_after=$(systemctl --user show --property=After --value codexia-tunnel.service)
-case " $api_requires " in *' codexia-api.service '*) ;; *) echo 'Tunnel did not require the API unit' >&2; exit 1;; esac
-case " $api_after " in *' codexia-api.service '*) ;; *) echo 'Tunnel was not ordered after the API unit' >&2; exit 1;; esac
-case " $api_after " in *' network-online.target '*) ;; *) echo 'Tunnel lost network-online ordering' >&2; exit 1;; esac
 
 # A database containing only a user-defined type and no migration ledger is
 # not pristine. Role recovery must reject it and preserve the type and volume.
@@ -678,4 +593,4 @@ rc=0; systemctl --user is-active codexia-db.service >/dev/null 2>&1 || rc=$?
 test "$rc" != 0
 test "$(podman unshare cat "$mountpoint/pgdata/PG_VERSION")" = 16
 
-printf '%s\n' 'Verified rootless Quadlet convergence, fresh PostgreSQL init, no-change repeat, data adoption, mismatch denial, pinned roles, private networks and no DB ports.'
+printf '%s\n' 'Verified rootless Quadlet convergence, fresh PostgreSQL init, no-change repeat, data adoption, mismatch denial, pinned roles, private networks, and closed publication with continuous management.'

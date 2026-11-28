@@ -3187,8 +3187,9 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   const configuredAuthMode = readCodexiaEnvironment('AUTH_MODE');
   if (configuredAuthMode === 'setup-only') {
     const { createOwnerSetupApp, readOwnerSetupConfig } = await import('./owner-setup.js');
-    const { config, redirects } = readOwnerSetupConfig();
-    const app = createOwnerSetupApp(config, redirects);
+    const { config, redirects, publicationPeers } = readOwnerSetupConfig();
+    if (publicationPeers.length !== 2) throw new Error('Setup publication requires both reviewed rootless network gateway addresses');
+    const app = createOwnerSetupApp(config, redirects, publicationPeers);
     try {
       await app.verifySchema();
       await app.listen({ host: process.env.HOST ?? '127.0.0.1', port: parsePositivePort(process.env.PORT) });

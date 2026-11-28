@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 umask 077
 repo_root=$(git rev-parse --show-toplevel)
+source "$repo_root/deploy/ansible/test-publication-gate-fixture.sh"
 [[ "${GITHUB_REPOSITORY:-}" =~ ^[A-Za-z0-9-]+/codexia$ ]] || exit 1
 image_owner="${GITHUB_REPOSITORY%/*}"
 image_repository="ghcr.io/${image_owner,,}/codexia-backend"
@@ -112,7 +113,7 @@ capture_failure_runtime() {
   local context="$tmp/runtime-failure.log" unit name
   {
     printf 'Rootless systemd unit state\n'
-    for unit in codexia-api.service codexia-db.service codexia-tunnel.service; do
+    for unit in codexia-api.service codexia-db.service; do
       printf 'UNIT=%s\n' "$unit"
       rootless_systemctl show --no-pager --property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus "$unit" 2>&1 || true
     done
@@ -126,7 +127,7 @@ capture_failure_runtime() {
     done
     printf '\nRecent rootless service warnings and errors\n'
     rootless journalctl --user --no-pager --since='5 minutes ago' --priority=warning \
-      -u codexia-api.service -u codexia-db.service -u codexia-tunnel.service 2>&1 || true
+      -u codexia-api.service -u codexia-db.service 2>&1 || true
     printf '\nBackup mount state\n'
     rootless findmnt -T "$fixture_home/.local/state/codexia-backup-mount" -n -o FSTYPE,SOURCE 2>&1 || true
     rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 2 -printf '%P %y\n' 2>&1 || true
@@ -182,6 +183,9 @@ run_playbook() {
     done < "$tmp/backup-release.timings"
   fi
   redact_log "$tmp/$name.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/$name-bounded.log"
+  if (( status != 0 )); then
+    tail -80 "$RUNNER_TEMP/codexia-push-app-lifecycle/$name-bounded.log" >&2
+  fi
   return "$status"
 }
 rootless() {
@@ -223,6 +227,9 @@ TIMING
 observe_runtime() {
   local key=$1 role=$2
   local container_id image_id api_health api_unit quadlet_sha release_sha pg_volume pg_mount pg_created data_volume data_mount data_created history_volume history_mount history_created db_container db_image api_count sentinel
+  [[ "$(rootless sudo -n /usr/local/sbin/codexia-api-gate status)" == open ]]
+  curl --noproxy '*' --fail --silent --show-error --max-time 3 http://127.0.0.1:18080/health/ready >/dev/null
+  assert_fixture_management_continues
   container_id=$(rootless_podman inspect --format '{{.Id}}' codexia-api)
   image_id=$(rootless_podman inspect --format '{{.Image}}' codexia-api)
   api_health=$(rootless_podman inspect --format '{{.State.Health.Status}}' codexia-api)
@@ -296,10 +303,11 @@ cleanup() {
     rootless fusermount3 -u "$fixture_home/.local/state/codexia-backup-mount" || cleanup_failed "$LINENO" 'SSHFS unmount'
     rootless mountpoint -q "$fixture_home/.local/state/codexia-backup-mount" && cleanup_failed "$LINENO" 'SSHFS mount remains'
   fi
+  cleanup_fixture_management || cleanup_failed "$LINENO" 'publication-gate fixture removal'
   if [[ "$runtime_ready" == true ]] && getent passwd "$fixture_user" >/dev/null 2>&1; then
-    rootless_systemctl stop codexia-backup-executor.service codexia-tunnel.service codexia-api.service codexia-db.service >/dev/null 2>&1 || true
+    rootless_systemctl stop codexia-backup-executor.service codexia-api.service codexia-db.service >/dev/null 2>&1 || true
     local name rc
-    for name in codexia-api codexia-tunnel codexia-db codexia-lifecycle-registry codexia-backup-sshfs codexia-auth-registration codexia-lifecycle-proxy; do
+    for name in codexia-api codexia-db codexia-lifecycle-registry codexia-backup-sshfs codexia-auth-registration codexia-lifecycle-proxy; do
       rc=0; rootless_podman container exists "$name" >/dev/null 2>&1 || rc=$?
       if (( rc == 0 )); then rootless_podman rm -f "$name" >/dev/null 2>&1 || true; fi
       rc=0; rootless_podman container exists "$name" >/dev/null 2>&1 || rc=$?
@@ -317,7 +325,7 @@ cleanup() {
       rc=0; rootless_podman network exists "$name" >/dev/null 2>&1 || rc=$?
       (( rc == 1 )) || cleanup_failed "$LINENO" "$name network absence verification"
     done
-    for name in codexia-backup-api-database-url codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password \
+    for name in codexia-backup-api-database-url codexia-postgres-admin-password codexia-postgres-app-password \
       codexia-auth-database-url codexia-auth-secret codexia-oidc-client-secret codexia-oauth-introspection-client-secret; do
       rc=0; rootless_podman secret exists "$name" >/dev/null 2>&1 || rc=$?
       if (( rc == 0 )); then rootless_podman secret rm "$name" >/dev/null 2>&1 || cleanup_failed "$LINENO" "$name secret removal"; fi
@@ -470,7 +478,6 @@ ENV_GENERATOR
 sudo systemctl daemon-reload
 # The service receives synthetic credentials only; all secret-bearing output is suppressed.
 mkdir -p "$tmp/secrets"
-printf 'fixture-tunnel-token-0123456789abcdef\n' > "$tmp/secrets/tunnel"
 printf '%064d' 1 > "$tmp/secrets/admin"
 printf '%064d\n' 2 > "$tmp/secrets/app"
 chmod 0600 "$tmp/secrets"/*
@@ -482,7 +489,6 @@ codexia_host_approved: true
 codexia_create_service_account: true
 codexia_deploy_ssh_public_key: "$deploy_public_key"
 codexia_secrets_approved: true
-codexia_tunnel_token_file: "$tmp/secrets/tunnel"
 codexia_postgres_admin_password_file: "$tmp/secrets/admin"
 codexia_postgres_app_password_file: "$tmp/secrets/app"
 codexia_base_approved: true
@@ -492,7 +498,10 @@ system_config_created=true
 user_created=true
 runtime_ready=true
 grant_mitogen_traversal
+start_fixture_management "$repo_root" "$tmp"
 run_playbook "$tmp/bootstrap.yml" bootstrap
+[[ "$(rootless sudo -n /usr/local/sbin/codexia-api-gate status)" == closed ]]
+assert_fixture_management_continues
 rootless grep -Fxq "restrict $deploy_public_key" "$fixture_home/.ssh/authorized_keys"
 service_uid=$(id -u codexia)
 [[ "$service_uid" == "$fixture_uid" ]]
@@ -531,7 +540,7 @@ if [[ "$postgres_health" != healthy ]]; then
 fi
 test "$podman_rootless" = true
 node - "$report" "$podman_version" "$podman_rootless" "$systemd_version" "$postgres_version" "$postgres_health" <<'CAPABILITIES'
-const fs=require('node:fs');const [path,podman,rootless,systemd,postgres,health]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.capabilities={host:{distribution:'Ubuntu 26.04',architecture:process.arch},rootlessPodman:{version:podman,rootless:rootless==='true'},userSystemd:{version:systemd},postgresql:{serverVersion:postgres,health},cloudflareTunnel:{status:'NOT_STARTED',reason:'external provider access is outside this disposable app lifecycle proof'}};r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
+const fs=require('node:fs');const [path,podman,rootless,systemd,postgres,health]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.capabilities={host:{distribution:'Ubuntu 26.04',architecture:process.arch},rootlessPodman:{version:podman,rootless:rootless==='true'},userSystemd:{version:systemd},postgresql:{serverVersion:postgres,health},managementConnector:{status:'LOOPBACK_FIXTURE',reason:'host unit and readiness fixture without an external Cloudflare connection'}};r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 CAPABILITIES
 
 record_phase_timing host_bootstrap "$bootstrap_started"
@@ -671,18 +680,6 @@ r.infrastructureImages=[
 ];r.updatedAt=new Date().toISOString();fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 
 IMAGE_INVENTORY
-
-disable_fixture_tunnel() {
-  # Base installs the canonical Tunnel Quadlet but does not start it. Remove that
-  # external-service unit only inside this disposable fixture; the app transaction
-  # then exercises the same optional-Tunnel branch without contacting Cloudflare.
-  rootless rm -f "$fixture_home/.config/containers/systemd/codexia-tunnel.container"
-  rootless_systemctl daemon-reload
-  if rootless_systemctl cat codexia-tunnel.service >/dev/null 2>&1; then
-    echo 'The disposable fixture unexpectedly retained a Cloudflare Tunnel unit' >&2
-    exit 1
-  fi
-}
 
 prepare_app_update() {
   # When no compatible published release exists, create an independent, same-identity

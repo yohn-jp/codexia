@@ -393,14 +393,13 @@
       active_unit="$unit_dir/codexia-api.container"
       wants_dir="$unit_dir/default.target.wants"
       api_wants_link="$wants_dir/codexia-api.service"
-      tunnel_wants_link="$wants_dir/codexia-tunnel.service"
       candidate_unit={{ (home + '/.local/state/codexia-deploy/' + codexia_candidate_unit_filename) | quote }}
       backup_control={{ (home + '/.local/bin/codexia-backup-control') | quote }}
       candidate_image={{ codexia_image | quote }}
       candidate_identity={{ (codexia_candidate_identity_file.content | b64decode | from_json) | to_json | quote }}
       candidate_source_sha={{ codexia_source_sha | quote }}
       prior_source_sha={{ ((codexia_current_identity_result.stdout | from_json).sourceSha if codexia_current_container_exists.rc == 0 else codexia_source_sha) | quote }}
-      require_tunnel={{ 'false' if (codexia_lifecycle_fixture | default(false) | bool) else 'true' }}
+      require_production_admission={{ 'false' if (codexia_lifecycle_fixture | default(false) | bool) else 'true' }}
       auth_settings_file={{ (home + '/.config/codexia-auth/runtime-' + codexia_auth_settings_sha256 + '.env') | quote }}
       auth_settings_digest={{ codexia_auth_settings_sha256 | quote }}
       first_activation={{ (codexia_expected_first_activation | default(none)) | to_json | quote }}
@@ -412,6 +411,8 @@
       release_state="$state_dir/deployed-release.json"
       transaction_intent="$state_dir/deploy-transaction.json"
       lock_file="$state_dir/host.lock"
+      gate_helper=/usr/local/sbin/codexia-api-gate
+      gate_control(){ sudo -n "$gate_helper" "$@"; }
       mkdir -p "$state_dir" "$unit_dir"
       exec 9>"$lock_file"
       flock --exclusive --nonblock 9 || { echo 'Another Codexia deployment or backup holds the host lock' >&2; exit 75; }
@@ -433,21 +434,19 @@
         echo 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet' >&2
         exit 1
       fi
-      tunnel_present=false
-      if systemctl --user cat codexia-tunnel.service >/dev/null 2>&1; then
-        tunnel_present=true
-      elif [[ "$require_tunnel" == true ]]; then
-        echo 'Deployment base runtime requires the rootless Tunnel Quadlet' >&2
+      db_source="$(systemctl --user show --property=SourcePath --value codexia-db.service)" || db_source=''
+      if [[ "$db_source" != "$unit_dir/codexia-db.container" ]]; then
+        echo 'Deployment base runtime requires the canonical generated PostgreSQL unit' >&2
         exit 1
       fi
-      if [[ "$require_tunnel" == true ]]; then
-        db_source="$(systemctl --user show --property=SourcePath --value codexia-db.service)" || db_source=''
-        tunnel_source="$(systemctl --user show --property=SourcePath --value codexia-tunnel.service)" || tunnel_source=''
-        if [[ "$db_source" != "$unit_dir/codexia-db.container" || "$tunnel_source" != "$unit_dir/codexia-tunnel.container" ]]; then
-          echo 'Deployment base runtime requires canonical generated PostgreSQL and Tunnel units' >&2
-          exit 1
-        fi
-      fi
+      cloudflared_state="$(systemctl is-active codexia-cloudflared.service)" || cloudflared_state=''
+      [[ "$cloudflared_state" == active ]] || { echo 'Deployment requires the independent host Cloudflare connector' >&2; exit 1; }
+      gate_state="$(gate_control status)" || { echo 'Publication gate state is not canonical' >&2; exit 1; }
+      case "$gate_state" in
+        open) gate_was_open=true ;;
+        closed) gate_was_open=false ;;
+        *) echo 'Publication gate helper returned an invalid state' >&2; exit 1 ;;
+      esac
       current_container=''
       current_image=''
       if podman container exists codexia-api; then
@@ -480,7 +479,7 @@
           stale_admission 'first activation requires a clean API target'
       fi
       # A clean production slot requires an explicitly admitted R6 or R3.
-      if [[ "$had_unit" == false && "$require_tunnel" == true && "$first_activation" == null && "$recovery_activation" == null && "$adoption_activation" == null ]]; then
+      if [[ "$had_unit" == false && "$require_production_admission" == true && "$first_activation" == null && "$recovery_activation" == null && "$adoption_activation" == null ]]; then
         stale_admission 'first activation requires an approved R6 plan or restored R3 plan'
       fi
       first_activation_window_current(){
@@ -702,7 +701,6 @@
       fi
       mkdir -p "$wants_dir"
       api_link_created=false
-      tunnel_link_created=false
       plan_wants_link(){
         local link="$1" target="$2" created_name="$3"
         if [[ -e "$link" || -L "$link" ]]; then
@@ -712,19 +710,14 @@
         fi
       }
       plan_wants_link "$api_wants_link" ../codexia-api.service api_link_created
-      if [[ "$tunnel_present" == true ]]; then
-        plan_wants_link "$tunnel_wants_link" ../codexia-tunnel.service tunnel_link_created
-      fi
       install_wants_links(){
         if [[ "$api_link_created" == true ]]; then ln -s -- ../codexia-api.service "$api_wants_link" || return 1; fi
-        if [[ "$tunnel_link_created" == true ]]; then ln -s -- ../codexia-tunnel.service "$tunnel_wants_link" || return 1; fi
       }
       if [[ "$unchanged" == true ]]; then
         install_wants_links
         systemctl --user daemon-reload
         systemctl --user is-active --quiet codexia-api.service
         podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api | grep -Fxq healthy
-        if [[ "$tunnel_present" == true ]]; then systemctl --user start codexia-tunnel.service; fi
         echo "UNCHANGED $candidate_image"
         exit 0
       fi
@@ -735,10 +728,8 @@
       if [[ "$had_unit" == true ]]; then
         cp --preserve=mode,ownership "$active_unit" "$state_dir/rollback-api.container"
       fi
-      tunnel_was_active=false
-      if systemctl --user is-active --quiet codexia-tunnel.service; then tunnel_was_active=true; fi
-      if [[ ( "$recovery_activation" != null || "$first_activation" != null || "$adoption_activation" != null ) && "$tunnel_was_active" == true ]]; then
-        stale_admission 'the restored target Tunnel started before publication'
+      if [[ ( "$recovery_activation" != null || "$first_activation" != null || "$adoption_activation" != null ) && "$gate_was_open" == true ]]; then
+        stale_admission 'the restored target publication gate opened before publication'
       fi
       if [[ "$release_present" == true ]]; then
         cp --preserve=mode,ownership "$release_state" "$state_dir/rollback-release.json"
@@ -748,24 +739,23 @@
       if [[ "$had_unit" == true ]]; then
         backup_pending_id="$(cat /proc/sys/kernel/random/uuid)"
       fi
-      activation_tunnel_hold=false
-      if [[ "$first_activation" != null || "$recovery_activation" != null || "$adoption_activation" != null ]]; then activation_tunnel_hold=true; fi
-      if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" "$backup_pending_id" "$recovery_operation_id" "$recovery_evidence_sha256" "$activation_tunnel_hold" <<'NODE'
+      activation_gate_hold=false
+      if [[ "$first_activation" != null || "$recovery_activation" != null || "$adoption_activation" != null ]]; then activation_gate_hold=true; fi
+      if ! node - "$transaction_intent" "$had_unit" "$gate_was_open" "$api_link_created" "$release_present" "$backup_pending_id" "$recovery_operation_id" "$recovery_evidence_sha256" "$activation_gate_hold" <<'NODE'
       const fs = require('node:fs');
-      const [target, hadUnit, tunnelWasActive, apiLinkCreated, tunnelLinkCreated, releasePresent, backupRunId,
-        recoveryOperationId, recoveryEvidenceSha256, tunnelHeldForActivation] = process.argv.slice(2);
+      const [target, hadUnit, gateWasOpen, apiLinkCreated, releasePresent, backupRunId,
+        recoveryOperationId, recoveryEvidenceSha256, gateHeldForActivation] = process.argv.slice(2);
       const asBoolean = value => {
         if (value === 'true') return true;
         if (value === 'false') return false;
         throw new Error('Invalid transaction state');
       };
-      fs.writeFileSync(target, JSON.stringify({format: 'codexia-deploy-transaction/v1', phase: 'pending',
+      fs.writeFileSync(target, JSON.stringify({format: 'codexia-deploy-transaction/v2', phase: 'pending',
         repository: process.env.CODEXIA_TARGET_REPOSITORY,
         repositoryId: Number(process.env.CODEXIA_TARGET_REPOSITORY_ID),
         ownerId: Number(process.env.CODEXIA_TARGET_OWNER_ID),
-        hadUnit: asBoolean(hadUnit), tunnelWasActive: asBoolean(tunnelWasActive),
-        apiLinkCreated: asBoolean(apiLinkCreated), tunnelLinkCreated: asBoolean(tunnelLinkCreated),
-        tunnelHeldForActivation: asBoolean(tunnelHeldForActivation),
+        hadUnit: asBoolean(hadUnit), gateWasOpen: asBoolean(gateWasOpen),
+        apiLinkCreated: asBoolean(apiLinkCreated), gateHeldForActivation: asBoolean(gateHeldForActivation),
         releasePresent: asBoolean(releasePresent), ...(backupRunId && {backupRunId}),
         ...(recoveryOperationId && {recoveryOperationId, recoveryEvidenceSha256})}) + '\n',
         {mode: 0o600, flag: 'wx', flush: true});
@@ -775,12 +765,9 @@
         exit 1
       fi
       sync -f "$state_dir"
-      recovery_tunnel_masked=false
       restore_previous(){
         local restore_status=0
-        if [[ "$tunnel_present" == true && "$recovery_tunnel_masked" == false ]]; then
-          systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || restore_status=1
-        fi
+        gate_control close || return 1
         # Before first activation there may be no generated API service to stop.
         # Do not turn a failed pristine-schema check into an unrecoverable pending
         # transaction merely because systemctl cannot find that absent unit.
@@ -802,15 +789,11 @@
           fi
           restored_image="$(podman inspect --format '{{ '{{' }}.ImageName{{ '}}' }}' codexia-api 2>/dev/null)" || restore_status=1
           [[ "$restored_image" == "$rollback_image" ]] || restore_status=1
-          if [[ "$tunnel_was_active" == true && "$restore_status" == 0 ]]; then systemctl --user start codexia-tunnel.service || restore_status=1; fi
+          if [[ "$gate_was_open" == true && "$restore_status" == 0 ]]; then gate_control open || restore_status=1; fi
         elif [[ "$restore_status" == 0 ]]; then
           rm -f -- "$active_unit"
           if [[ "$api_link_created" == true ]]; then rm -f -- "$api_wants_link"; fi
-          if [[ "$tunnel_link_created" == true ]]; then rm -f -- "$tunnel_wants_link"; fi
           systemctl --user daemon-reload || restore_status=1
-          if [[ ( "$recovery_activation" != null || "$first_activation" != null || "$adoption_activation" != null ) && "$restore_status" == 0 ]]; then
-            systemctl --user unmask codexia-tunnel.service || restore_status=1
-          fi
         fi
         if [[ "$restore_status" == 0 ]]; then
           if [[ "$release_present" == true ]]; then
@@ -853,20 +836,12 @@
           exit 1
         fi
       fi
-      # Keep the Tunnel masked across a VM reboot for both R3 and R6. A
-      # recorded first-activation window must be checked again before unmask.
-      if [[ "$recovery_activation" != null || "$first_activation" != null || "$adoption_activation" != null ]]; then
-        if ! systemctl --user mask --now codexia-tunnel.service; then
-          echo 'Could not hold the application Tunnel inactive for recovery; deployment remains pending' >&2
-          exit 1
-        fi
-        recovery_tunnel_masked=true
-      fi
-      # Record which links recovery owns before creating either one.
-      install_wants_links
-      if { [[ "$tunnel_present" == true && "$recovery_tunnel_masked" == false ]] && ! systemctl --user stop codexia-tunnel.service >/dev/null 2>&1; } ||
+      # Hold publication across reboot before creating activation links or
+      # stopping the writer. R3/R6 approval is rechecked before opening it.
+      if ! gate_control close ||
+         ! install_wants_links ||
          { [[ "$had_unit" == true ]] && ! systemctl --user stop codexia-api.service >/dev/null 2>&1; }; then
-        echo 'Could not stop the active API and Tunnel; deployment transaction remains pending for recovery' >&2
+        echo 'Could not close product publication or stop the active API; deployment transaction remains pending for recovery' >&2
         exit 1
       fi
       if [[ "$had_unit" == true ]]; then
@@ -927,18 +902,16 @@
         echo 'Candidate API image identity did not match the certified digest; deployment transaction remains pending if rollback is unverified' >&2
         exit 1
       fi
-      if [[ "$tunnel_present" == true ]]; then
-        require_activation_window_or_restore
-        if [[ "$recovery_tunnel_masked" == true ]] && ! systemctl --user unmask codexia-tunnel.service; then
-          restore_previous || echo 'Restored Backend rollback failed after Tunnel unmask failure' >&2
-          exit 1
-        fi
-        recovery_tunnel_masked=false
-        if ! systemctl --user start codexia-tunnel.service; then
-          restore_previous || echo 'Previous API recovery failed after Tunnel start failure' >&2
-          echo 'Application Tunnel did not start; deployment transaction remains pending if rollback is unverified' >&2
-          exit 1
-        fi
+      if ! curl --noproxy '*' --fail --silent --show-error --max-time 3 http://127.0.0.1:18081/health/ready >/dev/null; then
+        restore_previous || echo 'Previous API recovery failed after host loopback readiness failure' >&2
+        echo 'Candidate API is not ready at its host loopback endpoint; product gate remains closed' >&2
+        exit 1
+      fi
+      require_activation_window_or_restore
+      if ! gate_control open; then
+        restore_previous || echo 'Previous API recovery failed after publication gate open failure' >&2
+        echo 'Product publication gate did not open; deployment transaction remains pending if rollback is unverified' >&2
+        exit 1
       fi
       if ! node - "$candidate_image" "$current_image" "$candidate_identity" "$auth_settings_digest" "$backup_run_id" "$recovery_operation_id" "$recovery_evidence_sha256" > "$release_state.tmp" <<'NODE'
       const [image, previousImage, identity, authSettingsSha256, backupRunId,
@@ -966,7 +939,7 @@
       const fs = require('node:fs');
       const [target, candidateImage, authSettingsSha256] = process.argv.slice(2);
       const value = JSON.parse(fs.readFileSync(target, 'utf8'));
-      if (value.format !== 'codexia-deploy-transaction/v1' || value.phase !== 'pending') process.exit(2);
+      if (value.format !== 'codexia-deploy-transaction/v2' || value.phase !== 'pending') process.exit(2);
       const temporary = `${target}.tmp`;
       fs.writeFileSync(temporary, JSON.stringify({...value, phase: 'committed', candidateImage, authSettingsSha256}) + '\n',
         {mode: 0o600, flag: 'wx'});
@@ -999,15 +972,16 @@
          'Better Auth client registration verification' if 'Better Auth schema or registered clients failed verification' in (codexia_deploy_transaction.stderr | default('')) else
          'base runtime admission (history volume)' if 'Deployment base runtime requires the rootless history volume' in (codexia_deploy_transaction.stderr | default('')) else
          'base runtime admission (PostgreSQL)' if 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet' in (codexia_deploy_transaction.stderr | default('')) else
-         'base runtime admission (Tunnel)' if 'Deployment base runtime requires the rootless Tunnel Quadlet' in (codexia_deploy_transaction.stderr | default('')) else
-         'base runtime admission (generated units)' if 'Deployment base runtime requires canonical generated PostgreSQL and Tunnel units' in (codexia_deploy_transaction.stderr | default('')) else
+         'base runtime admission (Cloudflare connector)' if 'Deployment requires the independent host Cloudflare connector' in (codexia_deploy_transaction.stderr | default('')) else
+         'base runtime admission (database unit)' if 'Deployment base runtime requires the canonical generated PostgreSQL unit' in (codexia_deploy_transaction.stderr | default('')) else
+         'product publication gate admission' if 'Publication gate state is not canonical' in (codexia_deploy_transaction.stderr | default('')) else
          'off-VM backup admission' if 'Off-VM backup admission failed; candidate was not applied' in (codexia_deploy_transaction.stderr | default('')) else
          'encrypted backup' if 'Encrypted backup failed; candidate was not applied' in (codexia_deploy_transaction.stderr | default('')) else
          'fresh database schema initialization' if 'Fresh database initialization failed' in (codexia_deploy_transaction.stderr | default('')) else
          'candidate API startup' if 'Candidate API failed to start' in (codexia_deploy_transaction.stderr | default('')) else
          'candidate API readiness' if 'Candidate API readiness failed' in (codexia_deploy_transaction.stderr | default('')) else
          'candidate image identity verification' if 'Candidate API image identity did not match' in (codexia_deploy_transaction.stderr | default('')) else
-         'application Tunnel startup' if 'Application Tunnel did not start' in (codexia_deploy_transaction.stderr | default('')) else
+         'product publication gate' if 'Product publication gate' in (codexia_deploy_transaction.stderr | default('')) else
          'deployment record commit' if 'Could not commit the successful deployment record' in (codexia_deploy_transaction.stderr | default('')) else
          'an unclassified transaction command' }}
       (cause: {{ 'PostgreSQL authentication' if 'password authentication failed' in (codexia_deploy_transaction.stderr | default('')) else

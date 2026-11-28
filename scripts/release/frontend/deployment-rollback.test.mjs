@@ -12,11 +12,12 @@ const candidate = { deploymentId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
 const expectedTag = 'frontend-' + 'e'.repeat(64);
 const cloudflareTarget = {
   accountId: 'a'.repeat(32), zoneId: 'b'.repeat(32), tunnelId: previous.deploymentId,
-  authorPolicyId: previous.versionId, ciPolicyId: candidate.versionId,
+  authorPolicyId: previous.versionId, ciPolicyId: candidate.versionId, sshPolicyId: previous.deploymentId,
   tunnelTeamName: 'example', publicProtocolEnabled: false,
 };
 
 function publicationEnvironment(owner, ownerId, repositoryId, hostname) {
+  const sshHostname = `ssh-${hostname}`;
   return {
     GITHUB_REPOSITORY: owner + '/codexia',
     GITHUB_REPOSITORY_OWNER_ID: ownerId,
@@ -25,9 +26,10 @@ function publicationEnvironment(owner, ownerId, repositoryId, hostname) {
     GITHUB_RUN_ATTEMPT: '1',
     CODEXIA_SOURCE_SHA: 'a'.repeat(40),
     CODEXIA_PUBLIC_ORIGIN: 'https://' + hostname,
+    CODEXIA_MANAGEMENT_HOSTNAME: sshHostname,
     CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: JSON.stringify({
       ...cloudflareTarget, repository: owner + '/codexia', repositoryId: Number(repositoryId),
-      ownerId: Number(ownerId), origin: 'https://' + hostname,
+      ownerId: Number(ownerId), origin: 'https://' + hostname, sshHostname,
     }),
     CLOUDFLARE_ACCOUNT_ID: cloudflareTarget.accountId,
     CLOUDFLARE_API_TOKEN: 'fixture',

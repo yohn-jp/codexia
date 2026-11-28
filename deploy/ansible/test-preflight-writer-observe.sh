@@ -40,10 +40,21 @@ cat > "$scratch/bin/systemctl" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
   *SourcePath*codexia-api.service) printf '%s\n' "$HOME/.config/containers/systemd/codexia-api.container";;
-  *ActiveState*codexia-tunnel.service) printf '%s\n' "${TEST_TUNNEL_UNIT:-active}";;
+  'is-active codexia-cloudflared.service') [[ "${TEST_CONNECTOR_UNIT:-active}" == active ]] && printf 'active\n' || exit 3;;
   *ActiveState*codexia-api.service|*ActiveState*codexia-db.service) printf 'active\n';;
   *) exit 99;;
 esac
+STUB
+cat > "$scratch/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+[[ "${TEST_CONNECTOR_READY:-200}" == 200 ]] || exit 7
+printf '%s' "${TEST_CONNECTOR_READY:-200}"
+STUB
+cat > "$scratch/bin/sudo" <<'STUB'
+#!/usr/bin/env bash
+[[ "$*" == '-n /usr/local/sbin/codexia-api-gate status' ]] || exit 99
+[[ "${TEST_GATE_STATE:-open}" == open ]] || exit 1
+printf '%s\n' "${TEST_GATE_STATE:-open}"
 STUB
 cat > "$scratch/bin/podman" <<'STUB'
 #!/usr/bin/env bash
@@ -58,9 +69,6 @@ case "$*" in
     printf '%s\n' '[{"Type":"volume","Name":"codexia-postgres","Destination":"/var/lib/postgresql/data","RW":true}]';;
   'inspect --type container --format '*codexia-api)
     printf '%s true %s %s healthy\n' "$TEST_WRITER_ID" "$TEST_WRITER_ID" "$TEST_WRITER_IMAGE";;
-  'container exists codexia-tunnel')
-    [[ "${TEST_TUNNEL_EXISTS:-true}" == true ]];;
-  'inspect --type container --format '*codexia-tunnel) printf 'true\n';;
   'image inspect --format '*RepoDigests*) printf '["%s"]\n' "${TEST_IMAGE_BINDING:-$TEST_WRITER_IMAGE}";;
   'exec '*'/app/update-identity.json')
     printf '{"format":"codexia-backend-identity/v1","version":"0.1.932","sourceSha":"dddddddddddddddddddddddddddddddddddddddd","profile":"full","platform":"linux/amd64","migrationFingerprint":"%s","apiEpoch":1,"persistenceFormat":1}\n' "$TEST_LEDGER_HASH";;
@@ -101,7 +109,8 @@ assert.match(result.writer.quadletSha256, /^sha256:[a-f0-9]{64}$/);
 assert.match(result.writer.settingsSha256, /^sha256:[a-f0-9]{64}$/);
 assert.equal(result.database.clusterId, '1234567890123456789');
 assert.equal(result.database.migrationLedgerSha256, process.env.TEST_LEDGER_HASH);
-assert.deepEqual(result.tunnel, { unitState: 'active', containerRunning: true });
+assert.deepEqual(result.managementConnector, { unitState: 'active', ready: true });
+assert.deepEqual(result.publicationGate, { state: 'open' });
 assert.ok(!process.argv[2].includes(process.env.TEST_OWNER));
 JS
 
@@ -124,7 +133,6 @@ expect_denial env TEST_OWNER_MATCH=f bash ./preflight-writer-observe.sh
 expect_denial env TEST_AUTH_DATABASE_URL='postgres://codexia_auth_runtime:fixture@unreviewed.example:5432/codexia' bash ./preflight-writer-observe.sh
 
 expect_denial env TEST_EXTRA_WRITER=true bash ./preflight-writer-observe.sh
-expect_denial env TEST_TUNNEL_EXISTS=false bash ./preflight-writer-observe.sh
-
-stopped_tunnel="$(TEST_TUNNEL_UNIT=inactive TEST_TUNNEL_EXISTS=false bash ./preflight-writer-observe.sh)"
-node -e 'require("node:assert/strict").deepEqual(JSON.parse(process.argv[1]).tunnel, {unitState:"inactive",containerRunning:false})' "$stopped_tunnel"
+expect_denial env TEST_CONNECTOR_UNIT=inactive bash ./preflight-writer-observe.sh
+expect_denial env TEST_CONNECTOR_READY=503 bash ./preflight-writer-observe.sh
+expect_denial env TEST_GATE_STATE=closed bash ./preflight-writer-observe.sh

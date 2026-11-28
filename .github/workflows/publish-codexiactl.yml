@@ -57,7 +57,6 @@ jobs:
           CODEXIACTL_BUILD_SOURCE: ${{ github.sha }}
           CODEXIACTL_BUILD_VERSION: ${{ github.ref_name }}
           CODEXIACTL_BUILD_APP_CLIENT_ID: ${{ vars.CODEXIACTL_GITHUB_APP_CLIENT_ID }}
-          CODEXIACTL_BUILD_CLOUDFLARE_CLIENT_ID: ${{ vars.CODEXIACTL_CLOUDFLARE_OAUTH_CLIENT_ID }}
         run: bash scripts/ci/execution/verify-codexiactl.sh "$RUNNER_TEMP/codexiactl-release"
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:

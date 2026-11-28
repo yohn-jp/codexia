@@ -61,7 +61,7 @@ STATEMENT: >>>
 - 任意のCORS originを安全とみなさず、same-originと例外の正規宣言、Origin/CSRF/PKCEをそれぞれ検証する。
 - Health/metadataはsecret、project名、token、owner識別情報を返さない。GETできることがowner認可の証拠とはならない。
 
-**必要な検証:** Terraform/Access/Tunnelとui-routes.jsonの差分、path precedence、query付き/末尾slash/不正method、metadata公開とAPI私有pathの拒否、ownerでないブラウザー・MCP clientでのBOLA、Access停止時のsafe failure。現時点で本番実設定との突合は未確認。
+**必要な検証:** CodexiaCTL が観測したAccess/Tunnel/Workerと認定済みのedge契約との差分、path precedence、query付き/末尾slash/不正method、metadata公開とAPI私有pathの拒否、ownerでないブラウザー・MCP clientでのBOLA、Access停止時のsafe failure。現時点で本番実設定との突合は未確認。
 <<<
 
 [[/SECTION]]
@@ -155,7 +155,7 @@ TITLE: ツール導入の前提
 [TEXT]
 MID: 68db37d38b658c444307d4df2ff8dd18
 STATEMENT: >>>
-**採用済み目標:** [LINK: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN, Toolchain]、[LINK: DOC-ARCHITECTURE-HTTP-PLATFORM-MIGRATION, HTTP platform]、[LINK: DOC-ARCHITECTURE-MCP-V2-MIGRATION, MCP v2]、[LINK: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE, Tooling acceptance]。外部IFは実際のプロトコルに適したschema/宣言を維持し、TypeSpec/OpenAPIをMCPやTerraformの第二正本として強制しない。LikeC4は構成図、Threagileは脅威リスク、既存Mermaidは画面/状態遷移を所有する。上記のEXT-EDGE-002に記したFastifyは**継続採用する実行基盤**。TypeSpec/OpenAPIと明示的Fastifyルートへの移行は未実装。各ツールは未導入・未検証であり、仕様上の主体・権限・管理経路を変更しない。
+**採用済み目標:** [LINK: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN, Toolchain]、[LINK: DOC-ARCHITECTURE-HTTP-PLATFORM-MIGRATION, HTTP platform]、[LINK: DOC-ARCHITECTURE-MCP-V2-MIGRATION, MCP v2]、[LINK: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE, Tooling acceptance]。外部IFは実際のプロトコルに適したschema/宣言を維持し、TypeSpec/OpenAPIをMCPやCloudflare edge契約の第二正本として強制しない。LikeC4は構成図、Threagileは脅威リスク、既存Mermaidは画面/状態遷移を所有する。上記のEXT-EDGE-002に記したFastifyは**継続採用する実行基盤**。TypeSpec/OpenAPIと明示的Fastifyルートへの移行は未実装。各ツールは未導入・未検証であり、仕様上の主体・権限・管理経路を変更しない。
 <<<
 
 [[/SECTION]]

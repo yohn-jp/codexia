@@ -12,7 +12,7 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: 468bdb95899e040098d0ef13cbb3c9dd
 STATEMENT: >>>
-**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が管理経路と公開ゲートの契約を所有する。正式運用には統合実サービス受入を要する。
 
 **種別は承認済みの規範的設計。**
 配備運用と復旧担当が行う R2 の復元から R3 の公開までの証拠の引き渡しを定める。

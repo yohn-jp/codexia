@@ -23,6 +23,9 @@
     state: directory
     mode: '0700'
 
+- name: Verify and prepare the publication gate before absent database recovery
+  ansible.builtin.include_tasks: prepare-api-gate.yml
+
 - name: Recheck database absence, clean the obsolete API slot and recreate only the missing logical database
   ansible.builtin.command:
     argv: [/usr/bin/python3, '-', "{{ codexia_expected_absent_database }}"]

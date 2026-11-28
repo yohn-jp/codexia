@@ -131,7 +131,7 @@
           environment: "{{ service_runtime_env }}"
       when: codexia_stage == 'bootstrap' and codexia_expected_absent_database is defined
 
-    - name: Converge canonical database, networks, volumes and Tunnel Quadlets
+    - name: Converge canonical database, networks, volumes and the closed publication gate
       ansible.builtin.include_tasks:
         file: base-runtime.yml
         apply:

@@ -1058,8 +1058,8 @@ DECISION_STATUS: ACCEPTED
 CONFORMANCE_STATUS: MAPPED_UNVERIFIED
 APPLICABILITY: CURRENT
 DESIGN_OWNER: [Deployment](../deployment/DEPLOYMENT-REFERENCE.sdoc)、[System design](../architecture/SYSTEM-DESIGN.sdoc)
-IMPLEMENTATION_IDENTIFIERS: deploy/cloudflare/ui-routes.json; public-protocol-paths.json; terraform/
-VERIFICATION_IDENTIFIERS: scripts/verification/infrastructure/deployment-config.mjs
+IMPLEMENTATION_IDENTIFIERS: deploy/cloudflare/ui-routes.json; deploy/cloudflare/identity-probes.json; deploy/cloudflare/public-protocol-paths.json; cmd/codexiactl/cloudflare_managed_edge.go
+VERIFICATION_IDENTIFIERS: scripts/verification/infrastructure/deployment-config.mjs; cmd/codexiactl/cloudflare_deployment_contract_test.go
 TEST_IDS: TEST-EXT-001-001
 EXACT_RUN_REFERENCE: NOT_RUN
 COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
@@ -1079,8 +1079,8 @@ MID: 38f8a579218352387edacbee564f0d62
 UID: OBL-REQ-EXT-001-O01
 TITLE: OBL-REQ-EXT-001-O01
 DESIGN_REFERENCE: [Deployment](../deployment/DEPLOYMENT-REFERENCE.sdoc)、[System design](../architecture/SYSTEM-DESIGN.sdoc)
-IMPLEMENTATION_IDENTIFIERS: deploy/cloudflare/ui-routes.json; scripts/verification/infrastructure/deployment-config.mjs
-SURFACE_IDENTIFIERS: iacResource=cloudflare_zero_trust_access_application.codexia; iacResource=cloudflare_zero_trust_access_application.identity_probe; iacResource=cloudflare_zero_trust_access_application.public_protocol; iacResource=terraform_data.public_oauth_edge_readiness; iacResource=cloudflare_zero_trust_tunnel_cloudflared.codexia; iacResource=cloudflare_dns_record.codexia; iacResource=cloudflare_zero_trust_tunnel_cloudflared_config.codexia; iacResource=cloudflare_worker.frontend; iacResource=cloudflare_workers_route.frontend; iacResource=cloudflare_workers_route.origin
+IMPLEMENTATION_IDENTIFIERS: deploy/cloudflare/ui-routes.json; cmd/codexiactl/cloudflare_managed_edge.go: planManagedEdge; cmd/codexiactl/cloudflare_deployment_contract_test.go
+SURFACE_IDENTIFIERS: iacResource=cloudflareRoute.static:/*; iacResource=cloudflareRoute.origin:/api*; iacResource=cloudflareRoute.origin:/health*; iacResource=cloudflareRoute.origin:/mcp*; iacResource=cloudflareRoute.origin:/.well-known/*; iacResource=cloudflareAccess.probe:/api/version; iacResource=cloudflareAccess.probe:/desktop/update-identity.json; iacResource=cloudflareAccess.protocol:/mcp; iacResource=cloudflareAccess.protocol:/.well-known/oauth-protected-resource/api; iacResource=cloudflareAccess.protocol:/.well-known/oauth-authorization-server/api/auth; iacResource=cloudflareAccess.protocol:/.well-known/openid-configuration/api/auth; iacResource=cloudflareAccess.protocol:/api/auth/oauth2/authorize; iacResource=cloudflareAccess.protocol:/api/auth/oauth2/token; iacResource=cloudflareAccess.protocol:/api/auth/oauth2/introspect; iacResource=cloudflareAccess.protocol:/api/auth/oauth2/revoke; iacResource=cloudflareAccess.protocol:/api/auth/oauth2/userinfo; iacResource=cloudflareAccess.protocol:/api/auth/oauth2/consent; iacResource=cloudflareAccess.protocol:/api/auth/oauth2/consent-context; iacResource=cloudflareAccess.protocol:/api/auth/jwks; iacResource=cloudflareAccess.protocol:/api/auth/codexia/auth-methods; iacResource=cloudflareAccess.protocol:/api/auth/get-session; iacResource=cloudflareAccess.protocol:/api/auth/passkey/generate-authenticate-options; iacResource=cloudflareAccess.protocol:/api/auth/passkey/verify-authentication; iacResource=cloudflareAccess.protocol:/api/auth/sign-in/social; iacResource=cloudflareAccess.protocol:/api/auth/callback/workspace-oidc; iacResource=cloudflareAccess.protocol:/api/auth/sign-in/sso; iacResource=cloudflareAccess.protocol:/api/auth/sso/callback/codexia-owner-oidc; iacResource=cloudflareAccess.protocol:/oauth/login; iacResource=cloudflareAccess.protocol:/oauth/consent; iacResource=cloudflareAccess.protocol:/oauth/assets/*
 TEST_IDS: TEST-EXT-001-001
 EXACT_RUN_REFERENCE: NOT_RUN
 COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1093,7 +1093,7 @@ RELATIONS:
 - TYPE: File
   PATH: scripts/verification/infrastructure/deployment-config.mjs
 - TYPE: File
-  PATH: deploy/cloudflare/terraform/main.tf
+  PATH: cmd/codexiactl/cloudflare_managed_edge.go
 
 [REQUIREMENT]
 MID: e752ee48cf448d04c76e06aaad7394f5
@@ -1169,7 +1169,7 @@ UID: OBL-REQ-OPS-001-O01
 TITLE: OBL-REQ-OPS-001-O01
 DESIGN_REFERENCE: [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.sdoc)
 IMPLEMENTATION_IDENTIFIERS: deploy/ansible/site.yml
-SURFACE_IDENTIFIERS: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/deploy-ssh-key.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/managed-bootstrap-secrets.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/verify-base-tunnel-container.yml
+SURFACE_IDENTIFIERS: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/deploy-ssh-key.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/managed-bootstrap-secrets.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/prepare-api-gate.yml
 TEST_IDS: TEST-OPS-001-001
 EXACT_RUN_REFERENCE: NOT_RUN
 COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1204,7 +1204,7 @@ RELATIONS:
 - TYPE: File
   PATH: deploy/ansible/verify-base-db-container.yml
 - TYPE: File
-  PATH: deploy/ansible/verify-base-tunnel-container.yml
+  PATH: deploy/ansible/prepare-api-gate.yml
 - TYPE: File
   PATH: deploy/ansible/managed-bootstrap-secrets.yml
 
@@ -1240,7 +1240,7 @@ UID: OBL-REQ-OPS-002-O01
 TITLE: OBL-REQ-OPS-002-O01
 DESIGN_REFERENCE: [Update flow](../deployment/UPDATE-FLOW.sdoc)、[CI/CD](../verification/CI-CD.sdoc)
 IMPLEMENTATION_IDENTIFIERS: deploy/update-compatibility.json; .github/workflows/backend-release.yml; deploy/ansible/test-push-app-lifecycle.sh
-SURFACE_IDENTIFIERS: iacResource=cloudflare_worker_version.candidate; iacResource=cloudflare_worker.frontend; iacResource=terraform_data.public_oauth_edge_readiness; iacResource=cloudflare_workers_route.frontend; ansibleSource=deploy/ansible/deploy-lifecycle-fixture.yml; ansibleSource=deploy/ansible/deploy-prepare.yml; ansibleSource=deploy/ansible/deploy-transaction.yml; ansibleSource=deploy/ansible/deploy.yml; ansibleSource=deploy/ansible/verify-deploy-base-runtime.yml
+SURFACE_IDENTIFIERS: iacResource=cloudflareRoute.static:/*; iacResource=cloudflareAccess.protocol:/mcp; ansibleSource=deploy/ansible/deploy-lifecycle-fixture.yml; ansibleSource=deploy/ansible/deploy-prepare.yml; ansibleSource=deploy/ansible/deploy-transaction.yml; ansibleSource=deploy/ansible/deploy.yml; ansibleSource=deploy/ansible/verify-deploy-base-runtime.yml
 TEST_IDS: TEST-OPS-002-001
 EXACT_RUN_REFERENCE: NOT_RUN
 COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1255,9 +1255,7 @@ RELATIONS:
 - TYPE: File
   PATH: deploy/ansible/test-push-app-lifecycle.sh
 - TYPE: File
-  PATH: deploy/cloudflare/terraform/initial-frontend-version/main.tf
-- TYPE: File
-  PATH: deploy/cloudflare/terraform/main.tf
+  PATH: cmd/codexiactl/cloudflare_managed_edge.go
 - TYPE: File
   PATH: deploy/ansible/deploy-lifecycle-fixture.yml
 - TYPE: File
@@ -1845,7 +1843,7 @@ UID: TEST-TRC-04-001
 TITLE: TEST-TRC-04-001
 EXECUTION_SCOPE: TRACE_NODE
 EXACT_RUN_REFERENCE: NOT_RUN
-STATEMENT: Keep discovered HTTP routes, MCP tools, database objects, Desktop UI controls, Native iOS views, Terraform resources, and Ansible sources visible as unclassified until each has a reasoned requirement or non-requirement classification.
+STATEMENT: Keep discovered HTTP routes, MCP tools, database objects, Desktop UI controls, Native iOS views, Cloudflare edge contracts, and Ansible sources visible as unclassified until each has a reasoned requirement or non-requirement classification.
 RELATIONS:
 - TYPE: Parent
   VALUE: REQ-TRACE-001

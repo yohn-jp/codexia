@@ -255,11 +255,18 @@ recipient="$("$age_dir/age-keygen" -y "$identity")"
 cat > "$work/shims/systemctl" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "$#" == 4 && "$1" == --user && "$2" == is-active && "$3" == --quiet && "$4" =~ ^codexia-(api|tunnel)\.service$ ]]; then
-  exit 3
-fi
+case "$*" in
+  '--user is-active --quiet codexia-api.service') exit 3;;
+  'is-active --quiet codexia-cloudflared.service') exit 0;;
+esac
 printf '%s\n' 'Fixture rejected an unexpected systemctl command' >&2
 exit 2
+SH
+cat > "$work/shims/sudo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == '-n /usr/local/sbin/codexia-api-gate status' ]]
+printf '%s\n' closed
 SH
 cat > "$work/shims/podman" <<'SH'
 #!/usr/bin/env bash
@@ -271,7 +278,7 @@ fixture_pg_image="${CODEXIA_FIXTURE_PG_IMAGE:?}"
 map_container(){
   case "$1" in
     codexia-db) printf '%s' "$fixture_db";;
-    codexia-api|codexia-tunnel) printf '%s' "$fixture_empty_api";;
+    codexia-api) printf '%s' "$fixture_empty_api";;
     *) printf '%s' "$1";;
   esac
 }
@@ -374,7 +381,7 @@ case "$operation" in
     ;;
 esac
 SH
-chmod 0700 "$work/shims/systemctl" "$work/shims/podman"
+chmod 0700 "$work/shims/systemctl" "$work/shims/sudo" "$work/shims/podman"
 
 export CODEXIA_FIXTURE_DB_CONTAINER="$source_db"
 export CODEXIA_FIXTURE_HISTORY_VOLUME="$history_volume"

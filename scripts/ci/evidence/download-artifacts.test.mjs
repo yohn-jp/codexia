@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, open, readFile, readdir, rm, symlink, writeFile } from 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { assertTraceArtifact, downloadArtifact, extractArtifactFiles, extractJsonEntry, readBrowserArtifact, selectedArtifacts, validateZipEntryPath } from './download-artifacts.mjs';
+import { assertTraceArtifact, downloadArtifact, extractArtifactFiles, extractJsonEntry, readArtifactFiles, readBrowserArtifact, selectedArtifacts, validateZipEntryPath } from './download-artifacts.mjs';
 
 const identity = { runId: '123', sourceSha: 'a'.repeat(40) };
 const bytes = Buffer.from('archive');
@@ -206,6 +206,11 @@ test('verified frontend ZIP extraction writes only safe regular files into an em
   await writeFile(path.join(dir,'desktop','assets','app.js'),'export {};');
   execFileSync('zip',['-q','-r','frontend.zip','desktop'],{cwd:dir});
   const archive=await readFile(path.join(dir,'frontend.zip'));
+  const snapshot = await readArtifactFiles(archive);
+  assert.deepEqual(snapshot, new Map([
+    ['desktop/update-identity.json', Buffer.from('{}')],
+    ['desktop/assets/app.js', Buffer.from('export {};')],
+  ]));
   const destination=path.join(dir,'out');
   const written=await extractArtifactFiles(archive,destination);
   assert.deepEqual(written.sort(),['desktop/assets/app.js','desktop/update-identity.json']);
@@ -224,6 +229,7 @@ test('frontend ZIP extraction rejects symbolic links',async t=>{
   execFileSync('zip',['-q','-y','frontend.zip','linked.js'],{cwd:dir});
   const archive=await readFile(path.join(dir,'frontend.zip'));
   await assert.rejects(extractArtifactFiles(archive,path.join(dir,'out')),/symlinks and special files/);
+  await assert.rejects(readArtifactFiles(archive),/symlinks and special files/);
 });
 
 test('JSON and frontend artifact extraction reject files with an incorrect CRC', async t => {
@@ -237,6 +243,7 @@ test('JSON and frontend artifact extraction reject files with an incorrect CRC',
   assert.ok(offset > 0);
   archive.write('changed!', offset + content.indexOf('original'));
   await assert.rejects(extractJsonEntry(archive, 'profile-build.json'), /CRC|signature/i);
+  await assert.rejects(readArtifactFiles(archive), /CRC|signature/i);
   const destination = path.join(directory, 'out');
   await assert.rejects(extractArtifactFiles(archive, destination), /CRC|signature/i);
   assert.deepEqual(await readdir(destination), []);

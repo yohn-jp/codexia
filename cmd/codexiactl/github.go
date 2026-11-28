@@ -222,12 +222,15 @@ func (g *githubControl) listSecrets(ctx context.Context, name string, env github
 	return nil
 }
 
-var githubCommonVariables = map[string]bool{"CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET": true, wifClientIDInput: true}
-var githubBootstrapVariables = map[string]bool{
-	"CODEXIA_BOOTSTRAP_HOST": true, "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS": true,
-	"CODEXIA_BOOTSTRAP_SSH_USER": true, "CODEXIA_OWNER_SETUP_AGE_RECIPIENT": true,
-	"CODEXIA_BOOTSTRAP_ENABLED": true, "CODEXIA_DATABASE_INITIALIZATION_APPROVED": true,
-}
+var (
+	githubCommonVariables    = map[string]bool{"CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET": true}
+	githubBootstrapVariables = map[string]bool{
+		"CODEXIA_BOOTSTRAP_HOST": true, "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS": true,
+		"CODEXIA_BOOTSTRAP_SSH_USER": true, "CODEXIA_OWNER_SETUP_AGE_RECIPIENT": true,
+		"CODEXIA_BOOTSTRAP_ENABLED": true, "CODEXIA_DATABASE_INITIALIZATION_APPROVED": true,
+	}
+)
+
 var githubProductionVariables = map[string]bool{
 	"CODEXIA_DEPLOY_HOST": true, "CODEXIA_DEPLOY_SSH_KNOWN_HOSTS": true,
 }
@@ -236,8 +239,17 @@ var githubCommonSecrets = map[string]bool{
 	"CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN": true,
 	"CODEXIA_ACCESS_CLIENT_ID":                 true, "CODEXIA_ACCESS_CLIENT_SECRET": true,
 }
-var githubBootstrapSecrets = map[string]bool{"CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY": true, "CODEXIA_TUNNEL_TOKEN": true}
-var githubProductionSecrets = map[string]bool{"CODEXIA_DEPLOY_SSH_PRIVATE_KEY": true, "CLOUDFLARE_API_TOKEN": true, "CLOUDFLARE_ACCOUNT_ID": true}
+
+var githubBootstrapSecrets = map[string]bool{
+	"CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY": true,
+	sshAccessClientID:                   true, sshAccessSecret: true,
+}
+
+var githubProductionSecrets = map[string]bool{
+	"CODEXIA_DEPLOY_SSH_PRIVATE_KEY": true,
+	sshAccessClientID:                true, sshAccessSecret: true,
+	"CLOUDFLARE_API_TOKEN": true, "CLOUDFLARE_ACCOUNT_ID": true,
+}
 
 func githubInputAllowed(env, name string, common, bootstrap, production map[string]bool) bool {
 	switch env {

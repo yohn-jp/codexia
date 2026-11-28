@@ -2,43 +2,42 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
-	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	cloudflare "github.com/cloudflare/cloudflare-go/v7"
 	"github.com/cloudflare/cloudflare-go/v7/accounts"
-	"github.com/cloudflare/cloudflare-go/v7/dns"
-	"github.com/cloudflare/cloudflare-go/v7/option"
-	"github.com/cloudflare/cloudflare-go/v7/packages/pagination"
 	"github.com/cloudflare/cloudflare-go/v7/shared"
-	"github.com/cloudflare/cloudflare-go/v7/user"
-	"github.com/cloudflare/cloudflare-go/v7/workers"
 	"github.com/cloudflare/cloudflare-go/v7/zero_trust"
 )
 
 const (
-	cloudflareAccountScope = "com.cloudflare.api.account"
-	cloudflareZoneScope    = "com.cloudflare.api.account.zone"
-	cloudflareReadRole     = "CODEXIA_DEPLOYMENT_" + "CLOUDFLARE_READ_TOKEN"
-	cloudflareWorkerRole   = "CLOUDFLARE_API_TOKEN"
+	cloudflareAccountScope    = "com.cloudflare.api.account"
+	cloudflareZoneScope       = "com.cloudflare.api.account.zone"
+	cloudflareReadRole        = "CODEXIA_DEPLOYMENT_" + "CLOUDFLARE_READ_TOKEN"
+	cloudflareWorkerRole      = "CLOUDFLARE_API_TOKEN"
+	cloudflareProbeID         = "CODEXIA_ACCESS_CLIENT_ID"
+	cloudflareProbeSecret     = "CODEXIA_ACCESS_CLIENT_SECRET"
+	cloudflareObservationRole = "observation"
+	cloudflareRouteRole       = "routes"
+	cloudflareEdgeWorkerRole  = "empty-worker"
 )
 
-var errCloudflareMintUnavailable = errors.New("Cloudflare account token issuance authority and exact deployment scopes were not verified")
+var errCloudflareMintUnavailable = errors.New("the Cloudflare account token issuance authority and exact deployment scopes were not verified")
 
 func (o *cloudflareObservation) Close() {
 	if o.closeAuth != nil {
 		o.closeAuth()
 		o.closeAuth = nil
 	}
-	o.api = cloudflareAPI{}
+	o.cf = nil
 	o.operator = nil
-	o.provisioning, o.readToken, o.workerToken = [32]byte{}, [32]byte{}, [32]byte{}
 }
 
 func validCloudflareSecret(value []byte) bool {
@@ -53,62 +52,37 @@ func validCloudflareSecret(value []byte) bool {
 	return true
 }
 
-func readCloudflareSecret(o operator, label string) ([]byte, error) {
-	value, err := o.Secret(label)
+func (o *cloudflareObservation) Credential(ctx context.Context, environment, name string) ([]byte, error) {
+	if environment != bootstrapEnvironment && environment != productionEnvironment {
+		return nil, refused("Cloudflare credential role is outside the protected Environments")
+	}
+	switch name {
+	case "CLOUDFLARE_ACCOUNT_ID":
+		if environment == productionEnvironment && cloudflareID.MatchString(o.target.AccountID) {
+			return []byte(o.target.AccountID), nil
+		}
+	case cloudflareReadRole:
+		return o.issueAccountCredential(ctx, name, environment)
+	case cloudflareWorkerRole:
+		if environment == productionEnvironment {
+			return o.issueAccountCredential(ctx, name, environment)
+		}
+	}
+	return nil, refused("Cloudflare credential role is not recognized for this Environment")
+}
+
+func (o *cloudflareObservation) ConnectorToken(ctx context.Context) ([]byte, error) {
+	if !cloudflareID.MatchString(o.target.AccountID) || !cloudflareUUID.MatchString(o.target.TunnelID) {
+		return nil, refused("Cloudflare connector token requires the verified account and Tunnel")
+	}
+	value, err := cfResult[string](ctx, o.cf, "tunnels", "token", "get", o.target.TunnelID)
 	if err != nil {
 		return nil, err
 	}
-	if !validCloudflareSecret(value) {
-		clear(value)
-		return nil, errors.New("Cloudflare credential is empty or has invalid characters")
-	}
-	return value, nil
-}
-
-func cloudflareSecretDigest(value []byte) [32]byte { return sha256.Sum256(value) }
-
-func (o *cloudflareObservation) Credential(ctx context.Context, name string) ([]byte, error) {
-	return o.credential(ctx, name, false)
-}
-
-func (o *cloudflareObservation) ExistingCredential(ctx context.Context, name string) ([]byte, error) {
-	return o.credential(ctx, name, true)
-}
-
-func (o *cloudflareObservation) credential(ctx context.Context, name string, existing bool) ([]byte, error) {
-	switch name {
-	case "CLOUDFLARE_ACCOUNT_ID":
-		return []byte(o.target.AccountID), nil
-	case "CODEXIA_ACCESS_CLIENT_ID":
-		return []byte(o.serviceToken.ClientID), nil
-	case "CODEXIA_ACCESS_CLIENT_SECRET":
-		o.operator.Notice("Cloudflare only exposes the CI Access client secret when the service token is created. Use the current designated service token's authorized credential store. If unavailable, have the account owner provision and attach a scoped replacement to the existing CI-only policy, then rerun discovery. Keep the existing service token until the replacement is verified.")
-		return readCloudflareSecret(o.operator, "Existing Cloudflare CI Access service-token client secret")
-	case "CODEXIA_TUNNEL_TOKEN":
-		return o.tunnelCredential(ctx)
-	case cloudflareReadRole, cloudflareWorkerRole:
-		return o.apiCredential(ctx, name, existing)
-	default:
-		return nil, errors.New("Cloudflare credential role is not recognized")
-	}
-}
-
-func (o *cloudflareObservation) tunnelCredential(ctx context.Context) ([]byte, error) {
-	value, err := o.api.tunnels.Token.Get(ctx, o.target.TunnelID,
-		zero_trust.TunnelCloudflaredTokenGetParams{AccountID: cloudflare.F(o.target.AccountID)})
-	var token []byte
-	if err == nil {
-		token = []byte(*value)
-	} else if cloudflareStatus(err) == http.StatusUnauthorized || cloudflareStatus(err) == http.StatusForbidden {
-		o.operator.Notice("Cloudflare denied retrieval. Use the existing token from the verified Tunnel in https://one.dash.cloudflare.com/ or authorized custody. Keep the current token and connector in place.")
-		token, err = readCloudflareSecret(o.operator, "Existing Cloudflare Tunnel connector token")
-	}
-	if err != nil {
-		return nil, cloudflareError("existing connector token (Cloudflare Tunnel Edit)", err)
-	}
+	token := []byte(value)
 	if !tokenMatchesTunnel(token, o.target) {
 		clear(token)
-		return nil, errors.New("Cloudflare connector token does not match the observed account and Tunnel")
+		return nil, errors.New("the Cloudflare connector token does not match the observed account and Tunnel")
 	}
 	return token, nil
 }
@@ -127,13 +101,14 @@ func tokenMatchesTunnel(token []byte, target cloudflareTarget) bool {
 		Secret  []byte `json:"s"`
 	}
 	defer func() { clear(envelope.Secret) }()
-	return err == nil && json.Unmarshal(decoded, &envelope) == nil && envelope.Account == target.AccountID &&
+	return err == nil && jsonv2.Unmarshal(decoded, &envelope) == nil && envelope.Account == target.AccountID &&
 		envelope.Tunnel == target.TunnelID && len(envelope.Secret) > 0
 }
 
 type cloudflarePermissionPlan struct {
-	name, description string
-	permissions       map[string][]string
+	description string
+	permissions map[string][]string
+	temporary   bool
 }
 
 type cloudflarePermissionGroup struct {
@@ -141,234 +116,232 @@ type cloudflarePermissionGroup struct {
 	accountScope, zoneScope, selectable bool
 }
 
-func (o *cloudflareObservation) permissionPlan(role string) cloudflarePermissionPlan {
-	if role == cloudflareReadRole {
+type cfCredentialReceipt struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func cloudflarePermissionFor(role string) (cloudflarePermissionPlan, bool) {
+	switch role {
+	case cloudflareReadRole:
 		return cloudflarePermissionPlan{
-			name:        "codexia-deployment-read-" + o.target.ZoneID[:8],
 			description: "Workers Content Read-Only, Cloudflare Tunnel Read and Access: Apps and Policies Read for the selected account; DNS Read and Workers Routes Read for the selected zone",
 			permissions: map[string][]string{
 				cloudflareAccountScope: {"Workers Content Read-Only", "Cloudflare Tunnel Read", "Access: Apps and Policies Read"},
 				cloudflareZoneScope:    {"DNS Read", "Workers Routes Read"},
 			},
-		}
-	}
-	return cloudflarePermissionPlan{
-		name:        "codexia-worker-publication-" + o.target.AccountID[:8],
-		description: "Workers Editor for the selected account",
-		permissions: map[string][]string{cloudflareAccountScope: {"Workers Editor"}},
+		}, true
+	case cloudflareObservationRole:
+		return cloudflarePermissionPlan{
+			description: "Workers Content Read-Only for the selected account and Workers Routes Read for the selected zone",
+			permissions: map[string][]string{
+				cloudflareAccountScope: {"Workers Content Read-Only"},
+				cloudflareZoneScope:    {"Workers Routes Read"},
+			},
+			temporary: true,
+		}, true
+	case cloudflareWorkerRole:
+		return cloudflarePermissionPlan{
+			description: "Workers Editor for the selected account",
+			permissions: map[string][]string{cloudflareAccountScope: {"Workers Editor"}},
+		}, true
+	case cloudflareRouteRole:
+		return cloudflarePermissionPlan{
+			description: "Workers Routes Write for the selected zone",
+			permissions: map[string][]string{cloudflareZoneScope: {"Workers Routes Write"}},
+			temporary:   true,
+		}, true
+	case cloudflareEdgeWorkerRole:
+		return cloudflarePermissionPlan{
+			description: "Workers Scripts Write for the selected account (empty Worker creation)",
+			permissions: map[string][]string{cloudflareAccountScope: {"Workers Scripts Write"}},
+			temporary:   true,
+		}, true
+	default:
+		return cloudflarePermissionPlan{}, false
 	}
 }
 
-// A peer Environment may already hold a token issued under the former exact
-// contract. Preserve its exact policy when recovering that existing token,
-// but never issue a new token under the legacy, broader Workers roles.
-func (o *cloudflareObservation) legacyPermissionPlan(role string) cloudflarePermissionPlan {
-	plan := o.permissionPlan(role)
-	if role == cloudflareReadRole {
-		plan.permissions[cloudflareAccountScope][0] = "Workers Scripts Read"
-	} else {
-		plan.permissions[cloudflareAccountScope][0] = "Workers Scripts Write"
+func (o *cloudflareObservation) provisionAccountCredential(ctx context.Context, role string) ([]byte, error) {
+	plan, ok := cloudflarePermissionFor(role)
+	if !ok || !plan.temporary {
+		return nil, refused("Cloudflare SDK authority requires a recognized temporary credential role")
 	}
-	return plan
+	return o.issueAccountCredential(ctx, role, "")
 }
 
-func (o *cloudflareObservation) apiCredential(ctx context.Context, role string, existing bool) ([]byte, error) {
-	plan := o.permissionPlan(role)
-	var value []byte
-	var err error
-	if !existing {
-		value, err = o.mintCloudflareToken(ctx, plan)
-		if err != nil && !errors.Is(err, errCloudflareMintUnavailable) {
-			return nil, err
-		}
-		if errors.Is(err, errCloudflareMintUnavailable) && o.closeAuth != nil {
-			return nil, needsAction("Cloudflare OAuth could not establish automatic token issuance or a token with that stable name already exists. Review the account token inventory and the granted authority before retrying; no alternate token will be created automatically")
-		}
+type cfAccountTokenVerifier interface {
+	verifyAccountToken(context.Context, []byte) (accounts.TokenVerifyResponse, error)
+}
+
+type cfTokenCommand struct {
+	runtime *cfRuntime
+	token   []byte
+}
+
+func (c cfTokenCommand) run(ctx context.Context, args ...string) ([]byte, error) {
+	return c.runtime.runWithToken(ctx, c.token, args...)
+}
+
+func (runtime *cfRuntime) verifyAccountToken(ctx context.Context, token []byte) (accounts.TokenVerifyResponse, error) {
+	if runtime.accountID == "" || !validCloudflareSecret(token) {
+		return accounts.TokenVerifyResponse{}, refused("Cloudflare account token verification requires the validated target")
 	}
-	if len(value) == 0 {
-		if existing {
-			o.operator.Notice("This credential is already registered in another protected Environment. Retrieve it from its authorized custody.")
-		} else {
-			o.operator.Notice("Cloudflare could not authorize automatic scoped token issuance. Use a scoped token whose policies the management credential can inspect. The official token dashboard is " + cloudflareTokensPage + ". Choose a finite expiry.")
-		}
-		o.operator.Notice(fmt.Sprintf("Cloudflare credential scope for %s: %s. Account %s, zone %s.", role, plan.description, o.target.AccountID, o.target.ZoneID))
-		if err := requireApproval(o.operator, "Provide the separately scoped Cloudflare credential for this role?"); err != nil {
-			return nil, err
-		}
-		value, err = readCloudflareSecret(o.operator, "Cloudflare credential for "+role)
+	return cfResult[accounts.TokenVerifyResponse](ctx, cfTokenCommand{runtime, token}, "accounts", "tokens", "verify")
+}
+
+func cfList[T any](ctx context.Context, runner cfCommandRunner, args ...string) ([]T, error) {
+	var result []T
+	for page := 1; page <= cloudflareMaxPages; page++ {
+		query := append(slices.Clone(args), "--page", fmt.Sprint(page), "--per-page", fmt.Sprint(cloudflarePageSize))
+		items, err := cfResult[[]T](ctx, runner, query...)
 		if err != nil {
 			return nil, err
 		}
+		if len(items) > cloudflarePageSize {
+			return nil, errors.New("the Cloudflare inventory returned an invalid page size")
+		}
+		result = append(result, items...)
+		if len(items) < cloudflarePageSize {
+			return result, nil
+		}
 	}
-	digest := cloudflareSecretDigest(value)
-	if digest == o.provisioning || (role == cloudflareReadRole && digest == o.workerToken) ||
-		(role == cloudflareWorkerRole && digest == o.readToken) {
-		clear(value)
-		return nil, errors.New("Cloudflare management, read and Worker publication credentials must be distinct")
-	}
-	if err := o.verifyCloudflareCredential(ctx, value, role, existing); err != nil {
-		clear(value)
-		return nil, err
-	}
-	if role == cloudflareReadRole {
-		o.readToken = digest
-	} else {
-		o.workerToken = digest
-	}
-	return value, nil
+	return nil, errors.New("the Cloudflare inventory exceeded the supported page limit")
 }
 
-// checkOAuthTokenAuthority uses the actual account endpoints, not an assumed
-// relationship between OAuth scopes and API token permissions. Read-only
-// checks never call this function. No tokens are minted during this check.
-func (o *cloudflareObservation) checkOAuthTokenAuthority(ctx context.Context, requirements cloudflareAuthRequirements) error {
-	groups, err := o.api.permissionGroups(ctx, o.target.AccountID, true)
-	if err != nil {
-		return needsAction("Cloudflare OAuth could not read the selected account token permission catalog. Confirm that the publisher client and your Cloudflare role support account token management, or explicitly choose the temporary management token fallback")
+func (o *cloudflareObservation) accountTokenName(role, environment string) string {
+	suffix := role
+	switch role {
+	case cloudflareWorkerRole:
+		suffix = "publication"
+	case cloudflareReadRole:
+		suffix = "deployment-read"
 	}
-	if requirements.readMint {
-		if _, _, err := o.exactTokenPolicies(groups, o.permissionPlan(cloudflareReadRole), true); err != nil {
-			return needsAction("Cloudflare OAuth did not establish selectable deployment-read permissions")
-		}
+	if environment != "" {
+		suffix += "-" + environment
 	}
-	if requirements.workerWrite {
-		if _, _, err := o.exactTokenPolicies(groups, o.permissionPlan(cloudflareWorkerRole), true); err != nil {
-			return needsAction("Cloudflare OAuth did not establish selectable Worker publication permissions")
-		}
-	}
-	_, err = cloudflareList("account token inventory", func(page int) (*pagination.V4PagePaginationArray[shared.Token], error) {
-		return o.api.accountTokens.List(ctx, accounts.TokenListParams{AccountID: cloudflare.F(o.target.AccountID),
-			IncludeExpired: cloudflare.F(true), Page: cloudflare.F(float64(page)), PerPage: cloudflare.F(float64(cloudflarePageSize))})
-	})
-	if err != nil {
-		return needsAction("Cloudflare OAuth could not read the selected account token inventory. No GitHub input registration was attempted")
-	}
-	return nil
+	return fmt.Sprintf("codexia-%d-%s-%s", o.target.RepositoryID, o.target.ZoneID[:8], suffix)
 }
 
-func (o *cloudflareObservation) mintCloudflareToken(ctx context.Context, plan cloudflarePermissionPlan) ([]byte, error) {
-	account := cloudflare.F(o.target.AccountID)
-	api := o.api.accountTokens
-	// Only manually supplied account API tokens have an account token ID.
-	// An OAuth bearer is authorized by the provider's account-scoped token
-	// APIs and selectable permission catalog; Verify cannot identify it.
-	if o.closeAuth == nil {
-		current, err := api.Verify(ctx, accounts.TokenVerifyParams{AccountID: account})
-		if err != nil {
-			if cloudflareAuthorizationDenied(err) {
-				return nil, errCloudflareMintUnavailable
-			}
-			return nil, cloudflareError("account token authority", err)
-		}
-		if current.Status != "active" || !cloudflareID.MatchString(current.ID) {
-			return nil, errCloudflareMintUnavailable
-		}
-		currentMetadata, err := api.Get(ctx, current.ID, accounts.TokenGetParams{AccountID: account})
-		if err != nil {
-			if cloudflareAuthorizationDenied(err) {
-				return nil, errCloudflareMintUnavailable
-			}
-			return nil, cloudflareError("account token authority metadata", err)
-		}
-		if currentMetadata.ID != current.ID || !hasCloudflareTokenWrite(currentMetadata, o.target.AccountID) {
-			return nil, errCloudflareMintUnavailable
-		}
-	}
-	groups, err := o.api.permissionGroups(ctx, o.target.AccountID, true)
-	if err != nil {
-		if cloudflareAuthorizationDenied(err) {
-			return nil, errCloudflareMintUnavailable
-		}
-		return nil, cloudflareError("account token permission groups", err)
-	}
-	policies, expected, err := o.exactTokenPolicies(groups, plan, true)
-	if err != nil {
-		return nil, err
-	}
-	issued, err := cloudflareList("account token inventory", func(page int) (*pagination.V4PagePaginationArray[shared.Token], error) {
-		return api.List(ctx, accounts.TokenListParams{AccountID: account, IncludeExpired: cloudflare.F(true),
-			Page: cloudflare.F(float64(page)), PerPage: cloudflare.F(float64(cloudflarePageSize))})
-	})
-	if err != nil {
-		return nil, err
-	}
-	if slices.ContainsFunc(issued, func(token shared.Token) bool { return token.Name == plan.name }) {
-		o.operator.Notice("A Cloudflare account token already matches the stable issuance name " + plan.name + ". Review the account inventory and use authorized custody. The provider does not return an existing token's secret.")
+func (o *cloudflareObservation) issueAccountCredential(ctx context.Context, role, environment string) ([]byte, error) {
+	plan, found := cloudflarePermissionFor(role)
+	verifier, canVerify := o.cf.(cfAccountTokenVerifier)
+	if !found || !canVerify || !cloudflareID.MatchString(o.target.AccountID) ||
+		!cloudflareID.MatchString(o.target.ZoneID) || o.target.RepositoryID <= 0 {
 		return nil, errCloudflareMintUnavailable
 	}
-	expiry := time.Now().UTC().Truncate(time.Second).Add(90 * 24 * time.Hour)
-	review := fmt.Sprintf("Create Cloudflare account token %s for account %s, zone %s, expiry %s, scope %s?",
-		plan.name, o.target.AccountID, o.target.ZoneID, expiry.Format(time.RFC3339), plan.description)
-	if err := requireApproval(o.operator, review); err != nil {
-		return nil, err
-	}
-	created, err := api.New(ctx, accounts.TokenNewParams{AccountID: account, Name: cloudflare.F(plan.name),
-		Policies: cloudflare.F(policies), ExpiresOn: cloudflare.F(expiry)}, option.WithMaxRetries(0))
+	groups, err := cfResult[[]accounts.TokenPermissionGroupListResponse](ctx, o.cf, "accounts", "tokens", "permission-groups", "list")
 	if err != nil {
-		if cloudflareAuthorizationDenied(err) {
-			return nil, errCloudflareMintUnavailable
-		}
-		return nil, fmt.Errorf("Cloudflare token issuance could not be confirmed; reconcile %s in the account API token inventory before retrying", plan.name)
+		return nil, needsAction("The official Cloudflare Device Flow did not authorize the account token permission catalog")
 	}
-	secret := []byte(created.Value)
-	if created.Name != plan.name || !cloudflareID.MatchString(created.ID) || created.Status != "active" ||
-		!created.ExpiresOn.Equal(expiry) || !matchesCloudflareTokenPolicies(created.Policies, expected) || !validCloudflareSecret(secret) {
-		clear(secret)
-		return nil, fmt.Errorf("Cloudflare may have created %s but its receipt, scopes or credential could not be verified; reconcile its inventory before retrying", plan.name)
+	catalog := make([]cloudflarePermissionGroup, 0, len(groups))
+	for _, group := range groups {
+		catalog = append(catalog, cloudflarePermissionGroup{
+			id: group.ID, name: group.Name, selectable: group.IsSelectable,
+			accountScope: slices.Contains(group.Scopes, accounts.TokenPermissionGroupListResponseScopeComCloudflareAPIAccount),
+			zoneScope:    slices.Contains(group.Scopes, accounts.TokenPermissionGroupListResponseScopeComCloudflareAPIAccountZone),
+		})
 	}
-	return secret, nil
-}
-
-func cloudflareAuthorizationDenied(err error) bool {
-	status := cloudflareStatus(err)
-	return status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusNotFound
-}
-
-func hasCloudflareTokenWrite(token *shared.Token, account string) bool {
-	for _, policy := range token.Policies {
-		resources, ok := policy.Resources.(shared.TokenPolicyResourcesIAMResourcesTypeObjectString)
-		if !ok || len(resources) != 1 || resources[cloudflareAccountScope+"."+account] != "*" || policy.Effect != "allow" {
-			continue
-		}
-		if slices.ContainsFunc(policy.PermissionGroups, func(group shared.TokenPolicyPermissionGroup) bool {
-			return group.Name == "Account API Tokens Write" && cloudflareID.MatchString(group.ID)
-		}) {
-			return true
-		}
-	}
-	return false
-}
-
-func (api cloudflareAPI) permissionGroups(ctx context.Context, accountID string, accountOwned bool) ([]cloudflarePermissionGroup, error) {
-	var groups []cloudflarePermissionGroup
-	if accountOwned {
-		catalog, err := api.accountTokens.PermissionGroups.List(ctx, accounts.TokenPermissionGroupListParams{AccountID: cloudflare.F(accountID)})
-		if err != nil {
-			return nil, err
-		}
-		if catalog.JSON.Result.IsNull() || catalog.JSON.Result.IsInvalid() {
-			return nil, errors.New("Cloudflare account token permission catalog is invalid")
-		}
-		for _, group := range catalog.Result {
-			groups = append(groups, cloudflarePermissionGroup{id: group.ID, name: group.Name, selectable: group.IsSelectable,
-				accountScope: slices.Contains(group.Scopes, accounts.TokenPermissionGroupListResponseScopeComCloudflareAPIAccount),
-				zoneScope:    slices.Contains(group.Scopes, accounts.TokenPermissionGroupListResponseScopeComCloudflareAPIAccountZone)})
-		}
-		return groups, nil
-	}
-	catalog, err := api.userTokens.PermissionGroups.List(ctx, user.TokenPermissionGroupListParams{})
+	policies, expected, err := o.exactTokenPolicies(catalog, plan, true)
 	if err != nil {
 		return nil, err
 	}
-	if catalog.JSON.Result.IsNull() || catalog.JSON.Result.IsInvalid() {
-		return nil, errors.New("Cloudflare user token permission catalog is invalid")
+	name := o.accountTokenName(role, environment)
+	tokens, err := cfList[shared.Token](ctx, o.cf, "accounts", "tokens", "list", "--include-expired")
+	if err != nil {
+		return nil, needsAction("The official Cloudflare Device Flow did not authorize account token inventory")
 	}
-	for _, group := range catalog.Result {
-		groups = append(groups, cloudflarePermissionGroup{id: group.ID, name: group.Name, selectable: group.IsSelectable,
-			accountScope: slices.Contains(group.Scopes, user.TokenPermissionGroupListResponseScopeComCloudflareAPIAccount),
-			zoneScope:    slices.Contains(group.Scopes, user.TokenPermissionGroupListResponseScopeComCloudflareAPIAccountZone)})
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, token := range tokens {
+		if token.Name == name && (!plan.temporary || token.ExpiresOn.IsZero() || token.ExpiresOn.After(now)) {
+			return nil, needsAction("Cloudflare already has an issuance record for " + name + ". Verify its registration or resolve the prior operation in the account inventory before retrying")
+		}
 	}
-	return groups, nil
+	lifetime := 90 * 24 * time.Hour
+	purpose := ""
+	if plan.temporary {
+		lifetime = time.Hour
+		purpose = " CodexiaCTL will attempt to retire this temporary token after use."
+	}
+	expiry := now.Add(lifetime)
+	if err := requireApproval(o.operator, fmt.Sprintf("Create %s on account %s, zone %s, expiring at %s UTC (%s)?%s",
+		name, o.target.AccountID, o.target.ZoneID, expiry.Format(time.RFC3339), plan.description, purpose)); err != nil {
+		return nil, err
+	}
+	if err := o.requireCredentialWriteGuard(ctx); err != nil {
+		return nil, err
+	}
+	body, err := json.Marshal(policies)
+	if err != nil {
+		return nil, errCloudflareMintUnavailable
+	}
+	issued, err := cfResult[accounts.TokenNewResponse](ctx, o.cf, "accounts", "tokens", "create", "--name", name,
+		"--expires-on", expiry.Format(time.RFC3339), "--policies", string(body))
+	if err != nil {
+		return nil, needsAction("Cloudflare did not confirm issuance of " + name + ". Check the exact account token inventory before retrying")
+	}
+	token := []byte(issued.Value)
+	if !validCloudflareSecret(token) || !cloudflareID.MatchString(issued.ID) || issued.Name != name ||
+		issued.Status != "active" || !issued.ExpiresOn.Equal(expiry) || issued.NotBefore.After(now) ||
+		!matchesCloudflareTokenPolicies(issued.Policies, expected) {
+		clear(token)
+		return nil, needsAction("Cloudflare returned an unverifiable issuance receipt for " + name)
+	}
+	if plan.temporary {
+		if o.temporaryCredentials == nil {
+			o.temporaryCredentials = make(map[string]cfCredentialReceipt)
+		}
+		o.temporaryCredentials[role] = cfCredentialReceipt{ID: issued.ID, Name: name}
+	}
+	verified, err := verifier.verifyAccountToken(ctx, token)
+	if err != nil || verified.ID != issued.ID || verified.Status != "active" ||
+		!verified.ExpiresOn.Equal(expiry) || verified.NotBefore.After(now) {
+		clear(token)
+		return nil, needsAction("The official Cloudflare API did not verify the newly issued token for " + name)
+	}
+	metadata, err := cfResult[shared.Token](ctx, o.cf, "accounts", "tokens", "get", issued.ID)
+	if err != nil || !verifiedTokenMetadata(metadata, issued.ID, name, expiry, expected, now) {
+		clear(token)
+		return nil, needsAction("The Cloudflare token inventory did not confirm the approved scope and expiry for " + name)
+	}
+	return token, nil
+}
+
+func (o *cloudflareObservation) requireCredentialWriteGuard(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if o.credentialWriteGuard == nil {
+		return refused("Cloudflare credential issuance requires a verified current write context")
+	}
+	return o.credentialWriteGuard(ctx)
+}
+
+func verifiedTokenMetadata(token shared.Token, id, name string, expiry time.Time, expected map[string][]string, now time.Time) bool {
+	return token.ID == id && token.Name == name && token.Status == "active" && token.ExpiresOn.Equal(expiry) &&
+		!token.NotBefore.After(now) && matchesCloudflareTokenPolicies(token.Policies, expected)
+}
+
+func (o *cloudflareObservation) retireAccountCredential(ctx context.Context, role string) error {
+	receipt, found := o.temporaryCredentials[role]
+	if !found {
+		return nil
+	}
+	info, err := cfResult[shared.Token](ctx, o.cf, "accounts", "tokens", "get", receipt.ID)
+	if err != nil || info.ID != receipt.ID || info.Name != receipt.Name {
+		return needsAction("Could not verify the exact temporary Cloudflare token before retirement")
+	}
+	data, err := o.cf.run(ctx, "accounts", "tokens", "delete", receipt.ID, "--force")
+	clear(data)
+	if err != nil {
+		return needsAction("Cloudflare did not confirm retirement of the temporary token " + receipt.Name + ". Its configured expiry still applies")
+	}
+	tokens, err := cfList[shared.Token](ctx, o.cf, "accounts", "tokens", "list", "--include-expired")
+	if err != nil || slices.ContainsFunc(tokens, func(token shared.Token) bool { return token.ID == receipt.ID && token.Status == "active" }) {
+		return needsAction("Cloudflare did not verify retirement of the temporary token " + receipt.Name)
+	}
+	delete(o.temporaryCredentials, role)
+	return nil
 }
 
 func (o *cloudflareObservation) exactTokenPolicies(groups []cloudflarePermissionGroup, plan cloudflarePermissionPlan, requireSelectable bool) (
@@ -433,126 +406,95 @@ func matchesCloudflareTokenPolicies(policies []shared.TokenPolicy, expected map[
 	return len(observed) == len(expected)
 }
 
-func (o *cloudflareObservation) verifyCloudflareCredential(ctx context.Context, value []byte, role string, existing bool) error {
-	api := newCloudflareAPI(value, o.api.baseURL)
-	account := cloudflare.F(o.target.AccountID)
-	plans := []cloudflarePermissionPlan{o.permissionPlan(role)}
-	if existing {
-		plans = append(plans, o.legacyPermissionPlan(role))
-	}
-	if err := o.verifyCloudflareTokenPolicy(ctx, api, plans); err != nil {
-		return err
-	}
-	workers, err := api.workers.Beta.Workers.List(ctx, workers.BetaWorkerListParams{AccountID: account, PerPage: cloudflare.F(int64(1))})
-	if err != nil {
-		return cloudflareError("deployment token on the selected Worker account", err)
-	}
-	if workers.JSON.Result.IsNull() || workers.JSON.Result.IsInvalid() {
-		return errors.New("Cloudflare deployment token did not verify the selected Worker account")
-	}
-	if role != cloudflareReadRole {
-		return nil
-	}
-	dnsRecords, err := api.dns.List(ctx, dns.RecordListParams{ZoneID: cloudflare.F(o.target.ZoneID),
-		Name: cloudflare.F(dns.RecordListParamsName{Exact: cloudflare.F(o.host)}), PerPage: cloudflare.F(float64(2))})
-	if err != nil {
-		return cloudflareError("deployment read token on the selected DNS zone", err)
-	}
-	if len(dnsRecords.Result) != 1 || dnsRecords.Result[0].Content != o.target.TunnelID+".cfargotunnel.com" {
-		return errors.New("Cloudflare read token did not verify the selected DNS and Tunnel identity")
-	}
-	readTarget := o.target
-	return api.verifyCloudflareReadScopes(ctx, o.host, &readTarget, o.routesContract)
+const cloudflareAccessLifetime = 90 * 24 * time.Hour
+
+type cfServiceAuthReceipt struct {
+	AccountID string    `json:"accountId"`
+	ZoneID    string    `json:"zoneId"`
+	TokenID   string    `json:"tokenId"`
+	StartedAt time.Time `json:"startedAt"`
 }
 
-func (o *cloudflareObservation) verifyCloudflareTokenPolicy(ctx context.Context, candidate cloudflareAPI, plans []cloudflarePermissionPlan) error {
-	account := cloudflare.F(o.target.AccountID)
-	accountToken, accountErr := candidate.accountTokens.Verify(ctx, accounts.TokenVerifyParams{AccountID: account})
-	accountOwned := accountErr == nil
-	var id, status string
-	var notBefore, expiry time.Time
-	if accountOwned {
-		id, status, notBefore, expiry = accountToken.ID, string(accountToken.Status), accountToken.NotBefore, accountToken.ExpiresOn
-	} else {
-		if !cloudflareAuthorizationDenied(accountErr) {
-			return cloudflareError("deployment token verification", accountErr)
-		}
-		userToken, err := candidate.userTokens.Verify(ctx)
-		if err != nil {
-			return cloudflareError("deployment token verification", err)
-		}
-		id, status, notBefore, expiry = userToken.ID, string(userToken.Status), userToken.NotBefore, userToken.ExpiresOn
+type serviceAuthRole struct {
+	idInput, secretInput, name, tag string
+}
+
+func (o *cloudflareObservation) serviceRole(environment, idInput string) (serviceAuthRole, error) {
+	if (environment != bootstrapEnvironment && environment != productionEnvironment) ||
+		!cloudflareID.MatchString(o.target.AccountID) || !cloudflareID.MatchString(o.target.ZoneID) || o.target.RepositoryID <= 0 {
+		return serviceAuthRole{}, refused("Cloudflare Service Auth requires the verified repository, account, zone and Environment")
+	}
+	purpose, secret, tag := "ssh", sshAccessSecret, fmt.Sprintf("repo-%d-ssh-%s", o.target.RepositoryID, environment)
+	if idInput == cloudflareProbeID {
+		purpose, secret, tag = "probe", cloudflareProbeSecret, fmt.Sprintf("repo-%d-probe-%s", o.target.RepositoryID, productionEnvironment)
+	} else if idInput != sshAccessClientID {
+		return serviceAuthRole{}, refused("Cloudflare Service Auth role is outside the deployment contract")
+	}
+	name := fmt.Sprintf("codexia-%d-%s-%s-%s", o.target.RepositoryID, o.target.ZoneID[:8], purpose, environment)
+	return serviceAuthRole{idInput: idInput, secretInput: secret, name: name, tag: tag}, nil
+}
+
+func (o *cloudflareObservation) issueServiceAuth(ctx context.Context, role serviceAuthRole) (cfServiceAuthReceipt, []byte, []byte, error) {
+	var receipt cfServiceAuthReceipt
+	tokens, err := cfList[zero_trust.ServiceToken](ctx, o.cf, "zero-trust", "access", "service-tokens", "list", "--name", role.name)
+	if err != nil {
+		return receipt, nil, nil, err
+	}
+	if slices.ContainsFunc(tokens, func(token zero_trust.ServiceToken) bool { return token.Name == role.name }) {
+		return receipt, nil, nil, needsAction("Cloudflare already has Service Auth token " + role.name + ". Verify its registration or resolve the prior operation before retrying")
+	}
+	if err := requireApproval(o.operator, fmt.Sprintf("Create the 90-day Cloudflare Service Auth token %s with %s=%s?",
+		role.name, managedEdgeServiceTagKey, role.tag)); err != nil {
+		return receipt, nil, nil, err
+	}
+	if err := o.requireCredentialWriteGuard(ctx); err != nil {
+		return receipt, nil, nil, err
+	}
+	tags := map[string]string{managedEdgeServiceTagKey: role.tag}
+	tagArg, err := json.Marshal(tags)
+	if err != nil {
+		return receipt, nil, nil, errors.New("could not prepare exact Cloudflare Service Auth tags")
+	}
+	started := time.Now().UTC().Truncate(time.Second)
+	issued, err := cfResult[zero_trust.AccessServiceTokenNewResponse](ctx, o.cf, "zero-trust", "access", "service-tokens", "create",
+		"--name", role.name, "--duration", "2160h", "--enabled", "--tags", string(tagArg))
+	if err != nil {
+		return receipt, nil, nil, needsAction("Cloudflare did not confirm issuance of " + role.name + ". Check the exact Service Auth inventory before retrying")
+	}
+	secret := []byte(issued.ClientSecret)
+	duration, durationErr := time.ParseDuration(issued.Duration)
+	if !cloudflareUUID.MatchString(issued.ID) || issued.Name != role.name || !issued.Enabled ||
+		len(issued.Tags) != 1 || issued.Tags[managedEdgeServiceTagKey] != role.tag ||
+		durationErr != nil || duration != cloudflareAccessLifetime || !validCloudflareSecret(secret) {
+		clear(secret)
+		return receipt, nil, nil, needsAction("Cloudflare returned an unverifiable Service Auth issuance receipt for " + role.name)
+	}
+	receipt = cfServiceAuthReceipt{AccountID: o.target.AccountID, ZoneID: o.target.ZoneID, TokenID: issued.ID, StartedAt: started}
+	id, err := o.serviceAuthClientID(ctx, role, receipt)
+	if err != nil || string(id) != issued.ClientID {
+		clear(secret)
+		clear(id)
+		return cfServiceAuthReceipt{}, nil, nil, needsAction("Cloudflare Service Auth inventory did not confirm the issued credential for " + role.name)
+	}
+	return receipt, id, secret, nil
+}
+
+func (o *cloudflareObservation) serviceAuthClientID(ctx context.Context, role serviceAuthRole, receipt cfServiceAuthReceipt) ([]byte, error) {
+	if receipt.AccountID != o.target.AccountID || receipt.ZoneID != o.target.ZoneID || !cloudflareUUID.MatchString(receipt.TokenID) {
+		return nil, refused("Cloudflare Service Auth registration receipt does not match the observed target")
+	}
+	token, err := cfResult[zero_trust.ServiceToken](ctx, o.cf, "zero-trust", "access", "service-tokens", "get", receipt.TokenID)
+	if err != nil {
+		return nil, err
 	}
 	now := time.Now()
-	if status != "active" || !cloudflareID.MatchString(id) || notBefore.After(now) || !expiry.After(now) {
-		return errors.New("Cloudflare deployment token must be active and have a future expiry")
+	duration, durationErr := time.ParseDuration(token.Duration)
+	id, suffix := strings.CutSuffix(token.ClientID, ".access")
+	if token.ID != receipt.TokenID || token.Name != role.name || !suffix || !cloudflareID.MatchString(id) || !token.Enabled ||
+		durationErr != nil || duration != cloudflareAccessLifetime || !token.ExpiresAt.After(now) ||
+		token.ExpiresAt.After(now.Add(cloudflareAccessLifetime+5*time.Minute)) ||
+		len(token.Tags) != 1 || token.Tags[managedEdgeServiceTagKey] != role.tag || !token.LeakReportedAt.IsZero() {
+		return nil, needsAction("Cloudflare Service Auth credential does not verify the expected binding, policy tag and expiry")
 	}
-	// Verify binds the opaque candidate to its ID. Token Details and Permission
-	// Groups are read with the management credential, so the deployment token
-	// never needs permission to inspect or manage other credentials.
-	var metadata *shared.Token
-	var err error
-	authority := "API Tokens Read from the same Cloudflare user"
-	if accountOwned {
-		authority = "Account API Tokens Read on the selected Cloudflare account"
-		metadata, err = o.api.accountTokens.Get(ctx, id, accounts.TokenGetParams{AccountID: account})
-	} else {
-		metadata, err = o.api.userTokens.Get(ctx, id)
-	}
-	if err != nil {
-		return cloudflareError("deployment token metadata with "+authority, err)
-	}
-	if metadata.ID != id || metadata.Status != "active" || !metadata.ExpiresOn.Equal(expiry) || metadata.NotBefore.After(now) {
-		return errors.New("Cloudflare deployment token metadata does not match the verified token identity, validity or expiry")
-	}
-	groups, err := o.api.permissionGroups(ctx, o.target.AccountID, accountOwned)
-	if err != nil {
-		return cloudflareError("deployment token permission catalog with "+authority, err)
-	}
-	knownPolicy := false
-	for _, plan := range plans {
-		_, expected, err := o.exactTokenPolicies(groups, plan, false)
-		if err != nil {
-			continue
-		}
-		knownPolicy = true
-		if matchesCloudflareTokenPolicies(metadata.Policies, expected) {
-			return nil
-		}
-	}
-	if !knownPolicy {
-		return errors.New("Cloudflare permission catalog did not establish the deployment role's exact permission IDs and scope")
-	}
-	return refused("Cloudflare deployment token policy differs from the required permissions for the selected account and zone: " + plans[0].description)
-}
-
-func (api cloudflareAPI) verifyCloudflareReadScopes(ctx context.Context, host string, target *cloudflareTarget, routesContract []byte) error {
-	if err := api.checkWorker(ctx, host, *target, routesContract); err != nil {
-		return err
-	}
-	account := cloudflare.F(target.AccountID)
-	apps, err := api.access.Applications.List(ctx, zero_trust.AccessApplicationListParams{
-		AccountID: account, Domain: cloudflare.F(host), Exact: cloudflare.F(true), PerPage: cloudflare.F(int64(2))})
-	if err != nil {
-		return cloudflareError("deployment read token on production Access", err)
-	}
-	if len(apps.Result) != 1 || apps.Result[0].Domain != host || !cloudflareUUID.MatchString(apps.Result[0].ID) {
-		return errors.New("Cloudflare read token did not verify the selected Access application")
-	}
-	policies, err := api.cloudflarePolicies(ctx, target.AccountID, apps.Result[0].ID)
-	if err != nil {
-		return err
-	}
-	if len(policies) != 1 || policies[0].ID != target.AuthorPolicyID || policies[0].Decision != "allow" {
-		return errors.New("Cloudflare read token did not verify the selected author Access policy")
-	}
-	config, err := api.tunnels.Configurations.Get(ctx, target.TunnelID,
-		zero_trust.TunnelCloudflaredConfigurationGetParams{AccountID: account})
-	if err != nil {
-		return cloudflareError("deployment read token on the selected Tunnel configuration", err)
-	}
-	if config.Source != "cloudflare" || config.AccountID != target.AccountID || config.TunnelID != target.TunnelID {
-		return errors.New("Cloudflare read token did not verify the selected Tunnel configuration")
-	}
-	return nil
+	return []byte(token.ClientID), nil
 }

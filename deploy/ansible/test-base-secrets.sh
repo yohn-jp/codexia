@@ -7,15 +7,15 @@ service_user=$(id -un)
 service_uid=$(id -u)
 service_home=$(getent passwd "$service_user" | cut -d: -f6)
 mkdir "$tmp/bin" "$tmp/store"
-export BASE_SECRET_TUNNEL="$tmp/has-tunnel" BASE_SECRET_STORE="$tmp/store" BASE_SECRET_LOG="$tmp/commands" BASE_SECRET_EXISTING="$tmp/has-runtime"
+export BASE_SECRET_STORE="$tmp/store" BASE_SECRET_LOG="$tmp/commands" BASE_SECRET_EXISTING="$tmp/has-runtime"
 cat > "$tmp/bin/podman" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$BASE_SECRET_LOG"
 case "$1 $2" in
   'info --format') printf 'true\n';;
-  'container exists') [[ "$3" == codexia-tunnel && -f "$BASE_SECRET_TUNNEL" ]];;
-  'volume exists') test "$3" = codexia-postgres && test -f "$BASE_SECRET_EXISTING";;
+  'volume exists') [[ "$3" == codexia-postgres && -f "$BASE_SECRET_EXISTING" ]];;
+  'container exists') [[ "$3" == codexia-db || "$3" == codexia-api ]] && exit 1;;
   'secret exists') test -f "$BASE_SECRET_STORE/$3";;
   'secret inspect') test "$3" = --showsecret; jq -n --arg name "$4" --rawfile value "$BASE_SECRET_STORE/$4" '[{Spec:{Name:$name},SecretData:$value}]';;
   'secret create') test "$4" = -; test ! -e "$BASE_SECRET_STORE/$3"; cat > "$BASE_SECRET_STORE/$3"; printf 'created\n';;
@@ -24,7 +24,6 @@ esac
 SH
 chmod 700 "$tmp/bin/podman"
 export PATH="$tmp/bin:$PATH"
-printf 'fixture-tunnel-token\n' > "$tmp/tunnel"
 printf '%064d' 1 > "$tmp/admin"
 printf '%064d\n' 2 > "$tmp/app"
 cat > "$tmp/test.yml" <<YAML
@@ -36,7 +35,6 @@ cat > "$tmp/test.yml" <<YAML
     codexia_service_uid: $service_uid
     codexia_service_home: "$service_home"
     codexia_secrets_approved: true
-    codexia_tunnel_token_file: "$tmp/tunnel"
     codexia_postgres_admin_password_file: "$tmp/admin"
     codexia_postgres_app_password_file: "$tmp/app"
   tasks:
@@ -47,70 +45,47 @@ expect_fail() {
   if apply "$@" > "$tmp/fail.log"; then
     echo 'Unsafe base secret operation accepted' >&2; exit 1
   fi
-  if grep -Eq 'fixture-tunnel-token|0{63}[123]' "$tmp/fail.log"; then
+  if grep -Eq '0{63}[123]' "$tmp/fail.log"; then
     echo 'Credential appeared in Ansible output' >&2; exit 1
   fi
 }
-# Invalid input or reused DB password must fail before any creation.
-printf 'fixture tunnel with spaces\n' > "$tmp/tunnel"
+
+printf 'invalid' > "$tmp/app"
 expect_fail
 test -z "$(ls -A "$tmp/store")"
-printf 'fixture-tunnel-token\n' > "$tmp/tunnel"
-chmod 0644 "$tmp/tunnel"
+printf '%064d\n' 2 > "$tmp/app"
+cp "$tmp/app" "$tmp/app.original"
+printf '%064d' 1 > "$tmp/app"
 expect_fail
 test -z "$(ls -A "$tmp/store")"
-chmod 0600 "$tmp/tunnel"
-ln -s "$tmp/tunnel" "$tmp/tunnel-link"
-sed "s#$tmp/tunnel#$tmp/tunnel-link#" "$tmp/test.yml" > "$tmp/link.yml"
+mv "$tmp/app.original" "$tmp/app"
+ln -s "$tmp/admin" "$tmp/admin-link"
+sed "s#$tmp/admin#$tmp/admin-link#" "$tmp/test.yml" > "$tmp/link.yml"
 if "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/link.yml" > "$tmp/link.log"; then
   echo 'Symlink secret input accepted' >&2; exit 1
 fi
 test -z "$(ls -A "$tmp/store")"
-cp "$tmp/app" "$tmp/app.original"
-printf 'invalid' > "$tmp/app"
-expect_fail
-test -z "$(ls -A "$tmp/store")"
-cp "$tmp/admin" "$tmp/app"
-expect_fail
-test -z "$(ls -A "$tmp/store")"
-mv "$tmp/app.original" "$tmp/app"
+
 apply > "$tmp/first.log" || { cat "$tmp/first.log"; exit 1; }
-for name in tunnel admin app; do
-  case "$name" in
-    tunnel) target=codexia-tunnel-token;;
-    admin) target=codexia-postgres-admin-password;;
-    app) target=codexia-postgres-app-password;;
-  esac
-  cmp "$tmp/$name" "$tmp/store/$target"
-done
+cmp "$tmp/admin" "$tmp/store/codexia-postgres-admin-password"
+cmp "$tmp/app" "$tmp/store/codexia-postgres-app-password"
 apply > "$tmp/second.log" || { cat "$tmp/second.log"; exit 1; }
 grep -q 'changed=0' "$tmp/second.log"
-# Mismatch of one existing secret must not create another missing secret.
-mv "$tmp/store/codexia-tunnel-token" "$tmp/missing"
-cp "$tmp/admin" "$tmp/admin.original"
+
+mv "$tmp/store/codexia-postgres-app-password" "$tmp/missing"
 printf '%064d' 3 > "$tmp/admin"
 expect_fail
-test ! -e "$tmp/store/codexia-tunnel-token"
-mv "$tmp/admin.original" "$tmp/admin"
-# A positively identified Tunnel-only host may add its first database
-# credentials. It must retain the existing Tunnel secret exactly.
-mv "$tmp/missing" "$tmp/store/codexia-tunnel-token"
-mv "$tmp/store/codexia-postgres-admin-password" "$tmp/old-admin"
-mv "$tmp/store/codexia-postgres-app-password" "$tmp/old-app"
-touch "$BASE_SECRET_TUNNEL"
-apply > "$tmp/tunnel-only.log" || { cat "$tmp/tunnel-only.log"; exit 1; }
-cmp "$tmp/tunnel" "$tmp/store/codexia-tunnel-token"
-cmp "$tmp/old-admin" "$tmp/store/codexia-postgres-admin-password"
-cmp "$tmp/old-app" "$tmp/store/codexia-postgres-app-password"
-mv "$tmp/store/codexia-tunnel-token" "$tmp/missing"
-expect_fail
-test ! -e "$tmp/store/codexia-tunnel-token"
+test ! -e "$tmp/store/codexia-postgres-app-password"
+printf '%064d' 1 > "$tmp/admin"
+mv "$tmp/missing" "$tmp/store/codexia-postgres-app-password"
 touch "$BASE_SECRET_EXISTING"
+mv "$tmp/store/codexia-postgres-app-password" "$tmp/missing"
 expect_fail
-test ! -e "$tmp/store/codexia-tunnel-token"
-mv "$tmp/missing" "$tmp/store/codexia-tunnel-token"
+test ! -e "$tmp/store/codexia-postgres-app-password"
+rm "$BASE_SECRET_EXISTING"
+mv "$tmp/missing" "$tmp/store/codexia-postgres-app-password"
 apply > "$tmp/adopt.log" || { cat "$tmp/adopt.log"; exit 1; }
 grep -q 'changed=0' "$tmp/adopt.log"
-if grep -Eq 'fixture-tunnel-token|0{63}[123]' "$tmp/first.log" "$tmp/second.log" "$tmp/adopt.log"; then
+if grep -Eq '0{63}[123]' "$tmp/first.log" "$tmp/second.log" "$tmp/adopt.log"; then
   echo 'Credential appeared in Ansible output' >&2; exit 1
 fi

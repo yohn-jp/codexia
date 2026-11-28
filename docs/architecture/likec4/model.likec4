@@ -47,7 +47,7 @@ model {
       #edge
       metadata { trustBoundary 'edge' }
     }
-    tunnel = container 'Shared Tunnel: product API ingress (target)' {
+    tunnel = container 'Shared Tunnel: product API ingress' {
       #edge
       metadata { trustBoundary 'edge' }
     }
@@ -56,7 +56,7 @@ model {
   codexia = system 'Codexia VM' {
     #application
     metadata { trustBoundary 'application-host' }
-    publicationGate = component 'Independent host-local product publication gate (target)' {
+    publicationGate = component 'Systemd publication socket and TCP forwarding service' {
       #application
       metadata { trustBoundary 'application-host' }
     }
@@ -125,7 +125,7 @@ model {
         metadata { trustBoundary 'operations' }
       }
     }
-    managementIngress = container 'Same Cloudflare Tunnel: dedicated Access Service Auth SSH ingress (target)' {
+    managementIngress = container 'Same Cloudflare Tunnel: dedicated Access Service Auth SSH ingress' {
       #operations
       metadata { trustBoundary 'operations' }
     }

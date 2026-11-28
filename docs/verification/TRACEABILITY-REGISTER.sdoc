@@ -130,7 +130,7 @@ STATEMENT: >>>
 | packages/persistence-postgres/migrations/、認証スキーマ | 全table/column/index/FK/trigger/roleとmigration |
 | app/src/ | 全画面・CTRL/CTA・状態・遷移・認可 |
 | ios/**/Sources/ | Native iOS SwiftUI view型とtransport入口。source declarationは実機・挙動の受入証拠ではない |
-| deploy/cloudflare/terraform/、deploy/ansible/ | IaC resource、playbook、inventory設定。宣言と実環境適用・収束の証拠を区別 |
+| deploy/cloudflare/、deploy/ansible/ | IaC resource、playbook、inventory設定。宣言と実環境適用・収束の証拠を区別 |
 | deploy/、.github/workflows/ | Edge、IaC、更新、秘密管理、バックアップ、CI gate |
 | 全test、tests/e2e、tests/integration | どのobligationを何の期待値で証明するか |
 
@@ -148,7 +148,7 @@ TITLE: 自動検証の範囲と残件
 MID: 9ca3cf86c19ba54b938bb4a02053fd1f
 STATEMENT: >>>
 - StrictDoc verifierはUID/MID、typed relation、source path、登録済みTEST-IDとネイティブ登録の対応を検査する。行・表示名はAST discoveryから導出する。dashboard publisherはcheckout内のdesign/source/test path欠落、StrictDoc output digest、source SHA一致を検査する。
-- reverse scanはAPI runtime route、MCP登録、DB宣言object、Desktop UI control、Native iOS view、Terraform resource、Ansible source、CI workflow definitionを採取する。bounded scan外の要素は未検出を不存在と見なさず、limitation gapとして提示する。
+- reverse scanはAPI runtime route、MCP登録、DB宣言object、Desktop UI control、Native iOS view、Cloudflare edge contract、Ansible source、CI workflow definitionを採取する。bounded scan外の要素は未検出を不存在と見なさず、limitation gapとして提示する。
 - API Operation IDは生成Fastify contractから、CI workflow一覧は`.github/workflows`から抽出する。MCP effect、DB live catalog、Desktop runtime state、iOS device behavior、applied IaC、host convergenceとの一致はこの静的scan単独では検証しない。
 - `VERIFIED`は既存certifierが対象義務のexact-source evidenceを記録した場合のみ。ローカル成功、workflow定義、追加Markdown、source pathの存在では昇格しない。
 <<<

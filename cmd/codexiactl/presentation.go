@@ -103,7 +103,7 @@ func printTerminalLine(w io.Writer, role textRole, message string) {
 }
 
 var stageNames = [...]string{
-	"VM", "GitHub App and repository", "Tailscale", "Cloudflare", "Protected inputs",
+	"VM", "GitHub App and repository", "Cloudflare Device Flow", "Management SSH host pin", "Protected inputs",
 	"Management SSH and certified candidates", "R4 Bootstrap", "R5 Frontend",
 	"R5 Owner setup", "Handoff",
 }

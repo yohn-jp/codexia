@@ -73,7 +73,7 @@ test('reverse discovery inventories native iOS views and declared IaC resources'
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, 'ios/CodexiaApp/Sources'), { recursive: true });
   await mkdir(path.join(root, 'ios/CodexiaEditor/Sources'), { recursive: true });
-  await mkdir(path.join(root, 'deploy/cloudflare/terraform'), { recursive: true });
+  await mkdir(path.join(root, 'deploy/cloudflare'), { recursive: true });
   await mkdir(path.join(root, 'deploy/ansible'), { recursive: true });
   await writeFile(path.join(root, 'ios/CodexiaApp/Sources/EditorScreen.swift'), `import SwiftUI\nstruct EditorScreen: View { var body: some View { Text("Editor") } }\n`);
   await writeFile(path.join(root, 'ios/CodexiaEditor/Sources/AuthoringView.swift'), `import SwiftUI\npublic struct AuthoringView: View { public var body: some View { Text("Authoring") } }\n`);
@@ -84,7 +84,9 @@ test('reverse discovery inventories native iOS views and declared IaC resources'
   await mkdir(path.join(root, 'app/src/generated/http'), { recursive: true });
   await writeFile(path.join(root, 'app/src/generated/http/client.ts'), '// CTRL-PRJ-GENERATED');
   await writeFile(path.join(root, 'app/src/generated/browser-modules.ts'), '// CTRL-PRJ-SOURCE');
-  await writeFile(path.join(root, 'deploy/cloudflare/terraform/main.tf'), `resource "cloudflare_workers_route" "frontend" {\n  pattern = "example.com/*"\n}\n`);
+  await writeFile(path.join(root, 'deploy/cloudflare/ui-routes.json'), JSON.stringify({ routes: ['/*'], originRoutes: ['/api*'] }));
+  await writeFile(path.join(root, 'deploy/cloudflare/identity-probes.json'), JSON.stringify({ backend: { path: '/api/version' } }));
+  await writeFile(path.join(root, 'deploy/cloudflare/public-protocol-paths.json'), JSON.stringify({ mcp: { path: '/mcp' } }));
   await writeFile(path.join(root, 'deploy/ansible/site.yml'), `- name: Configure Codexia\n  hosts: codexia\n  tasks: []\n`);
 
   const result = await discoverReverseSurfaces({ repositoryRoot: root });
@@ -92,7 +94,12 @@ test('reverse discovery inventories native iOS views and declared IaC resources'
   assert.ok(result.surfaces.some(item => item.kind === 'uiControlBindingReference' && item.id === 'CTRL-PRJ-SOURCE'));
   assert.ok(result.surfaces.some(item => item.kind === 'nativeIosView' && item.id === 'EditorScreen' && item.source.path.endsWith('EditorScreen.swift')));
   assert.ok(result.surfaces.some(item => item.kind === 'nativeIosView' && item.id === 'AuthoringView' && item.source.path.endsWith('AuthoringView.swift')));
-  assert.ok(result.surfaces.some(item => item.kind === 'iacResource' && item.id === 'cloudflare_workers_route.frontend' && item.source.path.endsWith('main.tf')));
+  assert.deepEqual(result.surfaces.filter(item => item.kind === 'iacResource').map(item => [item.id, item.source.path]).sort(), [
+    ['cloudflareAccess.probe:/api/version', 'deploy/cloudflare/identity-probes.json'],
+    ['cloudflareAccess.protocol:/mcp', 'deploy/cloudflare/public-protocol-paths.json'],
+    ['cloudflareRoute.origin:/api*', 'deploy/cloudflare/ui-routes.json'],
+    ['cloudflareRoute.static:/*', 'deploy/cloudflare/ui-routes.json'],
+  ]);
   assert.ok(result.surfaces.some(item => item.kind === 'ansibleSource' && item.id === 'deploy/ansible/site.yml'));
   assert.ok(result.limitations.some(item => item.area === 'native-ios-runtime'));
   assert.ok(result.limitations.some(item => item.area === 'iac-runtime'));
@@ -102,22 +109,14 @@ test('platform source coordinates survive comments and blank lines', async t => 
   const root = await mkdtemp(path.join(tmpdir(), 'codexia-platform-coordinates-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const swiftPath = 'ios/CodexiaApp/Sources/EditorScreen.swift';
-  const terraformPath = 'deploy/cloudflare/terraform/main.tf';
   await mkdir(path.dirname(path.join(root, swiftPath)), { recursive: true });
-  await mkdir(path.dirname(path.join(root, terraformPath)), { recursive: true });
   const swift = ['import SwiftUI', '/*', 'struct CommentedView: View {}', '*/', '// struct CommentedLineView: View {}', '', '  struct EditorScreen: View {}', '', 'public struct SecondView: View {}'];
-  const terraform = ['/*', 'resource "cloudflare_workers_route" "commented" {}', '*/', '# resource "cloudflare_workers_route" "commented_line" {}', '', '  resource "cloudflare_workers_route" "frontend" {', '  pattern = "example.com/*"', '}', '', 'resource "cloudflare_workers_route" "origin" {}'];
   for (const newline of ['\n', '\r\n']) {
     await writeFile(path.join(root, swiftPath), swift.join(newline) + newline);
-    await writeFile(path.join(root, terraformPath), terraform.join(newline) + newline);
     const { surfaces } = await discoverReverseSurfaces({ repositoryRoot: root });
     assert.deepEqual(surfaces.filter(item => item.kind === 'nativeIosView').map(item => [item.id, item.source]), [
       ['EditorScreen', { path: swiftPath, line: 7 }],
       ['SecondView', { path: swiftPath, line: 9 }],
-    ]);
-    assert.deepEqual(surfaces.filter(item => item.kind === 'iacResource').map(item => [item.id, item.source]), [
-      ['cloudflare_workers_route.frontend', { path: terraformPath, line: 6 }],
-      ['cloudflare_workers_route.origin', { path: terraformPath, line: 10 }],
     ]);
   }
 });
@@ -127,11 +126,11 @@ test('typed iOS and IaC identifiers reverse-map without certifying implementatio
   const result = buildReverseTrace({
     discovered: [
       { kind: 'nativeIosView', id: 'AuthoringView', source, provenance: 'SwiftUI declaration' },
-      { kind: 'iacResource', id: 'cloudflare_workers_route.frontend', source, provenance: 'Terraform resource declaration' },
+      { kind: 'iacResource', id: 'cloudflareRoute.static:/*', source, provenance: 'Cloudflare route contract declaration' },
     ],
     obligations: [
       { requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', surfaceIdentifiers: [{ kind: 'nativeIosView', id: 'AuthoringView' }], testIds: [], exactRuns: [] },
-      { requirementId: 'REQ-EXT-001', obligationId: 'OBL-REQ-EXT-001-O01', surfaceIdentifiers: [{ kind: 'iacResource', id: 'cloudflare_workers_route.frontend' }], testIds: [], exactRuns: [] },
+      { requirementId: 'REQ-EXT-001', obligationId: 'OBL-REQ-EXT-001-O01', surfaceIdentifiers: [{ kind: 'iacResource', id: 'cloudflareRoute.static:/*' }], testIds: [], exactRuns: [] },
     ],
   });
   assert.deepEqual(result.rows.map(row => row.status), ['UNVERIFIED', 'UNVERIFIED']);

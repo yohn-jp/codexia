@@ -23,7 +23,6 @@ class ManagedSecretsTests(unittest.TestCase):
         self.store = {}
         self.resources = set()
         self.fail = None
-        self.tunnel = "synthetic-tunnel-token"
         self.host = hashlib.sha256(Path("/etc/machine-id").read_text().strip().encode()).hexdigest()
         mock = patch.object(managed, "podman", side_effect=self.podman)
         mock.start()
@@ -54,7 +53,7 @@ class ManagedSecretsTests(unittest.TestCase):
         return {"host": self.host, "hashes": {name: managed.inspect(name)[0] for name in self.store}}
 
     def run_bootstrap(self, *, installing=True, admitted=None):
-        return managed.converge(self.home, admitted if admitted is not None else self.admit(), self.tunnel, installing)
+        return managed.converge(self.home, admitted if admitted is not None else self.admit(), installing)
 
     def test_fresh_idempotence_and_existing_adoption(self):
         self.assertTrue(self.run_bootstrap())
@@ -76,7 +75,7 @@ class ManagedSecretsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_bootstrap(admitted=old)
         partial = self.store.copy()
-        self.assertEqual(set(partial), {managed.TUNNEL, managed.ADMIN, managed.APP})
+        self.assertEqual(set(partial), {managed.ADMIN, managed.APP})
         self.fail = None
         with self.assertRaisesRegex(ValueError, "changed since admission"):
             self.run_bootstrap(admitted=old)
@@ -95,25 +94,18 @@ class ManagedSecretsTests(unittest.TestCase):
             self.run_bootstrap()
         self.assertNotIn(managed.AUTH, self.store)
 
-    def test_only_an_existing_intact_tunnel_can_be_adopted_on_a_tunnel_only_host(self):
-        self.resources.add(("container", "codexia-tunnel"))
-        with self.assertRaises(ValueError):
+    def test_legacy_tunnel_container_or_credential_requires_owner_cleanup(self):
+        self.resources.add(("container", managed.LEGACY_TUNNEL_CONTAINER))
+        with self.assertRaisesRegex(ValueError, "owner-approved one-time retirement"):
             self.run_bootstrap()
         self.assertFalse(self.store)
-        token = ("tunnel-id", self.tunnel + "\n")
-        self.store[managed.TUNNEL] = token
-        with self.assertRaises(ValueError):
+        self.resources.clear()
+        self.store[managed.LEGACY_TUNNEL_SECRET] = ("legacy-id", "unread legacy credential")
+        with self.assertRaisesRegex(ValueError, "owner-approved one-time retirement"):
             self.run_bootstrap(installing=False)
-        self.run_bootstrap()
-        self.assertEqual(self.store[managed.TUNNEL], token)
+        self.assertEqual(set(self.store), {managed.LEGACY_TUNNEL_SECRET})
 
     def test_refuses_mismatch_before_writing_any_secret(self):
-        original = {managed.TUNNEL: ("existing", "other-connector-token")}
-        self.store.update(original)
-        with self.assertRaisesRegex(ValueError, "differs"):
-            self.run_bootstrap()
-        self.assertEqual(self.store, original)
-        self.store[managed.TUNNEL] = ("existing", self.tunnel)
         self.store[managed.APP] = ("application", "invalid-password")
         invalid = self.store.copy()
         with self.assertRaisesRegex(ValueError, "Invalid base database credential"):

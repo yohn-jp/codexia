@@ -8,12 +8,14 @@ Image={{ codexia_auth_bootstrap_image }}
 ContainerName=codexia-api
 Network=codexia.network
 Network=codexia-data.network
+PublishPort=127.0.0.1:18081:3000/tcp
 Secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL
 Secret=codexia-auth-secret,type=env,target=CODEXIA_AUTH_SECRET
 Secret=codexia-oauth-introspection-client-secret,type=env,target=CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET
 EnvironmentFile={{ home }}/.config/codexia-auth/runtime.env
 EnvironmentFile={{ home }}/.config/codexia-auth/owner-setup.env
 Environment=CODEXIA_AUTH_MODE=setup-only
+Environment=CODEXIA_OWNER_SETUP_PUBLICATION_PEERS={{ owner_setup_publication_peers }}
 Environment=HOST=0.0.0.0
 Environment=PORT=3000
 ReadOnly=true

@@ -265,7 +265,7 @@ export const DEDICATED_PROOFS = Object.freeze({
     steps: ['Install supported Ansible control environment', 'Exercise host stage twice and run Quadlet with Actions-only environment isolation'],
   },
   '.github/workflows/ansible-base-secrets.yml': {
-    job: 'Verify rootless Podman, PostgreSQL, and Tunnel Quadlets',
+    job: 'Verify rootless Podman, PostgreSQL, and the publication gate',
     steps: ['Prepare disposable runtime', 'Check PostgreSQL volume layout',
       'Exercise rootless convergence through a separate bootstrap account', 'Remove the disposable fixture user even after test failure'],
   },
@@ -274,8 +274,8 @@ export const DEDICATED_PROOFS = Object.freeze({
     steps: ['Check backup and recovery shell syntax', 'Verify push backup lock and recovery contract'],
   },
   '.github/workflows/deployment-config.yml': {
-    job: 'Verify Ansible and Terraform configuration',
-    steps: ['Select independent infrastructure checks'],
+    job: 'Verify Ansible configuration',
+    steps: ['Check Ansible configuration'],
   },
   '.github/workflows/full-model-oci-acceptance.yml': {
     job: FULL_MODEL_JOB,
@@ -284,18 +284,6 @@ export const DEDICATED_PROOFS = Object.freeze({
       'Run the real Full model OCI lifecycle acceptance'],
   },
 });
-
-function assertInfrastructureSelection(job, files) {
-  // The same merged-base diff must select the same independent scopes as the
-  // existing deployment-config workflow. Require positive evidence for each.
-  const ansible = files.some(file => /^(deploy\/(?:ansible|backup|quadlet|postgres)\/|\.github\/workflows\/deployment-config\.yml$|scripts\/shared\/python-env\.sh$)/u.test(file));
-  const terraform = files.some(file => /^(deploy\/cloudflare\/|\.github\/workflows\/deployment-config\.yml$)/u.test(file));
-  if (ansible || !terraform) assertSuccessfulStep(job, 'Check Ansible configuration');
-  if (terraform || !ansible) {
-    assertSuccessfulStep(job, 'Check all Terraform files');
-    assertSuccessfulStep(job, 'Validate Cloudflare Terraform');
-  }
-}
 
 export async function verifyReusableDedicatedProof({ sourceSha, before, repository, currentRun, git, request }) {
   const workflowPath = currentRun?.path;
@@ -319,7 +307,6 @@ export async function verifyReusableDedicatedProof({ sourceSha, before, reposito
   assert.ok(success(job) && positive(job.id), 'Dedicated PR proof did not succeed');
   assert.equal(job.run_attempt, run.run_attempt, 'Dedicated proof is not from latest attempt');
   for (const step of definition.steps) assertSuccessfulStep(job, step);
-  if (workflowPath === '.github/workflows/deployment-config.yml') assertInfrastructureSelection(job, candidate.files);
   return { version: 1, sourceSha, tree: candidate.tree, baseSha: candidate.base, headSha: candidate.head,
     prNumber, workflowPath, proofWorkflowPath: context.workflowPath, runId: run.id, attempt: run.run_attempt, jobId: job.id };
 }

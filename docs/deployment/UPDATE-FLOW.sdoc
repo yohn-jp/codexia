@@ -12,7 +12,7 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: 09ca9997e09d927460349d3585f2874e
 STATEMENT: >>>
-**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が管理経路と公開ゲートの契約を所有する。正式運用には統合実サービス受入を要する。
 
 **種別: 正本・規範的設計。** PostgreSQL schema を変更せず、特別なデータ統合を必要としない範囲の API/Core/module 機能を、承認済み main の検証・配布から自動的に本番へ適用する経路を定める。「自動」は **検証済み互換 digest だけを保護されたデプロイ制御が適用すること**であり、未知の migration や認証・保存形式の破壊を無条件で取り込むことではない。
 
@@ -95,7 +95,7 @@ MID: 377d307fdc89da6614584542e20ac849
 STATEMENT: >>>
 - **採用済み・実装済みのゲート:** 保護された deploy queue の取得直後に、候補の main・published release・証明書を再確認し、古い認定結果、動くタグ、出所不明の registry artifact を拒否する。CI と運用環境での受入は別の証拠を要する。
 - **現行 main:** `.github/workflows/backend-release.yml` と `.github/workflows/backend-deployment-handoff.yml` が exact-main 検証、handoff、保護されたデプロイを所有する。Ansible `deploy` は互換 Full image を適用し、migration fingerprint / persistence format / API epoch 不一致を拒否する。queue 内の再検証と Better Auth catalog の事前照合は通常更新の admission に含まれる。稼働中 VM での成功は別途実証する。
-- **別の ownership:** Cloudflare Worker の Frontend release、Cloudflare Terraform / Access、認証 schema maintenance は backend image-only lane に混ぜない。MCP デプロイ経路、VM polling、旧 pull updater を復活させない。
+- **別の ownership:** Cloudflare Worker の Frontend release、CodexiaCTL による Cloudflare 固有資源構成 / account owner の共有 Access policy、認証 schema maintenance は backend image-only lane に混ぜない。MCP デプロイ経路、VM polling、旧 pull updater を復活させない。
 <<<
 
 [[/SECTION]]
