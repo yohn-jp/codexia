@@ -14,7 +14,7 @@ The ordinary verification graph retains deployment contract, read-only planner, 
 
 WEB-01 ([#790](https://github.com/yohn-jp/codexia/issues/790)) accepts TypeScript 7 native type checking with Vite 8 independently of CSS migration. Require workspace and test type checking, emitted declarations, Node built-in types, Core/Full builds and OCI, OAuth source boundaries, Desktop browser E2E and existing mandatory verification and security checks. Do not use TypeScript 5 fallback, suppressed diagnostics or skipped tasks as proof.
 
-WEB-02 ([#791](https://github.com/yohn-jp/codexia/issues/791)) remains a separate accepted design pending implementation: vanilla-extract CSS/theme/recipes, Light/Dark/Paper parity, CSS/JS output and performance comparison, CodeMirror interaction and Desktop browser E2E. Its completion is not required for WEB-01 acceptance. iOS SwiftUI acceptance remains independent.
+WEB-02 ([#791](https://github.com/yohn-jp/codexia/issues/791)) integrated vanilla-extract into the Desktop build. Its verification covers Light/Dark/Paper theme parity, CSS/JS output and performance comparisons, CodeMirror interaction and Desktop browser E2E. WEB-01 compiler acceptance and native iOS SwiftUI acceptance remain independent.
 
 Workspace builds and `pnpm typecheck`, `pnpm typecheck:tests`, `pnpm typecheck:safety`, and `pnpm typecheck:deployment` use the root TypeScript 7 native `tsc`. The test-source runner supplies each existing verification scope as a project and reports compiler diagnostics through the corresponding `test-types-*` task. The shared tsconfig opts in to the installed Node types so project checks and declaration emit resolve Node built-ins consistently.
 

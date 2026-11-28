@@ -151,36 +151,43 @@ export class BackupConsoleControl {
       throw new Error('Manual run identity is invalid');
     const client = await this.options.pool.connect();
     try {
-      await client.query('BEGIN');
-      await client.query('SELECT pg_advisory_xact_lock(66501)');
-      const {
-        rows: [run],
-      } = await client.query<{
-        revision: number;
-        maintenance_window_id: string;
-        state: string;
-        source_sha: string | null;
-        image_digest: string | null;
-      }>(
-        "SELECT revision, maintenance_window_id, state, source_sha, image_digest FROM codexia_backup.runs WHERE id = $1 AND kind = 'manual' FOR UPDATE",
-        [runId],
-      );
-      if (!run || !['QUEUED', 'RUNNING'].includes(run.state)) throw new Error('Manual run is not claimable');
-      if (!allowedBackupMaintenanceWindow(this.options.policy, run.maintenance_window_id)) throw new Error('Maintenance window is closed');
-      const {
-        rows: [state],
-      } = await client.query<{ active_revision: number | null }>('SELECT active_revision FROM codexia_backup.state');
-      if (state?.active_revision !== run.revision) throw new Error('Active backup revision changed');
-      if (run.source_sha && (run.source_sha !== sourceSha || run.image_digest !== imageDigest))
-        throw new Error('Manual run source identity changed');
-      await client.query(
-        "UPDATE codexia_backup.runs SET state = 'RUNNING', phase = 'quiescing', source_sha = $2, image_digest = $3, reason_code = NULL, observed_at = clock_timestamp() WHERE id = $1",
-        [runId, sourceSha, imageDigest],
-      );
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      throw error;
+      const admitted = await backupTransaction(client, async () => {
+        const {
+          rows: [run],
+        } = await client.query<{
+          revision: number;
+          maintenance_window_id: string;
+          state: string;
+          phase: string;
+          source_sha: string | null;
+          image_digest: string | null;
+        }>(
+          "SELECT revision, maintenance_window_id, state, phase, source_sha, image_digest FROM codexia_backup.runs WHERE id = $1 AND kind = 'manual' FOR UPDATE",
+          [runId],
+        );
+        if (!run || !['QUEUED', 'RUNNING'].includes(run.state)) throw new Error('Manual run is not claimable');
+        if (!allowedBackupMaintenanceWindow(this.options.policy, run.maintenance_window_id)) {
+          if (run.state === 'RUNNING' && run.phase === 'starting' && run.source_sha === null) {
+            await client.query(
+              "UPDATE codexia_backup.runs SET state = 'BLOCKED', phase = 'blocked', reason_code = 'maintenance_window_closed', observed_at = clock_timestamp() WHERE id = $1",
+              [runId],
+            );
+          }
+          return false;
+        }
+        const {
+          rows: [state],
+        } = await client.query<{ active_revision: number | null }>('SELECT active_revision FROM codexia_backup.state');
+        if (state?.active_revision !== run.revision) throw new Error('Active backup revision changed');
+        if (run.source_sha && (run.source_sha !== sourceSha || run.image_digest !== imageDigest))
+          throw new Error('Manual run source identity changed');
+        await client.query(
+          "UPDATE codexia_backup.runs SET state = 'RUNNING', phase = 'quiescing', source_sha = $2, image_digest = $3, reason_code = NULL, observed_at = clock_timestamp() WHERE id = $1",
+          [runId, sourceSha, imageDigest],
+        );
+        return true;
+      });
+      if (!admitted) throw new TerminalControlError('Maintenance window is closed');
     } finally {
       client.release();
     }

@@ -1520,7 +1520,14 @@ export function PersistenceWorkspace({
         return;
       const sequence = openSequenceRef.current;
       const intent = selectionIntentRef.current;
-      const isCurrent = () => !signal.aborted && sequence === openSequenceRef.current && intent === selectionIntentRef.current;
+      const pendingKey = JSON.stringify([captured.document.projectId, captured.document.id]);
+      // A changed head can be the result of our own unconfirmed save. Leave
+      // it to the pending operation's receipt reconciliation to compare heads.
+      const isCurrent = () =>
+        !signal.aborted &&
+        sequence === openSequenceRef.current &&
+        intent === selectionIntentRef.current &&
+        !pendingSaveRef.current.has(pendingKey);
       try {
         const read = await api.persistenceDocument(projectId, captured.document.id, signal);
         if (
