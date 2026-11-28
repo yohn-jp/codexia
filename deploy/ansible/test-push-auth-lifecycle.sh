@@ -308,6 +308,7 @@ YAML
   disable_fixture_tunnel
 
   run_deploy auth-primary false '' auth-same-digest
+  grep -Fq 'Verified already active image ' "$tmp/auth-same-digest.log"
   [[ "$(release_checksums)" == "$prior" && "$(observe_auth "$primary_image")" == "$proof" ]]
   observe_runtime better-auth-same-digest auth-primary
   record_auth better-auth-same-digest "$primary_image" "$proof"
