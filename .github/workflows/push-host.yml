@@ -11,7 +11,7 @@ on:
       - deploy/ansible/host-validate.yml
       - deploy/ansible/site.yml
       - deploy/ansible/requirements.txt
-      - docs/deployment/PUSH-HOST-CI.md
+      - docs/deployment/PUSH-HOST-CI.sdoc
       - scripts/deployment/lifecycle/host.test.mjs
 permissions:
   contents: read

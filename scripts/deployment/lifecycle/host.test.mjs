@@ -12,7 +12,7 @@ test('push-host fixture is a manual, isolated Ansible bootstrap proof', async ()
   const workflow = await readFile(path.join(root, '.github/workflows/push-host.yml'), 'utf8');
   const helper = await readFile(path.join(root, 'deploy/ansible/test-push-host.sh'), 'utf8');
   const hostHelper = await readFile(path.join(root, 'deploy/ansible/test-host-integration.sh'), 'utf8');
-  const doc = await readFile(path.join(root, 'docs/deployment/PUSH-HOST-CI.md'), 'utf8');
+  const doc = await readFile(path.join(root, 'docs/deployment/PUSH-HOST-CI.sdoc'), 'utf8');
 
   assert.match(workflow, /^on:\n  workflow_dispatch:\n  pull_request:/mu);
   assert.match(workflow, /\.github\/workflows\/push-host\.yml/u);

@@ -68,8 +68,8 @@ test('lifecycle-only changes do not request a backend production release', () =>
     'deploy/backup/backup.sh',
     'deploy/postgres/010-create-app-role.sh',
     'deploy/quadlet/codexia-api.container',
-    'docs/deployment/PUSH-DEPLOYMENT.md',
-    'docs/deployment/IAC.md',
+    'docs/deployment/PUSH-DEPLOYMENT.sdoc',
+    'docs/deployment/IAC.sdoc',
     'scripts/deployment/lifecycle/app.mjs',
     'scripts/verification/runtime/better-auth-fixture.sh',
   ]) {
@@ -82,7 +82,7 @@ test('UX projection changes do not select frontend or backend production release
       'scripts/ux-simulator/generate.mjs',
       'scripts/ux-simulator/compare/browser.mjs',
       'scripts/audit/ux-artifact.mjs',
-      'docs/design/UX-SIMULATOR-CONTRACT.md',
+      'docs/design/UX-SIMULATOR-CONTRACT.sdoc',
     ]) assert.equal(componentReleaseAffected(component, [path]), false, `${component}: ${path}`);
   }
 });

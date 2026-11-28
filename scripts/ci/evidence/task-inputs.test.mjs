@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { PLAYWRIGHT_IMAGE_DIGESTS } from '../browser/image-digests.mjs';
-import { captureTaskInputSource, taskInvocation, taskWorkflowJob, UX_PROJECTION_DOCUMENTS, REQUIREMENTS_TRACE_DOCUMENTS, isRequirementsTraceInput, isNonExecutableDocumentation, isTaskInputDocument } from './task-inputs.mjs';
+import { captureTaskInputSource, taskInvocation, taskWorkflowJob, UX_PROJECTION_DOCUMENTS, isRequirementsTraceInput, isNonExecutableDocumentation, isTaskInputDocument } from './task-inputs.mjs';
 import { createVerificationPlan } from '../impact/plan.mjs';
 
 function captureTaskInputClosure({ root, sha, task, runtime }) {
@@ -127,7 +127,7 @@ test('a deployment document checked by root tests is included in the task source
   const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'unit-root', runtime };
   const original = captureTaskInputClosure(input);
   await mkdir(path.join(root, 'docs/deployment'), { recursive: true });
-  await writeFile(path.join(root, 'docs/deployment/IOS-CLIENT.md'), 'asserted deployment contract\n');
+  await writeFile(path.join(root, 'docs/deployment/IOS-CLIENT.sdoc'), 'asserted deployment contract\n');
   await git(root, 'add', '.');
   await git(root, 'commit', '-qm', 'add executable documentation input');
   const changed = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
@@ -138,7 +138,7 @@ test('design authority changes invalidate the trace proof source without changin
   const root = await fixture(t);
   const before = { root, sha: await git(root, 'rev-parse', 'HEAD'), runtime };
   await mkdir(path.join(root, 'docs/design'), { recursive: true });
-  await writeFile(path.join(root, 'docs/design/INTERACTION-CONTRACT.md'), '# Interaction authority\n');
+  await writeFile(path.join(root, 'docs/design/INTERACTION-CONTRACT.sdoc'), '# Interaction authority\n');
   await git(root, 'add', '.');
   await git(root, 'commit', '-qm', 'change UI trace authority');
   const after = { ...before, sha: await git(root, 'rev-parse', 'HEAD') };
@@ -348,20 +348,20 @@ test('projection authority documents are task inputs only for the simulator root
     assert.equal(isTaskInputDocument(file, 'unit-root'), true, `${file} binds simulator proof`);
     assert.equal(isTaskInputDocument(file, 'coverage'), file === 'app/DESIGN.md', `${file} keeps its existing product proof scope`);
   }
-  assert.equal(isTaskInputDocument('docs/design/DEVELOPMENT-PAGES-UX.md', 'unit-root'), false);
+  assert.equal(isTaskInputDocument('docs/design/DEVELOPMENT-PAGES-UX.sdoc', 'unit-root'), false);
 });
 
 test('specification authority and native iOS and IaC sources select the existing trace proof', () => {
   for (const file of [
-    'docs/architecture/DOCUMENTATION-AUTHORITY.md',
-    'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md',
-    'docs/architecture/SPECIFICATION-TOOLCHAIN.md',
-    'docs/requirements/STRICTDOC-TRACEABILITY.md',
-    'docs/requirements/REQUIREMENT-REGISTER.md',
-    'docs/verification/TRACEABILITY-REGISTER.md',
-    'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
+    'docs/architecture/DOCUMENTATION-AUTHORITY.sdoc',
+    'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.sdoc',
+    'docs/architecture/SPECIFICATION-TOOLCHAIN.sdoc',
+    'docs/requirements/STRICTDOC-TRACEABILITY.sdoc',
+    'docs/requirements/REQUIREMENT-REGISTER.sdoc',
+    'docs/verification/TRACEABILITY-REGISTER.sdoc',
+    'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.sdoc',
   ]) {
-    assert.ok(REQUIREMENTS_TRACE_DOCUMENTS.includes(file), file);
+    assert.ok(isRequirementsTraceInput(file), file);
     assert.equal(isTaskInputDocument(file, 'requirements-trace'), true, file);
     assert.equal(isRequirementsTraceInput(file), true, file);
   }

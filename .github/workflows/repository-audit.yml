@@ -31,25 +31,14 @@ on:
       - 'scripts/github/octokit.mjs'
       - 'scripts/github/paginate-actions.mjs'
       - '.github/workflows/repository-audit.yml'
-      - 'docs/verification/CI-DASHBOARD.md'
-      - 'docs/verification/GRAPHIFY-PAGES.md'
-      - 'docs/verification/PAGES-FUNCTION-INVENTORY.md'
-      - 'docs/design/DEVELOPMENT-PAGES-UX.md'
-      - 'docs/design/UX-SIMULATOR-CONTRACT.md'
-      - 'docs/design/SCREEN-CONTROL-CATALOG.md'
-      - 'docs/design/SCREEN-STATE-ATLAS.md'
-      - 'docs/design/USER-SCREEN-FLOW.md'
-      - 'docs/design/ADMIN-SCREEN-FLOW.md'
-      - 'docs/design/UX-CONTRACT.md'
-      - 'docs/design/INTERACTION-CONTRACT.md'
-      - 'docs/design/XSTATE-STATE-MACHINE-CONTRACT.md'
-      - 'docs/design/MOBILE-AUTHORING.md'
+      - 'docs/**/*.sdoc'
+      - 'docs/**/*.sgra'
+      - 'docs/**/_assets/**'
+      - 'docs/architecture/diagrams/**'
+      - 'docs/design/screen-*.json'
       - 'app/DESIGN.md'
-      - 'docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md'
-      - 'docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.md'
-      - 'docs/architecture/API-CONTRACT.md'
-      - 'docs/architecture/BACKUP-CONSOLE-CONTRACT.md'
-      - 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md'
+      - 'app/PRODUCT.md'
+      - 'app/.impeccable/**'
   push:
     branches: [main]
   workflow_dispatch:
@@ -246,6 +235,7 @@ jobs:
           CODEXIA_STRICTDOC_CHROMIUM: ${{ env.CODEXIA_E2E_CHROMIUM }}
           CODEXIA_CI_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           CODEXIA_CI_TASK: pages-requirements-trace
+          CODEXIA_STRICTDOC_PUBLIC: '1'
         run: |
           node scripts/strictdoc/verify.mjs --strictdoc "$RUNNER_TEMP/strictdoc/bin/strictdoc" --output-dir "$RUNNER_TEMP/strictdoc-output"
       - name: Generate source graph for the checkout
@@ -277,6 +267,14 @@ jobs:
           if [[ "$VERIFY_EVENT" == workflow_dispatch ]]; then VERIFY_EVENT=push; fi
           node scripts/ci/evidence/trace-receipt.mjs "$(git rev-parse HEAD)" "$VERIFY_EVENT" "$RUNNER_TEMP/verify-receipt.json"
           node scripts/audit/specifications.mjs "$RUNNER_TEMP/site" "$RUNNER_TEMP/strictdoc-output" "$(git rev-parse HEAD)" "$RUNNER_TEMP/verify-receipt.json"
+      - name: Build Japanese search for the staged public specifications
+        run: |
+          npm ci --prefix scripts/audit/pagefind --ignore-scripts --no-audit --no-fund
+          scripts/audit/pagefind/node_modules/.bin/pagefind \
+            --site "$RUNNER_TEMP/site/requirements/html" \
+            --output-path "$RUNNER_TEMP/site/design-search" \
+            --glob 'docs/**/*.sdoc.html' --root-selector main --force-language ja
+          cp scripts/audit/design-search.js "$RUNNER_TEMP/site/design-search/init.js"
       - name: Stamp specification source and content digest
         run: node scripts/audit/assemble-parts.mjs stamp "$RUNNER_TEMP/site" specification "$(git rev-parse HEAD)"
       - name: Record specification producer attempt

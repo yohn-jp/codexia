@@ -170,6 +170,7 @@ async function executeTaskInContext(task, index, scope) {
           CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task),
           CODEXIA_CI_SOURCE_SHA: sha,
           CODEXIA_CI_TASK: task,
+          CODEXIA_STRICTDOC_PUBLIC: '1',
           STRICTDOC_BIN: process.env.STRICTDOC_BIN ?? path.join(process.env.RUNNER_TEMP ?? '', 'strictdoc/bin/strictdoc'),
         });
       } else throw new Error(`No runner for ${task}`);

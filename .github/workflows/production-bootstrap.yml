@@ -46,7 +46,7 @@ on:
       - deploy/ansible/host.yml
       - deploy/ansible/deploy-ssh-key.yml
       - deploy/ansible/prepare-deploy-ssh.sh
-      - docs/deployment/PRODUCTION-BOOTSTRAP.md
+      - docs/deployment/PRODUCTION-BOOTSTRAP.sdoc
 permissions:
   contents: read
 # Keep the production queue across the runtime-key handoff, privileged R4

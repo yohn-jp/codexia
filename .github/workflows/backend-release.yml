@@ -88,8 +88,8 @@ on:
       - deploy/backup/**
       - deploy/postgres/**
       - deploy/quadlet/**
-      - docs/deployment/PUSH-DEPLOYMENT.md
-      - docs/deployment/IAC.md
+      - docs/deployment/PUSH-DEPLOYMENT.sdoc
+      - docs/deployment/IAC.sdoc
       - scripts/release/components/record-model.mjs
       - scripts/deployment/lifecycle/app*.mjs
       - scripts/deployment/lifecycle/auth-oidc.mjs

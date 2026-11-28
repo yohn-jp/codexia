@@ -42,7 +42,7 @@ test('browser cache has a single trusted main-push writer without changing test 
   assert.ok(steps.indexOf(save) < steps.findIndex(step => step.with?.name?.startsWith('ci-evidence-browser-')));
   assert.equal(browser.strategy.matrix.include, '${{ fromJSON(inputs.browser) }}');
   const { createVerificationPlan } = await import('./plan.mjs');
-  const main = createVerificationPlan({ files: ['docs/authoring.md'], event: 'push',
+  const main = createVerificationPlan({ files: ['docs/authoring.sdoc'], event: 'push',
     sha: 'a'.repeat(40), base: 'b'.repeat(40) });
   const { verificationPlanOutputs } = await import('./plan.mjs');
   const outputs = verificationPlanOutputs(main);
@@ -171,10 +171,10 @@ test('[TEST-QUAL-001-001] disposable app lifecycle admits only deployment-releva
     'modules/mcp/src/tools.ts',
     'packages/core/src/formatter.ts',
     'app/src/entries/desktop.tsx',
-    'deploy/backup/CONSOLE.md',
-    'deploy/ansible/AUTH-RUNTIME.md',
-    'docs/deployment/PUSH-DEPLOYMENT.md',
-    'docs/deployment/IAC.md',
+    'docs/deployment/BACKUP-CONSOLE-OPERATIONS.sdoc',
+    'docs/deployment/ANSIBLE-AUTH-RUNTIME.sdoc',
+    'docs/deployment/PUSH-DEPLOYMENT.sdoc',
+    'docs/deployment/IAC.sdoc',
     '.github/workflows/verify.yml',
     'scripts/deployment/admission/documentation.test.mjs',
     'scripts/ci/impact/plan.mjs',
@@ -214,7 +214,7 @@ test('audit Pages PR previews are scoped to Pages-owned inputs; main still publi
   for (const file of [
     'scripts/audit/portal.mjs',
     'scripts/strictdoc/verify.mjs',
-    'docs/requirements/REQUIREMENT-REGISTER.md',
+    'docs/requirements/REQUIREMENT-REGISTER.sdoc',
     'docs/architecture/likec4/codexia.c4',
     'scripts/graphify-pages/pack.mjs',
     'scripts/architecture-diagrams/pack.mjs',
@@ -225,7 +225,12 @@ test('audit Pages PR previews are scoped to Pages-owned inputs; main still publi
     'scripts/verification/artifacts/pages-smoke.mjs',
     'scripts/ci/evidence/trace-receipt.mjs',
     '.github/workflows/repository-audit.yml',
-    'docs/design/DEVELOPMENT-PAGES-UX.md',
+    'docs/design/DEVELOPMENT-PAGES-UX.sdoc',
+    'docs/architecture/MCP-V2-MIGRATION.sdoc',
+    'docs/verification/CI-CD.sdoc',
+    'docs/design/screen-catalog.json',
+    'docs/architecture/diagrams/screen-1.mmd',
+    'docs/requirements/codexia.sgra',
   ]) assert.equal(matchesWorkflowPaths(paths, [file]), true, file);
   for (const file of [
     'app/src/entries/desktop.tsx',
@@ -236,8 +241,6 @@ test('audit Pages PR previews are scoped to Pages-owned inputs; main still publi
     '.github/workflows/verify.yml',
     '.github/workflows/push-app-lifecycle.yml',
     'scripts/ci/impact/plan.mjs',
-    'docs/architecture/MCP-V2-MIGRATION.md',
-    'docs/verification/CI-CD.md',
     'ios/CodexiaApp/Sources/Root.swift',
   ]) assert.equal(matchesWorkflowPaths(paths, [file]), false, file);
   assert.equal(matchesWorkflowPaths(paths, [
@@ -246,7 +249,7 @@ test('audit Pages PR previews are scoped to Pages-owned inputs; main still publi
 });
 
 test('MCP v2 migration edits select exact-source Verify trace proof', async () => {
-  const file = 'docs/architecture/MCP-V2-MIGRATION.md';
+  const file = 'docs/architecture/MCP-V2-MIGRATION.sdoc';
   assert.deepEqual((await plan([file])).tasks, ['mcp-conformance', 'coverage', 'architecture-g5', 'requirements-trace']);
   assert.equal(isTaskInputDocument(file, 'requirements-trace'), true);
 });
@@ -342,30 +345,30 @@ test('generated Fastify artifact, registration adapter, and module route manifes
 });
 
 test('iOS deployment documentation selects the root tests that assert its contents', async () => {
-  const selection = await plan(['docs/deployment/IOS-CLIENT.md']);
-  assert.deepEqual(selection.tasks, ['unit-root', 'coverage', 'architecture-g5']);
+  const selection = await plan(['docs/deployment/IOS-CLIENT.sdoc']);
+  assert.deepEqual(selection.tasks, ['unit-root', 'coverage', 'architecture-g5', 'requirements-trace']);
 });
 
 test('StrictDoc authority selects trace proof and the requirement register also selects its DB contract', async () => {
   for (const file of [
-    'docs/requirements/README.md',
-    'docs/requirements/REQUIREMENT-REGISTER.md',
-    'docs/requirements/STRICTDOC-TRACEABILITY.md',
-    'docs/requirements/STRICTDOC-GRAMMAR.gra.md',
-    'docs/architecture/DOCUMENTATION-AUTHORITY.md',
-    'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md',
-    'docs/architecture/SPECIFICATION-TOOLCHAIN.md',
-    'docs/verification/TRACEABILITY-REGISTER.md',
-    'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
+    'docs/requirements/REQUIREMENTS-GOVERNANCE.sdoc',
+    'docs/requirements/REQUIREMENT-REGISTER.sdoc',
+    'docs/requirements/STRICTDOC-TRACEABILITY.sdoc',
+    'docs/requirements/codexia.sgra',
+    'docs/architecture/DOCUMENTATION-AUTHORITY.sdoc',
+    'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.sdoc',
+    'docs/architecture/SPECIFICATION-TOOLCHAIN.sdoc',
+    'docs/verification/TRACEABILITY-REGISTER.sdoc',
+    'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.sdoc',
     'scripts/strictdoc/verify.mjs',
     'scripts/strictdoc/strictdoc_config.py',
     'scripts/strictdoc/requirements.lock.txt',
   ]) {
     const selected = await plan([file]);
-    const requirementRegister = file === 'docs/requirements/REQUIREMENT-REGISTER.md';
+    const requirementRegister = file === 'docs/requirements/REQUIREMENT-REGISTER.sdoc';
     const uxAuthority = UX_PROJECTION_DOCUMENTS.includes(file);
     const architectureAuthority = file.startsWith('docs/architecture/');
-    const toolingAcceptance = file === 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md';
+    const toolingAcceptance = file === 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.sdoc';
     assert.deepEqual(selected.tasks, requirementRegister
       ? ['unit-root', 'db-contract', 'coverage', 'requirements-trace']
       : uxAuthority ? ['unit-root', 'coverage', 'requirements-trace']
@@ -401,8 +404,8 @@ test('changes to trace inputs select the existing trace task without dropping do
     ['modules/mcp/src/tools/project.ts', 'unit-mcp'],
     ['packages/persistence-postgres/migrations/0001-initial.sql', 'db-contract'],
     ['packages/persistence-postgres/tests/db-contract/catalog-contract.json', 'db-contract'],
-    ['docs/design/SCREEN-CONTROL-CATALOG.md', null],
-    ['docs/design/INTERACTION-CONTRACT.md', null],
+    ['docs/design/SCREEN-CONTROL-CATALOG.sdoc', null],
+    ['docs/design/INTERACTION-CONTRACT.sdoc', null],
     ['app/src/entries/desktop.tsx', 'unit-app'],
     ['deploy/ansible/deploy.yml', 'unit-root'],
     ['deploy/ansible/site.yml', 'unit-root'],
@@ -441,7 +444,7 @@ test('Full-model OCI selection follows the standalone workflow and the Verify ca
       `An admitted standalone model input cannot be dropped by the PR plan: ${changedPath}`);
   }
   assert.equal((await plan(['.github/workflows/verify.yml'])).full_model_oci, true, 'Verify caller changes require its model proof');
-  assert.equal((await plan(['docs/deployment/IAC.md'])).full_model_oci, false,
+  assert.equal((await plan(['docs/deployment/IAC.sdoc'])).full_model_oci, false,
     'Reviewed deployment documentation is not a real-model input');
   // Valid but unclassified inputs have no complete exclusion proof: PR admission fails closed.
   // The standalone main push path selector remains explicitly owned and independently tested.
@@ -566,7 +569,7 @@ test('test-only changes select their owner while non-executable documentation se
   assert.ok(selected.tasks.includes('unit-search'));
   assert.ok(selected.tasks.includes('test-types-modules'));
   assert.ok(!selected.tasks.includes('build-full'));
-  assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
+  assert.deepEqual((await plan(['docs/authoring.sdoc'])).tasks, ['coverage', 'requirements-trace']);
 });
 
 test('PostgreSQL contract fixture changes select the real database contract lane', async () => {
@@ -585,11 +588,11 @@ test('PostgreSQL contract fixture changes select the real database contract lane
 
 test('DB contract source authorities select DB proof while retaining trace and architecture owners', async () => {
   for (const file of [
-    'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md',
-    'docs/architecture/DATABASE-DETAIL-CONTRACT.md',
-    'docs/architecture/DATA-MODEL.md',
-    'docs/requirements/REQUIREMENT-REGISTER.md',
-    'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
+    'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.sdoc',
+    'docs/architecture/DATABASE-DETAIL-CONTRACT.sdoc',
+    'docs/architecture/DATA-MODEL.sdoc',
+    'docs/requirements/REQUIREMENT-REGISTER.sdoc',
+    'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.sdoc',
     'deploy/ansible/verify-postgres-roles.sql',
     'packages/api/src/auth-schema.ts',
     'packages/api/src/migrate-auth.ts',
@@ -599,8 +602,8 @@ test('DB contract source authorities select DB proof while retaining trace and a
     const selected = await plan([file]);
     assert.ok(selected.tasks.includes('db-contract'), file);
   }
-  assert.ok((await plan(['docs/requirements/REQUIREMENT-REGISTER.md'])).tasks.includes('requirements-trace'));
-  assert.ok((await plan(['docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md'])).tasks.includes('architecture-g5'));
+  assert.ok((await plan(['docs/requirements/REQUIREMENT-REGISTER.sdoc'])).tasks.includes('requirements-trace'));
+  assert.ok((await plan(['docs/architecture/POSTGRES-CONTRACT-VERIFICATION.sdoc'])).tasks.includes('architecture-g5'));
 });
 
 test('the canonical age backup script selects both DBV-007 and existing root backup verification', async () => {
@@ -618,18 +621,18 @@ test('existing PostgreSQL migration changes retain full verification', async () 
 test('architecture design documents select G5 in the existing Verify unit matrix', async () => {
   const { verificationPlanOutputs } = await import('./plan.mjs');
   const selected = await plan([
-    'docs/architecture/SYSTEM-DESIGN.md',
-    'docs/architecture/THREAT-MODEL.md',
-    'docs/verification/ARCHITECTURE-ATLAS.md',
+    'docs/architecture/SYSTEM-DESIGN.sdoc',
+    'docs/architecture/THREAT-MODEL.sdoc',
+    'docs/verification/ARCHITECTURE-ATLAS.sdoc',
   ]);
   assert.deepEqual(selected.tasks, ['coverage', 'architecture-g5', 'requirements-trace']);
   assert.deepEqual(selected.groups, ['unit-architecture', 'types-tests', 'types-trace']);
   const outputs = verificationPlanOutputs(selected);
   assert.deepEqual(JSON.parse(outputs.unit), ['architecture']);
   assert.deepEqual(JSON.parse(outputs.types), ['tests', 'trace']);
-  assert.deepEqual((await plan(['docs/architecture/API-AUTHN-AUTHZ.md'])).tasks, ['coverage', 'architecture-g5', 'requirements-trace']);
+  assert.deepEqual((await plan(['docs/architecture/API-AUTHN-AUTHZ.sdoc'])).tasks, ['coverage', 'architecture-g5', 'requirements-trace']);
   assert.deepEqual((await plan(['docs/security/authorization.md'])).tasks, ['coverage', 'architecture-g5']);
-  assert.deepEqual((await plan(['docs/deployment/IAC.md'])).tasks, ['unit-root', 'coverage', 'architecture-g5']);
+  assert.deepEqual((await plan(['docs/deployment/IAC.sdoc'])).tasks, ['unit-root', 'coverage', 'architecture-g5', 'requirements-trace']);
 
   for (const file of [
     'docs/architecture/likec4/model.likec4',
@@ -647,24 +650,24 @@ test('architecture design documents select G5 in the existing Verify unit matrix
 test('impact selection is independent of proof availability; unknown diffs still fail closed', async () => {
   const { createVerificationPlan, verificationPlanOutputs } = await import('./plan.mjs');
   const input = { event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) };
-  const affected = createVerificationPlan({ ...input, files: ['docs/authoring.md'] });
+  const affected = createVerificationPlan({ ...input, files: ['docs/authoring.sdoc'] });
   assert.equal(affected.mode, 'affected');
-  assert.deepEqual(affected.tasks, ['coverage']);
-  assert.equal(affected.excluded.length, VERIFICATION_TASKS.length - 1);
-  assert.deepEqual(JSON.parse(verificationPlanOutputs(affected).types), ['tests']);
+  assert.deepEqual(affected.tasks, ['coverage', 'requirements-trace']);
+  assert.equal(affected.excluded.length, VERIFICATION_TASKS.length - 2);
+  assert.deepEqual(JSON.parse(verificationPlanOutputs(affected).types), ['tests', 'trace']);
 
   const unknown = createVerificationPlan({ ...input, files: null });
   assert.equal(unknown.mode, 'full');
   assert.deepEqual(unknown.tasks, VERIFICATION_TASKS);
   assert.deepEqual(JSON.parse(verificationPlanOutputs(unknown).unit), ['core', 'api', 'db', 'modules', 'architecture']);
   assert.deepEqual(createVerificationPlan({ ...input, files: ['unknown.js'] }).tasks, NON_SWIFT_TASKS);
-  assert.equal(createVerificationPlan({ ...input, files: ['docs/authoring.md'], event: 'push' }).mode, 'full');
+  assert.equal(createVerificationPlan({ ...input, files: ['docs/authoring.sdoc'], event: 'push' }).mode, 'full');
 });
 
 test('certification rejects tampered PR base or changed-file inventory without historical proofs', async () => {
   const { createVerificationPlan, assertExactPrImpact } = await import('./plan.mjs');
   const input = { event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) };
-  const affected = createVerificationPlan({ ...input, files: ['docs/architecture/SYSTEM-DESIGN.md'] });
+  const affected = createVerificationPlan({ ...input, files: ['docs/architecture/SYSTEM-DESIGN.sdoc'] });
   assert.doesNotThrow(() => assertExactPrImpact(affected, input.base, affected.files));
   assert.throws(() => assertExactPrImpact(affected, 'c'.repeat(40), affected.files), /PR base/);
   assert.throws(() => assertExactPrImpact(affected, input.base, ['packages/api/src/server.ts']), /exact PR diff/);
@@ -723,21 +726,21 @@ test('known operational inputs retain root proof and trace evidence for register
     const expected = file === 'deploy/backup/backup.sh'
       ? ['unit-root', 'db-contract', 'coverage', 'requirements-trace']
       : file.startsWith('docs/deployment/')
-        ? ['unit-root', 'coverage', 'architecture-g5']
+        ? ['unit-root', 'coverage', 'architecture-g5', 'requirements-trace']
         : file.startsWith('edge/frontend/') && /\.[cm]?[jt]sx?$/u.test(file)
           ? ['unit-root', 'coverage', 'biome-ci']
           : ['unit-root','coverage'];
-    if ([
+    if (!expected.includes('requirements-trace') && [
       '.github/workflows/backend-deployment-handoff.yml', '.github/workflows/push-backup.yml',
       'deploy/ansible/deploy-transaction.yml', 'deploy/ansible/deploy.yml',
       'deploy/ansible/restore-drill.yml', 'deploy/backup/s3_transfer.py',
-      'docs/deployment/BACKUP.md', 'docs/deployment/README.md',
+      'docs/deployment/BACKUP.sdoc', 'docs/deployment/DEPLOYMENT-REFERENCE.sdoc',
     ].includes(file)) expected.push('requirements-trace');
     if (file.startsWith('deploy/ansible/') && /\.ya?ml$/u.test(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf') && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (isTraceTestSource(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (SWIFT_LINUX_RECIPES.includes(file)) expected.push('swift-linux');
-    if (file === 'deploy/production.json' || file === '.github/workflows/production-preflight.yml' ||
+    if (file === 'deploy/production.json' || file === '.github/workflows/production-preflight.yml' || file === 'docs/deployment/ACCESS-POLICY-MIGRATION.sdoc' ||
         /^deploy\/cloudflare\/[^/]+\.json$/u.test(file)) expected.push('codexiactl-linux');
     assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
@@ -769,8 +772,8 @@ test('operational proof remains owned by one exact-head root task and matching i
     assert.ok(!JSON.stringify(infra.jobs).includes('pnpm run '+command));
     assert.ok(!JSON.stringify(readWorkflow('frontend-release.yml').jobs).includes('pnpm run '+command));
   }
-  assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/README.md'));
-  assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/BACKUP.md'));
+  assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/DEPLOYMENT-REFERENCE.sdoc'));
+  assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/BACKUP.sdoc'));
   assert.ok(OPERATIONAL_ROOT_PATHS.includes('.github/workflows/tailscale-connectivity.yml'));
   const audit = readWorkflow('repository-audit.yml');
   assert.ok(!Object.hasOwn(audit.on,'workflow_run'));
@@ -836,12 +839,12 @@ test('CI contract-test changes select root, coverage, and trace for test sources
   }
 });
 
-test('root and coverage-only plans have a single owner for contract test execution', async () => {
+test('root, native document, and coverage-only plans have a single owner for contract test execution', async () => {
   const runner = readFileSync(new URL('../execution/group.mjs', import.meta.url),'utf8');
   const root = JSON.parse(readFileSync(new URL('../../../package.json',import.meta.url),'utf8'));
   assert.match(root.scripts['test:scripts'], /node --test 'scripts\/\*\*\/\*\.test\.mjs'/u);
   assert.match(runner, /if \(!plan\.tasks\.includes\('unit-root'\)\) await node\('--test', 'scripts\/ci\/impact\/contract\.test\.mjs'/u);
-  assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
+  assert.deepEqual((await plan(['docs/authoring.sdoc'])).tasks, ['coverage', 'requirements-trace']);
   assert.deepEqual((await plan(['deploy/ansible/host.yml'])).tasks, ['unit-root','coverage','requirements-trace']);
 });
 

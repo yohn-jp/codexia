@@ -1,0 +1,7 @@
+{
+  "name": "codexia-pages-search",
+  "private": true,
+  "dependencies": {
+    "pagefind": "1.6.0"
+  }
+}

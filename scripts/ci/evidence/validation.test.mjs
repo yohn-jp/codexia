@@ -94,7 +94,7 @@ test('certification maps profile-prefixed jobs to logical evidence names and acc
 
 test('Swift Linux evidence is required only for a selected task in the shared unit group', () => {
   for (const event of ['pull_request', 'push']) {
-    const source = ['docs/architecture/SYSTEM-DESIGN.md'];
+    const source = ['docs/architecture/SYSTEM-DESIGN.sdoc'];
     const unrelated = fixture(event, source);
     const architecture = unrelated.reports.find(report => report.group === 'unit-architecture');
     assert.deepEqual(architecture.results.map(result => result.task), event === 'push' ? ['architecture-g5', 'codexiactl-linux'] : ['architecture-g5']);

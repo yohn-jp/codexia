@@ -68,11 +68,11 @@ async function waitForDatabase(pool, label) {
 async function sourceIdentity() {
   const sourceSha = output('git', ['rev-parse', 'HEAD']);
   const paths = [
-    'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md',
-    'docs/architecture/DATABASE-DETAIL-CONTRACT.md',
-    'docs/architecture/DATA-MODEL.md',
-    'docs/requirements/REQUIREMENT-REGISTER.md',
-    'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
+    'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.sdoc',
+    'docs/architecture/DATABASE-DETAIL-CONTRACT.sdoc',
+    'docs/architecture/DATA-MODEL.sdoc',
+    'docs/requirements/REQUIREMENT-REGISTER.sdoc',
+    'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.sdoc',
     'deploy/ansible/verify-postgres-roles.sql',
     'deploy/backup/backup.sh',
     'packages/api/package.json',

@@ -64,6 +64,7 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
   const root = path.resolve(process.env.CODEXIA_PAGES_SITE ?? '');
   assert.ok(process.env.CODEXIA_PAGES_SITE, 'CODEXIA_PAGES_SITE is required');
   const registry = JSON.parse(await readFile(path.join(root, 'site-manifest.json'), 'utf8'));
+  assert.deepEqual(registry.designSearch, { version: '1.6.0', sourceSha: registry.sourceSha });
   assert.equal(registry.likec4?.sourceSha, registry.sourceSha);
   assert.equal(registry.likec4?.publication, 'public');
   assert.equal(registry.routes.find(item => item.route === '/requirements/html/')?.generationStatus, 'ready');
@@ -85,12 +86,30 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     await page.route('https://api.github.com/**', route => route.abort());
     const base = `http://127.0.0.1:${server.address().port}`;
     assert.equal((await page.goto(`${base}/`)).status(), 200);
+    const search = page.getByPlaceholder('設計文書を検索');
+    for (const [query, document] of [
+      ['資格情報', 'REQUIREMENT-REGISTER.sdoc.html'],
+      ['REQ-OPS-004', 'REQUIREMENT-REGISTER.sdoc.html'],
+      ['codexiactl', 'CODEXIACTL.sdoc.html'],
+    ]) {
+      await search.fill(query);
+      const result = page.locator(`#design-search .pagefind-ui__result-link[href$="/${document}"]`).first();
+      await result.waitFor({ state: 'visible' });
+      const target = await result.getAttribute('href');
+      assert.equal((await page.request.get(new URL(target, base).toString())).status(), 200);
+    }
+    await search.fill('資格情報');
+    await page.locator('#design-search .pagefind-ui__result-link[href$="/REQUIREMENT-REGISTER.sdoc.html"]').first().click();
+    await page.locator('[data-uid="REQ-OPS-004"]').waitFor({state:'attached'});
+    assert.equal((await page.goto(`${base}/requirements/html/requirements/REQUIREMENT-REGISTER.md-TRACE.html#REQ-CORE-001`)).status(), 200);
+    await page.waitForURL(/REQUIREMENT-REGISTER\.sdoc-TRACE\.html#REQ-CORE-001/u);
+    await page.goto(`${base}/`);
     const link = page.locator('a[href="requirements/html/"]').first();
     assert.equal(await link.count(), 1);
     await link.click();
     assert.match(page.url(), /\/requirements\/html\/$/u);
     await page.getByRole('link', { name: 'Development Portal', exact: true }).waitFor({ state: 'visible' });
-    assert.equal((await page.goto(`${base}/requirements/html/requirements/REQUIREMENT-REGISTER.md-TRACE.html`)).status(), 200);
+    assert.equal((await page.goto(`${base}/requirements/html/docs/requirements/REQUIREMENT-REGISTER.sdoc-TRACE.html`)).status(), 200);
     assert.match(await page.locator('body').innerText(), /REQ-CORE-001/u);
     assert.equal((await page.goto(`${base}/`)).status(), 200);
     const traceLink = page.locator('a[href="requirements/traceability/"]').first();

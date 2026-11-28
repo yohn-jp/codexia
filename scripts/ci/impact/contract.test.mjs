@@ -75,7 +75,7 @@ test('the CodexiaCTL binary is validated by Verify and independently released at
     assert.ok(plan.tasks.includes('codexiactl-linux'));
     assert.ok(plan.groups.includes('unit-architecture'));
   }
-  assert.ok(!createVerificationPlan({ files: ['docs/architecture/SYSTEM-DESIGN.md'], event: 'pull_request', sha, base }).tasks.includes('codexiactl-linux'));
+  assert.ok(!createVerificationPlan({ files: ['docs/architecture/SYSTEM-DESIGN.sdoc'], event: 'pull_request', sha, base }).tasks.includes('codexiactl-linux'));
   const verify = workflow.jobs.unit.steps.find(step => step.uses?.startsWith('actions/setup-go@'));
   assert.equal(verify.with['go-version-file'], 'cmd/codexiactl/go.mod');
   assert.match(verify.if, /codexiactl-linux/u);
@@ -183,10 +183,13 @@ test('the certified graph covers every declared obligation and admits trace-owne
   const traceSelected = "matrix.group == 'trace'";
   assert.equal(strictdocSetup.if, traceSelected);
   for (const [files, expected] of [
-    [['docs/verification/CI-CD.md'], true],
-    [['docs/design/DEVELOPMENT-PAGES-UX.md'], false],
+    [['docs/verification/CI-CD.sdoc'], true],
+    [['docs/design/DEVELOPMENT-PAGES-UX.sdoc'], true],
+    [['docs/requirements/codexia.sgra'], true],
+    [['docs/architecture/diagrams/screen-1.mmd'], true],
+    [['docs/design/screen-catalog.json'], true],
     [['packages/persistence-postgres/tests/db-contract/runner.test.mjs'], true],
-    [['docs/requirements/STRICTDOC-TRACEABILITY.md'], true],
+    [['docs/requirements/STRICTDOC-TRACEABILITY.sdoc'], true],
     [['scripts/strictdoc/verify.mjs'], true],
   ]) {
     assert.equal(createVerificationPlan({ files, event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) }).tasks.includes('requirements-trace'),

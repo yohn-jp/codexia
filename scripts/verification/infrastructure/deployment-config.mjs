@@ -26,11 +26,11 @@ const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terr
   read('deploy/quadlet/codexia-postgres.volume'),
   read('deploy/quadlet/codexia-tunnel.container'),
   read('Dockerfile.backend'),
-  read('docs/deployment/README.md'),
-  read('docs/deployment/PUSH-DEPLOYMENT.md'),
-  read('docs/deployment/IAC.md'),
-  read('deploy/ansible/README.md'),
-  read('docs/deployment/BACKUP.md'),
+  read('docs/deployment/DEPLOYMENT-REFERENCE.sdoc'),
+  read('docs/deployment/PUSH-DEPLOYMENT.sdoc'),
+  read('docs/deployment/IAC.sdoc'),
+  read('docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc'),
+  read('docs/deployment/BACKUP.sdoc'),
 ]);
 const [terraformProviderLock, terraformWorkflow, terraformExample] = await Promise.all([
   read('deploy/cloudflare/terraform/.terraform.lock.hcl'),
