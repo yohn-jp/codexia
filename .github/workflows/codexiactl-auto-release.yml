@@ -39,7 +39,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Publish or resume immutable v0.1.x for verified CLI changes
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
         with:
