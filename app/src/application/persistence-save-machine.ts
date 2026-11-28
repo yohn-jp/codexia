@@ -350,7 +350,7 @@ export function createPersistenceSaveMachine(services: PersistenceSaveMachineSer
               },
               unknown: {
                 on: {
-                  "SAVE.RETRY": { guard: "hasPendingOperation", target: "saving" },
+                  "SAVE.RETRY": { guard: "hasPendingOperation", target: "saving", actions: assign({ reconcileReplay: true }) },
                   "SAVE.MANUAL": { guard: "canSaveCurrentGeneration", target: "saving", actions: "setManualOperation" },
                   "DRAFT.CHANGED": { actions: "acceptDraftChange" },
                   "RECOVERY.READY": [

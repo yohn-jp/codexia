@@ -378,41 +378,50 @@ test("[TEST-API-002-001] a committed save with a lost response is reconciled aft
   expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
 });
 
-test("replaying a saved operation after a newer remote revision shows the current head", async ({ page, authorizeAuthor }) => {
-  const f = await fixture(page, authorizeAuthor);
-  const submitted = "B committed before its response was lost.";
-  const remote = "Remote D became the current head.";
-  const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
-  let resolveLost!: () => void;
-  const lost = new Promise<void>((resolve) => { resolveLost = resolve; });
-  await page.route(`**${documentPath(f)}`, async (route) => {
-    if (route.request().method() !== "PATCH") return route.continue();
-    requests.push({ idempotencyKey: route.request().headers()["idempotency-key"], clientId: route.request().headers()["x-client-id"], body: route.request().postData() });
-    if (requests.length === 1) {
-      const committed = await route.fetch();
-      expect(committed.ok()).toBe(true);
-      await route.abort();
-      resolveLost();
-      return;
-    }
-    const replay = await route.fetch();
-    expect(replay.ok()).toBe(true);
-    expect((await replay.json() as Read).revision.markdown).toBe(submitted);
-    await route.fulfill({ response: replay });
-  });
+for (const recovery of ["reload", "same-tab retry"] as const) {
+  test(`replaying a saved operation after a newer remote revision shows the current head (${recovery})`, async ({ page, authorizeAuthor }) => {
+    const f = await fixture(page, authorizeAuthor);
+    const submitted = "B committed before its response was lost.";
+    const remote = "Remote D became the current head.";
+    const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
+    let resolveLost!: () => void;
+    const lost = new Promise<void>((resolve) => { resolveLost = resolve; });
+    await page.route(`**${documentPath(f)}`, async (route) => {
+      if (route.request().method() !== "PATCH") return route.continue();
+      requests.push({ idempotencyKey: route.request().headers()["idempotency-key"], clientId: route.request().headers()["x-client-id"], body: route.request().postData() });
+      if (requests.length === 1) {
+        const committed = await route.fetch();
+        expect(committed.ok()).toBe(true);
+        await route.abort();
+        resolveLost();
+        return;
+      }
+      const replay = await route.fetch();
+      expect(replay.ok()).toBe(true);
+      expect((await replay.json() as Read).revision.markdown).toBe(submitted);
+      await route.fulfill({ response: replay });
+    });
 
-  await replaceEditor(page, submitted);
-  await lost;
-  await replace(f, remote);
-  await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true });
-  await expectEditor(page, remote);
-  await expectServerSaved(page);
-  expect(requests).toHaveLength(2);
-  expect(requests[1]).toEqual(requests[0]);
-  const latest = await read(f);
-  expect(latest.revision.markdown).toBe(remote);
-  expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
-});
+    await replaceEditor(page, submitted);
+    await lost;
+    const retry = page.getByRole("button", { name: "保存結果を確認して再試行", exact: true });
+    await expect(retry).toBeEnabled();
+    await replace(f, remote);
+    if (recovery === "reload") {
+      await page.reload();
+      await authorizeAuthor("desktop", page, { continueCurrentPage: true });
+    } else {
+      await retry.click();
+    }
+    await expectEditor(page, remote);
+    await expectServerSaved(page);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toEqual(requests[0]);
+    const latest = await read(f);
+    expect(latest.revision.markdown).toBe(remote);
+    expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
+  });
+}
 
 test("[TEST-UI-002-001] [TEST-UI-006-002] a lost save response survives newer input, reloads, and rebases the newer draft after acknowledgement", async ({ page, authorizeAuthor }) => {
   const f = await fixture(page, authorizeAuthor);

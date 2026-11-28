@@ -111,6 +111,27 @@ test("an unknown response retries the same operation and waits for its receipt",
   actor.stop();
 });
 
+test("retrying a save started in the same tab checks the current revision after its receipt", async () => {
+  const attempts: Array<Pick<Parameters<PersistenceSaveMachineServices["saveOperation"]>[0], "operationId" | "generation" | "reconcileReplay">> = [];
+  const { actor } = harness({
+    async saveOperation({ operationId, generation, reconcileReplay }) {
+      attempts.push({ operationId, generation, reconcileReplay });
+      if (attempts.length === 1) throw new Error("response lost");
+      return { kind: "confirmed", operationId, generation, receiptId: "revision-2" };
+    },
+  });
+  actor.send({ type: "DRAFT.PROTECTED", identity, generation: 1, dirty: true });
+  actor.send({ type: "SAVE.MANUAL", identity, operationId: "save-op-1", generation: 1 });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "unknown" } }), { timeout: 1_000 });
+  actor.send({ type: "SAVE.RETRY" });
+  await waitFor(actor, (snapshot) => snapshot.matches({ active: { server: "confirmed" } }), { timeout: 1_000 });
+  assert.deepEqual(attempts, [
+    { operationId: "save-op-1", generation: 1, reconcileReplay: false },
+    { operationId: "save-op-1", generation: 1, reconcileReplay: true },
+  ]);
+  actor.stop();
+});
+
 test("a 412 precondition response remains a conflict instead of becoming an unknown result", async () => {
   const conflict = Object.assign(new Error("precondition failed"), { status: 412 });
   const { actor } = harness({ async saveOperation() { throw conflict; } });
