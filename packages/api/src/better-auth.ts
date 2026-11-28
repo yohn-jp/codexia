@@ -31,6 +31,7 @@ export { CODEXIA_OWNER_SCOPE };
 
 export const CODEXIA_MCP_SCOPES = MCP_OAUTH_SCOPES;
 export const OIDC_PROVIDER_ID = 'workspace-oidc';
+export const CODEXIA_IOS_REDIRECT_URI = 'jp.yohn.codexia:/oauth2redirect';
 
 export interface BetterAuthRuntimeConfig {
   readonly databaseUrl: string;
@@ -181,6 +182,8 @@ export interface BetterAuthClientRegistrationConfig {
   readonly ownerClientIds: readonly string[];
   readonly mcpClientIds?: readonly string[];
   readonly introspectionClientId: string;
+  /** An exact callback allowlist for clients whose bootstrap contract is known. */
+  readonly expectedRedirectUris?: Readonly<Record<string, readonly string[]>>;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -223,6 +226,17 @@ export async function assertBetterAuthClientRegistrations(
     throw new Error('Better Auth owner, MCP, and introspection client registrations must be disjoint');
   }
 
+  const assertRegisteredRedirects = (clientId: string, client: Record<string, unknown>): void => {
+    const expected = config.expectedRedirectUris?.[clientId];
+    if (!expected) return;
+    const actual = stringList(client.redirectUris);
+    if (expected.length === 0 || new Set(expected).size !== expected.length ||
+        actual.length !== expected.length || new Set(actual).size !== actual.length ||
+        !expected.every(uri => actual.includes(uri))) {
+      throw new Error(`Registered Better Auth client ${clientId} has unexpected OAuth redirect URIs`);
+    }
+  };
+
   const assertLinkedToAudience = async (clientId: string): Promise<void> => {
     const resources = await registry.getClientResources(clientId);
     if (!resources.some(resource => asRecord(resource)?.resourceId === config.audience)) {
@@ -250,6 +264,7 @@ export async function assertBetterAuthClientRegistrations(
     if (scopes.some(scope => !(allowedScopes as readonly string[]).includes(scope))) {
       throw new Error(`Registered Better Auth ${kind} client has an unsupported scope: ${clientId}`);
     }
+    assertRegisteredRedirects(clientId, client);
     await assertLinkedToAudience(clientId);
   };
 
@@ -278,6 +293,7 @@ export async function assertBetterAuthClientRegistrations(
       `Better Auth introspection ID must identify an enabled confidential registered client: ${config.introspectionClientId}`,
     );
   }
+  assertRegisteredRedirects(config.introspectionClientId, introspectionClient);
   await assertLinkedToAudience(config.introspectionClientId);
 }
 
@@ -860,7 +876,10 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
         refreshGrantsRevoked,
       };
     },
-    async assertRegisteredClients(ownerSubject = config.ownerSubject ?? ''): Promise<void> {
+    async assertRegisteredClients(
+      ownerSubject = config.ownerSubject ?? '',
+      expectedRedirectUris?: Readonly<Record<string, readonly string[]>>,
+    ): Promise<void> {
       const context = await auth.$context;
       await assertBetterAuthClientRegistrations(
         {
@@ -869,6 +888,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
           ownerClientIds: config.ownerClientIds,
           mcpClientIds,
           introspectionClientId: config.oauthIntrospectionClientId,
+          expectedRedirectUris,
         },
         {
           async getOwner(ownerSubject) {

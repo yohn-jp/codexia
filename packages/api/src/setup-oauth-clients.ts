@@ -1,7 +1,5 @@
 import type { AsyncLocalStorage } from "node:async_hooks";
-import { CODEXIA_OWNER_SCOPE, type createBetterAuthRuntime } from "./better-auth.js";
-
-const IOS_REDIRECT_URI = "jp.yohn.codexia:/oauth2redirect";
+import { CODEXIA_OWNER_SCOPE, CODEXIA_IOS_REDIRECT_URI, type createBetterAuthRuntime } from "./better-auth.js";
 
 interface RegisteredClient {
   readonly userId: string;
@@ -66,7 +64,7 @@ export async function provisionSetupOAuthClients(
   // The existing disposable HTTP loopback fixture uses the provider's native loopback allowance.
   const webType = disposableLoopback ? "native" : "web";
   await ensureClient(webClientId, "Codexia Web", webRedirectUris, webType);
-  await ensureClient(iosClientId, "Codexia iOS", [IOS_REDIRECT_URI], "native");
+  await ensureClient(iosClientId, "Codexia iOS", [CODEXIA_IOS_REDIRECT_URI], "native");
   await ensureClient(introspectionClientId, "Codexia API introspection", [audience.origin + "/oauth/introspection"], webType, true);
   await runtime.assertRegisteredClients(ownerSubject);
   // Verify the stored secret through Better Auth's own authenticated client boundary.

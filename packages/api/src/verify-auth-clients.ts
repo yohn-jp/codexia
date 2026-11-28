@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { createBetterAuthRuntime } from "./better-auth.js";
+import { CODEXIA_IOS_REDIRECT_URI, createBetterAuthRuntime } from "./better-auth.js";
 import { assertAuthMigrationDatabaseIdentity, readBetterAuthMigrationConfig } from "./migrate-auth.js";
 import { fileURLToPath } from "node:url";
 import { installedSetupOwner } from "./owner-setup-store.js";
@@ -12,7 +12,16 @@ export async function verifyBetterAuthClientRegistrations(): Promise<void> {
     await assertAuthMigrationDatabaseIdentity(runtime.pool);
     await verifyAuthSchema(runtime.pool);
     await installedSetupOwner(runtime.pool, config.ownerSubject);
-    await runtime.assertRegisteredClients();
+    const [webClientId, iosClientId] = config.ownerClientIds;
+    if (!webClientId || !iosClientId || config.ownerClientIds.length !== 2) {
+      throw new Error("The reviewed owner client pair is missing");
+    }
+    const redirects = {
+      [webClientId]: [new URL("/desktop", config.publicOrigin).href],
+      [iosClientId]: [CODEXIA_IOS_REDIRECT_URI],
+      [config.oauthIntrospectionClientId]: [new URL("/oauth/introspection", runtime.audience).href],
+    };
+    await runtime.assertRegisteredClients(config.ownerSubject, redirects);
     await runtime.verifyIntrospectionCredentials();
     process.stdout.write("Better Auth schema, public clients and introspection client verified.\n");
   } finally {
