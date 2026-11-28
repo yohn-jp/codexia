@@ -253,7 +253,7 @@ YAML
     return 1
   fi
   require_approval_rejection auth-first-install-unapproved \
-    'Require explicit disposable approvals for pristine database initialization'
+    'Refuse implicit first activation without explicit verified schema approval'
   [[ "$(observe_auth_database)" == "$database_before" ]]
   require_inactive_api
   local orphan_record="$fixture_home/.local/state/codexia-deploy/deployed-release.json"
