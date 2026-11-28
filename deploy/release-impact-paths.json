@@ -38,7 +38,6 @@
     "packages/persistence-postgres/src/**/tests/**",
     "packages/persistence-contracts/src/**",
     "deploy/cloudflare/**",
-    "deploy/cloudflare/terraform/.terraform.lock.hcl",
     "deploy/frontend-compatibility.json",
     "deploy/production.json",
     "scripts/deployment/bootstrap/public-env.mjs",
