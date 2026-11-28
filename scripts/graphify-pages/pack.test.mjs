@@ -117,7 +117,7 @@ test('validates a same-SHA Graphify candidate inventory and publishes measured c
   await writeFile(join(source, 'graph.html'), '<html><body>' + 'Graphify native '.repeat(30) + '</body></html>');
   await writeFile(join(source, 'graph.json'), JSON.stringify({ ...graph, built_at_commit: sha }));
   const candidates = {
-    schemaVersion: 1, sourceSha: sha, generator: 'graphify.detect', generatorVersion: '0.9.120',
+    schemaVersion: 1, sourceSha: sha, generator: 'graphify.detect', generatorVersion: '0.9.121',
     codeOnly: true, excludes: [...EXCLUSION_PATTERNS], files: [...trackedFiles],
   };
   const candidateFile = join(root, 'candidates.json');

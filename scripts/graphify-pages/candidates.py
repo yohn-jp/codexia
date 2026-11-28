@@ -53,13 +53,13 @@ def collect_candidates(root: Path, excludes: list[str], cache_root: Path) -> dic
     try:
         from graphify.detect import detect
     except ImportError as exc:
-        raise RuntimeError("Graphify 0.9.120 must be installed before candidate collection") from exc
+        raise RuntimeError("Graphify 0.9.121 must be installed before candidate collection") from exc
     try:
         installed_version = version("graphifyy")
     except PackageNotFoundError as exc:
         raise RuntimeError("Graphify package metadata is unavailable") from exc
-    if installed_version != "0.9.120":
-        raise RuntimeError(f"expected graphifyy 0.9.120, found {installed_version}")
+    if installed_version != "0.9.121":
+        raise RuntimeError(f"expected graphifyy 0.9.121, found {installed_version}")
 
     root = root.resolve()
     cache_root.mkdir(parents=True, exist_ok=True)
