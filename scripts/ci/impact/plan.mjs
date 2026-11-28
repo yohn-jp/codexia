@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BROWSER_SHARDS, CONFORMANCE_TASKS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES, isOpenApiGenerationInput, isFastifyGenerationInput } from './contract.mjs';
+import { createWorkspaceGraph } from './workspace-graph.mjs';
 import { CODEXIACTL_SPECIFICATIONS, ROOT_VERIFICATION_DOCUMENTS, UX_PROJECTION_DOCUMENTS, isDesignProjectionModel, isNonExecutableDocumentation, isRequirementsTraceInput, taskGroup, taskWorkflowJob } from '../evidence/task-inputs.mjs';
 
 export const FULL_MODEL_OCI_PATHS = Object.freeze([
@@ -296,6 +297,13 @@ const DB_CONTRACT_SOURCE_PATHS = new Set([
   'packages/persistence-postgres/src/migration-set.ts',
 ]);
 
+let workspaceGraph;
+function currentWorkspaceGraph() {
+  workspaceGraph ??= createWorkspaceGraph(new Map(WORKSPACES.map(workspace => [workspace.id,
+    JSON.parse(readFileSync(new URL('../../../' + workspace.path + '/package.json', import.meta.url), 'utf8'))])));
+  return workspaceGraph;
+}
+
 export function createVerificationPlan({ files, event, sha, base = null }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '') || (base !== null && !/^[a-f0-9]{40}$/.test(base))) throw new Error('Invalid verification source identity');
   const selected = new Set(['coverage']);
@@ -306,7 +314,18 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   const swiftLinux = !Array.isArray(files) || files.some(file => !isChangedPath(file) || isSwiftLinuxInput(file));
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
+  let graph;
+  if (event === 'pull_request' && Array.isArray(files)) {
+    try { graph = currentWorkspaceGraph(); }
+    catch { full = true; }
+  }
   for (const file of files ?? []) {
+    // Use declared transitive workspace consumers in addition to the existing
+    // cross-boundary obligations; an unresolvable graph never narrows checks.
+    if (graph && typeof file === 'string' && graph.owner(file) && !/\.(?:test|spec)\.tsx?$/u.test(file)) {
+      try { add(...graph.affectedTypechecks(file)); }
+      catch { full = true; }
+    }
     // Fail closed on changed JS/TS sources.
     if (file === 'biome.json' ||
         (/^(?:app|packages|modules|edge\/frontend)\//u.test(file) && /\.(?:[cm]?js|jsx|[cm]?ts|tsx)$/u.test(file))) add('biome-ci');

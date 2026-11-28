@@ -5,22 +5,21 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discoverWorkspacePaths, trackedHttpOutputs } from '../evidence/coverage-inputs.mjs';
 import { runDependencyBuilds } from './parallel.mjs';
+import { createWorkspaceGraph } from '../impact/workspace-graph.mjs';
 import { CONFORMANCE_TASKS, TEST_TYPECHECK_SCOPES, TYPECHECK_TARGETS, UNIT_TARGETS, WORKSPACES } from '../impact/contract.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const generatedDirectoryNames = new Set(['.git', '.next', '.turbo', 'build', 'coverage', 'dist', 'node_modules', 'out', 'target']);
 const workspaceById = new Map(WORKSPACES.map((workspace) => [workspace.id, workspace]));
-const workspaceByName = new Map();
 const rootManifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const packageManifests = new Map();
 
 for (const workspace of WORKSPACES) {
   const manifestPath = path.join(root, workspace.path, 'package.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  if (!manifest.name || workspaceByName.has(manifest.name)) throw new Error(`Workspace package name is missing or duplicated at ${workspace.path}`);
-  workspaceByName.set(manifest.name, workspace.id);
   packageManifests.set(workspace.id, manifest);
 }
+const { dependenciesOf, buildDependencies } = createWorkspaceGraph(packageManifests);
 
 function fail(message) {
   throw new Error(message);
@@ -34,53 +33,6 @@ function run(command, args, cwd = root) {
     if (result.signal) throw new Error(`${command} was terminated by ${result.signal}`);
     throw new Error(`${command} exited with status ${result.status}`);
   }
-}
-
-function dependenciesOf(id) {
-  const manifest = packageManifests.get(id);
-  const dependencies = new Set();
-  for (const section of ['dependencies', 'optionalDependencies', 'devDependencies', 'peerDependencies']) {
-    for (const name of Object.keys(manifest[section] ?? {})) {
-      const dependencyId = workspaceByName.get(name);
-      if (dependencyId) dependencies.add(dependencyId);
-    }
-  }
-  return [...dependencies];
-}
-
-function buildDependencies(ids) {
-  const required = new Set();
-  const scanned = new Set();
-  const activeScan = new Set();
-  function collect(id) {
-    if (activeScan.has(id)) throw new Error(`Workspace build dependency cycle includes ${id}`);
-    if (scanned.has(id)) return;
-    activeScan.add(id);
-    for (const dependencyId of dependenciesOf(id)) {
-      required.add(dependencyId);
-      collect(dependencyId);
-    }
-    activeScan.delete(id);
-    scanned.add(id);
-  }
-  for (const id of ids) collect(id);
-
-  const ordered = [];
-  const built = new Set();
-  const activeBuild = new Set();
-  function order(id) {
-    if (built.has(id)) return;
-    if (activeBuild.has(id)) throw new Error(`Workspace build dependency cycle includes ${id}`);
-    activeBuild.add(id);
-    for (const dependencyId of dependenciesOf(id)) {
-      if (required.has(dependencyId)) order(dependencyId);
-    }
-    activeBuild.delete(id);
-    built.add(id);
-    ordered.push(id);
-  }
-  for (const id of required) order(id);
-  return ordered;
 }
 
 function runWorkspaceScript(targets, script) {

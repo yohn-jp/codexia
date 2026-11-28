@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { CONFORMANCE_TASKS, VERIFICATION_GROUPS, requiredBuildProfile, isFastifyGenerationInput, isOpenApiGenerationInput } from '../impact/contract.mjs';
+import { CONFORMANCE_TASKS, VERIFICATION_GROUPS, WORKSPACES, requiredBuildProfile, isFastifyGenerationInput, isOpenApiGenerationInput } from '../impact/contract.mjs';
+import { createWorkspaceGraph } from '../impact/workspace-graph.mjs';
 import { browserRuntimeRequirements } from '../browser/image-digests.mjs';
 import { THREAGILE_IMAGE } from '../../architecture/constants.mjs';
 import { isTraceTestSource } from '../../strictdoc/test-source-path.mjs';
@@ -279,12 +280,34 @@ export function captureTaskInputSource({ root, sha, runtime }) {
   assert.ok(manifest?.mode === '100644' || manifest?.mode === '100755', 'Task proof requires a regular root package.json');
   const { packageManager } = JSON.parse(readGit(root, 'cat-file', 'blob', manifest.oid));
   const entries = rows => rows.map(({ mode, file, oid }) => [mode, file, oid]);
+  // Resolve manifests from the requested immutable tree, not the worktree.
+  // Unknown graphs retain the conservative whole-source closure.
+  let graph;
+  try {
+    const manifestByPath = new Map(tree.map(entry => [entry.file, entry]));
+    graph = createWorkspaceGraph(new Map(WORKSPACES.map(workspace => {
+      const entry = manifestByPath.get(workspace.path + '/package.json');
+      assert.ok(entry?.mode === '100644' || entry?.mode === '100755');
+      return [workspace.id, JSON.parse(readGit(root, 'cat-file', 'blob', entry.oid))];
+    })));
+  } catch { graph = undefined; }
   const toolchain = sha256({ nodeVersion: runtime.nodeVersion, platform: runtime.platform, arch: runtime.arch,
     imageOS: runtime.imageOS ?? null, imageVersion: runtime.imageVersion ?? null, packageManager: packageManager ?? null });
 
   return (task, invocations = taskInvocation(task, runtime.execPath)) => {
     const group = taskGroup(task);
     const executable = tree.filter(({ file }) => isTaskInputDocument(file, task));
+    // Record the resolved workspace input closure using the exact same graph
+    // as execution and impact. Keep the conservative source fingerprint for
+    // now: scripts and raw cross-package imports may have undeclared inputs.
+    let workspaceInputs = null;
+    try {
+      const ids = graph?.typecheckClosure(task);
+      if (ids) {
+        const owners = new Set(ids);
+        workspaceInputs = { ids, inputs: entries(executable.filter(({ file }) => owners.has(graph.owner(file)))) };
+      }
+    } catch { workspaceInputs = null; }
     const source = sha256(entries(executable));
     const swift = task === 'swift-linux';
     const swiftToolchain = swift ? JSON.parse(readGit(root, 'show', sha + ':' + SWIFT_LINUX_TOOLCHAIN_PATH)) : null;
@@ -307,7 +330,7 @@ export function captureTaskInputSource({ root, sha, runtime }) {
       toolchain: swiftToolchain ? sha256({ toolchain, swift: swiftToolchain }) : goVersion ? sha256({ toolchain, go: goVersion }) : toolchain,
       recipe: sha256({ task, group, workflowJob: taskWorkflowJob(task), invocation: canonicalInvocations,
         groupPreparation: 'scripts/ci/execution/workspace.mjs prepare selected-group', concurrencyLimit: 2 }),
-      producers: sha256(taskProducerRecipe(task, swiftToolchain, goVersion)),
+      producers: sha256({ ...taskProducerRecipe(task, swiftToolchain, goVersion), ...(workspaceInputs ? { workspaceInputs } : {}) }),
     };
   };
 }
