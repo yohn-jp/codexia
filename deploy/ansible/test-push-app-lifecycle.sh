@@ -236,6 +236,44 @@ fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 TIMING
   return "$status"
 }
+
+# Disposable-host only. The guard-only measurement is NOT a recovery proof;
+# the canonical Ansible recovery remains mandatory.
+benchmark_no_intent_recovery() {
+  local kind mode round started elapsed output
+  local dir="$fixture_home/.local/state/codexia-deploy"
+  local unit_dir="$fixture_home/.config/containers/systemd"
+  [[ ! -e "$dir/deploy-transaction.json" && ! -L "$dir/deploy-transaction.json" &&
+     ! -e "$dir/backup-transaction" && ! -L "$dir/backup-transaction" ]] || return 1
+  for kind in deployment backup; do
+    round=0
+    for mode in recover guard guard recover; do
+      round=$((round + 1))
+      started=$(monotonic_ms)
+      if [[ "$mode" == guard ]]; then
+        if [[ "$kind" == deployment ]]; then
+          rootless test ! -e "$dir/deploy-transaction.json" || return 1
+          rootless test ! -L "$dir/deploy-transaction.json" || return 1
+        else
+          rootless test ! -e "$dir/backup-transaction" || return 1
+          rootless test ! -L "$dir/backup-transaction" || return 1
+        fi
+      elif [[ "$kind" == deployment ]]; then
+        output=$(rootless env CODEXIA_PUSH_STATE_DIR="$dir" CODEXIA_PUSH_QUADLET_DIR="$unit_dir" \
+          /bin/bash -s < "$repo_root/deploy/ansible/push-deployment-recover.sh") || return 1
+        [[ -z "$output" ]] || return 1
+      else
+        output=$(rootless /bin/bash -s -- recover < "$repo_root/deploy/backup/backup-runner.sh") || return 1
+        [[ -z "$output" ]] || return 1
+      fi
+      elapsed=$(( $(monotonic_ms) - started ))
+      printf 'LIFECYCLE_RECOVERY_AB kind=%s mode=%s iteration=%d duration_ms=%d\n' \
+        "$kind" "$mode" "$round" "$elapsed" |
+        tee -a "$RUNNER_TEMP/codexia-push-app-lifecycle/recovery-guard-bounded.log"
+    done
+  done
+}
+
 observe_runtime() {
   local key=$1 role=$2
   local container_id image_id api_health api_unit quadlet_sha release_sha pg_volume pg_mount pg_created data_volume data_mount data_created history_volume history_mount history_created db_container db_image api_count sentinel
@@ -769,6 +807,7 @@ for stage in deploy-repair-link deploy-same-digest; do
 done
 
 observe_runtime same-digest-reapply "$initial_key"
+benchmark_no_intent_recovery
 set_state same_digest_reapply PASS 'same immutable digest remained healthy with stable Quadlet and release record'
 
 seed_database_sentinel

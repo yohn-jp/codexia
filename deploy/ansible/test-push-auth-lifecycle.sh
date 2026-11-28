@@ -306,6 +306,7 @@ YAML
   grep -Fq 'Verified already active image ' "$tmp/auth-same-digest.log"
   [[ "$(release_checksums)" == "$prior" && "$(observe_auth "$primary_image")" == "$proof" ]]
   observe_runtime better-auth-same-digest auth-primary
+  benchmark_no_intent_recovery
   record_auth better-auth-same-digest "$primary_image" "$proof"
   set_state better_auth_same_digest PASS 'same release, settings, signing keys, auth schema and owner session'
 
