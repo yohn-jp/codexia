@@ -36,7 +36,9 @@ Keep each probe app's ID and AUD and the author-only parent.
 Check that the exact-path Tunnel rules from `identity-probes.json` precede the catch-all and accept only each probe's AUD and the author AUD.
 Check that the product Service Auth policy matches its exact repository and purpose tag and that the separate management app accepts only the two SSH tags for the selected repository.
 Run the protected production preflight before changing an existing deployment and repeat it after the change.
-Stop on an unresolved policy attachment or unexpected app replacement. Keep existing valid credentials until the replacement passes its intended access check.
+For a VM that still uses the retired management path, establish an independently authorized way to close and verify publication before applying Cloudflare changes.
+Preserve existing application and Tunnel IDs, audiences and valid credentials when the probe application still uses a shared policy selected by an explicit token ID, the protected host variables still identify the former management host, or public OAuth/MCP is already enabled.
+These states require a rehearsed, owner-approved transition with the existing independent SSH connection and rollback evidence. Stop if the CLI cannot verify that transition. Keep each existing credential until the replacement passes its intended access check.
 
 After an interrupted issuance or registration, retain the CLI checkpoint and repeat observation in the same trusted VM session and exclusive Settings window.
 Compare the recorded repository, account, Environment and purpose against the Cloudflare inventory and the protected GitHub settings before retrying.

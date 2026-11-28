@@ -63,7 +63,7 @@ The read-only inspection can report that the selected CLI version could not comp
 For an authorized deployment, use the credential and resource approvals within `init` to complete that observation and review the exact changes.
 Resolve other target and permission conflicts before continuing.
 After interruption, retain the checkpoint and resume `init` from the same VM and administrator account after reconciling any pending operation reported by the CLI.
-Follow the [LINK: DOC-DEPLOYMENT-ACCESS-POLICY-MIGRATION, Access policy migration] for interrupted provider credential issuance.
+Follow the [LINK: DOC-DEPLOYMENT-CODEXIACTL-43-cloudflare管理認証配備用資格製品-access-を分離, Cloudflare provisioning and recovery contract] for interrupted provider credential issuance.
 
 After the CLI confirms the normal frontend and the registration-only API and hands off the Owner Setup Grant, the owner opens the normal `/console/setup` page. Use the existing protected procedures below after owner registration.
 

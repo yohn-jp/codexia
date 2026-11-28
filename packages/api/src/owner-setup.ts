@@ -43,7 +43,11 @@ export function readOwnerSetupConfig() {
   if (publicationPeers.some(address => !isIPv4(address)) || new Set(publicationPeers).size !== publicationPeers.length) {
     throw new Error('Setup requires distinct IPv4 publication proxy peers');
   }
-  return { config: readBetterAuthMigrationConfig(false), redirects: redirects?.split(',').map(value => value.trim()) ?? [], publicationPeers };
+  return {
+    config: readBetterAuthMigrationConfig(false),
+    redirects: redirects?.split(',').map(value => value.trim()) ?? [],
+    publicationPeers,
+  };
 }
 
 function scopedKey(secret: string, purpose: string): Buffer {
@@ -304,9 +308,7 @@ export function createOwnerSetupApp(
       const transportSecure =
         httpFixture ||
         request.protocol === 'https' ||
-        (request.headers['x-forwarded-proto'] === 'https' &&
-          peerAddress !== undefined &&
-          trustedPublicationPeers.includes(peerAddress));
+        (request.headers['x-forwarded-proto'] === 'https' && peerAddress !== undefined && trustedPublicationPeers.includes(peerAddress));
       if (
         !transportSecure ||
         request.headers.host !== origin.host ||

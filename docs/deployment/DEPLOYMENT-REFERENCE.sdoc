@@ -106,7 +106,7 @@ STATEMENT: >>>
 From the existing trusted SSH session on the target VM, run `codexiactl doctor` or `codexiactl init --plan` and confirm the repository and the public and management hostnames from the certified `deploy/production.json`.
 Use `codexiactl init` to review and approve changes to Codexia's DNS records, Tunnel ingress, Access applications and dedicated policies, empty frontend Worker and routes.
 The CLI uses the official cf Device Flow and registers the applicable credentials in the protected Environments.
-Follow the [LINK: DOC-DEPLOYMENT-ACCESS-POLICY-MIGRATION, Access policy migration] to adopt existing edge resources and handle incomplete inventory or interrupted credential issuance.
+Follow the [LINK: DOC-DEPLOYMENT-CODEXIACTL-43-cloudflare管理認証配備用資格製品-access-を分離, Cloudflare provisioning and recovery contract] to adopt existing edge resources and handle incomplete inventory or interrupted credential issuance.
 
 The account owner manages the shared Access and identity provider rules.
 The zone owner handles any WAF exception for the exact HTTPS identity GET paths.
