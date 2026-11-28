@@ -345,3 +345,60 @@
     *,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}
   }
 }
+
+@layer components {
+  /* The product illustration is an explicitly fictional editorial crop, not
+     a claim to be a screenshot from the running authenticated application. */
+  .skip { left:-10000px;top:10px;transform:none }
+  .skip:focus { left:10px }
+  .hero { grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:clamp(26px,3.4vw,56px);align-items:center;min-height:600px;padding-block:75px 80px }
+  .hero h1 { font-size:clamp(43px,4.6vw,68px);line-height:1.5;letter-spacing:-.05em }
+  .hero-preview { position:relative;align-self:center;width:100%;padding:15px;background:#162f26;color:#edf4e7;border-radius:7px;box-shadow:0 30px 80px #18352b26 }
+  .preview-top,.preview-bottom {display:flex;justify-content:space-between;gap:10px;align-items:center;padding:1px 5px 15px;font:9px/1.5 var(--mono);letter-spacing:.06em;color:#c0d6c4}
+  .preview-top i {display:inline-block;width:5px;height:5px;border-radius:50%;background:#83be9d;margin-right:7px}
+  .preview-bottom {padding:14px 5px 0}
+  .preview-window {position:relative;background:#fffdfa;color:#273d31;border-radius:3px;overflow:visible}
+  .preview-toolbar {height:38px;display:flex;align-items:center;gap:8px;padding:0 15px;background:#eff2ec;font:11px var(--sans);border-bottom:1px solid #d9dfd5}
+  .preview-toolbar strong {display:inline-grid;place-items:center;width:21px;height:21px;background:#173a2b;color:white;font:bold 12px Georgia,serif;margin-right:3px}
+  .preview-toolbar span {color:#879d88}
+  .preview-toolbar b {margin-left:auto;color:#ab6b4c}
+  .preview-layout {display:grid;grid-template-columns:142px 1fr;min-height:265px;overflow:hidden}
+  .preview-outline {position:relative;background:#ecf1e9;border-right:1px solid #dae4d7;padding:17px 12px;font:10px/1.65 var(--sans);color:#536e5b}
+  .preview-outline small {display:block;margin-bottom:18px;font:9px var(--mono);letter-spacing:.06em;color:#758d76}
+  .preview-outline p {padding:9px 7px;border-bottom:1px solid #e0e8de;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .preview-outline .preview-selected {background:#dce8d9;color:#285239;font-weight:700;border-radius:2px}
+  .preview-outline>div {position:absolute;bottom:14px;left:17px;font:9px var(--mono)}
+  .preview-page {position:relative;min-width:0;padding:24px 22px 36px}
+  .preview-page>small {display:block;font:9px var(--mono);color:#83988a;letter-spacing:.06em}
+  .preview-page h3 {font-size:21px;line-height:1.35;margin:20px 0 14px}
+  .preview-page p {font:11px/2.0 var(--serif);margin:12px 0}
+  .preview-page mark {padding:1px 2px;background:#e4eedf;color:#315841}
+  .preview-page-foot {display:flex;justify-content:space-between;gap:12px;position:absolute;left:22px;right:22px;bottom:11px;border-top:1px solid #e3e8df;padding-top:7px;font:8px var(--mono);color:#8aa091}
+  .preview-callout {position:absolute;right:-18px;bottom:40px;width:200px;padding:14px 15px;background:#f0eee7;box-shadow:0 10px 32px #193c302d;border-left:3px solid #aa7457}
+  .preview-callout small {display:block;font:9px var(--mono);color:#8b6c56;margin-bottom:6px}
+  .preview-callout strong {display:block;font:600 15px var(--serif);color:#244936}
+  .preview-callout span {display:block;color:#647b68;font-size:10px;margin-top:3px}
+  .hero-index,.hero-corner {display:none}
+  .product-frame {scroll-margin-top:120px}
+}
+@layer responsive {
+  @media(max-width:960px){
+    .hero {grid-template-columns:1fr;gap:27px;padding:72px 0}
+    .hero-preview {max-width:680px;margin-top:14px}
+    .hero h1 {font-size:clamp(43px,6.4vw,64px)}
+  }
+  @media(max-width:450px){
+    .hero {padding:64px 0 57px;gap:22px}
+    .hero h1 {font-size:clamp(30px,7.7vw,37px)}
+    .hero-preview {padding:10px;margin-top:0}
+    .preview-top,.preview-bottom {font-size:8px}
+    .preview-layout {grid-template-columns:112px minmax(0,1fr);min-height:255px}
+    .preview-outline {padding:12px 7px;font-size:9px}
+    .preview-page {padding:16px 12px 26px}
+    .preview-page h3 {font-size:17px;margin:13px 0 9px}
+    .preview-page p {font-size:10px;line-height:1.9;margin:8px 0}
+    .preview-page-foot {left:12px;right:12px;font-size:7px}
+    .preview-callout {right:-7px;bottom:27px;width:162px;padding:9px 11px}
+    .preview-callout strong {font-size:13px}
+  }
+}
