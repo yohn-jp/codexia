@@ -35,6 +35,7 @@ close_gate() {
 }
 
 open_gate() {
+  local current_state
   if ! "$systemctl" unmask "$socket_unit" || ! "$systemctl" unmask "$service_unit"; then
     close_gate || true
     return 1
@@ -45,6 +46,10 @@ open_gate() {
   fi
   if [[ "$(unit_state "$socket_unit")" != active ||
         "$("$systemctl" show --property=UnitFileState --value "$socket_unit")" != enabled ]]; then
+    close_gate || true
+    return 1
+  fi
+  if ! current_state="$(gate_status)" || [[ "$current_state" != open ]]; then
     close_gate || true
     return 1
   fi

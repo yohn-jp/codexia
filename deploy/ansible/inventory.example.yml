@@ -57,7 +57,6 @@ all:
         # Optional: match the API resource URI registered with the provider.
         # codexia_api_audience: https://codexia.example.invalid/api
         # Required only for explicitly approved base-secret convergence.
-        codexia_tunnel_token_file: /private/tunnel-token
         codexia_postgres_admin_password_file: /private/postgres-admin-password
         codexia_postgres_app_password_file: /private/postgres-app-password
         # Protected push-deployment parameters are supplied at execution,

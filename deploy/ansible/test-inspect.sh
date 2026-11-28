@@ -23,7 +23,7 @@ case "$1 $2" in
   'network exists'|'volume exists') exit 0;;
   'secret exists')
     case "$3" in
-      codexia-tunnel-token|codexia-postgres-admin-password|codexia-postgres-app-password) exit 0;;
+      codexia-postgres-admin-password|codexia-postgres-app-password) exit 0;;
       codexia-postgres-preflight-password) exit 1;;
       *) exit 99;;
     esac;;
@@ -75,7 +75,6 @@ assert reports[0]["existing_images"] == {
     "codexia-api": "true sha256:fixture example.invalid/backend@sha256:fixture",
 }, "inspect must show only the observed existing container identity"
 assert reports[0]["secrets"] == {
-    "codexia-tunnel-token": 0,
     "codexia-postgres-admin-password": 0,
     "codexia-postgres-app-password": 0,
     "codexia-postgres-preflight-password": 1,

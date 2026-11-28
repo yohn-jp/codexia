@@ -154,16 +154,16 @@ history_fingerprint(){
     -v "$volume:/history:ro" "$PG_IMAGE" -euo pipefail -c 'cd /history; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum' | sha256sum | cut -d' ' -f1
 }
 require_quiesced(){
-  local status unit
-  for unit in codexia-api.service codexia-tunnel.service; do
-    status=0
-    systemctl --user is-active --quiet "$unit" || status=$?
-    case "$status" in
-      0) die "Push deployment requires inactive systemd unit: $unit";;
-      3|4) ;;
-      *) die "Cannot verify systemd unit state: $unit";;
-    esac
-  done
+  local status=0 gate_state
+  systemctl --user is-active --quiet codexia-api.service || status=$?
+  case "$status" in
+    0) die 'Push deployment requires the API service to be inactive';;
+    3|4) ;;
+    *) die 'Cannot verify API systemd unit state';;
+  esac
+  gate_state="$(sudo -n /usr/local/sbin/codexia-api-gate status)" || die 'Cannot verify product publication gate state'
+  [[ "$gate_state" == closed ]] || die 'Push deployment requires the product publication gate to be closed'
+  systemctl is-active --quiet codexia-cloudflared.service || die 'Management Tunnel connector must remain active during backup'
   status=0
   podman container exists codexia-api || status=$?
   case "$status" in

@@ -79,16 +79,19 @@ function requireOnlyWriter(containerId) {
   }
 }
 
-function tunnelIsRunning() {
-  try {
-    command('podman', ['container', 'exists', 'codexia-tunnel']);
-  } catch (error) {
-    if (error.status === 1) return false;
-    throw error;
-  }
-  const running = command('podman', ['inspect', '--type', 'container', '--format', '{{.State.Running}}', 'codexia-tunnel']);
-  requireEvidence(['true', 'false'].includes(running));
-  return running === 'true';
+function observeManagementConnector() {
+  const unitState = command('systemctl', ['is-active', 'codexia-cloudflared.service']);
+  requireEvidence(unitState === 'active');
+  const ready = command('curl', ['--noproxy', '*', '--silent', '--show-error', '--max-time', '3',
+    '--output', '/dev/null', '--write-out', '%{http_code}', 'http://127.0.0.1:2000/ready']);
+  requireEvidence(ready === '200');
+  return { unitState, ready: true };
+}
+
+function observePublicationGate() {
+  const state = command('sudo', ['-n', '/usr/local/sbin/codexia-api-gate', 'status']);
+  requireEvidence(state === 'open');
+  return { state };
 }
 
 function ledgerFingerprint(ledger) {
@@ -201,16 +204,15 @@ try {
       WHERE encode(sha256(convert_to(id::text, 'UTF8')), 'hex') = '${ownerBindingSha256.slice(7)}')`) === 't');
   }
 
-  stage = 'Tunnel state';
-  const unitState = systemd('ActiveState', 'codexia-tunnel.service');
-  requireEvidence(['active', 'inactive', 'failed'].includes(unitState));
-  const containerRunning = tunnelIsRunning();
-  requireEvidence((unitState === 'active') === containerRunning);
+  stage = 'management connector and product publication gate';
+  const managementConnector = observeManagementConnector();
+  const publicationGate = observePublicationGate();
 
   stage = 'observation consistency';
   requireOnlyWriter(containerId);
   requireEvidence(observeWriter() === firstWriter && digest(privateFile(unit)) === quadletSha256 &&
-    systemd('ActiveState', 'codexia-tunnel.service') === unitState && tunnelIsRunning() === containerRunning);
+    JSON.stringify(observeManagementConnector()) === JSON.stringify(managementConnector) &&
+    JSON.stringify(observePublicationGate()) === JSON.stringify(publicationGate));
   console.log(JSON.stringify({
     format: 'codexia-writer-observation/v1',
     observedAt: new Date().toISOString(),
@@ -218,7 +220,8 @@ try {
     hostId: hash(machineId),
     writer: { containerId, image, identity, authMode, quadletSha256, settingsSha256, ownerBindingSha256 },
     database: { clusterId, migrationLedgerSha256 },
-    tunnel: { unitState, containerRunning },
+    managementConnector,
+    publicationGate,
   }));
 } catch {
   console.error(`Writer observation failed: ${stage}`);

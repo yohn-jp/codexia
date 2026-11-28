@@ -453,9 +453,9 @@ class TransactionTests(unittest.TestCase):
             directory = Path(tmp)
             self.assertIsNone(observer.observe_transaction(directory))
             path = directory / "deploy-transaction.json"
-            data = {"format": "codexia-deploy-transaction/v1", "phase": "pending",
+            data = {"format": "codexia-deploy-transaction/v2", "phase": "pending",
                     "repository": "yohn-jp/codexia", "repositoryId": 401, "ownerId": 502,
-                    **{k: False for k in ("hadUnit", "tunnelWasActive", "apiLinkCreated", "tunnelLinkCreated", "releasePresent")}}
+                    **{k: False for k in ("hadUnit", "gateWasOpen", "apiLinkCreated", "gateHeldForActivation", "releasePresent")}}
             path.write_text(json.dumps(data))
             self.assertEqual(observer.observe_transaction(directory)["sha256"], observer.digest(data))
             path.write_text("{}")

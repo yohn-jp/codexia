@@ -35,7 +35,7 @@ for _ in $(seq 1 20); do
 done
 systemctl --user show --property=Version
 test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
-for name in codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password; do
+for name in codexia-postgres-admin-password codexia-postgres-app-password codexia-tunnel-token; do
   rc=0; podman secret exists "$name" || rc=$?
   test "$rc" = 1
 done
@@ -45,7 +45,7 @@ for name in codexia-postgres codexia-data codexia-history; do
 done
 # Exercise the production VM helper against real Podman before the standalone
 # file-adoption fixture creates its synthetic baseline.
-managed_names=(codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password
+managed_names=(codexia-postgres-admin-password codexia-postgres-app-password
                codexia-auth-database-url codexia-auth-secret codexia-oauth-introspection-client-secret)
 for name in "${managed_names[@]}"; do
   rc=0; podman secret exists "$name" || rc=$?
@@ -58,13 +58,12 @@ sudo install -o "$service_user" -g "$(id -gn "$service_user")" -m 0700 deploy/an
 host_id=$(tr -d '\n' </etc/machine-id | sha256sum | cut -d' ' -f1)
 admission=$(jq -cn --arg host "$host_id" '{host:$host, hashes:{}}')
 receipt="$state_dir/bootstrap-secret-ids.json"
-test "$(printf '%s' fixture-managed-tunnel | as_service "$helper" "$admission" install)" = INITIALIZED
+test "$(as_service "$helper" "$admission" install)" = INITIALIZED
 admission=$(as_service cat "$receipt" | jq -c --arg host "$host_id" '{host:$host, hashes:.}')
-test "$(printf '%s' fixture-managed-tunnel | as_service "$helper" "$admission" adopt)" = VERIFIED
+test "$(as_service "$helper" "$admission" adopt)" = VERIFIED
 as_service "$helper" auth-password | base64 -d | grep -qxE '[a-f0-9]{64}'
 for name in "${managed_names[@]}"; do podman secret rm "$name" >/dev/null; done
 as_service rm "$receipt"
-printf 'fixture-tunnel-token\n' > "$tmp/tunnel"
 printf '%064d' 1 > "$tmp/admin"
 printf '%064d\n' 2 > "$tmp/app"
 cat > "$tmp/inventory.yml" <<YAML
@@ -81,20 +80,19 @@ all:
         codexia_service_uid: $service_uid
         codexia_service_home: "$service_home"
         codexia_secrets_approved: true
-        codexia_tunnel_token_file: "$tmp/tunnel"
         codexia_postgres_admin_password_file: "$tmp/admin"
         codexia_postgres_app_password_file: "$tmp/app"
 YAML
 apply() { ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/inventory.yml" deploy/ansible/site.yml; }
-printf 'fixture tunnel with spaces\n' > "$tmp/tunnel"
-if apply > "$tmp/invalid-tunnel-token.log"; then echo 'Malformed Tunnel token accepted' >&2; exit 1; fi
-for name in codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password; do
+printf 'invalid' > "$tmp/app"
+if apply > "$tmp/invalid-database-secret.log"; then echo 'Malformed database credential accepted' >&2; exit 1; fi
+for name in codexia-postgres-admin-password codexia-postgres-app-password; do
   rc=0; podman secret exists "$name" || rc=$?
   test "$rc" = 1
 done
-printf 'fixture-tunnel-token\n' > "$tmp/tunnel"
+printf '%064d\n' 2 > "$tmp/app"
 apply > "$tmp/first.log" || { cat "$tmp/first.log"; exit 1; }
-for pair in 'tunnel codexia-tunnel-token' 'admin codexia-postgres-admin-password' 'app codexia-postgres-app-password'; do
+for pair in 'admin codexia-postgres-admin-password' 'app codexia-postgres-app-password'; do
   read -r file name <<< "$pair"
   podman secret inspect --showsecret "$name" | jq -j '.[0].SecretData' | cmp - "$tmp/$file"
 done
@@ -104,15 +102,13 @@ podman volume create codexia-postgres >/dev/null
 apply > "$tmp/adopt.log" || { cat "$tmp/adopt.log"; exit 1; }
 grep -q 'changed=0' "$tmp/adopt.log"
 # A missing secret on a pre-existing volume must not be recreated.
-podman secret rm codexia-tunnel-token >/dev/null
+podman secret rm codexia-postgres-app-password >/dev/null
 if apply > "$tmp/fail.log"; then echo 'Existing volume with missing secret accepted' >&2; exit 1; fi
-rc=0; podman secret exists codexia-tunnel-token || rc=$?
+rc=0; podman secret exists codexia-postgres-app-password || rc=$?
 test "$rc" = 1
-# Restore the exact synthetic baseline for the following runtime integration
-# test; this is fixture cleanup, not Ansible-managed secret rotation.
-cat "$tmp/tunnel" | podman secret create codexia-tunnel-token - >/dev/null
-podman secret inspect --showsecret codexia-tunnel-token | jq -j '.[0].SecretData' | cmp - "$tmp/tunnel"
-if grep -Eq 'fixture-tunnel-token|0{63}[12]' "$tmp/"*.log; then
+printf '%064d\n' 2 | podman secret create codexia-postgres-app-password - >/dev/null
+podman secret inspect --showsecret codexia-postgres-app-password | jq -j '.[0].SecretData' | cmp - <(printf '%064d\n' 2)
+if grep -Eq '0{63}[12]' "$tmp/"*.log; then
   echo 'Credential appeared in Ansible output' >&2; exit 1
 fi
 printf '%s\n' 'Verified real rootless Podman secret creation, exact adoption, idempotence and existing-data missing-secret denial.'

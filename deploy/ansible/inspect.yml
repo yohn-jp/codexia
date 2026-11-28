@@ -21,7 +21,7 @@
 - name: Observe tool paths without installing packages
   ansible.builtin.command:
     argv: [sh, -c, 'if command -v "$1"; then exit 0; else exit 1; fi', sh, "{{ item }}"]
-  loop: [podman, node, flock, age, findmnt, loginctl, systemctl, setfacl]
+  loop: [podman, node, flock, age, findmnt, loginctl, systemctl, setfacl, curl]
   register: inspect_tools
   changed_when: false
   failed_when: inspect_tools.rc not in [0, 1]
@@ -76,7 +76,6 @@
         - .local/share/containers/storage
         - .config/containers/systemd/codexia-db.container
         - .config/containers/systemd/codexia-api.container
-        - .config/containers/systemd/codexia-tunnel.container
         - .config/containers/systemd/codexia.network
         - .config/containers/systemd/codexia-data.network
         - .config/containers/systemd/codexia-postgres.volume
@@ -130,7 +129,6 @@
           ansible.builtin.command:
             argv: [podman, secret, exists, "{{ item }}"]
           loop:
-            - codexia-tunnel-token
             - codexia-postgres-admin-password
             - codexia-postgres-app-password
             - codexia-postgres-preflight-password
@@ -141,7 +139,7 @@
         - name: Observe container identities
           ansible.builtin.command:
             argv: [podman, container, exists, "{{ item }}"]
-          loop: [codexia-db, codexia-api, codexia-tunnel]
+          loop: [codexia-db, codexia-api]
           register: inspect_containers
           changed_when: false
           failed_when: inspect_containers.rc not in [0, 1]
