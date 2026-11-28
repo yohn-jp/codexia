@@ -24,7 +24,14 @@ private_directory(){ [[ -d "$1" && ! -L "$1" && -O "$1" && "$(stat -c %a -- "$1"
 private_file(){ [[ -f "$1" && ! -L "$1" && -O "$1" && "$(stat -c '%a:%h' -- "$1")" == 600:1 ]]; }
 sha256(){ local digest; digest="$(sha256sum)" && printf '%s\n' "${digest%% *}"; }
 database_units_digest(){
-  systemctl --user cat --no-pager "$db_service" codexia-postgres-volume.service codexia-data-network.service | sha256
+  local unit properties
+  local -a database_units=("$db_service" codexia-postgres-volume.service codexia-data-network.service)
+  # systemctl cat reads the on-disk files. Require the manager to have loaded them.
+  for unit in "${database_units[@]}"; do
+    properties="$(systemctl --user show "$unit" --property=LoadState --property=NeedDaemonReload)" || return 1
+    [[ $'\n'"$properties"$'\n' == *$'\nLoadState=loaded\n'* && $'\n'"$properties"$'\n' == *$'\nNeedDaemonReload=no\n'* ]] || return 1
+  done
+  systemctl --user cat --no-pager "${database_units[@]}" | sha256
 }
 admin_query(){
   podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"

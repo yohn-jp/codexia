@@ -187,6 +187,9 @@ async function createProtectedSocketFixture(t) {
     '    [ "$FIXTURE_UNIT_OBSERVATION" != unavailable ] || exit 1',
     '    printf "database unit\nvolume unit\nnetwork unit\n"',
     '    if [ "$FIXTURE_UNIT_OBSERVATION" = drift ]; then printf "changed database unit override\n"; fi;;',
+    '  show:*LoadState*NeedDaemonReload*)',
+    '    if [ "$FIXTURE_UNIT_OBSERVATION" = stale ]; then printf "LoadState=loaded\nNeedDaemonReload=yes\n"',
+    '    else printf "LoadState=loaded\nNeedDaemonReload=no\n"; fi;;',
     '  show:*codexia-db.service*FragmentPath*) echo "$XDG_RUNTIME_DIR/systemd/generator/codexia-db.service";;',
     '  show:*codexia-db.service*SourcePath*) echo "$HOME/.config/containers/systemd/codexia-db.container";;',
     '  show:*codexia-db.service*ActiveState*) echo failed;;',
@@ -262,7 +265,7 @@ test('protected socket recovery restores the prior writer after PostgreSQL stops
       assert.equal(await readFile(api, 'utf8'), 'inactive');
       assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
 
-      for (const observation of ['drift', 'unavailable']) {
+      for (const observation of ['drift', 'unavailable', 'stale']) {
         assert.notEqual(run(['--recover-only'], { FIXTURE_UNIT_OBSERVATION: observation }).status, 0);
         assert.equal(await readFile(database, 'utf8'), interruptedState);
         assert.equal(await readFile(api, 'utf8'), 'inactive');
