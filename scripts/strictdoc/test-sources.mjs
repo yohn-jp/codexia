@@ -12,7 +12,7 @@ const RUNNERS = new Map([
   ['@playwright/test', 'playwright'],
   ['playwright/test', 'playwright'],
 ]);
-const traverse = traverseModule.default;
+const traverse = typeof traverseModule === 'function' ? traverseModule : traverseModule.default;
 
 export function testIdsFromName(name) {
   if (typeof name !== 'string') return [];
