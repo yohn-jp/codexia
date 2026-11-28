@@ -296,13 +296,13 @@ TITLE: CodexiaCTL の Go 開発依存・ツール
 [TEXT]
 MID: 4f74267ac14a4b5b927a0b5861ee8d33
 STATEMENT: >>>
-[LINK: DOC-ARCHITECTURE-DEPENDENCY-POLICY-go-engineering, Go 開発基盤の選定] の採用目標を記録する。以下は実装済み manifest の宣言ではなく、導入時に実版へ同期する選定基準である。既存の実際の直接依存は前節と `go.mod` を参照する。新規の Go 実行時依存を本選定によって追加しない。
+[LINK: DOC-ARCHITECTURE-DEPENDENCY-POLICY-go-engineering, Go 開発基盤の選定] に従い、テスト専用 module の宣言版と checksum は `cmd/codexiactl/go.mod` と `go.sum` で管理する。Linux amd64 の linter アーカイブは `cmd/codexiactl/quality-toolchain.json` に版と SHA-256 を固定する。実行時の直接依存は前節を参照する。
 
-| 選定対象 | 初期基準版 | 分類・更新時の責務 |
+| 対象 | 版 | 分類・更新時の責務 |
 | --- | --- | --- |
 | `github.com/stretchr/testify` | v1.12.1 (MIT) | テスト専用、`assert`/`require`。objx、yaml 等の実解決閉包を確認。`go.mod`/`go.sum` を実装と同期し、通常 build の import graph から除外 |
 | `github.com/google/go-cmp` | v0.7.0 (BSD-3-Clause) | テスト専用、構造差分。既存 go-github の依存と同じ解決版を共有。直接 import を追加する際に manifest を同期 |
-| `golangci-lint` | v2.15.0 (GPL-3.0) | 公式配布物を独立開発ツールとして固定。実行バイナリのビルド Go 版、release digest、設定 schema、実行時間、ライセンス条件を確認 |
+| `golangci-lint` | v2.15.0 (GPL-3.0) | Go 1.27.0 でビルドされた公式 Linux amd64 配布物。版と digest の検証、設定 schema、実行時間、ライセンス条件の確認を `codexiactl-linux` の更新条件とする |
 | `gofumpt` | v0.12.0 | golangci-lint に内包。独立インストール・別設定を設けない |
 | `goimports` | x/tools v0.52.0 相当 | 同上。独立インストールしない |
 | `govulncheck` | 安定版・固定版は適格性確認時に確定 | 条件付き開発専用。公式配布又は別 module による固定ビルド、checksum、DB freshness、検出/失敗の区別、Go 対応を確認 |

@@ -122,6 +122,40 @@ test('a historical task closure uses the package manager from its requested Git 
   assert.notEqual(current.toolchain, historical.toolchain);
 });
 
+test('the Go closure binds the exact analyzer release, config, verification script and producer', async t => {
+  const root = await fixture(t);
+  const pinPath = 'cmd/codexiactl/quality-toolchain.json';
+  const configPath = 'cmd/codexiactl/.golangci.yml';
+  const pin = { golangciLint: { version: '2.15.0', sha256: '1'.repeat(64) } };
+  await mkdir(path.join(root, 'cmd/codexiactl'), { recursive: true });
+  await writeFile(path.join(root, 'cmd/codexiactl/go.mod'), 'module example.com/ctl\n\ngo 1.27.4\n');
+  await writeFile(path.join(root, pinPath), JSON.stringify(pin));
+  await writeFile(path.join(root, configPath), 'version: "2"\n');
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-qm', 'Go toolchain and configuration');
+  const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'codexiactl-linux', runtime };
+  const original = captureTaskInputClosure(input);
+
+  pin.golangciLint.sha256 = '2'.repeat(64);
+  await writeFile(path.join(root, pinPath), JSON.stringify(pin));
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-qm', 'Change pinned analyzer digest');
+  const changed = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+  assert.notEqual(changed.source, original.source);
+  assert.notEqual(changed.dependencies, original.dependencies);
+  assert.notEqual(changed.toolchain, original.toolchain);
+  assert.notEqual(changed.producers, original.producers);
+  assert.deepEqual(captureTaskInputClosure(input), original, 'Historical proof uses the pinned archive at the requested SHA');
+
+  for (const file of [configPath, 'scripts/ci/execution/verify-codexiactl.sh', '.github/workflows/verify.yml']) {
+    await git(root, 'reset', '--hard', input.sha);
+    await writeFile(path.join(root, file), 'source change\n');
+    await git(root, 'add', '.');
+    await git(root, 'commit', '-qm', 'Change Go quality input');
+    assert.notEqual(captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') }).source, original.source, file);
+  }
+});
+
 test('a deployment document checked by root tests is included in the task source closure', async t => {
   const root = await fixture(t);
   const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'unit-root', runtime };
