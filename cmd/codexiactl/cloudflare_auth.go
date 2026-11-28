@@ -30,7 +30,7 @@ const (
 
 var cloudflareInspectionScopes = []string{
 	"zone.read", "dns.read", "workers-routes.read", "argotunnel.read",
-	"access.read", "access-service-token.read", "workers-scripts.read",
+	"access.read", "access-service-token.read", "workers-scripts.metadata_read",
 }
 
 // Derive extra authority from the protected input inventory. An existing
@@ -77,8 +77,15 @@ func (r cloudflareAuthRequirements) oauthScopes() []string {
 	if r.tokenPolicy {
 		scopes = append(scopes, "account-api-tokens.write")
 	}
+	// CI verifies exact Worker versions, including module content during R5.
+	// Ask for that named issuance scope only when the read token is missing.
+	// Do not assume that the provider treats Editor as an interchangeable
+	// permission group when issuing a distinct Content Read-Only API token.
+	if r.readMint {
+		scopes = append(scopes, "workers-scripts.content_read")
+	}
 	if r.workerWrite {
-		scopes = append(scopes, "workers-scripts.write")
+		scopes = append(scopes, "workers-scripts.edit")
 	}
 	return scopes
 }

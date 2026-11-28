@@ -100,6 +100,10 @@ func TestCloudflareAuthRequirementsFollowMissingCredentials(t *testing.T) {
 }
 
 func TestCloudflareOAuthScopesIncludeOnlyRequiredAuthority(t *testing.T) {
+	base := []string{"zone.read", "dns.read", "workers-routes.read", "argotunnel.read", "access.read", "access-service-token.read", "workers-scripts.metadata_read"}
+	if !slices.Equal(cloudflareInspectionScopes, base) {
+		t.Fatalf("unexpected inspection scopes: %v", cloudflareInspectionScopes)
+	}
 	for _, tc := range []struct {
 		requirements cloudflareAuthRequirements
 		want         []string
@@ -107,10 +111,12 @@ func TestCloudflareOAuthScopesIncludeOnlyRequiredAuthority(t *testing.T) {
 		{cloudflareAuthRequirements{}, nil},
 		{cloudflareAuthRequirements{tunnel: true}, []string{"argotunnel.write"}},
 		{cloudflareAuthRequirements{tokenPolicy: true}, []string{"account-api-tokens.write"}},
-		{cloudflareAuthRequirements{tokenPolicy: true, mint: true, workerWrite: true}, []string{"account-api-tokens.write", "workers-scripts.write"}},
+		{cloudflareAuthRequirements{tokenPolicy: true, mint: true, readMint: true}, []string{"account-api-tokens.write", "workers-scripts.content_read"}},
+		{cloudflareAuthRequirements{tokenPolicy: true, mint: true, workerWrite: true}, []string{"account-api-tokens.write", "workers-scripts.edit"}},
+		{cloudflareAuthRequirements{tunnel: true, tokenPolicy: true, mint: true, readMint: true, workerWrite: true}, []string{"argotunnel.write", "account-api-tokens.write", "workers-scripts.content_read", "workers-scripts.edit"}},
 	} {
 		scopes := tc.requirements.oauthScopes()
-		expected := append(append([]string(nil), cloudflareInspectionScopes...), tc.want...)
+		expected := append(append([]string(nil), base...), tc.want...)
 		if !slices.Equal(scopes, expected) {
 			t.Fatalf("unexpected OAuth authority: %v", scopes)
 		}

@@ -367,7 +367,7 @@ func TestCloudflareMintRequiresScopedAuthorityAndDoesNotReplay(t *testing.T) {
 					if tc.wrongScope {
 						scope = cloudflareZoneScope
 					}
-					result = []any{map[string]any{"id": workerGroup, "name": "Workers Scripts Write", "is_selectable": true, "scopes": []string{scope}}}
+					result = []any{map[string]any{"id": workerGroup, "name": "Workers Editor", "is_selectable": true, "scopes": []string{scope}}}
 				case route:
 					result = []any{}
 					if tc.existing {
@@ -411,6 +411,7 @@ func TestCloudflareSuppliedTokenRequiresExactProviderPolicy(t *testing.T) {
 		otherID     = "dddddddddddddddddddddddddddddddd"
 		workerWrite = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 		workerRead  = "ffffffffffffffffffffffffffffffff"
+		legacyWrite = "55555555555555555555555555555555"
 		tunnelRead  = "11111111111111111111111111111111"
 		accessRead  = "22222222222222222222222222222222"
 		dnsRead     = "33333333333333333333333333333333"
@@ -418,9 +419,11 @@ func TestCloudflareSuppliedTokenRequiresExactProviderPolicy(t *testing.T) {
 	)
 	for _, tc := range []struct {
 		name, role, problem string
-		userOwned           bool
+		userOwned, existing bool
 	}{
 		{name: "Worker publication", role: cloudflareWorkerRole},
+		{name: "Existing legacy Worker token", role: cloudflareWorkerRole, existing: true},
+		{name: "New legacy Worker token rejected", role: cloudflareWorkerRole, problem: "policy"},
 		{name: "User-owned Worker publication", role: cloudflareWorkerRole, userOwned: true},
 		{name: "Read-only Worker token", role: cloudflareWorkerRole, problem: "policy"},
 		{name: "Overprivileged observer token", role: cloudflareReadRole, problem: "policy"},
@@ -453,6 +456,8 @@ func TestCloudflareSuppliedTokenRequiresExactProviderPolicy(t *testing.T) {
 			}
 			var verifiedResources = []any{policy(cloudflareAccountScope+"."+account, workerWrite)}
 			switch tc.name {
+			case "Existing legacy Worker token", "New legacy Worker token rejected":
+				verifiedResources = []any{policy(cloudflareAccountScope+"."+account, legacyWrite)}
 			case "Read-only Worker token":
 				verifiedResources = []any{policy(cloudflareAccountScope+"."+account, workerRead)}
 			case "Overprivileged observer token":
@@ -497,7 +502,8 @@ func TestCloudflareSuppliedTokenRequiresExactProviderPolicy(t *testing.T) {
 					if tc.name == "Permission advertised for wrong scope" {
 						workerScope = cloudflareZoneScope
 					}
-					result = []any{group("Workers Scripts Write", workerWrite, workerScope), group("Workers Scripts Read", workerRead, cloudflareAccountScope),
+					result = []any{group("Workers Editor", workerWrite, workerScope), group("Workers Content Read-Only", workerRead, cloudflareAccountScope),
+						group("Workers Scripts Write", legacyWrite, cloudflareAccountScope),
 						group("Cloudflare Tunnel Read", tunnelRead, cloudflareAccountScope), group("Access: Apps and Policies Read", accessRead, cloudflareAccountScope),
 						group("DNS Read", dnsRead, cloudflareZoneScope), group("Workers Routes Read", routesRead, cloudflareZoneScope)}
 				case "/accounts/" + account + "/workers/workers":
@@ -512,7 +518,7 @@ func TestCloudflareSuppliedTokenRequiresExactProviderPolicy(t *testing.T) {
 			defer server.Close()
 			edge := cloudflareObservation{target: cloudflareTarget{AccountID: account, ZoneID: zone},
 				api: newCloudflareAPI([]byte(managementValue), server.URL+"/")}
-			err := edge.verifyCloudflareCredential(context.Background(), []byte(suppliedValue), tc.role)
+			err := edge.verifyCloudflareCredential(context.Background(), []byte(suppliedValue), tc.role, tc.existing)
 			if tc.problem == "" {
 				if err != nil || workingReads.Load() != 1 {
 					t.Fatalf("expected verified scoped token with a successful read. Error %v", err)
