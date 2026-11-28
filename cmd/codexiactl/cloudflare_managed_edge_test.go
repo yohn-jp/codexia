@@ -162,3 +162,68 @@ func TestManagedEdgeRequiresExplicitNeverDeployedWorker(t *testing.T) {
 		t.Fatalf("explicit never-deployed Worker refused: %v", err)
 	}
 }
+
+func TestManagedEdgeRequiresManagementOriginAccess(t *testing.T) {
+	spec, state := managedEdgeFixture(t)
+	id := func(n int) string { return fmt.Sprintf("10000000-0000-4000-8000-%012d", n) }
+	state.Tunnels = []managedEdgeTunnel{{ID: id(20), Name: cloudflareTunnel, AccountTag: spec.AccountID, ConfigSrc: "cloudflare"}}
+	spec.ProbePolicyID, spec.ManagementPolicyID = id(21), id(22)
+	servicePolicy := func(policyID string, tokens []string) cloudflareAccessPolicy {
+		p := cloudflareAccessPolicy{ID: policyID, Decision: "non_identity", Precedence: 1}
+		for _, token := range tokens {
+			p.Include = append(p.Include, map[string]json.RawMessage{"service_token": json.RawMessage(fmt.Sprintf(`{"token_id":%q}`, token))})
+		}
+		state.Policies = append(state.Policies, managedEdgePolicy{cloudflareAccessPolicy: p, AccountID: spec.AccountID})
+		return p
+	}
+	author := state.Policies[0].cloudflareAccessPolicy
+	probe := servicePolicy(spec.ProbePolicyID, []string{spec.ProbeTokenID})
+	ssh := servicePolicy(spec.ManagementPolicyID, spec.SSHServiceTokenIDs)
+	state.AppPolicies = map[string][]cloudflareAccessPolicy{}
+	addApp := func(domain string, n int, policies ...cloudflareAccessPolicy) string {
+		aud := strings.Repeat(fmt.Sprintf("%x", n%16), 64)
+		app := managedEdgeApp{cloudflareAccessApp: cloudflareAccessApp{ID: id(n), AUD: aud, Domain: domain, Type: "self_hosted"}, AllowedIDPs: spec.AllowedIDPs}
+		for i := range policies {
+			policies[i].Precedence = int64(i + 1)
+		}
+		state.Apps = append(state.Apps, app)
+		state.AppPolicies[app.ID] = policies
+		return aud
+	}
+	addApp(spec.Host, 30, author)
+	var probes map[string]managedEdgePath
+	if err := json.Unmarshal(spec.Contract.identityProbes, &probes); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range probes {
+		addApp(spec.Host+p.Path, 31+len(state.Apps), probe, author)
+	}
+	sshAUD := addApp(spec.ManagementHost, 40, ssh)
+	state.TunnelConfig = map[string]json.RawMessage{"ingress": json.RawMessage(fmt.Sprintf(`[{"hostname":%q,"service":%q},{"service":"http_status:404"}]`, spec.ManagementHost, spec.SSHService))}
+	plan, err := planManagedEdge(spec, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range plan {
+		if change.Key != "converge Tunnel ingress" {
+			continue
+		}
+		var rules []managedEdgeIngress
+		if change.Path == "" {
+			t.Fatal("observed applications and tunnel did not resolve the ingress target")
+		}
+		if err := json.Unmarshal(change.Body.(map[string]any)["config"].(map[string]json.RawMessage)["ingress"], &rules); err != nil {
+			t.Fatal(err)
+		}
+		for _, rule := range rules {
+			if rule.Hostname == spec.ManagementHost && rule.Service == spec.SSHService {
+				if rule.OriginRequest == nil || rule.OriginRequest.Access == nil || !rule.OriginRequest.Access.Required || rule.OriginRequest.Access.TeamName != spec.TeamName || !slices.Equal(rule.OriginRequest.Access.AUDTag, []string{sshAUD}) {
+					t.Fatalf("management ingress does not enforce the observed SSH Access audience: %+v", rule)
+				}
+				return
+			}
+		}
+		t.Fatal("management ingress missing from configuration")
+	}
+	t.Fatal("management ingress repair was not planned")
+}

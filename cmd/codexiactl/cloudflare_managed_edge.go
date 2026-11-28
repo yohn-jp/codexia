@@ -420,7 +420,8 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		want = append(want, managedEdgeIngress{Hostname: s.Host, Path: p.TunnelPath, Service: s.ProductService, OriginRequest: &managedEdgeOrigin{HTTPHostHeader: s.Host, Access: &managedEdgeAccess{true, s.TeamName, []string{a.AUD, parent.AUD}}}})
 	}
 	want = append(want, managedEdgeIngress{Hostname: s.Host, Service: s.ProductService, OriginRequest: &managedEdgeOrigin{HTTPHostHeader: s.Host, Access: &managedEdgeAccess{true, s.TeamName, []string{parent.AUD}}}},
-		managedEdgeIngress{Hostname: s.ManagementHost, Service: s.SSHService}, managedEdgeIngress{Service: "http_status:404"})
+		managedEdgeIngress{Hostname: s.ManagementHost, Service: s.SSHService, OriginRequest: &managedEdgeOrigin{Access: &managedEdgeAccess{true, s.TeamName, []string{apps[s.ManagementHost].AUD}}}},
+		managedEdgeIngress{Service: "http_status:404"})
 	var actual []managedEdgeIngress
 	if raw := state.TunnelConfig["ingress"]; len(raw) != 0 && json.Unmarshal(raw, &actual) != nil {
 		return nil, errors.New("Invalid Cloudflare Tunnel ingress")
