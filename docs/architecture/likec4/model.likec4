@@ -47,7 +47,7 @@ model {
       #edge
       metadata { trustBoundary 'edge' }
     }
-    tunnel = container 'Tunnel / API ingress' {
+    tunnel = container 'Shared Tunnel: product API ingress (target)' {
       #edge
       metadata { trustBoundary 'edge' }
     }
@@ -56,6 +56,10 @@ model {
   codexia = system 'Codexia VM' {
     #application
     metadata { trustBoundary 'application-host' }
+    publicationGate = component 'Independent host-local product publication gate (target)' {
+      #application
+      metadata { trustBoundary 'application-host' }
+    }
     fastify = container 'Fastify API admission' {
       #application
       metadata { trustBoundary 'application' }
@@ -121,14 +125,14 @@ model {
         metadata { trustBoundary 'operations' }
       }
     }
+    managementIngress = container 'Same Cloudflare Tunnel: dedicated Access Service Auth SSH ingress (target)' {
+      #operations
+      metadata { trustBoundary 'operations' }
+    }
     ansible = component 'Pinned SSH and Ansible desired state' {
       #operations
       metadata { trustBoundary 'operations' }
     }
-  }
-  tailscale = externalSystem 'Tailscale OIDC and network coordination' {
-    #operations
-    metadata { trustBoundary 'operations' }
   }
   offsite = system 'S3-compatible off-VM storage' {
     #storage
@@ -154,7 +158,8 @@ model {
   web -> edge.tunnel 'Calls the authenticated API'
   ios -> edge.tunnel 'Calls the authenticated API'
   externalAi -> codexia.fastify.mcp 'Uses assigned MCP read / compute / propose scopes'
-  edge.tunnel -> codexia.fastify 'Forwards API ingress only'
+  edge.tunnel -> codexia.publicationGate 'Routes product traffic only to the gated endpoint'
+  codexia.publicationGate -> codexia.fastify 'Forwards product traffic only while admitted'
   codexia.fastify.mcp -> codexia.fastify.core 'Uses shared authorized domain actions'
   codexia.fastify.core <-> codexia.fastify.modules 'Reads, computes and proposes through trusted capabilities'
   codexia.fastify.core -> codexia.fastify.persistence 'Uses the PostgreSQL persistence boundary'
@@ -165,11 +170,10 @@ model {
   operations.workflow.verify -> operations.workflow.release 'Provides the exact-source certificate'
   operations.workflow.release -> ghcr 'Publishes the immutable Full image by digest'
   ghcr -> operations.workflow.admission 'Supplies the digest-pinned image'
-  operations.workflow.admission -> tailscale 'Obtains the protected Tailscale OIDC identity'
   operations.workflow.admission -> operations.ansible 'Runs the admitted deployment workflow'
-  operations.workflow -> tailscale 'Obtains the protected OIDC identity for deployment'
   operations.workflow -> operations.ansible 'Runs the admitted deployment workflow'
-  operations.ansible -> codexia.ssh 'Uses pinned SSH over the tailnet'
+  operations.ansible -> operations.managementIngress 'Uses dedicated protected Environment Service Auth and pinned SSH'
+  operations.managementIngress -> codexia.ssh 'Forwards only SSH independently of product publication'
   operations.ansible -> codexia.podman 'Converges the protected Quadlet desired state'
   codexia.podman -> codexia.postgres 'Runs PostgreSQL with preserved volumes'
   codexia.ssh -> codexia.backupExecutor 'Invokes the protected host-locked backup path'
@@ -192,8 +196,9 @@ views {
     title 'Protected deployment topology'
     include github
     include ghcr
-    include tailscale
     include operations.**
+    include edge.tunnel
+    include codexia.publicationGate
     include codexia.ssh
     include codexia.backupExecutor
     include codexia.podman

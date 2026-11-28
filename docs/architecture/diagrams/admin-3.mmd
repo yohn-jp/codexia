@@ -1,7 +1,8 @@
 flowchart LR
     ADMIN["運用者の承認済み操作"] --> HOST["GitHub Actions 保護環境<br/>または分離された bootstrap control node"]
-    HOST --> SSH["Tailscale / pinned SSH"]
+    HOST --> SSH["専用Access Service Auth / 共用Tunnel / pinned SSH"]
     SSH --> ANS["Ansible: inspect / host / secrets / base / auth-runtime / deploy"]
     ANS --> QUAD["rootless Quadlet + PostgreSQL"]
     ADMIN --> EDGE["Cloudflare Terraform / Access policy"]
-    EDGE --> ROUTE["公開 routing"]
+    EDGE --> ROUTE["製品公開 routing"]
+    EDGE --> SSH

@@ -14,7 +14,7 @@ MID: 5eec4a950e1b60f3c81b73ce3bfa54ae
 STATEMENT: >>>
 **種別: 規範的外部IF設計。** Codexiaの境界を越える通信・配布・資格情報・データ交換・障害/回復を、インターフェースごとに一意のIDで追跡する。サービスの機能・責務は [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, System design]、principal別の認可は [LINK: DOC-ARCHITECTURE-ROUTE-AUTHORIZATION-CONTRACT, Route authorization]、OAuth/MCPは [LINK: DOC-ARCHITECTURE-API-AUTHN-AUTHZ, API AuthN/AuthZ] / [LINK: DOC-ARCHITECTURE-MCP-OAUTH, MCP OAuth]、初期導入・更新は [Deployment](https://github.com/yohn-jp/codexia/blob/main/docs/deployment/README.md)、[LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, Initial deployment]、[LINK: DOC-DEPLOYMENT-UPDATE-FLOW, Update flow] が正本である。ここに別の認証系や代替管理プレーンを発明しない。
 
-以下は設計と関連設定/コードの所在を確認する契約台帳であり、本番のCloudflare/Tailscale/IdP/GHCRに実際に接続し、正常/異常を受入した証拠ではない。
+以下は設計と関連設定/コードの所在を確認する契約台帳であり、本番のCloudflare/IdP/GHCRに実際に接続し、正常/異常を受入した証拠ではない。
 <<<
 
 [[SECTION]]
@@ -34,7 +34,7 @@ STATEMENT: >>>
 | EXT-MCP-001 | External AI client → Codexia /mcp | OAuth protected resource + MCP 2026-07-28 Streamable HTTP / JSON-RPC | 登録MCP client、assigned project、mcp:read/compute/proposeのみ。approval/apply禁止 | [LINK: DOC-ARCHITECTURE-MCP-OAUTH, MCP OAuth]、packages/api/src/oauth-mcp.ts、modules/mcp/src/http.ts、tools/ |
 | EXT-MCP-002 | Local trusted MCP adapter → Core actions | MCP stdio | 運用実行環境のtrusted identityと同一Core action/effect。別writer禁止 | [LINK: DOC-ARCHITECTURE-MODULES, Modules]、modules/mcp/src/stdio.ts、tools.ts |
 | EXT-DB-001 | VM API/Core → PostgreSQL | pg protocol/transaction、別schema | public author dataはPostgreSQL正本。auth schemaとroleを分離 | [LINK: DOC-ARCHITECTURE-DATABASE-DETAIL-CONTRACT, DB detail]、packages/persistence-postgres/src/postgres-store.ts、packages/api/src/auth-schema.ts |
-| EXT-OPS-001 | GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → VM | private control-plane SSH / declarative deployment | protected environment、host key pin、release certificate。Cloudflare公開面を管理SSHに流用しない | [Deployment](https://github.com/yohn-jp/codexia/blob/main/docs/deployment/README.md)、deploy/ansible/、.github/workflows/backend-deployment-handoff.yml |
+| EXT-OPS-001 | GitHub Actions → Access Service Auth → 共用Cloudflare Tunnelの管理専用hostname → pinned SSH → Ansible → VM（移行目標） | protected management SSH / declarative deployment | protected environment、用途別token、host key pin、release certificate。製品用hostname・policy・公開ゲートと分離 | [Deployment](https://github.com/yohn-jp/codexia/blob/main/docs/deployment/README.md)、deploy/ansible/、.github/workflows/backend-deployment-handoff.yml |
 | EXT-OPS-002 | GitHub Actions ↔ GHCR / frontend Workers release | registry / CI artifacts / Cloudflare API | exact-source certification、immutable digest、separate component releasesと権限 | [LINK: DOC-VERIFICATION-CI-CD, CI/CD]、.github/workflows/backend-release.yml、frontend-release.yml |
 | EXT-OPS-004 | Owner browser console → Fastify /api/console/backups/* → restricted backup executor | owner session protected HTTPS、運用schemaの設定/ジョブ/receipt。オペレーターが API と executor を有効化 | S3 destinationだけをownerが指定。APIはVM/SSH/IAM/operator credentialを渡さない。任意RPC・SSRF・MCP bearer不可 | [LINK: DOC-ARCHITECTURE-BACKUP-CONSOLE-CONTRACT, Backup console]、[LINK: DOC-DESIGN-ADMIN-SCREEN-FLOW, Admin UI]、[LINK: DOC-ARCHITECTURE-ROUTE-AUTHORIZATION-CONTRACT, Route auth] |
 | EXT-OPS-003 | VM/backup job → local/remote backup保護先・**S3互換オブジェクトストレージ**と隔離restore | age encrypted backup/restore、S3 HTTPS API。実 S3 と独立復旧ホストでの運用受入を要する | 原稿・認証・host historyの扱い、鍵・宛先・保管/復旧権限を分離。S3 writerに削除権限を与えない | [LINK: DOC-DEPLOYMENT-BACKUP, Backup]、deploy/backup/、.github/workflows/push-backup.yml |
@@ -121,7 +121,7 @@ MID: 650c2a4e62f1a027741459a5ce59c9e0
 STATEMENT: >>>
 | IF | 正常動作に必要な観測点 | 失敗・復旧の検証 |
 | --- | --- | --- |
-| EXT-OPS-001 | certified commitと署名されたhost identity、許可された環境、Ansible収束、VMのhealthy API・DB | SSH/Tailscale失敗で変更しない、host key mismatchを拒否、失敗したdeployの状態・再実行を判定 |
+| EXT-OPS-001 | certified commitと署名されたhost identity、許可された環境、Ansible収束、VMのhealthy API・DB | SSH/Access/Tunnel失敗で変更しない、host key mismatchを拒否、失敗したdeployの状態・再実行を判定 |
 | EXT-OPS-002 | exact-source artifactとGHCR image digest、Frontend/Backendのepoch/persistence互換 | 古い/不明/誤digestやschema違いを拒否、未認定mainを昇格しない |
 | EXT-OPS-003 | 鍵の権限、バックアップ内容と保存先の保護、**S3互換bucketへのage暗号文転送・checksum検証・再取得**、リストア後のfingerprintと原稿/認証の一致 | 破損・鍵欠落・復旧先違い・古いbackup・S3転送中断・資格情報失効は安全停止。S3は追加のオフVM保管先でありDB正本ではない。コンテナー戻しとDB restoreを混同しない |
 | EXT-SHARE-001 | 有効なshare capabilityと公開版のreadのみ | 期限切れ・撤回・別project・private Evidence・method違反を拒否 |

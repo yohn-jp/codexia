@@ -53,11 +53,11 @@ STATEMENT: >>>
 - **Clients:** Desktop Web is the current supported authoring product; native iOS is the accepted target with development and automatic Xcode validation paused and device acceptance incomplete. Their local draft journals are separate recoverable stores, not manuscript authorities. Mobile Web and the Capacitor authentication bridge are retired. The [LINK: DOC-ARCHITECTURE-IOS-SWIFTUI-ARCHITECTURE-7-implementation-slices-and-acceptance-gates, OAuth retirement procedure] covers historical registrations.
 - **Cloudflare edge:** Workers Static Assets and Tunnel/API ingress route traffic. Access protects the UI entry and never substitutes for Fastify's principal, project, object and effect authorization.
 - **Application and data:** Fastify admission, Better Auth, MCP, shared domain actions, the trusted optional module runtime and the PostgreSQL persistence adapter lead to PostgreSQL as the sole canonical data authority.
-- **Host operations:** Protected GitHub Actions uses Tailscale OIDC, pinned SSH and Ansible to reach the approved host operations path. The web UI, API and MCP adapter do not reach SSH or Ansible.
+- **Host operations:** The accepted target uses protected GitHub Actions, dedicated Cloudflare Access Service Auth, the shared Tunnel, pinned SSH and Ansible. Product routing has an independent fail-closed publication gate; the Cloudflare provider is a common availability domain, and finite-lifetime Service Tokens are distinct from federated ephemeral identities. The web UI, API and MCP adapter do not reach SSH or Ansible.
 - **Backup and offsite storage.** The existing host-locked `backup.sh` path handles PostgreSQL and history data. It transfers age-encrypted ciphertext to S3-compatible storage and verifies retrieved bytes and an independent protected receipt. Operational acceptance requires transfer and readback against the actual S3 destination and a restore on an independent recovery host. [LINK: DOC-DEPLOYMENT-BACKUP, Backup]
 - **Public Pages:** The existing Repository Audit Pages publisher exposes allowlisted static artifacts. The model treats this public boundary separately from the protected GitHub Actions workflow; G5 scans architecture inputs and generated public-source material for credential-like values.
 
-These groupings describe trust relationships in the design. Actual Cloudflare, Tailscale, SSH, PostgreSQL, secret-store, S3 and restore-host configuration must be verified independently.
+These groupings describe trust relationships in the design. Actual Cloudflare, publication gate, SSH, PostgreSQL, secret-store, S3 and restore-host configuration must be verified independently.
 <<<
 
 [[/SECTION]]

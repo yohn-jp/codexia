@@ -6,7 +6,7 @@ stateDiagram-v2
     Quiesced --> BackedUp : backupとchecksum成功
     Quiesced --> HealthyOld : backup不成立・旧版復帰
     BackedUp --> Candidate : digest固定Unitを適用
-    Candidate --> HealthyNew : readiness成功・Tunnel復旧
+    Candidate --> HealthyNew : readiness成功・製品公開ゲート開放
     Candidate --> Restoring : 不健康・接続喪失・途中中断
     Restoring --> HealthyOld : 旧digestとreadiness確認
     Restoring --> Isolated : 安全な復帰を確認できない

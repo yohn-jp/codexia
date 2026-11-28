@@ -32,7 +32,7 @@ STATEMENT: >>>
 | MCP-CLIENT | OAuth access token、登録client allowlist、server側project assignment、`mcp:read/compute/propose` | 指定作品の許可effect、提案まで | 直接Persistence、承認・適用、owner-wide通知・認証設定 |
 | SHARE-READER | 公開readerの非推測capabilityと公開版/失効の照合 | 明示された公開資源のGETのみ | 下書き・別作品・履歴・private Evidence・mutation |
 | EDGE-CI | Cloudflare Service Authによる明示されたread-only identity probe | exact pathだけのHTTP観測 | 作者API、認証同意、作品、運用SSH |
-| OPERATOR | protected GitHub Environment、Tailscale OIDC、pinned SSH、別途承認 | IaC、DB保全、秘密管理、配備、Edge policy | Webのowner session/SETUPキーをインフラ資格として利用 |
+| OPERATOR | protected GitHub Environment、管理SSH専用Access Service Auth、pinned SSH、別途承認（移行目標） | IaC、DB保全、秘密管理、配備、Edge policy | Webのowner session/SETUPキーをインフラ資格として利用 |
 
 **認可の判定順序:** mode/method/path → HTTPS/Origin/CORS/CSRF → 証明のissuer・audience・credential状態 → principal分類 → project assignment → 実際のobject/revisionとaction effect → durable transaction条件。**一箇所でも否定・不明ならfail closed**。UIボタンの非表示、Cloudflare Access通過、IDをURLに入力できることは認可の根拠にならない。
 <<<
