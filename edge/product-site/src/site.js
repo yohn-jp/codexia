@@ -11,14 +11,13 @@ let scrollTop = 0;
 let rotation = 0;
 let lastFrame = '';
 const clamp = value => Math.max(0, Math.min(1, value));
-const lerp = (a,b,t) => a + (b-a)*t;
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 let active = 1;
 function showAct(act, force = false) {
   if (act === active && !force) return;
   active = act;
-  stage.dataset.act = reduce.matches ? '1' : String(act);
-  stageLabel.textContent = 'ACT ' + labels[reduce.matches ? 0 : act - 1];
+  stage.dataset.act = String(act);
+  stageLabel.textContent = 'ACT ' + labels[act - 1];
   for (const [index, link] of links.entries()) {
     if (index === act - 1) link.setAttribute('aria-current', 'step');
     else link.removeAttribute('aria-current');
@@ -45,20 +44,28 @@ function render() {
   scrollTop = window.scrollY;
   if (!ranges.length) return;
   const header = stageGeometry.top;
-  const top = !wide.matches && !reduce.matches ? header + stageGeometry.height : header;
+  const top = !wide.matches ? header + stageGeometry.height : header;
   const center = scrollTop + top + Math.max(0,window.innerHeight-top)*.5;
   let index = ranges.findIndex(r => r.top <= center && r.bottom > center);
-  if (index < 0) index = center < ranges[0].top ? 0 : ranges.length-1;
+  // The mobile editorial opening places the sticky stage between acts I and II.
+  // While scrolling over that stage, keep the preceding act, not the last act.
+  if (index < 0) {
+    const next = ranges.findIndex(range => range.top > center);
+    index = next < 0 ? ranges.length - 1 : Math.max(0, next - 1);
+  }
   const range = ranges[index];
   const local = clamp((center-range.top)/Math.max(1,range.bottom-range.top));
   const moment = index + local;
   showAct(index+1);
   const motion = !reduce.matches;
   // Scrub over narrow transition bands, retaining the visual for each act.
-  const growth = motion ? clamp((moment-.82)/.4) : 0;
-  const atlas = motion ? Math.min(clamp((moment-1.82)/.4),1-clamp((moment-2.78)/.42)) : 0;
-  const binding = motion ? clamp((moment-3.82)/.42) : 0;
-  const opening = motion ? lerp(.52,1,clamp(local/.5)) : 1;
+  // With reduced motion, display the complete state of the current act;
+  // only interpolation is removed, not the illustrated information.
+  const growth = motion ? clamp((moment-.82)/.4) : Number(index >= 1);
+  const atlas = motion ? Math.min(clamp((moment-1.82)/.4),1-clamp((moment-2.78)/.42)) : Number(index === 2);
+  const binding = motion ? clamp((moment-3.82)/.42) : Number(index === 4);
+  // The first sentence is the entry point, never conceal it while idle.
+  const opening = 1;
   const frame = [growth,atlas,binding,index===0?opening:1].map(v=>v.toFixed(3)).join('|');
   if(frame !== lastFrame) {
     lastFrame = frame;
@@ -141,13 +148,15 @@ const decisions = {
   approved: ['左手', '改稿版', '見本の改稿を採択しました。原稿と最終幕の表示に反映しました。', '『灰の書庫』 — 改稿版（左手）'],
   rejected: ['右手', '原文保持', '見本の原文を保持しました。最終幕にも判断を反映しました。', '『灰の書庫』 — 原文保持（右手）'],
 };
-for (const button of document.querySelectorAll('.decisions button')) {
+const decisionButtons = Array.from(document.querySelectorAll('.decisions button'));
+for (const button of decisionButtons) {
   button.disabled = false;
   button.addEventListener('click', () => {
     const choice = button.dataset.decision;
     const item = decisions[choice];
     if (!item) return;
     stage.dataset.decision = choice;
+    for (const candidate of decisionButtons) candidate.setAttribute('aria-pressed', String(candidate === button));
     document.getElementById('stage-hand').textContent = item[0];
     document.getElementById('book-edition').textContent = item[1];
     document.getElementById('decision-status').textContent = item[2];
