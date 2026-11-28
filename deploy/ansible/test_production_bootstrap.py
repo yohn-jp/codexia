@@ -142,6 +142,11 @@ class ControllerTests(unittest.TestCase):
 
     def test_refuses_unpinned_host(self):
         self.env["CODEXIA_BOOTSTRAP_HOST"] = "other.example.invalid"
+        self.env["CODEXIA_MANAGEMENT_HOSTNAME"] = "other.example.invalid"
+        target = json.loads(self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"])
+        target["sshHostname"] = "other.example.invalid"
+        self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"] = json.dumps(target)
+        # Bind the management target first so the independent pin is exercised.
         with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "pinned"):
             self.prepare()
 
@@ -153,5 +158,9 @@ class ControllerTests(unittest.TestCase):
     def test_refuses_same_name_certificate_for_another_repository_id(self):
         self.mutation()
         self.env["GITHUB_REPOSITORY_ID"] = "818"
+        target = json.loads(self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"])
+        target["repositoryId"] = 818
+        self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"] = json.dumps(target)
+        # The reviewed target is the alternate repository; the image receipt is not.
         with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "different repository"):
             self.prepare()
