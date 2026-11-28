@@ -33,40 +33,7 @@ var tailnetBrowserPath = regexp.MustCompile(`^/a/[A-Za-z0-9_-]+$`)
 var tailnetDNSName = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9.-]{0,251}[a-zA-Z0-9])?$`)
 // The OAuth token endpoint returns a short-lived tskey- access token, not a
 // tskey-client- secret or a tskey-auth- device enrollment key.
-var tailnetToken = regexp.MustCompile(`^(tskey-api-[A-Za-z0-9_-]{8,512}|tskey-[A-Za-z0-9]{8,512})package main
-
-import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"net/netip"
-	"net/url"
-	"os"
-	"os/exec"
-	"regexp"
-	"slices"
-	"strings"
-	"syscall"
-	"time"
-	"unicode"
-
-	ts "tailscale.com/client/tailscale/v2"
-)
-
-const tailnetCLI = "/usr/bin/tailscale"
-
-const wifIssuer = "https://token.actions.githubusercontent.com"
-const wifTrustConsole = "https://login.tailscale.com/admin/settings/trust-credentials"
-
-var tailnetNodeID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-var tailnetBrowserPath = regexp.MustCompile(`^/a/[A-Za-z0-9_-]+$`)
-var tailnetDNSName = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9.-]{0,251}[a-zA-Z0-9])?$`)
-)
+var tailnetToken = regexp.MustCompile(`^(tskey-api-[A-Za-z0-9_-]{8,512}|tskey-[A-Za-z0-9]{8,512})$`)
 
 type tailnetObservation struct {
 	Address  string
