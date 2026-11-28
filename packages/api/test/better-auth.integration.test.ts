@@ -845,42 +845,50 @@ test('[TEST-MCPV-004-003] Better Auth PKCE MCP client lists and invokes tools th
   }
 });
 
-test('Better Auth fixture teardown closes an active proxied response when the backend stops', async () => {
-  const { createServer: createHttpServer } = await import('node:http');
-  const { setTimeout: deadline } = await import('node:timers/promises');
-  const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
-  assert.ok(databaseUrl, 'CODEXIA_AUTH_TEST_DATABASE_URL must name an explicitly disposable PostgreSQL auth database');
-  const fixture = await startBetterAuthFixture({
-    databaseUrl,
-    createApiServer: () => {
-      const server = createHttpServer((_, response) => {
-        response.writeHead(200, { 'content-type': 'text/event-stream' });
-        response.write('data: fixture-ready\n\n');
-      });
-      const close = server.close.bind(server);
-      server.close = callback => {
-        close(callback);
-        server.closeAllConnections();
+for (const forceBackendClose of [true, false]) {
+  const shutdownMode = forceBackendClose ? 'forced' : 'graceful';
+  test(`Better Auth fixture teardown closes an active proxied response with ${shutdownMode} backend shutdown`, async () => {
+    const { createServer: createHttpServer } = await import('node:http');
+    const { setTimeout: deadline } = await import('node:timers/promises');
+    const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
+    assert.ok(databaseUrl, 'CODEXIA_AUTH_TEST_DATABASE_URL must name an explicitly disposable PostgreSQL auth database');
+    const fixture = await startBetterAuthFixture({
+      databaseUrl,
+      createApiServer: () => {
+        const server = createHttpServer((_, response) => {
+          response.writeHead(200, { 'content-type': 'text/event-stream' });
+          response.write('data: fixture-ready\n\n');
+        });
+        if (forceBackendClose) {
+          const close = server.close.bind(server);
+          server.close = callback => {
+            close(callback);
+            server.closeAllConnections();
+            return server;
+          };
+        }
+        // The graceful variant deliberately leaves the stream open until
+        // the proxy cancels its upstream request. A backend-first shutdown
+        // cannot complete while the client remains connected.
         return server;
-      };
-      return server;
-    },
+      },
+    });
+    const request = new AbortController();
+    let closing: Promise<void> | undefined;
+    try {
+      const response = await fetch(fixture.apiOrigin, { signal: request.signal });
+      assert.equal(response.status, 200);
+      const chunk = await response.body?.getReader().read();
+      assert.equal(new TextDecoder().decode(chunk?.value), 'data: fixture-ready\n\n');
+      closing = fixture.close();
+      assert.equal(
+        await Promise.race([closing.then(() => true), deadline(2_000, false, { ref: false })]),
+        true,
+        'fixture teardown waited for a client that had not yet been disposed',
+      );
+    } finally {
+      request.abort();
+      await (closing ?? fixture.close());
+    }
   });
-  const request = new AbortController();
-  let closing: Promise<void> | undefined;
-  try {
-    const response = await fetch(fixture.apiOrigin, { signal: request.signal });
-    assert.equal(response.status, 200);
-    const chunk = await response.body?.getReader().read();
-    assert.equal(new TextDecoder().decode(chunk?.value), 'data: fixture-ready\n\n');
-    closing = fixture.close();
-    assert.equal(
-      await Promise.race([closing.then(() => true), deadline(2_000, false, { ref: false })]),
-      true,
-      'fixture teardown waited for a client that had not yet been disposed',
-    );
-  } finally {
-    request.abort();
-    await (closing ?? fixture.close());
-  }
-});
+}
