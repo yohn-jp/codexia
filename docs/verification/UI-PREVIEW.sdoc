@@ -1,19 +1,47 @@
-# UI preview and Impeccable Detector (Windows / Linux / macOS)
+[DOCUMENT]
+MID: 6eccb69ce4da18b67c279fcc1f82d4dd
+TITLE: UI preview and Impeccable Detector (Windows / Linux / macOS)
+UID: DOC-VERIFICATION-UI-PREVIEW
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
 
-The local preview serves the Desktop React authoring UI with Better Auth and disposable PostgreSQL. The supported authoring platforms and browser verification scope are defined in [System design](../architecture/SYSTEM-DESIGN.md) and [E2E execution](E2E-EXECUTION.md). [UX-CONTRACT](../design/UX-CONTRACT.md) defines UX acceptance and [DESIGN.md](../../app/DESIGN.md) records the agreed visual design.
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
 
-## Design checks on GitHub
+[TEXT]
+MID: 2909761d56752bef6057ffd556d4c8a8
+STATEMENT: >>>
+The local preview serves the Desktop React authoring UI with Better Auth and disposable PostgreSQL. The supported authoring platforms and browser verification scope are defined in [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, System design] and [LINK: DOC-VERIFICATION-E2E-EXECUTION, E2E execution]. [LINK: DOC-DESIGN-UX-CONTRACT, UX-CONTRACT] defines UX acceptance and [DESIGN.md](https://github.com/yohn-jp/codexia/blob/main/app/DESIGN.md) records the agreed visual design.
+<<<
 
-The [Impeccable workflow](../../.github/workflows/impeccable.yml) runs on pull requests to `main` and pushes to `main` that touch its inputs. It scans the complete app and module sources on each selected run. To reproduce the scan from the repository root:
+[[SECTION]]
+MID: 023a07830fcaa8844ccbcca6465060d0
+UID: DOC-VERIFICATION-UI-PREVIEW-design-checks-on-github
+TITLE: Design checks on GitHub
+
+[TEXT]
+MID: 9ecdb3d753ac6a973f6c958756e0cafb
+STATEMENT: >>>
+The [Impeccable workflow](https://github.com/yohn-jp/codexia/blob/main/.github/workflows/impeccable.yml) runs on pull requests to `main` and pushes to `main` that touch its inputs. It scans the complete app and module sources on each selected run. To reproduce the scan from the repository root:
 
 ```sh
 .agents/skills/impeccable/scripts/impeccable detect --sarif --no-advisory app modules/*/src
 ```
 
 The project includes the skill and a launcher that fetches and verifies the pinned engine on a fresh runner. The workflow uses the [upstream SARIF integration](https://github.com/pbakaus/impeccable/blob/b49177d32788f2dc585c42831d845dacf1ebed2c/README.md#three-ways-to-run-the-detector) to publish primary findings to GitHub Code scanning under `impeccable`. Exit 0 uploads a clean report and exit 2 uploads findings. A scanner error fails the job before upload. Omit `--no-advisory` locally to include suggestions such as font sizes outside the documented scale. The detector reads the app's design system during source scans. Automatic agent hooks are disabled.
+<<<
 
-## Prerequisites
+[[/SECTION]]
 
+[[SECTION]]
+MID: ca903f3d8014ab27a90b434b1ebd3659
+UID: DOC-VERIFICATION-UI-PREVIEW-prerequisites
+TITLE: Prerequisites
+
+[TEXT]
+MID: 59e46085550bd8f55338d7df434e0484
+STATEMENT: >>>
 - Node.js and pnpm versions from the root `package.json` (currently Node >=24, pnpm 12.21.0).
 - A running **Docker Desktop** or Podman engine capable of pulling `postgres:17`. The harness runs a random-named container with **loopback-only ephemeral host port**, a random password, no mounted project or database volume, and removes it on exit.
 - Chrome or Playwright Chromium for authenticated visual snapshots. If neither is available: `corepack pnpm exec playwright install chromium`. Impeccable's URL checks independently use an installed Chrome/Chromium/Edge.
@@ -48,9 +76,16 @@ The snapshots preserve the seeded, authenticated layout but **are not interactiv
 On exit (`Ctrl+C`) the script stops its API, removes its PostgreSQL container and temporary server state, and deletes the active scan session file. Screenshots and reports stay under `artifacts/` until removed. On an abnormal hard shutdown, find orphaned local containers using `docker ps --filter label=dev.codexia.purpose=ui-preview` (or `podman ps ...`), and stop only the identified preview container.
 
 Options include `--port 4173`, `--profile core|full`, `--engine auto|docker|podman`, `--skip-build`, and `--no-capture`. With `--skip-build`, the preview reuses previously built packages and profile artifacts and still builds UI assets for the current OAuth client. `--no-capture` serves the interactive preview only. Full-profile modules require their existing build dependencies.
+<<<
 
-### Troubleshooting
+[[SECTION]]
+MID: 6e16edd54f9d5179076838da33b26162
+UID: DOC-VERIFICATION-UI-PREVIEW-troubleshooting
+TITLE: Troubleshooting
 
+[TEXT]
+MID: 363229126db9e0bcf6b7a86c80cfaec3
+STATEMENT: >>>
 - **`EUNSUPPORTEDPROTOCOL workspace:*`**: do not use npm install. Run `corepack pnpm install --frozen-lockfile` at the repository root.
 - **Vite's `browser-modules` import missing**: do not start Vite directly. The preview build calls the canonical profile generator before serving UI.
 - **`ERR_CONNECTION_REFUSED` or blank scan JSON**: confirm the preview command is still running and `ui:scan` sees its matching snapshot session. The scanner rejects a failed URL scan.
@@ -59,3 +94,8 @@ Options include `--port 4173`, `--profile core|full`, `--engine auto|docker|podm
 - **Port already in use**: `corepack pnpm ui:preview --port 4181`; the scanner discovers the snapshot port from the running session.
 
 Review findings against the visual design and UX contract. Use the authenticated snapshots to check rendered layout and contrast, and the interactive preview to verify focus and editing behavior.
+<<<
+
+[[/SECTION]]
+
+[[/SECTION]]

@@ -1,9 +1,28 @@
-# 仕様ツールのCI・設計可視化・公開に関する受入設計
+[DOCUMENT]
+MID: f5833db4dd74626d2e4dc40c7e47ca60
+TITLE: 仕様ツールのCI・設計可視化・公開に関する受入設計
+UID: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
 
-**種別: 採用済み品質ゲート設計・CI未変更。** 本書は [Toolchain](../architecture/SPECIFICATION-TOOLCHAIN.md) のツールを、[CI/CD](CI-CD.md)、[Test architecture](TEST-ARCHITECTURE-OPTIMIZATION.md)、[Traceability](TRACEABILITY-REGISTER.md) に従って**どの証拠で採用可否を判断するか**を所有する。CIの既存 `scripts/ci/impact/contract.mjs` と `.github/workflows/verify.yml` は依然唯一のverification task/plan authority。新しい単独ワークフローを乱立させたり、未実行の検証をpassしたことにしたりしない。
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
 
-## ツールと責務（対抗案）
+[TEXT]
+MID: 6fb5091e203be0ff9969bc840e21d81e
+STATEMENT: >>>
+**種別: 採用済み品質ゲート設計・CI未変更。** 本書は [LINK: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN, Toolchain] のツールを、[LINK: DOC-VERIFICATION-CI-CD, CI/CD]、[LINK: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION, Test architecture]、[LINK: DOC-VERIFICATION-TRACEABILITY-REGISTER, Traceability] に従って**どの証拠で採用可否を判断するか**を所有する。CIの既存 `scripts/ci/impact/contract.mjs` と `.github/workflows/verify.yml` は依然唯一のverification task/plan authority。新しい単独ワークフローを乱立させたり、未実行の検証をpassしたことにしたりしない。
+<<<
 
+[[SECTION]]
+MID: c2965d04c9d17c965670207075a45251
+UID: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE-ツールと責務対抗案
+TITLE: ツールと責務（対抗案）
+
+[TEXT]
+MID: 734dc4c5184226003493da4c792a05a0
+STATEMENT: >>>
 | 採用 | 不採用候補 | 受入のために本当に実行する内容 |
 | --- | --- | --- |
 | Redocly CLI 2 | Spectral | TypeSpec生成OpenAPI 3.1.0のlint/bundle、custom規則、壊れたschema/参照でfail |
@@ -16,26 +35,44 @@
 | k6 | Artillery | API/DB/MCP/streamの性能budgetを仕様から定義し、閾値で合否判定 |
 | StrictDoc静的HTML + Scalar | VitePress中心 | 設計文書全体・要求・source・test・schemaをGitHub Pagesの**既存唯一の公開者**から表示する採用目標。現在の公開は既存受入状態に従う |
 | 既存Actions exact-source evidence | Allureを証拠の第二正本にする | run/job/attempt/artifact identityと結果の厳密な結合 |
+<<<
 
-## CI validationと適合段階
+[[/SECTION]]
 
+[[SECTION]]
+MID: 500e746d70b44743f5cdb8fadaa9598f
+UID: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE-ci-validationと適合段階
+TITLE: CI validationと適合段階
+
+[TEXT]
+MID: 6a7d59aa42d9b34a0689bd4b70a3f131
+STATEMENT: >>>
 | 段階 | 検証と生成物 | fail条件 | 速さ/環境 |
 | --- | --- | --- | --- |
 | G0 ドキュメント静的 | StrictDoc parse、REQ-ID/relationのvalidation、TEST-ID付きネイティブ登録のAST discovery、Markdownリンク、TypeSpec compile | 欠落、重複、不正grammar、無効なreference、登録IDまたはExecution scopeの不整合 | 文書変更時の軽量CI |
 | G1 HTTPスキーマ | TypeSpec→OpenAPI 3.1.0、Redocly、oasdiff、実行時 Fastify route inventory と JSON Schema 生成物の照合、Orval client再生成diff、TypeScript typecheck | 実routeの未定義、破壊的変更の無承認、二重schema、非決定的生成 | API/contracts/client変更時 |
 | G2 実行時契約 | 使い捨てPostgreSQLのAPIでSchemathesis、owner/BOLA/競合/冪等性/receiptとMCP conformance | 仕様違反/認可迂回/保存不一致、未実行対象の偽PASS | API/MCP/DB変更時 |
 | G3 データ契約 | migration適用→pgTAP/pg_catalog、Better Auth schema、復元、tbls生成 | 物理差分/不一致、schema identity異常、復元失敗 | DB/auth/migration/依存変更時 |
-| G4 UX/host | 既存Playwright（正式対応Chromium。移行例外は [E2E execution](E2E-EXECUTION.md)）、XState v5の状態遷移義務、OCI、Ansible/Cloudflare config/probes、S3互換fixture | UI保存/復旧、session/auth、backup config/保全job/復元証拠、edge/deploy回帰 | 既存impact rulesに従う |
+| G4 UX/host | 既存Playwright（正式対応Chromium。移行例外は [LINK: DOC-VERIFICATION-E2E-EXECUTION, E2E execution]）、XState v5の状態遷移義務、OCI、Ansible/Cloudflare config/probes、S3互換fixture | UI保存/復旧、session/auth、backup config/保全job/復元証拠、edge/deploy回帰 | 既存impact rulesに従う |
 | G5 設計図/脅威 | LikeC4 validation、Threagile risk、公開の可否と画像/文書リンク | 不正なモデル、設計不整合、秘密露出 | docs/security/deploy変更時 |
 | G6 性能 | k6 threshold、現行比較baseline、起動/stream/DB負荷 | 承認済みp95/p99、RPS、RSS、SSE維持等のbudget違反 | cheap smokeはPR、長時間は明示したisolated run |
 | G7 追跡・証明 | 要求→仕様→実装→TEST-ID→exact-source evidence、逆引き未追跡一覧 | 未対応の採用済み要求や仕様外runtimeを未報告、証拠偽装、登録した検証scopeの消失 | 部分的にはPR、全量認定はrelease前 |
 
-G0〜G7は受入モデルであり、実行タスクは [CI/CD契約](CI-CD.md) から参照する。
+G0〜G7は受入モデルであり、実行タスクは [LINK: DOC-VERIFICATION-CI-CD, CI/CD契約] から参照する。
 HTTP契約の検証は既存Verifyの `unit-http-contract` と `typecheck-http-contract` を使用する。
 検証を追加するときは影響範囲、タスクの入力、実行証拠を同時に更新する。
+<<<
 
-## 既存REQ-IDから検証義務への接続
+[[/SECTION]]
 
+[[SECTION]]
+MID: eb514cef60545fdfe613899687fd1714
+UID: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE-既存req-idから検証義務への接続
+TITLE: 既存REQ-IDから検証義務への接続
+
+[TEXT]
+MID: 8c0df93bdb3921ab15dede8c94a5b95c
+STATEMENT: >>>
 本書のG0〜G7の各ゲートは、**新しい独立製品要求ではなく既存要求の検証手段**である。最初の関連付けを以下に固定する（各gateの完全な合否は後続PRでテストにより証明する）。
 
 | 要求 | 対象gate | 必ず確認する内容 |
@@ -51,30 +88,57 @@ HTTP契約の検証は既存Verifyの `unit-http-contract` と `typecheck-http-c
 | REQ-OPS-001〜003 | G3、G4 | setup、更新、backup/restoreの実ホスト・実DB証拠 |
 | REQ-QUAL-001〜003 | G2〜G7 | 検証の配置、exact-source認証、性能budget |
 
-この対応表だけで各REQのobligationを列挙したことにはならない。業務別の検証シナリオID・source symbol・実行証拠は [Traceability](TRACEABILITY-REGISTER.md) の専用関係で後続詳細化する。G0〜G7の実行・失敗注入が未実施なら要求の適合状態は変更しない。
+この対応表だけで各REQのobligationを列挙したことにはならない。業務別の検証シナリオID・source symbol・実行証拠は [LINK: DOC-VERIFICATION-TRACEABILITY-REGISTER, Traceability] の専用関係で後続詳細化する。G0〜G7の実行・失敗注入が未実施なら要求の適合状態は変更しない。
+<<<
 
-## OpenAPI lint・diff・runtime検証の分界
+[[/SECTION]]
 
+[[SECTION]]
+MID: 4bfafe764bdbb042183893bd4cd0a147
+UID: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE-openapi-lintdiffruntime検証の分界
+TITLE: OpenAPI lint・diff・runtime検証の分界
+
+[TEXT]
+MID: 0f682a4a68e870d6dcaab62888c45ae3
+STATEMENT: >>>
 - RedoclyはOpenAPI構造、参照、operationId一意性、HTTP status/scheme/response Schema、必要なタグ/説明/trace metadataをチェックする。アプリの認可は保証しない。
 - oasdiffは候補のTypeSpecから生成したOpenAPIを基準コミットのOpenAPIと比較する。
   移行前の基準にはGitに保存済みのOpenAPIを使い、移行後の基準はそのSHAの依存ロックと生成スクリプトで再生成する。
   pull requestはイベントの `pull_request.base.sha`、mainへのpushはイベントの `before` SHAを基準にする。
-  エラー級の非互換差分、イベントSHAの欠落、生成物とデプロイ互換設定のepoch不一致で失敗する。初回本番導入に限る epoch の限定是正は [API contract](../architecture/API-CONTRACT.md#操作の追加変更廃止) に従う。4 → 5 は基準 SHA と承認済み `ERR` の完全一致を確認する。oasdiff 自体は省略しない。
+  エラー級の非互換差分、イベントSHAの欠落、生成物とデプロイ互換設定のepoch不一致で失敗する。初回本番導入に限る epoch の限定是正は [LINK: DOC-ARCHITECTURE-API-CONTRACT-操作の追加変更廃止, API contract] に従う。4 → 5 は基準 SHA と承認済み `ERR` の完全一致を確認する。oasdiff 自体は省略しない。
 - Schemathesisは**隔離API**で実行する。書込み可能であるため本番や作者データに接続してはならない。Zod/TypeSpecの正常ケース、status/error/body、security testing、boundary/rate/invalid payload等を補強する。
 - Schemathesisによる拒否確認と、Codexiaのowner-only / MCP-proposal / project-BOLA / write preconditionを別々の独立したテストとして保持する。
 - 静的なOpenAPI形状を満たしても、opaque cursor、条件付きclient identity、アーカイブ参照整合性、ChangeSetの対象・重複・サイズ、自己mergeは業務上不正になり得る。positive-data検査はその場合に限りcanonical validationの予測と実応答のstatus/code/detailを照合する。それ以外は公式positive-data検査を実行する。適用結果を証拠に保持し、実DBの正常系・拒否系の対照試験も必須とする。単なる400の許容、検査対象除外、結果改変は禁止する。
 - HTTP error/codeやoptional responseがTypeSpec上で定義されていない場合、ツールがスキーマを自動修正するのではなくAPI-CONTRACTへ設計決定を戻す。
+<<<
 
-## LikeC4・Architecture Atlasのownership
+[[/SECTION]]
 
-- **LikeC4が対象とするのはC4系のsystem context、container/component、依存方向、外部trust relationship。** プロダクト構成の意味は [System design](../architecture/SYSTEM-DESIGN.md) と [Internal boundaries](../architecture/INTERNAL-BOUNDARIES.md) が承認し、LikeC4はその採用設計を可視化する実行可能な構造契約。
-- [Architecture Atlas](ARCHITECTURE-ATLAS.md) は、構造・信頼境界と運用トポロジーをLikeC4モデルからネイティブに表示する。画面・状態遷移、配備・更新手順、ER図は領域設計書のMermaidから表示する。
+[[SECTION]]
+MID: f435525f0b54a21aee60ab1aaa741c32
+UID: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE-likec4architecture-atlasのownership
+TITLE: LikeC4・Architecture Atlasのownership
+
+[TEXT]
+MID: 1561122df68ba7e6751723f8e9dbe61d
+STATEMENT: >>>
+- **LikeC4が対象とするのはC4系のsystem context、container/component、依存方向、外部trust relationship。** プロダクト構成の意味は [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, System design] と [LINK: DOC-ARCHITECTURE-INTERNAL-BOUNDARIES, Internal boundaries] が承認し、LikeC4はその採用設計を可視化する実行可能な構造契約。
+- [LINK: DOC-VERIFICATION-ARCHITECTURE-ATLAS, Architecture Atlas] は、構造・信頼境界と運用トポロジーをLikeC4モデルからネイティブに表示する。画面・状態遷移、配備・更新手順、ER図は領域設計書のMermaidから表示する。
 - **Threagile**は攻撃者、脅威、資産分類、リスクと対策・残留リスクを所有する。LikeC4の全構造を別の独立した真実として再記載しない。モデル間の対応は `EXT-*`/`REQ-AUTH-*` 等で参照し、データフロー/境界の相違をCI/レビューの逸脱として記録する。
 - C4図/脅威図は「この通信・リスクが設計上存在する」を示す。実環境にEdge ruleが適用されている証明や攻撃不能の証明にはならない。
 - 初期のリスク対象: OAuthとMCPのissuer/resource mismatch、BOLA、セッション混同、share-readerの拡張、偽のDB receipt、Cloudflare/Workers・Tailscale管理プレーン交錯、backup鍵/復元、公開Pagesの機密漏えい。
+<<<
 
-## k6性能・品質予算
+[[/SECTION]]
 
+[[SECTION]]
+MID: 1023da2a4c290c9bb916f4e5bd859b3c
+UID: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE-k6性能品質予算
+TITLE: k6性能・品質予算
+
+[TEXT]
+MID: 53a8a583c7d6b8badfe86e886a6e110c
+STATEMENT: >>>
 数値目標をコードやベンチの観測値から逆算して**自動的に採用済み要求にしない**。UX/性能正本で承認された予算がある場合だけthresholdを置く。未決定の値は提案としてレビューし、勝手に有効なgateへ追加しない。
 
 | シナリオ | 観測する指標 | 再現条件 |
@@ -87,15 +151,24 @@ HTTP契約の検証は既存Verifyの `unit-http-contract` と `typecheck-http-c
 | 配備/初期化 | OCI startup、ready、drain、migration確認 | Core/Full、アプリ/DBバージョン固定 |
 
 PRでは小さな回帰チェック、長時間/高負荷は適切に隔離した条件下で実行。書込を含む試験は使い捨てDBと無権限ネットワークに限定する。
+<<<
 
-## StrictDoc全面移行の受入
+[[/SECTION]]
 
-[採用済み全面移行方針](../architecture/SPECIFICATION-TOOLCHAIN.md#strictdocによる設計正本の全面移行採用済み方針) の移行受入を以下に定める。既存G0/G7、TRC、CI/CD・Pagesの受入を置換・緩和しない。Phase 0の試行と全量移行完了を区別する。現行のMarkdown/Grammarは領域受入までは有効である。
+[[SECTION]]
+MID: d09bc7a2947b5f3e0876708e41165e32
+UID: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE-strictdoc全面移行の受入
+TITLE: StrictDoc全面移行の受入
+
+[TEXT]
+MID: 768b77ba6eed590d08eb616cfe562a0b
+STATEMENT: >>>
+[LINK: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-strictdocによる設計正本の全面移行採用済み方針, 採用済み全面移行方針] の移行受入を以下に定める。既存G0/G7、TRC、CI/CD・Pagesの受入を置換・緩和しない。Phase 0の試行と全量移行完了を区別する。現行のMarkdown/Grammarは領域受入までは有効である。
 
 | ゲート | 必須証明 |
 | --- | --- |
 | SDOC-01 対象・所有権 | 移行時のmainのGit treeから全設計候補を棚卸し。規範、提案、runbook、歴史、索引、専門モデル/ツール入力、対象外を分類し、旧正本→新正本と消費先・参照の対応を記録する。全規範的設計の欠落、未分類、二重編集可能な正本を残さない。 |
-| SDOC-02 公式機能・代表試行 | 固定版と採用候補版の公式仕様・互換性を照合。要求台帳と異種設計（配備/CLI、認可表、UX表・状態図、DB詳細、CI、Impeccable入力）でnative SDoc・共有Grammar・標準HTML/JSONを実際に生成し、表、コード、図、本文、日本語、検索、リンク、relation、外部モデル参照を確認する。欠落や回避のための独自拡張が必要なら代替製品を比較し採用判断を行う。全量移行前に必須機能を証明する。 |
+| SDOC-02 公式機能・代表試行 | 固定版と採用候補版の公式仕様・互換性を照合。要求台帳と異種設計（配備/CLI、認可表、UX表・状態図、DB詳細、CI、Impeccable入力）でnative SDoc・共有Grammar・標準HTML/JSONを実際に生成し、表、コード、図、本文、日本語本文・UID・英数字の検索、検索結果から標準文書への遷移、リンク、relation、外部モデル参照を確認する。欠落や回避のための独自拡張が必要なら代替製品を比較し採用判断を行う。全量移行前に必須機能を証明する。 |
 | SDOC-03 意味・識別子保存 | 旧正本と新正本を領域ごとに照合し、要求・正常異常・禁止・例外・採用理由・未採用状態の意味を保存。移行前の全REQ/OBL/TEST UID、MID、relations、既存の検証義務・source識別子・適用状態を照合し、欠落、重複、無断の新規要件・状態昇格を拒否する。新IDは必要な追跡対象に限定し、基準IDを特定時点の件数で固定しない。 |
 | SDOC-04 消費先 | StrictDoc config、旧Markdown正規表現・単一台帳を前提とする検証、Architecture AtlasのMermaid抽出、UX Simulatorの表/遷移抽出、Pagesの固定HTMLパス/anchor、外部ツール（Impeccable等）、CTLの互換性・Release入力、CI/証明のpath参照を棚卸しして実際の消費経路を切り替える。専門モデルまたは標準の構造化出力を優先し、表示用の表の再解析や新たな第二の状態/判定実装を作らない。承認・観測・認可・実行の責務は変更しない。 |
 | SDOC-05 CI・証拠 | 既存single machine authority・requirements-trace・input closure・exact-source Certificationを使用し、.sdoc/.sgra、外部モデル・asset・設定・lock・生成器と実際の依存を登録する。追加・削除・移動・共通Grammarの変更を漏らさず、旧Markdown基準の固定パス/拡張子に起因する未実行や過剰実行を防ぐ。純粋な説明変更を不要な製品OCI/E2Eの理由にしない。実装消費契約の変更には既存必須検証を適用する。新しい常設パイプライン・認定系統を作らない。従来と比較した実測をPRに記録し、無根拠なCI性能悪化を許容しない。 |
@@ -103,13 +176,22 @@ PRでは小さな回帰チェック、長時間/高負荷は適切に隔離し�
 | SDOC-07 撤去 | 領域受入と同時に旧編集正本を廃止し、入口/必須外部形式は参照または必要な派生物とする。不要になったMarkdown抽出・同期・一時変換コードを撤去。HTML/JSON/図など派生物は手編集せず原則Git管理しない。追加した型・属性・依存は必要性と削減した管理対象を説明する。 |
 
 受入証拠は対象のsource SHAと結合してPR・既存CI artifactに記録する。未実施、部分成功、未知、未公開を成功と扱わない。設計決定の採用だけでいずれのゲートもPASSにしない。StrictDocは要求・文書の管理基盤であり、実製品・本番運用の認定は既存の各責務に残る。
+<<<
 
-## GitHub Pagesへの公開
+[[/SECTION]]
 
+[[SECTION]]
+MID: 82a8e7edafdb5bb3865724006aa5d31d
+UID: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE-github-pagesへの公開
+TITLE: GitHub Pagesへの公開
+
+[TEXT]
+MID: 5bb3bc7edcb043dbe172514a623a7575
+STATEMENT: >>>
 `.github/workflows/repository-audit.yml` が唯一の Pages 公開者である。
 ポータルは `/`、ソース監査の索引は `/audit/` に配置する。
 別の Pages 公開者や VM、Cloudflare のシークレットは追加しない。
-[Pages inventory](PAGES-FUNCTION-INVENTORY.md) ／ [Architecture Atlas](ARCHITECTURE-ATLAS.md) ／ [Development Pages UX design](../design/DEVELOPMENT-PAGES-UX.md)
+[LINK: DOC-VERIFICATION-PAGES-FUNCTION-INVENTORY, Pages inventory] ／ [LINK: DOC-VERIFICATION-ARCHITECTURE-ATLAS, Architecture Atlas] ／ [LINK: DOC-DESIGN-DEVELOPMENT-PAGES-UX, Development Pages UX design]
 
 - Repository Audit PagesはStrictDoc、Scalar、LikeC4の公開用生成物を組み立てる。
 - Scalarリファレンスはサイト相対 `/api/` に置く。
@@ -119,9 +201,18 @@ PRでは小さな回帰チェック、長時間/高負荷は適切に隔離し�
 - 本番APIに直接通信する `Try it out` や認証セッション/保護されたschemaの自動露出はしない。Scalarで許可するのは公開可能な静的契約表示。API実行は隔離した検証環境だけ。
 - 生成manifestには各結果のsource SHA、generator/依存lock identity、入力契約ファイル、使用したOpenAPI/schemaのdigest、生成時点、private/public判定を保持する。
 - PR previewでは公開せず従来のartifactへ格納し、mainの正規公開にのみ昇格する。GitHub Pages自体がCodexiaの本番Workers UI/Owner consoleになることはない。
+<<<
 
-## 証拠の取り扱いと完成判定
+[[/SECTION]]
 
+[[SECTION]]
+MID: 1dc6432b658d758db6781f8321668a8a
+UID: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE-証拠の取り扱いと完成判定
+TITLE: 証拠の取り扱いと完成判定
+
+[TEXT]
+MID: 65a19a828f328c32c30979e3684311f3
+STATEMENT: >>>
 TEST nodeは`Execution scope`に`TRACE_NODE`、`TRACE_BROWSER`、`PRODUCT`を宣言する。
 テストのネイティブ登録には文字列リテラルの`[TEST-ID]` prefixを置き、AST discoveryがTEST-ID、source path、行、表示名を抽出する。
 一つのケースを複数の独立TEST-IDが参照するときは、異なるID prefixを登録タイトルの先頭に連続して置き、それぞれを同じ登録へ対応させる。
@@ -140,8 +231,20 @@ trace taskは従来の固定補助suiteも実行する。
 - Node `node:test`、Playwright、Schemathesis、pgTAP、conformance、k6の出力は、**実際の情報が含まれる形式で**保持する。report形式に合わせて成功結果をでっち上げない。
 - StrictDocへの実行証拠リンクはexternal CI run/artifactを参照し、CI artifactのないソースコード参照をTEST PASSと誤認しない。
 - 初期導入PRでは、mockデータ・登録済み全要求の関係と対応、壊れたID/route/schemaの故障注入を合否の基礎にする。範囲外の本番API、private repository data、秘密値を含めない。
+<<<
 
-## 実行結果の参照
+[[/SECTION]]
 
+[[SECTION]]
+MID: 7e69c3bcf63b388e0a1ac4c20014af47
+UID: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE-実行結果の参照
+TITLE: 実行結果の参照
+
+[TEXT]
+MID: d88d50d2653834bbbcd160920fbe8f17
+STATEMENT: >>>
 受入結果は、該当するソースSHAのCI run、検査レポート、公開manifestから参照する。
 公開済みの静的契約と、実DB、API、ブラウザー、稼働環境での適合は、各検証が実行された範囲で判定する。
+<<<
+
+[[/SECTION]]

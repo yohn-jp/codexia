@@ -1,20 +1,20 @@
 # Codexia
 
-**Architecture authority:** The [canonical system design](docs/architecture/SYSTEM-DESIGN.md) and [documentation governance](docs/architecture/DOCUMENTATION-AUTHORITY.md) govern changes; the [PostgreSQL data model](docs/architecture/DATA-MODEL.md) defines persistent domain ownership. Code and CI provide conformance evidence, not a competing specification. The [documentation index](docs/README.md) includes user, owner-security, first-deployment and update state diagrams.
+**Architecture authority:** The [canonical system design](docs/architecture/SYSTEM-DESIGN.sdoc) and [documentation governance](docs/architecture/DOCUMENTATION-AUTHORITY.sdoc) govern changes; the [PostgreSQL data model](docs/architecture/DATA-MODEL.sdoc) defines persistent domain ownership. Code and CI provide conformance evidence, not a competing specification. The [documentation index](docs/README.md) includes user, owner-security, first-deployment and update state diagrams.
 
-A modular writing workspace with PostgreSQL as the sole authority for projects, hierarchy, Markdown documents, immutable revisions, Knowledge, Evidence and Text Anchors. **The currently supported authoring product is Windows Chromium (Chrome/Edge) Desktop React Web.** Native SwiftUI iOS remains an accepted target, but development and automatic Xcode validation are paused; implementation and physical-device acceptance are incomplete, so it is not currently a supported authoring deliverable. Desktop and iOS do not share UI components or client-side state; Core/API/Revision semantics are shared. Mobile Web/PWA and Capacitor WebView authoring have been retired, including the `/mobile/` route (see [iOS architecture](docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md)). Other author Web OS/browser combinations are outside the supported product boundary; this does not impose user-agent blocking or change public-reader/auth obligations. See [system design](docs/architecture/SYSTEM-DESIGN.md) and [E2E execution](docs/verification/E2E-EXECUTION.md). The Core profile runs without optional analysis or model dependencies; the full profile composes nine independent add-ons.
+A modular writing workspace with PostgreSQL as the sole authority for projects, hierarchy, Markdown documents, immutable revisions, Knowledge, Evidence and Text Anchors. **The currently supported authoring product is Windows Chromium (Chrome/Edge) Desktop React Web.** Native SwiftUI iOS remains an accepted target, but development and automatic Xcode validation are paused; implementation and physical-device acceptance are incomplete, so it is not currently a supported authoring deliverable. Desktop and iOS do not share UI components or client-side state; Core/API/Revision semantics are shared. Mobile Web/PWA and Capacitor WebView authoring have been retired, including the `/mobile/` route (see [iOS architecture](docs/architecture/IOS-SWIFTUI-ARCHITECTURE.sdoc)). Other author Web OS/browser combinations are outside the supported product boundary; this does not impose user-agent blocking or change public-reader/auth obligations. See [system design](docs/architecture/SYSTEM-DESIGN.sdoc) and [E2E execution](docs/verification/E2E-EXECUTION.sdoc). The Core profile runs without optional analysis or model dependencies; the full profile composes nine independent add-ons.
 
 Edit with revision checks, compare conflicts without losing drafts, restore earlier revisions, review module proposals, and export from consistent database snapshots. One server serves one trusted owner. Registered MCP clients operate within their assigned projects and OAuth scopes.
 
-[Documentation](docs/README.md) covers authoring, architecture, deployment and verification. The [external Plugin Platform proposal](docs/architecture/PLUGIN-PLATFORM.md) specifies a separate isolation and distribution design; built-in modules execute as trusted application code.
+[Documentation](docs/README.md) covers authoring, architecture, deployment and verification. The [external Plugin Platform proposal](docs/architecture/PLUGIN-PLATFORM.sdoc) specifies a separate isolation and distribution design; built-in modules execute as trusted application code.
 
-The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) contains broader design proposals; [Core architecture](docs/architecture/CORE.md) defines the supported persistence contract.
+The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.sdoc) contains broader design proposals; [Core architecture](docs/architecture/CORE.sdoc) defines the supported persistence contract.
 
 ## Run locally
 
-For isolated Codex Cloud tasks, follow the [Cloud development environment](docs/verification/CLOUD-DEVELOPMENT.md).
+For isolated Codex Cloud tasks, follow the [Cloud development environment](docs/verification/CLOUD-DEVELOPMENT.sdoc).
 
-Use the [local UI preview](docs/verification/UI-PREVIEW.md) to try the currently implemented Desktop React Web. The preview does not provide the paused native iOS target. It runs a disposable PostgreSQL container and a local Better Auth issuer. Install Node.js and pnpm versions satisfying [`package.json`](package.json), and start Docker or Podman.
+Use the [local UI preview](docs/verification/UI-PREVIEW.sdoc) to try the currently implemented Desktop React Web. The preview does not provide the paused native iOS target. It runs a disposable PostgreSQL container and a local Better Auth issuer. Install Node.js and pnpm versions satisfying [`package.json`](package.json), and start Docker or Podman.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -23,11 +23,11 @@ pnpm ui:preview --no-capture
 
 Open `http://127.0.0.1:4173/desktop/` and choose OAuth sign-in with the local preview identity provider. Stopping the preview removes its database.
 
-For a persistent standalone installation, follow [Better Auth provisioning and owner enrollment](deploy/ansible/AUTH-RUNTIME.md) and [protected first activation](docs/deployment/PUSH-DEPLOYMENT.md#first-application-activation). The API requires migrated PostgreSQL storage and an enrolled owner with registered OAuth clients. [.env.example](.env.example) lists runtime settings. The process reads its environment directly.
+For a persistent standalone installation, follow [Better Auth provisioning and owner enrollment](docs/deployment/ANSIBLE-AUTH-RUNTIME.sdoc) and [protected first activation](https://yohn-jp.github.io/codexia/requirements/html/docs/deployment/PUSH-DEPLOYMENT.sdoc.html#DOC-DEPLOYMENT-PUSH-DEPLOYMENT-first-application-activation). The API requires migrated PostgreSQL storage and an enrolled owner with registered OAuth clients. [.env.example](.env.example) lists runtime settings. The process reads its environment directly.
 
-Use the work panel to export a portable `codexia-work/v1` JSON snapshot or import one as a new project. This preserves current manuscripts, hierarchy, Knowledge and supported Evidence without turning legacy source conversion into an application feature. Historical revisions and browser drafts are not part of the JSON; see [portable works](docs/authoring-portable.md).
+Use the work panel to export a portable `codexia-work/v1` JSON snapshot or import one as a new project. This preserves current manuscripts, hierarchy, Knowledge and supported Evidence without turning legacy source conversion into an application feature. Historical revisions and browser drafts are not part of the JSON; see [portable works](docs/authoring-portable.sdoc).
 
-Create projects and documents in the workspace. Local drafts live in IndexedDB until the server confirms a database revision. Stale saves preserve the draft and expose conflict recovery. Browser recovery belongs to the same browser/origin; clearing its storage removes that recovery copy. Back up PostgreSQL and private host history separately, following [deployment](docs/deployment/README.md).
+Create projects and documents in the workspace. Local drafts live in IndexedDB until the server confirms a database revision. Stale saves preserve the draft and expose conflict recovery. Browser recovery belongs to the same browser/origin; clearing its storage removes that recovery copy. Back up PostgreSQL and private host history separately, following [deployment](docs/deployment/DEPLOYMENT-REFERENCE.sdoc).
 
 Writing, Research, and Review presets assemble independent Editor, Outline, Inspector, History, and Review panels. Use panel grips and dock targets, or the keyboard-accessible move controls, to split, tab, reorder, resize, show, and hide panels. **Save layout** stores the arrangement for the current author in this browser, separately from draft recovery and PostgreSQL. Invalid saved layouts fall back without erasing the prior setting until an explicit save.
 
@@ -39,11 +39,11 @@ For a local preview of the Full composition, pass `--profile full` to `pnpm ui:p
 
 The optional MCP module exposes Streamable HTTP at `/mcp`. Configure a registered client to use `https://<application-origin>/mcp`. A client assigned several projects selects one with `/mcp?projectId=<assigned-id>` and sends every MCP request to that URL. Public OAuth resource metadata is available at `/.well-known/oauth-protected-resource` and describes how the client connects to Better Auth.
 
-For local stdio, run `codexia-mcp` with an OAuth access token already issued to the registered MCP client in `CODEXIA_MCP_ACCESS_TOKEN`. Both transports enforce the same project assignments and `mcp:read`, `mcp:compute` and `mcp:propose` scopes. Applying proposals requires author approval. [MCP OAuth contract](docs/architecture/MCP-OAUTH.md)
+For local stdio, run `codexia-mcp` with an OAuth access token already issued to the registered MCP client in `CODEXIA_MCP_ACCESS_TOKEN`. Both transports enforce the same project assignments and `mcp:read`, `mcp:compute` and `mcp:propose` scopes. Applying proposals requires author approval. [MCP OAuth contract](docs/architecture/MCP-OAUTH.sdoc)
 
 ## Single OCI image
 
-The API requires a PostgreSQL database URL. The [OCI verification script](docs/verification/OCI.md) starts isolated PostgreSQL and Better Auth fixtures. For a persistent deployment, provision the auth database role, enroll the owner, register clients and [activate the reviewed image](docs/deployment/PUSH-DEPLOYMENT.md#first-application-activation).
+The API requires a PostgreSQL database URL. The [OCI verification script](docs/verification/OCI.sdoc) starts isolated PostgreSQL and Better Auth fixtures. For a persistent deployment, provision the auth database role, enroll the owner, register clients and [activate the reviewed image](https://yohn-jp.github.io/codexia/requirements/html/docs/deployment/PUSH-DEPLOYMENT.sdoc.html#DOC-DEPLOYMENT-PUSH-DEPLOYMENT-first-application-activation).
 
 ```sh
 podman build --format oci --build-arg PROFILE=core -t codexia:local .
@@ -85,6 +85,6 @@ pnpm build
 pnpm audit:core
 ```
 
-See [verification](docs/verification/README.md) for browser, OCI, MCP, model, recovery and deployment checks. `pnpm verify` runs the local composed checks; inputs and separate integration gates are documented there. Repository CI certifies the exact source before the [gated release workflow](docs/verification/OCI-RELEASE.md) may publish.
+See [verification](docs/verification/VERIFICATION-REFERENCE.sdoc) for browser, OCI, MCP, model, recovery and deployment checks. `pnpm verify` runs the local composed checks; inputs and separate integration gates are documented there. Repository CI certifies the exact source before the [gated release workflow](docs/verification/OCI-RELEASE.sdoc) may publish.
 
-See [Core architecture](docs/architecture/CORE.md), [Modules](docs/architecture/MODULES.md) and [Modular Workspace](docs/architecture/MODULAR-WORKSPACE.md) for ownership and safety contracts. Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [LICENSE](LICENSE) before contributing or distributing.
+See [Core architecture](docs/architecture/CORE.sdoc), [Modules](docs/architecture/MODULES.sdoc) and [Modular Workspace](docs/architecture/MODULAR-WORKSPACE.sdoc) for ownership and safety contracts. Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [LICENSE](LICENSE) before contributing or distributing.

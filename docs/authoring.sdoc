@@ -1,7 +1,22 @@
-# Authoring and recovery
+[DOCUMENT]
+MID: fc78805e5629d0f05a923fb11f63a87d
+TITLE: Authoring and recovery
+UID: DOC-AUTHORING
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
 
-## PostgreSQL projects
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
 
+[[SECTION]]
+MID: a4c57105758d1be32ee72628e2111224
+UID: DOC-AUTHORING-postgresql-projects
+TITLE: PostgreSQL projects
+
+[TEXT]
+MID: 7183151f54447fda5aa250fbd4189df0
+STATEMENT: >>>
 Codexia stores projects, hierarchy, manuscript revisions, Knowledge, Evidence and approved changes in PostgreSQL. The authoring API exposes this data through stable project/document identifiers; compatibility paths do not represent a Git checkout.
 
 The writing hierarchy uses the familiar YAML and Markdown shape:
@@ -14,9 +29,18 @@ manuscript/<volume>/<chapter>/<scene>.md
 ```
 
 Scene metadata names its Markdown document with `manuscript: manuscript/.../scene.md`. The authenticated author UI uses idempotent Persistence API creation and version-checked metadata changes for hierarchy entries; external-agent and module hierarchy changes use reviewed Core operations. Editing a manuscript preserves frontmatter, unsupported metadata and unrelated records.
+<<<
 
-## Draft and Saved
+[[/SECTION]]
 
+[[SECTION]]
+MID: 7f4ee6685a143e4cd59c78879de3e48b
+UID: DOC-AUTHORING-draft-and-saved
+TITLE: Draft and Saved
+
+[TEXT]
+MID: 3d0d1fdf5ceb27fb0a235dcef365441f
+STATEMENT: >>>
 | State | Meaning | Recovery boundary |
 | --- | --- | --- |
 | Draft | Text retained in the browser recovery journal | Same browser, author and origin |
@@ -25,29 +49,68 @@ Scene metadata names its Markdown document with `manuscript: manuscript/.../scen
 The browser reconciles its journal before presenting an editor as recovered and writable. Changing scenes, switching shells or refreshing must preserve recoverable input. A storage error is shown to the author; it is not reported as saved. Clearing browser storage removes that browser recovery copy. Keep pending work in the same browser and origin until it has been saved.
 
 Project versions and document revision IDs fence writes. When another operation has changed the selected base version, Codexia reports a conflict and keeps the author's text for review. It does not automatically merge manuscript prose or overwrite a newer revision.
+<<<
 
-## Desktop authoring
+[[/SECTION]]
 
+[[SECTION]]
+MID: 79eb8534a2360a256dbe306d8845d4c2
+UID: DOC-AUTHORING-desktop-authoring
+TITLE: Desktop authoring
+
+[TEXT]
+MID: 280f8ca40a0e23ef76f12f40df3d5320
+STATEMENT: >>>
 The current browser authoring UI is Desktop, served at `/desktop/`. The former Mobile Web shell and `/mobile/` route have been retired; they are not supported browser entry points. Native iOS is a separate accepted target, but development and automatic Xcode validation are paused and device acceptance is incomplete. This browser guide and the local preview do not describe or accept the iOS app.
 
 The editor supports Japanese manuscript typography, ruby and vertical reading. Finish an IME composition before navigation that would unmount the editor; blocked navigation keeps the active text.
+<<<
 
-## Workspace layouts
+[[/SECTION]]
 
+[[SECTION]]
+MID: e231dc5476f19ef070c5e554b9e23fae
+UID: DOC-AUTHORING-workspace-layouts
+TITLE: Workspace layouts
+
+[TEXT]
+MID: 21d283fa0d3180d6176c9ee66e4914b9
+STATEMENT: >>>
 Writing, Research and Review presets assemble independent Editor, Outline, Inspector, History and Review panels. Desktop panel grips and dock targets, plus keyboard-accessible move controls, support splits, tabs, ordering, resizing and visibility.
 
 **Save layout** stores the arrangement for the author in this browser, separately from draft recovery and PostgreSQL. A malformed layout falls back to a Core preset while preserving the stored value until an explicit replacement save. Missing optional contributions do not prevent other panels from working.
+<<<
 
-## Search and terminology
+[[/SECTION]]
 
+[[SECTION]]
+MID: d26027adfe11a0544fa4037caded7a40
+UID: DOC-AUTHORING-search-and-terminology
+TITLE: Search and terminology
+
+[TEXT]
+MID: 86914f71409c36402fa82e503c80e6af
+STATEMENT: >>>
 The optional Search/Terminology module indexes PostgreSQL document revisions. It supports lexical, exact, prefix and scoped queries. Dictionary changes use reviewable proposals.
 
 Term links are temporary editor and reading decorations; they do not insert links into Markdown. Use Ctrl/Command-click or Ctrl/Command-Enter on an editor term to navigate. Ambiguous aliases remain plain text and can be inspected in the terminology panel.
 
 Search can explicitly request NLP or Semantic capabilities. Ordinary lexical search does not load models. A Core-only build retains editing without the search module.
+<<<
 
-## Optional analysis
+[[/SECTION]]
 
+[[SECTION]]
+MID: eb9b53415f1d5adfe1347b6d8539d507
+UID: DOC-AUTHORING-optional-analysis
+TITLE: Optional analysis
+
+[TEXT]
+MID: 4cde8cb34fe456b1d47aa08f1cc80f66
+STATEMENT: >>>
 Module settings distinguish absent, disabled, enabled-idle and active modules. A missing package requires a compatible image; an enable toggle does not install executable code. Analysis results carry their source project/document revision. Applying a proposal requires author approval and revision validation.
 
 Assistant provider execution requires configuration and explicit consent for external transmission. Selecting no provider keeps local writing and review available. Host-owned usage and job history is stored separately from project data; preserve the deployment's history volume when replacing a container.
+<<<
+
+[[/SECTION]]

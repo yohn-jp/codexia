@@ -1,9 +1,28 @@
-# 要求→設計→実装→検証→証拠の双方向トレーサビリティ
+[DOCUMENT]
+MID: cf5ca8799fae37e7a193b1aa944a438a
+TITLE: 要求→設計→実装→検証→証拠の双方向トレーサビリティ
+UID: DOC-VERIFICATION-TRACEABILITY-REGISTER
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
 
-**種別: 追跡方式と生成結果の説明。** 要求の採否とIDは [Requirements](../requirements/README.md)、要求内容は [Requirement register](../requirements/REQUIREMENT-REGISTER.md) が唯一の編集正本である。この文書は別の要求台帳ではなく、生成レポートの読み方と観測範囲を記録する。適合状態はRequirement Registerの値を使い、実装コード、issue、過去の棚卸しから変更しない。
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
 
-## レコードの完全形
+[TEXT]
+MID: 4215250e01d71116ae64a46f5a215062
+STATEMENT: >>>
+**種別: 追跡方式と生成結果の説明。** 要求の採否とIDは [LINK: DOC-REQUIREMENTS-REQUIREMENTS-GOVERNANCE, Requirements]、要求内容は [LINK: DOC-REQUIREMENT-REGISTER, Requirement register] が唯一の編集正本である。この文書は別の要求台帳ではなく、生成レポートの読み方と観測範囲を記録する。適合状態はRequirement Registerの値を使い、実装コード、issue、過去の棚卸しから変更しない。
+<<<
 
+[[SECTION]]
+MID: 56a8db4cfd11c8769d3cf05d3f34834e
+UID: DOC-VERIFICATION-TRACEABILITY-REGISTER-レコードの完全形
+TITLE: レコードの完全形
+
+[TEXT]
+MID: e1e0e0e74cb501b0ce87094a33e1c8c9
+STATEMENT: >>>
 | フィールド | 必須内容 |
 | --- | --- |
 | Requirement / obligation | REQ-ID と個々の義務 O01/O02...。正常、拒否、競合、障害、回復、性能を独立に追跡 |
@@ -20,10 +39,19 @@
 REQ-OPS-003 は S3 互換ストレージへの転送と隔離復元、REQ-OPS-004 と REQ-OPS-005 はバックアップ管理 API と executor の部分導入を記録する。
 各要求の適合状態は要件台帳を参照する。
 バックアップの運用受入には、実 S3 での転送と読み戻し、および独立した復旧ホストでの復元の証拠が必要となる。
-[要件台帳](../requirements/REQUIREMENT-REGISTER.md) ／ [バックアップ管理の受入契約](../architecture/BACKUP-CONSOLE-CONTRACT.md)
+[LINK: DOC-REQUIREMENT-REGISTER, 要件台帳] ／ [LINK: DOC-ARCHITECTURE-BACKUP-CONSOLE-CONTRACT, バックアップ管理の受入契約]
+<<<
 
-## 現行 source の生成結果
+[[/SECTION]]
 
+[[SECTION]]
+MID: 35913555037ec96180f55f0f3f11b7cb
+UID: DOC-VERIFICATION-TRACEABILITY-REGISTER-現行-source-の生成結果
+TITLE: 現行 source の生成結果
+
+[TEXT]
+MID: 9c76aa3ee5a28083da60eb7209f8b59d
+STATEMENT: >>>
 公開 dashboard と同階層の `traceability.json` は、対象 SHA ごとに要求数、義務数、surface の逆引き、TEST-ID と検証結果を集計する。
 `UNMAPPED` は義務への対応が台帳に記録されていない状態を示す。
 `DEVIATION` は inventory または契約照合で明示された不一致を示す。
@@ -37,11 +65,20 @@ Requirement RegisterにはobligationとTEST-IDの関係を記録し、テスト�
 検証結果は G0〜G7 の項目ごとに、どの証拠を取得できたかで読む。
 StrictDoc の検査は G0 のうち UID・relation・出力再現性を扱う。
 G7 には未接続の実装面、未実行のテスト、証拠を得られていない義務を残す。
-その他のゲートは [仕様ツールの受入設計](SPECIFICATION-TOOLING-ACCEPTANCE.md) が要求する実行証拠を確認できた範囲で判定する。
+その他のゲートは [LINK: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE, 仕様ツールの受入設計] が要求する実行証拠を確認できた範囲で判定する。
+<<<
 
-## MCP v2 migration verification crosswalk
+[[/SECTION]]
 
-This plan-level crosswalk retains its recorded source/test associations as a migration reference. Its source snapshot and rows are not a current implementation inventory; use the generated traceability page and exact-source report for the current main state. `NOT_RUN` is not a pass. The accepted MCP requirements remain the conformance authorities; `MCPV-001..008` are verification-plan IDs from [MCP-V2-MIGRATION](../architecture/MCP-V2-MIGRATION.md), not product conformance statuses. Source locations and test case names below are trace candidates. `NOT_RUN` means no exact-source run/artifact was verified for this change. No MCPV item is marked PASS or VERIFIED here.
+[[SECTION]]
+MID: 661b53410712ed616e3fb64b3c899c64
+UID: DOC-VERIFICATION-TRACEABILITY-REGISTER-mcp-v2-migration-verification-crosswalk
+TITLE: MCP v2 migration verification crosswalk
+
+[TEXT]
+MID: 5490fcc8e37c292640aa45123d3ca10d
+STATEMENT: >>>
+This plan-level crosswalk retains its recorded source/test associations as a migration reference. Its source snapshot and rows are not a current implementation inventory; use the generated traceability page and exact-source report for the current main state. `NOT_RUN` is not a pass. The accepted MCP requirements remain the conformance authorities; `MCPV-001..008` are verification-plan IDs from [LINK: DOC-ARCHITECTURE-MCP-V2-MIGRATION, MCP-V2-MIGRATION], not product conformance statuses. Source locations and test case names below are trace candidates. `NOT_RUN` means no exact-source run/artifact was verified for this change. No MCPV item is marked PASS or VERIFIED here.
 
 MCP-specific source mapping was refreshed against integrated source `f4e574ec` (including the restored HTTP tests, worker cancellation and drain integration, and formatted API admission test). The repository requirement-trace gate checks deterministic UIDs/MIDs, source-path validity, each declared TEST-ID against a statically discovered native registration, its explicit execution scope and requirement parent, and reverse-surface mappings. Discovered line and title data are derived from source; they are not authored TEST-node relations. These checks do not replace protocol, Inspector, OAuth-client, PostgreSQL, or hosted exact-source evidence.
 
@@ -57,17 +94,35 @@ MCP-specific source mapping was refreshed against integrated source `f4e574ec` (
 | MCPV-008 | REQ-MCP-001, REQ-MCP-002 | registered MCP client over Better Auth and PostgreSQL (`TEST-MCPV-004-003`); external client interop per migration design | PARTIAL; the integration case uses the official SDK as the MCP client. Hosted client registration and real OAuth tool interactions require external client evidence; exact run NOT_RUN |
 
 `TEST-MCP-CORE-001-001` links the existing external Assistant admission/no-provider-call case to REQ-MCP-002; it is not a substitute for MCPV-002 protocol conformance. A TEST node identifies its scenario by TEST-ID and declares whether its execution scope is `TRACE_NODE`, `TRACE_BROWSER`, or `PRODUCT`. The matching source registration carries the literal TEST-ID prefix; discovery supplies its source path, line, and display title. The Better Auth integration case ties OAuth PKCE issuance and refresh to a real 2026 HTTP tool invocation through PostgreSQL. External client interoperability requires evidence from the selected products. Keep these mappings at MAPPED_UNVERIFIED/PARTIAL until the named cases are reviewed and exact-source evidence is captured.
+<<<
 
-## E2E追跡例 — 保存・競合・復旧
+[[/SECTION]]
 
+[[SECTION]]
+MID: 6119f32fff0e0556a025c4aa2d4d6a2b
+UID: DOC-VERIFICATION-TRACEABILITY-REGISTER-e2e追跡例--保存競合復旧
+TITLE: E2E追跡例 — 保存・競合・復旧
+
+[TEXT]
+MID: 2c9ada19ae08da20fee3b157c4dfa4e7
+STATEMENT: >>>
 1. REQ-DATA-002:O01（Revision不変）→ DATA-MODEL → 0001-initial.sql の document_revision と document_revision_immutable → Postgres実装 → UPDATE/DELETE拒否の実DBテスト → exact-sourceの結果。
 2. REQ-API-002:O01（競合時に偽成功を返さない）→ INTERACTION-CONTRACT / API-CONTRACT → PATCH /api/v1/persistence/projects/:p/documents/:d → persistence-routes.ts → postgres-store.ts → 409/元の原稿保全/receiptのAPI・ブラウザーE2E → 実行結果。
 3. REQ-UI-002:O01（保存範囲の正しい表示）→ SCREEN-CONTROL-CATALOG / INTERACTION-CONTRACT → journalとUI保存controller → API → DB receipt → 応答損失・追加編集・再読込・容量不足のブラウザー受入結果。
 
 **上記は必要な追跡経路の例であり、実行確認済みの証明ではない。** 途中で接続先が欠ければPARTIALである。
+<<<
 
-## 実装からの逆走査を必須にする
+[[/SECTION]]
 
+[[SECTION]]
+MID: 3625c88bc4c834fdcc72257b7cd80163
+UID: DOC-VERIFICATION-TRACEABILITY-REGISTER-実装からの逆走査を必須にする
+TITLE: 実装からの逆走査を必須にする
+
+[TEXT]
+MID: 9a052bcffba2642035f8bfc58fe35bc8
+STATEMENT: >>>
 | 走査元 | 仕様との対応付け対象 |
 | --- | --- |
 | packages/api/src/server.ts、persistence-routes.ts、Better Auth、各module HTTP contribution | 全 method+route、入力・出力DTO、拒否、エラー |
@@ -80,17 +135,35 @@ MCP-specific source mapping was refreshed against integrated source `f4e574ec` (
 | 全test、tests/e2e、tests/integration | どのobligationを何の期待値で証明するか |
 
 「対応要求なし」は正本への自動編入を意味しない。仕様外/旧設計残骸/内部補助/新規提案を区別し、ownerと理由を記録する。
+<<<
 
-## 自動検証の範囲と残件
+[[/SECTION]]
 
+[[SECTION]]
+MID: 692a4bf10f74e0952eb4f35fe9f88862
+UID: DOC-VERIFICATION-TRACEABILITY-REGISTER-自動検証の範囲と残件
+TITLE: 自動検証の範囲と残件
+
+[TEXT]
+MID: 9ca3cf86c19ba54b938bb4a02053fd1f
+STATEMENT: >>>
 - StrictDoc verifierはUID/MID、typed relation、source path、登録済みTEST-IDとネイティブ登録の対応を検査する。行・表示名はAST discoveryから導出する。dashboard publisherはcheckout内のdesign/source/test path欠落、StrictDoc output digest、source SHA一致を検査する。
 - reverse scanはAPI runtime route、MCP登録、DB宣言object、Desktop UI control、Native iOS view、Terraform resource、Ansible source、CI workflow definitionを採取する。bounded scan外の要素は未検出を不存在と見なさず、limitation gapとして提示する。
 - API Operation IDは生成Fastify contractから、CI workflow一覧は`.github/workflows`から抽出する。MCP effect、DB live catalog、Desktop runtime state、iOS device behavior、applied IaC、host convergenceとの一致はこの静的scan単独では検証しない。
 - `VERIFIED`は既存certifierが対象義務のexact-source evidenceを記録した場合のみ。ローカル成功、workflow定義、追加Markdown、source pathの存在では昇格しない。
+<<<
 
-## 生成された追跡結果
+[[/SECTION]]
 
-義務を追加・修正するときは [Requirement register](../requirements/REQUIREMENT-REGISTER.md) の StrictDoc node を編集する。
+[[SECTION]]
+MID: 44bd76650504a18916ea4025f60c4713
+UID: DOC-VERIFICATION-TRACEABILITY-REGISTER-生成された追跡結果
+TITLE: 生成された追跡結果
+
+[TEXT]
+MID: c130300395b9750aeaf5c68dd68afb99
+STATEMENT: >>>
+義務を追加・修正するときは [LINK: DOC-REQUIREMENT-REGISTER, Requirement register] の StrictDoc node を編集する。
 既存の `requirements-trace` はnodeの義務ID、設計・実装参照、surface identifier、TEST-IDを`trace-report.json`の`obligationTrace`に出力し、実装側から見つかった要素と義務の対応を`reverseTrace`に記録する。`caseExecutions`はAST discoveryで得た登録source path・行・表示名と実行観測をTEST-IDで結ぶ。`TRACE_NODE`と`TRACE_BROWSER`の実行対象source fileは発見した登録から選び、固定補助suiteも併せて実行する。`PRODUCT` suiteはtrace taskの実行対象に含めず、正規の製品検証taskによる証拠を待つ。未実行・skip・TODO・曖昧な対応をPASSに集約しない。両方向の表は同じ義務IDで照合でき、識別子が分からない要素や観測限界は生成結果のgapに残る。
 
 `caseExecutions` の結果は、そのテストケースが実際に実行されたことを示す。
@@ -100,3 +173,6 @@ Pages は、同一 SHA の Verify が認定した証拠 ZIP を既存の artifac
 製品側の各義務は、実装の識別子、必要な試験とその証明力、対応する環境と証拠が揃うまで、既存の適合状態を保つ。
 `/requirements/traceability/`は既存三projectionから同じsource SHAの静的HTML/JSONを作り、StrictDoc Matrix/Deep Trace/Coverage/HTML/JSONを直接開ける。Pages publisherの既存browser suiteは、検索、area/status/surface filter、双方向anchor、詳細開閉、mobile table scroll、LikeC4 provenanceをChromiumで確認する。
 公開PagesはStrictDocとtraceabilityのHTML/JSONを既存publisherから配布する。`NOT_RUN`のPRローカルreportをGitHub run証拠として扱わない。
+<<<
+
+[[/SECTION]]
