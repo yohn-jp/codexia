@@ -446,7 +446,7 @@ as_service rmdir -- "$db_verifier_bin"
 db_verifier_bin=
 
 # Mirror the production one-shot network admission against real rootless Podman.
-expected_networks=$(printf '%s\\n' 'codexia|bridge|false' 'codexia-data|bridge|true' | LC_ALL=C sort)
+expected_networks=$(printf '%s\n' 'codexia|bridge|false' 'codexia-data|bridge|true' | LC_ALL=C sort)
 observed_networks=$(podman network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' codexia codexia-data | LC_ALL=C sort)
 test "$observed_networks" = "$expected_networks"
 for volume in codexia-postgres codexia-data codexia-history; do
