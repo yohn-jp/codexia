@@ -433,6 +433,15 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
     add(`unit-${owner.id}`, `typecheck-${TYPECHECK_TARGETS.find(item => item.workspaces.includes(owner.id)).id}`,
       owner.id === 'app' ? 'test-types-app-e2e' : 'test-types-modules');
     if (testOnly) continue;
+    // The same declared input closure drives workspace preparation and proof
+    // fingerprints. Only add actual transitive consumers here; cross-boundary
+    // runtime, generator and browser obligations remain explicitly selected.
+    if (graph) {
+      try {
+        add(...graph.affectedTasks(file, VERIFICATION_TASKS.filter(task =>
+          (task.startsWith('unit-') && task !== 'unit-root') || task.startsWith('test-types-'))));
+      } catch { full = true; }
+    }
     if (owner.id === 'app') {
       add('build-core', 'audit-core', 'build-full', 'safety');
       browser(PROFILES);

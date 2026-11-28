@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { WORKSPACES, TYPECHECK_TARGETS } from './contract.mjs';
+import { CONFORMANCE_TASKS, TEST_TYPECHECK_SCOPES, TYPECHECK_TARGETS, WORKSPACES } from './contract.mjs';
 
 const sections = ['dependencies', 'optionalDependencies', 'devDependencies', 'peerDependencies'];
 
@@ -66,15 +66,40 @@ export function createWorkspaceGraph(manifests, workspaces = WORKSPACES) {
   function owner(file) {
     return workspaces.find(workspace => file.startsWith(workspace.path + '/'))?.id;
   }
-  function typecheckClosure(task) {
-    const roots = TYPECHECK_TARGETS.find(item => task === 'typecheck-' + item.id)?.workspaces;
-    return roots ? closure(roots) : null;
+  // One task-to-workspace mapping owns both dependency preparation and
+  // the declared part of impact / proof input closure. Non-workspace and
+  // implicit inputs are deliberately retained by the caller.
+  function taskRoots(task) {
+    if (task === 'coverage') return { roots: [], buildRoots: [] };
+    if (task === 'unit-root' || task === 'db-contract' || Object.hasOwn(CONFORMANCE_TASKS, task) || task === 'safety') {
+      return { roots: ['api'], buildRoots: ['api'] };
+    }
+    if (task.startsWith('unit-') && byId.has(task.slice(5))) return { roots: [task.slice(5)], buildRoots: [] };
+    const target = TYPECHECK_TARGETS.find(item => task === 'typecheck-' + item.id);
+    if (target) return { roots: target.workspaces, buildRoots: [] };
+    if (task === 'test-types-app-e2e') return { roots: ['app', 'api'], buildRoots: ['api'] };
+    const scope = task.startsWith('test-types-') ? task.slice(11) : null;
+    if (scope && TEST_TYPECHECK_SCOPES.includes(scope)) {
+      return { roots: workspaces.filter(workspace => workspace.path.startsWith(scope + '/')).map(workspace => workspace.id), buildRoots: [] };
+    }
+    return null;
   }
-  function affectedTypechecks(file) {
+  function taskWorkspaceClosure(task) {
+    const input = taskRoots(task);
+    return input ? closure(input.roots) : null;
+  }
+  function taskPrerequisites(task) {
+    const input = taskRoots(task);
+    if (!input) throw new Error('Unknown workspace preparation task: ' + task);
+    return [...new Set([...buildDependencies(input.roots), ...input.buildRoots])];
+  }
+  function affectedTasks(file, tasks) {
     const id = owner(file);
     if (!id) return [];
-    return TYPECHECK_TARGETS.filter(target => closure(target.workspaces).includes(id))
-      .map(target => 'typecheck-' + target.id);
+    return tasks.filter(task => taskWorkspaceClosure(task)?.includes(id));
   }
-  return { dependenciesOf, buildDependencies, closure, owner, typecheckClosure, affectedTypechecks };
+  function affectedTypechecks(file) {
+    return affectedTasks(file, TYPECHECK_TARGETS.map(target => 'typecheck-' + target.id));
+  }
+  return { dependenciesOf, buildDependencies, closure, owner, taskWorkspaceClosure, taskPrerequisites, affectedTasks, affectedTypechecks };
 }

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { discoverWorkspacePaths, trackedHttpOutputs } from '../evidence/coverage-inputs.mjs';
 import { runDependencyBuilds } from './parallel.mjs';
 import { createWorkspaceGraph } from '../impact/workspace-graph.mjs';
-import { CONFORMANCE_TASKS, TEST_TYPECHECK_SCOPES, TYPECHECK_TARGETS, UNIT_TARGETS, WORKSPACES } from '../impact/contract.mjs';
+import { TEST_TYPECHECK_SCOPES, TYPECHECK_TARGETS, UNIT_TARGETS, WORKSPACES } from '../impact/contract.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const generatedDirectoryNames = new Set(['.git', '.next', '.turbo', 'build', 'coverage', 'dist', 'node_modules', 'out', 'target']);
@@ -19,7 +19,7 @@ for (const workspace of WORKSPACES) {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   packageManifests.set(workspace.id, manifest);
 }
-const { dependenciesOf, buildDependencies } = createWorkspaceGraph(packageManifests);
+const { dependenciesOf, taskPrerequisites } = createWorkspaceGraph(packageManifests);
 
 function fail(message) {
   throw new Error(message);
@@ -133,19 +133,9 @@ function typecheckWorkspace() {
 }
 
 function prerequisiteIds(task) {
-  if (task === 'coverage') return [];
-  if (task === 'db-contract' || Object.hasOwn(CONFORMANCE_TASKS, task)) return [...buildDependencies(['api']), 'api'];
-  if (task.startsWith('unit-')) {
-    const id = getUnitTarget(task.slice(5)).id;
-    return id === 'root' ? [...buildDependencies(['api']), 'api'] : buildDependencies([id]);
-  }
-  if (task === 'safety' || task === 'test-types-app-e2e') {
-    if (rootManifest.devDependencies?.['@codexia/api'] !== 'workspace:*') fail('API workspace dependency is required');
-    return [...buildDependencies(['api']), 'api'];
-  }
-  if (task.startsWith('typecheck-')) return buildDependencies(typecheckWorkspaceIds(task.slice(10)));
-  if (task.startsWith('test-types-')) return buildDependencies(testTypecheckWorkspaceIds(task.slice(11)));
-  fail('Unknown type task ' + task);
+  if ((task === 'safety' || task === 'test-types-app-e2e') &&
+      rootManifest.devDependencies?.['@codexia/api'] !== 'workspace:*') fail('API workspace dependency is required');
+  return taskPrerequisites(task);
 }
 
 async function prepareSelectedGroup(filename) {

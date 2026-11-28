@@ -302,7 +302,7 @@ export function captureTaskInputSource({ root, sha, runtime }) {
     // now: scripts and raw cross-package imports may have undeclared inputs.
     let workspaceInputs = null;
     try {
-      const ids = graph?.typecheckClosure(task);
+      const ids = graph?.taskWorkspaceClosure(task);
       if (ids) {
         const owners = new Set(ids);
         workspaceInputs = { ids, inputs: entries(executable.filter(({ file }) => owners.has(graph.owner(file)))) };
