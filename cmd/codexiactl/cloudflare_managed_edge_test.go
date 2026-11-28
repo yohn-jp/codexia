@@ -15,7 +15,7 @@ func managedEdgeFixture(t *testing.T) (managedEdgeSpec, managedEdgeInventory) {
 	id := func(n int) string { return fmt.Sprintf("10000000-0000-4000-8000-%012d", n) }
 	spec := managedEdgeSpec{
 		Repository: githubTarget{Owner: "test-org", OwnerID: 1, RepoID: 2, InstallationID: 3},
-		Host: "codexia.example.com", ManagementHost: "ssh.example.com",
+		Host:       "codexia.example.com", ManagementHost: "ssh.example.com",
 		AccountID: strings.Repeat("a", 32), ZoneID: strings.Repeat("b", 32),
 		TeamName: "test-team", AuthorPolicyID: id(1), ProbeTokenID: id(2),
 		AllowedIDPs: []string{id(3)}, SSHServiceTokenIDs: []string{id(4), id(5)},
@@ -126,5 +126,39 @@ func TestManagedEdgeRequiresApprovalAndObservedConvergence(t *testing.T) {
 	}
 	if _, err := reconcileManagedEdge(context.Background(), api, spec, func([]string) error { return nil }, guard); err == nil || api.writes != 1 {
 		t.Fatal("unobserved mutation was retried or accepted")
+	}
+}
+
+func TestManagedEdgeRefusesChangedApprovedTarget(t *testing.T) {
+	spec, state := managedEdgeFixture(t)
+	state.Tunnels = []managedEdgeTunnel{{ID: "10000000-0000-4000-8000-000000000010", Name: cloudflareTunnel, AccountTag: spec.AccountID, ConfigSrc: "cloudflare"}}
+	api := &managedEdgeTestAPI{state: state}
+	// DNS still needs to be created under the same operation names, but the
+	// tunnel ID in its body changes while the operator is approving the plan.
+	_, err := reconcileManagedEdge(context.Background(), api, spec, func([]string) error {
+		api.state.Tunnels[0].ID = "10000000-0000-4000-8000-000000000011"
+		return nil
+	}, func(context.Context) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "plan changed") || api.writes != 0 {
+		t.Fatalf("changed target was not refused: err=%v writes=%d", err, api.writes)
+	}
+}
+
+func TestManagedEdgeRequiresExplicitNeverDeployedWorker(t *testing.T) {
+	spec, state := managedEdgeFixture(t)
+	off := false
+	w := managedEdgeWorker{ID: "canonical-worker", Name: cloudflareWorker}
+	w.Subdomain.Enabled, w.Subdomain.PreviewsEnabled = &off, &off
+	for _, deployedOn := range []json.RawMessage{nil, json.RawMessage(`"2026-11-28T00:00:00Z"`), json.RawMessage(`""`)} {
+		w.DeployedOn = deployedOn
+		state.Workers = []managedEdgeWorker{w}
+		if _, err := planManagedEdge(spec, state); err == nil || !strings.Contains(err.Error(), "without release admission") {
+			t.Fatalf("unproven empty Worker accepted: deployed_on=%s err=%v", deployedOn, err)
+		}
+	}
+	w.DeployedOn = json.RawMessage(`null`)
+	state.Workers = []managedEdgeWorker{w}
+	if _, err := planManagedEdge(spec, state); err != nil {
+		t.Fatalf("explicit never-deployed Worker refused: %v", err)
 	}
 }
