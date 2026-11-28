@@ -1502,7 +1502,7 @@ preparedAuthorTest("a project containing only root scenes can export its full te
   for (const scene of [one, two]) expect(text).toContain(scene.revision.markdown.trim());
 });
 
-test("Desktop publishing preserves proposal, scope, expiration, reader isolation, and revocation", async ({ page, browser, authorizeAuthor }) => {
+test("Desktop publishing preserves proposal, scope, expiration, reader isolation, and revocation", async ({ page, browser, request, authorizeAuthor }) => {
   test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
   const author = await authorizeAuthor("desktop");
   const origin = new URL(page.url()).origin;
@@ -1530,15 +1530,6 @@ test("Desktop publishing preserves proposal, scope, expiration, reader isolation
   const otherChapterScene = await createDocument({ kind: "scene", title: "別の節", orderKey: "b", markdown: "ANOTHER CHAPTER BODY\n", parentId: chapter.document.id });
   const rootScene = await createDocument({ kind: "scene", title: "同じタイトル", orderKey: "a", markdown: "ROOT-ONLY BODY\n", parentId: null });
   await createDocument({ kind: "note", title: "PRIVATE NOTE", orderKey: "b", markdown: "PRIVATE NOTE BODY\n", parentId: null });
-  await authorizeAuthor("desktop", page, { path: `/desktop/projects/${projectId}/scenes/${chapterScene.document.id}` });
-  await expect(editor(page)).toBeVisible();
-
-  const menu = page.locator(".st-workspace-panel-menu");
-  await menu.locator("summary").click();
-  await menu.getByRole("button", { name: "読み取り専用共有リンクを表示", exact: true }).click();
-  const panel = page.locator('[data-workspace-panel="module:publishing.share-links"]');
-  const scope = panel.getByRole("combobox", { name: "範囲", exact: true });
-  const target = panel.getByRole("combobox", { name: "対象", exact: true });
   type ShareProposal = { proposalId: string; changeSet: Pick<ChangeSet, "id" | "projectId"> };
   const shareChangeSetPath = (id: string) =>
     `${origin}${rootPath}/${projectId}/changesets/${encodeURIComponent(id)}`;
@@ -1567,6 +1558,31 @@ test("Desktop publishing preserves proposal, scope, expiration, reader isolation
     expect(applied.status(), await applied.text()).toBe(200);
     expect(await applied.json()).toMatchObject({ changeSet: { id: changeSet.id, projectId, status: "applied" } });
   };
+  // Apply and read the expiring grant before proposing another revision of share-grants.
+  const shortExpiryResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.create`, {
+    method: "POST",
+    data: { input: { kind: "scene", id: rootScene.document.id, label: "短時間リンク", expiresInHours: 8 / 3600 } },
+  });
+  expect(shortExpiryResponse.ok(), await shortExpiryResponse.text()).toBe(true);
+  const shortExpiryAction = await shortExpiryResponse.json() as {
+    data: ShareProposal & { token: string; share: { id: string; expiresAt: string } };
+  };
+  await approveAndApply(shortExpiryAction.data);
+  const shortExpiryUrl = new URL(`/r/publishing/${projectId}/${shortExpiryAction.data.token}`, publicReaderOrigin.origin);
+  const shortExpiryBase = `${origin}/api/public/projects/${projectId}/modules/publishing/share/${encodeURIComponent(shortExpiryAction.data.token)}`;
+  const liveGrant = await request.get(shortExpiryBase);
+  expect(liveGrant.status()).toBe(200);
+  expect(await liveGrant.json()).toMatchObject({ rootScenes: [{ id: rootScene.document.id }] });
+
+  await authorizeAuthor("desktop", page, { path: `/desktop/projects/${projectId}/scenes/${chapterScene.document.id}` });
+  await expect(editor(page)).toBeVisible();
+
+  const menu = page.locator(".st-workspace-panel-menu");
+  await menu.locator("summary").click();
+  await menu.getByRole("button", { name: "読み取り専用共有リンクを表示", exact: true }).click();
+  const panel = page.locator('[data-workspace-panel="module:publishing.share-links"]');
+  const scope = panel.getByRole("combobox", { name: "範囲", exact: true });
+  const target = panel.getByRole("combobox", { name: "対象", exact: true });
   await scope.selectOption("volume");
   await expect(target).toHaveValue(volume.document.id);
   await scope.selectOption("chapter");
@@ -1643,30 +1659,6 @@ test("Desktop publishing preserves proposal, scope, expiration, reader isolation
     await expect(readerPage.getByText("ROOT-ONLY BODY")).toBeVisible();
     await expect(readerPage.getByText("CHAPTER-ONLY BODY")).toHaveCount(0);
 
-    const shortExpiryResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.create`, {
-      method: "POST",
-      data: { input: { kind: "scene", id: rootScene.document.id, label: "短時間リンク", expiresInHours: 0.005 } },
-    });
-    expect(shortExpiryResponse.ok(), await shortExpiryResponse.text()).toBe(true);
-    const shortExpiryAction = await shortExpiryResponse.json() as {
-      data: ShareProposal & { token: string; share: { id: string; expiresAt: string } };
-    };
-    await approveAndApply(shortExpiryAction.data);
-    const shortExpiryUrl = new URL(`/r/publishing/${projectId}/${shortExpiryAction.data.token}`, publicReaderOrigin.origin);
-    const shortExpiryBase = `${origin}/api/public/projects/${projectId}/modules/publishing/share/${encodeURIComponent(shortExpiryAction.data.token)}`;
-    expect((await readerContext.request.get(shortExpiryBase)).ok()).toBe(true);
-    await expect
-      .poll(async () => (await readerContext.request.get(shortExpiryBase)).status(), { timeout: 30_000 })
-      .toBe(404);
-    await readerPage.goto(shortExpiryUrl.toString());
-    await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
-    const expiredListResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.list`, {
-      method: "POST", data: { input: {} },
-    });
-    expect(expiredListResponse.ok(), await expiredListResponse.text()).toBe(true);
-    const expiredList = await expiredListResponse.json() as { data: { shares: Array<{ id: string; active: boolean }> } };
-    expect(expiredList.data.shares.find((share) => share.id === shortExpiryAction.data.share.id)?.active).toBe(false);
-
     const revokeResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.revoke`, {
       method: "POST", data: { input: { id: actionBody.data.share.id } },
     });
@@ -1678,14 +1670,25 @@ test("Desktop publishing preserves proposal, scope, expiration, reader isolation
     });
     await readerPage.goto(issuedUrl.toString());
     await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
-    const revokedListResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.list`, {
+
+    await expect
+      .poll(async () => (await readerContext.request.get(shortExpiryBase)).status(), { timeout: 30_000 })
+      .toBe(404);
+    await readerPage.goto(shortExpiryUrl.toString());
+    await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
+
+    const listResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.list`, {
       method: "POST", data: { input: {} },
     });
-    expect(revokedListResponse.ok(), await revokedListResponse.text()).toBe(true);
-    const revokedList = await revokedListResponse.json() as { data: { shares: Array<{ id: string; active: boolean; revokedAt?: string }> } };
-    const revokedShare = revokedList.data.shares.find((share) => share.id === actionBody.data.share.id);
+    expect(listResponse.ok(), await listResponse.text()).toBe(true);
+    const list = await listResponse.json() as { data: { shares: Array<{ id: string; active: boolean; expiresAt: string; revokedAt?: string }> } };
+    const revokedShare = list.data.shares.find((share) => share.id === actionBody.data.share.id);
     expect(revokedShare?.active).toBe(false);
     expect(revokedShare?.revokedAt).toBeTruthy();
+    const expiredShare = list.data.shares.find((share) => share.id === shortExpiryAction.data.share.id);
+    expect(expiredShare).toMatchObject({ active: false, expiresAt: shortExpiryAction.data.share.expiresAt });
+    expect(expiredShare?.revokedAt).toBeUndefined();
+    expect(Date.parse(shortExpiryAction.data.share.expiresAt)).toBeLessThanOrEqual(Date.now());
   } finally {
     await readerContext.close();
   }
