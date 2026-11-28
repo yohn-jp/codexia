@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -264,5 +268,133 @@ func TestManagedEdgeServiceAuthMatchesRepositoryPurposeAndEnvironment(t *testing
 				t.Fatalf("unexpected plan decision: %v", err)
 			}
 		})
+	}
+}
+
+type fixtureCFCommand func(context.Context, ...string) ([]byte, error)
+
+func (f fixtureCFCommand) run(ctx context.Context, args ...string) ([]byte, error) {
+	return f(ctx, args...)
+}
+
+func TestManagedEdgeUsesPublicCFCommandsAndPrivateJSONBody(t *testing.T) {
+	spec, _ := managedEdgeFixture(t)
+	var paths []string
+	cf := fixtureCFCommand(func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) != 6 || !slices.Equal(args[:3], []string{"zero-trust", "access", "policies"}) ||
+			args[3] != "create" || args[4] != "--body" || !strings.HasPrefix(args[5], "@") {
+			t.Fatalf("unexpected cf command: %q", args)
+		}
+		path := strings.TrimPrefix(args[5], "@")
+		paths = append(paths, path)
+		stat, err := os.Stat(path)
+		if err != nil || stat.Mode().Perm() != 0o600 {
+			t.Fatalf("request payload is not private: %v", err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]string
+		if json.Unmarshal(data, &body) != nil || body["decision"] != "non_identity" {
+			t.Fatal("request payload differs from the approved policy")
+		}
+		return []byte(`{"id":"10000000-0000-4000-8000-000000000099"}`), nil
+	})
+	provider := managedEdgeProvider{cf: cf, spec: spec}
+	change := managedEdgeChange{Key: "create policy identity-probe", Method: http.MethodPost,
+		Path: "accounts/" + spec.AccountID + "/access/policies", Body: map[string]string{"decision": "non_identity"}}
+	if err := provider.Apply(context.Background(), change); err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("executed %d Cloudflare commands", len(paths))
+	}
+	if _, err := os.Stat(paths[0]); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Cloudflare request body was retained: %v", err)
+	}
+	change.Path = "accounts/" + spec.ZoneID + "/access/policies"
+	if err := provider.Apply(context.Background(), change); err == nil || len(paths) != 1 {
+		t.Fatal("accepted another account's Cloudflare write")
+	}
+}
+
+func TestManagedEdgeWorkerRoutingUsesScopedTypedSDK(t *testing.T) {
+	spec, _ := managedEdgeFixture(t)
+	const apiToken = "provider-verified-test-credential"
+	pattern := spec.Host + "/*"
+	routeID := strings.Repeat("c", 32)
+	var calls []string
+	workerBody := map[string]any{
+		"name":           cloudflareWorker,
+		"logpush":        false,
+		"observability":  map[string]any{"enabled": false},
+		"subdomain":      map[string]any{"enabled": false, "previews_enabled": false},
+		"tags":           []any{},
+		"tail_consumers": []any{},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+apiToken {
+			t.Error("Worker request did not use the explicitly supplied credential")
+		}
+		calls = append(calls, r.Method+" "+r.URL.RequestURI())
+		var result any
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/zones/"+spec.ZoneID+"/workers/routes":
+			result = []any{map[string]string{"id": routeID, "pattern": pattern, "script": cloudflareWorker}}
+		case r.Method == http.MethodGet && r.URL.Path == "/accounts/"+spec.AccountID+"/workers/domains":
+			result = []any{}
+		case r.Method == http.MethodPost && r.URL.Path == "/zones/"+spec.ZoneID+"/workers/routes":
+			var data map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&data); err != nil || !reflect.DeepEqual(data, map[string]any{"pattern": pattern, "script": cloudflareWorker}) {
+				t.Error("Worker route request differs from approval")
+			}
+			result = map[string]string{"id": routeID, "pattern": pattern, "script": cloudflareWorker}
+		case r.Method == http.MethodPost && r.URL.Path == "/accounts/"+spec.AccountID+"/workers/workers":
+			var data map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&data); err != nil || !reflect.DeepEqual(data, workerBody) {
+				t.Errorf("Worker creation payload differs from approved empty worker: %v", data)
+			}
+			result = map[string]any{"id": "new-worker-id", "name": cloudflareWorker,
+				"subdomain": workerBody["subdomain"]}
+		default:
+			t.Errorf("unknown SDK request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		cloudflareTestEnvelope(t, w, result)
+	}))
+	defer server.Close()
+	api := newCloudflareAPI([]byte(apiToken), server.URL+"/")
+	provider := managedEdgeProvider{spec: spec, reader: api,
+		routeWriter:  func(context.Context) (cloudflareAPI, error) { return api, nil },
+		workerWriter: func(context.Context) (cloudflareAPI, error) { return api, nil },
+	}
+	var state managedEdgeInventory
+	ctx := context.Background()
+	if err := observeManagedWorkerRouting(ctx, api, spec, &state); err != nil ||
+		!slices.Equal(state.Routes, []managedEdgeRoute{{ID: routeID, Pattern: pattern, Script: cloudflareWorker}}) ||
+		state.CustomDomainConflict {
+		t.Fatalf("Worker route observation failed: %+v %v", state.Routes, err)
+	}
+	route := managedEdgeChange{Method: http.MethodPost, Path: "zones/" + spec.ZoneID + "/workers/routes",
+		Body: map[string]any{"pattern": pattern, "script": cloudflareWorker}}
+	if err := provider.Apply(ctx, route); err != nil {
+		t.Fatal(err)
+	}
+	worker := managedEdgeChange{Method: http.MethodPost, Path: "accounts/" + spec.AccountID + "/workers/workers"}
+	if err := provider.Apply(ctx, worker); err != nil {
+		t.Fatal(err)
+	}
+	expected := []string{
+		"GET /zones/" + spec.ZoneID + "/workers/routes",
+		"GET /accounts/" + spec.AccountID + "/workers/domains?service=" + cloudflareWorker,
+		"GET /accounts/" + spec.AccountID + "/workers/domains?hostname=" + spec.Host,
+		"GET /accounts/" + spec.AccountID + "/workers/domains?hostname=" + spec.ManagementHost,
+		"POST /zones/" + spec.ZoneID + "/workers/routes",
+		"POST /accounts/" + spec.AccountID + "/workers/workers",
+	}
+	if !slices.Equal(calls, expected) {
+		t.Fatalf("unexpected Worker request sequence %q", calls)
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -56,7 +57,8 @@ type managedEdgePolicy struct {
 
 type managedEdgeApp struct {
 	cloudflareAccessApp
-	AllowedIDPs []string `json:"allowed_idps"`
+	AllowedIDPs []string                 `json:"allowed_idps"`
+	Policies    []cloudflareAccessPolicy `json:"policies"`
 }
 
 type managedEdgeIngress struct {
@@ -77,6 +79,8 @@ type managedEdgeAccess struct {
 	AUDTag   []string `json:"audTag"`
 }
 
+type managedEdgeIdentityProvider struct{ ID, Name string }
+
 type managedEdgePath struct{ Name, Path, TunnelPath string }
 
 type managedEdgeInventory struct {
@@ -88,6 +92,8 @@ type managedEdgeInventory struct {
 	Policies             []managedEdgePolicy
 	AppPolicies          map[string][]cloudflareAccessPolicy
 	IdentityProviders    []string
+	Providers            []managedEdgeIdentityProvider
+	TeamName             string
 	CustomDomainConflict bool
 	TunnelConfig         map[string]json.RawMessage
 }
@@ -139,10 +145,25 @@ func (s managedEdgeSpec) validate() error {
 			return errors.New("Invalid protected Cloudflare resource identity")
 		}
 	}
-	if s.PublicProtocolEnabled && !s.PublicProtocolAccepted {
-		return errors.New("Public OAuth/MCP routes require runtime acceptance")
-	}
 	return nil
+}
+
+func managedEdgeAppRelevant(app managedEdgeApp, spec managedEdgeSpec) bool {
+	relevant := func(domain string) bool {
+		return cloudflareMatchesHost(domain, spec.Host) || cloudflareMatchesHost(domain, spec.ManagementHost)
+	}
+	return relevant(app.Domain) || slices.ContainsFunc(app.SelfHostedDomains, relevant) ||
+		slices.ContainsFunc(app.Destinations, func(d struct {
+			Type      string            `json:"type"`
+			URI       string            `json:"uri"`
+			Overrides []json.RawMessage `json:"overrides"`
+		}) bool {
+			return d.Type == "public" && relevant(d.URI)
+		})
+}
+
+func compareCloudflarePolicyPrecedence(a, b cloudflareAccessPolicy) int {
+	return cmp.Compare(a.Precedence, b.Precedence)
 }
 
 func exactManagedServicePolicy(p cloudflareAccessPolicy, tags []string) bool {
@@ -353,7 +374,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 				publicChanges = append(publicChanges, managedEdgeChange{"remove Bypass " + domain, "DELETE", account + "/access/apps/" + a.ID, nil})
 			}
 		} else if s.PublicProtocolEnabled {
-			if !s.PublicProtocolTransitionApproved {
+			if !s.PublicProtocolAccepted || !s.PublicProtocolTransitionApproved {
 				return nil, errors.New("Enabling public protocol requires explicit transition approval")
 			}
 			body := map[string]any{"name": p.Name, "domain": domain, "type": "self_hosted", "app_launcher_visible": false,
@@ -468,6 +489,15 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 					return nil, errors.New("Unmanaged Cloudflare origin option")
 				}
 			}
+			var access map[string]json.RawMessage
+			if raw := origin["access"]; len(raw) != 0 && json.Unmarshal(raw, &access) != nil {
+				return nil, errors.New("Invalid Tunnel Access condition")
+			}
+			for key := range access {
+				if !slices.Contains([]string{"required", "teamName", "audTag"}, key) {
+					return nil, errors.New("Unmanaged Cloudflare Tunnel Access condition")
+				}
+			}
 		}
 		config["ingress"] = wantJSON
 		add("converge Tunnel ingress", "PUT", account+"/cfd_tunnel/"+tunnelID+"/configurations", map[string]any{"config": config})
@@ -531,6 +561,9 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 			continue
 		}
 		add("create DNS "+host, "POST", zone+"/dns_records", map[string]any{"type": "CNAME", "name": host, "content": tunnelID + ".cfargotunnel.com", "proxied": true, "ttl": 1})
+	}
+	if s.PublicProtocolEnabled && !s.PublicProtocolAccepted && len(changes) > 0 {
+		return nil, errors.New("Cloudflare changes to an edge with public OAuth/MCP paths require runtime acceptance")
 	}
 	return changes, nil
 }
@@ -600,7 +633,11 @@ func reconcileManagedEdge(ctx context.Context, api managedEdgeAPI, spec managedE
 			return keys, err
 		}
 		if err := api.Apply(ctx, change); err != nil {
-			return keys, err
+			if ctx.Err() != nil {
+				return keys, err
+			}
+			_, observeErr := api.Observe(ctx, spec)
+			return keys, errors.Join(err, observeErr, errors.New("Cloudflare changes stopped after an uncertain result; rerun to review the newly observed plan"))
 		}
 		delete(remaining, change.Key)
 	}

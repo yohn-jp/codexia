@@ -74,6 +74,7 @@ func TestCloudflareDenialAndRedirectKeepSecretsOutOfDiagnostics(t *testing.T) {
 		{"false envelope", http.StatusOK, `{"success":false,"errors":[{"message":"` + apiToken + `"}],"result":[]}`},
 		{"missing result", http.StatusOK, `{"success":true,"errors":[],"result":null}`},
 		{"redirect", http.StatusFound, ""},
+		{"redirect with success envelope", http.StatusTemporaryRedirect, `{"success":true,"errors":[],"result":[{"id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","name":"example.test","status":"active","account":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}],"result_info":{"total_pages":1}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +85,11 @@ func TestCloudflareDenialAndRedirectKeepSecretsOutOfDiagnostics(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Location", other.URL)
 				w.WriteHeader(tc.code)
-				fmt.Fprint(w, tc.body)
+				if tc.code < 300 || tc.code >= 400 || r.URL.Query().Get("name") == "example.test" {
+					fmt.Fprint(w, tc.body)
+				} else {
+					fmt.Fprint(w, `{"success":true,"errors":[],"result":[],"result_info":{"total_pages":1}}`)
+				}
 			}))
 			defer server.Close()
 			_, err := newCloudflareAPI([]byte(apiToken), server.URL+"/").findZone(context.Background(), "codexia.example.test")

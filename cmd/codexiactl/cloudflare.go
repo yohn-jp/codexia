@@ -58,22 +58,26 @@ type cloudflareTarget struct {
 }
 
 type cloudflareAPI struct {
-	resourceClient *cloudflare.Client
-	zones          *zones.ZoneService
-	dns            *dns.RecordService
-	workers        *workers.WorkerService
-	tunnels        *zero_trust.TunnelCloudflaredService
-	access         *zero_trust.AccessService
-	accountTokens  *accounts.TokenService
-	userTokens     *user.TokenService
-	baseURL        string
+	zones         *zones.ZoneService
+	dns           *dns.RecordService
+	workers       *workers.WorkerService
+	tunnels       *zero_trust.TunnelCloudflaredService
+	access        *zero_trust.AccessService
+	accountTokens *accounts.TokenService
+	userTokens    *user.TokenService
+	baseURL       string
 }
 
 type cloudflareObservation struct {
-	Target       string
-	Connectors   bool
-	ConnectorIDs []string
-	AccountID    string
+	Plan                   []string
+	cf                     cfCommandRunner
+	managed                *managedEdgeProvider
+	cloudflareRequirements cfDeviceRequirements
+	temporaryCredentials   map[string]cfCredentialReceipt
+	Target                 string
+	Connectors             bool
+	ConnectorIDs           []string
+	AccountID              string
 
 	target         cloudflareTarget
 	routesContract []byte
@@ -96,8 +100,7 @@ func newCloudflareAPI(secret []byte, baseURL string) cloudflareAPI {
 	opts := []option.RequestOption{option.WithBaseURL(baseURL), option.WithHTTPClient(client),
 		option.WithAPIToken(string(secret)), option.WithMiddleware(checkCloudflareResponse)}
 	return cloudflareAPI{
-		resourceClient: &cloudflare.Client{Options: opts},
-		zones:          zones.NewZoneService(opts...), dns: dns.NewRecordService(opts...), workers: workers.NewWorkerService(opts...),
+		zones: zones.NewZoneService(opts...), dns: dns.NewRecordService(opts...), workers: workers.NewWorkerService(opts...),
 		tunnels: zero_trust.NewTunnelCloudflaredService(opts...), access: zero_trust.NewAccessService(opts...),
 		accountTokens: accounts.NewTokenService(opts...), userTokens: user.NewTokenService(opts...), baseURL: baseURL,
 	}
@@ -109,6 +112,9 @@ func checkCloudflareResponse(request *http.Request, next option.MiddlewareNext) 
 		return nil, err
 	}
 	defer response.Body.Close()
+	if response.StatusCode >= 300 && response.StatusCode < 400 {
+		return nil, errors.New("Cloudflare redirected the authenticated SDK request")
+	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, cloudflareMaxResponse+1))
 	if err != nil || len(body) > cloudflareMaxResponse {
 		return nil, errors.New("Cloudflare response body could not be verified")
@@ -212,45 +218,66 @@ func (api cloudflareAPI) findZone(ctx context.Context, host string) (zones.Zone,
 	return candidates[0], nil
 }
 
-func observeCloudflare(ctx context.Context, o operator, repo githubTarget, settings productionContract, requirements cloudflareAuthRequirements) (*cloudflareObservation, error) {
+func observeCloudflare(ctx context.Context, o operator, repo githubTarget, settings productionContract,
+	snapshot githubSnapshot, requirements cfDeviceRequirements) (*cloudflareObservation, error) {
 	origin, err := url.Parse(settings.PublicOrigin)
 	if err != nil || origin.Scheme != "https" || origin.Hostname() != origin.Host || origin.User != nil ||
 		origin.Path != "" || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" ||
-		!strings.Contains(origin.Host, ".") || !cloudflareHost.MatchString(origin.Host) {
-		return nil, refused("Cloudflare requires the reviewed HTTPS production origin")
+		!validDNSHostname(origin.Host) || !validDNSHostname(settings.ManagementHostname) ||
+		origin.Host == settings.ManagementHostname || !repo.valid() {
+		return nil, refused("Cloudflare requires a verified repository, HTTPS production origin and distinct management hostname")
 	}
-	secret, closeAuth, err := cloudflareManagementCredential(ctx, o, origin.Host, requirements)
+	bindings, err := protectedCloudflareBindings(snapshot, repo, settings)
 	if err != nil {
 		return nil, err
 	}
-	defer clear(secret)
+	runtime, err := startCloudflareSession(ctx, o, origin.Host, settings.ManagementHostname, cfDeviceRequirements{zoneID: bindings.ZoneID})
+	if err != nil {
+		return nil, err
+	}
+	keepSession := false
 	defer func() {
-		if closeAuth != nil {
-			closeAuth()
+		if !keepSession {
+			_ = runtime.close()
 		}
 	}()
-	api := newCloudflareAPI(secret, cloudflareAPIBase)
-	zone, err := api.findZone(ctx, origin.Host)
+	zone, err := cfFindZone(ctx, runtime, origin.Host)
 	if err != nil {
 		return nil, err
 	}
-	observed, err := api.observeEdge(ctx, origin.Host, zone, repo, settings.edge)
-	if err != nil {
+	if (bindings.ZoneID != "" && bindings.ZoneID != zone.ID) ||
+		(bindings.AccountID != "" && bindings.AccountID != zone.Account.ID) {
+		return nil, refused("Cloudflare account or zone differs from the existing protected target")
+	}
+	if err := runtime.setAccount(zone.Account.ID); err != nil {
 		return nil, err
 	}
-	observed.operator = o
-	observed.provisioning = cloudflareSecretDigest(secret)
-	observed.closeAuth, closeAuth = closeAuth, nil
-	if observed.closeAuth != nil && requirements.tokenPolicy {
-		// OAuth is not an account API token. Establish the selected account's
-		// token-management API access before any protected inputs are written.
-		if err := observed.checkOAuthTokenAuthority(ctx, requirements); err != nil {
-			observed.Close()
-			return nil, err
-		}
+	spec := managedEdgeSpec{
+		Repository: repo, Host: origin.Host, ManagementHost: settings.ManagementHostname,
+		AccountID: zone.Account.ID, ZoneID: zone.ID, ExpectedTunnelID: bindings.TunnelID,
+		TeamName: bindings.TunnelTeamName, AuthorPolicyID: bindings.AuthorPolicyID,
+		ProbePolicyID: bindings.CIPolicyID, ManagementPolicyID: bindings.SSHPolicyID,
+		ProductService: managedEdgePublicationService, SSHService: managedEdgeManagementService,
+		PublicProtocolEnabled: bindings.PublicProtocolEnabled, Contract: settings.edge,
 	}
-	reportResult(o, successText, fmt.Sprintf("Cloudflare target verified\nAccount: %s\nZone: %s\nTunnel: %s", observed.AccountID, zone.ID, observed.target.TunnelID))
-	return observed, nil
+	provider := &managedEdgeProvider{cf: runtime, spec: spec}
+	if !requirements.allowTemporaryObservation {
+		_, err := provider.Observe(ctx, spec)
+		return nil, err
+	}
+
+	keepSession = true
+	return &cloudflareObservation{
+		AccountID: zone.Account.ID, host: origin.Host, operator: o, cf: runtime, managed: provider,
+		routesContract: settings.edge.routes, cloudflareRequirements: requirements,
+		target: cloudflareTarget{Repository: repo.FullName(), RepositoryID: repo.RepoID, OwnerID: repo.OwnerID,
+			Origin: settings.PublicOrigin, SSHHostname: settings.ManagementHostname, AccountID: zone.Account.ID, ZoneID: zone.ID},
+		closeAuth: func() {
+			if err := runtime.close(); err != nil {
+				o.Notice("Official cf session cleanup could not be fully verified")
+			}
+		},
+	}, nil
 }
 
 func (api cloudflareAPI) observeEdge(ctx context.Context, host string, zone zones.Zone, repo githubTarget, contract cloudflareContract) (*cloudflareObservation, error) {
@@ -380,4 +407,45 @@ func validateProtectedCloudflareTarget(snapshot githubSnapshot, repo githubTarge
 		}
 	}
 	return nil
+}
+
+func protectedCloudflareBindings(snapshot githubSnapshot, repo githubTarget, settings productionContract) (cloudflareTarget, error) {
+	var result cloudflareTarget
+	var observedProtocol bool
+	if err := validateProtectedCloudflareTarget(snapshot, repo, settings); err != nil {
+		return result, err
+	}
+	for _, environment := range []string{bootstrapEnvironment, productionEnvironment} {
+		value, exists := selectEnvironment(snapshot, environment).Variables[edgeTarget]
+		if !exists {
+			continue
+		}
+		var stored cloudflareTarget
+		if err := json.Unmarshal([]byte(value), &stored); err != nil {
+			return result, refused("Protected Cloudflare target was not verified")
+		}
+		// The SSH binding can be absent during migration. All previously
+		// recorded resource identities must still agree with one another.
+		for _, pair := range []struct {
+			dest *string
+			id   string
+		}{
+			{&result.AccountID, stored.AccountID}, {&result.ZoneID, stored.ZoneID}, {&result.TunnelID, stored.TunnelID},
+			{&result.AuthorPolicyID, stored.AuthorPolicyID}, {&result.CIPolicyID, stored.CIPolicyID},
+			{&result.SSHPolicyID, stored.SSHPolicyID}, {&result.TunnelTeamName, stored.TunnelTeamName},
+		} {
+			if pair.id == "" {
+				continue
+			}
+			if *pair.dest != "" && *pair.dest != pair.id {
+				return result, refused("Protected Cloudflare resource identities differ between GitHub Environments")
+			}
+			*pair.dest = pair.id
+		}
+		if observedProtocol && result.PublicProtocolEnabled != stored.PublicProtocolEnabled {
+			return result, refused("Protected Cloudflare protocol states differ between GitHub Environments")
+		}
+		result.PublicProtocolEnabled, observedProtocol = stored.PublicProtocolEnabled, true
+	}
+	return result, nil
 }
