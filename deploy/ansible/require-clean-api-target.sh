@@ -3,6 +3,18 @@
 set -Eeuo pipefail
 state_dir="$HOME/.local/state/codexia-deploy"
 unit_dir="$HOME/.config/containers/systemd"
+[[ "$(sudo -n /usr/local/sbin/codexia-api-gate status)" == closed ]] || {
+  echo 'Initial setup requires the system publication gate to be closed' >&2
+  exit 1
+}
+[[ "$(systemctl is-active codexia-cloudflared.service)" == active ]] || {
+  echo 'Initial setup requires the independent host Cloudflare connector' >&2
+  exit 1
+}
+[[ ! -e "$unit_dir/codexia-tunnel.container" && ! -L "$unit_dir/codexia-tunnel.container" ]] || {
+  echo 'Initial setup does not accept the obsolete rootless application Tunnel' >&2
+  exit 1
+}
 for marker in "$unit_dir/codexia-api.container" "$unit_dir/default.target.wants/codexia-api.service" \
               "$state_dir"/{deploy-transaction.json,deployed-release.json}{,.tmp} \
               "$state_dir"/{rollback-api.container,rollback-release.json,backup-transaction}; do
@@ -16,6 +28,13 @@ if podman container exists codexia-api; then
   exit 1
 elif [[ $? != 1 ]]; then
   echo 'Could not verify that the API container is absent' >&2
+  exit 1
+fi
+if podman container exists codexia-tunnel; then
+  echo 'Initial setup requires the obsolete rootless application Tunnel to be retired' >&2
+  exit 1
+elif [[ "$?" != 1 ]]; then
+  echo 'Could not verify that the obsolete application Tunnel is absent' >&2
   exit 1
 fi
 status=0

@@ -15,13 +15,16 @@ unit_state() {
 }
 
 close_gate() {
-  local result=0
+  local result=0 socket_unit_state
   "$systemctl" stop "$socket_unit" || result=1
   "$systemctl" stop "$service_unit" || result=1
-  "$systemctl" disable "$socket_unit" || result=1
+  socket_unit_state="$("$systemctl" show --property=UnitFileState --value "$socket_unit")" || result=1
+  if [[ "$socket_unit_state" == enabled || "$socket_unit_state" == enabled-runtime ]]; then
+    "$systemctl" disable "$socket_unit" || result=1
+  fi
   "$systemctl" mask "$socket_unit" || result=1
   "$systemctl" mask "$service_unit" || result=1
-  if [[ "$(unit_state "$socket_unit")" == active || "$(unit_state "$service_unit")" == active ]]; then
+  if [[ "$(unit_state "$socket_unit")" != inactive || "$(unit_state "$service_unit")" != inactive ]]; then
     result=1
   fi
   if [[ "$("$systemctl" show --property=UnitFileState --value "$socket_unit")" != masked ||
@@ -32,8 +35,10 @@ close_gate() {
 }
 
 open_gate() {
-  "$systemctl" unmask "$socket_unit"
-  "$systemctl" unmask "$service_unit"
+  if ! "$systemctl" unmask "$socket_unit" || ! "$systemctl" unmask "$service_unit"; then
+    close_gate || true
+    return 1
+  fi
   if ! "$systemctl" enable --now "$socket_unit"; then
     close_gate || true
     return 1
@@ -51,8 +56,9 @@ gate_status() {
   service_state="$(unit_state "$service_unit")"
   socket_file_state="$("$systemctl" show --property=UnitFileState --value "$socket_unit")"
   service_file_state="$("$systemctl" show --property=UnitFileState --value "$service_unit")"
-  if [[ "$socket_state" == active && "$socket_file_state" == enabled &&
-        "$service_file_state" != masked ]]; then
+  if [[ "$socket_state" == active &&
+        ( "$service_state" == inactive || "$service_state" == active ) &&
+        "$socket_file_state" == enabled && "$service_file_state" != masked ]]; then
     printf '%s\n' open
     return 0
   fi
