@@ -186,14 +186,8 @@ stop_loaded_unit(){
       ;;
   esac
 }
-gate_state="$(sudo -n "$gate_helper" status)" || {
-  echo 'Publication gate state is inconsistent; recovery intent retained' >&2
-  exit 1
-}
-[[ "$gate_state" == open || "$gate_state" == closed ]] || {
-  echo 'Publication gate returned an invalid status; recovery intent retained' >&2
-  exit 1
-}
+# The validated pending intent owns closure even if the previous systemctl
+# invocation stopped midway. Only a verified closed gate permits writer changes.
 sudo -n "$gate_helper" close &&
   [[ "$(sudo -n "$gate_helper" status)" == closed ]] || {
   echo 'Could not close and verify the product publication gate; recovery intent retained' >&2

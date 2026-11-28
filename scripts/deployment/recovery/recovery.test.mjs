@@ -81,8 +81,8 @@ esac
 printf "sudo %s\\n" "$*" >> "$CODEXIA_TEST_LOG"
 [ "$1" = -n ] && [ "$2" = /usr/local/sbin/codexia-api-gate ] || exit 90
 case "$3" in
-  status) cat "$CODEXIA_TEST_GATE_STATE_FILE";;
-  close) printf 'closed\\n' > "$CODEXIA_TEST_GATE_STATE_FILE";;
+  status) if grep -qx partial "$CODEXIA_TEST_GATE_STATE_FILE"; then exit 1; fi; cat "$CODEXIA_TEST_GATE_STATE_FILE";;
+  close) [ "${'$'}{CODEXIA_TEST_GATE_CLOSE_FAIL:-false}" = false ] || exit 1; printf 'closed\\n' > "$CODEXIA_TEST_GATE_STATE_FILE";;
   open) printf 'open\\n' > "$CODEXIA_TEST_GATE_STATE_FILE";;
   *) exit 91;;
 esac
@@ -237,7 +237,7 @@ test('recovery before first API unit installation does not require a nonexistent
   }
 });
 
-test('interrupted R3 keeps the publication gate closed until the unpublished API is removed', () => {
+test('interrupted R3 completes partial publication closure before removing the unpublished API', () => {
   const target = fixture();
   const intentPath = path.join(target.stateDir, 'deploy-transaction.json');
   const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
@@ -245,8 +245,12 @@ test('interrupted R3 keeps the publication gate closed until the unpublished API
     ...intent, hadUnit: false, gateWasOpen: false, gateHeldForActivation: true, releasePresent: false,
     recoveryOperationId: 'restore-one', recoveryEvidenceSha256: 'c'.repeat(64),
   }));
-  writeFileSync(target.env.CODEXIA_TEST_GATE_STATE_FILE, 'closed\n');
+  writeFileSync(target.env.CODEXIA_TEST_GATE_STATE_FILE, 'partial\n');
   try {
+    const blocked = runRecovery({ ...target, env: { ...target.env, CODEXIA_TEST_GATE_CLOSE_FAIL: 'true' } });
+    assert.notEqual(blocked.status, 0);
+    assert.equal(existsSync(intentPath), true);
+    assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /stop codexia-api\.service/u);
     const result = runRecovery(target);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(existsSync(intentPath), false);
