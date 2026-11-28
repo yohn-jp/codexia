@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+case "${1:-}" in ""|--wait-for-workspace) ;; *) exit 2 ;; esac
 [[ "$(uname -s):$(uname -m)" == Linux:x86_64 ]]
 toolchain=scripts/ios/swift-linux-toolchain.json
 version=$(jq -er .version "$toolchain")
@@ -23,6 +24,13 @@ swift_version=$(swift --version)
 printf '%s\n' "$swift_version"
 grep -Fxq "Swift version $version (swift-$version-RELEASE)" <<< "$swift_version"
 grep -Fxq 'Target: x86_64-unknown-linux-gnu' <<< "$swift_version"
+
+# G5 checks an exact, clean checkout. Only the private toolchain and Python
+# environment above may be prepared before the group runner releases it.
+if [[ "${1:-}" == --wait-for-workspace ]]; then
+  IFS= read -r permission
+  [[ "$permission" == workspace-ready ]]
+fi
 
 # Editor's locked dependency graph can resolve before generated API sources exist.
 # Keep each package's build plan, checkouts, and test binary in its own .build.
