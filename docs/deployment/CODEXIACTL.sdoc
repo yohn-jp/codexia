@@ -81,7 +81,7 @@ STATEMENT: >>>
 | `codexiactl doctor [--json]` | 同じ観測を使い、OS/sudo/SSH、Tunnel/Access、GitHub 権限と認定、Edge、設定欠落を診断。human-readable表示はWorkflowごと最新のRunだけに抑え、全取得履歴はJSON・fail-closed証跡で保持する。保護preflightは既存の読取り専用Workflowを明示承認の下で起動する `init` から利用する | 阻害要因とその修復先、実行に必要な承認。構成変更なし |
 | `codexiactl version` / `help` | バージョン・source・仕様と利用法を表示 | 外部接続・認証なし |
 
-`--json` は読取り結果に限定し、スキーマ版、対象、観測時刻、状態、blockers、run IDs、証拠参照を含む。秘密、grant、OAuth code、認証用 URL の query、トークンレスポンスを含めない。機械出力は stdout、診断は stderr。初回対話を stdin から無条件に自動承認する `--yes`、`--force`、任意 command 実行、秘密の command-line 引数、隠れた非対話モードは提供しない。ユーザー中断を除き終了コードは 0（要求した段階の成立）、1（失敗または不明）、2（不足・承認待ちで安全停止）、3（対象/状態の不整合・拒否）とする。中断は 130。ACTIVE と ACCEPTED は結果に必ず区別して表示する。
+`--json` は読取り結果に限定し、スキーマ版、対象、観測時刻、状態、blockers、run IDs、証拠参照を含む。schemaVersion 2 の管理先は `managementHostname` に出力する。秘密、grant、OAuth code、認証用 URL の query、トークンレスポンスを含めない。機械出力は stdout、診断は stderr。初回対話を stdin から無条件に自動承認する `--yes`、`--force`、任意 command 実行、秘密の command-line 引数、隠れた非対話モードは提供しない。ユーザー中断を除き終了コードは 0（要求した段階の成立）、1（失敗または不明）、2（不足・承認待ちで安全停止）、3（対象/状態の不整合・拒否）とする。中断は 130。ACTIVE と ACCEPTED は結果に必ず区別して表示する。
 <<<
 
 [[/SECTION]]

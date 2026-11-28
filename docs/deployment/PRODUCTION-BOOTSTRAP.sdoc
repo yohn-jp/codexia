@@ -86,6 +86,8 @@ Use GitHub Environments restricted to branch main; required reviewers and Preven
 The controller builds a single-host Ansible inventory in a private runner directory. R4 verifies the active host connector and installs the closed publication gate. On a fresh target the VM generates the PostgreSQL admin, application and auth-role passwords, Better Auth secret and OAuth introspection secret. On an existing target, the VM checks its existing identities and values. Missing credentials with existing data, a connector identity mismatch, a UID conflict or an unverified DB state require reconciliation before proceeding.
 
 Before enabling these workflows on an existing installation, review the repository and owner IDs, the main source's origin and the live Cloudflare topology. Add the reviewed binding to the existing Cloudflare target Variable in both protected Environments. Leave the independently verified credentials in their protected locations. The workflow rejects the old unbound target and any value copied from another repository. Use a fresh lifecycle Preflight after reconciling the Variables.
+
+For an existing VM, preserve its independently authenticated SSH path during migration. After the new management route, its two authorization boundaries, and the closed publication gate are demonstrated, the owner approves removal of the old connector and its dedicated credentials. If an interrupted deployment still has a journal from the old runtime, use the source that created the journal and the existing protected recovery procedure before this cleanup.
 <<<
 
 [[/SECTION]]
