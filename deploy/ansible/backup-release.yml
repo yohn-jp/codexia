@@ -65,8 +65,7 @@
       shift
       if [[ "${BACKUP_PROFILE:-false}" == true ]]; then
         local LC_NUMERIC=C TIMEFORMAT="$phase %3R" status=0
-        # Keep the command's stderr and status intact. Only Bash's time record
-        # goes to the disposable host's private timing file.
+        # Keep command stderr separate from the Bash timing record.
         { time "$@" 2>&7; } 7>&2 2>>"$state/backup-release.timings" || status=$?
         return "$status"
       else
