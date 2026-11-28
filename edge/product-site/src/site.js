@@ -3,41 +3,120 @@ const acts = Array.from(document.querySelectorAll('.act'));
 const links = Array.from(document.querySelectorAll('.chapter-nav a'));
 const labels = ['I / THE FIRST WORD', 'II / THE GROWING MANUSCRIPT', 'III / THE WORLD WITHIN', "IV / THE AUTHOR'S AUTHORITY", 'V / THE SOVEREIGN LIBRARY'];
 const wide = matchMedia('(min-width: 901px)');
+const root = document.documentElement;
+const stageLabel = document.getElementById('stage-act');
+const stageGeometry = { top:0, height:0, bottom:0 };
+let ranges = [];
+let scrollTop = 0;
+let rotation = 0;
+let lastFrame = '';
+const clamp = value => Math.max(0, Math.min(1, value));
+const lerp = (a,b,t) => a + (b-a)*t;
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 let active = 1;
 function showAct(act, force = false) {
   if (act === active && !force) return;
   active = act;
-  const showStage = wide.matches && !reduce.matches;
-  stage.dataset.act = showStage ? String(act) : '1';
-  document.getElementById('stage-act').textContent = 'ACT ' + labels[showStage ? act - 1 : 0];
+  stage.dataset.act = reduce.matches ? '1' : String(act);
+  stageLabel.textContent = 'ACT ' + labels[reduce.matches ? 0 : act - 1];
   for (const [index, link] of links.entries()) {
     if (index === act - 1) link.setAttribute('aria-current', 'step');
     else link.removeAttribute('aria-current');
   }
 }
-// Native scroll is authoritative; only act boundaries mutate the stage.
+// Geometry is read together, only after size/content changes. Scroll work
+// updates compositor-friendly values and never queries layout per glyph.
+function measure() {
+  const y = window.scrollY;
+  const r = stage.getBoundingClientRect();
+  stageGeometry.height = r.height;
+  stageGeometry.top = document.querySelector('.masthead').getBoundingClientRect().height;
+  stageGeometry.bottom = document.querySelector('.experience').getBoundingClientRect().bottom + y;
+  ranges = acts.map(act => {
+    const rect = act.getBoundingClientRect();
+    return {top:rect.top+y,bottom:rect.bottom+y};
+  });
+}
 let scheduled = false;
-function readScroll() {
+let needsMeasure = true;
+function render() {
   scheduled = false;
-  const middle = window.innerHeight * 0.53;
-  const rects = acts.map(act => act.getBoundingClientRect());
-  const current = rects.findIndex(rect => rect.top <= middle && rect.bottom > middle);
-  if (current >= 0) showAct(current + 1);
-  else if (rects[0].top > middle) showAct(1);
-  else if (rects[rects.length - 1].bottom <= middle) showAct(5);
+  if (needsMeasure) { needsMeasure = false; measure(); }
+  scrollTop = window.scrollY;
+  if (!ranges.length) return;
+  const header = stageGeometry.top;
+  const top = !wide.matches && !reduce.matches ? header + stageGeometry.height : header;
+  const center = scrollTop + top + Math.max(0,window.innerHeight-top)*.5;
+  let index = ranges.findIndex(r => r.top <= center && r.bottom > center);
+  if (index < 0) index = center < ranges[0].top ? 0 : ranges.length-1;
+  const range = ranges[index];
+  const local = clamp((center-range.top)/Math.max(1,range.bottom-range.top));
+  const moment = index + local;
+  showAct(index+1);
+  const motion = !reduce.matches;
+  // Scrub over narrow transition bands, retaining the visual for each act.
+  const growth = motion ? clamp((moment-.82)/.4) : 0;
+  const atlas = motion ? Math.min(clamp((moment-1.82)/.4),1-clamp((moment-2.78)/.42)) : 0;
+  const binding = motion ? clamp((moment-3.82)/.42) : 0;
+  const opening = motion ? lerp(.52,1,clamp(local/.5)) : 1;
+  const frame = [growth,atlas,binding,index===0?opening:1].map(v=>v.toFixed(3)).join('|');
+  if(frame !== lastFrame) {
+    lastFrame = frame;
+    stage.style.setProperty('--growth',growth.toFixed(3));
+    stage.style.setProperty('--atlas',atlas.toFixed(3));
+    stage.style.setProperty('--binding',binding.toFixed(3));
+    stage.style.setProperty('--opening',index===0?opening.toFixed(3):'1');
+  }
 }
 function schedule() {
   if (scheduled) return;
   scheduled = true;
-  requestAnimationFrame(readScroll);
+  requestAnimationFrame(render);
 }
-function adapt() { showAct(active, true); schedule(); }
-window.addEventListener('scroll', schedule, { passive: true });
-window.addEventListener('resize', schedule, { passive: true });
-wide.addEventListener('change', adapt);
-reduce.addEventListener('change', adapt);
+function invalidate() { needsMeasure=true; schedule(); }
+function adapt() { showAct(active,true); invalidate(); }
+stage.dataset.enhanced = 'true';
+window.addEventListener('scroll',schedule,{passive:true});
+window.addEventListener('resize',invalidate,{passive:true});
+wide.addEventListener('change',adapt);
+reduce.addEventListener('change',adapt);
+if ('ResizeObserver' in window) {
+  const observer = new ResizeObserver(invalidate);
+  observer.observe(stage);
+  for (const act of acts) observer.observe(act);
+}
+document.fonts.ready.then(invalidate);
 schedule();
+
+const lightToggle = document.getElementById('light-toggle');
+lightToggle.disabled = false;
+lightToggle.addEventListener('click',()=>{
+  const daylight = root.dataset.room !== 'daylight';
+  root.dataset.room = daylight ? 'daylight' : 'chiaroscuro';
+  lightToggle.setAttribute('aria-pressed',String(daylight));
+  lightToggle.setAttribute('aria-label',daylight?'夜想の書斎に切り替える':'昼光の書斎に切り替える');
+  lightToggle.querySelector('.light-label').textContent = daylight?'夜想':'昼光';
+});
+function setRotation(angle) {
+  rotation = Math.max(-34,Math.min(38,angle));
+  stage.style.setProperty('--rotation',rotation+'deg');
+}
+for (const [id,change] of [['rotate-left',-12],['rotate-right',12],['rotate-reset',0]]) {
+  const button = document.getElementById(id);
+  button.disabled = false;
+  button.addEventListener('click',()=>setRotation(change===0?0:rotation+change));
+}
+const book = stage.querySelector('.book');
+let drag = null;
+book.addEventListener('pointerdown',event=>{
+  if(active!==5 || reduce.matches || event.pointerType==='touch')return;
+  drag = {id:event.pointerId,x:event.clientX,rotation};
+  book.setPointerCapture(event.pointerId);
+});
+book.addEventListener('pointermove',event=>{
+  if(drag?.id===event.pointerId) setRotation(drag.rotation+(event.clientX-drag.x)*.18);
+});
+for(const event of ['pointerup','pointercancel','lostpointercapture'])book.addEventListener(event,()=>{drag=null;});
 
 const atlas = {
   character: ['佐伯律', '「紙の繊維に残る筆圧だけが、書き手の躊躇いを嘘なく記録している。」', '旧書庫の司書補。作品の視点人物。'],
@@ -46,9 +125,11 @@ const atlas = {
 };
 const atlasButtons = Array.from(document.querySelectorAll('[data-atlas]'));
 for (const button of atlasButtons) {
+  button.disabled = false;
   button.addEventListener('click', () => {
     const item = atlas[button.dataset.atlas];
     if (!item) return;
+    stage.dataset.atlasSelection = button.dataset.atlas;
     document.getElementById('atlas-title').textContent = item[0];
     document.getElementById('atlas-quote').textContent = item[1];
     document.getElementById('atlas-note').textContent = item[2];
@@ -61,6 +142,7 @@ const decisions = {
   rejected: ['右手', '原文保持', '見本の原文を保持しました。最終幕にも判断を反映しました。', '『灰の書庫』 — 原文保持（右手）'],
 };
 for (const button of document.querySelectorAll('.decisions button')) {
+  button.disabled = false;
   button.addEventListener('click', () => {
     const choice = button.dataset.decision;
     const item = decisions[choice];
