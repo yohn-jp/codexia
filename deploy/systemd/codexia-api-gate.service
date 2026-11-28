@@ -1,0 +1,29 @@
+[Unit]
+Description=Forward the Codexia publication gate to the healthy API
+After=network.target
+
+[Service]
+Type=notify
+DynamicUser=yes
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:18081
+Restart=no
+TimeoutStopSec=10s
+KillMode=control-group
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+

@@ -1,0 +1,1 @@
+codexia ALL=(root) NOPASSWD: /usr/local/sbin/codexia-api-gate open, /usr/local/sbin/codexia-api-gate close, /usr/local/sbin/codexia-api-gate status
