@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -244,9 +244,6 @@ async function planObservation({ bootstrapMode } = {}) {
         initializeDatabase: env.CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED === 'true',
         resumeAuthOnly: authContinuation,
       });
-      if (bootstrapMode === 'bootstrap' && !host.topology?.secrets?.['codexia-tunnel-token']) {
-        await access(join(env.RUNNER_TEMP, 'codexia-bootstrap/control/tunnel-token'));
-      }
       if (bootstrapMode === 'publish-frontend') {
         assert.equal(env.CODEXIA_INITIAL_FRONTEND_APPROVAL, 'PUBLISH_INITIAL_FRONTEND');
         assert.equal(request.intent, 'install');
