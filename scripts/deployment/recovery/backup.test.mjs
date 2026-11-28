@@ -487,6 +487,10 @@ test('the protected run shares the deploy lock and recovers both services after 
     },
     timeout: 10_000,
   });
+  const busyRecovery = invoke('lock', 'recover');
+  assert.equal(busyRecovery.status, 75, 'an unpublished intent does not prove the host runner is idle');
+  const idleRecovery = invoke('recover', 'recover');
+  assert.equal(idleRecovery.status, 0, idleRecovery.stderr);
   const contention = invoke('lock', run);
   assert.equal(contention.status, 75, contention.stderr);
   assert.equal(await readFile(trace, 'utf8'), '');
