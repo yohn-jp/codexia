@@ -51,6 +51,8 @@ type cloudflareTarget struct {
 	TunnelID              string `json:"tunnelId"`
 	AuthorPolicyID        string `json:"authorPolicyId"`
 	CIPolicyID            string `json:"ciPolicyId"`
+	SSHHostname           string `json:"sshHostname"`
+	SSHPolicyID           string `json:"sshPolicyId"`
 	TunnelTeamName        string `json:"tunnelTeamName"`
 	PublicProtocolEnabled bool   `json:"publicProtocolEnabled"`
 }
@@ -357,7 +359,7 @@ func cloudflareDrift(reason string) error {
 	return refused("Cloudflare " + reason + ". Reconcile the Codexia-owned edge through the approved CTL operation or the account-owned Access policy, then observe again")
 }
 
-func validateProtectedCloudflareTarget(snapshot githubSnapshot, repo githubTarget, origin string) error {
+func validateProtectedCloudflareTarget(snapshot githubSnapshot, repo githubTarget, settings productionContract) error {
 	for _, environment := range []string{bootstrapEnvironment, productionEnvironment} {
 		value, exists := selectEnvironment(snapshot, environment).Variables[edgeTarget]
 		if !exists {
@@ -368,8 +370,13 @@ func validateProtectedCloudflareTarget(snapshot githubSnapshot, repo githubTarge
 			stored.RepositoryID == 0 || stored.OwnerID == 0 || stored.Origin == "" {
 			return refused(environment + "/" + edgeTarget + " lacks the required repository and origin binding. Reobserve the edge in doctor and have the repository settings owner review the existing target, then register the verified repository and origin in the same protected Variable at " + repo.URL() + "/settings/environments")
 		}
-		if stored.Repository != repo.FullName() || stored.RepositoryID != repo.RepoID || stored.OwnerID != repo.OwnerID || stored.Origin != origin {
+		if stored.Repository != repo.FullName() || stored.RepositoryID != repo.RepoID || stored.OwnerID != repo.OwnerID || stored.Origin != settings.PublicOrigin {
 			return refused(environment + "/" + edgeTarget + " belongs to a different repository or origin. Reconcile the environment with the independently verified Cloudflare account, zone and origin before continuing")
+		}
+		if stored.SSHHostname != "" || stored.SSHPolicyID != "" {
+			if stored.SSHHostname != settings.ManagementHostname || !cloudflareUUID.MatchString(stored.SSHPolicyID) {
+				return refused(environment + "/" + edgeTarget + " belongs to a different or unverified Cloudflare management target")
+			}
 		}
 	}
 	return nil

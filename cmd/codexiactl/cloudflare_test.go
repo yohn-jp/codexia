@@ -538,27 +538,33 @@ func TestCloudflareSuppliedTokenRequiresExactProviderPolicy(t *testing.T) {
 func TestProtectedCloudflareTargetRejectsAnotherRepositoryWithSameOrigin(t *testing.T) {
 	fork := githubTarget{Owner: "Fork-Org", OwnerID: 801, RepoID: 192, InstallationID: 312}
 	const origin = "https://codexia.fork.example"
-	target := cloudflareTarget{Repository: fork.FullName(), RepositoryID: fork.RepoID, OwnerID: fork.OwnerID, Origin: origin}
-	check := func(value cloudflareTarget, repo githubTarget, requestedOrigin string) error {
+	const managementHost = "codexia-ssh.fork.example"
+	const sshPolicyID = "00000000-0000-0000-0000-000000000001"
+	target := cloudflareTarget{Repository: fork.FullName(), RepositoryID: fork.RepoID, OwnerID: fork.OwnerID, Origin: origin,
+		SSHHostname: managementHost, SSHPolicyID: sshPolicyID}
+	check := func(value cloudflareTarget, repo githubTarget, requestedOrigin, requestedManagementHost string) error {
 		data, err := json.Marshal(value)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return validateProtectedCloudflareTarget(githubSnapshot{Production: githubEnvironment{
 			Variables: map[string]string{edgeTarget: string(data)},
-		}}, repo, requestedOrigin)
+		}}, repo, productionContract{PublicOrigin: requestedOrigin, ManagementHostname: requestedManagementHost})
 	}
-	if err := check(target, fork, origin); err != nil {
+	if err := check(target, fork, origin, managementHost); err != nil {
 		t.Fatal(err)
 	}
-	if err := check(target, githubTestTarget, origin); err == nil {
+	if err := check(target, githubTestTarget, origin, managementHost); err == nil {
 		t.Fatal("a different repository accepted a Cloudflare target for the same origin")
 	}
-	if err := check(target, fork, "https://unrelated.fork.example"); err == nil {
+	if err := check(target, fork, "https://unrelated.fork.example", managementHost); err == nil {
 		t.Fatal("the selected repository accepted a Cloudflare target for another origin")
 	}
+	if err := check(target, fork, origin, "unrelated-ssh.fork.example"); err == nil {
+		t.Fatal("the selected repository accepted a Cloudflare target for another management hostname")
+	}
 	target.RepositoryID = 0
-	if err := check(target, fork, origin); err == nil {
+	if err := check(target, fork, origin, managementHost); err == nil {
 		t.Fatal("an unbound Cloudflare target was accepted")
 	}
 }
