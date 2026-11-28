@@ -48,6 +48,7 @@ HealthStartPeriod=60s
 HealthRetries=3
 # A successful systemctl start now proves the real API healthcheck passed.
 Notify=healthy
+PublishPort=127.0.0.1:18081:3000/tcp
 
 [Service]
 Restart=on-failure

@@ -17,9 +17,9 @@ func managedEdgeFixture(t *testing.T) (managedEdgeSpec, managedEdgeInventory) {
 		Repository: githubTarget{Owner: "test-org", OwnerID: 1, RepoID: 2, InstallationID: 3},
 		Host:       "codexia.example.com", ManagementHost: "ssh.example.com",
 		AccountID: strings.Repeat("a", 32), ZoneID: strings.Repeat("b", 32),
-		TeamName: "test-team", AuthorPolicyID: id(1), ProbeTokenID: id(2),
-		AllowedIDPs: []string{id(3)}, SSHServiceTokenIDs: []string{id(4), id(5)},
-		ProductService: "http://127.0.0.1:3000", SSHService: "ssh://127.0.0.1:22",
+		TeamName: "test-team", AuthorPolicyID: id(1),
+		AllowedIDPs:    []string{id(3)},
+		ProductService: "http://127.0.0.1:18080", SSHService: "ssh://127.0.0.1:22",
 		Contract: cloudflareContract{
 			routes:         cloudflareManifest(t, "ui-routes.json"),
 			identityProbes: cloudflareManifest(t, "identity-probes.json"),
@@ -72,7 +72,8 @@ func TestManagedEdgeRejectsUnsafeInventory(t *testing.T) {
 		name string
 		edit func(*managedEdgeSpec, *managedEdgeInventory)
 	}{
-		{"shared service token", func(s *managedEdgeSpec, _ *managedEdgeInventory) { s.SSHServiceTokenIDs[0] = s.ProbeTokenID }},
+		{"direct API bypass", func(s *managedEdgeSpec, _ *managedEdgeInventory) { s.ProductService = "http://127.0.0.1:18081" }},
+		{"wrong SSH endpoint", func(s *managedEdgeSpec, _ *managedEdgeInventory) { s.SSHService = "ssh://127.0.0.1:2222" }},
 		{"unaccepted protocol", func(s *managedEdgeSpec, _ *managedEdgeInventory) { s.PublicProtocolEnabled = true }},
 		{"unapproved protocol", func(s *managedEdgeSpec, _ *managedEdgeInventory) {
 			s.PublicProtocolEnabled, s.PublicProtocolAccepted = true, true
@@ -168,17 +169,17 @@ func TestManagedEdgeRequiresManagementOriginAccess(t *testing.T) {
 	id := func(n int) string { return fmt.Sprintf("10000000-0000-4000-8000-%012d", n) }
 	state.Tunnels = []managedEdgeTunnel{{ID: id(20), Name: cloudflareTunnel, AccountTag: spec.AccountID, ConfigSrc: "cloudflare"}}
 	spec.ProbePolicyID, spec.ManagementPolicyID = id(21), id(22)
-	servicePolicy := func(policyID string, tokens []string) cloudflareAccessPolicy {
+	servicePolicy := func(policyID string, tags []string) cloudflareAccessPolicy {
 		p := cloudflareAccessPolicy{ID: policyID, Decision: "non_identity", Precedence: 1}
-		for _, token := range tokens {
-			p.Include = append(p.Include, map[string]json.RawMessage{"service_token": json.RawMessage(fmt.Sprintf(`{"token_id":%q}`, token))})
+		for _, tag := range tags {
+			p.Include = append(p.Include, map[string]json.RawMessage{"service_token_tag": json.RawMessage(fmt.Sprintf(`{"key":"codexia-scope","value":%q}`, tag))})
 		}
 		state.Policies = append(state.Policies, managedEdgePolicy{cloudflareAccessPolicy: p, AccountID: spec.AccountID})
 		return p
 	}
 	author := state.Policies[0].cloudflareAccessPolicy
-	probe := servicePolicy(spec.ProbePolicyID, []string{spec.ProbeTokenID})
-	ssh := servicePolicy(spec.ManagementPolicyID, spec.SSHServiceTokenIDs)
+	probe := servicePolicy(spec.ProbePolicyID, managedEdgeProbeTags(spec.Repository.RepoID))
+	ssh := servicePolicy(spec.ManagementPolicyID, managedEdgeSSHTags(spec.Repository.RepoID))
 	state.AppPolicies = map[string][]cloudflareAccessPolicy{}
 	addApp := func(domain string, n int, policies ...cloudflareAccessPolicy) string {
 		aud := strings.Repeat(fmt.Sprintf("%x", n%16), 64)
@@ -226,4 +227,42 @@ func TestManagedEdgeRequiresManagementOriginAccess(t *testing.T) {
 		t.Fatal("management ingress missing from configuration")
 	}
 	t.Fatal("management ingress repair was not planned")
+}
+
+func TestManagedEdgeServiceAuthMatchesRepositoryPurposeAndEnvironment(t *testing.T) {
+	spec, state := managedEdgeFixture(t)
+	expected := []string{"repo-2-ssh-codexia-bootstrap", "repo-2-ssh-codexia-production"}
+	if !slices.Equal(managedEdgeSSHTags(spec.Repository.RepoID), expected) || !slices.Equal(managedEdgeProbeTags(spec.Repository.RepoID), []string{"repo-2-probe-codexia-production"}) {
+		t.Fatal("service tags differ from the release admission contract")
+	}
+	rule := func(key, value string) map[string]json.RawMessage {
+		return map[string]json.RawMessage{"service_token_tag": json.RawMessage(fmt.Sprintf(`{"key":%q,"value":%q}`, key, value))}
+	}
+	valid := []map[string]json.RawMessage{rule("codexia-scope", expected[1]), rule("codexia-scope", expected[0])}
+	for _, tc := range []struct {
+		name    string
+		include []map[string]json.RawMessage
+		want    bool
+	}{
+		{"exact tags in either order", valid, true},
+		{"foreign repository", []map[string]json.RawMessage{valid[0], rule("codexia-scope", "repo-3-ssh-codexia-bootstrap")}, false},
+		{"foreign purpose", []map[string]json.RawMessage{valid[0], rule("codexia-scope", "repo-2-probe-codexia-production")}, false},
+		{"foreign key", []map[string]json.RawMessage{valid[0], rule("scope", expected[0])}, false},
+		{"duplicate tag", []map[string]json.RawMessage{valid[0], valid[0]}, false},
+		{"extra OR selector", append(slices.Clone(valid), rule("codexia-scope", "repo-3-ssh-codexia-production")), false},
+		{"legacy explicit ID", []map[string]json.RawMessage{valid[0], {"service_token": json.RawMessage(`{"token_id":"10000000-0000-4000-8000-000000000002"}`)}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			policy := cloudflareAccessPolicy{ID: "10000000-0000-4000-8000-000000000022", Decision: "non_identity", Include: tc.include}
+			if exactManagedServicePolicy(policy, expected) != tc.want {
+				t.Fatal("unexpected service selector decision")
+			}
+			spec.ManagementPolicyID = policy.ID
+			state.Policies = append(state.Policies[:1], managedEdgePolicy{cloudflareAccessPolicy: policy, AccountID: spec.AccountID})
+			_, err := planManagedEdge(spec, state)
+			if (err == nil) != tc.want {
+				t.Fatalf("unexpected plan decision: %v", err)
+			}
+		})
+	}
 }

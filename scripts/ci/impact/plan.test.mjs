@@ -738,10 +738,20 @@ test('every selected task has one execution group and every exclusion has a reas
 
 test('known operational inputs retain root proof and trace evidence for registered test sources', async () => {
   const { OPERATIONAL_ROOT_PATHS } = await import('./plan.mjs');
+  for (const file of [
+    'deploy/systemd/codexia-api.socket',
+    'deploy/systemd/codexia-api-gate.service',
+    'cmd/codexiactl/assets/codexia-cloudflared.service',
+    'scripts/deployment/ssh/cloudflared-proxy.sh',
+    'scripts/deployment/ssh/install-cloudflared.sh',
+  ]) assert.ok(OPERATIONAL_ROOT_PATHS.includes(file), file);
+  assert.ok(OPERATIONAL_ROOT_PATHS.includes('deploy/ansible/prepare-api-gate.yml'));
   for (const file of OPERATIONAL_ROOT_PATHS) {
     const selected = await plan([file]);
     const expected = file === 'deploy/backup/backup.sh'
       ? ['unit-root', 'db-contract', 'coverage', 'requirements-trace']
+      : file.startsWith('cmd/codexiactl/')
+        ? ['unit-root', 'coverage', 'codexiactl-linux']
       : file.startsWith('docs/deployment/')
         ? ['unit-root', 'coverage', 'architecture-g5', 'requirements-trace']
         : file.startsWith('edge/frontend/') && /\.[cm]?[jt]sx?$/u.test(file)
@@ -778,7 +788,8 @@ test('operational proof remains owned by one exact-head root task and matching i
   const infra = readWorkflow('deployment-config.yml');
   for (const event of ['pull_request','push']) {
     assert.deepEqual(infra.on[event].branches, ['main'], event);
-    for (const path of ['deploy/ansible/**','deploy/backup/**','deploy/quadlet/**','deploy/postgres/**','deploy/cloudflare/**']) {
+    for (const path of ['deploy/ansible/**','deploy/backup/**','deploy/quadlet/**','deploy/systemd/**','deploy/postgres/**','deploy/cloudflare/**',
+      'cmd/codexiactl/assets/codexia-cloudflared.service']) {
       assert.ok(infra.on[event].paths.includes(path), path);
     }
   }
@@ -791,7 +802,6 @@ test('operational proof remains owned by one exact-head root task and matching i
   }
   assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/DEPLOYMENT-REFERENCE.sdoc'));
   assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/BACKUP.sdoc'));
-  assert.ok(OPERATIONAL_ROOT_PATHS.includes('.github/workflows/tailscale-connectivity.yml'));
   const audit = readWorkflow('repository-audit.yml');
   assert.ok(!Object.hasOwn(audit.on,'workflow_run'));
   assert.ok(!Object.hasOwn(audit.on,'delete'));

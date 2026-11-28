@@ -12,7 +12,7 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: b942199ec2093f8781017bf00a00ca44
 STATEMENT: >>>
-**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が管理経路と公開ゲートの契約を所有する。正式運用には統合実サービス受入を要する。
 
 > Owner setup supports a same-origin browser enrollment through the setup-only Fastify runtime. An operator must validate the VM and Cloudflare boundary before handing off credentials. The existing SSH enrollment path remains available during the transition. Design authority is [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, Initial deployment] and [LINK: DOC-DESIGN-ADMIN-SCREEN-FLOW, Owner security].
 
@@ -52,7 +52,7 @@ For the independent VM-side commands, set `CODEXIA_TARGET_REPOSITORY`, `CODEXIA_
 ~/.local/bin/codexia-owner-setup --replace-explicitly-approved <reviewed-full-image-digest> <previous-grant-id> <owner-age-recipient>
 ```
 
-After the owner registers a Passkey, run protected Bootstrap mode `prepare-activation`. It uses the existing `--prepare-activation` operator command to verify the enrolled owner and approved clients, stop the setup-only API and Tunnel, and derive the normal runtime owner subject from PostgreSQL. A retry after the settings were written verifies the same owner and clients against the live database before marking the clean slot ready. The protected fresh R6 deployment checks compatibility, the confirmed installation intent, and separate approvals. Existing-data recovery requires independent preservation before activation. Retain the same already-published normal frontend and canonical routes. Clear the temporary enrollment approval after preparation.
+After the owner registers a Passkey, run protected Bootstrap mode `prepare-activation`. It uses the existing `--prepare-activation` operator command to verify the enrolled owner and approved clients, close the publication gate and stop the setup-only API, and derive the normal runtime owner subject from PostgreSQL. A retry after the settings were written verifies the same owner and clients against the live database before marking the clean slot ready. The protected fresh R6 deployment checks compatibility, the confirmed installation intent, and separate approvals. Existing-data recovery requires independent preservation before activation. Retain the same already-published normal frontend and canonical routes. Clear the temporary enrollment approval after preparation.
 <<<
 
 [[/SECTION]]

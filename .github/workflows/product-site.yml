@@ -25,6 +25,8 @@ concurrency:
 jobs:
   verify:
     name: Verify product site
+    outputs:
+      site-artifact-id: ${{ steps.site-upload.outputs.artifact-id }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -75,6 +77,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - uses: actions/upload-artifact@v7.0.2
+        id: site-upload
         with:
           name: product-site-${{ github.run_id }}-${{ github.run_attempt }}
           path: edge/product-site/dist/
@@ -101,7 +104,8 @@ jobs:
           node-version: '24.22.3'
       - uses: actions/download-artifact@v8.0.2
         with:
-          name: product-site-${{ github.run_id }}-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.verify.outputs.site-artifact-id || 'missing-verified-artifact-id' }}
+          digest-mismatch: error
           path: edge/product-site/dist/
       - name: Verify the artifact and install locked deployment toolchain
         run: |

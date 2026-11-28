@@ -39,12 +39,6 @@ func (t githubTarget) oidcPrefix() string {
 	return fmt.Sprintf("repo:%s@%d/%s@%d", t.Owner, t.OwnerID, deploymentRepositoryName, t.RepoID)
 }
 
-func (t githubTarget) wifSubject() string { return t.oidcPrefix() + ":environment:codexia-*" }
-
-func (t githubTarget) workflowClaim() string {
-	return t.FullName() + "/.github/workflows/*@refs/heads/main"
-}
-
 func (t githubTarget) imageRepository() string {
 	return "ghcr.io/" + strings.ToLower(t.Owner) + "/codexia-backend"
 }

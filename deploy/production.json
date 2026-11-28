@@ -1,5 +1,6 @@
 {
   "publicOrigin": "https://codexia.yohn.jp",
+  "managementHostname": "codexia-ssh.yohn.jp",
   "desktopCallbackPath": "/desktop",
   "webClientId": "codexia-web",
   "iosClientId": "codexia-ios",

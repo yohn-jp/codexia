@@ -11,8 +11,8 @@ import (
 const (
 	vmStage = iota + 1
 	githubStage
-	tailnetStage
-	cloudflareStage
+	cloudflareAuthStage
+	sshPinStage
 	settingsStage
 	managementStage
 	bootstrapStage
@@ -69,7 +69,7 @@ func runInit(ctx context.Context) (resultErr error) {
 		return err
 	}
 	snapshot, err := gh.Observe(ctx)
-	if err := validateProtectedCloudflareTarget(snapshot, gh.target, settings.PublicOrigin); err != nil {
+	if err := validateProtectedCloudflareTarget(snapshot, gh.target, settings); err != nil {
 		return err
 	}
 	if errors.Is(err, errGitHubProtection) && !vm.CodexiaPresent {
@@ -121,7 +121,7 @@ func runInit(ctx context.Context) (resultErr error) {
 		management := existingManagement(snapshot)
 		if management == "" {
 			return needsAction("Existing Codexia resources were detected and neither protected SSH configuration is complete. Verify the installation through " +
-				c.target.URL() + "/blob/main/docs/deployment/PROTECTED-RECOVERY.md")
+				c.runbookLink(recoveryRunbook))
 		}
 		tty.Notice("Existing Codexia resources detected. Observe the protected lifecycle before changing provider or repository settings.")
 		receipt, id, err := c.preflight(ctx, management)
@@ -167,7 +167,7 @@ func managementInputsExist(env githubEnvironment, names []string, sshSecret stri
 			return false
 		}
 	}
-	for _, name := range commonSecrets {
+	for _, name := range managementSecrets() {
 		if !env.Secrets[name] {
 			return false
 		}
@@ -177,30 +177,34 @@ func managementInputsExist(env githubEnvironment, names []string, sshSecret stri
 
 func (c *workflowController) prepareInputs(ctx context.Context, gh *githubControl, o operator, vm vmObservation,
 	settings productionContract, snapshot githubSnapshot) error {
-	reportStage(o, tailnetStage, "Verify this VM's Tailnet, runner access policy and repository OIDC trust")
-	tailnet, err := prepareTailnet(ctx, o, vm, gh, snapshot, false)
+	reportStage(o, cloudflareAuthStage, "Check the Cloudflare connector and authenticate through the official cf Device Flow")
+	connectorNeedsInstall, err := CloudflareConnectorNeedsInstall(ctx)
 	if err != nil {
 		return err
 	}
-	pin, err := vm.ConfirmPin(o, tailnet.Address)
-	if err != nil {
-		return err
-	}
-	o.Notice("Verified the Tailnet node, CI policy and effective OpenSSH pin for " + tailnet.Address + ".")
-	reportStage(o, cloudflareStage, "Verify the existing edge for "+settings.PublicOrigin)
-	edge, err := observeCloudflare(ctx, o, gh.target, settings, cloudflareRequirementsFor(snapshot))
+	requirements := cloudflareRequirementsFor(snapshot).requireConnectorToken(connectorNeedsInstall)
+	edge, err := observeCloudflare(ctx, o, gh.target, settings, requirements)
 	if err != nil {
 		return err
 	}
 	defer edge.Close()
+	if edge.target.SSHHostname != settings.ManagementHostname {
+		return refused("The verified Cloudflare SSH ingress does not match the selected production management hostname")
+	}
 	if err := verifyInitialEdge(ctx, vm, edge); err != nil {
 		return err
 	}
+	reportStage(o, sshPinStage, "Confirm the OpenSSH host key behind "+settings.ManagementHostname)
+	pin, err := vm.ConfirmPin(o, settings.ManagementHostname)
+	if err != nil {
+		return err
+	}
+	o.Notice("Verified the Cloudflare management hostname and effective OpenSSH pin for " + settings.ManagementHostname + ".")
 	reportStage(o, settingsStage, "Compare checked VM and provider values against the selected repository's protected inputs")
 	if err := c.requireIdle(ctx, gh); err != nil {
 		return err
 	}
-	return registerInputs(ctx, o, gh, c, vm, tailnet, edge, snapshot, pin)
+	return registerInputs(ctx, o, gh, c, vm, settings.ManagementHostname, edge, snapshot, pin)
 }
 
 func (c *workflowController) reconcilePrevious(ctx context.Context, gh *githubControl) error {
@@ -569,12 +573,11 @@ func (c *workflowController) deliver(ctx context.Context, gh *githubControl, set
 	handoff.GrantBindingSHA = receipt.Evidence.Host.Database.OwnerSetupCheckpoint.GrantBindingSHA
 	if err := handoff.Deliver(ctx, c.operator, c.target, settings.PublicOrigin, settings.ServiceUID); err != nil {
 		if errors.Is(err, errHandoffUnavailable) {
-			c.operator.Notice("Owner recovery instructions: " + c.target.URL() + "/blob/main/deploy/ansible/AUTH-RUNTIME.md#first-owner-through-the-browser")
+			c.operator.Notice("For Owner recovery, see “First owner through the browser” in " + c.runbookLink(authRuntimeRunbook))
 		}
 		return err
 	}
 	c.operator.Notice("SETUP_PENDING. The Owner can enroll on " + settings.PublicOrigin + "/console/setup. ACTIVE: false. ACCEPTED: false.")
-	c.operator.Notice("After the Owner enrolls in their browser, use the protected preparation and activation steps at " +
-		c.target.URL() + "/blob/main/docs/deployment/PRODUCTION-BOOTSTRAP.md#run-r4-and-r5.")
+	c.operator.Notice("After the Owner enrolls in their browser, follow “Run R4 and R5” in " + c.runbookLink(bootstrapRunbook))
 	return nil
 }

@@ -66,6 +66,7 @@ export class RecentActivityStore {
   private readonly directory: string;
   private readonly filePath: string;
   private readonly orderPath: string;
+  private readonly pendingPath: string;
 
   constructor(usageDirectory: string) {
     if (typeof usageDirectory !== 'string' || !usageDirectory.trim()) {
@@ -75,17 +76,20 @@ export class RecentActivityStore {
     this.directory = join(this.root, 'recent-activity');
     this.filePath = join(this.directory, 'recent-activity-state.json');
     this.orderPath = join(this.directory, 'recent-activity-order.json');
+    this.pendingPath = join(this.directory, 'recent-activity-order.pending');
   }
 
   async list(ownerScope: string, projectId: string): Promise<RecentActivityItem[]> {
     const ownerKey = hash(validateOwnerScope(ownerScope));
     const identity = normalizeProjectId(projectId);
     const key = partitionKey(ownerKey, identity);
-    const state = await this.readState();
-    const entry = state.entries.find(candidate => candidate.key === key);
-    if (!entry) return [];
-    assertEntryScope(entry, ownerKey, identity);
-    return entry.items.map(item => ({ ...item })).sort(newestFirst);
+    return exclusive(this.filePath, async () => {
+      const state = await this.readCommittedState();
+      const entry = state.entries.find(candidate => candidate.key === key);
+      if (!entry) return [];
+      assertEntryScope(entry, ownerKey, identity);
+      return entry.items.map(item => ({ ...item })).sort(newestFirst);
+    });
   }
 
   async upsert(
@@ -106,7 +110,8 @@ export class RecentActivityStore {
     )
       invalidRecord('Recent activity order is invalid');
     return exclusive(this.filePath, async () => {
-      const state = await this.readState();
+      const state = await this.readCommittedState();
+      const previousHash = hash(JSON.stringify(state));
       const key = partitionKey(ownerKey, identity);
       let entry = state.entries.find(candidate => candidate.key === key);
       if (entry) {
@@ -142,9 +147,7 @@ export class RecentActivityStore {
           existing.pageIndex = normalizedInput.pageIndex;
           previous.pageSequence = order.sequence;
           deviceOrder.itemHash = hash(JSON.stringify(existing));
-          const orderBytes = this.serialize(ordering);
-          await this.persist(state);
-          await this.persistBytes(this.orderPath, orderBytes);
+          await this.persist(state, previousHash, ordering);
         }
         return result();
       }
@@ -162,7 +165,7 @@ export class RecentActivityStore {
       };
       entry.items = entry.items.filter(candidate => candidate.deviceType !== item.deviceType);
       entry.items.push(item);
-      let orderBytes: string | undefined;
+      let orderChanged = false;
       if (order && writerKey) {
         const device = deviceOrder ?? { lastWriter: null, itemHash: null, writers: {} };
         // A document transition closes the previous visit. A report newer
@@ -179,18 +182,15 @@ export class RecentActivityStore {
         device.lastWriter = writerKey;
         device.itemHash = hash(JSON.stringify(item));
         ordering[deviceKey] = device;
-        orderBytes = this.serialize(ordering);
+        orderChanged = true;
       } else if (deviceOrder?.lastWriter) {
         // Legacy clients remain accepted; their writes invalidate stale-page
         // merging from a prior ordered writer, but not its sequence fence.
         deviceOrder.lastWriter = null;
         deviceOrder.itemHash = null;
-        orderBytes = this.serialize(ordering);
+        orderChanged = true;
       }
-      await this.persist(state);
-      // A successful response certifies both the cursor and its admission
-      // fence. The same exclusive lock spans both atomic file replacements.
-      if (orderBytes !== undefined) await this.persistBytes(this.orderPath, orderBytes);
+      await this.persist(state, previousHash, orderChanged ? ordering : undefined);
       return result();
     });
   }
@@ -228,6 +228,10 @@ export class RecentActivityStore {
     } catch {
       corruptState();
     }
+    return this.normalizeOrder(value);
+  }
+
+  private normalizeOrder(value: unknown): OrderState {
     if (!isRecord(value)) corruptState();
     const state: OrderState = {};
     const digest = (key: unknown): key is string => typeof key === 'string' && /^[a-f0-9]{64}$/u.test(key);
@@ -270,8 +274,54 @@ export class RecentActivityStore {
     return serialized;
   }
 
-  private async persist(state: StoredState): Promise<void> {
-    await this.persistBytes(this.filePath, this.serialize(state));
+  private async readCommittedState(): Promise<StoredState> {
+    const state = await this.readState();
+    // Two SHA-256 digests and the fixed wrapper add less than 256 bytes to the order JSON.
+    const bytes = await readStateFile(this.pendingPath, MAX_STATE_BYTES + 256);
+    if (!bytes) return state;
+    let pending: unknown;
+    try {
+      pending = JSON.parse(bytes.toString('utf8'));
+    } catch {
+      corruptState();
+    }
+    if (
+      !isRecord(pending) ||
+      typeof pending.before !== 'string' ||
+      typeof pending.after !== 'string' ||
+      !/^[a-f0-9]{64}$/u.test(pending.before) ||
+      !/^[a-f0-9]{64}$/u.test(pending.after)
+    )
+      corruptState();
+    const ordering = this.serialize(this.normalizeOrder(pending.order));
+    const current = hash(JSON.stringify(state));
+    if (current === pending.after) {
+      await this.persistBytes(this.orderPath, ordering);
+    } else if (current !== pending.before) {
+      // A different backend changed the cursor while this write was interrupted.
+      corruptState();
+    }
+    await this.clearPending();
+    return state;
+  }
+
+  private async persist(state: StoredState, previousHash: string, ordering?: OrderState): Promise<void> {
+    const stateBytes = this.serialize(state);
+    if (!ordering) return this.persistBytes(this.filePath, stateBytes);
+    const orderBytes = this.serialize(ordering);
+    // The durable cursor replacement decides the transaction. A restart can finish
+    // the order replacement, or discard it if the cursor never advanced.
+    const after = hash(stateBytes.slice(0, -1));
+    const pending = `{"before":"${previousHash}","after":"${after}","order":${orderBytes.trimEnd()}}\n`;
+    await this.persistBytes(this.pendingPath, pending);
+    await this.persistBytes(this.filePath, stateBytes);
+    await this.persistBytes(this.orderPath, orderBytes);
+    await this.clearPending();
+  }
+
+  private async clearPending(): Promise<void> {
+    await unlink(this.pendingPath);
+    await syncDirectory(this.directory);
   }
 
   private async persistBytes(path: string, serialized: string): Promise<void> {
@@ -494,12 +544,12 @@ async function assertPrivateDirectory(path: string): Promise<void> {
   }
 }
 
-async function readStateFile(path: string): Promise<Buffer | undefined> {
+async function readStateFile(path: string, maxBytes = MAX_STATE_BYTES): Promise<Buffer | undefined> {
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const info = await handle.stat();
-    if (!info.isFile() || info.size > MAX_STATE_BYTES || (info.mode & 0o077) !== 0) {
+    if (!info.isFile() || info.size > maxBytes || (info.mode & 0o077) !== 0) {
       throw new RecentActivityStoreError(
         'recent_activity_state_corrupt',
         'Recent activity file must be private, regular, and within its size limit',

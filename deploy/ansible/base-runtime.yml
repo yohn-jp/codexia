@@ -19,11 +19,10 @@
     base_runtime_service_identity.stdout.split(':') | length != 7 or
     base_runtime_service_identity.stdout.split(':')[2] | int != codexia_service_uid or
     base_runtime_service_identity.stdout.split(':')[5] != codexia_service_home
-- name: Require the repository-validated PostgreSQL and Cloudflare image digests
+- name: Require the repository-validated PostgreSQL image digest
   ansible.builtin.assert:
     that:
       - "'Image=docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536' in (lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/codexia-db.container', rstrip=false) | split('\n'))"
-      - "'Image=docker.io/cloudflare/cloudflared@sha256:b94b96edf2c9c4360f8879c8580cfaa99077f19c849ec595ca2f711b27d4f344' in (lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/codexia-tunnel.container', rstrip=false) | split('\n'))"
     fail_msg: A pinned base image input differs from the reviewed repository design; no runtime resources will be changed.
 - name: Require actual rootless Podman
   ansible.builtin.command:
@@ -40,8 +39,7 @@
       - -eu
       - -c
       - >-
-        for secret in codexia-tunnel-token
-        codexia-postgres-admin-password codexia-postgres-app-password; do
+        for secret in codexia-postgres-admin-password codexia-postgres-app-password; do
           podman secret exists "$secret";
         done
     expand_argument_vars: false
@@ -103,37 +101,29 @@
       - item.stdout.split('|')[1] is match('^/.+')
     fail_msg: Existing Codexia volume identity or mountpoint is invalid; no volume will be replaced.
   loop: "{{ base_runtime_volume_details.results }}"
-- name: Observe database and Tunnel container identities
+- name: Observe the database container identity
   ansible.builtin.command:
-    argv: [podman, container, exists, "{{ item }}"]
-  loop: [codexia-db, codexia-tunnel]
-  register: base_runtime_containers
+    argv: [podman, container, exists, codexia-db]
+  register: base_runtime_db_container
   changed_when: false
-  failed_when: base_runtime_containers.rc not in [0, 1]
-- name: Inspect database and Tunnel systemd service state
+  failed_when: base_runtime_db_container.rc not in [0, 1]
+- name: Inspect the database systemd service state
   ansible.builtin.command:
-    argv: [systemctl, --user, is-active, "{{ item }}.service"]
-  loop: [codexia-db, codexia-tunnel]
-  register: base_runtime_services
+    argv: [systemctl, --user, is-active, codexia-db.service]
+  register: base_runtime_db_service
   changed_when: false
-  failed_when: base_runtime_services.rc not in [0, 3, 4]
+  failed_when: base_runtime_db_service.rc not in [0, 3, 4]
   check_mode: false
-- name: Require existing base containers to remain under their generated systemd units
+- name: Require the database container to remain under its generated systemd unit
   ansible.builtin.assert:
     that:
       - >-
-        (base_runtime_containers.results[0].rc == 0 and base_runtime_services.results[0].rc == 0) or
-        (base_runtime_containers.results[0].rc == 1 and base_runtime_services.results[0].rc != 0)
-      - >-
-        (base_runtime_containers.results[1].rc == 0 and base_runtime_services.results[1].rc == 0) or
-        (base_runtime_containers.results[1].rc == 1 and base_runtime_services.results[1].rc != 0)
-    fail_msg: Existing base containers and generated systemd units disagree; operator recovery is required.
+        (base_runtime_db_container.rc == 0 and base_runtime_db_service.rc == 0) or
+        (base_runtime_db_container.rc == 1 and base_runtime_db_service.rc != 0)
+    fail_msg: Existing database container and generated systemd unit disagree; operator recovery is required.
 - name: Verify the existing database container before any runtime mutation
   ansible.builtin.include_tasks: verify-base-db-container.yml
-  when: base_runtime_containers.results[0].rc == 0
-- name: Verify an existing Tunnel container before any runtime mutation
-  ansible.builtin.include_tasks: verify-base-tunnel-container.yml
-  when: base_runtime_containers.results[1].rc == 0
+  when: base_runtime_db_container.rc == 0
 - name: Require the existing database volume to contain an adoptable cluster or be empty
   ansible.builtin.command:
     argv:
@@ -151,7 +141,7 @@
   ansible.builtin.assert:
     that:
       - (base_runtime_pgdata_before.stdout | from_json).state in ['empty', 'ready']
-      - base_runtime_containers.results[0].rc != 0 or (base_runtime_pgdata_before.stdout | from_json).state == 'ready'
+      - base_runtime_db_container.rc != 0 or (base_runtime_pgdata_before.stdout | from_json).state == 'ready'
     fail_msg: Existing PostgreSQL volume data is not a canonical PostgreSQL 17 cluster; no DB service will be started.
   when: base_runtime_pgdata_before is not skipped
 - name: Inspect every existing base Quadlet before changing host files or Podman resources
@@ -168,7 +158,6 @@
     - codexia-data.volume
     - codexia-history.volume
     - codexia-db.container
-    - codexia-tunnel.container
   register: base_runtime_existing_quadlets
 - name: Reject symlinked or special existing base Quadlets before mutation
   ansible.builtin.assert:
@@ -184,9 +173,8 @@
       - not (base_runtime_existing_quadlets.results[item.index].stat.islnk | default(false))
     fail_msg: An existing base container must already have its generated Quadlet file.
   loop:
-    - {name: codexia-db, index: 5, result_index: 0}
-    - {name: codexia-tunnel, index: 6, result_index: 1}
-  when: base_runtime_containers.results[item.result_index].rc == 0
+    - {name: codexia-db, index: 5}
+  when: base_runtime_db_container.rc == 0
 - name: Reject any existing base Quadlet drift before mutation
   ansible.builtin.assert:
     that:
@@ -199,8 +187,10 @@
     that: codexia_database_initialization_approved | default(false) | bool
     fail_msg: Explicit approval is required before initializing an empty PostgreSQL volume.
   when: >-
-    base_runtime_containers.results[0].rc == 1 and
+    base_runtime_db_container.rc == 1 and
     (base_runtime_pgdata_before is skipped or (base_runtime_pgdata_before.stdout | from_json).state == 'empty')
+- name: Converge the independent management connector and closed product publication gate
+  ansible.builtin.include_tasks: prepare-api-gate.yml
 - name: Inspect the PostgreSQL init-script directory without following links
   become: true
   become_user: root
@@ -300,7 +290,7 @@
       - base_runtime_init_script.stat.pw_name == codexia_service_user
       - base_runtime_init_script.stat.checksum == (lookup('ansible.builtin.file', repo_root + '/deploy/postgres/010-create-app-role.sh', rstrip=false) | hash('sha1'))
     fail_msg: Existing PostgreSQL init script differs from the canonical initializer; it was not overwritten.
-- name: Install missing canonical network, volume, database, and Tunnel Quadlets
+- name: Install missing canonical network, volume, and database Quadlets
   ansible.builtin.copy:
     src: "{{ repo_root }}/deploy/quadlet/{{ item }}"
     dest: "{{ quadlet_dir }}/{{ item }}"
@@ -335,13 +325,13 @@
   changed_when: false
   when: >-
     (base_runtime_quadlet_copies.results | selectattr('changed', 'equalto', true) | list | length > 0) or
-    base_runtime_services.results[0].rc == 4
+    base_runtime_db_service.rc == 4
 - name: Start PostgreSQL only when its container does not already exist
   ansible.builtin.systemd_service:
     name: codexia-db.service
     scope: user
     state: started
-  when: base_runtime_containers.results[0].rc == 1
+  when: base_runtime_db_container.rc == 1
 - name: Wait for the permanent PostgreSQL server to accept TCP connections
   ansible.builtin.command:
     argv: [podman, exec, codexia-db, pg_isready, -h, 127.0.0.1, -U, codexia_admin, -d, codexia]
@@ -579,24 +569,3 @@
 - name: Report safe base runtime adoption without mutating database schema
   ansible.builtin.debug:
     msg: Verified canonical rootless networks, exact persistent volume names, pinned PostgreSQL 17, exact schema migration identity when present, and separate database roles. Existing database data and credentials were preserved.
-- name: Install the pinned Tunnel Quadlet after database convergence without starting it
-  ansible.builtin.copy:
-    src: "{{ repo_root }}/deploy/quadlet/codexia-tunnel.container"
-    dest: "{{ quadlet_dir }}/codexia-tunnel.container"
-    mode: '0600'
-    force: false
-  register: base_runtime_tunnel_quadlet
-- name: Load the generated Tunnel unit after installing its Quadlet without starting it
-  ansible.builtin.command:
-    argv: [systemctl, --user, daemon-reload]
-  changed_when: false
-  when: base_runtime_tunnel_quadlet.changed or base_runtime_services.results[1].rc == 4
-- name: Read the installed Tunnel Quadlet without reloading or starting the Tunnel
-  ansible.builtin.slurp:
-    path: "{{ quadlet_dir }}/codexia-tunnel.container"
-  register: base_runtime_tunnel_content
-- name: Verify the pinned Tunnel Quadlet exactly matches the repository source
-  ansible.builtin.assert:
-    that:
-      - base_runtime_tunnel_content.content == (lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/codexia-tunnel.container', rstrip=false) | b64encode)
-    fail_msg: Tunnel Quadlet differs from the reviewed source; it was not overwritten.

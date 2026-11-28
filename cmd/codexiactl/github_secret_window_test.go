@@ -145,7 +145,7 @@ func TestGitHubSecretDoesNotSendWithoutExclusiveWriterApproval(t *testing.T) {
 	if _, err := g.AcquireSecretWriteWindow(ctx, &githubTestOperator{deny: true}, githubTestOperationA); !errors.Is(err, errGitHubSettingsWriterUnavailable) {
 		t.Fatalf("did not stop when the exclusive scope was denied: %v", err)
 	}
-	err := g.PutSecret(ctx, githubBootstrapEnvironment, "CODEXIA_TUNNEL_TOKEN", []byte("fixture"))
+	err := g.PutSecret(ctx, githubBootstrapEnvironment, sshAccessSecret, []byte("fixture"))
 	if !errors.Is(err, errGitHubSettingsWriterUnavailable) || errors.Is(err, errGitHubSecretWriteUnknown) {
 		t.Fatalf("uncoordinated Secret send was not rejected before transmission: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestGitHubSecretStopsWhenItsWriterRecordChangesAndPreservesOtherHolder(t *t
 		case lock.serve(t, w, r), githubTestProtection(t, w, r):
 		case strings.HasSuffix(r.URL.Path, "/secrets/public-key"):
 			githubTestJSON(t, w, map[string]string{"key_id": "123", "key": base64.StdEncoding.EncodeToString(pub[:])})
-		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/secrets/CODEXIA_TUNNEL_TOKEN"):
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/secrets/"+sshAccessSecret):
 			lock.mu.Lock()
 			lock.value = githubTestOperationB
 			lock.mu.Unlock()
@@ -193,7 +193,7 @@ func TestGitHubSecretStopsWhenItsWriterRecordChangesAndPreservesOtherHolder(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = g.PutSecret(ctx, githubBootstrapEnvironment, "CODEXIA_TUNNEL_TOKEN", []byte("fixture"))
+	err = g.PutSecret(ctx, githubBootstrapEnvironment, sshAccessSecret, []byte("fixture"))
 	if !errors.Is(err, errGitHubSettingsWriterUnavailable) || errors.Is(err, errGitHubSecretWriteUnknown) {
 		t.Fatalf("Secret send did not stop on loss of its lock: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestGitHubSecretWriteUncertaintyDistinguishesDefiniteRejections(t *testing.
 				case lock.serve(t, w, r), githubTestProtection(t, w, r):
 				case strings.HasSuffix(r.URL.Path, "/secrets/public-key"):
 					githubTestJSON(t, w, map[string]string{"key_id": "123", "key": base64.StdEncoding.EncodeToString(pub[:])})
-				case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/secrets/CODEXIA_TUNNEL_TOKEN"):
+				case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/secrets/"+sshAccessSecret):
 					w.WriteHeader(tt.status)
 				default:
 					w.WriteHeader(http.StatusNotFound)
@@ -234,7 +234,7 @@ func TestGitHubSecretWriteUncertaintyDistinguishesDefiniteRejections(t *testing.
 			if _, err := g.AcquireSecretWriteWindow(ctx, new(githubTestOperator), githubTestOperationA); err != nil {
 				t.Fatal(err)
 			}
-			err := g.PutSecret(ctx, githubBootstrapEnvironment, "CODEXIA_TUNNEL_TOKEN", []byte("fixture"))
+			err := g.PutSecret(ctx, githubBootstrapEnvironment, sshAccessSecret, []byte("fixture"))
 			if err == nil || errors.Is(err, errGitHubSecretWriteUnknown) != tt.unknown {
 				t.Fatalf("unexpected classification for status %d: %v", tt.status, err)
 			}

@@ -119,7 +119,6 @@ jobs:
       contents: read
       actions: read
       packages: read
-      id-token: write
     steps:
       - name: Check protected backend push-deployment enablement
         id: deployment-gate
@@ -207,6 +206,9 @@ jobs:
           CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
           CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN }}
         run: node scripts/release/frontend/initial-publication.mjs observe-ingress
+      - name: Install checksum-pinned cloudflared client
+        if: steps.freshness.outputs.current == 'true'
+        run: bash scripts/deployment/ssh/install-cloudflared.sh
       - name: Prepare pinned SSH identity
         id: target
         if: steps.freshness.outputs.current == 'true'
@@ -214,23 +216,14 @@ jobs:
           CODEXIA_DEPLOY_HOST: ${{ vars.CODEXIA_DEPLOY_HOST }}
           CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
           CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_MANAGEMENT_HOSTNAME: ${{ env.CODEXIA_MANAGEMENT_HOSTNAME }}
         run: bash deploy/ansible/prepare-deploy-ssh.sh
-      - name: Require immutable GitHub OIDC claims for Tailscale
-        if: steps.freshness.outputs.current == 'true'
-        env:
-          CODEXIA_TAILSCALE_CLIENT_ID: ${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}
-          CODEXIA_TAILSCALE_ENVIRONMENT: codexia-production
-        run: node scripts/deployment/preflight/tailscale-oidc.mjs
-      - name: Connect to the Tailnet using GitHub OIDC
-        if: steps.freshness.outputs.current == 'true'
-        uses: tailscale/github-action@v4
-        with:
-          oauth-client-id: ${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}
-          audience: ${{ format('api.tailscale.com/{0}', vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID) }}
-          tags: tag:ci
-          ping: ${{ steps.target.outputs.host }}
       - name: Verify pinned public-key SSH as codexia
         if: steps.freshness.outputs.current == 'true'
+        env:
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: ssh -F "$RUNNER_TEMP/codexia-ssh/config" codexia-target 'test "$(id -un)" = codexia'
       - name: Verify deployed frontend epoch and Access boundary for certified backend recovery
         if: steps.freshness.outputs.current == 'true'
@@ -303,6 +296,8 @@ jobs:
           CODEXIA_INITIAL_INSTALL_APPROVED: ${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED || 'false' }}
           CODEXIA_DATABASE_INITIALIZATION_APPROVED: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED || 'false' }}
           CODEXIA_DATABASE_ADOPTION_APPROVED: ${{ vars.CODEXIA_DATABASE_ADOPTION_APPROVED || 'false' }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'

@@ -93,10 +93,13 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   '.github/workflows/ansible-host.yml',
   '.github/workflows/backend-deployment-handoff.yml',
   '.github/workflows/deployment-config.yml',
+  'cmd/codexiactl/assets/codexia-cloudflared.service',
   '.github/workflows/push-backup.yml',
   '.github/workflows/push-host.yml',
   '.github/workflows/repository-audit.yml',
-  '.github/workflows/tailscale-connectivity.yml',
+  'deploy/ansible/codexia-api-gate',
+  'deploy/ansible/codexia-api-gate.sudoers.j2',
+  'deploy/ansible/prepare-api-gate.yml',
   'deploy/ansible/base-runtime.yml',
   'deploy/ansible/base-secrets.yml',
   'deploy/ansible/check_postgres_volume.py',
@@ -125,7 +128,8 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/ansible/test_host_contract.py',
   'deploy/ansible/test_postgres_volume_layout.py',
   'deploy/ansible/verify-base-db-container.yml',
-  'deploy/ansible/verify-base-tunnel-container.yml',
+  'deploy/systemd/codexia-api-gate.service',
+  'deploy/systemd/codexia-api.socket',
   'deploy/backup/backup.sh',
   'deploy/cloudflare/identity-probes.json',
   'deploy/cloudflare/public-protocol-paths.json',
@@ -144,7 +148,6 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/quadlet/codexia-db.container',
   'deploy/quadlet/codexia-history.volume',
   'deploy/quadlet/codexia-postgres.volume',
-  'deploy/quadlet/codexia-tunnel.container',
   'deploy/quadlet/codexia.network',
   ...ROOT_VERIFICATION_DOCUMENTS,
   'edge/frontend/package-lock.json',
@@ -196,6 +199,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/ansible/reset-absent-app-database.py',
   'deploy/ansible/preflight-observe.yml',
   'deploy/ansible/test_preflight_observe.py',
+  'deploy/ansible/prepare-api-gate.yml',
   'deploy/ansible/prepare-deploy-ssh.sh',
   'scripts/deployment/preflight/observe.mjs',
   'scripts/deployment/preflight/run.mjs',
@@ -208,6 +212,8 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/deployment/preflight/preservation.mjs',
   'scripts/deployment/preflight/plan.mjs',
   'scripts/deployment/preflight/plan.test.mjs',
+  'scripts/deployment/ssh/cloudflared-proxy.sh',
+  'scripts/deployment/ssh/install-cloudflared.sh',
   'scripts/deployment/bootstrap/activate-backend.mjs',
   'scripts/deployment/bootstrap/activate-backend.test.mjs',
   'scripts/deployment/handoff/backend-contract.test.mjs',
@@ -333,7 +339,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
     if (file === '.github/workflows/product-site.yml' || file.startsWith('edge/product-site/')) continue;
     if (file.startsWith('cmd/codexiactl/') || file === 'scripts/ci/execution/verify-codexiactl.sh') {
       add('codexiactl-linux');
-      if (file === 'cmd/codexiactl/release-contract.json') add('unit-root');
+      if (file === 'cmd/codexiactl/release-contract.json' || operationalRootPaths.has(file)) add('unit-root');
       continue;
     }
     if (codexiactlSpecifications.has(file) || file === 'deploy/production.json' ||

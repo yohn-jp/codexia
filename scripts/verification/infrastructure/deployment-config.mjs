@@ -13,7 +13,7 @@ const edgePackage = JSON.parse(await read('edge/frontend/package.json'));
 const edgeLock = JSON.parse(await read('edge/frontend/package-lock.json'));
 const uiRoutes = JSON.parse(await read('deploy/cloudflare/ui-routes.json'));
 const publicProtocolPaths = JSON.parse(await read('deploy/cloudflare/public-protocol-paths.json'));
-const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terraformVariables, apiQuadlet, databaseQuadlet, databaseNetwork, databaseVolume, tunnelQuadlet, backendDockerfile, deploymentDocs, pushDeploymentDocs, iacDocs, ansibleDocs, backupDocs] = await Promise.all([
+const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terraformVariables, apiQuadlet, databaseQuadlet, databaseNetwork, databaseVolume, connectorUnit, gateSocket, gateService, backendDockerfile, deploymentDocs, pushDeploymentDocs, iacDocs, ansibleDocs, backupDocs] = await Promise.all([
   read('edge/frontend/static/_headers'),
   read('edge/frontend/static/_redirects'),
   read('packages/api/src/server.ts'),
@@ -24,7 +24,9 @@ const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terr
   read('deploy/quadlet/codexia-db.container'),
   read('deploy/quadlet/codexia-data.network'),
   read('deploy/quadlet/codexia-postgres.volume'),
-  read('deploy/quadlet/codexia-tunnel.container'),
+  read('cmd/codexiactl/assets/codexia-cloudflared.service'),
+  read('deploy/systemd/codexia-api.socket'),
+  read('deploy/systemd/codexia-api-gate.service'),
   read('Dockerfile.backend'),
   read('docs/deployment/DEPLOYMENT-REFERENCE.sdoc'),
   read('docs/deployment/PUSH-DEPLOYMENT.sdoc'),
@@ -64,8 +66,9 @@ assert.match(terraformMain, /pattern\s+=\s+"\$\{var\.app_hostname\}\$\{each\.val
 assert.match(terraformMain, /service\s+=\s+var\.origin_service/u);
 assert.match(terraformMain, /required\s+=\s+true/u);
 assert.match(terraformMain, /originRoutes/u);
-assert.match(terraformVariables, /condition\s*=\s*var\.origin_service\s*==\s*"http:\/\/codexia-api:3000"/u);
-assert.doesNotMatch(terraformVariables, /codexia-api-proxy/u, "retired proxy ingress must not be an accepted origin");
+assert.match(terraformVariables, /condition\s*=\s*var\.origin_service\s*==\s*"http:\/\/127\.0\.0\.1:18080"/u);
+assert.match(terraformMain, /hostname\s*=\s*var\.ssh_hostname\s+service\s*=\s*"ssh:\/\/127\.0\.0\.1:22"/u);
+assert.match(terraformMain, /decision\s*=\s*"non_identity"[\s\S]*?service_token_tag\s*=\s*\{[\s\S]*?key\s*=\s*"codexia-scope"/u);
 
 assert.equal(operations.apiSessionGet.path, '/api/session', 'the UI API client must keep using same-origin API paths');
 assert.doesNotMatch(apiClient, /VITE_API_URL/u, 'the frontend API origin is same-origin and must not be injected at build time');
@@ -83,7 +86,8 @@ assert.match(apiQuadlet, /Requires=codexia-db\.service/u);
 assert.match(apiQuadlet, /Network=codexia-data\.network/u);
 assert.match(apiQuadlet, /HealthCmd=.*\/health\/ready/u);
 assert.match(apiQuadlet, /Network=codexia\.network/u);
-assert.doesNotMatch(apiQuadlet, /^PublishPort=/mu, 'the API must not publish a host port');
+assert.deepEqual(apiQuadlet.match(/^PublishPort=.*$/gmu), ['PublishPort=127.0.0.1:18081:3000/tcp'],
+  'the API must publish only its private loopback address');
 const databaseImage = /^Image=(\S+)$/mu.exec(databaseQuadlet)?.[1];
 assert.match(databaseImage ?? '', /^docker\.io\/library\/postgres:17-bookworm@sha256:[0-9a-f]{64}$/u,
   'the live database must use an immutable official PostgreSQL 17 image');
@@ -106,14 +110,14 @@ assert.match(await read('deploy/postgres/010-create-app-role.sh'), /ALTER DATABA
 assert.match(databaseQuadlet, /HealthCmd=pg_isready -U codexia -d codexia/u);
 assert.match(databaseNetwork, /Internal=true/u, 'PostgreSQL must be isolated from the Tunnel network');
 assert.match(databaseVolume, /VolumeName=codexia-postgres/u);
-assert.ok(tunnelQuadlet.split('\n').includes('Image=docker.io/cloudflare/cloudflared@sha256:b94b96edf2c9c4360f8879c8580cfaa99077f19c849ec595ca2f711b27d4f344'), 'Tunnel image must use the reviewed Cloudflare digest');
-assert.match(tunnelQuadlet, /Secret=codexia-tunnel-token/u);
-assert.match(tunnelQuadlet, /Network=codexia\.network/u);
-assert.doesNotMatch(tunnelQuadlet, /^Network=codexia-data\.network$/mu, 'the Tunnel must not join the PostgreSQL network');
-assert.match(tunnelQuadlet, /^Requires=codexia-api\.service$/mu, 'the Tunnel dependency stays with the canonical API');
-assert.match(tunnelQuadlet, /^After=network-online\.target codexia-api\.service$/mu, 'the initial Tunnel dependency preserves network ordering');
-assert.match(tunnelQuadlet, /PublishPort=127\.0\.0\.1:2000:2000\/tcp/u, 'Tunnel metrics must bind to host loopback only');
-assert.doesNotMatch(tunnelQuadlet, /^PublishPort=(?!127\.0\.0\.1:2000:2000\/tcp)/mu, 'the Tunnel must not publish a public host port');
+assert.match(connectorUnit, /^LoadCredential=cloudflared-token:\/etc\/codexia\/cloudflared\/tunnel\.token$/mu);
+assert.match(connectorUnit, /^ExecStart=\/usr\/bin\/cloudflared tunnel --no-autoupdate run --metrics 127\.0\.0\.1:2000 --token-file=%d\/cloudflared-token$/mu);
+assert.doesNotMatch(connectorUnit, /^\w*=.*codexia-(?:api|db)/mu, 'the host connector must remain independent of application services');
+assert.deepEqual(gateSocket.match(/^Listen\w+=.*$/gmu), ['ListenStream=127.0.0.1:18080']);
+assert.match(gateSocket, /^Service=codexia-api-gate\.service$/mu);
+assert.match(gateSocket, /^WantedBy=sockets\.target$/mu);
+assert.match(gateService, /^ExecStart=\S*systemd-socket-proxyd --connections-max=256 127\.0\.0\.1:18081$/mu);
+assert.doesNotMatch(gateService, /^(?:Requires|Wants)=.*codexia-(?:api\.service|db|cloudflared)/mu);
 assert.match(backendDockerfile, /--server-only/u);
 assert.match(deploymentDocs, /\[LINK: DOC-DEPLOYMENT-BACKUP-受入シナリオ,/u,
   'The deployment overview must link the canonical recovery acceptance');

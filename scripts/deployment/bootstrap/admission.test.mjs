@@ -44,13 +44,13 @@ test('R4 enables only wholly separate base stages still required by observed sta
   });
   assert.deepEqual(admitBootstrap({
     ...input, topology: { hostReady: true, secrets: {
-      'codexia-tunnel-token': true, 'codexia-postgres-admin-password': true, 'codexia-postgres-app-password': true,
+      'codexia-postgres-admin-password': true, 'codexia-postgres-app-password': true,
     } },
   }).stages, ['base', 'auth-runtime']);
   assert.deepEqual(admitBootstrap({
     ...fixture({ D: 'compatible', A: 'ready' }, { intent: 'adopt' }, hash), mode: 'bootstrap',
     initializeDatabase: false, topology: { hostReady: true, secrets: {
-      'codexia-tunnel-token': true, 'codexia-postgres-admin-password': true, 'codexia-postgres-app-password': true,
+      'codexia-postgres-admin-password': true, 'codexia-postgres-app-password': true,
     } },
   }), { route: 'R4', stages: ['base'], installIntent: false });
 });
@@ -141,7 +141,6 @@ function observedSetup(database, backend = { state: 'absent' }, intent = 'instal
   const topology = {
     hostReady: true,
     secrets: {
-      'codexia-tunnel-token': true,
       'codexia-postgres-admin-password': true,
       'codexia-postgres-app-password': true,
     },

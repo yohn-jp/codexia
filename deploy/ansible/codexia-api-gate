@@ -1,0 +1,79 @@
+#!/bin/bash
+set -euo pipefail
+
+readonly socket_unit=codexia-api.socket
+readonly service_unit=codexia-api-gate.service
+readonly systemctl=/usr/bin/systemctl
+
+if [[ "$(id -u)" != 0 || $# != 1 ]]; then
+  echo 'Usage: codexia-api-gate open|close|status' >&2
+  exit 2
+fi
+
+unit_state() {
+  "$systemctl" show --property=ActiveState --value "$1"
+}
+
+close_gate() {
+  local result=0 socket_unit_state
+  "$systemctl" stop "$socket_unit" || result=1
+  "$systemctl" stop "$service_unit" || result=1
+  socket_unit_state="$("$systemctl" show --property=UnitFileState --value "$socket_unit")" || result=1
+  if [[ "$socket_unit_state" == enabled || "$socket_unit_state" == enabled-runtime ]]; then
+    "$systemctl" disable "$socket_unit" || result=1
+  fi
+  "$systemctl" mask "$socket_unit" || result=1
+  "$systemctl" mask "$service_unit" || result=1
+  if [[ "$(unit_state "$socket_unit")" != inactive || "$(unit_state "$service_unit")" != inactive ]]; then
+    result=1
+  fi
+  if [[ "$("$systemctl" show --property=UnitFileState --value "$socket_unit")" != masked ||
+        "$("$systemctl" show --property=UnitFileState --value "$service_unit")" != masked ]]; then
+    result=1
+  fi
+  return "$result"
+}
+
+open_gate() {
+  if ! "$systemctl" unmask "$socket_unit" || ! "$systemctl" unmask "$service_unit"; then
+    close_gate || true
+    return 1
+  fi
+  if ! "$systemctl" enable --now "$socket_unit"; then
+    close_gate || true
+    return 1
+  fi
+  if [[ "$(unit_state "$socket_unit")" != active ||
+        "$("$systemctl" show --property=UnitFileState --value "$socket_unit")" != enabled ]]; then
+    close_gate || true
+    return 1
+  fi
+}
+
+gate_status() {
+  local socket_state service_state socket_file_state service_file_state
+  socket_state="$(unit_state "$socket_unit")"
+  service_state="$(unit_state "$service_unit")"
+  socket_file_state="$("$systemctl" show --property=UnitFileState --value "$socket_unit")"
+  service_file_state="$("$systemctl" show --property=UnitFileState --value "$service_unit")"
+  if [[ "$socket_state" == active &&
+        ( "$service_state" == inactive || "$service_state" == active ) &&
+        "$socket_file_state" == enabled && "$service_file_state" != masked ]]; then
+    printf '%s\n' open
+    return 0
+  fi
+  if [[ "$socket_state" != active && "$service_state" != active &&
+        "$socket_file_state" == masked && "$service_file_state" == masked ]]; then
+    printf '%s\n' closed
+    return 0
+  fi
+  echo 'Codexia publication gate is in an inconsistent state' >&2
+  return 1
+}
+
+case "$1" in
+  open) open_gate ;;
+  close) close_gate ;;
+  status) gate_status ;;
+  *) echo 'Usage: codexia-api-gate open|close|status' >&2; exit 2 ;;
+esac

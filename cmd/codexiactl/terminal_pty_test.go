@@ -356,7 +356,7 @@ func TestTerminalRedirectedJSONIsOnePlainDocument(t *testing.T) {
 	}
 	var report statusReport
 	decoder := json.NewDecoder(&s.stdout)
-	if err := decoder.Decode(&report); err != nil || report.SchemaVersion != 1 || report.Active != "unknown" || report.Accepted != "unknown" || len(report.Blockers) == 0 {
+	if err := decoder.Decode(&report); err != nil || report.SchemaVersion != 2 || report.Active != "unknown" || report.Accepted != "unknown" || len(report.Blockers) == 0 {
 		t.Fatalf("missing plain failure report: %v, %+v", err, report)
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {

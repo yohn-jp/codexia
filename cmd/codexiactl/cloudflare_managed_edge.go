@@ -6,23 +6,20 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net"
-	"net/url"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 )
 
 // The integration caller obtains these values from the verified repository,
-// VM, account and cf session. The service token IDs are independently
-// verified by the credential issuance and protected registration flow.
+// VM, account and cf session. Service Auth selectors are derived from the
+// verified repository ID, independent of individual token rotation.
 type managedEdgeSpec struct {
 	Repository                                                  githubTarget
 	Host, ManagementHost, AccountID, ZoneID, ExpectedTunnelID   string
 	TeamName, AuthorPolicyID, ProbePolicyID, ManagementPolicyID string
-	AllowedIDPs, SSHServiceTokenIDs                             []string
-	ProbeTokenID, ProductService, SSHService                    string
+	AllowedIDPs                                                 []string
+	ProductService, SSHService                                  string
 	PublicProtocolEnabled, PublicProtocolAccepted               bool
 	PublicProtocolTransitionApproved                            bool
 	Contract                                                    cloudflareContract
@@ -105,14 +102,18 @@ type managedEdgeAPI interface {
 	Apply(context.Context, managedEdgeChange) error
 }
 
-func validLoopbackService(value, scheme string) bool {
-	u, err := url.Parse(value)
-	if err != nil || u.Scheme != scheme || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery {
-		return false
-	}
-	host, port, err := net.SplitHostPort(u.Host)
-	n, numberErr := strconv.Atoi(port)
-	return err == nil && numberErr == nil && host == "127.0.0.1" && n > 0 && n < 65536 && strconv.Itoa(n) == port
+const (
+	managedEdgePublicationService = "http://127.0.0.1:18080"
+	managedEdgeManagementService  = "ssh://127.0.0.1:22"
+	managedEdgeServiceTagKey      = "codexia-scope"
+)
+
+func managedEdgeProbeTags(repoID int64) []string {
+	return []string{fmt.Sprintf("repo-%d-probe-codexia-production", repoID)}
+}
+
+func managedEdgeSSHTags(repoID int64) []string {
+	return []string{fmt.Sprintf("repo-%d-ssh-codexia-bootstrap", repoID), fmt.Sprintf("repo-%d-ssh-codexia-production", repoID)}
 }
 
 func (s managedEdgeSpec) validate() error {
@@ -120,18 +121,10 @@ func (s managedEdgeSpec) validate() error {
 		!cloudflareHost.MatchString(s.Host) || !cloudflareHost.MatchString(s.ManagementHost) ||
 		!strings.Contains(s.Host, ".") || !strings.Contains(s.ManagementHost, ".") || s.Host == s.ManagementHost ||
 		!cloudflareTeam.MatchString(s.TeamName) || !cloudflareUUID.MatchString(s.AuthorPolicyID) ||
-		!cloudflareUUID.MatchString(s.ProbeTokenID) || len(s.SSHServiceTokenIDs) != 2 ||
-		!validLoopbackService(s.ProductService, "http") || !validLoopbackService(s.SSHService, "ssh") {
+		s.ProductService != managedEdgePublicationService || s.SSHService != managedEdgeManagementService {
 		return errors.New("Cloudflare edge target is not bound to a verified repository, account, zone and local endpoints")
 	}
 	seen := map[string]bool{}
-	for _, id := range append([]string{s.ProbeTokenID}, s.SSHServiceTokenIDs...) {
-		if !cloudflareUUID.MatchString(id) || seen[id] {
-			return errors.New("Cloudflare probe and SSH service token identities must be distinct")
-		}
-		seen[id] = true
-	}
-	seen = map[string]bool{}
 	for _, id := range s.AllowedIDPs {
 		if !cloudflareUUID.MatchString(id) || seen[id] {
 			return errors.New("Invalid Cloudflare identity provider selection")
@@ -152,21 +145,19 @@ func (s managedEdgeSpec) validate() error {
 	return nil
 }
 
-func exactManagedServicePolicy(p cloudflareAccessPolicy, ids []string) bool {
-	if p.Decision != "non_identity" || len(p.Exclude) != 0 || len(p.Require) != 0 || len(p.Include) != len(ids) {
+func exactManagedServicePolicy(p cloudflareAccessPolicy, tags []string) bool {
+	if p.Decision != "non_identity" || len(p.Exclude) != 0 || len(p.Require) != 0 || len(p.Include) != len(tags) {
 		return false
 	}
 	var actual []string
 	for _, include := range p.Include {
-		var rule struct {
-			TokenID string `json:"token_id"`
-		}
-		if len(include) != 1 || json.Unmarshal(include["service_token"], &rule) != nil || !cloudflareUUID.MatchString(rule.TokenID) {
+		var rule map[string]string
+		if len(include) != 1 || json.Unmarshal(include["service_token_tag"], &rule) != nil || len(rule) != 2 || rule["key"] != managedEdgeServiceTagKey || rule["value"] == "" {
 			return false
 		}
-		actual = append(actual, rule.TokenID)
+		actual = append(actual, rule["value"])
 	}
-	return slices.Equal(slices.Sorted(slices.Values(actual)), slices.Sorted(slices.Values(ids)))
+	return slices.Equal(slices.Sorted(slices.Values(actual)), slices.Sorted(slices.Values(tags)))
 }
 
 func exactManagedBypass(p cloudflareAccessPolicy) bool {
@@ -236,18 +227,21 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		}
 		apps[a.Domain] = a
 	}
-	selectPolicy := func(role, wanted string, domains, tokens []string) (string, error) {
+	selectPolicy := func(role, wanted string, domains, tags []string) (string, error) {
 		id := wanted
 		for _, domain := range domains {
 			if a := apps[domain]; a.ID != "" {
 				p := state.AppPolicies[a.ID]
-				if len(p) == 0 || !exactManagedServicePolicy(p[0], tokens) || id != "" && id != p[0].ID {
-					return "", errors.New("Existing Cloudflare service policy does not match the verified service token identities")
+				if len(p) == 0 || !exactManagedServicePolicy(p[0], tags) || id != "" && id != p[0].ID {
+					return "", errors.New("Existing Cloudflare service policy does not match the repository and purpose tags")
 				}
 				id = p[0].ID
 			}
 		}
 		name := fmt.Sprintf("Codexia %d %s", s.Repository.RepoID, role)
+		if role == "management-ssh" {
+			name = fmt.Sprintf("Codexia SSH (%d)", s.Repository.RepoID)
+		}
 		if id == "" {
 			for _, p := range state.Policies {
 				if p.Name == name {
@@ -260,14 +254,14 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		}
 		if id != "" {
 			p := policies[id]
-			if p.ID == "" || id == s.AuthorPolicyID || !exactManagedServicePolicy(p.cloudflareAccessPolicy, tokens) {
+			if p.ID == "" || id == s.AuthorPolicyID || !exactManagedServicePolicy(p.cloudflareAccessPolicy, tags) {
 				return "", errors.New("Cloudflare service policy differs from the approved policy")
 			}
 			return id, nil
 		}
 		var include []any
-		for _, token := range tokens {
-			include = append(include, map[string]any{"service_token": map[string]string{"token_id": token}})
+		for _, tag := range tags {
+			include = append(include, map[string]any{"service_token_tag": map[string]string{"key": managedEdgeServiceTagKey, "value": tag}})
 		}
 		add("create policy "+role, "POST", account+"/access/policies", map[string]any{"name": name, "decision": "non_identity", "include": include})
 		return "", nil
@@ -276,11 +270,11 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 	for _, key := range slices.Sorted(maps.Keys(probes)) {
 		probeDomains = append(probeDomains, s.Host+probes[key].Path)
 	}
-	probePolicy, err := selectPolicy("identity-probe", s.ProbePolicyID, probeDomains, []string{s.ProbeTokenID})
+	probePolicy, err := selectPolicy("identity-probe", s.ProbePolicyID, probeDomains, managedEdgeProbeTags(s.Repository.RepoID))
 	if err != nil {
 		return nil, err
 	}
-	sshPolicy, err := selectPolicy("management-ssh", s.ManagementPolicyID, []string{s.ManagementHost}, s.SSHServiceTokenIDs)
+	sshPolicy, err := selectPolicy("management-ssh", s.ManagementPolicyID, []string{s.ManagementHost}, managedEdgeSSHTags(s.Repository.RepoID))
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +308,9 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 			links = append(links, map[string]any{"id": id, "precedence": i + 1})
 		}
 		body := map[string]any{"name": name, "domain": domain, "type": "self_hosted", "policies": links, "session_duration": "8h", "app_launcher_visible": domain == s.Host}
-		if !serviceOnly {
+		if serviceOnly {
+			body["session_duration"] = "1h"
+		} else {
 			body["allowed_idps"] = s.AllowedIDPs
 			body["auto_redirect_to_identity"] = len(s.AllowedIDPs) == 1
 		}

@@ -18,34 +18,52 @@ mkdir -m 0700 "$directory"
 key="$directory/id_ed25519"
 pins="$directory/known_hosts"
 printf '%s\n' "${CODEXIA_DEPLOY_SSH_KNOWN_HOSTS:?Missing pinned SSH host key}" > "$pins"
-host=${CODEXIA_DEPLOY_HOST:-}
-if [[ -z $host ]]; then
-  # A single plain host in the protected pin file also declares the target.
-  host=$(awk 'NF && $1 !~ /^#/ { print $1 }' "$pins" | sort -u)
-fi
-if ! python3 - "$host" <<'PY'
-import ipaddress
+host=${CODEXIA_DEPLOY_HOST:?Missing protected management hostname}
+if ! python3 - "$host" "${CODEXIA_MANAGEMENT_HOSTNAME:?Missing reviewed management hostname}" <<'PY'
 import re
 import sys
 
-host = sys.argv[1]
-try:
-    ipaddress.ip_address(host)
-    valid = "%" not in host
-except ValueError:
-    valid = len(host) <= 253 and all(
+host, management_hostname = sys.argv[1:]
+def valid_hostname(value):
+    return len(value) <= 253 and "." in value and all(
         re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
-        for label in host.split(".")
+        for label in value.split(".")
     )
-sys.exit(0 if valid else 1)
+sys.exit(0 if valid_hostname(host) and host == management_hostname else 1)
 PY
 then
-  echo 'Set CODEXIA_DEPLOY_HOST to a single tailnet address or hostname covered by the protected SSH pin.' >&2
+  echo 'Set CODEXIA_DEPLOY_HOST to the protected management hostname covered by the pinned SSH host key.' >&2
   exit 1
 fi
+python3 - "$host" "${GITHUB_REPOSITORY:?Missing GitHub repository identity}" "${GITHUB_REPOSITORY_ID:?Missing GitHub repository ID}" "${GITHUB_REPOSITORY_OWNER_ID:?Missing GitHub owner ID}" "${CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET:?Missing verified Cloudflare target}" <<'PY'
+import json
+import sys
+
+host, repository, repository_id, owner_id, raw_target = sys.argv[1:]
+try:
+    target = json.loads(raw_target)
+    valid = (
+        target["repository"] == repository
+        and str(target["repositoryId"]) == repository_id
+        and str(target["ownerId"]) == owner_id
+        and target["sshHostname"] == host
+        and isinstance(target["sshHostname"], str)
+        and isinstance(target["sshPolicyId"], str)
+        and bool(target["sshPolicyId"])
+    )
+except (KeyError, TypeError, ValueError):
+    valid = False
+if not valid:
+    raise SystemExit("The management host does not match the protected repository Cloudflare target.")
+PY
 ssh-keygen -F "$host" -f "$pins" >/dev/null || { echo 'No SSH pin matches the declared VM.' >&2; exit 1; }
 printf '%s\n' "${CODEXIA_DEPLOY_SSH_PRIVATE_KEY:?Missing deployment SSH identity}" > "$key"
 ssh-keygen -y -P '' -f "$key" >/dev/null
+cloudflared="$RUNNER_TEMP/cloudflared"
+[[ -x "$cloudflared" ]] || { echo 'The pinned cloudflared client is missing.' >&2; exit 1; }
+repository_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+proxy="$repository_root/scripts/deployment/ssh/cloudflared-proxy.sh"
+[[ -x "$proxy" && ! -L "$proxy" ]] || { echo 'The reviewed Cloudflare SSH launcher is missing.' >&2; exit 1; }
 cat > "$directory/config" <<CONFIG
 Host codexia-target
     HostName $host
@@ -58,5 +76,6 @@ Host codexia-target
     UserKnownHostsFile "$pins"
     GlobalKnownHostsFile /dev/null
 CONFIG
+printf '    ProxyCommand "%s" %%h\n' "$proxy" >> "$directory/config"
 printf 'host=%s\n' "$host" >> "${GITHUB_OUTPUT:?}"
 if [[ "$user" != codexia ]]; then printf 'user=%s\n' "$user" >> "$GITHUB_OUTPUT"; fi

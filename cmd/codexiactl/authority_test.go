@@ -109,15 +109,24 @@ func TestDifferentCommitWithSameDeploymentContractAllowsFork(t *testing.T) {
 }
 
 func TestProductionSettingsAcceptForkOriginAndRejectNoncanonicalValues(t *testing.T) {
-	const profile = `{"publicOrigin":"https://codexia.fork.example","desktopCallbackPath":"/desktop","webClientId":"codexia-web","iosClientId":"codexia-ios","introspectionClientId":"codexia-resource-server","scopes":"openid codexia:api","serviceUid":1001,"serviceGid":1001}`
+	const profile = `{"publicOrigin":"https://codexia.fork.example","managementHostname":"codexia-ssh.fork.example","desktopCallbackPath":"/desktop","webClientId":"codexia-web","iosClientId":"codexia-ios","introspectionClientId":"codexia-resource-server","scopes":"openid codexia:api","serviceUid":1001,"serviceGid":1001}`
 	var settings productionContract
-	if err := validateProductionSettings([]byte(profile), &settings); err != nil || settings.PublicOrigin != "https://codexia.fork.example" {
+	if err := validateProductionSettings([]byte(profile), &settings); err != nil || settings.PublicOrigin != "https://codexia.fork.example" ||
+		settings.ManagementHostname != "codexia-ssh.fork.example" {
 		t.Fatalf("fork settings were rejected: %v", err)
 	}
 	for _, invalid := range []string{"https://10.0.0.1", "https://codexia.fork.example:443", "https://codexia.fork.example?", "https://codexia.fork.example/"} {
 		if err := validateProductionSettings([]byte(strings.ReplaceAll(profile, settings.PublicOrigin, invalid)), &settings); err == nil {
 			t.Fatalf("invalid origin %s was accepted", invalid)
 		}
+	}
+	for _, invalid := range []string{"", "codexia.fork.example", "-ssh.fork.example", "ssh..fork.example", "codexia.fork.example.", "127.0.0.1", "codexia.fork.example:22", "SSH.fork.example"} {
+		if err := validateProductionSettings([]byte(strings.Replace(profile, "codexia-ssh.fork.example", invalid, 1)), &settings); err == nil {
+			t.Fatalf("invalid management hostname %q was accepted", invalid)
+		}
+	}
+	if err := validateProductionSettings([]byte(strings.Replace(profile, "codexia-ssh.fork.example", "codexia.fork.example", 1)), &settings); err == nil {
+		t.Fatal("public and management hostnames were allowed to collide")
 	}
 	for _, ambiguous := range []string{
 		strings.Replace(profile, `"publicOrigin":`, `"publicOrigin":"https://other.example","publicOrigin":`, 1),
@@ -126,5 +135,15 @@ func TestProductionSettingsAcceptForkOriginAndRejectNoncanonicalValues(t *testin
 		if err := validateProductionSettings([]byte(ambiguous), &settings); err == nil {
 			t.Fatal("the CLI could interpret an ambiguous origin differently from the workflow")
 		}
+	}
+}
+
+func TestCLIReleaseContractTracksManagementAndDropsRetiredTailnetWorkflow(t *testing.T) {
+	t.Parallel()
+	if !slices.Contains(releaseContractPaths, "deploy/systemd/") {
+		t.Fatal("the release contract does not bind the management systemd units")
+	}
+	if slices.Contains(releaseContractPaths, ".github/workflows/tailscale-connectivity.yml") {
+		t.Fatal("the retired Tailnet workflow remains in the CLI release contract")
 	}
 }

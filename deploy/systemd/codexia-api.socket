@@ -1,0 +1,11 @@
+[Unit]
+Description=Codexia product publication gate
+
+[Socket]
+ListenStream=127.0.0.1:18080
+Accept=no
+Service=codexia-api-gate.service
+Backlog=256
+
+[Install]
+WantedBy=sockets.target

@@ -265,7 +265,7 @@ export const DEDICATED_PROOFS = Object.freeze({
     steps: ['Install supported Ansible control environment', 'Exercise host stage twice and run Quadlet with Actions-only environment isolation'],
   },
   '.github/workflows/ansible-base-secrets.yml': {
-    job: 'Verify rootless Podman, PostgreSQL, and Tunnel Quadlets',
+    job: 'Verify rootless Podman, PostgreSQL, and the publication gate',
     steps: ['Prepare disposable runtime', 'Check PostgreSQL volume layout',
       'Exercise rootless convergence through a separate bootstrap account', 'Remove the disposable fixture user even after test failure'],
   },
@@ -288,7 +288,7 @@ export const DEDICATED_PROOFS = Object.freeze({
 function assertInfrastructureSelection(job, files) {
   // The same merged-base diff must select the same independent scopes as the
   // existing deployment-config workflow. Require positive evidence for each.
-  const ansible = files.some(file => /^(deploy\/(?:ansible|backup|quadlet|postgres)\/|\.github\/workflows\/deployment-config\.yml$|scripts\/shared\/python-env\.sh$)/u.test(file));
+  const ansible = files.some(file => /^(deploy\/(?:ansible|backup|quadlet|systemd|postgres)\/|\.github\/workflows\/deployment-config\.yml$|cmd\/codexiactl\/assets\/codexia-cloudflared\.service$|scripts\/shared\/python-env\.sh$)/u.test(file));
   const terraform = files.some(file => /^(deploy\/cloudflare\/|\.github\/workflows\/deployment-config\.yml$)/u.test(file));
   if (ansible || !terraform) assertSuccessfulStep(job, 'Check Ansible configuration');
   if (terraform || !ansible) {

@@ -22,6 +22,24 @@ variable "app_hostname" {
   }
 }
 
+variable "ssh_hostname" {
+  type        = string
+  description = "Reviewed SSH-only hostname for the same Tunnel and DNS zone."
+  validation {
+    condition     = var.ssh_hostname != var.app_hostname && endswith(var.ssh_hostname, ".${var.zone_name}") && can(regex("^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$", var.ssh_hostname))
+    error_message = "Use a distinct SSH hostname in the selected zone."
+  }
+}
+
+variable "repository_id" {
+  type        = number
+  description = "GitHub repository ID used to scope Codexia Access Service Auth."
+  validation {
+    condition     = var.repository_id > 0 && floor(var.repository_id) == var.repository_id
+    error_message = "Set the numeric GitHub repository ID."
+  }
+}
+
 variable "team_name" {
   type        = string
   description = "Cloudflare Access team prefix before .cloudflareaccess.com."
@@ -38,7 +56,7 @@ variable "access_policy_id" {
 
 variable "access_ci_policy_id" {
   type        = string
-  description = "Existing account-owned reusable Service Auth policy UUID, restricted to the Codexia CI token and attached only to identity probes."
+  description = "Existing account-owned reusable Service Auth policy UUID, limited to the exact Codexia probe tag."
   validation {
     condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.access_ci_policy_id))
     error_message = "Set an existing reusable Service Auth policy UUID."
@@ -56,11 +74,11 @@ variable "allowed_idps" {
 
 variable "origin_service" {
   type        = string
-  description = "Canonical API on the private Podman network."
-  default     = "http://codexia-api:3000"
+  description = "VM-local product publication socket."
+  default     = "http://127.0.0.1:18080"
   validation {
-    condition     = var.origin_service == "http://codexia-api:3000"
-    error_message = "Tunnel ingress must target only the canonical private codexia-api container."
+    condition     = var.origin_service == "http://127.0.0.1:18080"
+    error_message = "Product ingress must target only the VM-local publication socket."
   }
 }
 

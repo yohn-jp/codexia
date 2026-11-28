@@ -132,15 +132,21 @@ func TestVMSelectsAnIndependentlyKnownEffectiveKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	vm := vmObservation{hostKeys: []ssh.PublicKey{key}}
-	if _, err := vm.pinForFingerprint("100.64.0.15", "SHA256:wrong"); err == nil {
+	const host = "codexia-ssh.example.test"
+	if _, err := vm.pinForFingerprint(host, "SHA256:wrong"); err == nil {
 		t.Fatal("trusted a fingerprint before comparing it")
 	}
-	pin, err := vm.pinForFingerprint("100.64.0.15", ssh.FingerprintSHA256(key))
+	pin, err := vm.pinForFingerprint(host, ssh.FingerprintSHA256(key))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pin != "100.64.0.15 "+public {
+	if pin != host+" "+public {
 		t.Fatalf("unexpected known_hosts line: %q", pin)
+	}
+	for _, invalid := range []string{"100.64.0.15", "codexia-ssh.example.test.", "codexia..example.test", "ssh.example.test:22"} {
+		if _, err := vm.pinForFingerprint(invalid, ssh.FingerprintSHA256(key)); err == nil {
+			t.Errorf("accepted a noncanonical management hostname %q", invalid)
+		}
 	}
 }
 
@@ -200,13 +206,16 @@ func TestExistingKnownHostsRecordsRetainTheirFormatting(t *testing.T) {
 		t.Fatal(err)
 	}
 	vm := vmObservation{hostKeys: []ssh.PublicKey{key}}
-	const host = "codexia.example.ts.net"
-	pin := "# retained comment\n" + host + ",100.64.0.15 " + public + " VPS host key\n"
+	const host = "codexia-ssh.example.test"
+	pin := "# retained comment\n" + host + " " + public + " VPS host key\n"
 	if err := vm.verifyKnownHosts(host, pin); err != nil {
 		t.Fatal(err)
 	}
-	if err := vm.verifyKnownHosts("100.64.0.20", pin); err == nil {
+	if err := vm.verifyKnownHosts("codexia-other.example.test", pin); err == nil {
 		t.Fatal("an unrelated host was accepted")
+	}
+	if err := vm.verifyKnownHosts(host, strings.Replace(pin, host+" ", host+",codexia-alt.example.test ", 1)); err == nil {
+		t.Fatal("a shared host alias was accepted as a compatible pin")
 	}
 	if err := vm.verifyKnownHosts(host, pin+"@revoked "+host+" "+public+"\n"); err == nil {
 		t.Fatal("a revoked pin was accepted")

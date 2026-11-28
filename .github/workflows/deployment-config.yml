@@ -7,6 +7,8 @@ on:
       - deploy/ansible/**
       - deploy/backup/**
       - deploy/quadlet/**
+      - deploy/systemd/**
+      - cmd/codexiactl/assets/codexia-cloudflared.service
       - deploy/postgres/**
       - deploy/cloudflare/**
       - .github/workflows/deployment-config.yml
@@ -17,6 +19,8 @@ on:
       - deploy/ansible/**
       - deploy/backup/**
       - deploy/quadlet/**
+      - deploy/systemd/**
+      - cmd/codexiactl/assets/codexia-cloudflared.service
       - deploy/postgres/**
       - deploy/cloudflare/**
       - .github/workflows/deployment-config.yml
@@ -70,7 +74,7 @@ jobs:
             terraform=false
             while IFS= read -r -d '' file; do
               case "$file" in
-                deploy/ansible/*|deploy/backup/*|deploy/quadlet/*|deploy/postgres/*|scripts/shared/python-env.sh) ansible=true ;;
+                deploy/ansible/*|deploy/backup/*|deploy/quadlet/*|deploy/systemd/*|deploy/postgres/*|cmd/codexiactl/assets/codexia-cloudflared.service|scripts/shared/python-env.sh) ansible=true ;;
                 deploy/cloudflare/*) terraform=true ;;
                 .github/workflows/deployment-config.yml) ansible=true; terraform=true ;;
               esac

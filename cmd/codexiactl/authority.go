@@ -22,9 +22,10 @@ var releaseVersion = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]
 // productionContract belongs to the selected repository's exact protected main.
 // It is passed explicitly so different targets cannot share observed settings.
 type productionContract struct {
-	PublicOrigin string
-	ServiceUID   int
-	edge         cloudflareContract
+	PublicOrigin       string
+	ManagementHostname string
+	ServiceUID         int
+	edge               cloudflareContract
 }
 
 type cloudflareContract struct {
@@ -158,6 +159,7 @@ func contractTree(ctx context.Context, client *github.Client, owner, repo, sha s
 func validateProductionSettings(content []byte, settings *productionContract) error {
 	var profile struct {
 		PublicOrigin          string `json:"publicOrigin"`
+		ManagementHostname    string `json:"managementHostname"`
 		DesktopCallbackPath   string `json:"desktopCallbackPath"`
 		WebClientID           string `json:"webClientId"`
 		IOSClientID           string `json:"iosClientId"`
@@ -173,15 +175,33 @@ func validateProductionSettings(content []byte, settings *productionContract) er
 	if err != nil || origin.Scheme != "https" || origin.Hostname() != origin.Host || origin.User != nil ||
 		origin.Path != "" || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" ||
 		!strings.Contains(origin.Host, ".") || !cloudflareHost.MatchString(origin.Host) || net.ParseIP(origin.Host) != nil ||
-		"https://"+origin.Hostname() != profile.PublicOrigin || profile.ServiceUID <= 0 || profile.ServiceGID <= 0 ||
+		"https://"+origin.Hostname() != profile.PublicOrigin || !validDNSHostname(profile.ManagementHostname) ||
+		profile.ManagementHostname == origin.Host || profile.ServiceUID <= 0 || profile.ServiceGID <= 0 ||
 		profile.DesktopCallbackPath != "/desktop" || !safeIdentifier.MatchString(profile.WebClientID) ||
 		!safeIdentifier.MatchString(profile.IOSClientID) || !safeIdentifier.MatchString(profile.IntrospectionClientID) ||
 		profile.Scopes != "openid codexia:api" || profile.WebClientID == profile.IOSClientID ||
 		profile.WebClientID == profile.IntrospectionClientID || profile.IOSClientID == profile.IntrospectionClientID {
 		return refused("The canonical production origin, identity, or protocol settings are invalid")
 	}
-	settings.PublicOrigin, settings.ServiceUID = profile.PublicOrigin, profile.ServiceUID
+	settings.PublicOrigin, settings.ManagementHostname, settings.ServiceUID = profile.PublicOrigin, profile.ManagementHostname, profile.ServiceUID
 	return nil
+}
+
+func validDNSHostname(host string) bool {
+	if len(host) < 3 || len(host) > 253 || host != strings.ToLower(host) || !strings.Contains(host, ".") || net.ParseIP(host) != nil {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, char := range label {
+			if !(char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (g *githubControl) readSourceFile(ctx context.Context, sha, path string) ([]byte, error) {

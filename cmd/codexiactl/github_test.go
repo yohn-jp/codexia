@@ -76,6 +76,36 @@ func githubTestJSON(t *testing.T, w http.ResponseWriter, value any) {
 	}
 }
 
+func TestGitHubInitialInputsUseSeparateSSHServiceAuthAndNoTailscaleOrTunnelToken(t *testing.T) {
+	t.Parallel()
+	for _, environment := range []string{githubBootstrapEnvironment, githubProductionEnvironment} {
+		for _, name := range []string{sshAccessClientID, sshAccessSecret, "CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN", "CODEXIA_ACCESS_CLIENT_ID", "CODEXIA_ACCESS_CLIENT_SECRET"} {
+			if !githubInputAllowed(environment, name, githubCommonSecrets, githubBootstrapSecrets, githubProductionSecrets) {
+				t.Errorf("%s/%s is outside the protected input contract", environment, name)
+			}
+		}
+	}
+	for _, name := range []string{"CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"} {
+		if !githubInputAllowed(githubProductionEnvironment, name, githubCommonSecrets, githubBootstrapSecrets, githubProductionSecrets) {
+			t.Errorf("production/%s is outside the protected input contract", name)
+		}
+		if githubInputAllowed(githubBootstrapEnvironment, name, githubCommonSecrets, githubBootstrapSecrets, githubProductionSecrets) {
+			t.Errorf("bootstrap unexpectedly accepts %s", name)
+		}
+	}
+	for _, legacy := range []struct{ environment, name string }{
+		{githubBootstrapEnvironment, "TS_OAUTH_CLIENT_ID"},
+		{githubProductionEnvironment, "TS_OAUTH_CLIENT_ID"},
+		{githubBootstrapEnvironment, "CODEXIA_TUNNEL_TOKEN"},
+		{githubProductionEnvironment, "CODEXIA_TUNNEL_TOKEN"},
+	} {
+		if githubInputAllowed(legacy.environment, legacy.name, githubCommonVariables, githubBootstrapVariables, githubProductionVariables) ||
+			githubInputAllowed(legacy.environment, legacy.name, githubCommonSecrets, githubBootstrapSecrets, githubProductionSecrets) {
+			t.Errorf("legacy input %s/%s remains allowed", legacy.environment, legacy.name)
+		}
+	}
+}
+
 func githubTestProtection(t *testing.T, w http.ResponseWriter, r *http.Request) bool {
 	t.Helper()
 	switch {
@@ -218,7 +248,7 @@ func TestGitHubSecretsUseSealedBoxAndPreserveExisting(t *testing.T) {
 			present := false
 			writes := 0
 			lock := new(githubTestSettingsVariable)
-			const name = "CODEXIA_TUNNEL_TOKEN"
+			const name = "CODEXIA_SSH_ACCESS_CLIENT_SECRET"
 			const secret = "fixture credential must never be echoed"
 			g := newTestGitHub(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == githubTestLockPath && r.Method == http.MethodPost {

@@ -23,10 +23,12 @@ const accountPath = `/client/v4/accounts/${accountId}`;
 const zonePath = `/client/v4/zones/${zoneId}`;
 const authorPolicyId = '10000000-0000-4000-8000-000000000004';
 const ciPolicyId = '10000000-0000-4000-8000-000000000005';
-const tokenId = '10000000-0000-4000-8000-000000000006';
+const sshPolicyId = '10000000-0000-4000-8000-000000000006';
+const repositoryId = 10;
 const hostname = 'deploy.example.com';
-const apps = ['', '/api/version', '/desktop/update-identity.json'].map((path, index) => ({
-  domain: hostname + path,
+const sshHostname = 'manage.example.com';
+const apps = [hostname, hostname + '/api/version', hostname + '/desktop/update-identity.json', sshHostname].map((domain, index) => ({
+  domain,
   id: `20000000-0000-4000-8000-00000000000${index}`,
   aud: String(index).repeat(64),
   type: 'self_hosted',
@@ -40,13 +42,13 @@ function fixture() {
   const state = { preview: false, activeVersion: oldVersion, uploadTag: null, replyLost: false, alias: false,
     scriptAbsent: false, inventoryDenied: false, backendAbsent: false, frontendDenied: false,
     workerId, initialUpload: null, previousDeploymentEvidence: false, controlsChanged: false,
-    setupRoutes: false, setupExposed: false,
+    setupRoutes: false, setupExposed: false, foreignSshTag: false, bypassPublicationGate: false,
     candidateIdentity: null, rejectPromotion: false, uploadCount: 0,
     publicEpoch: 1, publicAuth: ['cookie-owner', 'bearer-read-compute-propose'] };
   const apiResponse = result => Response.json({ success: true, errors: [], result });
   const client = createDeploymentEdge({
-    origin, accountId, zoneId, tunnelId,
-    authorPolicyId, ciPolicyId, tunnelTeamName: 'codexia-test', publicProtocolEnabled: false,
+    origin, accountId, zoneId, tunnelId, repositoryId,
+    authorPolicyId, ciPolicyId, sshHostname, sshPolicyId, tunnelTeamName: 'codexia-test', publicProtocolEnabled: false,
     readToken: 'read-secret', workerToken: 'worker-secret',
     accessEnv: { CODEXIA_PUBLIC_ORIGIN: origin, CODEXIA_ACCESS_CLIENT_ID: 'identity-id', CODEXIA_ACCESS_CLIENT_SECRET: 'identity-secret' },
     uploadVersion: async ({ tag }) => {
@@ -114,7 +116,11 @@ function fixture() {
         });
       }
       if (path === workerResourceById + '/versions/' + oldVersion) return apiResponse({ id: oldVersion, urls: [] });
-      if (path === zonePath + '/dns_records') return apiResponse([{ id: 'f'.repeat(32), name: hostname, proxied: true, type: 'CNAME', content: tunnelId + '.cfargotunnel.com' }]);
+      if (path === zonePath + '/dns_records') {
+        const name = target.searchParams.get('name');
+        return apiResponse([{ id: (name === hostname ? 'f' : 'd').repeat(32), name, proxied: true, type: 'CNAME',
+          content: tunnelId + '.cfargotunnel.com' }]);
+      }
       if (path === zonePath + '/workers/routes') {
         if (state.setupRoutes) return apiResponse([
           { pattern: hostname + '/console/setup', script: 'unexpected-setup-worker' },
@@ -130,24 +136,43 @@ function fixture() {
       if (path.endsWith('/policies')) {
         const index = apps.findIndex(app => path === accountPath + '/access/apps/' + app.id + '/policies');
         assert.ok(index >= 0);
+        const include = value => ({ service_token_tag: { key: 'codexia-scope', value } });
+        if (apps[index].domain === sshHostname) {
+          return apiResponse([{ id: sshPolicyId, decision: 'non_identity', precedence: 1,
+            include: [include('repo-10-ssh-codexia-bootstrap'),
+              include(state.foreignSshTag ? 'repo-11-ssh-codexia-production' : 'repo-10-ssh-codexia-production')] }]);
+        }
         const allow = { id: authorPolicyId, decision: 'allow', precedence: index ? 2 : 1 };
-        const service = { id: ciPolicyId, decision: 'non_identity', precedence: 1, include: [{ service_token: { token_id: tokenId } }] };
+        const service = { id: ciPolicyId, decision: 'non_identity', precedence: 1, include: [include('repo-10-probe-codexia-production')] };
         return apiResponse(index ? [service, allow] : [allow]);
       }
       if (path === accountPath + '/cfd_tunnel/' + tunnelId + '/configurations') {
         const ingress = ['^/api/version$', '^/desktop/update-identity\\.json$', undefined].map((path, index) => ({
-          hostname, path, service: 'http://codexia-api:3000',
+          hostname, path, service: state.bypassPublicationGate ? 'http://127.0.0.1:18081' : 'http://127.0.0.1:18080',
           originRequest: { httpHostHeader: hostname, access: { required: true, teamName: 'codexia-test',
             audTag: path ? [apps[index + 1].aud, apps[0].aud] : [apps[0].aud] } },
         }));
         return apiResponse({ tunnel_id: tunnelId, account_id: accountId, source: 'cloudflare',
-          config: { ingress: [...ingress, { service: 'http_status:404' }] } });
+          config: { ingress: [...ingress,
+            { hostname: sshHostname, service: 'ssh://127.0.0.1:22',
+              originRequest: { access: { required: true, teamName: 'codexia-test', audTag: [apps.at(-1).aud] } } },
+            { service: 'http_status:404' }] } });
       }
       assert.fail('Unexpected API request: ' + path);
     },
   });
   return { client, state, writes };
 }
+
+test('edge observation refuses foreign SSH tags and direct ingress to the API', async () => {
+  const { client, state, writes } = fixture();
+  state.foreignSshTag = true;
+  await assert.rejects(client.observeIngress(), /repository and purpose tags/u);
+  state.foreignSshTag = false;
+  state.bypassPublicationGate = true;
+  await assert.rejects(client.observeIngress(), /Tunnel ingress endpoint/u);
+  assert.deepEqual(writes, []);
+});
 
 test('owner enrollment uses the normal Worker routes and rejects a distinct setup route', async () => {
   const { client, state, writes } = fixture();
