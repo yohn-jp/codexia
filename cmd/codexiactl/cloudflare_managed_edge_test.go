@@ -383,8 +383,8 @@ func TestManagedEdgeWorkerRoutingUsesScopedTypedSDK(t *testing.T) {
 	api := newCloudflareAPI([]byte(apiToken), server.URL+"/")
 	provider := managedEdgeProvider{
 		spec: spec, reader: api,
-		routeWriter:  func(context.Context) (cloudflareAPI, error) { return api, nil },
-		workerWriter: func(context.Context) (cloudflareAPI, error) { return api, nil },
+		routeWriter:  api,
+		workerWriter: api,
 	}
 	var state managedEdgeInventory
 	ctx := context.Background()
@@ -599,5 +599,17 @@ func TestManagedEdgeOfficialCFInventoryRequiresIndependentRoutingProof(t *testin
 		len(state.Tunnels) != 1 || state.Tunnels[0].ID != tunnelID ||
 		len(state.AppPolicies[appID]) != 1 || state.AppPolicies[appID][0].ID != spec.AuthorPolicyID {
 		t.Fatalf("read-only observation did not record available inventory with incomplete routing proof: calls=%d err=%v", calls, err)
+	}
+}
+
+func TestManagedEdgeRejectsAnAttachedAuthorPolicyWithAnotherDecision(t *testing.T) {
+	spec, inventory := convergedManagedEdgeFixture(t)
+	for _, app := range inventory.Apps {
+		if app.Domain == spec.Host {
+			inventory.AppPolicies[app.ID][0].Decision = "bypass"
+		}
+	}
+	if _, err := planManagedEdge(spec, inventory); err == nil {
+		t.Fatal("accepted the author policy ID with a Bypass decision")
 	}
 }

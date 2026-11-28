@@ -18,8 +18,8 @@ import (
 type managedEdgeProvider struct {
 	cf           cfCommandRunner
 	reader       cloudflareAPI
-	routeWriter  func(context.Context) (cloudflareAPI, error)
-	workerWriter func(context.Context) (cloudflareAPI, error)
+	routeWriter  cloudflareAPI
+	workerWriter cloudflareAPI
 	spec         managedEdgeSpec
 }
 
@@ -259,7 +259,7 @@ func runCFChange(ctx context.Context, cf cfCommandRunner, body any, args ...stri
 
 func (p managedEdgeProvider) createRoute(ctx context.Context, value any) error {
 	body, ok := value.(map[string]any)
-	if !ok || p.routeWriter == nil {
+	if !ok || p.routeWriter.workers == nil {
 		return errors.New("cloudflare route mutation authority is unavailable")
 	}
 	pattern, _ := body["pattern"].(string)
@@ -267,15 +267,11 @@ func (p managedEdgeProvider) createRoute(ctx context.Context, value any) error {
 	if pattern == "" || !strings.HasPrefix(pattern, p.spec.Host+"/") || script != "" && script != cloudflareWorker {
 		return errors.New("invalid managed Cloudflare route")
 	}
-	api, err := p.routeWriter(ctx)
-	if err != nil {
-		return err
-	}
 	params := workers.RouteNewParams{ZoneID: cloudflare.F(p.spec.ZoneID), Pattern: cloudflare.F(pattern)}
 	if script != "" {
 		params.Script = cloudflare.F(script)
 	}
-	result, err := api.workers.Routes.New(ctx, params, option.WithMaxRetries(0))
+	result, err := p.routeWriter.workers.Routes.New(ctx, params, option.WithMaxRetries(0))
 	if err != nil {
 		return cloudflareError("create unambiguous Worker route", err)
 	}
@@ -286,12 +282,8 @@ func (p managedEdgeProvider) createRoute(ctx context.Context, value any) error {
 }
 
 func (p managedEdgeProvider) createWorker(ctx context.Context) error {
-	if p.workerWriter == nil {
+	if p.workerWriter.workers == nil {
 		return errors.New("cloudflare empty Worker mutation authority is unavailable")
-	}
-	api, err := p.workerWriter(ctx)
-	if err != nil {
-		return err
 	}
 	params := workers.BetaWorkerNewParams{
 		AccountID: cloudflare.F(p.spec.AccountID),
@@ -307,7 +299,7 @@ func (p managedEdgeProvider) createWorker(ctx context.Context) error {
 			}),
 		},
 	}
-	result, err := api.workers.Beta.Workers.New(ctx, params, option.WithMaxRetries(0))
+	result, err := p.workerWriter.workers.Beta.Workers.New(ctx, params, option.WithMaxRetries(0))
 	if err != nil {
 		return cloudflareError("create empty Worker", err)
 	}
@@ -349,8 +341,7 @@ func (o *cloudflareObservation) converge(ctx context.Context, snapshot githubSna
 		for _, role := range []string{cloudflareRouteRole, cloudflareEdgeWorkerRole, cloudflareObservationRole} {
 			resultErr = errors.Join(resultErr, o.retireAccountCredential(cleanup, role))
 		}
-		p.reader = cloudflareAPI{}
-		p.routeWriter, p.workerWriter = nil, nil
+		p.reader, p.routeWriter, p.workerWriter = cloudflareAPI{}, cloudflareAPI{}, cloudflareAPI{}
 	}()
 	if err := guard(ctx); err != nil {
 		return err
@@ -369,19 +360,6 @@ func (o *cloudflareObservation) converge(ctx context.Context, snapshot githubSna
 		return err
 	}
 	p.spec = spec
-	var routeSDK, workerSDK cloudflareAPI
-	p.routeWriter = func(ctx context.Context) (cloudflareAPI, error) {
-		if routeSDK.workers == nil {
-			routeSDK, err = o.newManagedSDK(ctx, cloudflareRouteRole)
-		}
-		return routeSDK, err
-	}
-	p.workerWriter = func(ctx context.Context) (cloudflareAPI, error) {
-		if workerSDK.workers == nil {
-			workerSDK, err = o.newManagedSDK(ctx, cloudflareEdgeWorkerRole)
-		}
-		return workerSDK, err
-	}
 	o.Plan, err = reconcileManagedEdge(ctx, p, spec, func(plan []string) error {
 		o.operator.Notice("Cloudflare edge plan for repository " + spec.Repository.FullName() + ", account " + spec.AccountID +
 			", zone " + spec.ZoneID + ":\n- " + strings.Join(plan, "\n- "))
@@ -392,14 +370,43 @@ func (o *cloudflareObservation) converge(ctx context.Context, snapshot githubSna
 		managedEdgeRequirements(plan, &req)
 		if req.managedAccess || req.managedDNS || req.managedTunnel ||
 			req.workerScriptsWrite != requiresWorkerWrite || req.routeWrite != requiresRouteWrite {
-			return o.replaceManagedSession(ctx, req)
+			if err := o.replaceManagedSession(ctx, req); err != nil {
+				return err
+			}
 		}
-		return nil
+		return o.prepareManagedWriters(ctx, plan, guard)
 	}, guard)
 	if err != nil {
 		return err
 	}
 	return o.finalizeManagedObservation(ctx, spec)
+}
+
+// Credential approval can wait for user input. Finish it before the
+// reconciler re-observes the approved plan and runs its final write guard.
+func (o *cloudflareObservation) prepareManagedWriters(ctx context.Context, plan []string, guard func(context.Context) error) error {
+	p := o.managed
+	if slices.ContainsFunc(plan, func(key string) bool { return strings.HasPrefix(key, "create Worker route ") }) {
+		if err := guard(ctx); err != nil {
+			return err
+		}
+		api, err := o.newManagedSDK(ctx, cloudflareRouteRole)
+		if err != nil {
+			return err
+		}
+		p.routeWriter = api
+	}
+	if slices.Contains(plan, "create empty Worker") {
+		if err := guard(ctx); err != nil {
+			return err
+		}
+		api, err := o.newManagedSDK(ctx, cloudflareEdgeWorkerRole)
+		if err != nil {
+			return err
+		}
+		p.workerWriter = api
+	}
+	return nil
 }
 
 func (o *cloudflareObservation) newManagedSDK(ctx context.Context, role string) (cloudflareAPI, error) {

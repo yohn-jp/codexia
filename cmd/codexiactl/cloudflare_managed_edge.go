@@ -312,7 +312,8 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 				return errors.New("cloudflare Access application has unexpected policies")
 			}
 			for i, id := range ids {
-				if id == "" || attached[i].ID != id || attached[i].Precedence != int64(i+1) {
+				if id == "" || attached[i].ID != id || attached[i].Precedence != int64(i+1) ||
+					id == s.AuthorPolicyID && attached[i].Decision != "allow" {
 					return errors.New("cloudflare Access policy identity or precedence differs")
 				}
 			}
