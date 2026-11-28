@@ -6,7 +6,7 @@ Provision a VM, enroll its first owner through the normal frontend and activate 
 
 Use the [initial deployment CLI](CODEXIACTL.md) from a pinned OpenSSH session on the target Ubuntu 26.04 x86-64 VM. It prepares the inputs below and invokes the existing protected workflows. The individual steps in this runbook are available for diagnosis and independent recovery. Independent Environment approvals and owner enrollment remain mandatory.
 
-On your trusted workstation, select a published immutable version from the [Codexia releases](https://github.com/yohn-jp/codexia/releases). Replace `vX.Y.Z` with that exact tag and use an up-to-date GitHub CLI to verify the release and the binary's provenance.
+On your trusted workstation, select a published immutable official CLI version from the [Codexia releases](https://github.com/yohn-jp/codexia/releases), including when deploying a fork. The download and attestation repository below is the **official CLI publisher**, not the deployment repository. Replace `vX.Y.Z` with that exact tag and use an up-to-date GitHub CLI to verify the release and the binary's provenance.
 
 ```sh
 tag=vX.Y.Z
@@ -16,7 +16,7 @@ gh release download "$tag" --repo "$repo" \
   --pattern codexiactl-linux-amd64 --pattern codexiactl-linux-amd64.sha256
 sha256sum --check --strict codexiactl-linux-amd64.sha256
 gh attestation verify ./codexiactl-linux-amd64 --repo "$repo" \
-  --signer-workflow "$repo/.github/workflows/publish-oci.yml" \
+  --signer-workflow "$repo/.github/workflows/publish-codexiactl.yml" \
   --source-ref "refs/tags/$tag" --deny-self-hosted-runners
 ```
 
@@ -30,7 +30,7 @@ chmod 0700 codexiactl-linux-amd64
 ./codexiactl-linux-amd64 init
 ```
 
-The release identifies its source and version. The repository maintainer provisions the repository-only GitHub App with Device Flow enabled and sets its public client ID in `CODEXIACTL_GITHUB_APP_CLIENT_ID` before building the tag. The CLI can guide an operator who explicitly selects the supported fine-grained PAT route. Use `doctor` for prerequisite and permission failures and `status` to inspect the latest verified lifecycle observation. The recovery operator and Backup Console own the independent restore evidence required for ACCEPTED. Run `init` again to reconcile an interrupted invocation. Resolve reported state conflicts through the owning protected workflow or recovery runbook before retrying.
+The release identifies its official source and version. As specified by [the normative GitHub authentication and target discovery contract](CODEXIACTL.md#41-github公式-app-による認証配備対象の発見), the official publisher provisions a single public Codexia GitHub App with Device Flow enabled and binds its public Client ID to official release builds using `CODEXIACTL_GITHUB_APP_CLIENT_ID`. Install that App on only the desired repository named `codexia` and authenticate as a user authorized to operate it. The conforming CLI discovers the App/user-accessible repositories, confirms the unique candidate or prompts for a selection, and binds all protected operations to that repository's immutable identity. The official repository and a user's fork use the same flow; do not create a separate App or provide a PAT for a fork. Do not use an older CLI release that has not implemented this contract as evidence of fork support. Use `doctor` for prerequisite and permission failures and `status` to inspect the latest verified lifecycle observation. The recovery operator and Backup Console own the independent restore evidence required for ACCEPTED. Run `init` again to reconcile an interrupted invocation. Resolve reported state conflicts through the owning protected workflow or recovery runbook before retrying.
 
 After the CLI confirms the normal frontend and the registration-only API and hands off the Owner Setup Grant, the owner opens the normal `/console/setup` page. Use the existing protected procedures below after owner registration.
 

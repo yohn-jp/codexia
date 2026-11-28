@@ -9,7 +9,7 @@
 
 ## 運用サイクルと実行主体（全操作の責務境界）
 
-新規 VM の初回登録は [codexiactl 初回配備 CLI](CODEXIACTL.md) を正本とする。運用者の SSH セッション上で外部認証・入力準備・既存 protected operation の起動と照合を自動化する。これは R0–R8 の第二実装ではなく、Ansible/Terraform を対象 VM で実行しない。外部サービス管理権限や独立した環境承認を迂回せず、通常配備には CLI を要求しない。
+新規 VM の初回登録は [codexiactl 初回配備 CLI](CODEXIACTL.md) を正本とする。運用者の SSH セッション上で外部認証・入力準備・既存 protected operation の起動と照合を自動化する。配備主体は [codexiactl §4.1](CODEXIACTL.md#41-github公式-app-による認証配備対象の発見) に従い公式 GitHub App で発見・確認された `codexia` repo 自身である。公式 CLI 配布元と区別し、同じ repository identity に main source、既存 Environment、認定済み候補、OIDC/SSH、host/edge 観測と復旧証跡を結合する。公式 repo と Fork で経路を分岐しない。これは R0–R8 の第二実装ではなく、Ansible/Terraform を対象 VM で実行しない。外部サービス管理権限や独立した環境承認を迂回せず、通常配備には CLI を要求しない。
 
 以下は運用の規範的な目標契約であり、実装済みとは主張しない。実装は本表に従う。新しいWorkflow・Environment・秘密情報管理経路・バックアップ形式を暗黙に追加する許可ではない。個々の詳細はリンク先の既存正本に従う。人が同一でも役割と資格情報は混同しない。
 

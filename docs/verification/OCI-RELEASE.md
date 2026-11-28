@@ -1,9 +1,9 @@
 ## OCI releases
 
-A repository-local GitHub Actions workflow publishes two independently verified `linux/amd64` images to GHCR when a semantic version tag such as `v0.1.0` is pushed:
+A repository-local GitHub Actions workflow publishes two independently verified `linux/amd64` images to GHCR when a supported semantic version tag is pushed. Official CLI tags `v0.1.x` are excluded. The image namespace derives from the publishing repository, for example:
 
-- `ghcr.io/yohn-jp/codexia/core:v0.1.0`
-- `ghcr.io/yohn-jp/codexia/full:v0.1.0`
+- `ghcr.io/<target-owner>/codexia/core:v1.0.0`
+- `ghcr.io/<target-owner>/codexia/full:v1.0.0`
 
 The workflow builds each profile from the tagged source, starts the resulting image, checks HTTP/assets/profile, non-root execution, writable data and graceful shutdown, then publishes that same tested image. A failed check prevents that profile from being published. The two profile jobs are independent: a partial release is possible if one fails, and must be treated as incomplete by operators. Do not repoint a published version tag; use a new version for corrections. No `latest` or mutable stable alias is published. Deployment should pin the registry manifest digest resolved from the release tag.
 
@@ -15,6 +15,4 @@ The shared exact-main verification and release authority is [CI/CD architecture]
 
 [`unpublished-image.mjs`](../../scripts/verification/artifacts/unpublished-image.mjs) checks GHCR immediately before each image push. An existing version tag is refused; only a registry 404 with `MANIFEST_UNKNOWN` or `NAME_UNKNOWN` confirms absence. Authorization, service, malformed-response and network failures stop publication. The workflow serializes events for the same Git ref. A partial publication must use a new version; rerunning it must not replace the profile already published.
 
-Before pushing a tag, enable GitHub Immutable Releases for the repository and configure the `CODEXIA_RELEASE_IMMUTABILITY_READ_TOKEN` Actions secret with an expiring fine-grained credential restricted to `yohn-jp/codexia` and repository Administration read permission. GitHub's settings endpoint requires that permission. The Workflow uses its own token for publication. The publisher checks the setting before pushing images and again before creating a new Release.
-
-The `Publish verified Release` job rechecks exact-source verification after both images and the CLI build succeed. It publishes `codexiactl-linux-amd64` and `codexiactl-linux-amd64.sha256` together. It accepts an existing Release only when its tag resolves to the verified source, the Release is immutable, both required assets match the exact binary and checksum, and GitHub verifies the release and build attestations. Other assets may be present. If verification fails for an existing Release, investigate without editing published assets and use a new verified version tag for corrections. Use this tag-triggered workflow to publish Releases.
+The tagged OCI publisher uses the repository-local `GITHUB_TOKEN` and rechecks the exact source before publication. Official CLI publication is a distinct workflow and follows [the canonical CodexiaCTL release contract](../deployment/CODEXIACTL.md#21-cli-自身のリリース更新ライフサイクル正本), including immutable Releases, artifact attestation and checksum. The CLI release workflow does not require an immutability-read token or a separate publishing App. Neither a tag on a different repository nor its product image is deployment certification evidence for the selected target repository.
