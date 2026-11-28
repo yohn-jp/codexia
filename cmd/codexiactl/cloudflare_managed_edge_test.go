@@ -398,3 +398,138 @@ func TestManagedEdgeWorkerRoutingUsesScopedTypedSDK(t *testing.T) {
 		t.Fatalf("unexpected Worker request sequence %q", calls)
 	}
 }
+
+type statefulManagedEdge struct {
+	state             managedEdgeInventory
+	writes, reads     int
+	loseFirstResponse bool
+}
+
+func (f *statefulManagedEdge) Observe(context.Context, managedEdgeSpec) (managedEdgeInventory, error) {
+	f.reads++
+	return f.state, nil
+}
+
+func (f *statefulManagedEdge) Apply(_ context.Context, change managedEdgeChange) error {
+	f.writes++
+	body, ok := change.Body.(map[string]any)
+	if !ok {
+		return errors.New("unexpected fixture payload")
+	}
+	pattern, isRoute := body["pattern"].(string)
+	if isRoute {
+		script, _ := body["script"].(string)
+		f.state.Routes = append(f.state.Routes, managedEdgeRoute{ID: strings.Repeat("b", 32), Pattern: pattern, Script: script})
+	} else {
+		host, _ := body["name"].(string)
+		content, _ := body["content"].(string)
+		if host == "" || content == "" {
+			return errors.New("unexpected fixture write")
+		}
+		f.state.DNS = append(f.state.DNS, managedEdgeDNS{
+			ID: strings.Repeat("c", 32), Name: host, Type: "CNAME", Content: content, Proxied: true,
+		})
+	}
+	if f.writes == 1 && f.loseFirstResponse {
+		return errors.New("Cloudflare response lost after write")
+	}
+	return nil
+}
+
+func convergedManagedEdgeFixture(t *testing.T) (managedEdgeSpec, managedEdgeInventory) {
+	t.Helper()
+	spec, state := managedEdgeFixture(t)
+	id := func(n int) string { return fmt.Sprintf("10000000-0000-4000-8000-%012d", n) }
+	tunnelID := id(20)
+	spec.ExpectedTunnelID = tunnelID
+	state.Tunnels = []managedEdgeTunnel{{ID: tunnelID, Name: cloudflareTunnel, AccountTag: spec.AccountID, ConfigSrc: "cloudflare"}}
+	spec.ProbePolicyID, spec.ManagementPolicyID = id(21), id(22)
+	servicePolicy := func(policyID string, tags []string) cloudflareAccessPolicy {
+		p := cloudflareAccessPolicy{ID: policyID, Decision: "non_identity", Precedence: 1}
+		for _, tag := range tags {
+			p.Include = append(p.Include, map[string]json.RawMessage{
+				"service_token_tag": json.RawMessage(fmt.Sprintf(`{"key":"codexia-scope","value":%q}`, tag)),
+			})
+		}
+		state.Policies = append(state.Policies, managedEdgePolicy{cloudflareAccessPolicy: p, AccountID: spec.AccountID})
+		return p
+	}
+	author := state.Policies[0].cloudflareAccessPolicy
+	probe := servicePolicy(spec.ProbePolicyID, managedEdgeProbeTags(spec.Repository.RepoID))
+	ssh := servicePolicy(spec.ManagementPolicyID, managedEdgeSSHTags(spec.Repository.RepoID))
+	state.AppPolicies = map[string][]cloudflareAccessPolicy{}
+	addApp := func(domain string, n int, policies ...cloudflareAccessPolicy) {
+		app := managedEdgeApp{cloudflareAccessApp: cloudflareAccessApp{
+			ID: id(n), AUD: strings.Repeat(fmt.Sprintf("%x", n%16), 64), Domain: domain, Type: "self_hosted",
+		}, AllowedIDPs: spec.AllowedIDPs}
+		for i := range policies {
+			policies[i].Precedence = int64(i + 1)
+		}
+		state.Apps = append(state.Apps, app)
+		state.AppPolicies[app.ID] = policies
+	}
+	addApp(spec.Host, 30, author)
+	var probes map[string]managedEdgePath
+	if err := json.Unmarshal(spec.Contract.identityProbes, &probes); err != nil {
+		t.Fatal(err)
+	}
+	for _, probePath := range probes {
+		addApp(spec.Host+probePath.Path, 31+len(state.Apps), probe, author)
+	}
+	addApp(spec.ManagementHost, 40, ssh)
+	var ingress map[string]json.RawMessage
+	plan, err := planManagedEdge(spec, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range plan {
+		switch {
+		case change.Key == "converge Tunnel ingress":
+			ingress = change.Body.(map[string]any)["config"].(map[string]json.RawMessage)
+		case strings.HasPrefix(change.Key, "create Worker route "):
+			body := change.Body.(map[string]any)
+			script, _ := body["script"].(string)
+			state.Routes = append(state.Routes, managedEdgeRoute{
+				ID: strings.Repeat("a", 32), Pattern: body["pattern"].(string), Script: script,
+			})
+		case strings.HasPrefix(change.Key, "create DNS "):
+			body := change.Body.(map[string]any)
+			state.DNS = append(state.DNS, managedEdgeDNS{
+				ID: strings.Repeat("a", 32), Name: body["name"].(string), Type: "CNAME", Content: body["content"].(string), Proxied: true,
+			})
+		}
+	}
+	state.TunnelConfig = ingress
+	off := false
+	worker := managedEdgeWorker{ID: "canonical-worker", Name: cloudflareWorker, DeployedOn: json.RawMessage("null")}
+	worker.Subdomain.Enabled, worker.Subdomain.PreviewsEnabled = &off, &off
+	state.Workers = []managedEdgeWorker{worker}
+	if plan, err := planManagedEdge(spec, state); err != nil || len(plan) != 0 {
+		t.Fatalf("complete fixture has drift: %v (%v)", plan, err)
+	}
+	return spec, state
+}
+
+func TestManagedEdgeReobservesResponseLossAndResumesWithoutReplay(t *testing.T) {
+	spec, state := convergedManagedEdgeFixture(t)
+	state.Routes = state.Routes[:len(state.Routes)-1]
+	state.DNS = state.DNS[:len(state.DNS)-1]
+	api := &statefulManagedEdge{state: state, loseFirstResponse: true}
+	ctx := context.Background()
+	guards, approvals := 0, 0
+	guard := func(context.Context) error { guards++; return nil }
+	approve := func([]string) error { approvals++; return nil }
+	plan, err := reconcileManagedEdge(ctx, api, spec, approve, guard)
+	if !slices.Equal(plan, []string{"create Worker route " + spec.Host + "/*", "create DNS " + spec.ManagementHost}) ||
+		err == nil || !strings.Contains(err.Error(), "uncertain result") || api.writes != 1 || api.reads != 3 || guards != 1 {
+		t.Fatalf("did not stop after response loss and reobserve: %+v, %v, writes=%d, reads=%d", plan, err, api.writes, api.reads)
+	}
+	plan, err = reconcileManagedEdge(ctx, api, spec, approve, guard)
+	if err != nil || !slices.Equal(plan, []string{"create DNS " + spec.ManagementHost}) || api.writes != 2 || guards != 2 {
+		t.Fatalf("resume replayed the observed route or failed the DNS write: %+v, %v, writes=%d", plan, err, api.writes)
+	}
+	plan, err = reconcileManagedEdge(ctx, api, spec, approve, guard)
+	if err != nil || len(plan) != 0 || approvals != 2 || api.writes != 2 {
+		t.Fatalf("idempotent run changed the converged state: %+v, %v, writes=%d", plan, err, api.writes)
+	}
+}

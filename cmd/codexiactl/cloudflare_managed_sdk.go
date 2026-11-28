@@ -384,9 +384,10 @@ func (o *cloudflareObservation) converge(ctx context.Context, snapshot githubSna
 		if err := requireApproval(o.operator, "Apply this Cloudflare edge plan while the publication gate is closed?"); err != nil {
 			return err
 		}
-		requiresWorkerWrite := req.workerScriptsWrite
+		requiresWorkerWrite, requiresRouteWrite := req.workerScriptsWrite, req.routeWrite
 		managedEdgeRequirements(plan, &req)
-		if req.managedAccess || req.managedDNS || req.managedTunnel || req.workerScriptsWrite != requiresWorkerWrite {
+		if req.managedAccess || req.managedDNS || req.managedTunnel ||
+			req.workerScriptsWrite != requiresWorkerWrite || req.routeWrite != requiresRouteWrite {
 			return o.replaceManagedSession(ctx, req)
 		}
 		return nil
@@ -440,6 +441,8 @@ func managedEdgeRequirements(plan []string, req *cfDeviceRequirements) {
 			req.managedDNS = true
 		case key == "create empty Worker":
 			req.workerScriptsWrite = true
+		case strings.HasPrefix(key, "create Worker route "):
+			req.routeWrite = true
 		}
 	}
 }
