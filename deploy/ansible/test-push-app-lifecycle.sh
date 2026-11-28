@@ -236,6 +236,31 @@ fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 TIMING
   return "$status"
 }
+
+# Disposable-only A/B: retain the canonical pull and compare its cost with a
+# locally present immutable digest. Do not use the latter for deployment.
+benchmark_oci_admission() {
+  local image prior_id after_id selected start_ms duration_ms digests round=0
+  image=$(rootless_podman inspect --format '{{.ImageName}}' codexia-api)
+  [[ "$image" == "$image_repository"@sha256:* && "${image##*@sha256:}" =~ ^[a-f0-9]{64}$ ]] || return 1
+  prior_id=$(rootless_podman inspect --format '{{.Id}}' codexia-api)
+  for selected in pull local local pull; do
+    round=$((round + 1))
+    start_ms=$(monotonic_ms)
+    if [[ "$selected" == pull ]]; then
+      rootless_podman pull "$image" >/dev/null
+    else
+      digests=$(rootless_podman image inspect --format '{{json .RepoDigests}}' "$image") || return 1
+      node -e 'const [list,image]=process.argv.slice(1); if (!JSON.parse(list).includes(image)) process.exit(1)' "$digests" "$image"
+    fi
+    duration_ms=$(( $(monotonic_ms) - start_ms ))
+    printf 'LIFECYCLE_OCI_AB mode=%s iteration=%d duration_ms=%d\n' "$selected" "$round" "$duration_ms" |
+      tee -a "$RUNNER_TEMP/codexia-push-app-lifecycle/oci-admission-bounded.log"
+  done
+  after_id=$(rootless_podman inspect --format '{{.Id}}' codexia-api)
+  [[ "$after_id" == "$prior_id" ]] || { echo 'The A/B probe unexpectedly replaced the API writer' >&2; return 1; }
+}
+
 observe_runtime() {
   local key=$1 role=$2
   local container_id image_id api_health api_unit quadlet_sha release_sha pg_volume pg_mount pg_created data_volume data_mount data_created history_volume history_mount history_created db_container db_image api_count sentinel
@@ -769,6 +794,7 @@ for stage in deploy-repair-link deploy-same-digest; do
 done
 
 observe_runtime same-digest-reapply "$initial_key"
+benchmark_oci_admission
 set_state same_digest_reapply PASS 'same immutable digest remained healthy with stable Quadlet and release record'
 
 seed_database_sentinel
