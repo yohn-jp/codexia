@@ -23,7 +23,7 @@ start_fixture_management() {
   fixture_management_owned=true
   sudo install -m 0755 "$scratch/cloudflared-download/cloudflared" /usr/bin/cloudflared
   sudo install -m 0644 "$repo/cmd/codexiactl/assets/codexia-cloudflared.service" /etc/systemd/system/
-  sudo tee /run/codexia-fixture-management.py >/dev/null <<'PY'
+  cat > "$scratch/management.py" <<'PY'
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class ManagementFixture(BaseHTTPRequestHandler):
@@ -33,6 +33,9 @@ class ManagementFixture(BaseHTTPRequestHandler):
 
 ThreadingHTTPServer(("127.0.0.1", 2000), ManagementFixture).serve_forever()
 PY
+  # The production unit uses DynamicUser. The fixture runs under umask 077,
+  # so copy the public test script with explicit read access for that UID.
+  sudo install -m 0644 "$scratch/management.py" /run/codexia-fixture-management.py
   sudo install -d -m 0755 /run/systemd/system/codexia-cloudflared.service.d
   sudo tee /run/systemd/system/codexia-cloudflared.service.d/fixture.conf >/dev/null <<'UNIT'
 [Service]
@@ -42,7 +45,11 @@ ExecStart=/usr/bin/python3 /run/codexia-fixture-management.py
 UNIT
   sudo systemctl daemon-reload
   sudo systemctl start codexia-cloudflared.service
-  curl --noproxy '*' --fail --silent --show-error --retry 10 --retry-connrefused --max-time 3 http://127.0.0.1:2000/ready
+  if ! curl --noproxy '*' --fail --silent --show-error --retry 10 --retry-connrefused \
+      --retry-delay 1 --retry-max-time 15 --max-time 3 http://127.0.0.1:2000/ready; then
+    sudo journalctl -u codexia-cloudflared.service -n 30 --no-pager >&2
+    return 1
+  fi
   fixture_management_pid=$(systemctl show --property=MainPID --value codexia-cloudflared.service)
   [[ "$fixture_management_pid" -gt 1 ]]
 }
