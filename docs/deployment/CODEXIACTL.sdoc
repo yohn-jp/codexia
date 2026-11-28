@@ -282,7 +282,7 @@ GitHub REST API から選択 repo の identity、default/main、Environment と�
 
 [[SECTION]]
 MID: 9a19462f5110c87d4a7274969d895c2b
-UID: DOC-DEPLOYMENT-CODEXIACTL-42-tailscalenode-認証と管理-api-認証は別
+UID: DOC-DEPLOYMENT-CODEXIACTL-42-unified-tunnel-management
 TITLE: 4.2 単一 Cloudflare Tunnel による管理接続
 
 [TEXT]
@@ -292,7 +292,7 @@ STATEMENT: >>>
 
 管理用 hostname にだけ適用される専用 Service Auth を使う。bootstrap と production の Environment に別々の有効期限付き SSH 専用 Service Token と既存の別々の SSH Ed25519 key を登録する。製品用 identity probe の Service Token、Worker publication token、Tunnel connector token は SSH 認可に流用しない。Cloudflare Access は到達認可、OpenSSH は独立した host pin と利用者認証、既存 Environment 保護は実行主体の認可を所有する。同一 VM の管理 hostname と Access app は両 Environment の専用 Service Token を許可するため、Access だけで bootstrap と runtime の OS 利用者を分離できるとは扱わない。各 Environment の資格情報登録・使用を分離し、sshd の公開鍵と既存 sudo/rootless 制限が利用者権限を分離する。WIF と同等の secretless 認証を提供するとは扱わない。Runner の固定版 cloudflared の service token は子プロセスの環境変数で供給し、引数・ログに出さず、OpenSSH ProxyCommand を利用する。Ansible の実行主体・sudo/rootless 境界は従来どおり。WebSocket の切断に対する受入は §8 の実測で判定する。
 
-Tailscale の導入、node、Tailnet 管理認証、WIF、ACL、TS_OAUTH_CLIENT_ID、旧接続 fallback は撤去対象。旧 VM の移行に限り既に信頼された管理経路を新経路の実疎通確認まで維持し、対象専用の旧資格と設定のみ承認後撤去する。他サービスの Tailnet や既存管理者接続を無断で変更しない。
+Tailscale の導入、node、Tailnet 管理認証、WIF、ACL、TS_OAUTH_CLIENT_ID、旧接続 fallback は撤去対象。既存 VM の移行では、既に信頼された管理経路を新経路の実疎通確認まで維持し、対象専用の旧資格と設定を承認後に撤去する。他サービスの Tailnet や既存管理者接続を無断で変更しない。
 <<<
 
 [[/SECTION]]
@@ -317,6 +317,8 @@ STATEMENT: >>>
 | GitHub | 既存 App で選択 repo の Environment public key を取得し、sealed box で該当 Secret を登録。read-back 不可の値は実アクセスで照合 |
 
 Cloudflare IaC の所有先は既存 Terraform。事前に承認済みの SSH 専用 hostname、app、専用再利用可能 Service Auth policy と製品用 probe policy を用意する。token 自動発行と policy 許可を両立するため、公式の `service_token_tag` selector による repository ID・用途・Environment を一つの tag value に結合した完全一致方式を先行適格性試験の候補とする。個別 tag の複数 Include による OR 認可で scope を広げない。管理 app は bootstrap と production の各完全一致値に限定し、製品 probe は別の値と policy に限定する。固定 Terraform provider の schema・scope と権限境界、別 repo/別用途 token の拒否を実証してから確定する。tag を作成・付替え可能な主体がその認可を与え得ることを考慮し、任意 token、account 共通タグ、any-valid-token、作者 Allow、Bypass を管理アプリに許可しない。代替として明示 ID の既存 Terraform 承認済み適用を自動連携する方式は、手動 token/ID 転記が不要であることを実証できる場合のみ比較対象にする。CTL は Terraform 管理資源を API で独自管理せず、VM 上で Terraform を実行しない。Terraform の初回構築・変更の独立承認は維持するが、認定済み edge 所望状態に対して資格情報の手動作成を要求しない。存在・一致・アクセスを実観測してから次へ進む。
+
+実装候補で使う tag key は `codexia-scope`。管理 policy は `repo-<repository-id>-ssh-codexia-bootstrap` と `repo-<repository-id>-ssh-codexia-production` の二つの完全一致値を受理する。製品 probe policy は `repo-<repository-id>-probe-codexia-production` のみを受理し、同じ製品 probe 資格を両保護 Environment に登録できる。管理 hostname は `deploy/production.json` の `managementHostname`、観測後の名前と policy ID は保護対象記録の `sshHostname` と `sshPolicyId` を用いる。
 
 既存 Secret が使用可能な場合は継続使用する。Secret 本体を再取得できない Service Token については、欠落した用途だけ新規 token を承認の下で発行・限定許可・実接続を確認して登録し、同じ目的の旧 token の廃止は新 token の動作確認後に限定する。失敗や応答喪失は既存の inventory と receipt を再観測して安全停止し、重複発行・手動 token 貼付けで成功扱いにしない。長命の広範な管理 token を GitHub や VM に残さない。Owner の本人認証は別の責務である。
 <<<

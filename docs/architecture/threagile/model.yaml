@@ -382,7 +382,7 @@ technical_assets:
 
   Product publication gate:
     id: publication-gate
-    description: Independent host-local listener and forwarding service, fail closed during bootstrap, deployment and recovery
+    description: Host-local systemd publication socket and socket-proxyd service at port 18080, forwarding only to the API loopback port 18081
     type: process
     usage: business
     used_as_client_by_human: false
@@ -617,7 +617,7 @@ technical_assets:
 
   Dedicated Cloudflare management ingress:
     id: cloudflare-management
-    description: SSH-only Access Service Auth route of the same Tunnel as product ingress
+    description: SSH-only Access Service Auth route of the same Tunnel as product ingress, fixed to host loopback SSH port 22
     type: external-entity
     usage: devops
     used_as_client_by_human: false

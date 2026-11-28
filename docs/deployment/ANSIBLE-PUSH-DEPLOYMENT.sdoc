@@ -12,13 +12,13 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: 5ec4897eb37fb91bf4e32925a0c71b45
 STATEMENT: >>>
-**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が管理経路と公開ゲートの契約を所有する。正式運用には統合実サービス受入を要する。
 
 > On a pristine approved VM, the browser enrollment flow uses a one-time setup key and a restricted Fastify API behind Cloudflare. The protected production workflow uses the normal same-origin frontend. See [LINK: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME-first-owner-through-the-browser, first owner through the browser] and the [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, initial deployment design].
 
 The [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, initial deployment state machine] and [LINK: DOC-DEPLOYMENT-UPDATE-FLOW, compatible update/rollback state machine] are normative. The implemented `bootstrap` stage converges approved host, secrets, base, and auth-runtime tasks; owner enrollment and protected application activation remain separate.
 
-The protected GitHub Actions → Tailscale → SSH workflow is the only deployment controller. Under the rootless `codexia` service account, Ansible converges PostgreSQL, API and Tunnel Quadlets. `site.yml` rejects the obsolete pull-updater stages.
+The protected GitHub Actions workflow reaches the pinned SSH host through Cloudflare Access Service Auth and Tunnel. Ansible converges the rootless PostgreSQL and API Quadlets and controls the independent host publication gate. `site.yml` rejects the obsolete pull-updater stages.
 
 The protected controller generates its inventory and pins SSH. An isolated stage test can use its own inventory:
 
@@ -28,7 +28,7 @@ ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e co
 
 Supported stages are `inspect`, `bootstrap`, `host`, `secrets`, `base`, `auth-runtime`, `deploy`, `deploy-lifecycle-fixture` and `restore-drill`. The lifecycle fixture stage runs only from the run-bound disposable GitHub Actions workflow; it is not a production operation.
 
-The `host` stage validates Ubuntu 26.04, systemd and cgroup v2, and creates or adopts the authorized service account. The `secrets` stage installs the Tunnel credential and the two PostgreSQL credentials without implicit rotation. The `base` stage converges networks, volumes, PostgreSQL 17 and Tunnel Quadlets, verifying exact persistent storage and identities. These stages do not publish new API images.
+The `host` stage validates Ubuntu 26.04, systemd and cgroup v2, and creates or adopts the authorized service account. The `secrets` stage installs the two PostgreSQL credentials without implicit rotation. The `base` stage converges networks, volumes and PostgreSQL 17, verifies the existing host connector, and installs the initial closed publication gate. These stages do not publish new API images.
 
 The `deploy` stage requires a certified immutable Full image, main-source provenance certificate, and a compatible deployed UI epoch. It recovers interrupted transactions, serializes application changes, and observes candidate health. Before replacing an existing API it requires off-VM backup through the active Console revision and VM-local executor settings. Image-only updates refuse changed migration fingerprint, persistence format or API epoch. A failed candidate restores the prior Quadlet and release record.
 <<<

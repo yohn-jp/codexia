@@ -37,7 +37,9 @@ STATEMENT: >>>
 | 製品公開遮断 | 既存 Ansible lifecycle が所有する VM-local gate。標準 systemd .socket/.service と systemd-socket-proxyd を第一候補に適格性を実証 |
 | API / DB / backup | 既存 rootless Podman Quadlet、PostgreSQL、host lock、既存 backup producer と transaction/recovery intent |
 
-公開ゲート候補の具体構成: host の基盤 cloudflared は API/DB/Quadlet への Requires/After 依存を持たない。公式 host service を必要最小限の権限で起動し、connector token を protected file/credential で供給する。管理 ingress は host sshd のみに到達し、製品 ingress は全対象 hostname/path で専用 loopback socket のみに到達する。標準 systemd-socket-proxyd はその socket から API の host-local loopback endpoint に転送する。API は外部 interface に bind/publish せず、管理 connector から API へ直接到達できる ingress、別の公開 port、直接 Worker origin、bastion 任意転送を許容しない。VM 上の信頼済み管理者の host-local 操作とは区別する。DB の private network と製品側の Access/JWT/公開 protocol 契約を維持する。具体 port、service user、unit 依存、package version は先行実証で決定し、実装と同時に正本化する。
+公開ゲート候補の具体構成: host の基盤 cloudflared は API/DB/Quadlet への Requires/After 依存を持たない。公式 host service を必要最小限の権限で起動し、connector token を protected file/credential で供給する。管理 ingress は host sshd のみに到達し、製品 ingress は全対象 hostname/path で専用 loopback socket のみに到達する。標準 systemd-socket-proxyd はその socket から API の host-local loopback endpoint に転送する。API は外部 interface に bind/publish せず、管理 connector から API へ直接到達できる ingress、別の公開 port、直接 Worker origin、bastion 任意転送を許容しない。VM 上の信頼済み管理者の host-local 操作とは区別する。DB の private network と製品側の Access/JWT/公開 protocol 契約を維持する。port、service user、unit 依存、package version の実装候補は実サービス適格性で確認する。
+
+実装候補では host connector を `codexia-cloudflared.service` とし、管理 ingress を `ssh://127.0.0.1:22` に接続する。製品 ingress は `127.0.0.1:18080` の `codexia-api.socket` に接続し、`codexia-api-gate.service` が `127.0.0.1:18081` の API へ転送する。最終値は実サービス適格性で確認する。
 
 | 状態 | 基盤 Tunnel / 管理 SSH | 製品公開ゲート |
 | --- | --- | --- |
