@@ -1,0 +1,48 @@
+[DOCUMENT]
+MID: c980457ee6594cbe8c2a6f0660f09ae1
+TITLE: Codexia 公式製品サイト
+UID: DOC-DESIGN-PRODUCT-SITE
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 48f0c24dcc6b46f39f8190ab20a4783
+STATEMENT: >>>
+**種別: 規範的設計。Owner: 公式製品サイト。対象: 創作者、導入検討者、サイト開発・公開担当者。** 製品サイトは Codexia の思想と使用価値をインタラクティブな作品として伝える、独立した公開用静的サイトである。アプリケーションの author UI、Reader、API、管理面、GitHub Pages の設計閲覧ポータルとは別物とする。製品の機能・セキュリティ契約は [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, System design] と各領域の正本に従う。
+<<<
+
+[[SECTION]]
+MID: 012a65f302ac4626ab6127da94088891
+UID: DOC-DESIGN-PRODUCT-SITE-experience
+TITLE: 体験と情報設計
+
+[TEXT]
+MID: 0525c781685443a5b5da1db5ee44fd88
+STATEMENT: >>>
+- **一行から一冊へ。** 一つの架空の原稿が、I 執筆、II 章と推敲の積層、III Folio Atlas による根拠参照、IV 作者の AI 提案採否、V 装丁と自己所有へ連続的に変化する。紙、墨、革、金箔、斜光を共通の空間素材として扱う。一般的な機能カードの羅列に置換しない。
+- スクロールは自然に前後でき、各幕に直接到達できる。操作は明示的であり、採否は見本原稿と最終表示の双方に反映され、選び直せる。すべて架空の見本であることを明記する。製品 API や AI に接続せず、保存、暗号化、認証、診断の実行を装わない。製品の実装済み機能・配布状況と設計目標を混同しない。
+- 静的な見出し、本文、導入・GitHub・開発ポータルへの導線を保ち、JavaScript 無効時にも読める。小画面では独立した構図を用い、作者用 Mobile Web の復活を意味しない。キーボード操作、フォーカス、WCAG 2.2 AA、prefers-reduced-motion を製品紹介サイトにも適用する。
+- 日本語組版・操作要素は DOM とし、関係線は SVG を優先する。高度なスクロール演出や立体装丁は必要性に応じ Astro 静的生成、GSAP/ScrollTrigger、Three.js、vanilla-extract の採用を検討する。依存追加は [LINK: DOC-ARCHITECTURE-DEPENDENCY-POLICY, dependency policy] に従い、固定された依存と検証を伴わせる。常時 WebGL 描画、スクロールごとの不要な DOM 再構築、過剰な合成は避け、表示中かつ変化時のみ必要な描画を行う。60fps を目標とし、実測で評価する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 37a882726b54404f861c2fa45f4919e7
+UID: DOC-DESIGN-PRODUCT-SITE-publication
+TITLE: 公開境界と運用
+
+[TEXT]
+MID: 1d7b39c0c34647d9bc9e4d6448796e15
+STATEMENT: >>>
+- 公式 URL は https://products.yohn.jp/codexia/ 。共有製品ホストの名前空間は複数製品を収容できる。公式 Codexia サイトの所有範囲は /codexia/ 配下と正規化用 /codexia に限定し、ホスト全体や他製品のルートを取得しない。共有ホストの DNS は別途一度だけ管理者が準備する。
+- 同一モノレポの edge/product-site がサイトの唯一のソースとビルド責務を所有する。Cloudflare Workers Static Assets の独立 Worker codexia-product-site に静的成果物のみを公開する。実行用 Worker スクリプト、API バインディング、DB、Tunnel、Access 変更は不要であり、個人稼働環境 codexia.yohn.jp、codexia-frontend、GitHub Pages に変更を加えない。外部 CDN の実行コードを直接読み込まない。
+- 公式配布リポジトリ yohn-jp/codexia の main で、製品サイト専用 CI が変更された静的ソースを検証・ビルドし、その正確な成果物を公開する。PR は検証のみで本番資格情報を持たない。既存の CLOUDFLARE_API_TOKEN と CLOUDFLARE_ACCOUNT_ID を必要な公開ステップにのみ渡す。製品サイトの公開承認・排他は本体のデプロイと別の環境・concurrency group に置く。既存 token が route/Worker に必要な権限を持たなければ失敗として扱う。権限を推測して広げない。
+- 公開前に固定された Wrangler で静的資産・構成を検証し、古い main の成果物による上書きを拒否する。公開後に公開 URL の HTTP 応答とビルド元 SHA の同一性を確認する。ビルド成功、デプロイ成功、公開 URL での観測、実ブラウザでの体験受入は独立した結果である。失敗は成功に置換せず、既知の正常 Worker version を Cloudflare の正規ロールバックで復旧する。
+<<<
+
+[[/SECTION]]
