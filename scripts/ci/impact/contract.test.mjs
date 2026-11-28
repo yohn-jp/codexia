@@ -347,7 +347,7 @@ test('browser groups retain immutable runtime and restore the exact producer bef
   const { chromium: chromiumDigest } = PLAYWRIGHT_IMAGE_DIGESTS;
   assert.deepEqual(Object.keys(PLAYWRIGHT_IMAGE_DIGESTS), ['chromium']);
   assert.match(chromiumDigest, /^sha256:[0-9a-f]{64}$/u);
-  assert.equal(browser.container.image, "${{ format('ghcr.io/{0}/playwright-ubuntu-chromium@" + chromiumDigest + "', github.repository) }}");
+  assert.equal(browser.container.image, 'ghcr.io/yohn-jp/codexia/playwright-ubuntu-chromium@' + chromiumDigest);
   assert.equal(browser.container.options, '--init --ipc=host');
   assert.deepEqual(browser.container.credentials, {
     username: '${{ github.actor }}',

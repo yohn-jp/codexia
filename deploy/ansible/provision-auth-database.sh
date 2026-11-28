@@ -7,6 +7,11 @@ die(){ printf '%s\n' "$1" >&2; exit 1; }
 operation="$1"
 lock_file="$2"
 image="${3:-}"
+image_repository="${CODEXIA_IMAGE_REPOSITORY:-}"
+reviewed_image() {
+  [[ "$image_repository" =~ ^ghcr\.io/[a-z0-9-]+/codexia-backend$ &&
+     "$1" == "$image_repository@"* && "${1#*@}" =~ ^sha256:[a-f0-9]{64}$ ]]
+}
 [[ "$lock_file" == /* && ! "$lock_file" =~ [[:cntrl:]] ]] || die 'Invalid auth bootstrap lock path'
 [[ "$lock_file" == "$HOME/.local/state/codexia-deploy/host.lock" ]] || die 'Auth bootstrap requires the canonical host lock'
 if [[ -e "$lock_file" || -L "$lock_file" ]]; then
@@ -15,20 +20,27 @@ if [[ -e "$lock_file" || -L "$lock_file" ]]; then
 elif [[ "$operation" != inspect ]]; then
   die 'The canonical deployment host lock is missing'
 fi
+repository="${CODEXIA_TARGET_REPOSITORY:-}"
+repository_id="${CODEXIA_TARGET_REPOSITORY_ID:-}"
+owner_id="${CODEXIA_TARGET_OWNER_ID:-}"
+if [[ -n "$image" ]]; then
+  [[ "$repository" =~ ^[A-Za-z0-9-]+/codexia$ && "$repository_id" =~ ^[1-9][0-9]*$ && "$owner_id" =~ ^[1-9][0-9]*$ ]] ||
+    die 'Reviewed deployment repository identity is required'
+fi
 case "$operation" in
   inspect|verify|verify-permissions) [[ $# == 2 ]] || die 'Unexpected auth bootstrap argument' ;;
   initialize-application)
-    [[ "$image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ &&
+    reviewed_image "$image" && [[
        ( $# == 3 || ( $# == 4 && "$4" == OWNER_SETUP ) ) ]] ||
       die 'Application initialization requires a reviewed immutable Full image' ;;
   verify-bootstrap-resume|converge)
-    [[ ( "$operation" == converge && $# == 2 ) ||
-       ( ( $# == 5 || ( $# == 6 && "$6" == empty-auth-schema ) ) &&
-         "$image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ &&
-         "$4" =~ ^[1-9][0-9]{0,19}:[1-9][0-9]{0,9}$ && "$5" =~ ^sha256:[a-f0-9]{64}$ ) ]] ||
+    [[ "$operation" == converge && $# == 2 ]] ||
+      { reviewed_image "$image" &&
+        [[ ( $# == 5 || ( $# == 6 && "$6" == empty-auth-schema ) ) &&
+           "$4" =~ ^[1-9][0-9]{0,19}:[1-9][0-9]{0,9}$ && "$5" =~ ^sha256:[a-f0-9]{64}$ ]]; } ||
       die 'Bootstrap resumption requires the approved database, Full image and migration fingerprint' ;;
   verify-empty-auth-resume-held)
-    [[ $# == 5 && "$image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ &&
+    reviewed_image "$image" && [[ $# == 5 &&
        "$4" =~ ^[1-9][0-9]{0,19}:[1-9][0-9]{0,9}$ &&
        ( "$5" == candidate || "$5" =~ ^sha256:[a-f0-9]{64}$ ) ]] ||
       die 'Empty-auth resumption requires the approved database, Full image and migration fingerprint' ;;
@@ -100,7 +112,7 @@ verify_bootstrap_resume(){
   "$HOME/.local/bin/codexia-require-clean-api-target"
   intent="$state_dir/owner-setup.intent"
   [[ -f "$intent" && ! -L "$intent" && -O "$intent" && "$(stat -c %a -- "$intent")" == 600 &&
-     "$(cat -- "$intent")" == "$expected_database:$image" ]] ||
+     "$(cat -- "$intent")" == "$repository:$repository_id:$owner_id:$expected_database:$image" ]] ||
     die 'Bootstrap resumption requires the exact recorded initial installation'
   for evidence in owner-setup.installation owner-setup.promoted owner-setup.age owner-setup.age.pending cutover-transaction.json; do
     [[ ! -e "$state_dir/$evidence" && ! -L "$state_dir/$evidence" ]] ||
@@ -124,7 +136,7 @@ verify_empty_auth_resume(){
   "$HOME/.local/bin/codexia-require-clean-api-target"
   intent="$state_dir/owner-setup.intent"
   [[ -f "$intent" && ! -L "$intent" && -O "$intent" && "$(stat -c %a -- "$intent")" == 600 &&
-     "$(cat -- "$intent")" == "$expected_database:$image" ]] ||
+     "$(cat -- "$intent")" == "$repository:$repository_id:$owner_id:$expected_database:$image" ]] ||
     die 'Empty-auth resumption requires the exact recorded initial installation'
   for evidence in owner-setup.installation owner-setup.promoted owner-setup.age owner-setup.age.pending cutover-transaction.json; do
     [[ ! -e "$state_dir/$evidence" && ! -L "$state_dir/$evidence" ]] ||
@@ -307,7 +319,7 @@ SQL
         die 'Fresh owner setup requires a known PostgreSQL database without an auth schema'
       if [[ -e "$intent" || -L "$intent" ]]; then
         [[ -f "$intent" && ! -L "$intent" && -O "$intent" && "$(stat -c %a -- "$intent")" == 600 &&
-           "$(cat -- "$intent")" == "$database:$image" ]] ||
+           "$(cat -- "$intent")" == "$repository:$repository_id:$owner_id:$database:$image" ]] ||
           die 'Fresh owner setup must match the recorded database and Full image'
       else
         for evidence in owner-setup.installation owner-setup.promoted owner-setup.age owner-setup.age.pending; do
@@ -318,7 +330,7 @@ SQL
           die 'Fresh owner setup refuses existing runtime configuration'
         application_schema require-pristine
         temporary="$(mktemp "$state_dir/.owner-setup.XXXXXX")"
-        printf '%s\n' "$database:$image" >"$temporary"
+        printf '%s\n' "$repository:$repository_id:$owner_id:$database:$image" >"$temporary"
         mv -fT -- "$temporary" "$intent"
         sync -f -- "$state_dir"
       fi

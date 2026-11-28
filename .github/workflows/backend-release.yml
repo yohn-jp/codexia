@@ -38,6 +38,8 @@ on:
       - scripts/release/backend/registry-tag.mjs
       - deploy/update-compatibility.json
       - scripts/release/components/verify-source.mjs
+      - scripts/github/repository.mjs
+      - scripts/github/octokit.mjs
       - scripts/release/components/policy.mjs
       - scripts/ci/impact/contract.mjs
       - scripts/ci/evidence/artifact-selection.mjs
@@ -112,6 +114,10 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.repository.full_name == github.repository &&
+      github.event.workflow_run.repository.id == github.repository_id &&
+      github.event.workflow_run.repository.owner.id == github.repository_owner_id &&
+      github.event.workflow_run.head_repository.id == github.repository_id &&
+      github.event.workflow_run.head_repository.owner.id == github.repository_owner_id &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -179,7 +185,6 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
-          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_BACKEND_PROMOTION_DIR: ${{ runner.temp }}/backend-promotion
         run: node scripts/release/backend/resolve-promotion.mjs
       - uses: actions/upload-artifact@v7.0.2
@@ -314,7 +319,6 @@ jobs:
         if: ${{ steps.freshness.outputs.affected == 'true' && needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_BACKEND_PROMOTION_DIR: ${{ runner.temp }}/backend-promotion
         run: |
           if ! node scripts/deployment/handoff/verify-promotion.mjs; then
@@ -331,7 +335,6 @@ jobs:
         id: push-image
         if: steps.freshness.outputs.affected == 'true'
         env:
-          IMAGE: ghcr.io/yohn-jp/codexia-backend
           MAIN_SHA: ${{ github.event.workflow_run.head_sha }}
           PROMOTED: ${{ needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' }}
           PRODUCER_SHA: ${{ needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' && needs.promotion.outputs.producer-sha || github.event.workflow_run.head_sha }}
@@ -342,6 +345,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          owner="${GITHUB_REPOSITORY%%/*}"
+          IMAGE="ghcr.io/${owner,,}/codexia-backend"
           if [[ "$PROMOTED" != true ]]; then
             PRODUCER_VERSION="$(node scripts/release/components/version.mjs backend)"
             PRODUCER_EVENT=workflow_run

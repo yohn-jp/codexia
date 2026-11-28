@@ -93,7 +93,7 @@ test('task proof Octokit client blocks arbitrary file data and destinations with
   ]) await assert.rejects(client.get(path), /Unexpected GitHub task proof API endpoint/);
   assert.equal(calls, 0);
   assert.throws(() => createGitHubProofClient({ repository: 'foreign/repo', token: 'test-token', request }),
-    /canonical repository/);
+    /Invalid Codexia repository/);
   assert.throws(() => createGitHubProofClient({ repository: 'yohn-jp/codexia', token: '', request }),
     /GitHub read token is required/);
 });
@@ -102,7 +102,7 @@ function mainEvidence({ latestConclusion = 'success' } = {}) {
   const plan = createVerificationPlan({ files: null, event: 'push', sha: sourceSha });
   const digest = planDigest(plan);
   const run = { id: 500, run_number: 20, run_attempt: 2, workflow_id: 7, path: '.github/workflows/verify.yml',
-    repository: { id: 9 }, head_repository: { id: 9 }, head_sha: sourceSha, event: 'push', head_branch: 'main',
+    repository: { id: 9, full_name: 'yohn-jp/codexia', owner: { id: 10 } }, head_repository: { id: 9, full_name: 'yohn-jp/codexia', owner: { id: 10 } }, head_sha: sourceSha, event: 'push', head_branch: 'main',
     status: 'completed', conclusion: latestConclusion };
   const start = '2026-11-21T00:00:00Z';
   const end = '2026-11-21T00:01:00Z';
@@ -111,7 +111,7 @@ function mainEvidence({ latestConclusion = 'success' } = {}) {
     status: 'completed', conclusion: 'success', started_at: start, completed_at: end }];
   const reports = new Map();
   const artifacts = [{ id: 900, name: 'ci-plan', digest: `sha256:${'1'.repeat(64)}`, size_in_bytes: 100,
-    expired: false, created_at: '2026-11-21T00:00:30Z', workflow_run: { id: run.id, head_sha: sourceSha } }];
+    expired: false, created_at: '2026-11-21T00:00:30Z', workflow_run: { id: run.id, head_sha: sourceSha, repository_id: 9, head_repository_id: 9 } }];
   for (const group of Object.keys(VERIFICATION_GROUPS)) {
     const id = jobId++;
     jobs.push({ id, run_id: run.id, run_attempt: run.run_attempt, head_sha: sourceSha, name: group,
@@ -148,7 +148,7 @@ function mainEvidence({ latestConclusion = 'success' } = {}) {
     reports.set(`ci-evidence-${group}`, report);
     artifacts.push({ id: 900 + jobId, name: `ci-evidence-${group}`, digest: `sha256:${String(jobId).padStart(64, '0')}`,
       size_in_bytes: 100, expired: false, created_at: '2026-11-21T00:00:30Z',
-      workflow_run: { id: run.id, head_sha: sourceSha } });
+      workflow_run: { id: run.id, head_sha: sourceSha, repository_id: 9, head_repository_id: 9 } });
   }
   const certification = { id: jobId++, run_id: run.id, run_attempt: run.run_attempt, head_sha: sourceSha, name: 'certification',
     status: 'completed', conclusion: 'success', started_at: start, completed_at: end,
@@ -183,7 +183,7 @@ function mockRequest({ run, jobs, artifacts, latestRuns = [run] }) {
 test('resolves only certified full exact-base main coverage evidence by immutable artifact', async () => {
   const evidence = mainEvidence();
   const current = { workflow_id: 7, path: '.github/workflows/verify.yml', event: 'pull_request',
-    head_sha: candidateSha, repository: { id: 9 } };
+    head_sha: candidateSha, repository: { id: 9, full_name: 'yohn-jp/codexia', owner: { id: 10 } } };
   const request = mockRequest(evidence);
   const receipt = await resolveExactMainCoverageProof({ plan: createVerificationPlan({ files: ['docs/README.md'],
     event: 'pull_request', sha: candidateSha, base: sourceSha }), current, repository: 'yohn-jp/codexia', token: 'test-token', request,
@@ -201,7 +201,7 @@ test('does not fall back to an older successful main run when the latest exact-b
   const latest = { ...older, id: older.id + 1, run_number: older.run_number + 1, conclusion: 'failure' };
   const evidence = mainEvidence();
   const current = { workflow_id: 7, path: '.github/workflows/verify.yml', event: 'pull_request',
-    head_sha: candidateSha, repository: { id: 9 } };
+    head_sha: candidateSha, repository: { id: 9, full_name: 'yohn-jp/codexia', owner: { id: 10 } } };
   await assert.rejects(resolveExactMainCoverageProof({ plan: createVerificationPlan({ files: ['docs/README.md'],
     event: 'pull_request', sha: candidateSha, base: sourceSha }), current, repository: 'yohn-jp/codexia', token: 'test-token',
   request: mockRequest({ ...evidence, latestRuns: [older, latest] }),
@@ -217,7 +217,7 @@ test('coverage proof resolution never requires proof receipts from NOT_SELECTED 
   const options = {
     plan: createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: candidateSha, base: sourceSha }),
     current: { workflow_id: 7, path: '.github/workflows/verify.yml', event: 'pull_request',
-      head_sha: candidateSha, repository: { id: 9 } },
+      head_sha: candidateSha, repository: { id: 9, full_name: 'yohn-jp/codexia', owner: { id: 10 } } },
     repository: 'yohn-jp/codexia', token: 'test-token', request, readArtifact,
   };
   const receipt = await resolveExactMainCoverageProof(options);

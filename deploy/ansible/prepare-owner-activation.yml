@@ -3,6 +3,7 @@
   hosts: codexia
   gather_facts: false
   any_errors_fatal: true
+  vars_files: [repository-vars.yml]
   vars:
     owner_setup_home: "{{ codexia_service_home }}"
     owner_setup_operations:
@@ -19,7 +20,7 @@
           - owner_setup_home == '/home/codexia'
           - codexia_owner_setup_approved is sameas true
           - codexia_owner_setup_operation in owner_setup_operations
-          - codexia_auth_bootstrap_image is match('^ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+          - codexia_auth_bootstrap_image is match(codexia_image_pattern)
           - codexia_owner_setup_expected_origin is match('^https://[^/]+$')
           - codexia_owner_setup_expected_web_client_id is match('^[a-zA-Z0-9._:/|+-]+$')
           - codexia_owner_setup_expected_web_redirect_uris is sequence and codexia_owner_setup_expected_web_redirect_uris is not string
@@ -51,6 +52,10 @@
       become: true
       become_user: "{{ codexia_service_user }}"
       environment:
+        CODEXIA_IMAGE_REPOSITORY: "{{ codexia_image_repository }}"
+        CODEXIA_TARGET_REPOSITORY: "{{ codexia_target_repository }}"
+        CODEXIA_TARGET_REPOSITORY_ID: "{{ codexia_target_repository_id }}"
+        CODEXIA_TARGET_OWNER_ID: "{{ codexia_target_owner_id }}"
         HOME: "{{ owner_setup_home }}"
         XDG_CONFIG_HOME: "{{ owner_setup_home }}/.config"
         XDG_DATA_HOME: "{{ owner_setup_home }}/.local/share"

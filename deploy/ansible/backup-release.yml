@@ -10,7 +10,11 @@
   ansible.builtin.assert:
     that:
       - deployed.format == 'codexia-push-deployment/v1'
-      - deployed.image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - deployed.image is match(codexia_image_pattern)
+      - >-
+        (deployed.repository is not defined and deployed.repositoryId is not defined and deployed.ownerId is not defined) or
+        (deployed.repository == codexia_target_repository and deployed.repositoryId == (codexia_target_repository_id | int)
+         and deployed.ownerId == (codexia_target_owner_id | int))
       - deployed.identity.format == 'codexia-backend-identity/v1'
       - deployed.identity.profile == 'full'
       - deployed.identity.sourceSha is match('^[a-f0-9]{40}$')

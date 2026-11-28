@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import { actionsRepository, assertBackendImageDigest } from '../../github/repository.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -12,7 +13,7 @@ const root = fileURLToPath(new URL('../../../', import.meta.url));
 const positive = value => Number.isSafeInteger(Number(value)) && Number(value) > 0;
 
 export async function createBackendDeploymentCertificates({ env = process.env, payload } = {}) {
-  assert.equal(env.GITHUB_REPOSITORY, 'yohn-jp/codexia');
+  const context = actionsRepository(env);
   assert.equal(env.GITHUB_EVENT_NAME, 'workflow_run');
   assert.equal(env.GITHUB_REF, 'refs/heads/main');
   const sourceSha = env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA;
@@ -44,11 +45,12 @@ export async function createBackendDeploymentCertificates({ env = process.env, p
   for (const profile of ['core', 'full']) {
     const image = profile === 'core' ? env.CODEXIA_CERTIFIED_IMAGE : env.CODEXIA_CERTIFIED_FULL_IMAGE;
     assert.ok(positive(env.GITHUB_RUN_ID), 'Backend publication run ID is invalid');
+    assertBackendImageDigest(image, context.repository);
     const identity = await inspectBackendImageWithoutExecution(image, {
       sourceSha: receipt.sourceSha, version, profile, migrationFingerprint, compatibility,
     }, { tempRoot: env.RUNNER_TEMP || undefined });
     const certificate = buildPushDeploymentCertificate({
-      verifiedMainSha: sourceSha, verifiedMainTree, verifyRun, producerReceipt: receipt, profile, image, identity,
+      verifiedMainSha: sourceSha, verifiedMainTree, verifyRun, producerReceipt: receipt, profile, image, identity, context,
     });
     await writeFile(path.join(destination, profile + '.json'), JSON.stringify(certificate, null, 2) + '\n',
       { mode: 0o600, flag: 'wx' });

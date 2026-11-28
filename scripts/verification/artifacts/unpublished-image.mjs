@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Read-only registry check immediately before the existing image push.
+import { actionsRepository } from '../../github/repository.mjs';
 import { assertImageTagAbsent, assertReleaseIdentity } from '../../release/components/policy.mjs';
 
 const { IMAGE: image, TAG: tag, GITHUB_ACTOR: actor, GH_TOKEN: token, GITHUB_SHA: sha } = process.env;
-if (!image || !/^ghcr\.io\/yohn-jp\/codexia\/(core|full)$/.test(image) || !tag || !actor || !token || !sha) {
+const target = 'ghcr.io/' + actionsRepository().repository.toLowerCase();
+if (!image || ![target + '/core', target + '/full'].includes(image) || !tag || !actor || !token || !sha) {
   throw new Error('OCI immutability check requires the exact release image, tag and registry read credentials');
 }
 assertReleaseIdentity(tag, sha, sha);

@@ -45,7 +45,7 @@ export async function downloadArtifact(artifact, repository, token, request = fe
   assert.match(artifact.digest, /^sha256:[a-f0-9]{64}$/u);
   assert.ok(Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 && artifact.size_in_bytes <= maxArchive);
   const [owner, repo] = repository.split('/');
-  const octokit = createGitHubOctokit({ token, fetchImpl: request, timeout: 15_000 });
+  const octokit = createGitHubOctokit({ token, repository, fetchImpl: request, timeout: 15_000 });
   const response = await octokit.rest.actions.downloadArtifact({
     owner, repo, artifact_id: artifact.id, archive_format: 'zip', request: { signal: AbortSignal.timeout(15_000) },
   });

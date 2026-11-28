@@ -23,12 +23,10 @@ import (
 
 const maxEnvelopeSize = 16 * 1024
 const maxGrantPayloadSize = 4 * 1024
-const ownerRecoveryRunbook = "https://github.com/yohn-jp/codexia/blob/main/deploy/ansible/AUTH-RUNTIME.md#first-owner-through-the-browser"
 
 var (
-	errHandoffUnavailable  = errors.New("the live Owner Setup Grant and its recipient binding could not be verified. Follow the independently approved reissue procedure if the grant or its binding is unavailable. " + ownerRecoveryRunbook)
+	errHandoffUnavailable  = errors.New("the live Owner Setup Grant and its recipient binding could not be verified. Follow the independently approved reissue procedure if the grant or its binding is unavailable")
 	errHandoffNeedsConsent = errors.New("Owner handoff requires an independently verified recipient or explicit same-Owner VM trust")
-	ownerBackendImage      = regexp.MustCompile(`^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$`)
 	ownerGrantKey          = regexp.MustCompile(`^"[A-Za-z0-9_-]{43}"$`)
 )
 
@@ -86,25 +84,25 @@ func chooseHandoff(o operator, existingRecipient string) (*ownerHandoff, error) 
 	}
 	if !approved {
 		if existingRecipient != "" {
-			o.Notice("The registered recipient is kept. If the private key was lost or the grant expired, use the independently approved reissue procedure. " + ownerRecoveryRunbook)
+			o.Notice("The registered recipient is kept. If the private key was lost or the grant expired, use the independently approved reissue procedure.")
 		}
 		return nil, errHandoffNeedsConsent
 	}
 	return &ownerHandoff{Recipient: recipient}, nil
 }
 
-func (h *ownerHandoff) Deliver(ctx context.Context, o operator, origin string, serviceUID int) error {
+func (h *ownerHandoff) Deliver(ctx context.Context, o operator, target githubTarget, origin string, serviceUID int) error {
 	location, err := url.Parse(origin)
 	if err != nil || location.Scheme != "https" || location.Hostname() == "" || location.User != nil ||
 		location.Path != "" || location.RawQuery != "" || location.ForceQuery || location.Fragment != "" ||
 		location.String() != origin {
 		return errHandoffUnavailable
 	}
-	if !ownerBackendImage.MatchString(h.BackendImage) || !checkpointHost.MatchString(h.GrantBindingSHA) ||
+	if !target.matchesFullImage(h.BackendImage) || !checkpointHost.MatchString(h.GrantBindingSHA) ||
 		!validAgeRecipient(h.Recipient) || h.displayed {
 		return errHandoffUnavailable
 	}
-	envelope, err := readOwnerEnvelope(ctx, h.BackendImage, h.Recipient, h.GrantBindingSHA, serviceUID)
+	envelope, err := readOwnerEnvelope(ctx, target, h.BackendImage, h.Recipient, h.GrantBindingSHA, serviceUID)
 	if err != nil {
 		return err
 	}
@@ -125,7 +123,7 @@ func (h *ownerHandoff) Deliver(ctx context.Context, o operator, origin string, s
 	return nil
 }
 
-func readOwnerEnvelope(ctx context.Context, image, recipient, grantBinding string, serviceUID int) ([]byte, error) {
+func readOwnerEnvelope(ctx context.Context, target githubTarget, image, recipient, grantBinding string, serviceUID int) ([]byte, error) {
 	const serviceName = "codexia"
 	const serviceHome = "/home/codexia"
 	account, err := user.Lookup(serviceName)
@@ -137,7 +135,9 @@ func readOwnerEnvelope(ctx context.Context, image, recipient, grantBinding strin
 	defer cancel()
 	runtime := "/run/user/" + uid
 	cmd := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "-H", "-u", serviceName, "--", "/usr/bin/env",
-		"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "XDG_RUNTIME_DIR="+runtime, "DBUS_SESSION_BUS_ADDRESS=unix:path="+runtime+"/bus",
+		"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "CODEXIA_IMAGE_REPOSITORY="+target.imageRepository(),
+		"CODEXIA_TARGET_REPOSITORY="+target.FullName(), "CODEXIA_TARGET_REPOSITORY_ID="+strconv.FormatInt(target.RepoID, 10),
+		"CODEXIA_TARGET_OWNER_ID="+strconv.FormatInt(target.OwnerID, 10), "XDG_RUNTIME_DIR="+runtime, "DBUS_SESSION_BUS_ADDRESS=unix:path="+runtime+"/bus",
 		serviceHome+"/.local/bin/codexia-owner-setup", "--export-handoff", image, recipient, grantBinding)
 	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"}
 	cmd.Stderr = io.Discard
@@ -217,7 +217,7 @@ func saveOwnerEnvelope(home string, envelope []byte) (string, error) {
 	if !errors.As(err, &noMatch) {
 		return "", errHandoffUnavailable
 	}
-	directory, err := openPrivateStateDirectory(home)
+	directory, err := openPrivateStateDirectory(home, true)
 	if err != nil {
 		return "", err
 	}

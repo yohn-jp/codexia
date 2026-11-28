@@ -10,7 +10,7 @@ import { assertFreshObservationTime, createDeploymentPlan } from './plan.mjs';
 
 const rawHash = /^[a-f0-9]{64}$/u;
 const taggedHash = /^sha256:[a-f0-9]{64}$/u;
-const image = /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
+import { actionsRepository, assertBackendImageDigest } from '../../github/repository.mjs';
 const unknown = { M: 'unknown', H: 'unknown', D: 'unknown', A: 'unknown', B: 'unknown', F: 'unknown', T: 'unknown' };
 const hash = value => value == null ? null : digestEvidence(value);
 const fields = ['format', 'sourceSha', 'version', 'profile', 'apiEpoch', 'oauthConfigIdentity'];
@@ -21,11 +21,11 @@ function frontendIdentity(value) {
   return Object.fromEntries(fields.filter(key => value[key] !== undefined).map(key => [key, value[key]]));
 }
 
-function candidateIdentity(backend, frontend, authSchemas) {
+function candidateIdentity(backend, frontend, authSchemas, context) {
   const identity = validateBackendIdentity(backend.identity);
   const ui = frontendIdentity(frontend.identity);
   assert.equal(identity.profile, 'full');
-  assert.ok(image.test(backend.image));
+  assertBackendImageDigest(backend.image, context.repository);
   assert.equal(identity.apiEpoch, ui.apiEpoch, 'Candidate artifacts do not form a compatible Full pair');
   assert.ok(parsePublicFrontendConfigIdentity(ui.oauthConfigIdentity), 'Candidate frontend has no certified OAuth contract');
   assert.ok(Array.isArray(authSchemas) && authSchemas.length > 0 &&
@@ -69,12 +69,12 @@ function stateDatabase(database, target, intent) {
 // supplied state, certificate body, digest-only backup claim or transition.
 export function planFromObservations({ host, edge, hostPinSha256, candidateBackend,
   candidateFrontend, authSchemas, priorBackend = null, intent, window = null,
-  preservationReceipt = null, now = new Date() }) {
+  preservationReceipt = null, now = new Date(), context = actionsRepository() }) {
   assert.ok(rawHash.test(hostPinSha256));
   const installed = host?.backend;
   const installedCertificate = installed?.state === 'running' && installed.writer.image === candidateBackend.image
     ? candidateBackend : priorBackend;
-  const targetIdentity = candidateIdentity(candidateBackend, candidateFrontend, authSchemas);
+  const targetIdentity = candidateIdentity(candidateBackend, candidateFrontend, authSchemas, context);
   const target = {
     backendCertificateSha256: digestEvidence(candidateBackend),
     frontendArtifactSha256: candidateFrontend.artifactDigest,
@@ -99,7 +99,7 @@ export function planFromObservations({ host, edge, hostPinSha256, candidateBacke
       const writer = installed.writer;
       const identity = validateBackendIdentity(writer.identity);
       assert.equal(identity.profile, 'full');
-      assert.ok(image.test(writer.image));
+      assertBackendImageDigest(writer.image, context.repository);
       if (!installedCertificate || installedCertificate.image !== writer.image ||
           !isDeepStrictEqual(installedCertificate.identity, identity)) {
         blockers.push('unverified-installed-backend-publication');

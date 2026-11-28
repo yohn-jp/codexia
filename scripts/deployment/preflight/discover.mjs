@@ -5,12 +5,12 @@ import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 import { selectReleaseSource } from '../../release/components/source-gate.mjs';
 import { selectExactMainVerifyRun } from '../../verification/artifacts/frontend.mjs';
 
-const repo = { owner: 'yohn-jp', repo: 'codexia' };
+import { actionsRepository, matchesRunRepository } from '../../github/repository.mjs';
 const positive = value => Number.isSafeInteger(value) && value > 0;
 
 // An artifact is only a locator. readLifecycleCandidate independently verifies
 // both producers, the archive, the Verify source, OCI contents and compatibility.
-export async function discoverPublication(component, { main, history, currentSource, runs, artifacts, jobs, verify }) {
+export async function discoverPublication(component, { main, history, currentSource, runs, artifacts, jobs, verify, context = actionsRepository() }) {
   for (const [dispatchIndex, workflowSha] of history.entries()) {
     if (!currentSource(component, workflowSha, main)) break;
     const matches = await runs(component, workflowSha);
@@ -23,8 +23,7 @@ export async function discoverPublication(component, { main, history, currentSou
       assert.equal(run.path, '.github/workflows/' + component + '-release.yml');
       assert.equal(run.event, 'workflow_run');
       assert.equal(run.head_branch, 'main');
-      assert.equal(run.repository?.full_name, 'yohn-jp/codexia');
-      assert.equal(run.head_repository?.full_name, 'yohn-jp/codexia');
+      assert.ok(matchesRunRepository(run, context), 'Release producer repository mismatch');
       assert.ok(positive(run.id) && positive(run.run_attempt));
       if (run.status !== 'completed') throw new Error('Release producer is still running');
       const inventory = await artifacts(run.id);
@@ -69,6 +68,8 @@ export async function discoverPublication(component, { main, history, currentSou
 }
 
 export async function discoverRequest(env, fetchImpl = fetch) {
+  const context = actionsRepository(env);
+  const { owner, repo } = context;
   const hasWindow = Boolean(env.CODEXIA_WINDOW_ID || env.CODEXIA_WINDOW_START || env.CODEXIA_WINDOW_END);
   if (hasWindow) {
     assert.ok(env.CODEXIA_WINDOW_START && env.CODEXIA_WINDOW_END, 'Both approved window timestamps are required');
@@ -76,13 +77,13 @@ export async function discoverRequest(env, fetchImpl = fetch) {
       assert.ok(env.CODEXIA_WINDOW_ID, 'Restoration requires the existing approved window ID');
     }
   }
-  const github = createGitHubOctokit({ token: env.GH_TOKEN, fetchImpl, timeout: 30_000 });
+  const github = createGitHubOctokit({ ...context, token: env.GH_TOKEN, fetchImpl, timeout: 30_000 });
   const actions = github.rest.actions;
-  const pages = (endpoint, parameters, key) => paginateActionsInventory(github, endpoint, { ...repo, ...parameters }, key);
+  const pages = (endpoint, parameters, key) => paginateActionsInventory(github, endpoint, { owner, repo, ...parameters }, key);
   const git = (...args) => execFileSync('git', args, { encoding: 'utf8', timeout: 60_000 });
   const main = env.GITHUB_SHA;
   const readers = {
-    main, history: git('rev-list', '--first-parent', main).trim().split('\n'),
+    main, context, history: git('rev-list', '--first-parent', main).trim().split('\n'),
     currentSource: (component, source) => selectReleaseSource(component, source, main, git, null).affected,
     runs: (component, source) => pages(actions.listWorkflowRuns,
       { workflow_id: component + '-release.yml', head_sha: source, branch: 'main', event: 'workflow_run' }, 'workflow_runs'),
@@ -92,7 +93,7 @@ export async function discoverRequest(env, fetchImpl = fetch) {
       const runs = await pages(actions.listWorkflowRuns,
         { workflow_id: 'verify.yml', head_sha: source, branch: 'main', event: 'push' }, 'workflow_runs');
       const run = selectExactMainVerifyRun(runs, {
-        repository: 'yohn-jp/codexia', repositoryId: Number(env.CODEXIA_REPOSITORY_ID), sourceSha: source,
+        ...context, sourceSha: source,
       });
       assert.equal(run.status, 'completed');
       return run.id;

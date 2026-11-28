@@ -3,16 +3,16 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { validatePushDeploymentCertificate } from '../admission/validate.mjs';
-import { assertVerificationJobs } from '../../release/components/policy.mjs';
+import { assertVerificationRunJobs } from '../../release/components/policy.mjs';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
-const repository = 'yohn-jp/codexia';
+import { actionsRepository, matchesRunRepository } from '../../github/repository.mjs';
 
-export function assertCurrentCertifiedVerify(runs, certificate) {
+export function assertCurrentCertifiedVerify(runs, certificate, context = actionsRepository()) {
   const matches = runs.filter(run => run.path === '.github/workflows/verify.yml' &&
     run.event === 'push' && run.head_branch === 'main' &&
-    run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
+    matchesRunRepository(run, context) &&
     run.head_sha === certificate.verifiedMainSha &&
     Number.isSafeInteger(run.run_number) && run.run_number > 0 &&
     Number.isSafeInteger(run.run_attempt) && run.run_attempt > 0);
@@ -28,22 +28,23 @@ export function assertCurrentCertifiedVerify(runs, certificate) {
 }
 
 export async function reverifyQueuedBackend({ env = process.env, fetchImpl = fetch } = {}) {
-  assert.equal(env.GITHUB_REPOSITORY, repository);
+  const context = actionsRepository(env);
   assert.ok(env.GH_TOKEN, 'Protected queue revalidation requires Actions read permission');
   const certificate = validatePushDeploymentCertificate(JSON.parse(Buffer.from(
     env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64 ?? '', 'base64').toString('utf8')),
-  env.CODEXIA_VERIFIED_MAIN_SHA);
-  const github = createGitHubOctokit({ token: env.GH_TOKEN, fetchImpl, timeout: 20_000 });
-  const params = { owner: 'yohn-jp', repo: 'codexia' };
+  env.CODEXIA_VERIFIED_MAIN_SHA, context);
+  const github = createGitHubOctokit({ ...context, token: env.GH_TOKEN, fetchImpl, timeout: 20_000 });
+  const { owner, repo } = context;
+  const params = { owner, repo };
   const runs = await paginateActionsInventory(github, github.rest.actions.listWorkflowRuns,
     { ...params, workflow_id: 'verify.yml', head_sha: certificate.verifiedMainSha,
       branch: 'main', event: 'push' }, 'workflow_runs');
-  const current = assertCurrentCertifiedVerify(runs, certificate);
+  const current = assertCurrentCertifiedVerify(runs, certificate, context);
   const exact = (await github.rest.actions.getWorkflowRun({ ...params, run_id: current.id })).data;
-  assertCurrentCertifiedVerify([exact], certificate);
+  assertCurrentCertifiedVerify([exact], certificate, context);
   const jobs = await paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRun,
     { ...params, run_id: current.id, filter: 'latest' }, 'jobs');
-  assertVerificationJobs(jobs);
+  assertVerificationRunJobs(jobs, exact);
   console.log('The exact successful Backend Verify run and attempt remain current after the production queue.');
 }
 

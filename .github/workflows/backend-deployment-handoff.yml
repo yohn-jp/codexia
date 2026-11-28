@@ -24,7 +24,7 @@ jobs:
   verify-handoff:
     name: Verify certified backend handoff (read-only)
     if: >-
-      (github.event_name == 'workflow_dispatch' && github.repository == 'yohn-jp/codexia' &&
+      (github.event_name == 'workflow_dispatch' && github.event.repository.name == 'codexia' && github.event.repository.default_branch == 'main' &&
        github.ref == 'refs/heads/main' &&
        (inputs.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND' || inputs.approval_phrase == 'ADOPT_EXISTING_CODEXIA_BACKEND' || inputs.approval_phrase == 'PUBLISH_RESTORED_CODEXIA_BACKEND')) ||
       (github.event_name == 'workflow_run' &&
@@ -32,6 +32,10 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.repository.full_name == github.repository &&
+      github.event.workflow_run.repository.id == github.repository_id &&
+      github.event.workflow_run.repository.owner.id == github.repository_owner_id &&
+      github.event.workflow_run.head_repository.id == github.repository_id &&
+      github.event.workflow_run.head_repository.owner.id == github.repository_owner_id &&
       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -86,7 +90,7 @@ jobs:
     name: Deploy certified Full backend to production
     needs: [verify-handoff]
     if: >-
-      ((github.event_name == 'workflow_dispatch' && github.repository == 'yohn-jp/codexia' &&
+      ((github.event_name == 'workflow_dispatch' && github.event.repository.name == 'codexia' && github.event.repository.default_branch == 'main' &&
         github.ref == 'refs/heads/main' &&
         (inputs.approval_phrase == 'ACTIVATE_CODEXIA_BACKEND' || inputs.approval_phrase == 'ADOPT_EXISTING_CODEXIA_BACKEND' || inputs.approval_phrase == 'PUBLISH_RESTORED_CODEXIA_BACKEND')) ||
       (github.event_name == 'workflow_run' &&
@@ -94,6 +98,10 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.repository.full_name == github.repository &&
+      github.event.workflow_run.repository.id == github.repository_id &&
+      github.event.workflow_run.repository.owner.id == github.repository_owner_id &&
+      github.event.workflow_run.head_repository.id == github.repository_id &&
+      github.event.workflow_run.head_repository.owner.id == github.repository_owner_id &&
       github.event.workflow_run.head_repository.full_name == github.repository)) &&
       needs.verify-handoff.result == 'success' &&
       needs.verify-handoff.outputs.certified-full-image != '' &&
@@ -193,6 +201,12 @@ jobs:
       - name: Load the public production origin and OAuth configuration
         if: steps.freshness.outputs.current == 'true'
         run: node scripts/deployment/bootstrap/public-env.mjs
+      - name: Verify the selected production Cloudflare ingress
+        if: steps.freshness.outputs.current == 'true'
+        env:
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN }}
+        run: node scripts/release/frontend/initial-publication.mjs observe-ingress
       - name: Prepare pinned SSH identity
         id: target
         if: steps.freshness.outputs.current == 'true'
@@ -201,6 +215,12 @@ jobs:
           CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
           CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}
         run: bash deploy/ansible/prepare-deploy-ssh.sh
+      - name: Require immutable GitHub OIDC claims for Tailscale
+        if: steps.freshness.outputs.current == 'true'
+        env:
+          CODEXIA_TAILSCALE_CLIENT_ID: ${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}
+          CODEXIA_TAILSCALE_ENVIRONMENT: codexia-production
+        run: node scripts/deployment/preflight/tailscale-oidc.mjs
       - name: Connect to the Tailnet using GitHub OIDC
         if: steps.freshness.outputs.current == 'true'
         uses: tailscale/github-action@v4
@@ -243,7 +263,6 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && steps.freshness.outputs.current == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_FIRST_ACTIVATION_APPROVAL: ${{ inputs.approval_phrase }}
           CODEXIA_DEPLOYMENT_CERTIFICATE_B64: ${{ needs.verify-handoff.outputs.deployment-certificate }}
           CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.target.outputs.host }}
@@ -286,7 +305,10 @@ jobs:
           CODEXIA_DATABASE_ADOPTION_APPROVED: ${{ vars.CODEXIA_DATABASE_ADOPTION_APPROVED || 'false' }}
         run: |
           set -euo pipefail
-          [[ "$CODEXIA_CERTIFIED_FULL_IMAGE" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]]
+          node --input-type=module <<'NODE'
+          import { actionsRepository, assertBackendImageDigest } from './scripts/github/repository.mjs';
+          assertBackendImageDigest(process.env.CODEXIA_CERTIFIED_FULL_IMAGE, actionsRepository().repository);
+          NODE
           test -n "$CODEXIA_DEPLOYMENT_CERTIFICATE_B64"
           [[ "$CODEXIA_VERIFIED_MAIN_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$CODEXIA_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]

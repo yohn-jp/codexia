@@ -14,7 +14,7 @@ import { expectedBackendMigrationFingerprint } from '../../release/backend/image
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
-const REPOSITORY='yohn-jp/codexia';
+import { actionsRepository } from '../../github/repository.mjs';
 const DIRECTORY=process.env.CODEXIA_BACKEND_PROMOTION_DIR;
 const RECORD='codexia-backend-promotion.json';
 
@@ -24,7 +24,7 @@ function positive(value,label){
 }
 
 export async function verifyBackendPromotionHandoff({env=process.env}={}){
-  assert.equal(env.GITHUB_REPOSITORY,REPOSITORY);
+  const { owner, repo, repository, repositoryId, ownerId } = actionsRepository(env);
   assert.equal(env.GITHUB_EVENT_NAME,'workflow_run');
   assert.equal(env.GITHUB_REF,'refs/heads/main');
   assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA);
@@ -32,11 +32,13 @@ export async function verifyBackendPromotionHandoff({env=process.env}={}){
   assert.ok(typeof DIRECTORY==='string'&&path.isAbsolute(DIRECTORY),'Backend promotion directory is invalid');
   const token=env.GH_TOKEN;
   const receipt=JSON.parse(await readFile(path.join(DIRECTORY,RECORD),'utf8'));
-  const github=createGitHubOctokit({token,timeout:20_000});
-  const owner='yohn-jp',repo='codexia';
+  const github=createGitHubOctokit({token,repository,repositoryId,timeout:20_000});
   const proof=await verifyFrontendMainPromotionProof({env});
   assert.equal(receipt.format,'codexia-backend-promotion/v1');
   assert.equal(receipt.event,'pull_request');
+  assert.equal(receipt.repository, repository);
+  assert.equal(receipt.repositoryId, repositoryId);
+  assert.equal(receipt.ownerId, ownerId);
   assert.equal(receipt.mainSha,env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA);
   assert.equal(receipt.sourceSha,proof.headSha);
   assert.equal(receipt.sourceTree,proof.tree);
@@ -47,7 +49,6 @@ export async function verifyBackendPromotionHandoff({env=process.env}={}){
   assert.equal(receipt.verifyRunId,proof.sourceVerifyRunId);
   assert.equal(receipt.planDigest,proof.planDigest);
   assert.equal(receipt.version,readComponentVersion('backend',String(receipt.workflowRunNumber)));
-  const repositoryId=positive(env.CODEXIA_REPOSITORY_ID,'Repository ID');
   const workflow=(await github.rest.actions.getWorkflow({owner,repo,workflow_id:'backend-release.yml'})).data;
   assert.equal(workflow.path,'.github/workflows/backend-release.yml');
   assert.equal(positive(receipt.workflowId,'Producer workflow ID'),workflow.id);

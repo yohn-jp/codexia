@@ -1,8 +1,8 @@
+import { deploymentRepository } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateActionsInventory, paginateGitHubArray } from '../../github/paginate-actions.mjs';
 
-const PROOF_REPOSITORY = 'yohn-jp/codexia';
 const PROOF_ENDPOINTS = [
   /^actions\/workflows\/verify\.yml$/u,
   /^actions\/workflows\/[1-9]\d*\/runs$/u,
@@ -15,10 +15,10 @@ const PROOF_ENDPOINTS = [
 ];
 
 /** Read-only Octokit access for exact-source evidence reuse, limited to approved API paths. */
-export function createGitHubProofClient({ repository, token, request = fetch }) {
-  assert.equal(repository, PROOF_REPOSITORY, 'Task proof reuse is restricted to the canonical repository');
+export function createGitHubProofClient({ repository, repositoryId, token, request = fetch }) {
+  const { owner, repo } = deploymentRepository(repository);
   assert.ok(typeof token === 'string' && token.length > 0, 'GitHub read token is required');
-  const octokit = createGitHubOctokit({ token, fetchImpl: request });
+  const octokit = createGitHubOctokit({ token, repository, repositoryId, fetchImpl: request });
   const route = (endpoint, parameters = {}) => {
     const prefix = `/repos/${repository}/`;
     if (typeof endpoint === 'string' && endpoint.startsWith(prefix)) endpoint = endpoint.slice(prefix.length);
@@ -39,7 +39,6 @@ export function createGitHubProofClient({ repository, token, request = fetch }) 
     }
     return endpoint;
   };
-  const [owner, repo] = repository.split('/');
   const getResponse = async (endpoint, parameters = {}) => {
     const path = route(endpoint, parameters);
     const run = /^actions\/runs\/([1-9]\d*)$/u.exec(path);

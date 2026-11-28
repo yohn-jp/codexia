@@ -10,10 +10,13 @@ import (
 )
 
 type statusReport struct {
-	SchemaVersion      int             `json:"schemaVersion"`
-	ObservedAt         time.Time       `json:"observedAt"`
-	EvidenceObservedAt *time.Time      `json:"evidenceObservedAt,omitempty"`
-	RepositoryID       int64           `json:"repositoryId"`
+	SchemaVersion      int        `json:"schemaVersion"`
+	ObservedAt         time.Time  `json:"observedAt"`
+	EvidenceObservedAt *time.Time `json:"evidenceObservedAt,omitempty"`
+	RepositoryID       int64      `json:"repositoryId"`
+	OwnerID            int64      `json:"ownerId,omitempty"`
+	InstallationID     int64      `json:"installationId,omitempty"`
+	target             githubTarget
 	Repository         string          `json:"repository"`
 	HostID             string          `json:"hostId,omitempty"`
 	MainSHA            string          `json:"mainSha,omitempty"`
@@ -39,7 +42,7 @@ type observedRun struct {
 }
 
 func readOnly(ctx context.Context, i invocation, stdout, stderr io.Writer) int {
-	status := statusReport{SchemaVersion: 1, RepositoryID: targetRepositoryID, Repository: "yohn-jp/codexia",
+	status := statusReport{SchemaVersion: 1,
 		Phase: "UNKNOWN", Route: "unknown", Active: "unknown", Accepted: "unknown", OrdinaryUpdate: "unknown",
 		Blockers: []string{}, Runs: []observedRun{}, Evidence: []string{}}
 	err := inspectReadOnly(ctx, i, &status)
@@ -65,7 +68,7 @@ func readOnly(ctx context.Context, i invocation, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stdout, "Latest recorded workflow per lane (history available with --json):")
 		}
 		for _, run := range latestWorkflowSummary(status.Runs) {
-			fmt.Fprintln(stdout, " ", run.Workflow, run.Status, run.Conclusion, runLink(run.ID))
+			fmt.Fprintln(stdout, " ", run.Workflow, run.Status, run.Conclusion, status.target.runLink(run.ID))
 		}
 	}
 	return reportError(ctx, stderr, err)
@@ -94,38 +97,60 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 		return err
 	}
 	defer closeGitHub(ctx, gh)
+	state, err := readCheckpoint(vm.HostID)
+	if err != nil {
+		report.Blockers = append(report.Blockers, "checkpoint-identity-unverified")
+		return err
+	}
+	settings, err := gh.selectTarget(ctx, tty, vm, state)
+	if err != nil {
+		report.Blockers = append(report.Blockers, "github-target-or-contract-unverified")
+		return err
+	}
+	report.target = gh.target
+	report.Repository, report.RepositoryID, report.OwnerID, report.InstallationID =
+		gh.target.FullName(), gh.target.RepoID, gh.target.OwnerID, gh.target.InstallationID
+	report.PublicOrigin = settings.PublicOrigin
+	oidcErr := gh.verifyOIDC(ctx)
+	if oidcErr != nil {
+		report.Blockers = append(report.Blockers, "github-immutable-oidc-unverified")
+		tty.Notice(oidcErr.Error())
+	}
 	snapshot, snapshotErr := gh.Observe(ctx)
 	report.MainSHA = snapshot.MainSHA
+	targetErr := validateProtectedCloudflareTarget(snapshot, gh.target, settings.PublicOrigin)
+	if targetErr != nil {
+		report.Blockers = append(report.Blockers, "existing-protected-input-mismatch")
+		tty.Notice(targetErr.Error())
+	}
 	reportProtectedInputs(snapshot, report)
 	if snapshotErr != nil {
 		report.Blockers = append(report.Blockers, "github-environment-or-permission-unverified")
 		tty.Notice(snapshotErr.Error())
 	}
-	settings, err := productionSettings(ctx, snapshot.MainSHA, false)
-	if err != nil {
-		report.Blockers = append(report.Blockers, "canonical-source-unverified")
-		return err
+	if snapshot.MainSHA != gh.approvedSHA {
+		report.Blockers = append(report.Blockers, "github-target-or-contract-unverified")
+		return refused("GitHub main changed after deployment target confirmation")
 	}
-	report.PublicOrigin = settings.PublicOrigin
-	runs, err := gh.StatusHistory(ctx)
-	if err != nil {
+	runs, historyErr := gh.StatusHistory(ctx)
+	if historyErr != nil {
 		report.Blockers = append(report.Blockers, "workflow-observation-unavailable")
-		return err
 	}
 	for _, run := range runs {
 		report.Runs = append(report.Runs, observedRun{run.ID, run.File, stateValue(run.Status), stateValue(run.Conclusion)})
 	}
-	observeExistingReceipt(ctx, gh, vm.HostID, runs, time.Now().UTC(), report)
+	if historyErr == nil {
+		observeExistingReceipt(ctx, gh, vm.HostID, runs, time.Now().UTC(), report)
+	}
+	var providerErr error
 	if i.command == "doctor" || i.plan {
-		if err := inspectProviders(ctx, tty, vm, snapshot, settings, report); err != nil {
-			return err
-		}
+		providerErr = inspectProviders(ctx, tty, vm, gh, snapshot, settings, report)
 	}
 	if i.plan {
 		tty.Notice("Proposed operations: register missing protected inputs, run protected read-only SSH and lifecycle checks, then follow the admitted route through R4 and R5. Each write and workflow dispatch requires separate approval.")
 	}
-	if snapshotErr != nil {
-		return snapshotErr
+	if err := errors.Join(snapshotErr, oidcErr, targetErr, historyErr, providerErr); err != nil {
+		return err
 	}
 	if len(report.Blockers) > 0 {
 		if i.plan {
@@ -156,13 +181,13 @@ func blockerGuidance(blocker string) string {
 	case "interactive-authentication-required":
 		return "Reconnect to the target VM over a real interactive SSH terminal (ssh -t), not a pipe or CI stdin. Read-only provider access is authenticated through /dev/tty."
 	case "github-authentication-unverified":
-		return "Use the official GitHub App Device Flow when provisioned, or a one-day fine-grained PAT restricted to this Codexia repository. The temporary PAT needs Contents read, Actions write, Environments write and Metadata read; no token belongs in the CI Secrets."
+		return "Use the official Codexia GitHub App with Device Flow and install it on only the intended codexia repository."
 	case "independent-restore-acceptance-unverified":
 		return "The app can be ACTIVE, but ACCEPTED requires independent verified backup restoration and protected recovery evidence. Use the existing Backup and Restore runbooks; a green CI job is insufficient."
 	case "live-deployment-state-unverified":
 		return "The latest signed Preflight did not prove a known Bootstrap/Activation/ACTIVE state. Review the exact plan and live VM evidence before issuing a new deployment; do not initialize an unknown DB."
 	case "github-environment-or-permission-unverified":
-		return "Settings > Environments: for codexia-bootstrap and codexia-production, require a separate reviewer, prevent self-review, and restrict deployment branches to main. Verify the PAT has Environments read/write. https://github.com/yohn-jp/codexia/settings/environments"
+		return "Settings > Environments: for codexia-bootstrap and codexia-production, require a separate reviewer, prevent self-review, and restrict deployment branches to main. Verify the official GitHub App and authenticated user can access these settings in the selected repository."
 	case "latest-target-lifecycle-evidence-unavailable":
 		return "No current, exact-main Preflight receipt is proven for this VM. A first installation needs init to request a fresh protected Preflight; an existing installation needs operator recovery evidence. Older successful runs do not authorize changes."
 	case "tailnet-identity-or-policy-unverified":
@@ -181,8 +206,12 @@ func blockerGuidance(blocker string) string {
 		return "A newer protected operation may have changed the VM. Confirm the latest run, then request a fresh Preflight with init."
 	case "workflow-observation-unavailable":
 		return "Check GitHub Actions read permission and API availability for the target repository."
-	case "canonical-source-unverified":
+	case "github-target-or-contract-unverified":
 		return "Verify the exact-release source and current protected workflow contract before running init."
+	case "github-immutable-oidc-unverified":
+		return "Check the default immutable OIDC subject in the selected repository's settings and the App's Administration read permission."
+	case "checkpoint-identity-unverified":
+		return "Reconcile any earlier local checkpoint and its repository binding through the protected deployment runbook."
 	case "target-vm-unverified":
 		return "Run from an independently authenticated non-root SSH terminal on the supported Ubuntu x86-64 target."
 	}
@@ -214,9 +243,9 @@ func reportProtectedInputs(snapshot githubSnapshot, report *statusReport) {
 	}
 }
 
-func inspectProviders(ctx context.Context, o operator, vm vmObservation, snapshot githubSnapshot, settings productionContract, report *statusReport) error {
+func inspectProviders(ctx context.Context, o operator, vm vmObservation, gh *githubControl, snapshot githubSnapshot, settings productionContract, report *statusReport) error {
 	var failures []error
-	tailnet, tailErr := prepareTailnet(ctx, o, vm, true)
+	tailnet, tailErr := prepareTailnet(ctx, o, vm, gh, snapshot, true)
 	if tailErr != nil {
 		report.Blockers = append(report.Blockers, "tailnet-identity-or-policy-unverified")
 		o.Notice("Tailscale check: " + tailErr.Error())
@@ -237,7 +266,7 @@ func inspectProviders(ctx context.Context, o operator, vm vmObservation, snapsho
 	// Cloudflare discovery is independent of a failed Tailscale trust check.
 	// Continue gathering read-only evidence instead of requiring another doctor
 	// invocation merely to discover the next missing prerequisite.
-	edge, edgeErr := observeCloudflare(ctx, o, settings.PublicOrigin)
+	edge, edgeErr := observeCloudflare(ctx, o, gh.target, settings)
 	if edgeErr != nil {
 		report.Blockers = append(report.Blockers, "cloudflare-edge-unverified")
 		o.Notice("Cloudflare check: " + edgeErr.Error())
@@ -286,7 +315,7 @@ func observeExistingReceipt(ctx context.Context, gh workflowGitHub, host string,
 		return
 	}
 	report.EvidenceObservedAt = &observed
-	report.Evidence = append(report.Evidence, runLink(receipt.RunID))
+	report.Evidence = append(report.Evidence, report.target.runLink(receipt.RunID))
 	switch receipt.Plan.CandidateRoute {
 	case "R0", "R1", "R2", "R3", "R4", "R5", "R6", "R8":
 		report.Route = receipt.Plan.CandidateRoute
@@ -346,9 +375,9 @@ func latestStatusReceipt(ctx context.Context, gh workflowGitHub, host string, ru
 	if err != nil || verifyJobs(metadata, operations["lifecycle"], jobs) != nil {
 		return lifecycleReceipt{}, false
 	}
-	receipt, err := readReceipt(ctx, gh, latest.ID)
+	receipt, err := readReceipt(ctx, gh, report.target, latest.ID)
 	if err != nil || (receipt.Management != "runtime" && receipt.Management != "bootstrap") ||
-		receipt.validateObservation(report.MainSHA, latest.ID, receipt.Management, host, report.PublicOrigin, now) != nil {
+		receipt.validateObservation(report.target, report.MainSHA, latest.ID, receipt.Management, host, report.PublicOrigin, now) != nil {
 		return lifecycleReceipt{}, false
 	}
 	return receipt, true

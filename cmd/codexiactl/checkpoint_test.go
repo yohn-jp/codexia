@@ -32,13 +32,14 @@ func TestCheckpointRoundTripAndLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	saved := checkpoint{
-		RepositoryID: 1450072993, HostID: host, MainSHA: strings.Repeat("b", 40),
+		HostID: host, MainSHA: strings.Repeat("b", 40),
 		Operation: "r4", StartedAt: time.Date(2026, 11, 27, 1, 2, 3, 0, time.UTC), Pending: true, PreflightRunID: 43,
 		GateOriginal:       map[string]*string{"CODEXIA_BOOTSTRAP_ENABLED": &previous, "CODEXIA_DATABASE_INITIALIZATION_APPROVED": nil},
 		EphemeralRecipient: delivery.Recipient().String(),
 		BootstrapKeyWrite:  "unresolved",
 		SettingsWriterID:   strings.Repeat("d", 32),
 	}
+	saved.bindTarget(githubTestTarget)
 	if err := store.Save(saved); err != nil {
 		t.Fatal(err)
 	}

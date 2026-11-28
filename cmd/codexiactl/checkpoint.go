@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	json "encoding/json/v2"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/user"
@@ -31,6 +32,9 @@ var (
 
 type checkpoint struct {
 	RepositoryID       int64              `json:"repositoryId"`
+	Owner              string             `json:"owner"`
+	OwnerID            int64              `json:"ownerId"`
+	InstallationID     int64              `json:"installationId"`
 	HostID             string             `json:"hostId"`
 	MainSHA            string             `json:"mainSha"`
 	Operation          string             `json:"operation,omitempty"`
@@ -67,7 +71,7 @@ func administratorHome() (string, error) {
 	return current.HomeDir, nil
 }
 
-func openPrivateStateDirectory(home string) (*os.File, error) {
+func openPrivateStateDirectory(home string, create bool) (*os.File, error) {
 	flags := unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
 	homeFD, err := unix.Open(home, flags, 0)
 	if err != nil {
@@ -78,15 +82,20 @@ func openPrivateStateDirectory(home string) (*os.File, error) {
 	if err := unix.Fstat(homeFD, &info); err != nil || info.Uid != uint32(os.Geteuid()) || info.Mode&0o022 != 0 {
 		return nil, errCheckpointUnsafe
 	}
-	switch err := unix.Mkdirat(homeFD, privateStateDirectory, 0o700); {
-	case err == nil:
-		if err := unix.Fsync(homeFD); err != nil {
+	if create {
+		switch err := unix.Mkdirat(homeFD, privateStateDirectory, 0o700); {
+		case err == nil:
+			if err := unix.Fsync(homeFD); err != nil {
+				return nil, errCheckpointUnsafe
+			}
+		case !errors.Is(err, unix.EEXIST):
 			return nil, errCheckpointUnsafe
 		}
-	case !errors.Is(err, unix.EEXIST):
-		return nil, errCheckpointUnsafe
 	}
 	dir, err := unix.Openat(homeFD, privateStateDirectory, flags, 0)
+	if errors.Is(err, unix.ENOENT) && !create {
+		return nil, err
+	}
 	if err != nil {
 		return nil, errCheckpointUnsafe
 	}
@@ -109,7 +118,7 @@ func openCheckpointAt(home, hostID string) (*checkpointStore, error) {
 	if !checkpointHost.MatchString(hostID) {
 		return nil, errCheckpointUnsafe
 	}
-	dir, err := openPrivateStateDirectory(home)
+	dir, err := openPrivateStateDirectory(home, true)
 	if err != nil {
 		return nil, err
 	}
@@ -143,8 +152,31 @@ func openStateFile(dir *os.File, name string, flags int) (*os.File, error) {
 	return os.NewFile(uintptr(fd), name), nil
 }
 
+func readCheckpoint(hostID string) (checkpoint, error) {
+	home, err := administratorHome()
+	if err != nil {
+		return checkpoint{}, err
+	}
+	dir, err := openPrivateStateDirectory(home, false)
+	if errors.Is(err, unix.ENOENT) {
+		return checkpoint{}, nil
+	}
+	if err != nil {
+		return checkpoint{}, err
+	}
+	defer dir.Close()
+	return loadCheckpoint(dir, hostID)
+}
+
 func (s *checkpointStore) Load() (checkpoint, error) {
-	file, err := openStateFile(s.dir, s.hostID+".json", unix.O_RDONLY)
+	return loadCheckpoint(s.dir, s.hostID)
+}
+
+func loadCheckpoint(dir *os.File, hostID string) (checkpoint, error) {
+	if !checkpointHost.MatchString(hostID) {
+		return checkpoint{}, errCheckpointUnsafe
+	}
+	file, err := openStateFile(dir, hostID+".json", unix.O_RDONLY)
 	if errors.Is(err, unix.ENOENT) {
 		return checkpoint{}, nil
 	}
@@ -157,8 +189,13 @@ func (s *checkpointStore) Load() (checkpoint, error) {
 		return checkpoint{}, errCheckpointUnsafe
 	}
 	var disk checkpointDisk
-	if err := json.Unmarshal(data, &disk, json.RejectUnknownMembers(true)); err != nil ||
-		disk.Version != 1 || !disk.State.validFor(s.hostID) {
+	if err := json.Unmarshal(data, &disk, json.RejectUnknownMembers(true)); err != nil {
+		return checkpoint{}, errCheckpointUnsafe
+	}
+	if disk.Version == 1 {
+		return checkpoint{}, fmt.Errorf("%w: the previous checkpoint lacks owner and App installation identity. Retain it and reconcile its run and Settings evidence through the original repository's protected runbook", errCheckpointUnsafe)
+	}
+	if disk.Version != 2 || !disk.State.validFor(hostID) {
 		return checkpoint{}, errCheckpointUnsafe
 	}
 	return disk.State, nil
@@ -168,7 +205,7 @@ func (s *checkpointStore) Save(value checkpoint) error {
 	if !value.validFor(s.hostID) {
 		return errCheckpointUnsafe
 	}
-	data, err := json.Marshal(checkpointDisk{Version: 1, State: value})
+	data, err := json.Marshal(checkpointDisk{Version: 2, State: value})
 	if err != nil || len(data) > maxCheckpointSize {
 		return errCheckpointUnsafe
 	}
@@ -205,7 +242,7 @@ func (s *checkpointStore) Close() error {
 }
 
 func (c checkpoint) validFor(hostID string) bool {
-	if c.HostID != hostID || c.RepositoryID <= 0 || !checkpointSource.MatchString(c.MainSHA) ||
+	if c.HostID != hostID || !c.target().valid() || !checkpointSource.MatchString(c.MainSHA) ||
 		c.RunID < 0 || c.PreflightRunID < 0 || c.FrontendRunID < 0 || c.OwnerSetupRunID < 0 {
 		return false
 	}
@@ -245,4 +282,16 @@ func (c checkpoint) validFor(hostID string) bool {
 		}
 	}
 	return true
+}
+
+func (c checkpoint) target() githubTarget {
+	return githubTarget{Owner: c.Owner, OwnerID: c.OwnerID, RepoID: c.RepositoryID, InstallationID: c.InstallationID}
+}
+
+func (c checkpoint) matchesTarget(target githubTarget) bool {
+	return target.valid() && c.target() == target
+}
+
+func (c *checkpoint) bindTarget(target githubTarget) {
+	c.Owner, c.OwnerID, c.RepositoryID, c.InstallationID = target.Owner, target.OwnerID, target.RepoID, target.InstallationID
 }

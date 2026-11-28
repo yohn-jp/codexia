@@ -82,7 +82,7 @@ func TestDispatchRemembersAmbiguousResponsesWithoutResending(t *testing.T) {
 	store := &memoryCheckpoint{}
 	gh := &fakeWorkflow{dispatchError: errGitHubDispatchUnknown}
 	c := workflowController{github: gh, store: store, operator: acceptingOperator{}, sha: strings.Repeat("a", 40),
-		state: checkpoint{HostID: strings.Repeat("b", 64), RepositoryID: targetRepositoryID}}
+		state: checkpoint{HostID: strings.Repeat("b", 64), RepositoryID: githubTestTarget.RepoID}}
 	if _, err := c.dispatch(context.Background(), "management", nil); err == nil {
 		t.Fatal("missing dispatch response must fail")
 	}
@@ -151,7 +151,7 @@ func (acceptingOperator) Notice(string)                 {}
 func TestValidateReceiptBoundToTargetAndTime(t *testing.T) {
 	now := time.Now().UTC()
 	sha, id, host := strings.Repeat("a", 40), int64(238), strings.Repeat("b", 64)
-	r := lifecycleReceipt{SourceSHA: sha, RunID: id, Attempt: 1, Management: "bootstrap", PlanSHA: strings.Repeat("c", 64)}
+	r := lifecycleReceipt{Repository: githubTestTarget.FullName(), RepositoryID: githubTestTarget.RepoID, OwnerID: githubTestTarget.OwnerID, SourceSHA: sha, RunID: id, Attempt: 1, Management: "bootstrap", PlanSHA: strings.Repeat("c", 64)}
 	r.Request.Intent, r.Plan.Intent = "install", "install"
 	r.Request.BackendPublisherRunID, r.Request.Frontend.RunID, r.Request.Frontend.ArtifactID, r.Request.Frontend.VerifyRunID = 5, 6, 7, 8
 	r.Request.Frontend.ArtifactDigest = strings.Repeat("d", 64)
@@ -161,20 +161,30 @@ func TestValidateReceiptBoundToTargetAndTime(t *testing.T) {
 	r.Plan.Observation.ObservedAt = now.Add(-time.Minute)
 	r.Plan.Observation.Binding.HostID = host
 	r.Evidence.Edge.Origin = "https://codexia.yohn.jp"
-	if err := r.validate(sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now); err != nil {
+	r.Evidence.Candidate.BackendImage = githubTestTarget.imageRepository() + "@sha256:" + strings.Repeat("b", 64)
+	if err := r.validate(githubTestTarget, sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.validate(sha, id, "bootstrap", strings.Repeat("f", 64), r.Evidence.Edge.Origin, now); err == nil {
+	fork := githubTarget{Owner: "Fork-Org", OwnerID: 12, RepoID: 34, InstallationID: 56}
+	if err := r.validate(fork, sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now); err == nil {
+		t.Fatal("receipt accepted evidence for a different repository")
+	}
+	foreignImage := r
+	foreignImage.Evidence.Candidate.BackendImage = fork.imageRepository() + "@sha256:" + strings.Repeat("b", 64)
+	if err := foreignImage.validate(githubTestTarget, sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now); err == nil {
+		t.Fatal("receipt accepted the product image of a different repository")
+	}
+	if err := r.validate(githubTestTarget, sha, id, "bootstrap", strings.Repeat("f", 64), r.Evidence.Edge.Origin, now); err == nil {
 		t.Fatal("receipt accepted a different VM")
 	}
-	if err := r.validate(sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now.Add(6*time.Minute)); err == nil {
+	if err := r.validate(githubTestTarget, sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now.Add(6*time.Minute)); err == nil {
 		t.Fatal("stale approval evidence was reused")
 	}
 	r.Request.Intent, r.Plan.Intent = "update", "update"
-	if err := r.validateObservation(sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now); err != nil {
+	if err := r.validateObservation(githubTestTarget, sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now); err != nil {
 		t.Fatalf("read-only status must accept update evidence: %v", err)
 	}
-	if err := r.validate(sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now); err == nil {
+	if err := r.validate(githubTestTarget, sha, id, "bootstrap", host, r.Evidence.Edge.Origin, now); err == nil {
 		t.Fatal("update evidence was accepted as a first-install approval")
 	}
 }

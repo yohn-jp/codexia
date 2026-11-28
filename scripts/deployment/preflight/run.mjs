@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { readPreservationEvidence } from './preservation.mjs';
+import { actionsRepository } from '../../github/repository.mjs';
 import { digestEvidence } from './evidence-digest.mjs';
 import { authSchemaFingerprint, CODEXIA_AUTH_SCHEMA } from '../../../packages/api/src/auth-schema.ts';
 
@@ -17,12 +18,12 @@ const sha = /^[a-f0-9]{40}$/u;
 const output = () => join(env.RUNNER_TEMP, 'codexia-lifecycle-preflight.json');
 
 function runBinding() {
-  assert.equal(env.GITHUB_REPOSITORY, 'yohn-jp/codexia');
+  const { repository, repositoryId, ownerId } = actionsRepository(env);
   assert.equal(env.GITHUB_REF, 'refs/heads/main');
   assert.equal(env.GITHUB_EVENT_NAME, 'workflow_dispatch');
   assert.ok(sha.test(env.GITHUB_SHA ?? '') && positive(Number(env.GITHUB_RUN_ID)) &&
     positive(Number(env.GITHUB_RUN_ATTEMPT)), 'Invalid protected workflow identity');
-  return { sourceSha: env.GITHUB_SHA, runId: Number(env.GITHUB_RUN_ID), attempt: Number(env.GITHUB_RUN_ATTEMPT) };
+  return { repository, repositoryId, ownerId, sourceSha: env.GITHUB_SHA, runId: Number(env.GITHUB_RUN_ID), attempt: Number(env.GITHUB_RUN_ATTEMPT) };
 }
 
 export function parsePreflightRequest(raw) {
@@ -49,11 +50,12 @@ export function parsePreflightRequest(raw) {
 }
 
 export async function readLifecycleHost({ inventory, targetHost, sshDirectory = 'codexia-ssh', recovery = false, adoption = false }) {
+  const { repository, repositoryId, ownerId } = actionsRepository(env);
   const scratch = await mkdtemp(join(env.RUNNER_TEMP, 'codexia-lifecycle-'));
   try {
     const pin = (await readFile(join(env.RUNNER_TEMP, sshDirectory, 'known_hosts'), 'utf8')).trimEnd();
     assert.ok(targetHost && pin);
-    const hostPinSha256 = digestEvidence({ target: targetHost, pin });
+    const hostPinSha256 = digestEvidence({ repository, repositoryId, ownerId, target: targetHost, pin });
     const out = join(scratch, 'host.json');
     const vars = join(scratch, 'vars.json');
     let query;
@@ -102,8 +104,9 @@ async function mainSource() {
   const token = env.GH_TOKEN || env.GITHUB_TOKEN;
   assert.ok(token, 'Protected source check requires GitHub Actions read access');
   const { createGitHubOctokit } = await import('../../github/octokit.mjs');
+  const { owner, repo } = actionsRepository(env);
   const { data: reference } = await createGitHubOctokit({ token, timeout: 30_000 }).rest.git.getRef({
-    owner: 'yohn-jp', repo: 'codexia', ref: 'heads/main',
+    owner, repo, ref: 'heads/main',
   });
   const main = reference.object?.sha;
   assert.equal(main, env.GITHUB_SHA, 'Main changed after protected dispatch');
@@ -159,6 +162,7 @@ async function candidateObservation() {
 
 async function planObservation({ bootstrapMode } = {}) {
   const binding = runBinding();
+  const context = actionsRepository(env);
   let stage = 'request';
   try {
     await mainSource();
@@ -175,17 +179,13 @@ async function planObservation({ bootstrapMode } = {}) {
     const host = receipt.host;
     assert.equal(host.format, 'codexia-lifecycle-host/v1');
     stage = 'edge-observation';
-    const { createDeploymentEdge } = await import('../../release/frontend/initial-publication.mjs');
-    const config = JSON.parse(env.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET);
-    assert.ok(config && Object.keys(config).every(key => ['accountId','zoneId','tunnelId',
-      'authorPolicyId','ciPolicyId','tunnelTeamName','publicProtocolEnabled'].includes(key)),
-    'Invalid protected Cloudflare target');
-    const edgeReader = createDeploymentEdge({
-      ...config,
-      origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
-      readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN,
-      ...(bootstrapMode === 'publish-frontend' ? { workerToken: env.CLOUDFLARE_API_TOKEN } : {}),
-    });
+    const { createDeploymentEdge, deploymentEdgeFromEnvironment, protectedCloudflareTarget } =
+      await import('../../release/frontend/initial-publication.mjs');
+    const config = protectedCloudflareTarget(env);
+    const edgeReader = bootstrapMode === 'publish-frontend'
+      ? createDeploymentEdge({ ...config, origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
+        readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN, workerToken: env.CLOUDFLARE_API_TOKEN })
+      : deploymentEdgeFromEnvironment(env);
     let edge = null;
     try {
       edge = await edgeReader.observeLifecycle({
@@ -203,7 +203,7 @@ async function planObservation({ bootstrapMode } = {}) {
       : null;
     const preservationReceipt = readPreservationEvidence(reviewed
       ? JSON.stringify(reviewed.evidence?.preservationReceipt ?? null)
-      : env.CODEXIA_DEPLOYMENT_PRESERVATION, host);
+      : env.CODEXIA_DEPLOYMENT_PRESERVATION, host, context);
     const result = planFromObservations({ host, edge, hostPinSha256: receipt.hostPinSha256,
       candidateBackend, candidateFrontend, authSchemas, priorBackend: candidate.priorBackend,
       intent: request.intent, window: request.window ?? null,
@@ -217,7 +217,9 @@ async function planObservation({ bootstrapMode } = {}) {
       if (bootstrapMode !== 'bootstrap') {
         assert.equal(host.database.setupImage, candidateBackend.image, 'Owner setup must use the certified installation image');
       }
-      assert.equal(reviewed.sourceSha, binding.sourceSha);
+      for (const field of ['repository', 'repositoryId', 'ownerId', 'sourceSha']) {
+        assert.equal(reviewed[field], binding[field], 'Reviewed preflight source or repository mismatch');
+      }
       assert.equal(reviewed.runId, Number(env.CODEXIA_BOOTSTRAP_PREFLIGHT_RUN_ID));
       assert.equal(reviewed.attempt, Number(env.CODEXIA_BOOTSTRAP_PREFLIGHT_ATTEMPT));
       assert.equal(reviewed.planSha256, env.CODEXIA_BOOTSTRAP_PLAN_SHA256);
@@ -244,9 +246,9 @@ async function planObservation({ bootstrapMode } = {}) {
         stage = 'canonical-frontend-publication';
         const { publishInitialFrontend } = await import('../bootstrap/publish-frontend.mjs');
         const { recordComponentRelease } = await import('../../release/components/record.mjs');
-        await publishInitialFrontend({ edge: edgeReader, observed: edge, candidate: candidateFrontend,
+        await publishInitialFrontend({ edge: edgeReader, observed: edge, candidate: candidateFrontend, context,
           assertCurrentSource: mainSource,
-          recordRelease: release => recordComponentRelease(release, { github: createGitHubOctokit({ token: env.GH_TOKEN }) }),
+          recordRelease: release => recordComponentRelease(release, { github: createGitHubOctokit({ token: env.GH_TOKEN }), context }),
         });
         console.log('Certified canonical frontend and immutable release record verified for initial owner enrollment');
         return;
@@ -255,8 +257,8 @@ async function planObservation({ bootstrapMode } = {}) {
         assertInitialFrontendReady(edge, candidateFrontend.identity);
         const { initialFrontendRelease } = await import('../bootstrap/publish-frontend.mjs');
         const { assertComponentReleaseRecorded } = await import('../../release/components/record.mjs');
-        await assertComponentReleaseRecorded(initialFrontendRelease(candidateFrontend),
-          { github: createGitHubOctokit({ token: env.GH_TOKEN }) });
+        await assertComponentReleaseRecorded(initialFrontendRelease(candidateFrontend, context),
+          { github: createGitHubOctokit({ token: env.GH_TOKEN }), context });
       }
       const overrides = bootstrapMode === 'bootstrap' ? {
         codexia_bootstrap_stages: admission.stages,

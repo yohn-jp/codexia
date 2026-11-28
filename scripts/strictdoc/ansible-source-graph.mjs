@@ -38,6 +38,17 @@ function collectIncludes(value, sourcePath, violations, includes = new Set()) {
   }
   if (!isRecord(value)) return includes;
   for (const [key, item] of Object.entries(value)) {
+    if (key === 'vars_files') {
+      if (!Array.isArray(item)) {
+        violations.push(`Unresolved vars_files in Ansible source ${sourcePath}; expected a list of literal YAML paths.`);
+        continue;
+      }
+      for (const filename of item) {
+        const target = staticIncludeValue(typeof filename === 'string' ? filename : null, sourcePath, key, violations);
+        if (target) includes.add(target);
+      }
+      continue;
+    }
     if (['ansible.builtin.include_tasks', 'include_tasks', 'ansible.builtin.import_tasks', 'import_tasks', 'ansible.builtin.include', 'include'].includes(key)) {
       const target = staticIncludeValue(item, sourcePath, key, violations);
       if (target) includes.add(target);

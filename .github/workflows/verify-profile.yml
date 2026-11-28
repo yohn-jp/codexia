@@ -217,7 +217,8 @@ jobs:
           retention-days: 7
     # All browser lanes use the Git-capable immutable Chromium Ubuntu image.
     container:
-      image: ${{ format('ghcr.io/{0}/playwright-ubuntu-chromium@sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725', github.repository) }}
+      # Project-owned test toolchain, shared by all deployment repositories.
+      image: ghcr.io/yohn-jp/codexia/playwright-ubuntu-chromium@sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}

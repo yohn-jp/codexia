@@ -6,13 +6,14 @@ import { execFileSync } from 'node:child_process';
 import { assertTrustedBackendPublicationRun } from './verify-push.mjs';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 
-const repository = 'yohn-jp/codexia';
+import { actionsRepository } from '../../github/repository.mjs';
 const sha = /^[a-f0-9]{40}$/u;
 
-async function readPublisherRun(id, token, fetchImpl = fetch) {
-  const github = createGitHubOctokit({ token, fetchImpl, timeout: 20_000 });
+async function readPublisherRun(context, id, token, fetchImpl = fetch) {
+  const { owner, repo } = context;
+  const github = createGitHubOctokit({ ...context, token, fetchImpl, timeout: 20_000 });
   try {
-    return (await github.rest.actions.getWorkflowRun({ owner: 'yohn-jp', repo: 'codexia', run_id: id })).data;
+    return (await github.rest.actions.getWorkflowRun({ owner, repo, run_id: id })).data;
   } catch (error) {
     if (Number.isSafeInteger(error?.status)) {
       throw new Error(`Requested backend publisher run could not be verified (HTTP ${error.status})`, { cause: error });
@@ -23,7 +24,7 @@ async function readPublisherRun(id, token, fetchImpl = fetch) {
 
 export async function resolveManualPublisherRun({ env, checkoutSha, fetchImpl = fetch }) {
   assert.equal(env.GITHUB_EVENT_NAME, 'workflow_dispatch', 'Manual certificate revalidation requires workflow_dispatch');
-  assert.equal(env.GITHUB_REPOSITORY, repository, 'Repository mismatch');
+  const context = actionsRepository(env);
   assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Manual certificate revalidation must run from main');
   assert.match(env.GITHUB_SHA ?? '', sha, 'Main workflow SHA is invalid');
   assert.equal(checkoutSha, env.GITHUB_SHA, 'Trusted verifier checkout differs from the dispatch source');
@@ -33,13 +34,13 @@ export async function resolveManualPublisherRun({ env, checkoutSha, fetchImpl = 
   assert.ok(Number.isSafeInteger(id) && id > 0, 'Backend publisher run ID is outside the supported range');
   const token = env.GH_TOKEN || env.GITHUB_TOKEN;
   assert.ok(typeof token === 'string' && token.length > 0, 'Actions read token is required');
-  const run = await readPublisherRun(id, token, fetchImpl);
+  const run = await readPublisherRun(context, id, token, fetchImpl);
   assertTrustedBackendPublicationRun(run, {
     id,
     attempt: run.run_attempt,
     runNumber: run.run_number,
     headSha: env.CODEXIA_PUBLISHER_SHA,
-  });
+  }, context);
   return {
     id: run.id,
     run_attempt: run.run_attempt,
@@ -50,8 +51,8 @@ export async function resolveManualPublisherRun({ env, checkoutSha, fetchImpl = 
     head_sha: run.head_sha,
     status: run.status,
     conclusion: run.conclusion,
-    repository: { full_name: run.repository.full_name },
-    head_repository: { full_name: run.head_repository.full_name },
+    repository: { full_name: context.repository, id: context.repositoryId, owner: { id: context.ownerId } },
+    head_repository: { full_name: context.repository, id: context.repositoryId, owner: { id: context.ownerId } },
   };
 }
 

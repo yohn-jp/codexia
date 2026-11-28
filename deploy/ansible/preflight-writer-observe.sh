@@ -20,7 +20,10 @@ const { hostname } = require('node:os');
 const { join } = require('node:path');
 
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
-const imagePattern = /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/;
+const imageRepository = process.env.CODEXIA_IMAGE_REPOSITORY ?? '';
+const matchesImage = image => /^ghcr\.io\/[a-z0-9-]+\/codexia-backend$/.test(imageRepository) &&
+  typeof image === 'string' && image.startsWith(imageRepository + '@') &&
+  /^sha256:[a-f0-9]{64}$/.test(image.slice(imageRepository.length + 1));
 const containerPattern = /^[a-f0-9]{64}$/;
 const ownerPattern = /^[a-zA-Z0-9._@:/|+-]+$/;
 const hash = (value) => createHash('sha256').update(value).digest('hex');
@@ -113,7 +116,7 @@ try {
   const firstWriter = observeWriter();
   const [containerId, running, imageId, image, health, ...rest] = firstWriter.split(' ');
   requireEvidence(rest.length === 0 && containerPattern.test(containerId) &&
-    /^(?:sha256:)?[a-f0-9]{64}$/.test(imageId) && imagePattern.test(image) &&
+    /^(?:sha256:)?[a-f0-9]{64}$/.test(imageId) && matchesImage(image) &&
     running === 'true' && health === 'healthy' && systemd('ActiveState', 'codexia-api.service') === 'active');
   requireOnlyWriter(containerId);
   requireVolume('codexia-api', 'codexia-data', '/data');

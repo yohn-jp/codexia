@@ -14,8 +14,12 @@ version=${CODEXIACTL_BUILD_VERSION:-dev}
 client_id=${CODEXIACTL_BUILD_APP_CLIENT_ID:-}
 if [[ ! "$source_sha" =~ ^[a-f0-9]{40}$ || "$source_sha" != "${CODEXIACTL_BUILD_SOURCE:-$source_sha}" ]] ||
    [[ "$version" != dev && ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] ||
-   [[ -n "$client_id" && ! "$client_id" =~ ^Iv[0-9A-Za-z.]{4,62}$ ]]; then
+   [[ -n "$client_id" && ! "$client_id" =~ ^Iv[0-9A-Za-z.]{10,62}$ ]]; then
   echo 'Invalid codexiactl release source, version, or GitHub App client ID.' >&2
+  exit 1
+fi
+if [[ "$version" != dev && -z "$client_id" ]]; then
+  echo 'Set the official App public Client ID in the publisher repository variable CODEXIACTL_GITHUB_APP_CLIENT_ID before releasing CodexiaCTL.' >&2
   exit 1
 fi
 

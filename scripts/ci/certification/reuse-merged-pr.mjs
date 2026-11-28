@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Read-only certification of a merged PR's source tree; never promote PR bytes here.
+import { actionsRepository, assertArtifactRunRepository, deploymentRepository, matchesRunRepository } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { CERTIFICATION_DEPENDENCIES } from '../impact/contract.mjs';
 import { execFileSync } from 'node:child_process';
@@ -46,7 +47,7 @@ function assertWorkflowRun(run, context, sha, event) {
   assert.ok(positive(run?.id) && positive(run.run_number) && positive(run.run_attempt), 'Invalid workflow run identity');
   assert.equal(run.workflow_id, context.workflowId, 'Unexpected workflow');
   assert.equal(run.path, context.workflowPath, 'Unexpected workflow path');
-  assert.ok(sameRepo(run.repository, context.repoId) && sameRepo(run.head_repository, context.repoId), 'Foreign repository proof');
+  assert.ok(matchesRunRepository(run, context), 'Foreign repository proof');
   assert.equal(run.head_sha, sha, 'Workflow source mismatch');
   assert.equal(run.event, event, 'Workflow event mismatch');
 }
@@ -151,9 +152,10 @@ function apiList(request, endpoint, key, parameters = {}) {
 }
 
 function mainContext(repository, currentRun, sourceSha, workflowPath) {
-  assert.equal(repository, 'yohn-jp/codexia', 'Unexpected repository');
-  assert.ok(positive(currentRun?.repository?.id) && positive(currentRun.workflow_id));
-  const context = { repoId: currentRun.repository.id, workflowId: currentRun.workflow_id, workflowPath };
+  deploymentRepository(repository);
+  assert.ok(positive(currentRun?.repository?.id) && positive(currentRun.repository.owner?.id) && positive(currentRun.workflow_id));
+  const context = { repository, repoId: currentRun.repository.id, repositoryId: currentRun.repository.id,
+    ownerId: currentRun.repository.owner.id, workflowId: currentRun.workflow_id, workflowPath };
   assertWorkflowRun(currentRun, context, sourceSha, 'push');
   assert.equal(currentRun.head_branch, 'main');
   return context;
@@ -164,7 +166,7 @@ async function mergedPrRun({ context, candidate, request }) {
     { head_sha: candidate.head, event: 'pull_request' });
   const run = newest(runs.filter(value => value?.head_sha === candidate.head && value.event === 'pull_request' &&
     value.workflow_id === context.workflowId && value.path === context.workflowPath &&
-    sameRepo(value.repository, context.repoId) && sameRepo(value.head_repository, context.repoId)));
+    matchesRunRepository(value, context)));
   assertWorkflowRun(run, context, candidate.head, 'pull_request');
   assert.ok(success(run), 'Latest PR verification is not successful');
   const prNumber = await mergedPrNumber(run, candidate, context.repoId, request);
@@ -198,12 +200,14 @@ export async function readReusableMainEvidence({ sourceSha, before, repository, 
   const inventory = { identity, artifacts };
   const planArtifact = selectLatestPlanArtifact(artifacts, jobs, identity);
   const [selectedPlan] = selectedArtifacts(inventory, [planArtifact.id], identity, 'plan');
+  assertArtifactRunRepository(selectedPlan, run);
   const plan = await readArtifact(selectedPlan, 'ci-plan.json');
   assertCandidatePlan(plan, candidate);
   assertFullModelJob(plan, jobs);
   const evidence = selectLatestEvidenceArtifacts(plan, artifacts, jobs, identity);
   const selected = selectedArtifacts(inventory, evidence.map(item => item.id), identity, 'evidence');
   // Only digest-verified JSON is read. Never restore or execute code from a PR artifact.
+  for (const item of selected) assertArtifactRunRepository(item, run);
   const reports = await Promise.all(selected.map(item => readArtifact(item, 'report.json')));
   assertPlanEvidence(plan, jobs, reports);
   const producerJobs = await resolveProducerJobAttempts(jobs, run,
@@ -304,7 +308,7 @@ async function main() {
   assert.match(sourceSha ?? '', shaPattern);
   assert.match(runId ?? '', /^[1-9]\d*$/u);
   assert.ok(token && eventPath);
-  assert.equal(repository, 'yohn-jp/codexia', 'Unexpected repository');
+  const context = actionsRepository();
   const client = createGitHubProofClient({ repository, token });
   const request = client.get;
   const resolve = async () => {
@@ -315,6 +319,7 @@ async function main() {
     assert.equal(payload.deleted, false);
     const currentRun = await request('actions/runs/' + runId);
     assert.equal(String(currentRun.id), runId);
+    assert.ok(matchesRunRepository(currentRun, context), 'Verify repository mismatch');
     const verify = command === 'dedicated' ? verifyReusableDedicatedProof : verifyReusableMainProof;
     return verify({ sourceSha, before: payload.before, repository, currentRun, request,
       git: args => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 15000 }),

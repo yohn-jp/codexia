@@ -32,8 +32,10 @@ runs:
         set -euo pipefail
         [[ "$PREFLIGHT_RUN" =~ ^[1-9][0-9]{0,15}$ ]]
         gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREFLIGHT_RUN" |
-          jq -e --arg repo "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" --arg id "$PREFLIGHT_RUN" '
-            select((.id | tostring) == $id and .repository.full_name == $repo and .head_repository.full_name == $repo and
+          jq -e --arg repo "$GITHUB_REPOSITORY" --arg rid "$GITHUB_REPOSITORY_ID" --arg oid "$GITHUB_REPOSITORY_OWNER_ID" \
+            --arg sha "$GITHUB_SHA" --arg id "$PREFLIGHT_RUN" '
+            def target: .full_name == $repo and (.id | tostring) == $rid and (.owner.id | tostring) == $oid;
+            select((.id | tostring) == $id and (.repository | target) and (.head_repository | target) and
             .event == "workflow_dispatch" and .head_branch == "main" and .head_sha == $sha and
             .path == ".github/workflows/production-preflight.yml" and .status == "completed" and
             .conclusion == "success" and
@@ -45,6 +47,7 @@ runs:
         path: ${{ runner.temp }}/reviewed-preflight
         github-token: ${{ github.token }}
         run-id: ${{ inputs.run-id }}
+        digest-mismatch: error
     - id: receipt
       shell: bash
       env:
@@ -53,7 +56,9 @@ runs:
       run: |
         set -euo pipefail
         receipt="$RUNNER_TEMP/reviewed-preflight/codexia-lifecycle-preflight.json"
-        jq -e --arg sha "$GITHUB_SHA" --arg management "$MANAGEMENT" --arg id "$PREFLIGHT_RUN" '
+        jq -e --arg repo "$GITHUB_REPOSITORY" --arg rid "$GITHUB_REPOSITORY_ID" --arg oid "$GITHUB_REPOSITORY_OWNER_ID" \
+          --arg sha "$GITHUB_SHA" --arg management "$MANAGEMENT" --arg id "$PREFLIGHT_RUN" '
+          .repository == $repo and (.repositoryId | tostring) == $rid and (.ownerId | tostring) == $oid and
           .sourceSha == $sha and (.runId | tostring) == $id and .attempt == 1 and .management == $management and
           .request.intent == .plan.intent and .request.window == .plan.window and
           (.planSha256 | test("^[a-f0-9]{64}$"))' "$receipt" >/dev/null

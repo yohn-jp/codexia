@@ -37,7 +37,7 @@ test('verified PR artifact digest and identity flow through extraction into a ma
   const actualIdentity=JSON.parse(await readFile(path.join(output,'desktop','update-identity.json'),'utf8'));
   const release=buildComponentReleaseRecord('frontend',mainSha,actualIdentity,{event:'pull_request',sourceSha,version:identity.version,workflowRunId:123,
     workflowAttempt:2,workflowId:72,artifactId:selected.id,artifactDigest:selected.digest.slice(7),profile:identity.profile,apiEpoch:identity.apiEpoch,
-    prNumber:17,verifyRunId:900,proofRunId:proof.runId,verifyAttempt:proof.attempt,planDigest,sourceTree:tree,mergeBaseSha:baseSha},tree);
+    prNumber:17,verifyRunId:900,proofRunId:proof.runId,verifyAttempt:proof.attempt,planDigest,sourceTree:tree,mergeBaseSha:baseSha},tree,{ repository: 'yohn-jp/codexia', repositoryId: 42, ownerId: 10 });
   assert.equal(release.targetSha,mainSha);
   assert.equal(release.metadata.sourceSha,mainSha);
   assert.equal(release.metadata.producer.sourceSha,sourceSha);
@@ -49,7 +49,7 @@ test('verified PR artifact digest and identity flow through extraction into a ma
 test('epoch lifecycle rejects a frontend without approved public OAuth settings before artifact access', async () => {
   await assert.rejects(verifyLifecycleFrontendArtifact({}, {
     expectedEpoch: 46,
-    env: { GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_REF: 'refs/heads/main' },
+    env: { GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_REPOSITORY_ID: '42', GITHUB_REPOSITORY_OWNER_ID: '10', GITHUB_REF: 'refs/heads/main' },
     fetchImpl: () => { assert.fail('An unconfigured lifecycle must not access an artifact'); },
   }), /approved public frontend OAuth configuration/u);
 });

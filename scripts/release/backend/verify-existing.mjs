@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { actionsRepository, assertBackendImageDigest, assertReleaseRepositoryBinding, matchesRunRepository } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
@@ -8,31 +9,30 @@ import { backendPublicationFromEnvironment, buildComponentReleaseRecord, publica
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
-const REPOSITORY='yohn-jp/codexia';
-const digestImage=/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
 function parseMetadata(body){
   assert.equal(typeof body,'string','Existing backend release metadata is missing');
   const blocks=[...body.matchAll(/```json\s*\n([\s\S]*?)\n```/gu)];
   assert.equal(blocks.length,1,'Existing backend release metadata block is ambiguous');
   return JSON.parse(blocks[0][1]);
 }
-export function assertExistingBackendReleaseBinding(release,tagRef,expected){
+export function assertExistingBackendReleaseBinding(release,tagRef,expected,context){
   assert.equal(release?.tag_name,'backend-v'+expected.version,'Existing backend release tag mismatch');
   assert.equal(release?.draft,false,'Existing backend release must be published');
   assert.equal(release?.prerelease,false,'Existing backend release cannot be a prerelease');
   assert.equal(tagRef?.object?.type,'commit','Existing backend tag must directly name its source');
   assert.equal(tagRef.object.sha,expected.mainSha,'Existing backend tag/main source mismatch');
   const metadata=parseMetadata(release.body);
-  for(const image of [metadata.images?.core,metadata.images?.full]) assert.match(image??'',digestImage,'Existing backend image digest is invalid');
+  assertReleaseRepositoryBinding(metadata, context);
+  for(const image of [metadata.images?.core,metadata.images?.full]) assertBackendImageDigest(image, context.repository);
   assert.equal(metadata.images[expected.profile],expected.image,'Existing backend release does not bind the immutable registry digest');
   if(expected.event==='pull_request'){
     const record=buildComponentReleaseRecord('backend',expected.mainSha,null,{core:metadata.images.core,full:metadata.images.full,
-      compatibility:expected.compatibility,event:'pull_request',receipt:expected.receipt,mainTree:expected.mainTree,publication:expected.publication});
+      compatibility:expected.compatibility,event:'pull_request',receipt:expected.receipt,mainTree:expected.mainTree,publication:expected.publication},undefined,context);
     assert.deepEqual(metadata,record.metadata,'Existing backend release does not bind this exact promoted producer receipt');
   }else{
     assert.ok(['push','workflow_run'].includes(expected.event),'Main backend producer event mismatch');
     const record=buildComponentReleaseRecord('backend',expected.mainSha,null,{core:metadata.images.core,full:metadata.images.full,
-      compatibility:expected.compatibility,event:expected.event,receipt:expected.receipt,mainTree:expected.mainTree,publication:expected.publication});
+      compatibility:expected.compatibility,event:expected.event,receipt:expected.receipt,mainTree:expected.mainTree,publication:expected.publication},undefined,context);
     assert.deepEqual(metadata,record.metadata,'Existing backend release does not bind this exact main build receipt');
   }
   return metadata;
@@ -68,17 +68,17 @@ export function publishedBackendCompatibility(sourceSha) {
 
 export async function verifyExistingBackendRelease({env=process.env,args=process.argv.slice(2),usePublishedSourceCompatibility=false}={}){
   const [image,mainSha,producerSha,version,profile,event]=args;
-  assert.equal(env.GITHUB_REPOSITORY,REPOSITORY);
+  const context = actionsRepository(env);
   assert.equal(env.GITHUB_REF,'refs/heads/main');
-  assert.match(image??'',digestImage);assert.match(mainSha??'',/^[a-f0-9]{40}$/u);
+  assertBackendImageDigest(image, context.repository);assert.match(mainSha??'',/^[a-f0-9]{40}$/u);
   assert.match(producerSha??'',/^[a-f0-9]{40}$/u);assert.match(version??'',/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u);
   assert.ok(['core','full'].includes(profile));assert.ok(['push','workflow_run','pull_request'].includes(event));
   const publicationEvent=env.GITHUB_EVENT_NAME;
   assert.ok(['push','workflow_run'].includes(publicationEvent),'Invalid main publication event');
   const token=env.GH_TOKEN;assert.ok(typeof token==='string'&&token.length>0,'GitHub Actions read token required');
-  const github=createGitHubOctokit({token});
+  const github=createGitHubOctokit({...context,token});
   const tag='backend-v'+version;
-  const [owner,repo]=REPOSITORY.split('/');
+  const { owner, repo } = context;
   const [{data:release},{data:tagRef}]=await Promise.all([
     github.rest.repos.getReleaseByTag({owner,repo,tag}),
     github.rest.git.getRef({owner,repo,ref:'tags/'+tag}),
@@ -109,7 +109,7 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
     ? publishedBackendCompatibility(mainSha)
     : JSON.parse(await readFile(new URL('../../../deploy/update-compatibility.json', import.meta.url), 'utf8'));
   const publication=backendPublicationFromEnvironment(env,mainSha);
-  const metadata=assertExistingBackendReleaseBinding(release,tagRef,{image,mainSha,producerSha,version,profile,event,receipt,mainTree,compatibility,publication});
+  const metadata=assertExistingBackendReleaseBinding(release,tagRef,{image,mainSha,producerSha,version,profile,event,receipt,mainTree,compatibility,publication},context);
   if(event==='pull_request')assert.equal(metadata.producer.sourceSha,producerSha,'Existing release producer SHA mismatch');
   else assert.equal(producerSha,mainSha,'Main producer SHA mismatch');
   const workflowHeadSha=publication?.workflowHeadSha??mainSha;
@@ -118,13 +118,16 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
       owner,repo,workflow_id:'backend-release.yml',head_sha:workflowHeadSha,branch:'main',event:publicationEvent,
     },'workflow_runs');
   for(const run of runs){
-    if(run?.path!=='.github/workflows/backend-release.yml'||run.event!==publicationEvent||run.head_branch!=='main'||run.head_sha!==workflowHeadSha||
+    if(!matchesRunRepository(run, context)||run?.path!=='.github/workflows/backend-release.yml'||run.event!==publicationEvent||run.head_branch!=='main'||run.head_sha!==workflowHeadSha||
       run.status!=='completed'||run.conclusion!=='success'||!publicationInWorkflowWindow(release,run))continue;
     if(publication&&run.id!==publication.workflowRunId)continue;
     if(event!=='pull_request'&&(run.id!==receipt.workflowRunId||run.run_number!==receipt.workflowRunNumber))continue;
     assert.ok(Number.isSafeInteger(run.id)&&run.id>0,'Backend publication run ID is invalid');
     const jobs=await paginateActionsInventory(github,github.rest.actions.listJobsForWorkflowRun,
       {owner,repo,run_id:run.id,filter:'latest'},'jobs');
+    if (!jobs.every(job => job.run_id === run.id && job.head_sha === run.head_sha && Number.isSafeInteger(job.run_attempt) &&
+      job.run_attempt > 0 && job.run_attempt <= run.run_attempt)) continue;
+    if (jobs.find(job => job.name === 'Publish immutable GHCR image')?.run_attempt !== run.run_attempt) continue;
     if(successfulPublicationJobs(jobs,event==='pull_request',true))return {release,metadata,publicationRunId:run.id};
   }
   throw new Error('No successful main backend publication run binds the existing immutable digest');

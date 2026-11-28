@@ -79,6 +79,9 @@ test('the convergence step forwards the certified identity, private certificate 
     symlinkSync(lookup.stdout.trim(), path.join(bin, command));
   }
 
+  mkdirSync(path.join(directory, 'scripts', 'github'), { recursive: true });
+  writeFileSync(path.join(directory, 'scripts', 'github', 'repository.mjs'),
+    readFileSync(new URL('../../github/repository.mjs', import.meta.url)));
   const digest = `ghcr.io/yohn-jp/codexia-backend@sha256:${'a'.repeat(64)}`;
   const verified = 'b'.repeat(40);
   const producer = 'c'.repeat(40);
@@ -87,6 +90,7 @@ test('the convergence step forwards the certified identity, private certificate 
     PATH: bin,
     RUNNER_TEMP: directory,
     GITHUB_STEP_SUMMARY: path.join(directory, 'summary'),
+    GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_REPOSITORY_ID: '401', GITHUB_REPOSITORY_OWNER_ID: '502',
     CODEXIA_CERTIFIED_FULL_IMAGE: digest,
     CODEXIA_DEPLOYMENT_CERTIFICATE_B64: certificateBytes.toString('base64'),
     CODEXIA_VERIFIED_MAIN_SHA: verified,
@@ -341,11 +345,12 @@ test('locked fresh activation requires the installation marker to bind the datab
   const verify = () => spawnSync('bash', ['-c', [
     'set -eu', 'state_dir="$FIXTURE"; approved_cluster=123; approved_database=456; candidate_image="$IMAGE"',
     'stale_admission(){ echo "$1" >&2; exit 1; }', gate,
-  ].join('\n')], { env: { ...process.env, FIXTURE: fixture, IMAGE: image }, encoding: 'utf8' });
+  ].join('\n')], { env: { ...process.env, FIXTURE: fixture, IMAGE: image, CODEXIA_TARGET_REPOSITORY: 'yohn-jp/codexia',
+    CODEXIA_TARGET_REPOSITORY_ID: '401', CODEXIA_TARGET_OWNER_ID: '502' }, encoding: 'utf8' });
   assert.match(verify().stderr, /prepared owner markers are unavailable/u);
-  writeFileSync(intent, '123:789:' + image + '\n', { mode: 0o600 });
+  writeFileSync(intent, 'yohn-jp/codexia:401:502:123:789:' + image + '\n', { mode: 0o600 });
   assert.match(verify().stderr, /fresh installation identity changed/u);
-  writeFileSync(intent, '123:456:' + image + '\n', { mode: 0o600 });
+  writeFileSync(intent, 'yohn-jp/codexia:401:502:123:456:' + image + '\n', { mode: 0o600 });
   const approved = verify();
   assert.equal(approved.status, 0, approved.stderr);
 });
@@ -787,6 +792,7 @@ test('both first-owner launchers require a clean API target under the deployment
   for (const file of ['tls.crt', 'tls.key']) writeFileSync(path.join(auth, file), '', { mode: 0o600 });
   const env = {
     ...process.env, HOME: home, PATH: bin + path.delimiter + process.env.PATH,
+    CODEXIA_IMAGE_REPOSITORY: 'ghcr.io/yohn-jp/codexia-backend',
     CONTAINER_STATUS: '1', UNIT_STATUS: '4', UNIT_STATE: 'LoadState=not-found\nActiveState=inactive',
   };
   const image = 'ghcr.io/yohn-jp/codexia-backend@sha256:' + 'a'.repeat(64);
@@ -857,7 +863,9 @@ test('the recovery launcher audits sanitized counts without sending its one-use 
 test('main-only manual Tailnet diagnostic verifies pinned SSH as codexia without joining PR validation or deployment', () => {
   assert.deepEqual(Object.keys(tailscale.on), ['workflow_dispatch']);
   const job = tailscale.jobs.connectivity;
-  assert.equal(job.if, "github.ref == 'refs/heads/main'", 'PR refs must not receive the deployment SSH secret');
+  assert.match(job.if, /github.ref == 'refs\/heads\/main'/u, 'PR refs must not receive the deployment SSH secret');
+  assert.match(job.if, /github.event.repository.name == 'codexia'/u);
+  assert.match(job.if, /github.event.repository.default_branch == 'main'/u);
   assert.equal(job.environment, 'codexia-production');
   const ssh = job.steps.find(step => step.name === 'Verify pinned public-key SSH as codexia');
   assert.ok(ssh, 'the manual Tailnet diagnostic must authenticate SSH, not only test TCP/22');

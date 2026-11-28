@@ -113,8 +113,12 @@ worker_enablement="$(systemctl --user show codexia-backup-executor.service -p Un
 for file in "$release" "$units/codexia-api.container" "$units/codexia-db.container" "$units/codexia-postgres.volume"; do
   private_file "$file" || fail 'Protected socket operation requires regular committed deployment and database files'
 done
+image_repository="${CODEXIA_IMAGE_REPOSITORY:-}"
+[[ "$image_repository" =~ ^ghcr\.io/[a-z0-9-]+/codexia-backend$ ]] || fail 'A reviewed image repository is required'
 image="$(jq -er 'select(.format == "codexia-push-deployment/v1" and .identity.format == "codexia-backend-identity/v1" and .identity.profile == "full") |
-  .image | select(test("^ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$"))' "$release")"
+  .image' "$release")"
+[[ "$image" == "$image_repository@"* && "${image#*@}" =~ ^sha256:[a-f0-9]{64}$ ]] ||
+  fail 'Committed image differs from the reviewed image repository'
 image_id="$(podman image inspect --format '{{.Id}}' "$image")"
 [[ "${image_id#sha256:}" =~ ^[a-f0-9]{64}$ ]] || fail 'Committed Full image is unavailable'
 volume="$(podman volume inspect --format '{{.Name}}|{{.Mountpoint}}' codexia-postgres)"

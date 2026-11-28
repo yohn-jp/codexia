@@ -12,7 +12,7 @@ jobs:
     name: Verify Tailnet SSH reachability
     runs-on: ubuntu-24.04
     timeout-minutes: 8
-    if: github.ref == 'refs/heads/main'
+    if: github.event.repository.name == 'codexia' && github.event.repository.default_branch == 'main' && github.ref == 'refs/heads/main'
     environment: codexia-production
 
     steps:
@@ -26,6 +26,11 @@ jobs:
           CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
           CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}
         run: bash deploy/ansible/prepare-deploy-ssh.sh
+      - name: Require immutable GitHub OIDC claims for Tailscale
+        env:
+          CODEXIA_TAILSCALE_CLIENT_ID: ${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}
+          CODEXIA_TAILSCALE_ENVIRONMENT: codexia-production
+        run: node scripts/deployment/preflight/tailscale-oidc.mjs
       - name: Connect to Tailscale using GitHub OIDC
         uses: tailscale/github-action@v4
         with:

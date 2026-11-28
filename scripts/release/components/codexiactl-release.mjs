@@ -98,7 +98,7 @@ async function main() {
     throw new Error('CLI release requires a trusted workflow artifact directory');
   }
 
-  const github = createGitHubOctokit({ token: env.GH_TOKEN });
+  const github = createGitHubOctokit({ token: env.GH_TOKEN, repository, repositoryId: env.GITHUB_REPOSITORY_ID });
   const assets = await stagedAssets(path.join(env.RUNNER_TEMP, 'codexiactl-release'));
   const result = await reconcileCodexiactlRelease({
     tag,

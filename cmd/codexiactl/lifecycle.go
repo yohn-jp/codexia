@@ -13,7 +13,6 @@ import (
 var (
 	sourceHash       = regexp.MustCompile(`^[a-f0-9]{40}$`)
 	digestHash       = regexp.MustCompile(`^[a-f0-9]{64}$`)
-	fullImage        = regexp.MustCompile(`^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$`)
 	safeIdentifier   = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{0,79}$`)
 	errExistingOwner = errors.New("an existing Owner is enrolled. Continue through the protected deployment runbook")
 )
@@ -31,12 +30,15 @@ type frontendIdentity struct {
 }
 
 type lifecycleReceipt struct {
-	SourceSHA  string
-	RunID      int64
-	Attempt    int
-	Management string
-	PlanSHA    string `json:"planSha256"`
-	Request    struct {
+	Repository   string
+	RepositoryID int64
+	OwnerID      int64
+	SourceSHA    string
+	RunID        int64
+	Attempt      int
+	Management   string
+	PlanSHA      string `json:"planSha256"`
+	Request      struct {
 		Intent                string
 		Window                *json.RawMessage
 		BackendPublisherRunID int64
@@ -90,17 +92,18 @@ type lifecycleReceipt struct {
 
 const evidenceMaxAge = 5 * time.Minute
 
-func (r lifecycleReceipt) validate(sha string, id int64, management, hostID, origin string, now time.Time) error {
+func (r lifecycleReceipt) validate(target githubTarget, sha string, id int64, management, hostID, origin string, now time.Time) error {
 	if r.Request.Intent != "install" || r.Request.Window != nil {
 		return refused("Expected a window-free initial-install Preflight")
 	}
-	return r.validateObservation(sha, id, management, hostID, origin, now)
+	return r.validateObservation(target, sha, id, management, hostID, origin, now)
 }
 
-func (r lifecycleReceipt) validateObservation(sha string, id int64, management, hostID, origin string, now time.Time) error {
-	if r.SourceSHA != sha || r.RunID != id || r.Attempt != 1 || r.Management != management ||
+func (r lifecycleReceipt) validateObservation(target githubTarget, sha string, id int64, management, hostID, origin string, now time.Time) error {
+	if !target.valid() || r.Repository != target.FullName() || r.RepositoryID != target.RepoID || r.OwnerID != target.OwnerID ||
+		!target.matchesFullImage(r.Evidence.Candidate.BackendImage) || r.SourceSHA != sha || r.RunID != id || r.Attempt != 1 || r.Management != management ||
 		r.Plan.Observation.Binding.HostID != hostID || r.Evidence.Edge.Origin != origin {
-		return refused("Preflight evidence does not match the approved source, attempt, VM, or origin")
+		return refused("Preflight evidence does not match the approved repository, candidate image, source, attempt, VM, or origin")
 	}
 	f := r.Request.Frontend
 	switch r.Request.Intent {
@@ -198,10 +201,10 @@ func (r lifecycleReceipt) setupForDelivery() bool {
 		digestHash.MatchString(handoff.GrantBindingSHA)
 }
 
-func (r lifecycleReceipt) reviewSummary(id int64) string {
+func (r lifecycleReceipt) reviewSummary(target githubTarget, id int64) string {
 	s := r.Plan.Observation.State
 	return fmt.Sprintf("Preflight %s. Observation M=%s H=%s D=%s A=%s B=%s F=%s T=%s. Candidate Backend publisher %d, Frontend build %d, approval plan %s.",
-		runLink(id), stateValue(s.M), stateValue(s.H), stateValue(s.D), stateValue(s.A),
+		target.runLink(id), stateValue(s.M), stateValue(s.H), stateValue(s.D), stateValue(s.A),
 		stateValue(s.B), stateValue(s.F), stateValue(s.T), r.Request.BackendPublisherRunID, r.Request.Frontend.RunID, r.PlanSHA)
 }
 

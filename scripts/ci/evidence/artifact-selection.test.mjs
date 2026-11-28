@@ -15,7 +15,7 @@ import { paginateGitHubArray } from '../../github/paginate-actions.mjs';
 import { createGitHubProofClient } from './proof-client.mjs';
 
 function octokitForPages(readRows, requested = []) {
-  return createGitHubOctokit({ token: 'fixture-token', fetchImpl: async input => {
+  return createGitHubOctokit({ repository: "yohn-jp/codexia", token: 'fixture-token', fetchImpl: async input => {
     const url = new URL(String(input));
     const page = Number(url.searchParams.get('page') ?? '1');
     requested.push({ path: url.pathname, page });
@@ -148,7 +148,7 @@ test('producer restore inventories only the exact artifact name and still reject
   const records=Array.from({length:101},(_,index)=>artifact(index+1,artifactName,'2026-10-24T19:50:00Z'));
   const requested=[];
   const github=octokitForPages(()=>records,requested);
-  assert.deepEqual(await listProducerArtifacts(github,runId,artifactName),records);
+  assert.deepEqual(await listProducerArtifacts(github,runId,artifactName, { owner: "yohn-jp", repo: "codexia" }),records);
   assert.deepEqual(requested.map(item=>item.page),[1,2]);
 });
 

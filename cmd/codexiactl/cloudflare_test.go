@@ -147,16 +147,14 @@ func TestCloudflareDiscoversCanonicalEdgeWithoutMutation(t *testing.T) {
 		ciID       = "00000000-0000-0000-0000-000000000006"
 		tokenID    = "00000000-0000-0000-0000-000000000007"
 	)
-	previousRoutes, previousIdentity, previousProtocol := productionCloudflareRoutes, productionIdentityProbes, productionProtocolPaths
-	t.Cleanup(func() {
-		productionCloudflareRoutes, productionIdentityProbes, productionProtocolPaths = previousRoutes, previousIdentity, previousProtocol
-	})
-	productionCloudflareRoutes = cloudflareManifest(t, "ui-routes.json")
-	productionIdentityProbes = cloudflareManifest(t, "identity-probes.json")
-	productionProtocolPaths = cloudflareManifest(t, "public-protocol-paths.json")
+	contract := cloudflareContract{
+		routes:         cloudflareManifest(t, "ui-routes.json"),
+		identityProbes: cloudflareManifest(t, "identity-probes.json"),
+		protocolPaths:  cloudflareManifest(t, "public-protocol-paths.json"),
+	}
 	var identities map[string]cloudflarePath
 	var routeManifest cloudflareRoutes
-	if json.Unmarshal(productionIdentityProbes, &identities) != nil || json.Unmarshal(productionCloudflareRoutes, &routeManifest) != nil {
+	if json.Unmarshal(contract.identityProbes, &identities) != nil || json.Unmarshal(contract.routes, &routeManifest) != nil {
 		t.Fatal("canonical Cloudflare fixture is invalid")
 	}
 	application := func(id, path, aud string) map[string]any {
@@ -226,7 +224,7 @@ func TestCloudflareDiscoversCanonicalEdgeWithoutMutation(t *testing.T) {
 	}))
 	defer server.Close()
 	api := newCloudflareAPI([]byte("test-provisioning-token"), server.URL+"/")
-	observed, err := api.observeEdge(context.Background(), host, zones.Zone{ID: zoneID, Account: zones.ZoneAccount{ID: account}})
+	observed, err := api.observeEdge(context.Background(), host, zones.Zone{ID: zoneID, Account: zones.ZoneAccount{ID: account}}, githubTestTarget, contract)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,6 +234,8 @@ func TestCloudflareDiscoversCanonicalEdgeWithoutMutation(t *testing.T) {
 	}
 	if observed.Connectors || target.AuthorPolicyID != authorID || target.CIPolicyID != ciID ||
 		target.TunnelTeamName != "test-team" || target.PublicProtocolEnabled || target.TunnelID != tunnelID ||
+		target.Repository != githubTestTarget.FullName() || target.RepositoryID != githubTestTarget.RepoID ||
+		target.OwnerID != githubTestTarget.OwnerID || target.Origin != "https://"+host ||
 		target.AccountID != account || target.ZoneID != zoneID || observed.serviceToken.ClientID != "test.access" {
 		t.Fatalf("incorrect bound edge snapshot %#v", target)
 	}
@@ -512,5 +512,33 @@ func TestCloudflareSuppliedTokenRequiresExactProviderPolicy(t *testing.T) {
 				t.Fatalf("sent %d Worker reads before token policy was verified", calls)
 			}
 		})
+	}
+}
+
+func TestProtectedCloudflareTargetRejectsAnotherRepositoryWithSameOrigin(t *testing.T) {
+	fork := githubTarget{Owner: "Fork-Org", OwnerID: 801, RepoID: 192, InstallationID: 312}
+	const origin = "https://codexia.fork.example"
+	target := cloudflareTarget{Repository: fork.FullName(), RepositoryID: fork.RepoID, OwnerID: fork.OwnerID, Origin: origin}
+	check := func(value cloudflareTarget, repo githubTarget, requestedOrigin string) error {
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return validateProtectedCloudflareTarget(githubSnapshot{Production: githubEnvironment{
+			Variables: map[string]string{edgeTarget: string(data)},
+		}}, repo, requestedOrigin)
+	}
+	if err := check(target, fork, origin); err != nil {
+		t.Fatal(err)
+	}
+	if err := check(target, githubTestTarget, origin); err == nil {
+		t.Fatal("a different repository accepted a Cloudflare target for the same origin")
+	}
+	if err := check(target, fork, "https://unrelated.fork.example"); err == nil {
+		t.Fatal("the selected repository accepted a Cloudflare target for another origin")
+	}
+	target.RepositoryID = 0
+	if err := check(target, fork, origin); err == nil {
+		t.Fatal("an unbound Cloudflare target was accepted")
 	}
 }

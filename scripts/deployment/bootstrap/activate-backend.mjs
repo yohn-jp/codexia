@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { actionsRepository } from '../../github/repository.mjs';
 import { execFileSync } from 'node:child_process';
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -86,15 +87,15 @@ export function admitBackendRecovery({ deployment, current, host, now = new Date
 }
 
 async function main(stage, env) {
-  assert.equal(env.GITHUB_REPOSITORY, 'yohn-jp/codexia');
+  const { owner, repo, repository, repositoryId, ownerId } = actionsRepository(env);
   assert.equal(env.GITHUB_REF, 'refs/heads/main');
   assert.equal(env.GITHUB_EVENT_NAME, 'workflow_dispatch');
   if (stage === 'freshness') {
     const git = (...args) => execFileSync('git', args, { encoding: 'utf8', timeout: 60_000 });
     const token = env.GH_TOKEN || env.GITHUB_TOKEN;
     assert.ok(token, 'Protected source freshness requires GitHub Actions read access');
-    const { data: reference } = await createGitHubOctokit({ token, timeout: 30_000 }).rest.git.getRef({
-      owner: 'yohn-jp', repo: 'codexia', ref: 'heads/main',
+    const { data: reference } = await createGitHubOctokit({ token, repository, repositoryId, timeout: 30_000 }).rest.git.getRef({
+      owner, repo, ref: 'heads/main',
     });
     const liveMain = reference.object?.sha;
     assertManualActivationSource(env.CODEXIA_VERIFIED_MAIN_SHA, env.GITHUB_SHA, liveMain, git);
@@ -102,6 +103,10 @@ async function main(stage, env) {
     return;
   }
   const receipt = JSON.parse(await readFile(join(env.RUNNER_TEMP, 'reviewed-preflight/codexia-lifecycle-preflight.json'), 'utf8'));
+  assert.equal(receipt.repository, repository, 'Reviewed preflight repository mismatch');
+  assert.equal(receipt.repositoryId, repositoryId, 'Reviewed preflight repository ID mismatch');
+  assert.equal(receipt.ownerId, ownerId, 'Reviewed preflight owner ID mismatch');
+  assert.equal(receipt.sourceSha, env.GITHUB_SHA, 'Reviewed preflight source mismatch');
   const { parsePreflightRequest, readLifecycleCandidate, readLifecycleHost } = await import('../preflight/run.mjs');
   const request = parsePreflightRequest(JSON.stringify(receipt.request));
   const { plan, planSha256 } = receipt;
@@ -127,7 +132,7 @@ async function main(stage, env) {
   }
 
   assert.equal(stage, 'admit');
-  const { createDeploymentEdge } = await import('../../release/frontend/initial-publication.mjs');
+  const { deploymentEdgeFromEnvironment } = await import('../../release/frontend/initial-publication.mjs');
   const { planFromObservations } = await import('../preflight/observe.mjs');
   const releases = await readLifecycleCandidate(request);
   assert.deepEqual(releases.candidateBackend, JSON.parse(Buffer.from(env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, 'base64')),
@@ -136,13 +141,10 @@ async function main(stage, env) {
     inventory: join(env.RUNNER_TEMP, 'codexia-first-activation-inventory.yml'),
     targetHost: env.CODEXIA_PREFLIGHT_TARGET_HOST, recovery, adoption,
   });
-  const edge = await createDeploymentEdge({ ...JSON.parse(env.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET),
-    origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
-    readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN,
-  }).observeLifecycle({ backendExpected: host.backend.state === 'running' });
+  const edge = await deploymentEdgeFromEnvironment(env).observeLifecycle({ backendExpected: host.backend.state === 'running' });
   const { readPreservationEvidence } = await import('../preflight/preservation.mjs');
   const preservationReceipt = adoption
-    ? readPreservationEvidence(JSON.stringify(receipt.evidence?.preservationReceipt ?? null), host)
+    ? readPreservationEvidence(JSON.stringify(receipt.evidence?.preservationReceipt ?? null), host, { repository, repositoryId, ownerId })
     : null;
   const { plan: current } = planFromObservations({ host, edge, hostPinSha256, ...releases,
     intent: request.intent, window: request.window, preservationReceipt });

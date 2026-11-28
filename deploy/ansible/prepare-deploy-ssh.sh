@@ -4,7 +4,10 @@ set -euo pipefail
 umask 077
 user=codexia
 if [[ $# == 1 && "$1" == --preflight-admin ]]; then
-  [[ "${GITHUB_REPOSITORY:-}" == yohn-jp/codexia && "${GITHUB_REF:-}" == refs/heads/main && "${GITHUB_EVENT_NAME:-}" == workflow_dispatch && "${GITHUB_WORKFLOW:-}" == 'Production Access Preflight' ]] || exit 1
+  [[ "${GITHUB_ACTIONS:-}" == true &&
+     "${GITHUB_REPOSITORY:-}" =~ ^[A-Za-z0-9-]+/codexia$ &&
+     "${GITHUB_REPOSITORY_ID:-}" =~ ^[1-9][0-9]*$ &&
+     "${GITHUB_REPOSITORY_OWNER_ID:-}" =~ ^[1-9][0-9]*$ && "${GITHUB_REF:-}" == refs/heads/main && "${GITHUB_EVENT_NAME:-}" == workflow_dispatch && "${GITHUB_WORKFLOW:-}" == 'Production Access Preflight' ]] || exit 1
   user=${CODEXIA_PREFLIGHT_SSH_USER:?Missing independently approved administrator user}
   [[ "$user" =~ ^[a-z_][a-z0-9_-]{0,31}$ && "$user" != root && "$user" != codexia ]] || exit 1
 elif [[ $# != 0 ]]; then

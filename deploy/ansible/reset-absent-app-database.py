@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """R4 convergence of a verified absent application DB; never delete a database."""
 import fcntl
+import json
 import os
 from pathlib import Path
 import re
@@ -8,7 +9,12 @@ import stat
 import subprocess
 import sys
 
-FULL_IMAGE = r"ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}"
+def full_image_pattern():
+    repository = os.environ.get("CODEXIA_IMAGE_REPOSITORY", "")
+    if not re.fullmatch(r"ghcr[.]io/[a-z0-9-]+/codexia-backend", repository):
+        raise ValueError("A reviewed image repository is required")
+    return re.escape(repository) + r"@sha256:[a-f0-9]{64}"
+
 STATE_FILES = (
     "deployed-release.json", "owner-setup.intent", "owner-setup.installation",
     "owner-setup.promoted", "owner-setup.age", "owner-setup.age.pending",
@@ -97,7 +103,7 @@ def verify_api_container(unit):
     if not exists("container", "codexia-api"):
         return
     _, image = command(["podman", "inspect", "--format", "{{.ImageName}}", "codexia-api"])
-    require(re.fullmatch(FULL_IMAGE, image), "Unexpected image in the API slot")
+    require(re.fullmatch(full_image_pattern(), image), "Unexpected image in the API slot")
     if present(unit):
         require("Image=" + image in unit.read_text().splitlines(), "API slot image differs from its Quadlet")
 
@@ -123,6 +129,25 @@ def sync_directory(path):
             os.close(fd)
 
 
+def verify_residue_repository(state):
+    repository = os.environ.get("CODEXIA_TARGET_REPOSITORY", "")
+    repository_id = os.environ.get("CODEXIA_TARGET_REPOSITORY_ID", "")
+    owner_id = os.environ.get("CODEXIA_TARGET_OWNER_ID", "")
+    require(re.fullmatch(r"[A-Za-z0-9-]+/codexia", repository)
+            and re.fullmatch(r"[1-9][0-9]*", repository_id)
+            and re.fullmatch(r"[1-9][0-9]*", owner_id), "Missing reviewed repository identity")
+    release = state / "deployed-release.json"
+    if private_file(release):
+        value = json.loads(release.read_text())
+        require(isinstance(value, dict) and value.get("format") == "codexia-push-deployment/v1"
+                and value.get("repository") == repository and value.get("repositoryId") == int(repository_id)
+                and value.get("ownerId") == int(owner_id), "Prior release belongs to a different repository")
+    intent = state / "owner-setup.intent"
+    if private_file(intent):
+        require(intent.read_text().startswith(f"{repository}:{repository_id}:{owner_id}:"),
+                "Prior setup belongs to a different repository")
+
+
 def converge(expected, home):
     state = home / ".local/state/codexia-deploy"
     auth = home / ".config/codexia-auth"
@@ -139,11 +164,12 @@ def converge(expected, home):
         verify_absent(expected)
         require(not any(present(state / name) for name in PENDING),
                 "An existing deployment operation must be recovered before bootstrap")
+        verify_residue_repository(state)
         api = units / "codexia-api.container"
         if private_file(api):
             lines = api.read_text().splitlines()
             require("ContainerName=codexia-api" in lines
-                    and any(re.fullmatch("Image=" + FULL_IMAGE, line) for line in lines),
+                    and any(re.fullmatch("Image=" + full_image_pattern(), line) for line in lines),
                     "Unexpected API Quadlet")
         verify_api_container(api)
         obsolete = [p for p in [*(state / name for name in STATE_FILES),

@@ -9,6 +9,16 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+
+
+def setUpModule():
+    target = patch.dict(os.environ, {"CODEXIA_IMAGE_REPOSITORY": "ghcr.io/yohn-jp/codexia-backend",
+        "CODEXIA_TARGET_REPOSITORY": "yohn-jp/codexia", "CODEXIA_TARGET_REPOSITORY_ID": "401",
+        "CODEXIA_TARGET_OWNER_ID": "502"})
+    target.start()
+    unittest.addModuleCleanup(target.stop)
+
+
 spec = importlib.util.spec_from_file_location("preflight_observe", Path(__file__).with_name("preflight-observe.py"))
 observer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(observer)
@@ -109,6 +119,7 @@ def recovery_record():
     sha = "a" * 64
     return {
         "format": "codexia-recovery-handoff/v1",
+        "repository": "yohn-jp/codexia", "repositoryId": 401, "ownerId": 502,
         "operationId": "restore-20261124-01",
         "environment": "codexia-production",
         "backup": {
@@ -279,7 +290,7 @@ class ObserveDatabaseTests(unittest.TestCase):
                     return self.observe(directory=directory, **kwargs)
 
             self.assertNotIn("bootstrapIntent", observe_initialized(resume_clean=True))
-            intent.write_text(f"123:456:{image}\n")
+            intent.write_text(f"yohn-jp/codexia:401:502:123:456:{image}\n")
             intent.chmod(0o600)
             result = observe_initialized(resume_clean=True)
             self.assertEqual(result["authState"], "absent")
@@ -292,7 +303,7 @@ class ObserveDatabaseTests(unittest.TestCase):
             self.assertNotIn("bootstrapIntent", observe_initialized(resume_clean=True))
             handoff.unlink()
             for cluster_id, database_oid in [("321", "456"), ("123", "654")]:
-                intent.write_text(f"{cluster_id}:{database_oid}:{image}\n")
+                intent.write_text(f"yohn-jp/codexia:401:502:{cluster_id}:{database_oid}:{image}\n")
                 with self.subTest(cluster=cluster_id, database=database_oid), self.assertRaises(ValueError):
                     observe_initialized(resume_clean=True)
 
@@ -303,7 +314,7 @@ class ObserveDatabaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             intent = directory / "owner-setup.intent"
-            intent.write_text(f"123:456:{image}\n")
+            intent.write_text(f"yohn-jp/codexia:401:502:123:456:{image}\n")
             intent.chmod(0o600)
             with patch.object(observer, "command", return_value=(0, "true")), \
                     patch.object(observer, "json_sql", side_effect=[cluster,
@@ -343,7 +354,7 @@ class ObserveDatabaseTests(unittest.TestCase):
             (directory / "owner-setup.container").write_text(f"Image={image}\n")
             for intent_database, expected in [(None, "recovery"), ("456", "pending")]:
                 if intent_database:
-                    intent.write_text(f"123:{intent_database}:{image}\n")
+                    intent.write_text(f"yohn-jp/codexia:401:502:123:{intent_database}:{image}\n")
                     intent.chmod(0o600)
                 with self.subTest(intent_database=intent_database):
                     with patch.object(observer, "command", return_value=(0, "true")), \
@@ -354,7 +365,7 @@ class ObserveDatabaseTests(unittest.TestCase):
                             ]):
                         result = self.observe(directory=directory)
                         self.assertEqual(result["authState"], expected)
-            intent.write_text(f"123:999:{image}\n")
+            intent.write_text(f"yohn-jp/codexia:401:502:123:999:{image}\n")
             with patch.object(observer, "command", return_value=(0, "true")), \
                     patch.object(observer, "sql", return_value="t"), \
                     patch.object(observer, "json_sql", side_effect=[
@@ -374,7 +385,7 @@ class ObserveDatabaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             intent = directory / "owner-setup.intent"
-            intent.write_text(f"123:456:{image}\n")
+            intent.write_text(f"yohn-jp/codexia:401:502:123:456:{image}\n")
             intent.chmod(0o600)
 
             def observe_owner(owner):
@@ -443,6 +454,7 @@ class TransactionTests(unittest.TestCase):
             self.assertIsNone(observer.observe_transaction(directory))
             path = directory / "deploy-transaction.json"
             data = {"format": "codexia-deploy-transaction/v1", "phase": "pending",
+                    "repository": "yohn-jp/codexia", "repositoryId": 401, "ownerId": 502,
                     **{k: False for k in ("hadUnit", "tunnelWasActive", "apiLinkCreated", "tunnelLinkCreated", "releasePresent")}}
             path.write_text(json.dumps(data))
             self.assertEqual(observer.observe_transaction(directory)["sha256"], observer.digest(data))
@@ -493,6 +505,8 @@ class AbsentDatabaseResetTests(unittest.TestCase):
             for path in old + [backup]:
                 path.write_text("fixture")
                 path.chmod(0o600)
+            old[0].write_text(json.dumps({"format": "codexia-push-deployment/v1", "repository": "yohn-jp/codexia",
+                                          "repositoryId": 401, "ownerId": 502}))
             events = []
 
             def sql(query, read_only=True):
@@ -540,6 +554,23 @@ class AbsentDatabaseResetTests(unittest.TestCase):
                 reset.converge("absent", home)
                 sql.assert_not_called()
                 self.assertEqual(stop.call_count, 2)
+
+
+    def test_foreign_release_residue_prevents_reset(self):
+        reset = self.reset
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state = home / ".local/state/codexia-deploy"
+            state.mkdir(parents=True)
+            release = state / "deployed-release.json"
+            release.write_text(json.dumps({"format": "codexia-push-deployment/v1", "repository": "yohn-jp/codexia",
+                                          "repositoryId": 818, "ownerId": 502}))
+            release.chmod(0o600)
+            with patch.object(reset, "verify_absent"), patch.object(reset, "stop_slot") as stop:
+                with self.assertRaisesRegex(ValueError, "different repository"):
+                    reset.converge("absent", home)
+                stop.assert_not_called()
+            self.assertTrue(release.exists())
 
     def test_pending_transaction_prevents_reset(self):
         reset = self.reset

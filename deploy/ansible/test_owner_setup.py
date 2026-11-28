@@ -35,10 +35,13 @@ class OwnerSetupTests(unittest.TestCase):
         self.private_file(self.config / "owner-setup.env", "CODEXIA_OWNER_SETUP_WEB_REDIRECT_URIS=https://setup.example.test/desktop\n")
         self.private_file(self.config / "owner-setup.container", f"Image={IMAGE}\n")
         self.private_file(self.state / "owner-setup.installation", "123\n")
+        self.private_file(self.state / "owner-setup.intent", f"yohn-jp/codexia:401:502:123:456:{IMAGE}\n")
         self.unit = self.units / "codexia-api.container"
         self.trace = self.home / "trace"
         self.environment = {
-            **os.environ, "HOME": str(self.home), "PATH": f"{self.bin}:/usr/bin:/bin",
+            **os.environ, "CODEXIA_IMAGE_REPOSITORY": "ghcr.io/yohn-jp/codexia-backend",
+            "CODEXIA_TARGET_REPOSITORY": "yohn-jp/codexia", "CODEXIA_TARGET_REPOSITORY_ID": "401",
+            "CODEXIA_TARGET_OWNER_ID": "502", "HOME": str(self.home), "PATH": f"{self.bin}:/usr/bin:/bin",
             "TRACE": str(self.trace), "OWNER": OWNER, "DESCRIPTION": json.dumps({"state": "BLOCKED"}),
             "GRANT_BINDING": BINDING,
         }
@@ -154,7 +157,7 @@ esac
 ''')
         (self.state / "owner-setup.installation").unlink()
         intent = self.state / "owner-setup.intent"
-        self.private_file(intent, f"123:456:{IMAGE}\n")
+        self.private_file(intent, f"yohn-jp/codexia:401:502:123:456:{IMAGE}\n")
         self.environment["LEDGER"] = LEDGER
         lock = self.state / "host.lock"
 
@@ -216,7 +219,7 @@ esac
 ''')
         marker = self.state / "owner-setup.installation"
         marker.unlink()
-        self.private_file(self.state / "owner-setup.intent", f"123:456:{IMAGE}\n")
+        self.private_file(self.state / "owner-setup.intent", f"yohn-jp/codexia:401:502:123:456:{IMAGE}\n")
         self.private_file(self.state / "host.lock", "")
         self.environment["LEDGER"] = LEDGER
         rejected = self.run_setup("--initialize", "--resume-bootstrap", "123:456", LEDGER)
@@ -230,7 +233,7 @@ esac
         self.assertEqual(marker.read_text(), "123\n")
 
     def test_protected_owner_operation_revalidates_observed_credentials_under_host_lock(self):
-        self.private_file(self.state / "owner-setup.intent", f"123:456:{IMAGE}\n")
+        self.private_file(self.state / "owner-setup.intent", f"yohn-jp/codexia:401:502:123:456:{IMAGE}\n")
         self.environment["CODEXIA_OWNER_SETUP_EXPECTED_SECRET_SET_SHA256"] = "a" * 64
         observer = self.home / ".local/bin/codexia-preflight-observe"
         observer.write_text('#!/bin/bash\n'
@@ -247,7 +250,7 @@ esac
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
 
     def test_initialized_schema_with_matching_intent_can_issue_only_first_grant(self):
-        self.private_file(self.state / "owner-setup.intent", f"123:456:{IMAGE}\n")
+        self.private_file(self.state / "owner-setup.intent", f"yohn-jp/codexia:401:502:123:456:{IMAGE}\n")
         result = self.run_setup("--converge", "NEW_APPROVED", "age1fixture")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.state / "owner-setup.age").read_text(), "encrypted-fixture")
@@ -266,7 +269,7 @@ esac
         self.assertFalse(self.unit.exists())
 
     def test_issued_grant_exports_only_for_original_recipient_until_approved_reissue(self):
-        self.private_file(self.state / "owner-setup.intent", f"123:456:{IMAGE}\n")
+        self.private_file(self.state / "owner-setup.intent", f"yohn-jp/codexia:401:502:123:456:{IMAGE}\n")
         issued = self.run_setup("--converge", "NEW_APPROVED", "age1fixture")
         self.assertEqual(issued.returncode, 0, issued.stderr)
         self.environment["DESCRIPTION"] = json.dumps({"state": "SETUP_PENDING", "grantId": OWNER})
@@ -302,7 +305,7 @@ esac
         self.assertEqual(current.stdout, "encrypted-other-fixture")
 
     def test_interrupted_replacement_with_ciphertext_but_no_new_receipt_cannot_export(self):
-        self.private_file(self.state / "owner-setup.intent", f"123:456:{IMAGE}\n")
+        self.private_file(self.state / "owner-setup.intent", f"yohn-jp/codexia:401:502:123:456:{IMAGE}\n")
         issued = self.run_setup("--converge", "NEW_APPROVED", "age1fixture")
         self.assertEqual(issued.returncode, 0, issued.stderr)
         receipt = self.state / "owner-setup.age.receipt.json"
@@ -403,10 +406,10 @@ esac
     def test_marker_loss_resumes_only_against_the_bound_fresh_database(self):
         (self.state / "owner-setup.installation").unlink()
         intent = self.state / "owner-setup.intent"
-        self.private_file(intent, f"123:999:{IMAGE}\n")
+        self.private_file(intent, f"yohn-jp/codexia:401:502:123:999:{IMAGE}\n")
         self.assertNotEqual(self.run_setup("--converge", "NEW_APPROVED", "age1fixture").returncode, 0)
         self.assertNotIn("issued", self.trace.read_text())
-        self.private_file(intent, f"123:456:{IMAGE}\n")
+        self.private_file(intent, f"yohn-jp/codexia:401:502:123:456:{IMAGE}\n")
         result = self.run_setup("--converge", "NEW_APPROVED", "age1fixture")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.state / "owner-setup.installation").read_text(), "123\n")

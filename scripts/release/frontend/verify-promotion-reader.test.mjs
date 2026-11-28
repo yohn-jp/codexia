@@ -28,7 +28,7 @@ test('frontend promotion proof reader downloads and extracts a digest-verified J
       : new Response(archive);
   };
 
-  assert.deepEqual(await readFrontendPromotionProofArtifact(artifact, 'report.json', 'test-read-token', fetchImpl), expected);
+  assert.deepEqual(await readFrontendPromotionProofArtifact(artifact, 'report.json', 'yohn-jp/codexia', 'test-read-token', fetchImpl), expected);
   assert.equal(requests[0].url, 'https://api.github.com/repos/yohn-jp/codexia/actions/artifacts/731/zip');
   assert.equal(new Headers(requests[0].options.headers).get('authorization'), 'token test-read-token');
   assert.equal(requests[0].options.redirect, 'manual');

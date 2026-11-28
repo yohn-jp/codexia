@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
+import { actionsRepository, matchesRunRepository, assertBackendImageDigest } from '../../github/repository.mjs';
 import { validateBackendIdentity } from '../../release/backend/update-identity.mjs';
 import { validatePushDeploymentCertificate } from './validate.mjs';
 
 const sha = /^[a-f0-9]{40}$/u;
-const image = /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
 const digest = /^sha256:[a-f0-9]{64}$/u;
 const positive = value => Number.isSafeInteger(value) && value > 0;
 
 /** Create the credential-free artifact that a later protected deploy workflow consumes. */
-export function buildPushDeploymentCertificate({ verifiedMainSha, verifiedMainTree, verifyRun, producerReceipt, profile, image: imageRef, identity }) {
+export function buildPushDeploymentCertificate({ verifiedMainSha, verifiedMainTree, verifyRun, producerReceipt, profile, image: imageRef, identity, context = actionsRepository() }) {
   assert.match(verifiedMainSha ?? '', sha, 'Verified main revision is invalid');
   assert.match(verifiedMainTree ?? '', sha, 'Verified main tree is invalid');
   assert.ok(verifyRun && typeof verifyRun === 'object', 'Verify run evidence is missing');
@@ -17,11 +17,10 @@ export function buildPushDeploymentCertificate({ verifiedMainSha, verifiedMainTr
   assert.equal(verifyRun.head_branch, 'main', 'Verify source must be main');
   assert.equal(verifyRun.status, 'completed', 'Verify run is not complete');
   assert.equal(verifyRun.conclusion, 'success', 'Unsuccessful Verify run cannot certify deployment');
-  assert.equal(verifyRun.repository?.full_name, 'yohn-jp/codexia', 'Verify repository mismatch');
-  assert.equal(verifyRun.head_repository?.full_name, 'yohn-jp/codexia', 'Verify source repository mismatch');
+  assert.ok(matchesRunRepository(verifyRun, context), 'Verify repository mismatch');
   assert.equal(verifyRun.head_sha, verifiedMainSha, 'Verified main SHA differs from Verify run');
   assert.ok(positive(verifyRun.id) && positive(verifyRun.run_attempt), 'Verify run identity is invalid');
-  assert.match(imageRef ?? '', image, 'Deployment image must use an immutable GHCR digest');
+  assertBackendImageDigest(imageRef, context.repository);
 
   const candidate = validateBackendIdentity(identity);
   assert.ok(['core', 'full'].includes(profile), 'Deployment profile is invalid');
@@ -56,7 +55,9 @@ export function buildPushDeploymentCertificate({ verifiedMainSha, verifiedMainTr
       event: verifyRun.event,
       branch: verifyRun.head_branch,
       conclusion: verifyRun.conclusion,
-      repository: verifyRun.repository.full_name,
+      repository: context.repository,
+      repositoryId: context.repositoryId,
+      ownerId: context.ownerId,
       headSha: verifyRun.head_sha,
       id: verifyRun.id,
       attempt: verifyRun.run_attempt,
@@ -74,5 +75,5 @@ export function buildPushDeploymentCertificate({ verifiedMainSha, verifiedMainTr
     image: imageRef,
     identity: candidate,
   };
-  return validatePushDeploymentCertificate(certificate, verifiedMainSha);
+  return validatePushDeploymentCertificate(certificate, verifiedMainSha, context);
 }

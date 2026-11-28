@@ -1,3 +1,4 @@
+import { deploymentRepository } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -129,7 +130,7 @@ export function summarizeCertifiedBrowser({ expected, run, certification, produc
 
 async function readReceipt(expected, token, waitSeconds) {
   const { repository, repositoryId, sourceSha, event } = expected;
-  const github = createGitHubOctokit({ token });
+  const github = createGitHubOctokit({ token, repository, repositoryId });
   const [owner, repo] = repository.split('/');
   const target = { owner, repo };
   const actions = github.rest.actions;
@@ -179,7 +180,7 @@ async function main() {
   assert.match(sourceSha ?? '', /^[a-f0-9]{40}$/u);
   assert.ok(['push', 'pull_request', 'workflow_dispatch'].includes(event) && output && extra.length === 0,
     'Usage: trace-receipt.mjs SHA EVENT OUTPUT');
-  assert.equal(repository, 'yohn-jp/codexia');
+  deploymentRepository(repository);
   assert.ok(Number.isSafeInteger(repositoryId) && repositoryId > 0, 'Missing repository ID');
   assert.ok(token, 'GitHub Actions read token is required');
   const receipt = await readReceipt({ sourceSha, event, repository, repositoryId }, token, waitSeconds).catch(error => {

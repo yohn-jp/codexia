@@ -1,3 +1,4 @@
+import { assertArtifactRunRepository, deploymentRepository, matchesRunRepository } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { assertPlanEvidence } from './validation.mjs';
@@ -12,7 +13,6 @@ import { coverageRuntime } from './coverage-inputs.mjs';
 import { createGitHubProofClient } from './proof-client.mjs';
 
 const VERIFY_PATH = '.github/workflows/verify.yml';
-const PROOF_REPOSITORY = 'yohn-jp/codexia';
 const COVERAGE_JOB = 'types-tests';
 const COVERAGE_WORKFLOW_JOB = 'types';
 const COVERAGE_ARTIFACT = 'ci-evidence-types-tests';
@@ -39,7 +39,7 @@ async function resolveCompactMainCoverageProof({ plan, run, jobs, current, repos
   assert.equal(certSteps.length, 1, 'Missing or duplicate compact exact-main certification step');
   assert.equal(certSteps[0].conclusion, 'success', 'Compact exact-main certification failed');
   const before = execFileSync('git', ['rev-parse', `${plan.base}^1`], { encoding: 'utf8' }).trim();
-  const githubRequest = createGitHubProofClient({ repository, token, request });
+  const githubRequest = createGitHubProofClient({ repository, repositoryId: current.repository.id, token, request });
   const { receipt: mainProof, plan: sourcePlan, reports: sourceReports } = await readReusableMainEvidence({
     sourceSha: plan.base, before, repository, currentRun: run,
     checkoutSha: plan.sha,
@@ -94,14 +94,15 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   assert.equal(plan.event, 'pull_request', 'Task proof reuse is only available to pull requests');
   assert.match(plan.base ?? '', /^[a-f0-9]{40}$/u, 'Task proof reuse requires an exact PR base');
   assert.ok(plan.tasks.includes('coverage'), 'Coverage task is not selected');
-  assert.equal(repository, PROOF_REPOSITORY, 'Task proof reuse is restricted to the canonical repository');
+  deploymentRepository(repository);
   assert.ok(typeof token === 'string' && token.length > 0, 'GitHub read token is required');
+  assert.equal(current?.repository?.full_name, repository, 'Current run repository mismatch');
   assert.equal(current?.path, VERIFY_PATH, 'Current workflow path mismatch');
   assert.equal(current?.event, 'pull_request', 'Current run is not a pull request');
   assert.equal(current?.head_sha, plan.sha, 'Current run source mismatch');
   assert.ok(positive(current?.workflow_id) && positive(current?.repository?.id), 'Current workflow identity is incomplete');
 
-  const github = createGitHubProofClient({ repository, token, request });
+  const github = createGitHubProofClient({ repository, repositoryId: current.repository.id, token, request });
   const get = github.get;
   const workflow = await get('actions/workflows/verify.yml');
   assert.equal(workflow.id, current.workflow_id, 'Current run uses another workflow');
@@ -109,7 +110,7 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   const runs = await github.paginate(`actions/workflows/${workflow.id}/runs`, { head_sha: plan.base, event: 'push' }, 'workflow_runs');
   const exactRuns = runs.filter(run => run?.workflow_id === current.workflow_id && run.path === VERIFY_PATH &&
     run.event === 'push' && run.head_branch === 'main' && run.head_sha === plan.base &&
-    run.repository?.id === current.repository.id && run.head_repository?.id === current.repository.id);
+    matchesRunRepository(run, { repository, repositoryId: current.repository.id, ownerId: current.repository.owner.id }));
   assert.ok(exactRuns.length > 0, 'No exact-base main verification run');
   const runNumbers = new Set();
   for (const run of exactRuns) {
@@ -136,11 +137,13 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   const selectedPlanArtifact = selectedArtifacts({ identity, artifacts }, [
     selectLatestPlanArtifact(artifacts, jobs, identity).id,
   ], identity, 'plan')[0];
+  assertArtifactRunRepository(selectedPlanArtifact, run);
   const mainPlan = validateVerificationPlan(await read(selectedPlanArtifact, 'ci-plan.json'));
   assert.equal(mainPlan.event, 'push');
   assert.equal(mainPlan.mode, 'full', 'Partial main plans cannot authorize task proof reuse');
   const evidenceArtifacts = selectLatestEvidenceArtifacts(mainPlan, artifacts, jobs, identity);
   const selectedEvidence = selectedArtifacts({ identity, artifacts }, evidenceArtifacts.map(item => item.id), identity, 'evidence');
+  for (const item of selectedEvidence) assertArtifactRunRepository(item, run);
   const reports = await Promise.all(selectedEvidence.map(item => read(item, 'report.json')));
   assertPlanEvidence(mainPlan, jobs, reports);
   const report = reports.find(item => item.group === COVERAGE_JOB);

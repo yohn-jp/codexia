@@ -7,7 +7,17 @@ die() { printf '%s\n' "$1" >&2; exit 1; }
 [[ $# -ge 2 && $# -le 5 ]] || die 'An explicit owner setup operation and reviewed Full image are required'
 operation="$1"
 image="$2"
-[[ "$image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || die 'A reviewed immutable Full image is required'
+image_repository="${CODEXIA_IMAGE_REPOSITORY:-}"
+reviewed_image() {
+  [[ "$image_repository" =~ ^ghcr\.io/[a-z0-9-]+/codexia-backend$ &&
+     "$1" == "$image_repository@"* && "${1#*@}" =~ ^sha256:[a-f0-9]{64}$ ]]
+}
+repository="${CODEXIA_TARGET_REPOSITORY:-}"
+repository_id="${CODEXIA_TARGET_REPOSITORY_ID:-}"
+owner_id="${CODEXIA_TARGET_OWNER_ID:-}"
+[[ "$repository" =~ ^[A-Za-z0-9-]+/codexia$ && "$repository_id" =~ ^[1-9][0-9]*$ && "$owner_id" =~ ^[1-9][0-9]*$ ]] ||
+  die 'Reviewed deployment repository identity is required'
+reviewed_image "$image" || die 'A reviewed immutable Full image is required'
 config_dir="$HOME/.config/codexia-auth"
 state_dir="$HOME/.local/state/codexia-deploy"
 unit_dir="$HOME/.config/containers/systemd"
@@ -101,7 +111,7 @@ database="$(read_database 'SELECT system_identifier || chr(58) || (SELECT oid FR
   die 'Could not verify PostgreSQL cluster and database identity'
 
 assert_intent() {
-  private_file "$intent" && [[ "$(cat -- "$intent")" == "$database:$image" ]] ||
+  private_file "$intent" && [[ "$(cat -- "$intent")" == "$repository:$repository_id:$owner_id:$database:$image" ]] ||
     die 'The approved fresh installation does not match the current database and reviewed Full image'
 }
 
@@ -109,7 +119,7 @@ assert_installation() {
   private_file "$marker" || die 'This VM has no approved initial setup record'
   [[ "$(cat -- "$marker")" == "${database%%:*}" ]] ||
     die 'Owner setup cannot be adopted on a replacement PostgreSQL cluster'
-  if present "$intent"; then assert_intent; fi
+  assert_intent
 }
 
 assert_approved_checkpoint() {

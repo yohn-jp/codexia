@@ -205,10 +205,11 @@ test('Ansible projection follows parsed literal include graphs and rejects orpha
     await writeFile(path.join(root, relative), source);
   };
   await write('deploy/ansible/site.yml', [
-    '- name: Site stage', '  hosts: all', '  tasks:',
+    '- name: Site stage', '  hosts: all', '  vars_files: [repository-vars.yml]', '  tasks:',
     '    - name: Include base tasks', '      ansible.builtin.include_tasks:',
     '        file: tasks/base.yml',
   ].join('\n'));
+  await write('deploy/ansible/repository-vars.yml', 'deployment_repository: fixture/codexia\n');
   await write('deploy/ansible/tasks/base.yml', [
     '- name: Import nested tasks', '  ansible.builtin.import_tasks: nested/runtime.yml',
   ].join('\n'));
@@ -229,6 +230,7 @@ test('Ansible projection follows parsed literal include graphs and rejects orpha
     }],
   });
   assert.ok(projection.surfaces.find(item => item.id === 'deploy/ansible/tasks/nested/runtime.yml')?.inventoryGroups.includes('site'));
+  assert.ok(projection.surfaces.find(item => item.id === 'deploy/ansible/repository-vars.yml')?.inventoryGroups.includes('site'));
   assert.ok(projection.surfaces.find(item => item.id === 'deploy/ansible/inventory.example.yml')?.mappingBasis === 'semantic');
   assert.ok(projection.violations.some(item => item.includes('not reachable') && item.endsWith('deploy/ansible/roles/new-role/tasks/main.yml')));
 

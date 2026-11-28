@@ -355,7 +355,9 @@ case "${1:-}" in
       die 'Usage: drill /absolute/backup/directory /absolute/private/age-identity --approved [--candidate-full-image IMAGE@sha256:DIGEST --candidate-ledger sha256:DIGEST [--candidate-api-ready --candidate-runtime-settings /absolute/private/runtime.env --candidate-introspection-secret-file /absolute/private/secret]]'
     candidate=; ledger=; candidate_api_ready=false; candidate_runtime_settings=
     if [[ $# -ge 8 ]]; then
-      [[ "$5" == --candidate-full-image && "$6" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || die 'Use a digest-pinned reviewed Full backend image'
+      [[ "$5" == --candidate-full-image && "${CODEXIA_IMAGE_REPOSITORY:-}" =~ ^ghcr\.io/[a-z0-9][a-z0-9-]*/codexia-backend$ &&
+         "${6%@*}" == "$CODEXIA_IMAGE_REPOSITORY" && "${6##*@}" =~ ^sha256:[a-f0-9]{64}$ ]] ||
+        die 'Use a digest-pinned reviewed Full backend image from the independently verified recovery repository'
       candidate="$6"
       [[ "$7" == --candidate-ledger && "$8" =~ ^sha256:[a-f0-9]{64}$ ]] || die 'Use a digest-pinned candidate migration ledger'
       ledger="$8"

@@ -5,6 +5,8 @@ This operation never opens a network connection or writes to the target VM.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import ipaddress
 import json
 import os
@@ -16,7 +18,6 @@ import sys
 
 import yaml
 
-IMMUTABLE_FULL_IMAGE = re.compile(r"ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}\Z")
 USERNAME = re.compile(r"[a-z_][a-z0-9_-]{0,31}\Z")
 MAIN_SHA = re.compile(r"[a-f0-9]{40}\Z")
 RUN_NUMBER = re.compile(r"[1-9][0-9]*\Z")
@@ -50,7 +51,8 @@ def validate_host(host: str) -> None:
         raise InvalidBootstrapInput("Bootstrap host must be a single literal address or DNS name")
 
 
-def certified_image(env: dict[str, str], runner_temp: Path) -> str:
+def certified_image(env: dict[str, str], runner_temp: Path, repository: str,
+                    repository_id: int, owner_id: int, image_repository: str) -> str:
     source = required(env, "GITHUB_SHA")
     run_id = required(env, "GITHUB_RUN_ID")
     attempt = required(env, "GITHUB_RUN_ATTEMPT")
@@ -72,15 +74,30 @@ def certified_image(env: dict[str, str], runner_temp: Path) -> str:
     if (receipt.get("sourceSha") != source or type(receipt.get("runId")) is not int or str(receipt["runId"]) != run_id
             or type(receipt.get("attempt")) is not int or str(receipt["attempt"]) != attempt):
         raise InvalidBootstrapInput("Verified lifecycle candidate does not match the current workflow run and attempt")
-    if not isinstance(certified, str) or not IMMUTABLE_FULL_IMAGE.fullmatch(certified) or profile != "full":
+    if (receipt.get("repository") != repository or receipt.get("repositoryId") != repository_id or
+            receipt.get("ownerId") != owner_id):
+        raise InvalidBootstrapInput("Verified lifecycle candidate belongs to a different repository")
+    verify_run = candidate.get("verifyRun", {})
+    if (verify_run.get("repository") != repository or verify_run.get("repositoryId") != repository_id or
+            verify_run.get("ownerId") != owner_id):
+        raise InvalidBootstrapInput("Certified deployment image belongs to a different repository")
+    if (not isinstance(certified, str) or
+            not re.fullmatch(re.escape(image_repository) + r"@sha256:[a-f0-9]{64}", certified) or profile != "full"):
         raise InvalidBootstrapInput("Verified lifecycle candidate does not match the reviewed digest and Full profile")
     return certified
 
 
 def prepare(env: dict[str, str]) -> dict[str, str]:
-    if (env.get("GITHUB_ACTIONS") != "true" or env.get("GITHUB_REPOSITORY") != "yohn-jp/codexia" or
+    if (env.get("GITHUB_ACTIONS") != "true" or
             env.get("GITHUB_REF") != "refs/heads/main" or env.get("GITHUB_EVENT_NAME") != "workflow_dispatch"):
         raise InvalidBootstrapInput("Production bootstrap preparation is restricted to manual runs on protected main")
+    repository = required(env, "GITHUB_REPOSITORY")
+    owner_match = re.fullmatch(r"([A-Za-z0-9-]+)/codexia", repository)
+    repository_id = required(env, "GITHUB_REPOSITORY_ID")
+    owner_id = required(env, "GITHUB_REPOSITORY_OWNER_ID")
+    if not owner_match or not RUN_NUMBER.fullmatch(repository_id) or not RUN_NUMBER.fullmatch(owner_id):
+        raise InvalidBootstrapInput("Missing immutable repository identity")
+    image_repository = f"ghcr.io/{owner_match[1].lower()}/codexia-backend"
     operation = required(env, "CODEXIA_BOOTSTRAP_MODE")
     if operation != "preflight" and operation not in MUTATING_MODES:
         raise InvalidBootstrapInput("Unsupported bootstrap operation")
@@ -94,7 +111,8 @@ def prepare(env: dict[str, str]) -> dict[str, str]:
         raise InvalidBootstrapInput("Read-only preflight and owner operations must not include mutation approvals for database initialization")
 
     runner_temp = Path(required(env, "RUNNER_TEMP")).resolve(strict=True)
-    image = certified_image(env, runner_temp) if operation in MUTATING_MODES else None
+    image = (certified_image(env, runner_temp, repository, int(repository_id), int(owner_id), image_repository)
+             if operation in MUTATING_MODES else None)
     root = runner_temp / "codexia-bootstrap"
     if root.exists() or root.is_symlink():
         raise InvalidBootstrapInput("Refusing to reuse an existing bootstrap controller directory")
@@ -115,6 +133,17 @@ def prepare(env: dict[str, str]) -> dict[str, str]:
         if tunnel:
             if not re.fullmatch(r"[!-~]{1,8192}", tunnel):
                 raise InvalidBootstrapInput("Expected a single Tunnel connector token")
+            try:
+                target = json.loads(required(env, "CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"))
+                credential = json.loads(base64.b64decode(tunnel + "=" * (-len(tunnel) % 4), validate=True))
+                if (target["repository"] != repository or target["repositoryId"] != int(repository_id) or
+                    target["ownerId"] != int(owner_id) or target["origin"] != profile["publicOrigin"] or
+                    target["origin"] != required(env, "CODEXIA_PUBLIC_ORIGIN") or
+                    not target["accountId"] or not target["tunnelId"] or
+                    credential["a"] != target["accountId"] or credential["t"] != target["tunnelId"]):
+                    raise ValueError
+            except (binascii.Error, UnicodeError, ValueError, KeyError, TypeError) as exc:
+                raise InvalidBootstrapInput("Tunnel connector token does not match the protected Cloudflare target") from exc
             tunnel_file = control / "tunnel-token"
             with open(tunnel_file, "x", opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
                 output.write(tunnel)

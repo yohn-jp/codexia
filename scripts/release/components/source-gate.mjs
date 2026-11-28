@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // A completed, exact-source Verify main run authorizes one component release.
 // Evaluate only after Verify completes. Only a net change to the same component supersedes a source.
+import { actionsRepository, assertArtifactRunRepository, deploymentRepository, matchesRunRepository } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -17,15 +18,15 @@ export function verifiedReleaseEvent(payload, env, checkoutSha) {
   const run = payload?.workflow_run;
   assert.equal(env.GITHUB_EVENT_NAME, 'workflow_run', 'Release requires a completed Verify event');
   assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Release event must run on main');
-  assert.equal(env.GITHUB_REPOSITORY, 'yohn-jp/codexia', 'Release repository mismatch');
+  const context = actionsRepository(env);
   assert.equal(run?.path, '.github/workflows/verify.yml', 'Unexpected verification workflow');
   assert.equal(run?.event, 'push', 'PR verification cannot authorize releases');
   assert.equal(run?.head_branch, 'main', 'Release verification must come from main');
   assert.equal(run?.status, 'completed', 'Release verification is not complete');
   assert.equal(run?.conclusion, 'success', 'Unsuccessful verification cannot authorize release');
-  assert.equal(run?.repository?.full_name, env.GITHUB_REPOSITORY, 'Verification repository mismatch');
-  assert.equal(run?.head_repository?.full_name, env.GITHUB_REPOSITORY, 'Verification source repository mismatch');
+  assert.ok(matchesRunRepository(run, context), 'Verification repository mismatch');
   assert.ok(Number.isSafeInteger(run?.id) && run.id > 0, 'Invalid verification run ID');
+  assert.ok(Number.isSafeInteger(run.run_attempt) && run.run_attempt > 0, 'Invalid verification run attempt');
   assert.match(run.head_sha ?? '', /^[a-f0-9]{40}$/u, 'Invalid verified commit');
   assert.equal(env.CODEXIA_SOURCE_SHA, run.head_sha, 'Release source SHA differs from verification event');
   assert.equal(String(env.CODEXIA_VERIFY_RUN_ID), String(run.id), 'Release verification run ID mismatch');
@@ -56,9 +57,8 @@ export function selectReleaseSource(component, source, main, git, before) {
 async function readVerifiedPushBase(run, runId, repository, token) {
   assert.ok(token, 'Release requires Actions read permission');
   assert.ok(Number.isSafeInteger(runId) && runId > 0, 'Invalid trusted Verify run ID');
-  assert.equal(repository, 'yohn-jp/codexia', 'Release repository mismatch');
+  const { owner, repo } = deploymentRepository(repository);
   const github = createGitHubOctokit({ token });
-  const [owner, repo] = repository.split('/');
   const [jobs, artifacts] = await Promise.all([
     paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRun,
       { owner, repo, run_id: runId, filter: 'latest' }, 'jobs'),
@@ -66,6 +66,7 @@ async function readVerifiedPushBase(run, runId, repository, token) {
       { owner, repo, run_id: runId }, 'artifacts'),
   ]);
   const planArtifact = selectLatestPlanArtifact(artifacts, jobs, { runId, sourceSha: run.head_sha });
+  assertArtifactRunRepository(planArtifact, run);
   const data = await extractJsonEntry(await downloadArtifact(planArtifact, repository, token), 'ci-plan.json');
   const plan = validateVerificationPlan(JSON.parse(data));
   assert.equal(plan.event, 'push');
@@ -102,7 +103,7 @@ const main = async () => {
   if (affected) {
     assert.ok(process.env.GH_TOKEN, 'Release requires Actions read permission');
     execFileSync(process.execPath, ['scripts/release/components/verify-source.mjs'], {
-      cwd:root,env:{...process.env,CODEXIA_COMMIT_RELEASE:'1'},stdio:'inherit',timeout:120_000,
+      cwd:root,env:{...process.env,CODEXIA_COMMIT_RELEASE:'1',CODEXIA_VERIFY_RUN_ATTEMPT:String(run.run_attempt)},stdio:'inherit',timeout:120_000,
     });
   }
   const output = 'affected=' + String(affected) + '\nsource-sha=' + checkoutSha +

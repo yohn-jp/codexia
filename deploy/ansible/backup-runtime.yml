@@ -198,6 +198,7 @@
 - name: Install the protected executor environment
   vars:
     backup_managed_env: |
+      CODEXIA_IMAGE_REPOSITORY={{ codexia_image_repository }}
       CODEXIA_BACKUP_POLICY_FILE={{ backup_config }}/policy.json
       CODEXIA_BACKUP_EXECUTOR_CONFIG_FILE={{ backup_config }}/executor.json
       CODEXIA_BACKUP_PYTHON={{ backup_root }}/sdk/bin/python
