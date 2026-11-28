@@ -11,8 +11,8 @@ import (
 const (
 	vmStage = iota + 1
 	githubStage
-	tailnetStage
-	cloudflareStage
+	cloudflareAuthStage
+	sshPinStage
 	settingsStage
 	managementStage
 	bootstrapStage
@@ -69,7 +69,7 @@ func runInit(ctx context.Context) (resultErr error) {
 		return err
 	}
 	snapshot, err := gh.Observe(ctx)
-	if err := validateProtectedCloudflareTarget(snapshot, gh.target, settings.PublicOrigin); err != nil {
+	if err := validateProtectedCloudflareTarget(snapshot, gh.target, settings); err != nil {
 		return err
 	}
 	if errors.Is(err, errGitHubProtection) && !vm.CodexiaPresent {
@@ -167,7 +167,7 @@ func managementInputsExist(env githubEnvironment, names []string, sshSecret stri
 			return false
 		}
 	}
-	for _, name := range commonSecrets {
+	for _, name := range managementSecrets() {
 		if !env.Secrets[name] {
 			return false
 		}
@@ -177,30 +177,34 @@ func managementInputsExist(env githubEnvironment, names []string, sshSecret stri
 
 func (c *workflowController) prepareInputs(ctx context.Context, gh *githubControl, o operator, vm vmObservation,
 	settings productionContract, snapshot githubSnapshot) error {
-	reportStage(o, tailnetStage, "Verify this VM's Tailnet, runner access policy and repository OIDC trust")
-	tailnet, err := prepareTailnet(ctx, o, vm, gh, snapshot, false)
+	reportStage(o, cloudflareAuthStage, "Check the Cloudflare connector and authenticate through the official cf Device Flow")
+	connectorNeedsInstall, err := CloudflareConnectorNeedsInstall(ctx)
 	if err != nil {
 		return err
 	}
-	pin, err := vm.ConfirmPin(o, tailnet.Address)
-	if err != nil {
-		return err
-	}
-	o.Notice("Verified the Tailnet node, CI policy and effective OpenSSH pin for " + tailnet.Address + ".")
-	reportStage(o, cloudflareStage, "Verify the existing edge for "+settings.PublicOrigin)
-	edge, err := observeCloudflare(ctx, o, gh.target, settings, cloudflareRequirementsFor(snapshot))
+	requirements := cloudflareRequirementsFor(snapshot).requireConnectorToken(connectorNeedsInstall)
+	edge, err := observeCloudflare(ctx, o, gh.target, settings, requirements)
 	if err != nil {
 		return err
 	}
 	defer edge.Close()
+	if edge.target.SSHHostname != settings.ManagementHostname {
+		return refused("The verified Cloudflare SSH ingress does not match the selected production management hostname")
+	}
 	if err := verifyInitialEdge(ctx, vm, edge); err != nil {
 		return err
 	}
+	reportStage(o, sshPinStage, "Confirm the OpenSSH host key behind "+settings.ManagementHostname)
+	pin, err := vm.ConfirmPin(o, settings.ManagementHostname)
+	if err != nil {
+		return err
+	}
+	o.Notice("Verified the Cloudflare management hostname and effective OpenSSH pin for " + settings.ManagementHostname + ".")
 	reportStage(o, settingsStage, "Compare checked VM and provider values against the selected repository's protected inputs")
 	if err := c.requireIdle(ctx, gh); err != nil {
 		return err
 	}
-	return registerInputs(ctx, o, gh, c, vm, tailnet, edge, snapshot, pin)
+	return registerInputs(ctx, o, gh, c, vm, settings.ManagementHostname, edge, snapshot, pin)
 }
 
 func (c *workflowController) reconcilePrevious(ctx context.Context, gh *githubControl) error {

@@ -32,8 +32,6 @@ const maxAuthorizedKeys = 1024 * 1024
 
 var unixUsername = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 var machineIDPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
-var tailnetIPv4 = netip.MustParsePrefix("100.64.0.0/10")
-var tailnetIPv6 = netip.MustParsePrefix("fd7a:115c:a1e0::/48")
 
 type vmObservation struct {
 	User            string
@@ -264,13 +262,12 @@ func (vm vmObservation) confirmHostFingerprint(o operator) (string, error) {
 }
 
 func (vm vmObservation) pinForFingerprint(address, fingerprint string) (string, error) {
-	ip, err := netip.ParseAddr(address)
-	if err != nil || !isTailnetAddress(ip) {
-		return "", errors.New("the OpenSSH pin requires an observed Tailscale VM address")
+	if !validDNSHostname(address) {
+		return "", errors.New("the OpenSSH pin requires the verified Cloudflare management hostname")
 	}
 	for _, key := range vm.hostKeys {
 		if ssh.FingerprintSHA256(key) == fingerprint {
-			return ip.String() + " " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))), nil
+			return address + " " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))), nil
 		}
 	}
 	return "", refused("independently verified fingerprint does not match an effective VM OpenSSH host key")
@@ -289,8 +286,11 @@ func (vm vmObservation) verifyKnownHosts(host, pins string) error {
 			return errors.New("the existing protected SSH pin is malformed")
 		}
 		remaining = rest
-		if !slices.ContainsFunc(hosts, func(pattern string) bool { return strings.EqualFold(pattern, host) }) {
+		if !slices.Contains(hosts, host) {
 			continue
+		}
+		if len(hosts) != 1 {
+			return errors.New("the existing SSH pin includes additional host aliases outside the Cloudflare management ingress")
 		}
 		localKey := slices.ContainsFunc(vm.hostKeys, func(local ssh.PublicKey) bool {
 			return bytes.Equal(local.Marshal(), key.Marshal())
@@ -304,10 +304,6 @@ func (vm vmObservation) verifyKnownHosts(host, pins string) error {
 		return errors.New("no existing protected SSH pin binds the observed VM address to an effective host key")
 	}
 	return nil
-}
-
-func isTailnetAddress(ip netip.Addr) bool {
-	return ip.Zone() == "" && (tailnetIPv4.Contains(ip) || tailnetIPv6.Contains(ip))
 }
 
 func newSSHIdentity() ([]byte, string, error) {

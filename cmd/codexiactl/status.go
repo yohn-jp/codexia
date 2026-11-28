@@ -22,7 +22,7 @@ type statusReport struct {
 	MainSHA            string          `json:"mainSha,omitempty"`
 	PublicOrigin       string          `json:"publicOrigin,omitempty"`
 	Clock              string          `json:"clock,omitempty"`
-	TailnetAddress     string          `json:"tailnetAddress,omitempty"`
+	ManagementHostname string          `json:"managementHostname,omitempty"`
 	Phase              string          `json:"phase"`
 	Route              string          `json:"route"`
 	Active             string          `json:"active"`
@@ -42,7 +42,7 @@ type observedRun struct {
 }
 
 func readOnly(ctx context.Context, i invocation, stdout, stderr io.Writer) int {
-	status := statusReport{SchemaVersion: 1,
+	status := statusReport{SchemaVersion: 2,
 		Phase: "UNKNOWN", Route: "unknown", Active: "unknown", Accepted: "unknown", OrdinaryUpdate: "unknown",
 		Blockers: []string{}, Runs: []observedRun{}, Evidence: []string{}}
 	err := inspectReadOnly(ctx, i, &status)
@@ -106,7 +106,7 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 	reportStage(tty, vmStage, "Check local SSH session, OS, clock and administrator access")
 	reportResult(tty, successText, "Local VM observed; clock "+vm.Clock)
 	if i.command == "doctor" || i.plan {
-		tty.Notice("READ-ONLY INSPECTION: no VM, Tailnet, Cloudflare, or GitHub settings will be changed. Provider credentials are requested only for temporary API reads and are not stored. Decline a provider to stop safely.")
+		tty.Notice("READ-ONLY INSPECTION: no VM, Cloudflare, or GitHub settings will be changed. Provider credentials are requested only for temporary API reads and are not stored. Decline a provider to stop safely.")
 	}
 	reportStage(tty, githubStage, "Authenticate and inspect the selected repository")
 	gh, err := githubLogin(ctx, tty, githubAppClientID)
@@ -136,7 +136,7 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 	}
 	snapshot, snapshotErr := gh.Observe(ctx)
 	report.MainSHA = snapshot.MainSHA
-	targetErr := validateProtectedCloudflareTarget(snapshot, gh.target, settings.PublicOrigin)
+	targetErr := validateProtectedCloudflareTarget(snapshot, gh.target, settings)
 	if targetErr != nil {
 		report.Blockers = append(report.Blockers, "existing-protected-input-mismatch")
 		reportResult(tty, warningText, targetErr.Error())
@@ -213,14 +213,16 @@ func blockerGuidance(blocker string) string {
 		return "Settings > Environments: for codexia-bootstrap and codexia-production, restrict deployment branches to main. Required reviewers and Prevent self-review are optional. Verify the official GitHub App and authenticated user can access these settings in the selected repository."
 	case "latest-target-lifecycle-evidence-unavailable":
 		return "No current, exact-main Preflight receipt is proven for this VM. A first installation needs init to request a fresh protected Preflight; an existing installation needs operator recovery evidence. Older successful runs do not authorize changes."
-	case "tailnet-identity-or-policy-unverified":
-		return "Review the exact OIDC subject, auth_keys-only scope, tag:ci and main-workflow claims at " + wifTrustConsole + ". For a missing credential, init can offer a separate, scoped one after approval; doctor and --plan never create it."
 	case "ssh-host-pin-unverified":
 		return "Compare the VM's SSH host key fingerprint with the independent SSH client/provider console; never disable strict host-key verification."
 	case "cloudflare-edge-unverified", "edge-initial-install-unverified":
-		return "Inspect the account, zone, Tunnel, Access and Worker for the configured production origin. Changes to Terraform-owned resources must use the existing IaC path."
+		return "Inspect the selected Cloudflare account, zone, management SSH ingress, Tunnel, Access and Worker for the configured production origin. Changes to Terraform-owned resources must use the existing IaC path."
+	case "cloudflare-connector-install-required":
+		return "Run codexiactl init from the independent SSH administrator session to install the pinned Cloudflare connector after explicit approval. Keep the current management path until the runner's SSH and Ansible checks succeed."
+	case "cloudflare-connector-unverified":
+		return "Inspect the existing Cloudflare connector files and systemd service. Reconcile conflicting files through the approved VM administration path before continuing."
 	case "protected-inputs-missing":
-		return "Missing GitHub Environment inputs are reported before any write. Run init only after reviewing the target and supplying the approved, minimum-scope provider credentials."
+		return "Missing GitHub Environment inputs are reported before any write. Run init to issue and register only the approved minimum-scope credentials that are missing; existing credentials are not replaced."
 	case "existing-protected-input-mismatch":
 		return "The live target differs from existing protected GitHub inputs. Do not overwrite them automatically; reconcile the owning environment first."
 	case "protected-input-inventory-unavailable":
@@ -248,9 +250,7 @@ func reportProtectedInputs(snapshot githubSnapshot, report *statusReport) {
 			report.ProtectedInputs[item.environment+"/"+item.name] = inventory[item.name]
 		}
 	}
-	for _, item := range append(protectedVariables("", "", "", ""),
-		environmentInput{bootstrapEnvironment, wifClientIDInput, ""},
-		environmentInput{productionEnvironment, wifClientIDInput, ""}) {
+	for _, item := range protectedVariables("", "", "", "") {
 		if inventory := selectEnvironment(snapshot, item.environment).Variables; inventory != nil {
 			_, report.ProtectedInputs[item.environment+"/"+item.name] = inventory[item.name]
 		}
@@ -268,50 +268,55 @@ func reportProtectedInputs(snapshot githubSnapshot, report *statusReport) {
 
 func inspectProviders(ctx context.Context, o operator, vm vmObservation, gh *githubControl, snapshot githubSnapshot, settings productionContract, report *statusReport) error {
 	var failures []error
-	reportStage(o, tailnetStage, "Inspect Tailnet identity and CI SSH/OIDC trust")
-	tailnet, tailErr := prepareTailnet(ctx, o, vm, gh, snapshot, true)
-	if ctx.Err() != nil || errors.Is(tailErr, errTerminalInterrupt) {
-		return errors.Join(ctx.Err(), tailErr)
-	}
-	if tailErr != nil {
-		report.Blockers = append(report.Blockers, "tailnet-identity-or-policy-unverified")
-		reportResult(o, warningText, "Tailscale check: "+tailErr.Error())
-		failures = append(failures, tailErr)
-	} else {
-		report.TailnetAddress = tailnet.Address
-	}
 	var pin string
-	if tailErr == nil {
-		var pinErr error
-		pin, pinErr = vm.ConfirmPin(o, tailnet.Address)
-		if ctx.Err() != nil || errors.Is(pinErr, errTerminalInterrupt) {
-			return errors.Join(ctx.Err(), pinErr)
-		}
-		if pinErr != nil {
-			report.Blockers = append(report.Blockers, "ssh-host-pin-unverified")
-			reportResult(o, warningText, "SSH identity check: "+pinErr.Error())
-			failures = append(failures, pinErr)
-		} else {
-			reportResult(o, successText, "Tailnet identity, CI trust and SSH host pin verified")
-		}
-	}
-	// Cloudflare discovery is independent of a failed Tailscale trust check.
-	// Continue gathering read-only evidence instead of requiring another doctor
-	// invocation merely to discover the next missing prerequisite.
-	reportStage(o, cloudflareStage, "Inspect DNS, Tunnel, Access and Workers")
+	reportStage(o, cloudflareAuthStage, "Inspect Cloudflare account, SSH ingress, Tunnel, Access and Workers")
 	edge, edgeErr := observeCloudflare(ctx, o, gh.target, settings, cloudflareAuthRequirements{})
+	if edge != nil {
+		defer edge.Close()
+	}
 	if edgeErr != nil {
 		report.Blockers = append(report.Blockers, "cloudflare-edge-unverified")
 		reportResult(o, warningText, "Cloudflare check: "+edgeErr.Error())
 		failures = append(failures, edgeErr)
 	} else {
-		defer edge.Close()
+		if edge.target.SSHHostname != settings.ManagementHostname {
+			err := refused("The verified Cloudflare SSH ingress does not match the selected production management hostname")
+			report.Blockers = append(report.Blockers, "cloudflare-edge-unverified")
+			reportResult(o, warningText, "Cloudflare check: "+err.Error())
+			failures = append(failures, err)
+		} else {
+			report.ManagementHostname = settings.ManagementHostname
+			reportStage(o, sshPinStage, "Confirm the OpenSSH host key behind "+settings.ManagementHostname)
+			var pinErr error
+			pin, pinErr = vm.ConfirmPin(o, settings.ManagementHostname)
+			if ctx.Err() != nil || errors.Is(pinErr, errTerminalInterrupt) {
+				return errors.Join(ctx.Err(), pinErr)
+			}
+			if pinErr != nil {
+				report.Blockers = append(report.Blockers, "ssh-host-pin-unverified")
+				reportResult(o, warningText, "SSH identity check: "+pinErr.Error())
+				failures = append(failures, pinErr)
+			} else {
+				reportResult(o, successText, "Cloudflare management ingress and SSH host pin verified")
+			}
+		}
 		if verifyErr := verifyInitialEdge(ctx, vm, edge); verifyErr != nil {
 			report.Blockers = append(report.Blockers, "edge-initial-install-unverified")
 			reportResult(o, warningText, "Cloudflare edge check: "+verifyErr.Error())
 			failures = append(failures, verifyErr)
 		} else {
 			reportResult(o, successText, "Cloudflare edge verified")
+		}
+		needsInstall, connectorErr := CloudflareConnectorNeedsInstall(ctx)
+		if connectorErr != nil {
+			report.Blockers = append(report.Blockers, "cloudflare-connector-unverified")
+			reportResult(o, warningText, "Cloudflare connector check: "+connectorErr.Error())
+			failures = append(failures, connectorErr)
+		} else if needsInstall {
+			err := needsAction("the pinned Cloudflare connector is not installed and active on this VM")
+			report.Blockers = append(report.Blockers, "cloudflare-connector-install-required")
+			reportResult(o, warningText, "Cloudflare connector check: "+err.Error())
+			failures = append(failures, err)
 		}
 	}
 	reportStage(o, settingsStage, "Compare protected inputs with observed provider identity")
@@ -324,7 +329,12 @@ func inspectProviders(ctx context.Context, o operator, vm vmObservation, gh *git
 		report.Blockers = append(report.Blockers, "protected-input-inventory-unavailable")
 		return nil
 	}
-	desired, err := observedProtectedVariables(snapshot, vm, tailnet, pin, edge.Target)
+	if err := validateServiceAuthPairs(snapshot); err != nil {
+		report.Blockers = append(report.Blockers, "existing-protected-input-mismatch")
+		reportResult(o, warningText, "Protected Service Auth check: "+err.Error())
+		return err
+	}
+	desired, err := observedProtectedVariables(snapshot, vm, settings.ManagementHostname, pin, edge.Target)
 	if err != nil {
 		report.Blockers = append(report.Blockers, "existing-protected-input-mismatch")
 		return err

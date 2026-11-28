@@ -148,9 +148,9 @@ func TestDoctorReportsActionableBlockersWithoutDumpingWorkflowHistory(t *testing
 		"interactive-authentication-required",
 		"github-authentication-unverified",
 		"github-environment-or-permission-unverified",
-		"tailnet-identity-or-policy-unverified",
 		"latest-target-lifecycle-evidence-unavailable",
 		"cloudflare-edge-unverified",
+		"cloudflare-connector-install-required",
 		"independent-restore-acceptance-unverified",
 		"live-deployment-state-unverified",
 	} {

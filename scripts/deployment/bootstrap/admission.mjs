@@ -35,7 +35,7 @@ export function admitBootstrap({ mode, plan, planSha256, current, topology,
   }
   if (plan.observation.bootstrapResume) return { route, stages: ['auth-runtime'], installIntent: true };
   const needsHost = topology?.hostReady !== true;
-  const needsSecrets = ['codexia-tunnel-token', 'codexia-postgres-admin-password', 'codexia-postgres-app-password']
+  const needsSecrets = ['codexia-postgres-admin-password', 'codexia-postgres-app-password']
     .some(secret => topology?.secrets?.[secret] !== true);
   const needsBase = state.H !== 'ready' || state.D !== 'compatible';
   const needsAuth = state.A === 'absent';

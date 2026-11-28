@@ -16,7 +16,8 @@ const (
 	ownerRecipient     = "CODEXIA_OWNER_SETUP_AGE_RECIPIENT"
 	bootstrapSSHSecret = "CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY"
 	runtimeSSHSecret   = "CODEXIA_DEPLOY_SSH_PRIVATE_KEY"
-	wifClientIDInput   = "TS_OAUTH_CLIENT_ID"
+	sshAccessClientID  = "CODEXIA_SSH_ACCESS_CLIENT_ID"
+	sshAccessSecret    = "CODEXIA_SSH_ACCESS_CLIENT_SECRET"
 	edgeTarget         = "CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"
 )
 
@@ -24,39 +25,43 @@ var commonSecrets = []string{
 	"CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN", "CODEXIA_ACCESS_CLIENT_ID", "CODEXIA_ACCESS_CLIENT_SECRET",
 }
 
+func managementSecrets() []string {
+	return append(append([]string(nil), commonSecrets...), sshAccessClientID, sshAccessSecret)
+}
+
 type environmentInput struct {
 	environment, name string
 	value             string
 }
 
-func protectedVariables(address, pin, user, target string) []environmentInput {
+func protectedVariables(managementHostname, pin, user, target string) []environmentInput {
 	return []environmentInput{
-		{bootstrapEnvironment, "CODEXIA_BOOTSTRAP_HOST", address},
+		{bootstrapEnvironment, "CODEXIA_BOOTSTRAP_HOST", managementHostname},
 		{bootstrapEnvironment, "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS", pin},
 		{bootstrapEnvironment, "CODEXIA_BOOTSTRAP_SSH_USER", user},
 		{bootstrapEnvironment, edgeTarget, target},
-		{productionEnvironment, "CODEXIA_DEPLOY_HOST", address},
+		{productionEnvironment, "CODEXIA_DEPLOY_HOST", managementHostname},
 		{productionEnvironment, "CODEXIA_DEPLOY_SSH_KNOWN_HOSTS", pin},
 		{productionEnvironment, edgeTarget, target},
 	}
 }
 
-func observedProtectedVariables(snapshot githubSnapshot, vm vmObservation, tailnet tailnetObservation,
-	pin, edge string) ([]environmentInput, error) {
-	values := protectedVariables(tailnet.Address, pin, vm.User, edge)
-	values = append(values,
-		environmentInput{bootstrapEnvironment, wifClientIDInput, tailnet.ClientID},
-		environmentInput{productionEnvironment, wifClientIDInput, tailnet.ClientID})
+func observedProtectedVariables(snapshot githubSnapshot, vm vmObservation, managementHostname, pin, edge string) ([]environmentInput, error) {
+	if !validDNSHostname(managementHostname) {
+		return nil, refused("The observed Cloudflare management hostname is invalid")
+	}
+	if !strings.HasPrefix(pin, managementHostname+" ") {
+		return nil, refused("The independently verified OpenSSH pin is not bound to the Cloudflare management hostname")
+	}
+	values := protectedVariables(managementHostname, pin, vm.User, edge)
 	for _, pair := range []struct{ host, known int }{{0, 1}, {4, 5}} {
 		env := selectEnvironment(snapshot, values[pair.host].environment)
 		host := env.Variables[values[pair.host].name]
 		if host == "" {
 			continue
 		}
-		if host != tailnet.Address && !slices.ContainsFunc(tailnet.Aliases, func(alias string) bool {
-			return strings.EqualFold(alias, host)
-		}) {
-			return nil, refused("An existing protected SSH destination belongs to a different VM")
+		if host != managementHostname {
+			return nil, refused("An existing protected SSH destination differs from the verified Cloudflare management hostname")
 		}
 		values[pair.host].value = host
 		existingPin := env.Variables[values[pair.known].name]
@@ -66,7 +71,7 @@ func observedProtectedVariables(snapshot githubSnapshot, vm vmObservation, tailn
 			}
 			values[pair.known].value = existingPin
 		} else {
-			values[pair.known].value = host + strings.TrimPrefix(pin, tailnet.Address)
+			values[pair.known].value = host + strings.TrimPrefix(pin, managementHostname)
 		}
 	}
 	return values, nil
@@ -75,8 +80,11 @@ func observedProtectedVariables(snapshot githubSnapshot, vm vmObservation, tailn
 func protectedSecrets() []environmentInput {
 	results := []environmentInput{
 		{bootstrapEnvironment, bootstrapSSHSecret, ""},
+		{bootstrapEnvironment, sshAccessClientID, ""},
+		{bootstrapEnvironment, sshAccessSecret, ""},
 		{productionEnvironment, runtimeSSHSecret, ""},
-		{bootstrapEnvironment, "CODEXIA_TUNNEL_TOKEN", ""},
+		{productionEnvironment, sshAccessClientID, ""},
+		{productionEnvironment, sshAccessSecret, ""},
 		{productionEnvironment, "CLOUDFLARE_API_TOKEN", ""},
 		{productionEnvironment, "CLOUDFLARE_ACCOUNT_ID", ""},
 	}
@@ -124,9 +132,24 @@ func missingSecrets(snapshot githubSnapshot) []environmentInput {
 	return results
 }
 
+func validateServiceAuthPairs(snapshot githubSnapshot) error {
+	for _, environment := range []string{bootstrapEnvironment, productionEnvironment} {
+		inputs := selectEnvironment(snapshot, environment).Secrets
+		for _, pair := range [][2]string{{sshAccessClientID, sshAccessSecret}, {"CODEXIA_ACCESS_CLIENT_ID", "CODEXIA_ACCESS_CLIENT_SECRET"}} {
+			if inputs[pair[0]] != inputs[pair[1]] {
+				return needsAction("The protected " + environment + " Cloudflare Service Auth credential pair is incomplete. Reconcile the owning Environment without replacing its existing Secret, then run init again")
+			}
+		}
+	}
+	return nil
+}
+
 func registerInputs(ctx context.Context, o operator, control *githubControl, c *workflowController, vm vmObservation,
-	tailnet tailnetObservation, edge *cloudflareObservation, snapshot githubSnapshot, pin string) error {
-	desired, err := observedProtectedVariables(snapshot, vm, tailnet, pin, edge.Target)
+	managementHostname string, edge *cloudflareObservation, snapshot githubSnapshot, pin string) error {
+	if err := validateServiceAuthPairs(snapshot); err != nil {
+		return err
+	}
+	desired, err := observedProtectedVariables(snapshot, vm, managementHostname, pin, edge.Target)
 	if err != nil {
 		return err
 	}
@@ -140,7 +163,7 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 	}
 	if len(variables)+len(secrets) == 0 && c.state.BootstrapPublicKey == "" {
 		o.Notice("Protected inputs are already registered. The runner checks actual connectivity in the next stage.")
-		return nil
+		return ensureCloudflareConnector(ctx, o, edge)
 	}
 	for _, item := range variables {
 		o.Notice("Add missing Variable " + item.environment + "/" + item.name)
@@ -165,7 +188,10 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 	if snapshot.MainSHA != c.sha {
 		return refused("GitHub main advanced before protected Settings registration")
 	}
-	desired, err = observedProtectedVariables(snapshot, vm, tailnet, pin, edge.Target)
+	if err := validateServiceAuthPairs(snapshot); err != nil {
+		return err
+	}
+	desired, err = observedProtectedVariables(snapshot, vm, managementHostname, pin, edge.Target)
 	if err != nil {
 		return err
 	}
@@ -210,21 +236,14 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 				return err
 			}
 		default:
-			peer := snapshot.Bootstrap
-			if input.environment == bootstrapEnvironment {
-				peer = snapshot.Production
-			}
-			credential := edge.Credential
-			if peer.Secrets[input.name] {
-				credential = edge.ExistingCredential
-			}
-			value, observed := credentials[input.name]
+			credentialKey := input.environment + "/" + input.name
+			value, observed := credentials[credentialKey]
 			if !observed {
-				value, err = credential(ctx, input.name)
+				value, err = edge.Credential(ctx, input.environment, input.name)
 				if err != nil {
 					return err
 				}
-				credentials[input.name] = value
+				credentials[credentialKey] = value
 			}
 			if err := putMissingSecret(ctx, c, control, input, value); err != nil {
 				return err
@@ -243,8 +262,30 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 		return needsAction("Some protected inputs could not be verified after registration. Check " +
 			c.target.URL() + "/settings/environments and run codexiactl doctor before resuming")
 	}
+	if err := ensureCloudflareConnector(ctx, o, edge); err != nil {
+		return err
+	}
 	o.Notice("Protected input registration verified. The runner checks actual connectivity in the next stage.")
 	return nil
+}
+
+func ensureCloudflareConnector(ctx context.Context, o operator, edge *cloudflareObservation) error {
+	needed, err := CloudflareConnectorNeedsInstall(ctx)
+	if err != nil {
+		return err
+	}
+	if !needed {
+		return nil
+	}
+	token, err := edge.ConnectorToken(ctx)
+	if err != nil {
+		return err
+	}
+	defer clear(token)
+	if len(token) == 0 {
+		return needsAction("The verified Cloudflare Tunnel did not provide a connector token")
+	}
+	return installCloudflareConnector(ctx, o, token)
 }
 
 func settingsApprovalMatches(approved, current []environmentInput) bool {
