@@ -28,6 +28,7 @@ try {
     await delay(500);
   }
   assert.ok(ready, 'Wrangler static asset server did not become ready');
+  const basePolicy = (await fetch(base + '/')).headers.get('content-security-policy');
   for (const [path, prefix] of [
     ['/?utm_source=smoke', '/assets/'],
     ['/desktop', '/desktop/assets/'],
@@ -42,7 +43,9 @@ try {
     const response = await fetch(base + path, { redirect: 'manual' });
     assert.equal(response.status, 200, path);
     assert.match(response.headers.get('content-type') ?? '', /text\/html/);
-    assert.match(response.headers.get('content-security-policy') ?? '', /script-src 'self'/);
+    const policy = response.headers.get('content-security-policy');
+    assert.match(policy ?? '', /script-src 'self'/);
+    assert.equal(policy, path.startsWith('/desktop') ? `${basePolicy}; img-src 'self' data:` : basePolicy, path);
     assert.equal(response.headers.get('strict-transport-security'), 'max-age=31536000', `${path} host-only HSTS`);
     const html = await response.text();
     const js = inspectHtml(html).scripts.find(src => /\.js(?:\?|$)/iu.test(src));
@@ -106,6 +109,17 @@ try {
         await page.goto(origin + path, { waitUntil: 'domcontentloaded' });
         await page.getByRole('heading', { name: heading, exact: true }).waitFor({ timeout: 20000 });
         if (path === '/console/setup') await page.getByLabel('初期登録キー').waitFor({ timeout: 20000 });
+        if (path === '/desktop') {
+          const width = await page.evaluate(async () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = canvas.height = 1;
+            const preview = new Image();
+            preview.src = canvas.toDataURL('image/png');
+            await preview.decode();
+            return preview.naturalWidth;
+          });
+          assert.equal(width, 1, 'Desktop CSP must allow locally attached scratch image previews');
+        }
         assert.deepEqual(errors, [], `${path} browser exceptions`);
       } finally {
         await page.close();

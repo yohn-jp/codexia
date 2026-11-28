@@ -17,6 +17,9 @@ const (
 	bootstrapFile         = "production-bootstrap.yml"
 	preflightFile         = "production-preflight.yml"
 	frontendFile          = "frontend-release.yml"
+	bootstrapRunbook      = "PRODUCTION-BOOTSTRAP.sdoc"
+	recoveryRunbook       = "PROTECTED-RECOVERY.sdoc"
+	authRuntimeRunbook    = "ANSIBLE-AUTH-RUNTIME.sdoc"
 )
 
 type workflowOperation struct {
@@ -66,6 +69,10 @@ type workflowController struct {
 
 func (t githubTarget) runLink(id int64) string {
 	return t.URL() + "/actions/runs/" + strconv.FormatInt(id, 10)
+}
+
+func (c *workflowController) runbookLink(file string) string {
+	return c.target.URL() + "/blob/" + c.sha + "/docs/deployment/" + file
 }
 
 func (c *workflowController) currentMain(ctx context.Context) error {
@@ -249,11 +256,11 @@ func (c *workflowController) preflight(ctx context.Context, management string) (
 
 func (c *workflowController) lifecycleBlocker(id int64, err error) error {
 	if errors.Is(err, errExistingOwner) {
-		return fmt.Errorf("%w: %s/blob/main/docs/deployment/PRODUCTION-BOOTSTRAP.md#interrupted-installations-and-recovery (Preflight %s)",
-			err, c.target.URL(), c.target.runLink(id))
+		return fmt.Errorf("%w. See “Interrupted installations and recovery” in %s (Preflight %s)",
+			err, c.runbookLink(bootstrapRunbook), c.target.runLink(id))
 	}
-	return fmt.Errorf("%w. Review %s and the protected procedure at %s/blob/main/docs/deployment/PROTECTED-RECOVERY.md",
-		err, c.target.runLink(id), c.target.URL())
+	return fmt.Errorf("%w. Review %s and the protected procedure at %s",
+		err, c.target.runLink(id), c.runbookLink(recoveryRunbook))
 }
 
 func readReceipt(ctx context.Context, github workflowGitHub, target githubTarget, id int64) (lifecycleReceipt, error) {
