@@ -243,8 +243,12 @@ benchmark_no_intent_recovery() {
   local kind mode round started elapsed output
   local dir="$fixture_home/.local/state/codexia-deploy"
   local unit_dir="$fixture_home/.config/containers/systemd"
-  [[ ! -e "$dir/deploy-transaction.json" && ! -L "$dir/deploy-transaction.json" &&
-     ! -e "$dir/backup-transaction" && ! -L "$dir/backup-transaction" ]] || return 1
+  # These private paths belong to codexia (0700); check as the actual
+  # service identity, not the GitHub runner, before replaying recovery.
+  rootless test ! -e "$dir/deploy-transaction.json" || return 1
+  rootless test ! -L "$dir/deploy-transaction.json" || return 1
+  rootless test ! -e "$dir/backup-transaction" || return 1
+  rootless test ! -L "$dir/backup-transaction" || return 1
   for kind in deployment backup; do
     round=0
     for mode in recover guard guard recover; do
