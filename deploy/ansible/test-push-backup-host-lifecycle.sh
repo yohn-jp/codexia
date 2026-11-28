@@ -84,8 +84,16 @@ SOCKET_NODE
   rootless_systemctl stop codexia-tunnel.service
   rootless rm -- "$tunnel"
   rootless_systemctl daemon-reload
+  local prior_container
+  prior_container="$(rootless_podman inspect --format '{{.Id}}' codexia-api)"
+  rootless_systemctl is-active --quiet codexia-api.service
+  rootless_systemctl is-active --quiet codexia-backup-executor.service
+  [[ "$(rootless_podman inspect --format '{{.Image}} {{.State.Health.Status}}' codexia-api)" == "$image healthy" ]]
   started=$(date +%s%3N)
   rootless_systemctl stop codexia-backup-executor.service codexia-api.service
+  [[ "$(rootless_systemctl show codexia-api.service -p ActiveState --value)" == inactive &&
+     "$(rootless_systemctl show codexia-api.service -p Result --value)" == success &&
+     "$(rootless_systemctl show codexia-backup-executor.service -p ActiveState --value)" == inactive ]]
   record_phase_timing private_socket_stop_api_executor "$started"
   started=$(date +%s%3N)
   rootless_systemctl restart codexia-db.service
@@ -94,8 +102,14 @@ SOCKET_NODE
   started=$(date +%s%3N)
   verify_socket_client
   record_phase_timing private_socket_verify_after_restart "$started"
+  # Earlier successful fixture starts consume the same three-start budget.
+  # Clear the counter only for the healthy API we just stopped deliberately.
+  rootless_systemctl reset-failed codexia-api.service
   started=$(date +%s%3N)
   rootless_systemctl start codexia-api.service codexia-backup-executor.service
+  [[ "$(rootless_podman inspect --format '{{.Id}}' codexia-api)" != "$prior_container" &&
+     "$(rootless_podman inspect --format '{{.Image}} {{.State.Health.Status}}' codexia-api)" == "$image healthy" ]]
+  rootless_systemctl is-active --quiet codexia-backup-executor.service
   record_phase_timing private_socket_start_api_executor "$started"
   # The synthetic lifecycle intentionally has no production Tunnel token.
   disable_fixture_tunnel

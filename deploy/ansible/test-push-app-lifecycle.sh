@@ -747,6 +747,14 @@ grep -Fq 'Deployment transaction failed during off-VM backup admission' "$tmp/de
 observe_runtime missing-executor "$initial_key"
 verify_private_backup_socket
 observe_runtime private-backup-socket-restart "$initial_key"
+if [[ "${CODEXIA_BENCHMARK_BACKUP_RUNTIME:-false}" == true ]]; then
+  local benchmark_started
+  benchmark_started=$(date +%s%3N)
+  rootless python3 - < "$repo_root/deploy/ansible/benchmark-backup-extraction.py" |
+    tee "$RUNNER_TEMP/codexia-push-app-lifecycle/backup-extraction-bounded.log"
+  extraction_benchmark_ms=$(( $(date +%s%3N) - benchmark_started ))
+  record_phase_timing backup_extraction_comparison "$benchmark_started"
+fi
 if run_deploy "$update_key" false '' deploy-console-unconfigured; then
   echo 'An update reached candidate activation before Console backup configuration' >&2
   return 1
@@ -832,6 +840,7 @@ set_state durable_interruption_recovery PASS 'the next canonical invocation reco
 set_state database_volume_writer_quadlet_release_continuity PASS 'database sentinel, volume IDs, sole writer, Quadlet and release record were observed after transitions'
 }
 source "$repo_root/deploy/ansible/test-push-backup-host-lifecycle.sh"
+extraction_benchmark_ms=0
 scenario_started=$(date +%s%3N)
 case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in
   app)
@@ -848,11 +857,7 @@ case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in
     exit 1
     ;;
 esac
-record_phase_timing "${CODEXIA_LIFECYCLE_SCENARIO}_transitions" "$scenario_started"
-if [[ "${CODEXIA_LIFECYCLE_SCENARIO}" == app && "${CODEXIA_BENCHMARK_BACKUP_RUNTIME:-false}" == true ]]; then
-  rootless python3 - < "$repo_root/deploy/ansible/benchmark-backup-extraction.py" |
-    tee "$RUNNER_TEMP/codexia-push-app-lifecycle/backup-extraction-bounded.log"
-fi
+record_phase_timing "${CODEXIA_LIFECYCLE_SCENARIO}_transitions" "$((scenario_started + extraction_benchmark_ms))"
 node - "$report" <<'REPORT_COMPLETE'
 const fs=require('node:fs');const p=process.argv[2],r=JSON.parse(fs.readFileSync(p,'utf8'));r.status='PASS';r.updatedAt=new Date().toISOString();fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 REPORT_COMPLETE
