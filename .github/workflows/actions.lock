@@ -47,7 +47,6 @@ workflows:
         - 'actions/setup-node@v7.1.0'
         - 'actions/upload-artifact@v7.0.2'
         - 'docker/login-action@v4.8.0'
-        - 'hashicorp/setup-terraform@v4.0.1'
         - 'tailscale/github-action@v4'
     '.github/workflows/full-model-oci-acceptance.yml':
         - 'actions/cache@v6.1.0'
