@@ -116,7 +116,8 @@ try {
       assert.equal(await page.locator('#hand').textContent(), '右手');
       assert.equal(await page.locator('button[data-decision="rejected"]').getAttribute('aria-pressed'), 'true');
       await page.locator('button[data-decision="pending"]').click();
-      assert.equal(await page.locator('button[data-decision="pending"]').getAttribute('aria-pressed'), 'true');
+      assert.equal(await page.locator('button[data-decision="pending"]').getAttribute('aria-pressed'), null);
+      assert.equal(await page.locator('button[data-decision="approved"]').getAttribute('aria-pressed'), 'false');
       assert.match(await page.locator('#decision-status').textContent(), /未決定/);
       await page.reload({waitUntil:'load'});
       assert.equal(await page.locator('#hand').textContent(), '右手', 'Concept must not persist state');
