@@ -89,6 +89,12 @@
     fail_msg: Existing Codexia gate unit differs from the reviewed source; no system unit was overwritten.
   loop: "{{ base_runtime_gate_units.results }}"
 
+- name: Require the fixed gate unit pair to be wholly absent or wholly installed
+  ansible.builtin.assert:
+    that:
+      - (base_runtime_gate_units.results | selectattr('stat.exists', 'equalto', true) | list | length) in [0, 2]
+    fail_msg: Only one publication-gate unit is present; resolve the interrupted host installation before convergence.
+
 - name: Inspect the existing root gate helper without following links
   become: true
   become_user: root
@@ -212,6 +218,71 @@
       - (base_runtime_api_container.rc == 0 and base_runtime_api_service.rc == 0) or
         (base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0)
     fail_msg: Existing API container and generated systemd unit disagree; publication gate state is unchanged.
+
+- name: Require the existing lifecycle host lock before initializing a fresh API-less gate
+  ansible.builtin.stat:
+    path: "{{ home }}/.local/state/codexia-deploy/host.lock"
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: base_runtime_fresh_gate_host_lock
+  changed_when: false
+  when: base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0 and
+        (base_runtime_gate_units.results | selectattr('stat.exists', 'equalto', true) | list | length) == 0
+
+- name: Require the lifecycle host lock to be the existing private regular file
+  ansible.builtin.assert:
+    that:
+      - base_runtime_fresh_gate_host_lock.stat.exists
+      - base_runtime_fresh_gate_host_lock.stat.isreg | default(false)
+      - not (base_runtime_fresh_gate_host_lock.stat.islnk | default(false))
+      - base_runtime_fresh_gate_host_lock.stat.pw_name == codexia_service_user
+      - base_runtime_fresh_gate_host_lock.stat.mode == '0600'
+    fail_msg: Fresh publication-gate initialization requires the existing lifecycle host lock; no new lock authority is created.
+  when: base_runtime_fresh_gate_host_lock is not skipped
+
+- name: Initialize only a fresh API-less gate closed under the lifecycle host lock
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/flock
+      - --exclusive
+      - --nonblock
+      - "{{ home }}/.local/state/codexia-deploy/host.lock"
+      - /bin/bash
+      - -eu
+      - -c
+      - |
+        container_rc=0
+        if podman container exists codexia-api; then
+          echo 'API container appeared while the fresh publication gate was being initialized' >&2
+          exit 1
+        else
+          container_rc=$?
+        fi
+        [[ "$container_rc" == 1 ]] || { echo 'Could not prove API container absence under the lifecycle lock' >&2; exit 1; }
+        api_load_state="$(systemctl --user show --property=LoadState --value codexia-api.service 2>/dev/null)" || {
+          echo 'Could not read API unit state under the lifecycle lock' >&2
+          exit 1
+        }
+        if [[ "$api_load_state" == not-found ]]; then
+          api_active_state=inactive
+        else
+          api_active_state="$(systemctl --user show --property=ActiveState --value codexia-api.service 2>/dev/null)" || {
+            echo 'Could not read API unit activity under the lifecycle lock' >&2
+            exit 1
+          }
+        fi
+        case "$api_load_state:$api_active_state" in
+          not-found:inactive|loaded:inactive|masked:inactive) ;;
+          *) echo 'API unit appeared or has an ambiguous state under the lifecycle lock' >&2; exit 1 ;;
+        esac
+        sudo -n /usr/local/sbin/codexia-api-gate close
+        [[ "$(sudo -n /usr/local/sbin/codexia-api-gate status)" == closed ]]
+  register: base_runtime_fresh_gate_close
+  changed_when: true
+  when: base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0 and
+        (base_runtime_gate_units.results | selectattr('stat.exists', 'equalto', true) | list | length) == 0
 
 - name: Read the publication gate state through the fixed root helper
   ansible.builtin.command:

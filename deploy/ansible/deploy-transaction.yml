@@ -1001,6 +1001,7 @@
          'base runtime admission (PostgreSQL)' if 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet' in (codexia_deploy_transaction.stderr | default('')) else
          'base runtime admission (Cloudflare connector)' if 'Deployment requires the independent host Cloudflare connector' in (codexia_deploy_transaction.stderr | default('')) else
          'base runtime admission (database unit)' if 'Deployment base runtime requires the canonical generated PostgreSQL unit' in (codexia_deploy_transaction.stderr | default('')) else
+         'product publication gate admission' if 'Publication gate state is not canonical' in (codexia_deploy_transaction.stderr | default('')) else
          'off-VM backup admission' if 'Off-VM backup admission failed; candidate was not applied' in (codexia_deploy_transaction.stderr | default('')) else
          'encrypted backup' if 'Encrypted backup failed; candidate was not applied' in (codexia_deploy_transaction.stderr | default('')) else
          'fresh database schema initialization' if 'Fresh database initialization failed' in (codexia_deploy_transaction.stderr | default('')) else
