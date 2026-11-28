@@ -147,7 +147,8 @@ test("read-only deployed client verification requires exact original OAuth redir
     },
     getClientResources: id => original.getClientResources(id),
   };
-  const strict = { ...config, expectedRedirectUris: redirects };
+  const expectedRedirectUris = Object.fromEntries(Object.entries(redirects).map(([id, values]) => [id, [...values]]));
+  const strict = { ...config, expectedRedirectUris };
   await assertBetterAuthClientRegistrations(strict, registry);
   for (const clientId of ["codexia-web", "codexia-ios", "codexia-introspector"]) {
     const permitted = redirects[clientId]!;
