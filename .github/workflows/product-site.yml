@@ -26,7 +26,7 @@ jobs:
   verify:
     name: Verify product site
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -48,6 +48,22 @@ jobs:
         run: npm ci --prefix edge/frontend
       - name: Validate Worker configuration without publishing
         run: edge/frontend/node_modules/.bin/wrangler deploy --config edge/product-site/wrangler.jsonc --dry-run --outdir "$RUNNER_TEMP/product-site-dry-run"
+      - name: Install locked isolated browser toolchain
+        run: npm ci --prefix edge/product-site --ignore-scripts
+      - name: Install matching Chromium
+        run: edge/product-site/node_modules/.bin/playwright-core install --with-deps --only-shell chromium
+      - name: Verify browser interactions and Worker static delivery
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PRODUCT_SITE_EVIDENCE: ${{ runner.temp }}/product-site-evidence
+        run: node edge/product-site/browser-smoke.mjs
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: product-site-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/product-site-evidence/
+          if-no-files-found: warn
+          retention-days: 7
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: product-site-${{ github.run_id }}-${{ github.run_attempt }}
@@ -106,7 +122,7 @@ jobs:
           curl --fail --silent --show-error --max-time 30 -H 'Cache-Control: no-cache' -D "$RUNNER_TEMP/product-site-headers" "${url}?source=$GITHUB_SHA" -o "$RUNNER_TEMP/product-site-index.html"
           grep -F "<meta name=\"codexia-source\" content=\"$GITHUB_SHA\">" "$RUNNER_TEMP/product-site-index.html"
           grep -i '^content-security-policy:' "$RUNNER_TEMP/product-site-headers"
-          for asset in site.css site.js; do
+          for asset in site.css site.js favicon.svg; do
             curl --fail --silent --show-error --max-time 30 "${url}${asset}?source=$GITHUB_SHA" -o "$RUNNER_TEMP/$asset"
             cmp "edge/product-site/dist/codexia/$asset" "$RUNNER_TEMP/$asset"
           done

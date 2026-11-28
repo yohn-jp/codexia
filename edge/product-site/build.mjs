@@ -11,5 +11,5 @@ assert.equal(html.split('__SOURCE_SHA__').length, 2);
 await rm(dist, { recursive: true, force: true });
 await mkdir(target, { recursive: true });
 await writeFile(new URL('index.html', target), html.replace('__SOURCE_SHA__', sha));
-for (const name of ['site.css', 'site.js']) await cp(new URL(name, src), new URL(name, target));
+for (const name of ['site.css', 'site.js', 'favicon.svg']) await cp(new URL(name, src), new URL(name, target));
 await cp(new URL('_headers', src), new URL('_headers', dist));
