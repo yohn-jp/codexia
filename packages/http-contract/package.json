@@ -15,7 +15,7 @@
     "lint:generated": "redocly lint openapi/codexia.openapi.yaml --config redocly.yaml"
   },
   "devDependencies": {
-    "@redocly/cli": "2.82.0",
+    "@redocly/cli": "2.83.0",
     "@typespec/compiler": "1.18.0",
     "@typespec/http": "1.18.0",
     "@typespec/openapi": "1.18.0",
