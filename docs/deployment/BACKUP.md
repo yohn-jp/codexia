@@ -22,10 +22,11 @@ Continue the logical PostgreSQL backup using `pg_dump`, age, and S3-compatible o
 
 ## Verify a candidate ledger on a restored backup
 
-Load the reviewed, publication-certified Full backend image by its immutable digest on the isolated recovery host. Use the migration fingerprint from the same certified image.
+Load the reviewed, publication-certified Full backend image by its immutable digest on the isolated recovery host. Set `CODEXIA_IMAGE_REPOSITORY` to `ghcr.io/<lowercase-owner>/codexia-backend` using the repository identity verified in the protected recovery review. Use the migration fingerprint from the same certified image.
 
 ```sh
-bash deploy/backup/backup.sh drill "$backup_directory" "$recovery_identity_file" --approved \
+CODEXIA_IMAGE_REPOSITORY="$reviewed_image_repository" \
+  bash deploy/backup/backup.sh drill "$backup_directory" "$recovery_identity_file" --approved \
   --candidate-full-image "$certified_full_image" --candidate-ledger "$migration_fingerprint"
 ```
 

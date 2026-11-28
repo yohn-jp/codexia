@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createGitHubOctokit } from './octokit.mjs';
+import { createGitHubOctokit as scopedOctokit } from './octokit.mjs';
 import { paginateActionsInventory, paginateGitHubArray } from './paginate-actions.mjs';
+
+const createGitHubOctokit = options => scopedOctokit({ repository: 'yohn-jp/codexia', repositoryId: 1450072993, ...options });
 
 function responseFor(url, body, init = {}) {
   const response = Response.json(body, init);
@@ -167,4 +169,22 @@ test('bounded array pagination stops when an inventory exceeds its declared limi
   const octokit = createGitHubOctokit({ token: 'read-token', fetchImpl: async url => responseFor(url, [{ id: 1 }, { id: 2 }, { id: 3 }]) });
   await assert.rejects(paginateGitHubArray(octokit, octokit.rest.repos.listReleases,
     { owner: 'yohn-jp', repo: 'codexia' }, { maxItems: 2 }), /exceeds its supported bound/u);
+});
+
+test('a fork token stays within its configured repository, including pagination', async () => {
+  const paths = [];
+  const octokit = createGitHubOctokit({
+    repository: 'fork-owner/codexia', repositoryId: 888, token: 'test-token',
+    fetchImpl: async url => {
+      paths.push(new URL(url).pathname);
+      return responseFor(url, {});
+    },
+  });
+  await octokit.rest.repos.get({ owner: 'fork-owner', repo: 'codexia' });
+  await octokit.request('GET https://api.github.com/repositories/888/releases');
+  await assert.rejects(octokit.rest.git.createRef({
+    owner: 'yohn-jp', repo: 'codexia', ref: 'refs/tags/backend-v1.2.3', sha: 'a'.repeat(40),
+  }), /outside the canonical repository/u);
+  await assert.rejects(octokit.request('GET https://api.github.com/repositories/1450072993/releases'), /outside the canonical repository/u);
+  assert.deepEqual(paths, ['/repos/fork-owner/codexia', '/repositories/888/releases']);
 });

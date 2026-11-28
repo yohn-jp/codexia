@@ -66,6 +66,10 @@ on:
       - scripts/release/components/version*.mjs
       - scripts/release/components/record.mjs
       - scripts/release/components/verify-source.mjs
+      - scripts/github/repository.mjs
+      - scripts/github/octokit.mjs
+      - scripts/release/frontend/deployment-rollback.mjs
+      - scripts/release/frontend/initial-publication.mjs
       - scripts/verification/infrastructure/deployment-config.mjs
       - scripts/verification/artifacts/frontend*.mjs
       - scripts/release/frontend/promotion-contract.test.mjs
@@ -116,6 +120,10 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.repository.full_name == github.repository &&
+      github.event.workflow_run.repository.id == github.repository_id &&
+      github.event.workflow_run.repository.owner.id == github.repository_owner_id &&
+      github.event.workflow_run.head_repository.id == github.repository_id &&
+      github.event.workflow_run.head_repository.owner.id == github.repository_owner_id &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -182,6 +190,11 @@ jobs:
         run: node scripts/deployment/bootstrap/public-env.mjs
       - name: Install frozen CI evidence dependencies
         run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
+      - name: Verify the selected production Cloudflare ingress
+        env:
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN }}
+        run: node scripts/release/frontend/initial-publication.mjs observe-ingress
       - name: Probe production identity endpoints and Access boundary
         id: probe
         env:
@@ -192,7 +205,6 @@ jobs:
         id: promotion
         env:
           GH_TOKEN: ${{ github.token }}
-          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_LIVE_FRONTEND_VERSION: ${{ steps.probe.outputs.frontendVersion }}
           CODEXIA_LIVE_FRONTEND_SOURCE_SHA: ${{ steps.probe.outputs.frontendSourceSha }}
           CODEXIA_LIVE_FRONTEND_PROFILE: ${{ steps.probe.outputs.frontendProfile }}
@@ -349,21 +361,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_VERIFY_RUN_ID: ${{ needs.preflight.outputs.producer-verify-run-id || needs.source.outputs.verify-run-id }}
           CODEXIA_FRONTEND_CERTIFIED_VERIFY_RUN_ID: ${{ needs.source.outputs.verify-run-id }}
-          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
         run: node scripts/verification/artifacts/frontend.mjs
       - name: Verify live backend API compatibility before switching UI
         id: compatibility
         if: steps.freshness.outputs.affected == 'true'
         env:
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
-        run: node scripts/release/frontend/verify-compatibility.mjs
+        run: |
+          node scripts/release/frontend/initial-publication.mjs observe-ingress
+          node scripts/release/frontend/verify-compatibility.mjs
       - name: Pin active Worker deployment before the publication attempt
         id: before-deploy
         if: steps.compatibility.outputs.deploy == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN }}
           CODEXIA_FRONTEND_ROLLBACK_STATE: ${{ runner.temp }}/codexia-frontend-before-deploy.json
         run: node scripts/release/frontend/deployment-rollback.mjs capture
       - name: Deploy static assets only
@@ -387,6 +404,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN }}
           CODEXIA_FRONTEND_ROLLBACK_STATE: ${{ runner.temp }}/codexia-frontend-before-deploy.json
         run: node scripts/release/frontend/deployment-rollback.mjs restore
       - name: Record independent frontend release
@@ -398,7 +417,7 @@ jobs:
 
   initial-frontend:
     name: Publish canonical frontend for initial owner enrollment
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.event.repository.name == 'codexia' && github.event.repository.default_branch == 'main' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: codexia-production
@@ -455,7 +474,6 @@ jobs:
       - name: Read certified source and candidate artifacts
         env:
           GH_TOKEN: ${{ github.token }}
-          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_PREFLIGHT_REQUEST: ${{ steps.preflight.outputs.request }}
         run: node scripts/deployment/preflight/run.mjs candidate
       - name: Prepare runtime pinned SSH
@@ -465,6 +483,11 @@ jobs:
           CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
           CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}
         run: bash deploy/ansible/prepare-deploy-ssh.sh
+      - name: Require immutable GitHub OIDC claims for Tailscale
+        env:
+          CODEXIA_TAILSCALE_CLIENT_ID: ${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}
+          CODEXIA_TAILSCALE_ENVIRONMENT: codexia-production
+        run: node scripts/deployment/preflight/tailscale-oidc.mjs
       - name: Connect the existing protected management plane
         uses: tailscale/github-action@v4
         with:

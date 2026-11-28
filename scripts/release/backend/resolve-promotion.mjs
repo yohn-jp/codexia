@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { actionsRepository, assertArtifactRunRepository, matchesRunRepository, releaseRepositoryBinding } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { appendFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -15,7 +16,6 @@ import { validateBackendIdentity } from './update-identity.mjs';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateActionsInventory, paginateGitHubArray } from '../../github/paginate-actions.mjs';
 
-const REPOSITORY = 'yohn-jp/codexia';
 const IMAGE_FILE = 'codexia-backend-image.tar.gz';
 const IMAGE = 'codexia-backend-ci';
 const RECORD = 'codexia-backend-promotion.json';
@@ -63,9 +63,9 @@ export function assertBackendPromotionVersion(candidate, existing) {
   return true;
 }
 
-async function latestBackendReleaseVersion(github) {
+async function latestBackendReleaseVersion(github,{owner,repo}) {
   const releases = await paginateGitHubArray(github, github.rest.repos.listReleases,
-    { owner: 'yohn-jp', repo: 'codexia' }, { maxItems: 9_999 });
+    { owner, repo }, { maxItems: 9_999 });
   assert.ok(Array.isArray(releases) && releases.length <= 9_999, 'Invalid or over-limit backend release inventory');
   const versions = releases.filter(value => value &&
     typeof value.tag_name === 'string' && /^backend-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(value.tag_name))
@@ -73,9 +73,9 @@ async function latestBackendReleaseVersion(github) {
   return versions.reduce((latest, value)=>latest===null||compareComponentVersions(value,latest)>0?value:latest,null);
 }
 
-async function assertBackendVersionTagFree(version,github){
+async function assertBackendVersionTagFree(version,github,{owner,repo}){
   try {
-    await github.rest.git.getRef({owner:'yohn-jp',repo:'codexia',ref:`tags/backend-v${version}`});
+    await github.rest.git.getRef({owner,repo,ref:`tags/backend-v${version}`});
   } catch(error) {
     if(error?.status===404)return;
     throw new Error('Backend release tag availability lookup failed'+(Number.isSafeInteger(error?.status)?` (HTTP ${error.status})`:''),{cause:error});
@@ -89,37 +89,38 @@ export async function inspectBackendImageWithoutExecution(archivePath, profile, 
 }
 
 async function resolve({env=process.env,fetchImpl=fetch}={}) {
-  assert.equal(env.GITHUB_REPOSITORY,REPOSITORY,'Backend promotion repository mismatch');
+  const context=actionsRepository(env);
+  const {owner,repo,repository,repositoryId}=context;
   assert.equal(env.GITHUB_EVENT_NAME,'workflow_run','Backend promotion requires completed Verify');
   assert.equal(env.GITHUB_REF,'refs/heads/main','Backend promotion requires main');
   assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),(env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA),'Backend promotion checkout differs from verified main');
   const token=env.GH_TOKEN;
   assert.ok(typeof token==='string'&&token.length>0,'GitHub Actions read token required');
-  const github=createGitHubOctokit({token,fetchImpl,timeout:20_000});
+  const github=createGitHubOctokit({...context,token,fetchImpl,timeout:20_000});
   const proof=await verifyFrontendMainPromotionProof({env,fetchImpl});
-  const workflow=(await github.rest.actions.getWorkflow({owner:'yohn-jp',repo:'codexia',workflow_id:'backend-release.yml'})).data;
+  const workflow=(await github.rest.actions.getWorkflow({owner,repo,workflow_id:'backend-release.yml'})).data;
   assert.equal(workflow.path,'.github/workflows/backend-release.yml','Backend producer workflow path mismatch');
-  const repositoryId=positive(env.CODEXIA_REPOSITORY_ID,'Backend repository ID');
   const runs=await paginateActionsInventory(github,github.rest.actions.listWorkflowRuns,
-    {owner:'yohn-jp',repo:'codexia',workflow_id:workflow.id,head_sha:proof.headSha,event:'pull_request'},'workflow_runs');
+    {owner,repo,workflow_id:workflow.id,head_sha:proof.headSha,event:'pull_request'},'workflow_runs');
   const run=selectBackendPromotionRun(runs,proof,repositoryId,positive(workflow.id,'Backend producer workflow ID'));
+  assert.ok(matchesRunRepository(run, context), 'Backend PR producer repository mismatch');
   const [latestJobs,artifacts]=await Promise.all([
     paginateActionsInventory(github,github.rest.actions.listJobsForWorkflowRun,
-      {owner:'yohn-jp',repo:'codexia',run_id:run.id,filter:'latest'},'jobs'),
+      {owner,repo,run_id:run.id,filter:'latest'},'jobs'),
     paginateActionsInventory(github,github.rest.actions.listWorkflowRunArtifacts,
-      {owner:'yohn-jp',repo:'codexia',run_id:run.id},'artifacts'),
+      {owner,repo,run_id:run.id},'artifacts'),
   ]);
   const selected=selectBackendArtifacts(run,artifacts,latestJobs,{runId:run.id,currentAttempt:run.run_attempt,sourceSha:proof.headSha,
     event:'pull_request',headBranch:proof.headRef});
   const producerAttempts=new Map(await Promise.all([...new Set(selected.map(item=>item.producerAttempt))].map(async attempt=>[
     attempt,await paginateActionsInventory(github,github.rest.actions.listJobsForWorkflowRunAttempt,
-      {owner:'yohn-jp',repo:'codexia',run_id:run.id,attempt_number:attempt},'jobs'),
+      {owner,repo,run_id:run.id,attempt_number:attempt},'jobs'),
   ])));
   for(const item of selected) assertBackendProducerAttempt(item,producerAttempts.get(item.producerAttempt),{runId:run.id,sourceSha:proof.headSha});
   const version=readComponentVersion('backend',String(run.run_number));
-  const latest=await latestBackendReleaseVersion(github);
+  const latest=await latestBackendReleaseVersion(github,context);
   assertBackendPromotionVersion(version,latest);
-  await assertBackendVersionTagFree(version,github);
+  await assertBackendVersionTagFree(version,github,context);
   const compatibility=JSON.parse(await readFile(new URL('../../../deploy/update-compatibility.json',import.meta.url),'utf8'));
   const migrationFingerprint=await expectedBackendMigrationFingerprint();
   const outputDir=env.CODEXIA_BACKEND_PROMOTION_DIR;
@@ -127,12 +128,13 @@ async function resolve({env=process.env,fetchImpl=fetch}={}) {
   await mkdir(outputDir,{recursive:true});
   const scratch=await mkdtemp(path.join(env.RUNNER_TEMP||tmpdir(),'codexia-backend-promotion-'));
   try {
-    const receipt={format:'codexia-backend-promotion/v1',event:'pull_request',sourceSha:proof.headSha,version,
+    const receipt={...releaseRepositoryBinding(context),format:'codexia-backend-promotion/v1',event:'pull_request',sourceSha:proof.headSha,version,
       workflowRunId:run.id,workflowRunNumber:run.run_number,workflowAttempt:run.run_attempt,workflowId:workflow.id,prNumber:proof.prNumber,
       verifyRunId:proof.sourceVerifyRunId,proofRunId:proof.runId,verifyAttempt:proof.attempt,planDigest:proof.planDigest,
       sourceTree:proof.tree,mergeBaseSha:proof.baseSha,mainSha:env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA,artifacts:{}};
     for(const item of selected){
-      const bytes=await downloadArtifact(item.artifact,REPOSITORY,token,fetchImpl,{maxArchive:MAX_IMAGE_BYTES,downloadTimeoutMs:180_000});
+      assertArtifactRunRepository(item.artifact, run);
+      const bytes=await downloadArtifact(item.artifact,repository,token,fetchImpl,{maxArchive:MAX_IMAGE_BYTES,downloadTimeoutMs:180_000});
       const extracted=path.join(scratch,item.profile);
       const files=await extractArtifactFiles(bytes,extracted,{maxArchive:MAX_IMAGE_BYTES,maxUncompressed:MAX_IMAGE_BYTES});
       assert.deepEqual(files,[IMAGE_FILE],'Backend producer artifact contains unexpected files');

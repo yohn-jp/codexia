@@ -22,8 +22,41 @@ import (
 )
 
 const githubTestSHA = "0123456789012345678901234567890123456789"
+const githubTestAppID = "fixture-client-id"
+
+var githubTestTarget = githubTarget{Owner: "yohn-jp", OwnerID: 299811358, RepoID: 1450072993, InstallationID: 317}
+
+func githubTestRepository(target githubTarget, permissions map[string]any) map[string]any {
+	return map[string]any{
+		"id": target.RepoID, "name": deploymentRepositoryName, "full_name": target.FullName(), "default_branch": "main",
+		"owner": map[string]any{"id": target.OwnerID, "login": target.Owner}, "permissions": permissions,
+	}
+}
 
 func newTestGitHub(t *testing.T, handler http.HandlerFunc) *githubControl {
+	t.Helper()
+	return newTestGitHubFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/user/installations":
+			i := map[string]any{
+				"id": githubTestTarget.InstallationID, "client_id": githubTestAppID,
+				"account":              map[string]any{"id": githubTestTarget.OwnerID, "login": githubTestTarget.Owner},
+				"repository_selection": "selected", "permissions": map[string]any{
+					"contents": "read", "metadata": "read", "environments": "write", "actions": "write", "administration": "write",
+				},
+			}
+			githubTestJSON(t, w, map[string]any{"total_count": 1, "installations": []any{i}})
+		case "/user/installations/317/repositories":
+			githubTestJSON(t, w, map[string]any{"total_count": 1, "repositories": []any{githubTestRepository(githubTestTarget, map[string]any{"push": true})}})
+		case "/repos/yohn-jp/codexia/actions/oidc/customization/sub":
+			githubTestJSON(t, w, map[string]any{"use_default": true, "use_immutable_subject": true, "sub_claim_prefix": githubTestTarget.oidcPrefix()})
+		default:
+			handler(w, r)
+		}
+	})
+}
+
+func newTestGitHubFixture(t *testing.T, handler http.HandlerFunc) *githubControl {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -32,7 +65,7 @@ func newTestGitHub(t *testing.T, handler http.HandlerFunc) *githubControl {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &githubControl{client: client}
+	return &githubControl{client: client, target: githubTestTarget, approvedSHA: githubTestSHA, appClientID: githubTestAppID}
 }
 
 func githubTestJSON(t *testing.T, w http.ResponseWriter, value any) {
@@ -57,9 +90,7 @@ func githubTestProtection(t *testing.T, w http.ResponseWriter, r *http.Request) 
 	case strings.HasSuffix(r.URL.Path, "/branches/main"):
 		githubTestJSON(t, w, map[string]any{"name": "main", "protected": true, "commit": map[string]any{"sha": githubTestSHA}})
 	case r.URL.Path == "/repos/yohn-jp/codexia":
-		githubTestJSON(t, w, map[string]any{
-			"id": 1450072993, "full_name": "yohn-jp/codexia", "default_branch": "main", "permissions": map[string]any{"push": true},
-		})
+		githubTestJSON(t, w, githubTestRepository(githubTestTarget, map[string]any{"push": true}))
 	default:
 		return false
 	}
@@ -125,7 +156,7 @@ func TestGitHubRunAndJobsRequireOriginalAttempt(t *testing.T) {
 			githubTestJSON(t, w, map[string]any{
 				"id": id, "head_branch": "main", "head_sha": githubTestSHA, "path": ".github/workflows/production-bootstrap.yml",
 				"event": "workflow_dispatch", "run_attempt": 1, "status": "completed", "conclusion": "success",
-				"repository": map[string]any{"id": 1450072993}, "head_repository": map[string]any{"id": 1450072993},
+				"repository": githubTestRepository(githubTestTarget, nil), "head_repository": githubTestRepository(githubTestTarget, nil),
 			})
 		case strings.HasSuffix(r.URL.Path, "/runs/12345/attempts/1/jobs"):
 			githubTestJSON(t, w, map[string]any{"total_count": 1, "jobs": []any{map[string]any{
@@ -161,7 +192,7 @@ func TestGitHubRecentPreservesDispatchIdentityWithoutExposingRunTitleInJSON(t *t
 			runs = append(runs, map[string]any{"id": 3921, "head_branch": "main", "head_sha": githubTestSHA,
 				"path": ".github/workflows/production-bootstrap.yml", "event": "workflow_dispatch",
 				"run_attempt": 1, "status": "in_progress", "display_title": title,
-				"repository": map[string]any{"id": 1450072993}, "head_repository": map[string]any{"id": 1450072993},
+				"repository": githubTestRepository(githubTestTarget, nil), "head_repository": githubTestRepository(githubTestTarget, nil),
 			})
 		}
 		githubTestJSON(t, w, map[string]any{"total_count": len(runs), "workflow_runs": runs})
@@ -295,7 +326,7 @@ func TestGitHubArtifactDownloadDoesNotSendAuthorization(t *testing.T) {
 			githubTestJSON(t, w, map[string]any{
 				"id": 41, "head_branch": "main", "head_sha": githubTestSHA, "path": ".github/workflows/production-preflight.yml",
 				"event": "workflow_dispatch", "run_attempt": 1, "status": "completed", "conclusion": "success",
-				"repository": map[string]any{"id": 1450072993}, "head_repository": map[string]any{"id": 1450072993},
+				"repository": githubTestRepository(githubTestTarget, nil), "head_repository": githubTestRepository(githubTestTarget, nil),
 			})
 		case strings.HasSuffix(r.URL.Path, "/runs/41/artifacts"):
 			githubTestJSON(t, w, map[string]any{"total_count": 1, "artifacts": []any{map[string]any{
@@ -357,7 +388,7 @@ func TestGitHubAdditiveBranchRestrictionRequiresExistingReviewers(t *testing.T) 
 			g := newTestGitHub(t, func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.URL.Path == "/repos/yohn-jp/codexia":
-					githubTestJSON(t, w, map[string]any{"id": 1450072993, "full_name": "yohn-jp/codexia", "default_branch": "main", "permissions": map[string]any{"admin": true}})
+					githubTestJSON(t, w, githubTestRepository(githubTestTarget, map[string]any{"admin": true}))
 				case strings.HasSuffix(r.URL.Path, "/environments/codexia-bootstrap"):
 					rules := []any{}
 					if reviewers {

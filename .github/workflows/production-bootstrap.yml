@@ -127,7 +127,7 @@ jobs:
 
   runtime-identity:
     name: Derive the existing runtime SSH public key before R4
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'yohn-jp/codexia' && inputs.mode == 'bootstrap'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.event.repository.name == 'codexia' && github.event.repository.default_branch == 'main' && inputs.mode == 'bootstrap'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     environment: codexia-production
@@ -159,7 +159,7 @@ jobs:
   bootstrap:
     needs: runtime-identity
     name: Protected production controller (${{ inputs.mode }})
-    if: always() && !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'yohn-jp/codexia' && inputs.mode != 'provision-backups' && (inputs.mode != 'bootstrap' || needs.runtime-identity.result == 'success')
+    if: always() && !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.event.repository.name == 'codexia' && github.event.repository.default_branch == 'main' && inputs.mode != 'provision-backups' && (inputs.mode != 'bootstrap' || needs.runtime-identity.result == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment:
@@ -237,7 +237,6 @@ jobs:
         if: inputs.mode != 'preflight'
         env:
           GH_TOKEN: ${{ github.token }}
-          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_PREFLIGHT_REQUEST: ${{ steps.preflight.outputs.request }}
         run: node scripts/deployment/preflight/run.mjs candidate
       - name: Install the pinned Ansible control environment
@@ -254,11 +253,17 @@ jobs:
           CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS }}
           CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY }}
           CODEXIA_TUNNEL_TOKEN: ${{ inputs.mode == 'bootstrap' && secrets.CODEXIA_TUNNEL_TOKEN || '' }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
           CODEXIA_OWNER_SETUP_AGE_RECIPIENT: ${{ inputs.mode == 'owner-setup' && vars.CODEXIA_OWNER_SETUP_AGE_RECIPIENT || '' }}
           CODEXIA_RUNTIME_SSH_PUBLIC_KEY: ${{ needs.runtime-identity.outputs.public-key }}
           CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED: ${{ inputs.mode == 'bootstrap' && inputs.initialize_database && vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED == 'true' }}
         run: |
           "$RUNNER_TEMP/codexia-ansible/bin/python" deploy/ansible/prepare-production-bootstrap.py
+      - name: Require immutable GitHub OIDC claims for Tailscale
+        env:
+          CODEXIA_TAILSCALE_CLIENT_ID: ${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}
+          CODEXIA_TAILSCALE_ENVIRONMENT: codexia-bootstrap
+        run: node scripts/deployment/preflight/tailscale-oidc.mjs
       - name: Connect to the protected Tailnet with GitHub OIDC
         uses: tailscale/github-action@v4
         with:
@@ -344,7 +349,7 @@ jobs:
     needs: bootstrap
     if: >-
       always() && !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
-      github.repository == 'yohn-jp/codexia' && ((inputs.mode == 'bootstrap' && needs.bootstrap.result == 'success') ||
+      github.event.repository.name == 'codexia' && github.event.repository.default_branch == 'main' && ((inputs.mode == 'bootstrap' && needs.bootstrap.result == 'success') ||
       (inputs.mode == 'provision-backups' && needs.bootstrap.result == 'skipped'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -377,6 +382,11 @@ jobs:
           CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
           CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}
         run: bash deploy/ansible/prepare-deploy-ssh.sh
+      - name: Require immutable GitHub OIDC claims for Tailscale
+        env:
+          CODEXIA_TAILSCALE_CLIENT_ID: ${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}
+          CODEXIA_TAILSCALE_ENVIRONMENT: codexia-production
+        run: node scripts/deployment/preflight/tailscale-oidc.mjs
       - name: Connect the existing protected management plane
         uses: tailscale/github-action@v4
         with:

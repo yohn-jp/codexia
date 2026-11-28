@@ -58,7 +58,7 @@ func TestTailnetAuthenticatesTheObservedNodeAndScopedTrust(t *testing.T) {
 		CurrentTailnet: &localTailnetIdentity{Name: "example", StableID: network},
 		Self:           &localTailnetNode{ID: nodeID, PublicKey: fixtureNodeIdentity, DNSName: "codexia.example.ts.net.", TailscaleIPs: []string{address}},
 	}
-	got, err := inspectTailnet(context.Background(), client, local)
+	got, err := inspectTailnetWithApproval(context.Background(), client, local, githubTestTarget, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestTailnetAuthenticatesTheObservedNodeAndScopedTrust(t *testing.T) {
 		t.Fatalf("did not read device, WIF and ACL evidence: %d calls", got)
 	}
 	local.Self.PublicKey = "nodekey:wrong"
-	if _, err := inspectTailnet(context.Background(), client, local); err == nil {
+	if _, err := inspectTailnetWithApproval(context.Background(), client, local, githubTestTarget, "", nil, nil); err == nil {
 		t.Fatal("accepted a different node key")
 	}
 }
@@ -86,11 +86,11 @@ func TestTailscaleWIFRejectsBroadOrIncompleteClaims(t *testing.T) {
 	} {
 		key := validWIFKey("test")
 		change(&key)
-		if matchesWIF(key) {
+		if matchesWIF(githubTestTarget, key) {
 			t.Fatal("accepted broader or unusable WIF trust")
 		}
 	}
-	if !matchesWIF(validWIFKey("test")) {
+	if !matchesWIF(githubTestTarget, validWIFKey("test")) {
 		t.Fatal("rejected narrowly bound repository, workflow main and environment claims")
 	}
 }
@@ -99,7 +99,7 @@ func validWIFKey(id string) ts.Key {
 	return ts.Key{
 		ID: id, KeyType: "federated", Audience: "api.tailscale.com/" + id,
 		Issuer:  wifIssuer,
-		Subject: wifSubject,
+		Subject: githubTestTarget.wifSubject(),
 		Scopes:  []string{"auth_keys"}, Tags: []string{"tag:ci"},
 		CustomClaimRules: map[string]string{
 			"ref":          "refs/heads/main",
@@ -114,13 +114,13 @@ func TestTailscaleWIFReportsExactReconciliationActions(t *testing.T) {
 	key.Subject = "repo:yohn-jp@299811358/codexia@1450072993:environment:codexia-production"
 	key.Scopes = []string{"all"}
 	key.CustomClaimRules = nil
-	problems := strings.Join(wifProblems(key), "\n")
+	problems := strings.Join(wifProblems(githubTestTarget, key), "\n")
 	for _, expected := range []string{"subject must be", "immutable owner/repository", "scopes must contain only auth_keys", "custom claim ref", "custom claim workflow_ref"} {
 		if !strings.Contains(problems, expected) {
 			t.Errorf("missing actionable WIF mismatch %q in %q", expected, problems)
 		}
 	}
-	if matchesWIF(key) {
+	if matchesWIF(githubTestTarget, key) {
 		t.Fatal("legacy broad OIDC credential bypassed scoped trust")
 	}
 }
@@ -161,8 +161,8 @@ func TestTailnetCreatesOnlySeparatelyApprovedScopedOIDCTrust(t *testing.T) {
 				CustomClaimRules map[string]string `json:"customClaimRules"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil ||
-				request.Subject != wifSubject || request.Issuer != wifIssuer ||
-				!matchesWIF(validWIFKey("new-scoped-key")) || !slices.Equal(request.Scopes, []string{"auth_keys"}) ||
+				request.Subject != githubTestTarget.wifSubject() || request.Issuer != wifIssuer ||
+				!matchesWIF(githubTestTarget, validWIFKey("new-scoped-key")) || !slices.Equal(request.Scopes, []string{"auth_keys"}) ||
 				!slices.Equal(request.Tags, []string{"tag:ci"}) ||
 				request.CustomClaimRules["ref"] != "refs/heads/main" ||
 				request.CustomClaimRules["workflow_ref"] != "yohn-jp/codexia/.github/workflows/*@refs/heads/main" {
@@ -190,18 +190,18 @@ func TestTailnetCreatesOnlySeparatelyApprovedScopedOIDCTrust(t *testing.T) {
 		CurrentTailnet: &localTailnetIdentity{Name: "example", StableID: network},
 		Self: &localTailnetNode{ID: "nVM", PublicKey: "nodekey:" + strings.Repeat("a", 64),
 			DNSName: "codexia.example.ts.net.", TailscaleIPs: []string{address}}}
-	if _, err := inspectTailnet(context.Background(), client, local); err == nil {
+	if _, err := inspectTailnetWithApproval(context.Background(), client, local, githubTestTarget, "", nil, nil); err == nil {
 		t.Fatal("read-only inspection accepted broad legacy WIF")
 	}
 	declined := &wifApprovalOperator{}
-	if _, err := inspectTailnetWithApproval(context.Background(), client, local, declined, true); err == nil {
+	if _, err := inspectTailnetWithApproval(context.Background(), client, local, githubTestTarget, "", declined, func(context.Context) error { return nil }); err == nil {
 		t.Fatal("declined WIF creation was not stopped")
 	}
 	if created.Load() != 0 {
 		t.Fatal("WIF was created without separate approval")
 	}
 	approved := &wifApprovalOperator{approve: true}
-	got, err := inspectTailnetWithApproval(context.Background(), client, local, approved, true)
+	got, err := inspectTailnetWithApproval(context.Background(), client, local, githubTestTarget, "", approved, func(context.Context) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,5 +280,22 @@ func TestEveryProtectedTailnetWorkflowUsesTheApprovedCredentialAudience(t *testi
 				t.Fatalf("%s must bind each OIDC audience to its protected TS_OAUTH_CLIENT_ID, actions=%d", name, count)
 			}
 		})
+	}
+}
+
+func TestForeignTailnetCredentialDoesNotMatchSelectedRepository(t *testing.T) {
+	fork := githubTarget{Owner: "Fork-Org", OwnerID: 801, RepoID: 192, InstallationID: 312}
+	key := validWIFKey("scoped-credential")
+	if matchesWIF(fork, key) {
+		t.Fatal("the official credential authorized a fork")
+	}
+	key.Subject = fork.wifSubject()
+	key.CustomClaimRules["workflow_ref"] = fork.workflowClaim()
+	if matchesWIF(fork, key) {
+		t.Fatal("foreign repository claim authorized a fork")
+	}
+	key.CustomClaimRules["repository"] = fork.FullName()
+	if !matchesWIF(fork, key) {
+		t.Fatal("a fully bound fork credential was denied")
 	}
 }

@@ -5,15 +5,19 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { migrationSetFingerprint } from '../../../packages/persistence-postgres/src/migration-set.ts';
-import { planFromObservations } from './observe.mjs';
+import { planFromObservations as observeWithContext } from './observe.mjs';
 import { parsePreflightRequest } from './run.mjs';
 import { frontendOAuthConfigIdentity } from '../../build/frontend/oauth-config.mjs';
+
+const context = { repository: 'yohn-jp/codexia', owner: 'yohn-jp', repo: 'codexia', repositoryId: 1450072993, ownerId: 405 };
+const planFromObservations = evidence => observeWithContext({ ...evidence, context });
 
 test('the host observation entrypoint loads from a clean checkout without evidence-reader dependencies', () => {
   const root = mkdtempSync(join(tmpdir(), 'codexia-preflight-import-'));
   try {
     for (const path of [
       'scripts/deployment/preflight/run.mjs',
+      'scripts/github/repository.mjs',
       'scripts/deployment/preflight/preservation.mjs',
       'scripts/deployment/preflight/evidence-digest.mjs',
       'packages/api/src/auth-schema.ts',

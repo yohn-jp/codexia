@@ -1,0 +1,10 @@
+---
+# GitHub's reserved runner context identifies the repository that owns this
+# operation. Independent local operators supply the reviewed target explicitly.
+codexia_actions_repository: "{{ lookup('ansible.builtin.env', 'GITHUB_REPOSITORY') }}"
+codexia_target_repository: "{{ codexia_actions_repository or lookup('ansible.builtin.env', 'CODEXIA_TARGET_REPOSITORY') }}"
+codexia_target_repository_id: "{{ lookup('ansible.builtin.env', 'GITHUB_REPOSITORY_ID') or lookup('ansible.builtin.env', 'CODEXIA_TARGET_REPOSITORY_ID') }}"
+codexia_target_owner_id: "{{ lookup('ansible.builtin.env', 'GITHUB_REPOSITORY_OWNER_ID') or lookup('ansible.builtin.env', 'CODEXIA_TARGET_OWNER_ID') }}"
+codexia_image_repository: "{{ 'ghcr.io/' + (codexia_target_repository.split('/')[0] | lower) + '/codexia-backend' if codexia_target_repository is match('^[a-zA-Z0-9-]+/codexia$') else '' }}"
+codexia_image_pattern: "{{ '^' + (codexia_image_repository | regex_escape) + '@sha256:[a-f0-9]{64}$' }}"
+codexia_fixture_image_repository: "{{ codexia_image_repository | replace('ghcr.io/', 'localhost:5000/') }}"

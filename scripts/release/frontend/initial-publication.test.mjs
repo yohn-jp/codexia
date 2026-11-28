@@ -275,6 +275,7 @@ async function enrollmentFixture({ empty = false } = {}) {
   const observe = () => f.client.observeLifecycle({ backendExpected: false, ownerSetup: true });
   const publish = async (overrides = {}) => publishInitialFrontend({
     edge: f.client, observed: await observe(), candidate: enrollmentCandidate,
+    context: { repository: 'example-org/codexia', repositoryId: 321, ownerId: 123 },
     assertCurrentSource: async () => {}, recordRelease: async record => records.push(record),
     ...overrides,
   });
@@ -290,6 +291,9 @@ test('R5 publishes the first version of the canonical private Worker and records
   assert.deepEqual(f.writes.map(({ method, auth }) => [method, auth]), [['POST', 'Bearer worker-secret']]);
   assert.equal(f.records[0].targetSha, enrollmentCandidate.identity.sourceSha);
   assert.equal(f.records[0].metadata.worker, 'codexia-frontend');
+  assert.equal(f.records[0].metadata.repository, 'example-org/codexia');
+  assert.equal(f.records[0].metadata.repositoryId, 321);
+  assert.equal(f.records[0].metadata.ownerId, 123);
   assert.equal(f.records[0].metadata.requiredApiEpoch, 3);
 });
 

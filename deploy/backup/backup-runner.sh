@@ -9,7 +9,7 @@ control="$HOME/.local/bin/codexia-backup-control"
 intent="$state_dir/backup-transaction"
 lock_file="$state_dir/host.lock"
 readonly uuid='^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
-readonly image_pattern='^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$'
+readonly image_pattern='^ghcr\.io/[a-z0-9][a-z0-9-]*/codexia-backend@sha256:[a-f0-9]{64}$'
 
 die(){ echo "$*" >&2; exit 1; }
 exists(){ [[ -e "$1" || -L "$1" ]]; }
@@ -63,6 +63,16 @@ fi
 exec 9>>"$lock_file"
 flock --exclusive --nonblock 9 || exit 75
 
+# Backup can resume the exact VM-local committed image. A pending intent
+# cannot select an image, even if another repository published its digest.
+release="$state_dir/deployed-release.json"
+private_file "$release" || die 'A committed deployment record is required for backup'
+image="$(jq -er '.image' "$release")"
+[[ "$image" =~ $image_pattern ]] || die 'Invalid committed deployment image'
+if [[ -n "${CODEXIA_IMAGE_REPOSITORY:-}" && "${image%@*}" != "$CODEXIA_IMAGE_REPOSITORY" ]]; then
+  die 'The committed deployment image belongs to a different repository'
+fi
+
 same_running_image(){
   local expected actual
   expected="$(podman image inspect --format '{{.Id}}' "$1")" &&
@@ -114,8 +124,9 @@ finish_transfer(){
 if exists "$intent"; then
   private_file "$intent" || die 'Unsafe pending backup intent'
   mapfile -t pending < "$intent"
-  [[ "${#pending[@]}" -ge 4 && "${#pending[@]}" -le 5 && "${pending[0]}" =~ $uuid && "${pending[1]}" =~ $image_pattern &&
+  [[ "${#pending[@]}" -ge 4 && "${#pending[@]}" -le 5 && "${pending[0]}" =~ $uuid &&
      ( "${pending[2]}" == true || "${pending[2]}" == false ) ]] || die 'Invalid pending backup intent'
+  [[ "${pending[1]}" == "$image" ]] || die 'Pending backup intent does not match the committed deployment'
   [[ "${pending[3]}" == /* && "${pending[3]##*/}" =~ ^codexia-[0-9]{8}T[0-9]{6}Z-${pending[0]}$ ]] ||
     die 'Invalid pending backup artifact path'
   resume_services "${pending[1]}" "${pending[2]}" || die 'Backup service recovery is pending'
@@ -140,10 +151,7 @@ run_id="$1"
 load_staging
 systemctl --user is-active --quiet codexia-api.service
 [[ "$(podman inspect --format '{{.State.Health.Status}}' codexia-api)" == healthy ]] || die 'The backup requires a healthy API'
-release="$state_dir/deployed-release.json"
-private_file "$release" || die 'A committed deployment record is required for backup'
-image="$(jq -er '.image' "$release")"
-[[ "$image" =~ $image_pattern ]] && same_running_image "$image" || die 'The running API differs from the admitted image'
+same_running_image "$image" || die 'The running API differs from the admitted image'
 source_sha="$(podman exec codexia-api cat /app/update-identity.json |
   jq -er --slurpfile record "$release" 'select(. == $record[0].identity and .format == "codexia-backend-identity/v1" and .profile == "full") | .sourceSha')"
 [[ "$source_sha" =~ ^[a-f0-9]{40}$ ]] || die 'The admitted API source identity is invalid'

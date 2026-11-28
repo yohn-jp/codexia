@@ -21,11 +21,14 @@
   ansible.builtin.assert:
     that:
       - codexia_lifecycle_verification.format == 'codexia-push-app-lifecycle-evidence/v1'
+      - codexia_lifecycle_verification.repository == codexia_target_repository
+      - codexia_lifecycle_verification.repositoryId == codexia_target_repository_id | int
+      - codexia_lifecycle_verification.ownerId == codexia_target_owner_id | int
       - codexia_lifecycle_verification.sourceSha == lookup('ansible.builtin.env', 'CODEXIA_LIFECYCLE_SOURCE_SHA')
       - codexia_lifecycle_verification.runId == lookup('ansible.builtin.env', 'GITHUB_RUN_ID') | int
       - codexia_lifecycle_verification.runAttempt == lookup('ansible.builtin.env', 'GITHUB_RUN_ATTEMPT') | int
       - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].profile == 'full'
-      - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].image is match('^ghcr\\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].image is match(codexia_image_pattern)
       - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity.profile == 'full'
       - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity.platform == 'linux/amd64'
       - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity.sourceSha is match('^[a-f0-9]{40}$')
@@ -66,7 +69,7 @@
   failed_when: >-
     codexia_lifecycle_candidate_digests.rc != 0 or
     (codexia_image not in (codexia_lifecycle_candidate_digests.stdout | from_json) and
-    ('localhost:5000/yohn-jp/codexia-backend@' + codexia_image.split('@')[-1]) not in (codexia_lifecycle_candidate_digests.stdout | from_json))
+    ((codexia_fixture_image_repository + '@') + codexia_image.split('@')[-1]) not in (codexia_lifecycle_candidate_digests.stdout | from_json))
 
 - name: Create a stopped metadata container for the actual candidate image
   ansible.builtin.command:

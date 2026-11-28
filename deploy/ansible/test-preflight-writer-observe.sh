@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export CODEXIA_IMAGE_REPOSITORY=ghcr.io/yohn-jp/codexia-backend
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT

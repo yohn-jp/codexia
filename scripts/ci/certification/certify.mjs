@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { actionsRepository, matchesRunRepository } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { appendFile, readFile, readdir } from 'node:fs/promises';
@@ -25,10 +26,12 @@ assert.equal(outcomes.plan?.result, 'success', 'Impact planning did not succeed'
 assert.ok(Object.values(outcomes).every(value => ['success', 'skipped'].includes(value.result)), 'A required DAG group failed, was cancelled or unexecuted');
 const plan = validateVerificationPlan(JSON.parse(await readFile(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
 assert.equal(plan.sha, CODEXIA_EXPECTED_SHA);
-assert.equal(GITHUB_REPOSITORY, 'yohn-jp/codexia', 'Unexpected repository');
+const context = actionsRepository();
 const github = createGitHubOctokit({ token: GH_TOKEN });
-const [owner, repo] = GITHUB_REPOSITORY.split('/');
+const { owner, repo } = context;
 const run = (await github.rest.actions.getWorkflowRun({ owner, repo, run_id: Number(GITHUB_RUN_ID) })).data;
+assert.ok(matchesRunRepository(run, context, { sameHead: run.event !== 'pull_request' }), 'Verification repository mismatch');
+assert.equal(run.path, '.github/workflows/verify.yml', 'Verification workflow path mismatch');
 assert.equal(run.head_sha, CODEXIA_EXPECTED_SHA, 'Workflow run must bind exact source');
 assert.equal(run.event, plan.event, 'Impact plan event mismatch');
 if (run.event !== 'pull_request') assert.equal(plan.mode, 'full', 'Main/manual verification must execute all unconditional validations');

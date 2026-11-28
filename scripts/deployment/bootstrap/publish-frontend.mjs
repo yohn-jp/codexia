@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { buildComponentReleaseRecord } from '../../release/components/record-model.mjs';
 import { initialFrontendNeedsPublication, assertInitialFrontendReady } from './admission.mjs';
 
-export function initialFrontendRelease(candidate) {
+export function initialFrontendRelease(candidate, context) {
   const { identity, runId, producerAttempt, artifactId, artifactDigest } = candidate;
   // The lifecycle artifact verifier certifies a main workflow_run producer.
   // Bind the immutable release to its certified source, not the later dispatch.
@@ -10,12 +10,12 @@ export function initialFrontendRelease(candidate) {
     event: 'workflow_run', sourceSha: identity.sourceSha, version: identity.version,
     workflowRunId: runId, workflowAttempt: producerAttempt, artifactId, artifactDigest,
     profile: identity.profile, apiEpoch: identity.apiEpoch,
-  });
+  }, undefined, context);
 }
 
 /** Called only after the protected R5 controller has admitted the exact plan. */
-export async function publishInitialFrontend({ edge, observed, candidate, assertCurrentSource, recordRelease }) {
-  const release = initialFrontendRelease(candidate);
+export async function publishInitialFrontend({ edge, observed, candidate, context, assertCurrentSource, recordRelease }) {
+  const release = initialFrontendRelease(candidate, context);
   const needsPublication = initialFrontendNeedsPublication(observed, candidate.identity);
   await assertCurrentSource();
   if (needsPublication) {

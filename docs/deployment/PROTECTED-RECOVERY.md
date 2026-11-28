@@ -54,7 +54,7 @@ v2 manifest の database と history の fingerprint は内容照合用で、sou
 既存 Preflight は認証元を確認した証拠の digest を既存計画の `backupSha256` に結び付け、同じ復元操作 ID を承認対象に含める。
 digest はすり替えを検出する手掛かりで、証拠の発行元は保護された運用経路で確認する。
 
-保護された handoff は production queue と既存の host lock の下で、同じ記録の digest、承認期限、対象の host/cluster/OID、復元内容、ledger、owner と Auth、候補および Frontend を再照合する。
+保護された handoff は production queue と既存の host lock の下で、同じ記録の digest、承認期限、配備対象の repository と repository/owner ID、対象の host/cluster/OID、復元内容、ledger、owner と Auth、候補および Frontend を再照合する。
 元の writer の停止または遮断が現在も有効なことを確認し、Tunnel の公開直前に承認期限と対象を再確認する。
 別の対象や古い記録は R0 で停止し、再判定する。
 [Preflight の binding](../../scripts/deployment/preflight/observe.mjs) [配備トランザクション](../../deploy/ansible/deploy-transaction.yml)
@@ -68,4 +68,5 @@ digest はすり替えを検出する手掛かりで、証拠の発行元は保�
 | 実環境 | 実際の保存先と独立ホストで復元し、運用者が RPO/RTO、復元点以後の書込み、元 writer 停止、外部経路、owner のログイン、バックアップ運用を受け入れる |
 
 現行の [Ansible 隔離ドリル](../../deploy/ansible/restore-drill.yml) は使い捨て資源を使い、[通常配備の中断復旧](../../deploy/ansible/push-deployment-recover.sh) は既存の release 状態を扱う。
+独立した復旧ホストで Ansible や中断復旧スクリプトを実行する場合は、承認済みの配備対象から `CODEXIA_TARGET_REPOSITORY`、`CODEXIA_TARGET_REPOSITORY_ID`、`CODEXIA_TARGET_OWNER_ID` を設定する。
 復旧担当者と配備運用者は上記の受入を経て、既存の v2 保全資料と独立した復旧鍵を用いる手順を運用へ適用する。

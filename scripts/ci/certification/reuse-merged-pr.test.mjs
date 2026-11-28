@@ -10,7 +10,7 @@ import { createVerificationPlan, planDigest } from '../impact/plan.mjs';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from '../impact/contract.mjs';
 
 const sourceSha = 'a'.repeat(40), base = 'b'.repeat(40), head = 'c'.repeat(40), tree = 'd'.repeat(40);
-const repository = 'yohn-jp/codexia', repo = { id: 123 }, workflow_id = 42;
+const repository = 'yohn-jp/codexia', repo = { id: 123, full_name: repository, owner: { id: 10 } }, workflow_id = 42;
 const start = '2026-11-17T10:00:00Z', end = '2026-11-17T10:05:00Z', merged = '2026-11-17T10:06:00Z';
 const digest = 'sha256:' + 'e'.repeat(64);
 const workflowPath = '.github/workflows/verify.yml';
@@ -43,7 +43,7 @@ function fixture(files = ['package.json']) {
   const contents = new Map();
   const add = (name, content) => {
     const item = { id: artifacts.length + 100, name, expired: false, digest, size_in_bytes: 100,
-      created_at: '2026-11-17T10:01:00Z', workflow_run: { id: prRun.id, head_sha: head } };
+      created_at: '2026-11-17T10:01:00Z', workflow_run: { id: prRun.id, head_sha: head, repository_id: repo.id, head_repository_id: repo.id } };
     artifacts.push(item);
     contents.set(item.id, content);
     return item;

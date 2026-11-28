@@ -1,3 +1,4 @@
+import { assertBackendImageDigest, assertReleaseRepositoryBinding, releaseRepositoryBinding } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { assertFrontendIdentity } from '../frontend/verify-compatibility.mjs';
 import { readComponentVersion } from './version.mjs';
@@ -35,9 +36,10 @@ export function publicationInWorkflowWindow(release, run) {
 }
 
 /** Build immutable component-release metadata while keeping tested bytes and reviewed main source distinct. */
-export function buildComponentReleaseRecord(component,sourceSha,identity,producer,mainTree){
+export function buildComponentReleaseRecord(component,sourceSha,identity,producer,mainTree,context){
   assert.ok(['frontend','backend'].includes(component),'Unknown component');
   assert.match(sourceSha??'',sha,'Component source SHA is invalid');
+  const binding = releaseRepositoryBinding(context);
   let version,metadata;
   if(component==='frontend'){
     assertFrontendIdentity(identity);
@@ -71,9 +73,8 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
         proofRunId:producer.proofRunId,verifyAttempt:producer.verifyAttempt,planDigest:producer.planDigest,sourceTree:producer.sourceTree,
         mergeBaseSha:producer.mergeBaseSha}}:{})};
   }else{
-    const digestPattern=/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
     const core=producer?.core,full=producer?.full;
-    assert.match(core??'',digestPattern);assert.match(full??'',digestPattern);assert.notEqual(core,full);
+    assertBackendImageDigest(core, binding.repository);assertBackendImageDigest(full, binding.repository);assert.notEqual(core,full);
     const compatibility=producer.compatibility;
     assert.ok(compatibility&&Number.isSafeInteger(compatibility.apiEpoch)&&compatibility.apiEpoch>0);
     version=readComponentVersion('backend');
@@ -81,6 +82,7 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
     if(producer.event==='pull_request'){
       const receipt=producer.receipt;
       assert.ok(receipt&&typeof receipt==='object'&&!Array.isArray(receipt),'Backend promotion receipt is missing');
+      assertReleaseRepositoryBinding(receipt, context);
       assert.equal(receipt.format,'codexia-backend-promotion/v1');
       assert.equal(receipt.event,'pull_request');
       assert.equal(receipt.mainSha,sourceSha,'Backend promotion main authority mismatch');
@@ -119,6 +121,7 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
     }else if(['push','workflow_run'].includes(producer.event)&&producer.receipt){
       const receipt=producer.receipt;
       assert.ok(receipt&&typeof receipt==='object'&&!Array.isArray(receipt),'Backend build receipt is missing');
+      assertReleaseRepositoryBinding(receipt, context);
       assert.equal(receipt.format,'codexia-backend-build/v1');
       assert.equal(receipt.event,producer.event);
       assert.equal(receipt.sourceSha,sourceSha,'Backend build source differs from main release authority');
@@ -153,6 +156,7 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
       'Backend promotion receipt belongs to another Verify run');
   }
   metadata.version=version;
+  Object.assign(metadata, binding);
   const tag=component+'-v'+version;
   const body='Certified component release.\n\n```json\n'+JSON.stringify(metadata,null,2)+'\n```';
   return {tag,title:component+' v'+version,targetSha:sourceSha,metadata,body};

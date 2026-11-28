@@ -13,7 +13,7 @@ run_better_auth_lifecycle() {
   }
   build_auth_candidate() {
     local scenario=$1 tag digest immutable digest_file recipe
-    tag="localhost:5000/yohn-jp/codexia-backend:$scenario-$source_sha"
+    tag="$fixture_image_repository:$scenario-$source_sha"
     digest_file="$auth_context/$scenario.digest"
     recipe="$auth_context/$scenario.Dockerfile"
     rootless cp "$auth_context/Dockerfile" "$recipe" || return
@@ -31,7 +31,7 @@ run_better_auth_lifecycle() {
       return 1
     }
     digest=$(rootless cat "$digest_file") || return
-    immutable="ghcr.io/yohn-jp/codexia-backend@$digest"
+    immutable="$image_repository@$digest"
     node "$repo_root/scripts/deployment/lifecycle/app.mjs" record-auth "$scenario" "$immutable" || return
     printf '%s\n' "$immutable"
   }

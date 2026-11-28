@@ -2,7 +2,7 @@
 - name: Require immutable certified artifact
   ansible.builtin.assert:
     that:
-      - codexia_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - codexia_image is match(codexia_image_pattern)
       - codexia_source_sha is match('^[a-f0-9]{40}$')
       - codexia_profile == 'full'
       - codexia_verified_main_sha is match('^[a-f0-9]{40}$')
@@ -25,6 +25,12 @@
   ansible.builtin.assert:
     that:
       - codexia_deployment_certificate.format == 'codexia-backend-deployment-certificate/v1'
+      - codexia_target_repository == codexia_actions_repository
+      - codexia_target_repository_id is match('^[1-9][0-9]*$')
+      - codexia_target_owner_id is match('^[1-9][0-9]*$')
+      - codexia_deployment_certificate.verifyRun.repository == codexia_target_repository
+      - codexia_deployment_certificate.verifyRun.repositoryId == codexia_target_repository_id | int
+      - codexia_deployment_certificate.verifyRun.ownerId == codexia_target_owner_id | int
       - codexia_deployment_certificate.verifiedMainSha == codexia_verified_main_sha
       - codexia_deployment_certificate.verifiedMainTree is match('^[a-f0-9]{40}$')
       - codexia_deployment_certificate.producer.sourceSha == codexia_source_sha

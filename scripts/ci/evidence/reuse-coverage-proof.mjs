@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Optional reuse applies only to the selected coverage check; impact selection is authoritative.
+import { actionsRepository, matchesRunRepository } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { appendFile, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -32,10 +33,11 @@ async function main() {
       console.log('Coverage proof unavailable; execute the selected coverage task.');
     } else {
       try {
-        assert.equal(GITHUB_REPOSITORY, 'yohn-jp/codexia', 'Unexpected repository');
+        const context = actionsRepository();
         const github = createGitHubOctokit({ token: GH_TOKEN });
-        const [owner, repo] = GITHUB_REPOSITORY.split('/');
+        const { owner, repo } = context;
         const { data: current } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: Number(GITHUB_RUN_ID) });
+        assert.ok(matchesRunRepository(current, context, { sameHead: false }), 'Verify repository mismatch');
         const coverageReuse = await resolveExactMainCoverageProof({
           plan, current, repository: GITHUB_REPOSITORY, token: GH_TOKEN,
         });

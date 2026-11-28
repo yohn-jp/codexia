@@ -2,7 +2,12 @@
 
 set -Eeuo pipefail
 
-if [[ $# != 2 || "$1" != --apply || ! "$2" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]]; then
+image_repository="${CODEXIA_IMAGE_REPOSITORY:-}"
+reviewed_image() {
+  [[ "$image_repository" =~ ^ghcr\.io/[a-z0-9-]+/codexia-backend$ &&
+     "$1" == "$image_repository@"* && "${1#*@}" =~ ^sha256:[a-f0-9]{64}$ ]]
+}
+if [[ $# != 2 || "$1" != --apply ]] || ! reviewed_image "$2"; then
   echo 'Usage: codexia-register-auth --apply <reviewed immutable Full image>' >&2
   exit 2
 fi

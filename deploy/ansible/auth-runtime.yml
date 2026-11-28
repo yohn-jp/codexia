@@ -79,7 +79,7 @@
       - codexia_oidc_issuer is not defined
       - codexia_oauth_mcp_client_ids is not defined
       - codexia_oauth_owner_client_ids.split(',') | length == 2
-      - codexia_auth_bootstrap_image is match('^ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - codexia_auth_bootstrap_image is match(codexia_image_pattern)
       - not (codexia_owner_setup_approved | default(false)) or codexia_owner_setup_age_recipient is match('^age1[0-9a-z]+$')
       - codexia_owner_setup_web_redirect_uris is sequence and codexia_owner_setup_web_redirect_uris is not string
       - codexia_owner_setup_web_redirect_uris | length > 0
@@ -410,7 +410,7 @@
   ansible.builtin.assert:
     that:
       - codexia_database_initialization_approved | default(false) | bool
-      - (codexia_auth_bootstrap_image | default('')) is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - (codexia_auth_bootstrap_image | default('')) is match(codexia_image_pattern)
     fail_msg: Initialize a pristine application schema with explicit approval and a reviewed immutable Full image before provisioning the auth schema.
   when: not codexia_auth_database_state_value.applicationLedgerExists
 

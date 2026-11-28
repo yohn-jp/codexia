@@ -7,6 +7,8 @@ import { createRequire } from 'node:module';
 import { resolveManualPublisherRun } from './prepare-revalidation.mjs';
 import { prepareManualVerifierContext } from './run-revalidation.mjs';
 
+const context = { repository: 'yohn-jp/codexia', owner: 'yohn-jp', repo: 'codexia', repositoryId: 1450072993, ownerId: 405 };
+
 const require = createRequire(new URL('../../../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 const workflow = parse(await readFile(new URL('../../../.github/workflows/backend-handoff-revalidate.yml', import.meta.url), 'utf8'));
@@ -21,13 +23,13 @@ const run = () => ({
   head_sha: sha('a'),
   status: 'completed',
   conclusion: 'success',
-  repository: { full_name: 'yohn-jp/codexia' },
-  head_repository: { full_name: 'yohn-jp/codexia' },
+  repository: { full_name: context.repository, id: context.repositoryId, owner: { id: context.ownerId } },
+  head_repository: { full_name: context.repository, id: context.repositoryId, owner: { id: context.ownerId } },
   actor: { login: 'ignored-public-metadata' },
 });
 const env = () => ({
   GITHUB_EVENT_NAME: 'workflow_dispatch',
-  GITHUB_REPOSITORY: 'yohn-jp/codexia',
+  GITHUB_REPOSITORY: context.repository, GITHUB_REPOSITORY_ID: String(context.repositoryId), GITHUB_REPOSITORY_OWNER_ID: String(context.ownerId),
   GITHUB_REF: 'refs/heads/main',
   GITHUB_SHA: sha('b'),
   CODEXIA_PUBLISHER_RUN_ID: '44878012473',

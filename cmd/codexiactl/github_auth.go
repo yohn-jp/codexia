@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,36 +17,20 @@ import (
 var (
 	githubAppClientIDPattern = regexp.MustCompile(`^Iv[A-Za-z0-9.]{10,62}$`)
 	githubUserCode           = regexp.MustCompile(`^[A-Z0-9]{4}-[A-Z0-9]{4}$`)
-	githubPATPrefix          = []byte("github_pat_")
 )
 
-const githubPermissionNotice = "GitHub access to yohn-jp/codexia requires Contents and Metadata read, Actions and Environments read/write. " +
-	"The existing protected workflows may also require Pull requests read for release evidence."
-
-const githubPATSetup = "https://github.com/settings/personal-access-tokens/new?" +
-	"name=Codexia+initial+deployment&target_name=yohn-jp&expires_in=1&contents=read&actions=write&environments=write"
+const githubPermissionNotice = "GitHub requires Metadata and Contents read, Actions and Environments read/write, and Administration read for OIDC settings. " +
+	"Changing branch restrictions requires Administration write with separate approval. The official App maintainer configures these permissions."
 
 func githubLogin(ctx context.Context, o operator, clientID string) (*githubControl, error) {
+	if !githubAppClientIDPattern.MatchString(clientID) {
+		return nil, needsAction("The official release has no configured GitHub App Client ID. Ask the yohn-jp/codexia release maintainer to enable Device Flow and expiring user tokens in the public App at https://github.com/settings/apps, then bind its Client ID to the official release")
+	}
 	o.Notice(githubPermissionNotice)
-	useDevice := githubAppClientIDPattern.MatchString(clientID)
-	if useDevice {
-		o.Notice("Use the repository-only installation of the release's Codexia GitHub App at https://github.com/settings/installations for this short-lived session.")
-		choice, err := o.Confirm("Start GitHub Device Flow at https://github.com/login/device? The browser code expires within 15 minutes")
-		if err != nil {
-			return nil, err
-		}
-		useDevice = choice
-	} else {
-		o.Notice("This build has no provisioned release-bound GitHub App client ID. A maintainer must configure the release app for Device Flow.")
+	if err := requireApproval(o, "Start the official Codexia GitHub App Device Flow at https://github.com/login/device? The browser code expires within 15 minutes."); err != nil {
+		return nil, err
 	}
-
-	var credential []byte
-	var err error
-	if useDevice {
-		credential, err = githubDeviceAccess(ctx, o, clientID, githubHTTPClient(20*time.Second))
-	} else {
-		credential, err = githubPAT(o)
-	}
+	credential, err := githubDeviceAccess(ctx, o, clientID, githubHTTPClient(20*time.Second))
 	if err != nil {
 		return nil, err
 	}
@@ -57,36 +40,39 @@ func githubLogin(ctx context.Context, o operator, clientID string) (*githubContr
 		return nil, err
 	}
 	user, resp, err := control.client.Users.Get(ctx, "")
-	if err != nil || user.GetID() <= 0 || user.GetLogin() == "" {
+	if err != nil || user.GetID() <= 0 || !githubOwnerName.MatchString(user.GetLogin()) {
 		control.Close(ctx)
 		return nil, githubFailure("verify the authenticated GitHub user", resp, err)
 	}
-	if !useDevice {
-		// GitHub only includes this documented header for applicable credentials.
-		// Check present expiry metadata and require the operator to select an expiring PAT.
-		expiry := resp.Header.Get("GitHub-Authentication-Token-Expiration")
-		if expiry != "" && !githubPATExpiry(expiry, time.Now()) {
-			control.Close(ctx)
-			return nil, errors.New("GitHub fine-grained PAT has an invalid or expired lifetime")
-		}
-	}
 	control.actor = user.GetLogin()
-	control.appSession = useDevice
-	approved, err := o.Confirm(fmt.Sprintf("Use GitHub account %s for the yohn-jp/codexia initial installation", control.actor))
-	if err != nil || !approved {
-		control.Close(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return nil, errors.New("GitHub account declined")
-	}
-	if useDevice {
-		if err := control.verifyInstallation(ctx); err != nil {
-			control.Close(ctx)
-			return nil, err
-		}
-	}
+	control.appClientID = clientID
 	return control, nil
+}
+
+func (g *githubControl) selectTarget(ctx context.Context, o operator, vm vmObservation, state checkpoint) (productionContract, error) {
+	candidates, err := g.discoverTargets(ctx)
+	if err != nil {
+		return productionContract{}, err
+	}
+	g.target, err = chooseGitHubTarget(o, candidates, state)
+	if err != nil {
+		return productionContract{}, err
+	}
+	sha, err := g.Main(ctx)
+	if err != nil {
+		return productionContract{}, err
+	}
+	settings, err := g.productionSettings(ctx, sha)
+	if err != nil {
+		return productionContract{}, err
+	}
+	o.Notice(fmt.Sprintf("Target %s (owner ID %d, repository ID %d, installation %d), GitHub user %s, protected main %s, public origin %s, VM %s.",
+		g.target.FullName(), g.target.OwnerID, g.target.RepoID, g.target.InstallationID, g.actor, sha, settings.PublicOrigin, vm.HostID))
+	if err := requireApproval(o, "Confirm the observed deployment repository and VM?"); err != nil {
+		return productionContract{}, err
+	}
+	g.approvedSHA = sha
+	return settings, nil
 }
 
 func githubDeviceAccess(ctx context.Context, o operator, clientID string, client *http.Client) ([]byte, error) {
@@ -157,37 +143,6 @@ func githubDeviceError(ctx context.Context, err error, phase string) error {
 	return errors.New("Could not " + phase + " the GitHub Device Flow")
 }
 
-func githubPAT(o operator) ([]byte, error) {
-	ok, err := o.Confirm("Use an expiring fine-grained PAT restricted to yohn-jp/codexia instead")
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, errors.New("GitHub authentication was not approved")
-	}
-	o.Notice("Create a one-day token at " + githubPATSetup + " and choose only the codexia repository.")
-	raw, err := o.Secret("Enter the expiring, repository-limited GitHub fine-grained PAT")
-	defer clear(raw)
-	if err != nil {
-		return nil, err
-	}
-	value := bytes.TrimSpace(raw)
-	if !bytes.HasPrefix(value, githubPATPrefix) || len(value) <= len(githubPATPrefix) || len(value) > 256 ||
-		bytes.ContainsAny(value, " \t\r\n\x00") {
-		return nil, errors.New("GitHub requires a fine-grained PAT")
-	}
-	return bytes.Clone(value), nil
-}
-
-func githubPATExpiry(value string, now time.Time) bool {
-	for _, format := range []string{"2006-01-02 15:04:05 MST", time.RFC3339} {
-		if expiry, err := time.Parse(format, value); err == nil {
-			return expiry.After(now)
-		}
-	}
-	return false
-}
-
 func newGitHubControl(token []byte) (*githubControl, error) {
 	api := githubHTTPClient(20 * time.Second)
 	api.Transport = &githubAPITransport{next: http.DefaultTransport, token: token}
@@ -224,39 +179,6 @@ func (g *githubControl) Close(context.Context) {
 	// The installer uses only its public ID and never persists the short-lived token.
 	clear(g.token)
 	g.token = nil
-}
-
-func (g *githubControl) verifyInstallation(ctx context.Context) error {
-	const help = "Configure the release's GitHub App installation for yohn-jp/codexia only at https://github.com/settings/installations"
-	for page := 1; page != 0; {
-		list, resp, err := g.client.Apps.ListUserInstallations(ctx, &github.ListOptions{PerPage: 100, Page: page})
-		if err != nil {
-			return githubFailure("inspect the authenticated GitHub App installation", resp, err)
-		}
-		for _, installation := range list {
-			if !strings.EqualFold(installation.GetAccount().GetLogin(), githubOwner) || installation.GetID() <= 0 ||
-				installation.GetRepositorySelection() != "selected" || installation.SuspendedAt != nil {
-				continue
-			}
-			repos, repoResp, err := g.client.Apps.ListUserRepos(ctx, installation.GetID(), &github.ListOptions{PerPage: 2})
-			if err != nil {
-				return githubFailure("inspect repositories available to the GitHub App and signed-in user", repoResp, err)
-			}
-			if repos.GetTotalCount() != 1 || len(repos.Repositories) != 1 || repoResp.NextPage != 0 ||
-				repos.Repositories[0].GetID() != githubRepoID {
-				continue
-			}
-			perms := installation.GetPermissions()
-			if perms.GetActions() != "write" || perms.GetEnvironments() != "write" ||
-				!githubHasRead(perms.GetContents()) || !githubHasRead(perms.GetMetadata()) {
-				return errors.New("The GitHub App installation permissions are insufficient. " + githubPermissionNotice)
-			}
-			g.appAdministration = perms.GetAdministration() == "write"
-			return nil
-		}
-		page = resp.NextPage
-	}
-	return errors.New(help)
 }
 
 func githubHasRead(permission string) bool {

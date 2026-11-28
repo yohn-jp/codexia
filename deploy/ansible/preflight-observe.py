@@ -17,7 +17,12 @@ import sys
 from contextlib import ExitStack
 from datetime import datetime, timezone
 
-FULL_IMAGE = r"ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}"
+def full_image_pattern():
+    repository = os.environ.get("CODEXIA_IMAGE_REPOSITORY", "")
+    if not re.fullmatch(r"ghcr[.]io/[a-z0-9-]+/codexia-backend", repository):
+        raise ValueError("A reviewed image repository is required")
+    return re.escape(repository) + r"@sha256:[a-f0-9]{64}"
+
 RAW_HASH = r"[a-f0-9]{64}"
 RECORD_ID = r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}"
 
@@ -171,10 +176,11 @@ def read_recovery_handoff(state_dir):
                 os.path.samestat(parent, path.parent.stat(follow_symlinks=False)))
     value = json.loads(raw, object_pairs_hook=no_duplicate_keys)
     require(isinstance(value, dict) and set(value) == {
-        "format", "operationId", "environment", "backup", "target", "release",
+        "format", "operationId", "environment", "repository", "repositoryId", "ownerId", "backup", "target", "release",
         "window", "writerFence", "executorFenceSha256", "credentialsRecordSha256",
         "postBackupWritesRecordSha256",
     })
+    require(matches_repository(value))
     require_fields({key: value[key] for key in
                     ("format", "operationId", "environment", "executorFenceSha256", "credentialsRecordSha256",
                      "postBackupWritesRecordSha256")}, {
@@ -200,7 +206,7 @@ def read_recovery_handoff(state_dir):
                  source.get("sourceClusterId") == target["clusterId"] and
                  source.get("sourceDatabaseOid") == target["databaseOid"]))
     require_fields(value["release"], {
-        "image": FULL_IMAGE, "sourceSha": r"[a-f0-9]{40}", "frontendArtifactSha256": RAW_HASH,
+        "image": full_image_pattern(), "sourceSha": r"[a-f0-9]{40}", "frontendArtifactSha256": RAW_HASH,
     })
     timestamp = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z"
     require_fields(value["window"], {"id": RECORD_ID, "notBefore": timestamp, "notAfter": timestamp})
@@ -318,9 +324,11 @@ def read_owner_installation_intent(path, cluster):
     if info is None:
         return None
     require(stat.S_IMODE(info.st_mode) == 0o600)
-    system_id, database_oid, image = private_text(path).removesuffix("\n").split(":", 2)
+    repository, repository_id, owner_id, system_id, database_oid, image = private_text(path).removesuffix("\n").split(":", 5)
+    require(re.fullmatch(r"[1-9][0-9]*", repository_id) and re.fullmatch(r"[1-9][0-9]*", owner_id)
+            and matches_repository({"repository": repository, "repositoryId": int(repository_id), "ownerId": int(owner_id)}))
     require(system_id == cluster["clusterId"] and database_oid == cluster["databaseOid"]
-            and re.fullmatch(r"[1-9][0-9]{0,9}", database_oid) and re.fullmatch(FULL_IMAGE, image))
+            and re.fullmatch(r"[1-9][0-9]{0,9}", database_oid) and re.fullmatch(full_image_pattern(), image))
     return {"clusterId": system_id, "databaseOid": database_oid, "image": image}
 
 
@@ -332,6 +340,16 @@ def user_exists(name):
         return False
 
 
+def matches_repository(record):
+    repository = os.environ.get("CODEXIA_TARGET_REPOSITORY", "")
+    return (re.fullmatch(r"[A-Za-z0-9-]+/codexia", repository)
+            and record.get("repository") == repository
+            and type(record.get("repositoryId")) is int and record["repositoryId"] > 0
+            and type(record.get("ownerId")) is int and record["ownerId"] > 0
+            and str(record["repositoryId"]) == os.environ.get("CODEXIA_TARGET_REPOSITORY_ID")
+            and str(record["ownerId"]) == os.environ.get("CODEXIA_TARGET_OWNER_ID"))
+
+
 def observe_transaction(state_dir):
     require(metadata(state_dir / "backup-transaction") is None)
     # No retired operation can be interpreted or resumed by ordinary deployment.
@@ -339,7 +357,7 @@ def observe_transaction(state_dir):
     path = state_dir / "deploy-transaction.json"
     if metadata(path) is not None:
         data = json.loads(private_text(path))
-        require(data.get("format") == "codexia-deploy-transaction/v1"
+        require(matches_repository(data) and data.get("format") == "codexia-deploy-transaction/v1"
                 and data.get("phase") in ("pending", "committed"))
         require(all(type(data.get(k)) is bool for k in
                     ("hadUnit", "tunnelWasActive", "apiLinkCreated", "tunnelLinkCreated", "releasePresent")))
@@ -452,15 +470,10 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
         return result
     if has_marker:
         require(stat.S_IMODE(marker_info.st_mode) == 0o600 and private_text(marker).strip() == cluster["clusterId"])
-    if intent is not None:
-        result["setupImage"] = intent["image"]
-    else:
-        # Earlier setup operations wrote the installation marker only after
-        # migration. An existing grant can resume with the exact staged unit.
-        lines = private_text(auth_dir / "owner-setup.container").splitlines()
-        images = [line.removeprefix("Image=") for line in lines if line.startswith("Image=")]
-        require(len(images) == 1 and re.fullmatch(FULL_IMAGE, images[0]))
-        result["setupImage"] = images[0]
+    if intent is None:
+        result["authState"] = "recovery"
+        return result
+    result["setupImage"] = intent["image"]
     if sql("codexia", "SELECT to_regclass('codexia_auth.owner_setup') IS NOT NULL;") != "t":
         return result
     owner = json_sql("codexia", """SELECT json_build_object(
@@ -492,7 +505,7 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
     if promoted:
         require(has_marker and stat.S_IMODE(promotion_info.st_mode) == 0o600)
         promotion = private_text(promotion_marker)
-        require(promotion == "activation-ready\n" or (intent is None and promotion == ""))
+        require(promotion == "activation-ready\n")
     handoff = metadata(state_dir / "owner-setup.age")
     has_envelope = bool(handoff and stat.S_ISREG(handoff.st_mode) and handoff.st_uid == os.getuid()
                         and stat.S_IMODE(handoff.st_mode) == 0o600 and handoff.st_size > 0)
@@ -501,7 +514,7 @@ def observe_database(volumes, containers, state_dir, auth_dir, writer, auth_quer
         "setupMarkerPresent": has_marker, "grantBindingSha256": grant_binding,
         "pendingHandoff": pending_handoff, "encryptedHandoffPresent": has_envelope,
     }
-    if not promoted and not owner["hasGrant"] and owner["pristine"] and intent is not None:
+    if not promoted and not owner["hasGrant"] and owner["pristine"]:
         require(handoff is None)
         result["authState"] = "pending"
     elif owner["grant"] and not owner["consumed"] and owner["ownerCount"] == 0 and not promoted:
@@ -631,7 +644,7 @@ def observe():
             require(len(info) == 3)
             if full and info == [full["containerId"], "true", full["image"]]:
                 backend = {"state": "running", "writer": full}
-            elif setup_unit and re.fullmatch(FULL_IMAGE, info[2]) and "Image=" + info[2] in setup_unit.splitlines():
+            elif setup_unit and re.fullmatch(full_image_pattern(), info[2]) and "Image=" + info[2] in setup_unit.splitlines():
                 backend = {"state": "setup", "containerSha256": digest(info)}
             else:
                 backend = {"state": "fault"} if info[1] == "false" else {"state": "unknown"}
@@ -669,7 +682,7 @@ def observe():
         if database["state"] in ("missing", "absent"):
             # Verify the canonical residual slot independently of old DB health.
             if containers["codexia-api"]:
-                require(re.fullmatch(FULL_IMAGE, info[2]))
+                require(re.fullmatch(full_image_pattern(), info[2]))
                 if metadata(residues[0]) is not None:
                     lines = private_text(residues[0]).splitlines()
                     require("ContainerName=codexia-api" in lines and "Image=" + info[2] in lines)

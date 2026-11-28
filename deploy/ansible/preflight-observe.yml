@@ -5,12 +5,17 @@
   become: "{{ lifecycle_observe_as_service | default(false) }}"
   become_user: codexia
   any_errors_fatal: true
+  vars_files: [repository-vars.yml]
   vars:
     codexia_service_user: codexia
     # Administrator observations also run before the host stage installs ACL
     # tooling. Pipelining keeps temporary script files out of the target home.
     ansible_pipelining: true
     runtime_environment:
+      CODEXIA_IMAGE_REPOSITORY: "{{ codexia_image_repository }}"
+      CODEXIA_TARGET_REPOSITORY: "{{ codexia_target_repository }}"
+      CODEXIA_TARGET_REPOSITORY_ID: "{{ codexia_target_repository_id }}"
+      CODEXIA_TARGET_OWNER_ID: "{{ codexia_target_owner_id }}"
       HOME: "{{ ansible_facts.user_dir }}"
       XDG_CONFIG_HOME: "{{ ansible_facts.user_dir }}/.config"
       XDG_DATA_HOME: "{{ ansible_facts.user_dir }}/.local/share"
@@ -22,6 +27,9 @@
       ansible.builtin.assert:
         that:
           - ansible_play_hosts_all | length == 1
+          - codexia_image_repository | length > 0
+          - codexia_target_repository_id is match('^[1-9][0-9]*$')
+          - codexia_target_owner_id is match('^[1-9][0-9]*$')
           - codexia_preflight_observation_file is defined
           - codexia_preflight_observation_file is match('^/[^\\r\\n]+$')
           - codexia_preflight_auth_schema_query is defined
@@ -131,6 +139,10 @@
         stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/preflight-observe.py', rstrip=false) }}"
         expand_argument_vars: false
       environment: "{{ (runtime_environment if ansible_facts.user_id == 'codexia' else {}) | combine({
+        'CODEXIA_IMAGE_REPOSITORY': codexia_image_repository,
+        'CODEXIA_TARGET_REPOSITORY': codexia_target_repository,
+        'CODEXIA_TARGET_REPOSITORY_ID': codexia_target_repository_id,
+        'CODEXIA_TARGET_OWNER_ID': codexia_target_owner_id,
         'CODEXIA_INSPECT_FACTS': {'accountPresent': inspect_account.rc == 0,
           'storagePresent': (inspect_files.results[0].stat.exists | default(false)) if inspect_account.rc == 0 else false,
           'hostReady': (inspect_tools.results | selectattr('rc', 'ne', 0) | list | length == 0)

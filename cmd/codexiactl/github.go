@@ -18,10 +18,6 @@ import (
 )
 
 const (
-	githubOwner  = "yohn-jp"
-	githubRepo   = "codexia"
-	githubRepoID = 1450072993
-
 	githubBootstrapEnvironment  = "codexia-bootstrap"
 	githubProductionEnvironment = "codexia-production"
 )
@@ -33,14 +29,15 @@ var (
 )
 
 type githubControl struct {
-	client            *github.Client
-	download          *http.Client
-	token             []byte
-	actor             string
-	appSession        bool
-	appAdministration bool
-	settingsMu        sync.Mutex
-	settingsWriter    *githubSecretWriteWindow
+	client         *github.Client
+	download       *http.Client
+	token          []byte
+	actor          string
+	appClientID    string
+	target         githubTarget
+	approvedSHA    string
+	settingsMu     sync.Mutex
+	settingsWriter *githubSecretWriteWindow
 }
 
 type githubEnvironment struct {
@@ -66,7 +63,7 @@ func (g *githubControl) Main(ctx context.Context) (string, error) {
 }
 
 func (g *githubControl) mainBranch(ctx context.Context) (string, error) {
-	branch, resp, err := g.client.Repositories.GetBranch(ctx, githubOwner, githubRepo, "main", 0)
+	branch, resp, err := g.client.Repositories.GetBranch(ctx, g.target.Owner, deploymentRepositoryName, "main", 0)
 	if err != nil {
 		return "", githubFailure("read the main branch", resp, err)
 	}
@@ -82,17 +79,15 @@ func (g *githubControl) verifyRepository(ctx context.Context) error {
 }
 
 func (g *githubControl) repository(ctx context.Context) (*github.Repository, error) {
-	repo, resp, err := g.client.Repositories.Get(ctx, githubOwner, githubRepo)
+	repo, resp, err := g.client.Repositories.Get(ctx, g.target.Owner, deploymentRepositoryName)
 	if err != nil {
 		return nil, githubFailure("verify the deployment repository", resp, err)
 	}
-	if repo.GetID() != githubRepoID || repo.GetFullName() != githubOwner+"/"+githubRepo || repo.GetDefaultBranch() != "main" || repo.GetArchived() || repo.GetDisabled() {
+	if repo.GetName() != deploymentRepositoryName || !g.target.matchesRepository(repo) || repo.GetDefaultBranch() != "main" || repo.GetArchived() || repo.GetDisabled() {
 		return nil, errGitHubTarget
 	}
-	// The metadata is the signed-in user's repository role when GitHub returns it.
-	// Fine-grained token and App permissions are evaluated again by their actual endpoints.
-	if permissions := repo.GetPermissions(); permissions != nil && !permissions.GetPush() && !permissions.GetMaintain() && !permissions.GetAdmin() {
-		return nil, errors.New("GitHub deployment requires write access to yohn-jp/codexia")
+	if !githubCanDeploy(repo) {
+		return nil, errors.New("GitHub deployment requires user write access to " + g.target.FullName())
 	}
 	return repo, nil
 }
@@ -105,7 +100,7 @@ func (g *githubControl) Observe(ctx context.Context) (githubSnapshot, error) {
 		return snapshot, err
 	}
 	for _, file := range githubWorkflows {
-		workflow, resp, err := g.client.Actions.GetWorkflowByFileName(ctx, githubOwner, githubRepo, file)
+		workflow, resp, err := g.client.Actions.GetWorkflowByFileName(ctx, g.target.Owner, deploymentRepositoryName, file)
 		if err != nil {
 			return snapshot, githubFailure("read the active "+file+" workflow", resp, err)
 		}
@@ -148,14 +143,14 @@ func (g *githubControl) requireProtection(ctx context.Context, name string) erro
 	if githubIndependentReview(env) {
 		return g.requireMainOnly(ctx, name, env.GetDeploymentBranchPolicy())
 	}
-	return fmt.Errorf("%w: %s has no enforceable independent approval. Open https://github.com/yohn-jp/codexia/settings/environments, select %s, set Required reviewers to another trusted GitHub account (not the operator), enable Prevent self-review, and keep deployment branches restricted to main. The CLI never disables approval to proceed", errGitHubProtection, name, name)
+	return fmt.Errorf("%w: %s has no enforceable independent approval. Open %s/settings/environments, select %s, set Required reviewers to another trusted GitHub account (not the operator), enable Prevent self-review, and keep deployment branches restricted to main. The CLI never disables approval to proceed", errGitHubProtection, name, g.target.URL(), name)
 }
 
 func (g *githubControl) environment(ctx context.Context, name string) (*github.Environment, error) {
 	if name != githubBootstrapEnvironment && name != githubProductionEnvironment {
 		return nil, errGitHubProtection
 	}
-	env, resp, err := g.client.Repositories.GetEnvironment(ctx, githubOwner, githubRepo, name)
+	env, resp, err := g.client.Repositories.GetEnvironment(ctx, g.target.Owner, deploymentRepositoryName, name)
 	if err != nil {
 		return nil, githubFailure("read protection for "+name, resp, err)
 	}
@@ -190,11 +185,11 @@ func githubIndependentReview(env *github.Environment) bool {
 }
 
 func (g *githubControl) requireMainOnly(ctx context.Context, name string, policy *github.BranchPolicy) error {
-	protectionErr := fmt.Errorf("%w: %s must use Selected branches and tags with exactly one rule: branch main (no tags). Configure this at https://github.com/yohn-jp/codexia/settings/environments before retrying", errGitHubProtection, name)
+	protectionErr := fmt.Errorf("%w: %s must use Selected branches and tags with exactly one rule: branch main (no tags). Configure this at %s/settings/environments before retrying", errGitHubProtection, name, g.target.URL())
 	if !policy.GetCustomBranchPolicies() || policy.GetProtectedBranches() {
 		return protectionErr
 	}
-	rules, resp, err := g.client.Repositories.ListDeploymentBranchPolicies(ctx, githubOwner, githubRepo, name, &github.ListOptions{PerPage: 2})
+	rules, resp, err := g.client.Repositories.ListDeploymentBranchPolicies(ctx, g.target.Owner, deploymentRepositoryName, name, &github.ListOptions{PerPage: 2})
 	if err != nil {
 		return githubFailure("read deployment-branch restrictions for "+name, resp, err)
 	}
@@ -210,7 +205,7 @@ func (g *githubControl) requireMainOnly(ctx context.Context, name string, policy
 
 func (g *githubControl) listVariables(ctx context.Context, name string, variables map[string]string) error {
 	for page := 1; page != 0; {
-		list, resp, err := g.client.Actions.ListEnvVariables(ctx, githubOwner, githubRepo, name, &github.ListOptions{Page: page, PerPage: 100})
+		list, resp, err := g.client.Actions.ListEnvVariables(ctx, g.target.Owner, deploymentRepositoryName, name, &github.ListOptions{Page: page, PerPage: 100})
 		if err != nil {
 			return githubFailure("list Environment variables for "+name, resp, err)
 		}
@@ -234,7 +229,7 @@ func (g *githubControl) listVariables(ctx context.Context, name string, variable
 
 func (g *githubControl) listSecrets(ctx context.Context, name string, env githubEnvironment) error {
 	for page := 1; page != 0; {
-		list, resp, err := g.client.Actions.ListEnvSecrets(ctx, githubOwner, githubRepo, name, &github.ListOptions{Page: page, PerPage: 100})
+		list, resp, err := g.client.Actions.ListEnvSecrets(ctx, g.target.Owner, deploymentRepositoryName, name, &github.ListOptions{Page: page, PerPage: 100})
 		if err != nil {
 			return githubFailure("list Environment secrets for "+name, resp, err)
 		}
@@ -265,8 +260,8 @@ var githubProductionVariables = map[string]bool{
 }
 
 var githubCommonSecrets = map[string]bool{
-	"TS_OAUTH_CLIENT_ID": true, "CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN": true,
-	"CODEXIA_ACCESS_CLIENT_ID": true, "CODEXIA_ACCESS_CLIENT_SECRET": true,
+	"CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN": true,
+	"CODEXIA_ACCESS_CLIENT_ID":                 true, "CODEXIA_ACCESS_CLIENT_SECRET": true,
 }
 var githubBootstrapSecrets = map[string]bool{"CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY": true, "CODEXIA_TUNNEL_TOKEN": true}
 var githubProductionSecrets = map[string]bool{"CODEXIA_DEPLOY_SSH_PRIVATE_KEY": true, "CLOUDFLARE_API_TOKEN": true, "CLOUDFLARE_ACCOUNT_ID": true}
@@ -295,7 +290,7 @@ func (g *githubControl) PutVariable(ctx context.Context, environment, name, valu
 	if window == nil {
 		return errGitHubSettingsWriterUnavailable
 	}
-	current, resp, err := g.client.Actions.GetEnvVariable(ctx, githubOwner, githubRepo, environment, name)
+	current, resp, err := g.client.Actions.GetEnvVariable(ctx, g.target.Owner, deploymentRepositoryName, environment, name)
 	if expected == nil {
 		if githubStatus(resp) != http.StatusNotFound {
 			if err == nil {
@@ -318,14 +313,14 @@ func (g *githubControl) PutVariable(ctx context.Context, environment, name, valu
 		return err
 	}
 	if expected == nil {
-		resp, err = g.client.Actions.CreateEnvVariable(ctx, githubOwner, githubRepo, environment, github.ActionsCreateVariableRequest{Name: name, Value: value})
+		resp, err = g.client.Actions.CreateEnvVariable(ctx, g.target.Owner, deploymentRepositoryName, environment, github.ActionsCreateVariableRequest{Name: name, Value: value})
 	} else {
-		resp, err = g.client.Actions.UpdateEnvVariable(ctx, githubOwner, githubRepo, environment, name, github.ActionsUpdateVariableRequest{Value: &value})
+		resp, err = g.client.Actions.UpdateEnvVariable(ctx, g.target.Owner, deploymentRepositoryName, environment, name, github.ActionsUpdateVariableRequest{Value: &value})
 	}
 	if err != nil {
 		return githubFailure("register Environment variable "+name, resp, err)
 	}
-	current, resp, err = g.client.Actions.GetEnvVariable(ctx, githubOwner, githubRepo, environment, name)
+	current, resp, err = g.client.Actions.GetEnvVariable(ctx, g.target.Owner, deploymentRepositoryName, environment, name)
 	if err != nil {
 		return githubFailure("verify Environment variable "+name, resp, err)
 	}
@@ -348,7 +343,7 @@ func (g *githubControl) DeleteVariable(ctx context.Context, environment, name, e
 	if window == nil {
 		return errGitHubSettingsWriterUnavailable
 	}
-	current, resp, err := g.client.Actions.GetEnvVariable(ctx, githubOwner, githubRepo, environment, name)
+	current, resp, err := g.client.Actions.GetEnvVariable(ctx, g.target.Owner, deploymentRepositoryName, environment, name)
 	if githubStatus(resp) == http.StatusNotFound {
 		return nil
 	}
@@ -361,11 +356,11 @@ func (g *githubControl) DeleteVariable(ctx context.Context, environment, name, e
 	if err := window.verify(ctx); err != nil {
 		return err
 	}
-	resp, err = g.client.Actions.DeleteEnvVariable(ctx, githubOwner, githubRepo, environment, name)
+	resp, err = g.client.Actions.DeleteEnvVariable(ctx, g.target.Owner, deploymentRepositoryName, environment, name)
 	if err != nil {
 		return githubFailure("restore the temporary Environment variable "+name, resp, err)
 	}
-	_, resp, err = g.client.Actions.GetEnvVariable(ctx, githubOwner, githubRepo, environment, name)
+	_, resp, err = g.client.Actions.GetEnvVariable(ctx, g.target.Owner, deploymentRepositoryName, environment, name)
 	if githubStatus(resp) != http.StatusNotFound {
 		return githubFailure("verify removal of temporary Environment variable "+name, resp, err)
 	}
@@ -385,7 +380,7 @@ func (g *githubControl) PutSecret(ctx context.Context, environment, name string,
 	if err := g.requireWriteTarget(ctx, environment); err != nil {
 		return err
 	}
-	key, resp, err := g.client.Actions.GetEnvPublicKey(ctx, githubOwner, githubRepo, environment)
+	key, resp, err := g.client.Actions.GetEnvPublicKey(ctx, g.target.Owner, deploymentRepositoryName, environment)
 	if err != nil {
 		return githubFailure("get the encryption key for "+environment, resp, err)
 	}
@@ -399,7 +394,7 @@ func (g *githubControl) PutSecret(ctx context.Context, environment, name string,
 	}
 	// The approved exclusive Settings window covers cooperating GitHub writers.
 	// GitHub's unconditional PUT does not protect against administrators outside that scope.
-	_, resp, err = g.client.Actions.GetEnvSecret(ctx, githubOwner, githubRepo, environment, name)
+	_, resp, err = g.client.Actions.GetEnvSecret(ctx, g.target.Owner, deploymentRepositoryName, environment, name)
 	if githubStatus(resp) != http.StatusNotFound {
 		if err == nil {
 			return fmt.Errorf("GitHub Environment secret %s already exists", name)
@@ -412,7 +407,7 @@ func (g *githubControl) PutSecret(ctx context.Context, environment, name string,
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	resp, err = g.client.Actions.CreateOrUpdateEnvSecret(ctx, githubOwner, githubRepo, environment, name, github.SecretRequest{
+	resp, err = g.client.Actions.CreateOrUpdateEnvSecret(ctx, g.target.Owner, deploymentRepositoryName, environment, name, github.SecretRequest{
 		KeyID: key.GetKeyID(), EncryptedValue: base64.StdEncoding.EncodeToString(ciphertext),
 	})
 	if err != nil {
@@ -425,7 +420,7 @@ func (g *githubControl) PutSecret(ctx context.Context, environment, name string,
 	if githubStatus(resp) != http.StatusCreated {
 		return fmt.Errorf("%w: GitHub did not confirm creation of %s as a new Environment secret", errGitHubSecretWriteUnknown, name)
 	}
-	secret, resp, err := g.client.Actions.GetEnvSecret(ctx, githubOwner, githubRepo, environment, name)
+	secret, resp, err := g.client.Actions.GetEnvSecret(ctx, g.target.Owner, deploymentRepositoryName, environment, name)
 	if err != nil {
 		return errors.Join(errGitHubSecretWriteUnknown, githubFailure("verify Environment secret metadata for "+name, resp, err))
 	}
@@ -447,7 +442,7 @@ func githubDefiniteSecretRejection(resp *github.Response) bool {
 }
 
 func (g *githubControl) requireWriteTarget(ctx context.Context, environment string) error {
-	if err := g.verifyRepository(ctx); err != nil {
+	if err := g.requireApprovedTarget(ctx, false); err != nil {
 		return err
 	}
 	return g.requireProtection(ctx, environment)

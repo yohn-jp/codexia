@@ -158,12 +158,12 @@ func (api cloudflareAPI) cloudflarePolicies(ctx context.Context, account, app st
 	return policies, nil
 }
 
-func (api cloudflareAPI) checkAccessAndTunnel(ctx context.Context, host string, target *cloudflareTarget) (zero_trust.ServiceToken, error) {
+func (api cloudflareAPI) checkAccessAndTunnel(ctx context.Context, host string, target *cloudflareTarget, contract cloudflareContract) (zero_trust.ServiceToken, error) {
 	accountID := target.AccountID
 	account := cloudflare.F(accountID)
 	var identityPaths, protocolPaths map[string]cloudflarePath
-	if json.Unmarshal(productionIdentityProbes, &identityPaths) != nil || len(identityPaths) != 2 ||
-		json.Unmarshal(productionProtocolPaths, &protocolPaths) != nil || len(protocolPaths) == 0 {
+	if json.Unmarshal(contract.identityProbes, &identityPaths) != nil || len(identityPaths) != 2 ||
+		json.Unmarshal(contract.protocolPaths, &protocolPaths) != nil || len(protocolPaths) == 0 {
 		return zero_trust.ServiceToken{}, errors.New("Cloudflare Access path contracts are unavailable in the certified CLI")
 	}
 	items, err := cloudflareList("Access applications (Access: Apps and Policies Read)", func(page int) (*pagination.V4PagePaginationArray[zero_trust.AccessApplicationListResponse], error) {

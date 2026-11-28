@@ -1,3 +1,4 @@
+import { actionsRepository, assertBackendImageDigest } from '../../github/repository.mjs';
 import { compareComponentVersions } from '../../release/components/version.mjs';
 import { validateBackendIdentity } from '../../release/backend/update-identity.mjs';
 import { isDeepStrictEqual } from 'node:util';
@@ -7,14 +8,12 @@ import { fileURLToPath } from 'node:url';
 
 const sha = /^[a-f0-9]{40}$/u;
 const digest = /^sha256:[a-f0-9]{64}$/u;
-const image = /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const exactKeys = (value, expected) => value && typeof value === 'object' && !Array.isArray(value) &&
   Object.keys(value).sort().join(',') === [...expected].sort().join(',');
-const immutableImage = value => typeof value === 'string' && image.test(value);
 
 /** Validate a deploy certificate and its complete authenticated release receipt. */
-export function validatePushDeploymentCertificate(certificate, expectedMainSha) {
+export function validatePushDeploymentCertificate(certificate, expectedMainSha, context = actionsRepository()) {
   if (!exactKeys(certificate, ['format', 'verifiedMainSha', 'verifiedMainTree', 'verifyRun', 'producer', 'image', 'identity']) ||
       certificate.format !== 'codexia-backend-deployment-certificate/v1') {
     throw new Error('Invalid push deployment certificate');
@@ -22,14 +21,16 @@ export function validatePushDeploymentCertificate(certificate, expectedMainSha) 
   if (!sha.test(expectedMainSha ?? '') || certificate.verifiedMainSha !== expectedMainSha) {
     throw new Error('Certificate main revision differs from the expected main revision');
   }
-  if (!sha.test(certificate.verifiedMainTree ?? '') || !immutableImage(certificate.image)) {
+  if (!sha.test(certificate.verifiedMainTree ?? '')) {
     throw new Error('Invalid certified source tree or immutable image');
   }
 
+  assertBackendImageDigest(certificate.image, context.repository);
   const run = certificate.verifyRun;
-  if (!exactKeys(run, ['event', 'branch', 'conclusion', 'repository', 'headSha', 'id', 'attempt']) ||
+  if (!exactKeys(run, ['event', 'branch', 'conclusion', 'repository', 'repositoryId', 'ownerId', 'headSha', 'id', 'attempt']) ||
       run.event !== 'push' || run.branch !== 'main' || run.conclusion !== 'success' ||
-      run.repository !== 'yohn-jp/codexia' || run.headSha !== expectedMainSha ||
+      run.repository !== context.repository || run.repositoryId !== context.repositoryId ||
+      run.ownerId !== context.ownerId || run.headSha !== expectedMainSha ||
       !positive(run.id) || !positive(run.attempt)) {
     throw new Error('Certificate is not bound to successful exact-main verification');
   }
@@ -47,7 +48,8 @@ export function validatePushDeploymentCertificate(certificate, expectedMainSha) 
   const expectedFormat = promotion ? 'codexia-backend-promotion/v1' : 'codexia-backend-build/v1';
   if (receipt?.format !== expectedFormat || receipt.event !== producer.event || receipt.sourceSha !== producer.sourceSha ||
       receipt.sourceTree !== producer.sourceTree || receipt.workflowRunId !== producer.runId ||
-      receipt.version !== certificate.identity?.version) {
+      receipt.repository !== context.repository || receipt.repositoryId !== context.repositoryId ||
+      receipt.ownerId !== context.ownerId || receipt.version !== certificate.identity?.version) {
     throw new Error('Producer receipt does not match the certificate identity');
   }
   if (promotion && (receipt.mainSha !== expectedMainSha || !positive(receipt.workflowId) || !positive(receipt.prNumber))) {
@@ -81,12 +83,13 @@ export function validatePushDeploymentCertificate(certificate, expectedMainSha) 
  * GitHub's artifact provenance, OCI signatures, SSH authorization, or runtime
  * health. Success is compatibility admission, not permission to activate.
  */
-export function assertPushDeploymentAdmission(certificate, installedValue, { expectedMainSha, deployedUiEpoch }) {
-  const admitted = validatePushDeploymentCertificate(certificate, expectedMainSha);
+export function assertPushDeploymentAdmission(certificate, installedValue, { expectedMainSha, deployedUiEpoch, context = actionsRepository() }) {
+  const admitted = validatePushDeploymentCertificate(certificate, expectedMainSha, context);
   const { producer, identity: candidate, image: candidateImage, verifiedMainSha, verifyRun } = admitted;
-  if (!exactKeys(installedValue, ['image', 'identity']) || !image.test(installedValue.image ?? '')) {
+  if (!exactKeys(installedValue, ['image', 'identity'])) {
     throw new Error('Invalid observed installed image identity');
   }
+  assertBackendImageDigest(installedValue.image, context.repository);
   const installed = validateBackendIdentity(installedValue.identity);
   if (!positive(deployedUiEpoch) || installed.apiEpoch !== deployedUiEpoch || candidate.apiEpoch !== deployedUiEpoch) {
     throw new Error('Push deployment frontend/API epoch mismatch');

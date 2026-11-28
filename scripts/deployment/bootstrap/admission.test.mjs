@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { migrationSetFingerprint } from '../../../packages/persistence-postgres/src/migration-set.ts';
 import { createDeploymentPlan } from '../preflight/plan.mjs';
-import { planFromObservations } from '../preflight/observe.mjs';
+import { planFromObservations as observeWithContext } from '../preflight/observe.mjs';
 import { frontendOAuthConfigIdentity } from '../../build/frontend/oauth-config.mjs';
 import { admitBootstrap, ownerSetupFrontendBindings, initialFrontendNeedsPublication, assertInitialFrontendReady } from './admission.mjs';
+
+const context = { repository: 'yohn-jp/codexia', owner: 'yohn-jp', repo: 'codexia', repositoryId: 1450072993, ownerId: 405 };
+const planFromObservations = evidence => observeWithContext({ ...evidence, context });
 
 const hash = 'a'.repeat(64);
 const now = new Date('2026-11-24T06:00:00.000Z');

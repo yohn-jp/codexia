@@ -5,7 +5,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { assertPushDeploymentAdmission, validatePushDeploymentCertificate } from './validate.mjs';
+import { assertPushDeploymentAdmission as admitWithContext, validatePushDeploymentCertificate as validateWithContext } from './validate.mjs';
+
+const context = { repository: 'yohn-jp/codexia', owner: 'yohn-jp', repo: 'codexia', repositoryId: 1450072993, ownerId: 405 };
+
+const assertPushDeploymentAdmission = (certificate, installed, options) =>
+  admitWithContext(certificate, installed, { ...options, context });
+const validatePushDeploymentCertificate = (certificate, sha) => validateWithContext(certificate, sha, context);
 
 const sha = char => char.repeat(40);
 const digest = char => `sha256:${char.repeat(64)}`;
@@ -19,9 +25,9 @@ const certificate = (extra = {}) => ({
   format: 'codexia-backend-deployment-certificate/v1',
   verifiedMainSha: sha('b'),
   verifiedMainTree: sha('c'),
-  verifyRun: { event: 'push', branch: 'main', conclusion: 'success', repository: 'yohn-jp/codexia', headSha: sha('b'), id: 100, attempt: 1 },
+  verifyRun: { event: 'push', branch: 'main', conclusion: 'success', repository: context.repository, repositoryId: context.repositoryId, ownerId: context.ownerId, headSha: sha('b'), id: 100, attempt: 1 },
   producer: { event: 'workflow_run', sourceSha: sha('d'), sourceTree: sha('c'), runId: 101, attempt: 1,
-    artifactId: 102, artifactDigest: digest('e'), receipt: { format: 'codexia-backend-build/v1', event: 'workflow_run',
+    artifactId: 102, artifactDigest: digest('e'), receipt: { format: 'codexia-backend-build/v1', repository: context.repository, repositoryId: context.repositoryId, ownerId: context.ownerId, event: 'workflow_run',
       sourceSha: sha('d'), sourceTree: sha('c'), workflowRunId: 101, workflowRunNumber: 4, version: '0.1.2',
       artifacts: { full: { id: 102, digest: digest('e'), producerAttempt: 1, archiveSha256: 'e'.repeat(64) } } } },
   image: `ghcr.io/yohn-jp/codexia-backend@${digest('f')}`,
@@ -144,11 +150,11 @@ test('CLI admits the same certificate and installed identity Ansible supplies', 
     writeFileSync(certificatePath, JSON.stringify(certificate()));
     const installedValue = Buffer.from(JSON.stringify(installed())).toString('base64');
     const result = spawnSync(process.execPath, [fileURLToPath(new URL('./validate.mjs', import.meta.url)),
-      '--admit', certificatePath, installedValue, sha('b'), '1'], { encoding: 'utf8' });
+      '--admit', certificatePath, installedValue, sha('b'), '1'], { encoding: 'utf8', env: { ...process.env, GITHUB_REPOSITORY: context.repository, GITHUB_REPOSITORY_ID: String(context.repositoryId), GITHUB_REPOSITORY_OWNER_ID: String(context.ownerId), } });
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /Admitted certified image/u);
     const rejected = spawnSync(process.execPath, [fileURLToPath(new URL('./validate.mjs', import.meta.url)),
-      '--admit', certificatePath, installedValue, sha('9'), '1'], { encoding: 'utf8' });
+      '--admit', certificatePath, installedValue, sha('9'), '1'], { encoding: 'utf8', env: { ...process.env, GITHUB_REPOSITORY: context.repository, GITHUB_REPOSITORY_ID: String(context.repositoryId), GITHUB_REPOSITORY_OWNER_ID: String(context.ownerId), } });
     assert.equal(rejected.status, 1);
     assert.match(rejected.stderr, /main revision/u);
   } finally {

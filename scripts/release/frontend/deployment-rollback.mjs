@@ -4,11 +4,22 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { deploymentEdgeFromEnvironment, protectedCloudflareTarget } from './initial-publication.mjs';
 
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const digest = /^[a-f0-9]{64}$/u;
 const account = /^[a-f0-9]{32}$/u;
 const worker = 'codexia-frontend';
+
+export function frontendPublicationContext(env) {
+  const target = protectedCloudflareTarget(env);
+  assert.ok(account.test(target.accountId ?? '') && env.CLOUDFLARE_ACCOUNT_ID === target.accountId,
+    'Worker publication credentials do not match the protected Cloudflare account');
+  const { GITHUB_RUN_ID: runId, GITHUB_RUN_ATTEMPT: attempt, CODEXIA_SOURCE_SHA: sourceSha } = env;
+  assert.ok(/^[1-9]\d*$/u.test(runId ?? '') && /^[1-9]\d*$/u.test(attempt ?? '') &&
+    /^[a-f0-9]{40}$/u.test(sourceSha ?? ''), 'Worker publication requires the certified source and current Actions run');
+  return { ...target, runId, attempt, sourceSha };
+}
 
 export function assertSingleDeployment(value) {
   assert.ok(value && uuid.test(value.id) && value.strategy === 'percentage' &&
@@ -29,14 +40,27 @@ export function selectRollback(before, current, deployedTag, expectedTag) {
   return 'rollback';
 }
 
-async function main(mode, env, fetchImpl = fetch) {
-  const accountId = env.CLOUDFLARE_ACCOUNT_ID;
+export async function reconcileFrontendDeployment(mode, env, fetchImpl = fetch) {
+  const context = frontendPublicationContext(env);
+  const { accountId } = context;
   const token = env.CLOUDFLARE_API_TOKEN;
   const artifactDigest = env.CODEXIA_FRONTEND_ARTIFACT_DIGEST;
   const state = env.CODEXIA_FRONTEND_ROLLBACK_STATE;
   assert.ok(account.test(accountId ?? '') && typeof token === 'string' && token.length > 0 &&
     digest.test(artifactDigest ?? '') && typeof state === 'string' && state.startsWith('/'),
   'Rollback requires approved Worker account, credentials, immutable artifact and private state path');
+  assert.ok(mode === 'capture' || mode === 'restore', 'Unsupported frontend rollback operation');
+  const expectedTag = `frontend-${artifactDigest}`;
+  const record = mode === 'restore' ? JSON.parse(await readFile(state, 'utf8')) : null;
+  if (record) {
+    assert.equal(record.format, 'codexia-frontend-rollback/v2');
+    assert.equal(record.expectedTag, expectedTag);
+    assert.deepEqual(record.context, context, 'Frontend rollback belongs to a different deployment target');
+  }
+  const ingress = await deploymentEdgeFromEnvironment(env, fetchImpl).observeIngress();
+  if (record) {
+    assert.equal(record.ingressDigest, ingress.ingressDigest, 'Protected Cloudflare ingress changed since publication');
+  }
   const base = `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${worker}`;
   const request = async (path, init = {}) => {
     const response = await fetchImpl(base + path, {
@@ -55,18 +79,16 @@ async function main(mode, env, fetchImpl = fetch) {
       'Missing Worker deployment inventory');
     return assertSingleDeployment(result.deployments[0]);
   };
-  const expectedTag = `frontend-${artifactDigest}`;
   if (mode === 'capture') {
     const before = await readCurrent();
-    await writeFile(state, JSON.stringify({ format: 'codexia-frontend-rollback/v1', before, expectedTag }) + '\n',
+    assert.equal(before.deploymentId, ingress.deployment.id, 'Worker deployment changed during target verification');
+    assert.equal(before.versionId, ingress.deployment.versionId, 'Worker version changed during target verification');
+    await writeFile(state, JSON.stringify({ format: 'codexia-frontend-rollback/v2', context,
+      ingressDigest: ingress.ingressDigest, before, expectedTag }) + '\n',
       { flag: 'wx', mode: 0o600 });
     console.log('Pinned pre-deployment Worker version for failure reconciliation.');
     return;
   }
-  assert.equal(mode, 'restore', 'Unsupported frontend rollback operation');
-  const record = JSON.parse(await readFile(state, 'utf8'));
-  assert.equal(record.format, 'codexia-frontend-rollback/v1');
-  assert.equal(record.expectedTag, expectedTag);
   const current = await readCurrent();
   if (current.deploymentId === record.before?.deploymentId && current.versionId === record.before?.versionId) {
     console.log('Worker was not changed; no rollback required.');
@@ -91,7 +113,7 @@ async function main(mode, env, fetchImpl = fetch) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main(process.argv[2], process.env).catch(error => {
+  reconcileFrontendDeployment(process.argv[2], process.env).catch(error => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });

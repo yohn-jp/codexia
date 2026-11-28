@@ -40,7 +40,7 @@ concurrency:
 jobs:
   probe:
     name: Verify production Access and identity paths
-    if: github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'access'))
+    if: github.event.repository.name == 'codexia' && github.event.repository.default_branch == 'main' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'access'))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     environment: codexia-production
@@ -54,6 +54,11 @@ jobs:
           node-version: '24.22.3'
       - name: Load reviewed production OAuth settings
         run: node scripts/deployment/bootstrap/public-env.mjs
+      - name: Verify the selected production Cloudflare ingress
+        env:
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN: ${{ secrets.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN }}
+        run: node scripts/release/frontend/initial-publication.mjs observe-ingress
       - name: Probe production identity endpoints and Access boundary
         env:
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
@@ -62,7 +67,7 @@ jobs:
 
   lifecycle-candidate:
     name: Verify certified candidate pair before observing the production host
-    if: github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'lifecycle'
+    if: github.event.repository.name == 'codexia' && github.event.repository.default_branch == 'main' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'lifecycle'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: codexia-production
@@ -91,7 +96,6 @@ jobs:
       - name: Read certified source and candidate artifacts
         env:
           GH_TOKEN: ${{ github.token }}
-          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_PREFLIGHT_INTENT: ${{ inputs.intent }}
           CODEXIA_WINDOW_ID: ${{ inputs.window_id }}
           CODEXIA_WINDOW_START: ${{ inputs.window_start }}
@@ -108,7 +112,7 @@ jobs:
   lifecycle-host:
     name: Observe the pinned production host without mutation
     needs: lifecycle-candidate
-    if: github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'lifecycle'
+    if: github.event.repository.name == 'codexia' && github.event.repository.default_branch == 'main' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'lifecycle'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: ${{ inputs.management == 'bootstrap' && 'codexia-bootstrap' || 'codexia-production' }}
@@ -140,6 +144,11 @@ jobs:
           CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS }}
           CODEXIA_PREFLIGHT_SSH_USER: ${{ vars.CODEXIA_BOOTSTRAP_SSH_USER }}
         run: bash deploy/ansible/prepare-deploy-ssh.sh --preflight-admin
+      - name: Require immutable GitHub OIDC claims for Tailscale
+        env:
+          CODEXIA_TAILSCALE_CLIENT_ID: ${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}
+          CODEXIA_TAILSCALE_ENVIRONMENT: ${{ inputs.management == 'bootstrap' && 'codexia-bootstrap' || 'codexia-production' }}
+        run: node scripts/deployment/preflight/tailscale-oidc.mjs
       - name: Connect the existing protected management plane
         uses: tailscale/github-action@v4
         with:
@@ -187,7 +196,7 @@ jobs:
   lifecycle-plan:
     name: Compute the read-only lifecycle plan from fresh host and certified candidate evidence
     needs: [lifecycle-candidate, lifecycle-host]
-    if: always() && !cancelled() && github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'lifecycle'
+    if: always() && !cancelled() && github.event.repository.name == 'codexia' && github.event.repository.default_branch == 'main' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'lifecycle'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: codexia-production

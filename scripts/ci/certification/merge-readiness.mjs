@@ -51,7 +51,10 @@ async function main() {
   assert.match(number ?? '', /^[1-9]\d*$/u, 'Usage: merge-readiness.mjs PR_NUMBER');
   assert.equal(extra.length, 0);
   const token = process.env.GH_TOKEN;
-  const github = createGitHubOctokit({ token });
+  const probe = createGitHubOctokit({ token, repository });
+  const { data: target } = await probe.rest.repos.get({ owner, repo });
+  assert.equal(target.full_name, repository);
+  const github = createGitHubOctokit({ token, repository, repositoryId: target.id });
   const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: Number(number) });
   const readMain = async () => (await github.rest.repos.getBranch({ owner, repo, branch: 'main' })).data.commit.sha;
   const mainSha = await readMain();

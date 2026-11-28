@@ -8,7 +8,12 @@ import stat
 import subprocess
 import sys
 
-FULL_IMAGE = r"ghcr[.]io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}"
+def full_image_pattern():
+    repository = os.environ.get("CODEXIA_IMAGE_REPOSITORY", "")
+    if not re.fullmatch(r"ghcr[.]io/[a-z0-9-]+/codexia-backend", repository):
+        raise ValueError("A reviewed image repository is required")
+    return re.escape(repository) + r"@sha256:[a-f0-9]{64}"
+
 STATE_FILES = (
     "deployed-release.json", "owner-setup.intent", "owner-setup.installation",
     "owner-setup.promoted", "owner-setup.age", "owner-setup.age.pending",
@@ -97,7 +102,7 @@ def verify_api_container(unit):
     if not exists("container", "codexia-api"):
         return
     _, image = command(["podman", "inspect", "--format", "{{.ImageName}}", "codexia-api"])
-    require(re.fullmatch(FULL_IMAGE, image), "Unexpected image in the API slot")
+    require(re.fullmatch(full_image_pattern(), image), "Unexpected image in the API slot")
     if present(unit):
         require("Image=" + image in unit.read_text().splitlines(), "API slot image differs from its Quadlet")
 
@@ -143,7 +148,7 @@ def converge(expected, home):
         if private_file(api):
             lines = api.read_text().splitlines()
             require("ContainerName=codexia-api" in lines
-                    and any(re.fullmatch("Image=" + FULL_IMAGE, line) for line in lines),
+                    and any(re.fullmatch("Image=" + full_image_pattern(), line) for line in lines),
                     "Unexpected API Quadlet")
         verify_api_container(api)
         obsolete = [p for p in [*(state / name for name in STATE_FILES),

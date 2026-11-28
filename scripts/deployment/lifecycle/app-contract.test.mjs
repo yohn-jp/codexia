@@ -313,7 +313,7 @@ test('runtime verification uses a separate proof stage and shares the production
   const fixtureDigestGate = transaction.find(task => task.name === 'Require the exact immutable running image reference in the disposable registry');
   assert.ok(fixtureDigestGate, 'the disposable registry must admit only its exact immutable running image reference');
   assert.ok(fixtureDigestGate['ansible.builtin.assert'].that.some(condition => condition.includes('codexia_current_api_image_name.stdout in')));
-  assert.match(fixtureDigestGate['ansible.builtin.assert'].that.join(' '), /localhost:5000\|ghcr/u,
+  assert.match(fixtureDigestGate['ansible.builtin.assert'].that.join(' '), /match\(codexia_image_pattern\).+match\(.+codexia_fixture_image_repository/u,
     'the exact digest may retain its GHCR source name after the fixture registry rewrite');
   assert.ok(prepare.some(task => task.name === 'Install the interrupted deployment recovery helper'));
   const transactionCommand = transaction.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
@@ -396,7 +396,9 @@ test('image selection binds the exact-source Full artifact and verified publicat
   assert.match(source, /migrationFingerprint/u);
   assert.match(source, /apiEpoch/u);
   assert.match(source, /persistenceFormat/u);
-  assert.match(source, /localhost:5000\/yohn-jp\/codexia-backend:lifecycle-/u);
+  assert.match(source, /backendImageName\(target\(\).repository\)/u);
+  assert.match(source, /\$\{fixtureRegistry\(\)\}:lifecycle-/u);
+  assert.match(fixture, /prefix = "\$image_repository"\nlocation = "\$fixture_image_repository"/u);
   assert.match(fixture, /CAPABILITY_UNAVAILABLE/u);
   assert.match(fixture, /rootless_podman --version/u);
   assert.doesNotMatch(fixture, /\.Host\.Version/u);

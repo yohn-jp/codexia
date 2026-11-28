@@ -1,3 +1,4 @@
+import { actionsRepository, backendImageName, deploymentRepository } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +8,7 @@ export function assertBackendRegistryTag({tag, sourceSha, repository, ref}) {
   assert.match(sourceSha ?? '', /^[a-f0-9]{40}$/u, 'Verified source SHA is invalid');
   assert.ok(tag === 'sha-' + sourceSha || tag === 'sha-' + sourceSha + '-full',
     'Registry lookup requires exact verified source SHA tag');
-  assert.equal(repository, 'yohn-jp/codexia', 'GitHub repository mismatch');
+  deploymentRepository(repository);
   assert.equal(ref, 'refs/heads/main', 'GitHub ref mismatch');
 }
 
@@ -21,7 +22,7 @@ async function main() {
   });
   const actor = process.env.GITHUB_ACTOR, token = process.env.GH_TOKEN;
   assert.ok(actor && token);
-  const repository = 'yohn-jp/codexia-backend';
+  const repository = backendImageName(actionsRepository().repository).slice('ghcr.io/'.length);
   const auth = await fetch('https://ghcr.io/token?service=ghcr.io&scope=' + encodeURIComponent('repository:' + repository + ':pull'), {
     headers: { Authorization: 'Basic ' + Buffer.from(actor + ':' + token).toString('base64') },
     redirect: 'error', signal: AbortSignal.timeout(15000),

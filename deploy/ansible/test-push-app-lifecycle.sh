@@ -3,6 +3,10 @@
 set -Eeuo pipefail
 umask 077
 repo_root=$(git rev-parse --show-toplevel)
+[[ "${GITHUB_REPOSITORY:-}" =~ ^[A-Za-z0-9-]+/codexia$ ]] || exit 1
+image_owner="${GITHUB_REPOSITORY%/*}"
+image_repository="ghcr.io/${image_owner,,}/codexia-backend"
+fixture_image_repository="localhost:5000/${image_owner,,}/codexia-backend"
 report=${CODEXIA_LIFECYCLE_REPORT_FILE:?}
 evidence=${CODEXIA_LIFECYCLE_EVIDENCE_FILE:?}
 source_sha=${CODEXIA_LIFECYCLE_SOURCE_SHA:?}
@@ -168,6 +172,9 @@ rootless() {
   sudo -u "$fixture_user" env HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" \
     XDG_DATA_HOME="$fixture_home/.local/share" XDG_STATE_HOME="$fixture_home/.local/state" \
     XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" \
+    CODEXIA_IMAGE_REPOSITORY="$image_repository" \
+    CODEXIA_TARGET_REPOSITORY="$GITHUB_REPOSITORY" CODEXIA_TARGET_REPOSITORY_ID="$GITHUB_REPOSITORY_ID" \
+    CODEXIA_TARGET_OWNER_ID="$GITHUB_REPOSITORY_OWNER_ID" \
     /bin/bash -c 'cd "$HOME" && exec "$@"' bash "$@"
 }
 rootless_podman() { rootless /usr/bin/podman "$@"; }
@@ -613,11 +620,11 @@ registry_started=$(date +%s%3N)
 rootless_podman pull docker.io/library/registry:2 >/dev/null
 registry_image_digest=$(rootless_podman image inspect --format '{{json .RepoDigests}}' docker.io/library/registry:2 | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const a=JSON.parse(s);const v=a.find(x=>/^docker\.io\/library\/registry@sha256:[a-f0-9]{64}$/.test(x));if(!v)process.exit(1);console.log(v)})')
 rootless_podman run -d --name codexia-lifecycle-registry -p 127.0.0.1:5000:5000 "$registry_image_digest" >/dev/null
-cat > "$tmp/registries.conf" <<'REGISTRY'
+cat > "$tmp/registries.conf" <<REGISTRY
 unqualified-search-registries = ["docker.io"]
 [[registry]]
-prefix = "ghcr.io/yohn-jp/codexia-backend"
-location = "localhost:5000/yohn-jp/codexia-backend"
+prefix = "$image_repository"
+location = "$fixture_image_repository"
 insecure = true
 [[registry]]
 prefix = "localhost:5000"
@@ -674,13 +681,13 @@ FROM ${BASE_IMAGE}
 LABEL org.codexia.lifecycle-scenario="app-update"
 DOCKERFILE
   sudo install -o codexia -g codexia -m 0644 "$tmp/app-update.Dockerfile" "$candidate/Dockerfile"
-  tag="localhost:5000/yohn-jp/codexia-backend:app-update-$source_sha"
+  tag="$fixture_image_repository:app-update-$source_sha"
   rootless_podman build --pull=never --build-arg "BASE_IMAGE=$from" -t "$tag" -f "$candidate/Dockerfile" "$candidate" >"$tmp/app-update-build.log" 2>&1
   digest_file="$candidate/digest"
   rootless_podman push --digestfile "$digest_file" "$tag" >"$tmp/app-update-push.log" 2>&1
   digest=$(rootless cat "$digest_file")
   rootless rm -f "$digest_file"
-  node "$repo_root/scripts/deployment/lifecycle/app.mjs" record-auth app-update "ghcr.io/yohn-jp/codexia-backend@$digest"
+  node "$repo_root/scripts/deployment/lifecycle/app.mjs" record-auth app-update "$image_repository@$digest"
 }
 seed_database_sentinel() {
   rootless_podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -q -v ON_ERROR_STOP=1 -U codexia_admin -d codexia' <<'SENTINEL_SQL'
@@ -768,13 +775,13 @@ ENTRYPOINT ["/bin/false"]
 DOCKERFILE
 sudo install -o codexia -g codexia -m 0644 "$tmp/failed.Dockerfile" "$failed_context/Dockerfile"
 rootless_podman build --build-arg "BASE_IMAGE=$update_image" -t codexia-backend-lifecycle-fail -f "$failed_context/Dockerfile" "$failed_context" >/dev/null
-failed_tag="localhost:5000/yohn-jp/codexia-backend:lifecycle-failed-$source_sha"
+failed_tag="$fixture_image_repository:lifecycle-failed-$source_sha"
 rootless_podman tag codexia-backend-lifecycle-fail "$failed_tag"
 failed_digest_file="$fixture_home/.local/state/codexia-lifecycle-build/failed.digest"
 rootless_podman push --digestfile "$failed_digest_file" "$failed_tag" >/dev/null
 failed_digest=$(sudo -u codexia cat "$failed_digest_file")
 rootless rm -f "$failed_digest_file"
-failed_image="ghcr.io/yohn-jp/codexia-backend@$failed_digest"
+failed_image="$image_repository@$failed_digest"
 node "$repo_root/scripts/deployment/lifecycle/app.mjs" record-failed "$failed_image"
 before_failure=$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" | cut -d' ' -f1)
 if run_deploy failed false '' deploy-failed-candidate; then

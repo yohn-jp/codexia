@@ -118,6 +118,28 @@ export function assertVerificationJobs(jobs) {
   assertNamedJobs(jobs, required, skipped);
 }
 
+/**
+ * Validate the live job set and the certification attempt of a selected Verify run.
+ * @param {unknown} jobs
+ * @param {{id: number, head_sha: string, run_attempt: number}} run
+ */
+export function assertVerificationRunJobs(jobs, run) {
+  if (!Array.isArray(jobs) || !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1) {
+    throw new Error('Invalid Verify job inventory or workflow attempt');
+  }
+  for (const job of jobs) {
+    if (!record(job) || job.run_id !== run.id || job.head_sha !== run.head_sha ||
+        typeof job.run_attempt !== 'number' || !Number.isSafeInteger(job.run_attempt) ||
+        job.run_attempt < 1 || job.run_attempt > run.run_attempt) {
+      throw new Error('Verify job run, source or attempt mismatch');
+    }
+  }
+  if (jobs.find(job => job.name === 'certification')?.run_attempt !== run.run_attempt) {
+    throw new Error('Verify certification attempt mismatch');
+  }
+  assertVerificationJobs(jobs);
+}
+
 /** @param {string} tag @param {string} expectedSha @param {string} actualSha */
 export function assertReleaseIdentity(tag, expectedSha, actualSha) {
   if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag) || !/^[a-f0-9]{40}$/.test(expectedSha) || actualSha !== expectedSha) {

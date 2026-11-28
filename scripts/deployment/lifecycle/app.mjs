@@ -18,8 +18,17 @@ import { successfulPublicationJobs, verifyExistingBackendRelease } from '../../r
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateActionsInventory, paginateGitHubArray } from '../../github/paginate-actions.mjs';
 
-const repository = 'yohn-jp/codexia';
-const imagePrefix = 'ghcr.io/yohn-jp/codexia-backend';
+import { actionsRepository, backendImageName, matchesRunRepository, assertBackendImageDigest } from '../../github/repository.mjs';
+
+const target = () => actionsRepository();
+const imageRepository = () => backendImageName(target().repository);
+const fixtureRegistry = () => imageRepository().replace('ghcr.io/', 'localhost:5000/');
+const repositoryBinding = () => {
+  const { repository, repositoryId, ownerId } = target();
+  return { repository, repositoryId, ownerId };
+};
+const matchesEvidenceRepository = evidence => Object.entries(repositoryBinding())
+  .every(([key, value]) => evidence[key] === value);
 const digestPattern = /^sha256:[a-f0-9]{64}$/u;
 const shaPattern = /^[a-f0-9]{40}$/u;
 const root = fileURLToPath(new URL('../../../', import.meta.url));
@@ -85,15 +94,16 @@ export function publicError(error) {
 let github;
 function octokit() { return github ??= createGitHubOctokit({ token, timeout: 20_000 }); }
 async function readBackendInventory(endpoint, key, parameters = {}) {
+  const { owner, repo } = target();
   if (endpoint === 'actions/runs') return paginateActionsInventory(octokit(),
     octokit().rest.actions.listWorkflowRunsForRepo,
-    { owner: 'yohn-jp', repo: 'codexia', ...parameters }, key);
+    { owner, repo, ...parameters }, key);
   const jobs = /^actions\/runs\/([1-9]\d*)\/jobs$/u.exec(endpoint);
   if (jobs) return paginateActionsInventory(octokit(), octokit().rest.actions.listJobsForWorkflowRun,
-    { owner: 'yohn-jp', repo: 'codexia', run_id: Number(jobs[1]), ...parameters }, key);
+    { owner, repo, run_id: Number(jobs[1]), ...parameters }, key);
   const artifacts = /^actions\/runs\/([1-9]\d*)\/artifacts$/u.exec(endpoint);
   if (artifacts) return paginateActionsInventory(octokit(), octokit().rest.actions.listWorkflowRunArtifacts,
-    { owner: 'yohn-jp', repo: 'codexia', run_id: Number(artifacts[1]), ...parameters }, key);
+    { owner, repo, run_id: Number(artifacts[1]), ...parameters }, key);
   throw new Error('Unapproved backend lifecycle evidence inventory');
 }
 function imageIdentity(image, { expectedImage = false, disposableRegistry = false } = {}) {
@@ -104,7 +114,7 @@ function imageIdentity(image, { expectedImage = false, disposableRegistry = fals
     rootlessPodman(['cp', `${container}:/app/update-identity.json`, scratch]);
     const value = JSON.parse(execFileSync('sudo', ['cat', scratch], { encoding: 'utf8' }));
     const digest = image.split('@')[1];
-    const expectedDigestRefs = disposableRegistry ? [image, `localhost:5000/yohn-jp/codexia-backend@${digest}`] : [image];
+    const expectedDigestRefs = disposableRegistry ? [image, `${fixtureRegistry()}@${digest}`] : [image];
     const identity = assertBackendImageIdentity(value, observed, {});
     if (expectedImage) check(expectedDigestRefs.some(reference => observed.RepoDigests?.includes(reference)), 'Pulled backend image does not bind its exact immutable digest');
     return { identity, imageId: observed.Id, repoDigests: observed.RepoDigests || [], layers: observed.RootFS?.Layers, labels: observed.Config?.Labels };
@@ -130,13 +140,15 @@ function validateImageIdentity(identity, expectedSha) {
   return identity;
 }
 async function waitForExactSourceBackendRun() {
+  const context = target();
+  const { owner, repo } = context;
   const deadline = Date.now() + 45 * 60_000;
   while (Date.now() < deadline) {
     const workflowRuns = await paginateActionsInventory(octokit(), octokit().rest.actions.listWorkflowRunsForRepo,
-      { owner: 'yohn-jp', repo: 'codexia', head_sha: sourceSha }, 'workflow_runs');
+      { owner, repo, head_sha: sourceSha }, 'workflow_runs');
     const acceptedEvents = env.GITHUB_EVENT_NAME === 'pull_request' ? ['pull_request'] : ['pull_request', 'workflow_run'];
     const matches = workflowRuns.filter(run => run?.path === '.github/workflows/backend-release.yml' &&
-      acceptedEvents.includes(run.event) && run.head_sha === sourceSha && run.repository?.full_name === repository &&
+      acceptedEvents.includes(run.event) && run.head_sha === sourceSha && matchesRunRepository(run, context, { sameHead: run.event !== 'pull_request' }) &&
       (run.event !== 'workflow_run' || run.head_branch === 'main'))
       .sort((left, right) => right.run_number - left.run_number || right.id - left.id);
     if (matches.length) {
@@ -180,7 +192,7 @@ async function loadExactSourceFullCandidate() {
   const selected = await readExactBackendProducerArtifacts(run, { sourceSha, runId: run.id, currentAttempt: run.run_attempt,
     event: run.event, workflowSha: sourceSha, headBranch: run.head_branch });
   const full = selected.find(item => item.profile === 'full');
-  const bytes = await downloadArtifact(full.artifact, repository, token, fetch, { maxArchive: 512 * 1024 * 1024, downloadTimeoutMs: 60_000 });
+  const bytes = await downloadArtifact(full.artifact, target().repository, token, fetch, { maxArchive: 512 * 1024 * 1024, downloadTimeoutMs: 60_000 });
   const folder = await mkdtemp(path.join(tempRoot, 'codexia-lifecycle-pr-full-'));
   try {
     const files = await extractArtifactFiles(bytes, folder, { maxArchive: 512 * 1024 * 1024, maxUncompressed: 512 * 1024 * 1024 });
@@ -232,27 +244,30 @@ export function selectLifecycleTransition(head, prior) {
 }
 
 async function certifiedCompatibleCandidate(head) {
+  const context = target();
+  const { owner, repo, repository, repositoryId, ownerId } = context;
   const prior = selectPriorPublication(await paginateGitHubArray(octokit(), octokit().rest.repos.listReleases,
-    { owner: 'yohn-jp', repo: 'codexia' }, { maxItems: 1_000_000 }), head.identity);
+    { owner, repo }, { maxItems: 1_000_000 }), head.identity);
   check(prior, 'No earlier published backend matches the current API epoch and persistence format');
   const { release, metadata } = prior;
   let scratch;
   try {
+    check(matchesEvidenceRepository(metadata), 'Backend release repository does not match the current repository');
     const workflowHead = metadata.publication?.workflowHeadSha ?? metadata.sourceSha;
     const runs = metadata.publication
-      ? [(await octokit().rest.actions.getWorkflowRun({ owner: 'yohn-jp', repo: 'codexia', run_id: metadata.publication.workflowRunId })).data]
+      ? [(await octokit().rest.actions.getWorkflowRun({ owner, repo, run_id: metadata.publication.workflowRunId })).data]
       : await paginateActionsInventory(octokit(), octokit().rest.actions.listWorkflowRuns,
-        { owner: 'yohn-jp', repo: 'codexia', workflow_id: 'backend-release.yml', event: 'workflow_run', branch: 'main', head_sha: workflowHead }, 'workflow_runs');
-    const publications = runs.filter(run => run.path === '.github/workflows/backend-release.yml' && run.event === 'workflow_run' &&
+        { owner, repo, workflow_id: 'backend-release.yml', event: 'workflow_run', branch: 'main', head_sha: workflowHead }, 'workflow_runs');
+    const publications = runs.filter(run => matchesRunRepository(run, context) && run.path === '.github/workflows/backend-release.yml' && run.event === 'workflow_run' &&
       run.head_branch === 'main' && run.head_sha === workflowHead && run.status === 'completed' &&
       run.conclusion === 'success' && publicationInWorkflowWindow(release, run));
     check(publications.length === 1, 'Backend release must bind one successful publication workflow');
     const [publicationRun] = publications;
     const [jobs, artifacts] = await Promise.all([
       paginateActionsInventory(octokit(), octokit().rest.actions.listJobsForWorkflowRun,
-        { owner: 'yohn-jp', repo: 'codexia', run_id: publicationRun.id, filter: 'latest' }, 'jobs'),
+        { owner, repo, run_id: publicationRun.id, filter: 'latest' }, 'jobs'),
       paginateActionsInventory(octokit(), octokit().rest.actions.listWorkflowRunArtifacts,
-        { owner: 'yohn-jp', repo: 'codexia', run_id: publicationRun.id }, 'artifacts'),
+        { owner, repo, run_id: publicationRun.id }, 'artifacts'),
     ]);
     const certificateArtifact = selectPushDeploymentCertificateArtifact(artifacts, publicationRun, { sourceSha: metadata.sourceSha });
     const certificateBytes = await downloadArtifact(certificateArtifact, repository, token, fetch, { maxArchive: 4 * 1024 * 1024, downloadTimeoutMs: 30_000 });
@@ -260,7 +275,7 @@ async function certifiedCompatibleCandidate(head) {
     const certFiles = await extractArtifactFiles(certificateBytes, scratch, { maxArchive: 4 * 1024 * 1024, maxUncompressed: 4 * 1024 * 1024 });
     check(certFiles.length === 2 && certFiles.includes('core.json') && certFiles.includes('full.json'), 'Release certificate artifact is incomplete');
     const certificates = await Promise.all(['core.json', 'full.json'].map(async file => JSON.parse(await readFile(path.join(scratch, file), 'utf8'))));
-    const [, fullCertificate] = validatePushDeploymentCertificatePair(certificates, metadata.sourceSha);
+    const [, fullCertificate] = validatePushDeploymentCertificatePair(certificates, metadata.sourceSha, context);
     check(successfulPublicationJobs(jobs, fullCertificate.producer.event === 'pull_request', true), 'Backend publication jobs do not prove a successful producer path');
     check(fullCertificate.image === metadata.images?.full, 'Release metadata Full digest differs from its verified certificate');
     check(fullCertificate.identity.version === metadata.version, 'Full certificate version differs from release metadata');
@@ -268,7 +283,8 @@ async function certifiedCompatibleCandidate(head) {
     const receiptPath = path.join(scratch, fullCertificate.producer.event === 'pull_request' ? 'codexia-backend-promotion.json' : 'codexia-backend-build.json');
     await writeFile(receiptPath, JSON.stringify(fullCertificate.producer.receipt) + '\n', { mode: 0o600, flag: 'wx' });
     const releaseEnv = {
-      GITHUB_REPOSITORY: repository, GITHUB_REF: 'refs/heads/main', GITHUB_EVENT_NAME: 'workflow_run',
+      GITHUB_REPOSITORY: repository, GITHUB_REPOSITORY_ID: String(repositoryId),
+      GITHUB_REPOSITORY_OWNER_ID: String(ownerId), GITHUB_ACTIONS: env.GITHUB_ACTIONS, GITHUB_REF: 'refs/heads/main', GITHUB_EVENT_NAME: 'workflow_run',
       GITHUB_RUN_ID: String(publicationRun.id), GITHUB_RUN_NUMBER: String(publicationRun.run_number),
       GITHUB_SHA: workflowHead, CODEXIA_SOURCE_SHA: metadata.sourceSha,
       CODEXIA_VERIFY_RUN_ID: String(metadata.publication?.verifyRunId ?? ''), GH_TOKEN: token, RUNNER_TEMP: tempRoot,
@@ -291,7 +307,7 @@ async function certifiedCompatibleCandidate(head) {
   }
 }
 function pushIntoDisposableRegistry(candidate, name) {
-  const sourceTag = `localhost:5000/yohn-jp/codexia-backend:lifecycle-${name}-${sourceSha}`;
+  const sourceTag = `${fixtureRegistry()}:lifecycle-${name}-${sourceSha}`;
   rootlessPodman(['tag', candidate.image, sourceTag]);
   const digestFile = path.join(os.tmpdir(), `codexia-lifecycle-${name}-${runId}-${attempt}-${randomUUID()}.digest`);
   let digest;
@@ -300,7 +316,7 @@ function pushIntoDisposableRegistry(candidate, name) {
     digest = execFileSync('sudo', ['-u', 'codexia', 'cat', digestFile], { encoding: 'utf8' }).trim();
   } finally { execFileSync('sudo', ['rm', '-f', digestFile], { stdio: 'ignore' }); }
   check(digestPattern.test(digest), `Disposable registry returned an invalid ${name} OCI digest`);
-  const image = `${imagePrefix}@${digest}`;
+  const image = `${imageRepository()}@${digest}`;
   rootlessPodman(['pull', image], { timeout: 180_000 });
   const observed = imageIdentity(image, { expectedImage: true, disposableRegistry: true });
   assert.deepEqual(observed.identity, candidate.identity, `${name} image identity changed in the disposable registry`);
@@ -308,7 +324,7 @@ function pushIntoDisposableRegistry(candidate, name) {
   return { image, digest, imageId: observed.imageId, repoDigests: observed.repoDigests, profile: 'full', identity: observed.identity };
 }
 async function prepareImages() {
-  check(actions && env.GITHUB_REPOSITORY === repository && shaPattern.test(sourceSha || '') && positive(runId) && positive(attempt),
+  check(actions && shaPattern.test(sourceSha || '') && positive(runId) && positive(attempt),
     'Lifecycle image proof must run for an exact repository Actions source and run');
   check(typeof token === 'string' && token.length > 0, 'GitHub Actions read token is required');
   await mkdir(path.dirname(reportPath), { recursive: true, mode: 0o700 });
@@ -331,7 +347,7 @@ async function prepareImages() {
   } catch (error) {
     report.fixtureFallbackReason = publicError(error);
   }
-  const prepared = { format: 'codexia-push-app-lifecycle-prepared/v1', sourceSha, runId, runAttempt: attempt, head, published };
+  const prepared = { format: 'codexia-push-app-lifecycle-prepared/v1', ...repositoryBinding(), sourceSha, runId, runAttempt: attempt, head, published };
   // codeql[js/http-to-file-access] Only verified immutable GitHub artifact identities are persisted to this private runner file.
   await writeLifecycleJson(preparedPath, prepared);
   report.images = [
@@ -344,15 +360,15 @@ async function prepareImages() {
   console.log(JSON.stringify({ preparedPath, reportPath, publishedRelease: published?.releaseTag }, null, 2));
 }
 async function mirrorPreparedImages() {
-  check(actions && env.GITHUB_REPOSITORY === repository && shaPattern.test(sourceSha || '') && positive(runId) && positive(attempt),
+  check(actions && shaPattern.test(sourceSha || '') && positive(runId) && positive(attempt),
     'Disposable image mirroring must remain bound to the current Actions run');
   const prepared = JSON.parse(await readFile(preparedPath, 'utf8'));
-  check(prepared.format === 'codexia-push-app-lifecycle-prepared/v1' && prepared.sourceSha === sourceSha &&
+  check(prepared.format === 'codexia-push-app-lifecycle-prepared/v1' && matchesEvidenceRepository(prepared) && prepared.sourceSha === sourceSha &&
     prepared.runId === runId && prepared.runAttempt === attempt, 'Prepared image evidence belongs to another workflow run');
   const { head, published } = prepared;
   const headRef = pushIntoDisposableRegistry(head, 'head');
   const publishedRef = published && pushIntoDisposableRegistry(published, 'prior');
-  const evidence = { format: 'codexia-push-app-lifecycle-evidence/v1', sourceSha, runId, runAttempt: attempt,
+  const evidence = { format: 'codexia-push-app-lifecycle-evidence/v1', ...repositoryBinding(), sourceSha, runId, runAttempt: attempt,
     backendProducer: { runId: head.producerRunId, attempt: head.producerAttempt, artifactId: head.artifactId,
       artifactDigest: head.artifactDigest, workflow: head.producerWorkflow, event: head.producerEvent,
       conclusion: head.producerConclusion },
@@ -375,11 +391,11 @@ async function mirrorPreparedImages() {
   console.log(JSON.stringify({ evidencePath, reportPath, headImage: headRef.image, publishedImage: publishedRef?.image }, null, 2));
 }
 async function recordFailedCandidate(image) {
-  check(actions && env.GITHUB_REPOSITORY === repository && shaPattern.test(sourceSha || '') && positive(runId) && positive(attempt),
+  check(actions && shaPattern.test(sourceSha || '') && positive(runId) && positive(attempt),
     'Fault candidate proof must remain bound to the current Actions run');
-  check(/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u.test(image || ''), 'Fault candidate must use a disposable immutable OCI digest');
+  assertBackendImageDigest(image, target().repository);
   const evidence = JSON.parse(await readFile(evidencePath, 'utf8'));
-  check(evidence.format === 'codexia-push-app-lifecycle-evidence/v1' && evidence.sourceSha === sourceSha && evidence.runId === runId && evidence.runAttempt === attempt,
+  check(evidence.format === 'codexia-push-app-lifecycle-evidence/v1' && matchesEvidenceRepository(evidence) && evidence.sourceSha === sourceSha && evidence.runId === runId && evidence.runAttempt === attempt,
     'Fault candidate evidence belongs to another workflow run');
   const base = evidence.candidates[evidence.transition.to];
   check(base && base.image !== evidence.candidates[evidence.transition.from].image,
@@ -400,12 +416,12 @@ async function recordFailedCandidate(image) {
 }
 
 async function recordAuthCandidate(scenario, image) {
-  check(actions && env.GITHUB_REPOSITORY === repository && shaPattern.test(sourceSha || '') && positive(runId) && positive(attempt),
+  check(actions && shaPattern.test(sourceSha || '') && positive(runId) && positive(attempt),
     'Better Auth test image proof must remain bound to the current Actions run');
-  check(['auth-primary', 'auth-update', 'auth-failed', 'app-update'].includes(scenario) &&
-    /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u.test(image || ''), 'Invalid Better Auth test image');
+  check(['auth-primary', 'auth-update', 'auth-failed', 'app-update'].includes(scenario), 'Invalid Better Auth test scenario');
+  assertBackendImageDigest(image, target().repository);
   const evidence = JSON.parse(await readFile(evidencePath, 'utf8'));
-  check(evidence.format === 'codexia-push-app-lifecycle-evidence/v1' && evidence.sourceSha === sourceSha &&
+  check(evidence.format === 'codexia-push-app-lifecycle-evidence/v1' && matchesEvidenceRepository(evidence) && evidence.sourceSha === sourceSha &&
     evidence.runId === runId && evidence.runAttempt === attempt, 'Better Auth image evidence belongs to another run');
   const base = imageIdentity(evidence.candidates.head.image, { expectedImage: true, disposableRegistry: true });
   rootlessPodman(['pull', image], { timeout: 180_000 });

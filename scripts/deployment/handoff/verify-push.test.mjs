@@ -8,26 +8,32 @@ import { test } from 'node:test';
 import { REQUIRED_VERIFICATION_JOBS } from '../../ci/impact/contract.mjs';
 import * as handoff from './verify-push.mjs';
 import {
-  assertTrustedBackendPublicationRun,
-  createHandoffDeploymentOutputs,
+  assertTrustedBackendPublicationRun as verifyTrustedRun,
+  createHandoffDeploymentOutputs as createOutputs,
   selectPushDeploymentCertificateArtifact,
-  validatePushDeploymentCertificatePair,
+  validatePushDeploymentCertificatePair as validatePair,
   verifyBackendPushHandoff,
 } from './verify-push.mjs';
+
+const context = { repository: 'yohn-jp/codexia', owner: 'yohn-jp', repo: 'codexia', repositoryId: 1450072993, ownerId: 405 };
+
+const assertTrustedBackendPublicationRun = (run, expected) => verifyTrustedRun(run, expected, context);
+const createHandoffDeploymentOutputs = result => createOutputs(result, context);
+const validatePushDeploymentCertificatePair = (values, sha) => validatePair(values, sha, context);
 
 const sha = char => char.repeat(40);
 const digest = char => `sha256:${char.repeat(64)}`;
 const mainSha = sha('a'), mainTree = sha('b'), sourceSha = sha('c');
 const buildRun = () => ({ id: 100, run_attempt: 2, path: '.github/workflows/backend-release.yml', event: 'workflow_run',
   run_number: 773, head_branch: 'main', head_sha: mainSha, status: 'completed', conclusion: 'success',
-  repository: { full_name: 'yohn-jp/codexia' }, head_repository: { full_name: 'yohn-jp/codexia' } });
-const receipt = () => ({ format: 'codexia-backend-build/v1', event: 'workflow_run', sourceSha, version: '0.1.3',
+  repository: { full_name: context.repository, id: context.repositoryId, owner: { id: context.ownerId } }, head_repository: { full_name: context.repository, id: context.repositoryId, owner: { id: context.ownerId } } });
+const receipt = () => ({ format: 'codexia-backend-build/v1', repository: context.repository, repositoryId: context.repositoryId, ownerId: context.ownerId, event: 'workflow_run', sourceSha, version: '0.1.3',
   workflowRunId: 101, workflowRunNumber: 4, sourceTree: mainTree, artifacts: {
     core: { id: 201, digest: digest('d'), producerAttempt: 1, archiveSha256: 'e'.repeat(64) },
     full: { id: 202, digest: digest('e'), producerAttempt: 1, archiveSha256: 'f'.repeat(64) },
   } });
 const cert = profile => ({ format: 'codexia-backend-deployment-certificate/v1', verifiedMainSha: mainSha, verifiedMainTree: mainTree,
-  verifyRun: { event: 'push', branch: 'main', conclusion: 'success', repository: 'yohn-jp/codexia', headSha: mainSha, id: 90, attempt: 1 },
+  verifyRun: { event: 'push', branch: 'main', conclusion: 'success', repository: context.repository, repositoryId: context.repositoryId, ownerId: context.ownerId, headSha: mainSha, id: 90, attempt: 1 },
   producer: { event: 'workflow_run', sourceSha, sourceTree: mainTree, runId: 101, attempt: 1, artifactId: profile === 'core' ? 201 : 202,
     artifactDigest: digest(profile === 'core' ? 'd' : 'e'), receipt: receipt() },
   image: `ghcr.io/yohn-jp/codexia-backend@${digest(profile === 'core' ? 'f' : '9')}`,
@@ -35,7 +41,7 @@ const cert = profile => ({ format: 'codexia-backend-deployment-certificate/v1', 
     migrationFingerprint: digest('a'), persistenceFormat: 1, apiEpoch: 1 } });
 const artifact = (run = buildRun()) => ({ id: 303, name: `codexia-backend-deployment-certificate-${mainSha}-run-${run.id}-attempt-${run.run_attempt}`,
   digest: digest('1'), size_in_bytes: 500, expired: false,
-  workflow_run: { id: run.id, head_sha: run.head_sha } });
+  workflow_run: { id: run.id, head_sha: run.head_sha, repository_id: context.repositoryId, head_repository_id: context.repositoryId } });
 const publicationSteps = conclusion => [
   { name: 'Require complete exact-source main verification', status: 'completed', conclusion: 'success' },
   ...[
@@ -175,7 +181,7 @@ test('handoff validates the certified ancestor and its own Verify run in a histo
   ];
   const verify = { ...buildRun(), id: 90, run_attempt: 1, path: '.github/workflows/verify.yml',
     event: 'push', head_sha: certifiedSha };
-  const env = { GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_EVENT_NAME: 'workflow_run',
+  const env = { GITHUB_REPOSITORY: context.repository, GITHUB_REPOSITORY_ID: String(context.repositoryId), GITHUB_REPOSITORY_OWNER_ID: String(context.ownerId), GITHUB_EVENT_NAME: 'workflow_run',
     GITHUB_REF: 'refs/heads/main', CODEXIA_PUBLISHER_RUN_ID: '100', GH_TOKEN: 'fixture-read', RUNNER_TEMP: root };
   const run = async (head, verifySha, verifyJobs = []) => {
     const publicationRun = { ...buildRun(), head_sha: head };
@@ -210,8 +216,8 @@ test('handoff validates the certified ancestor and its own Verify run in a histo
 
   process.chdir(repository);
   await assert.rejects(run(workflowSha, workflowSha), /Certificate Verify source SHA mismatch/u);
-  await assert.rejects(run(workflowSha, certifiedSha), /exact required job set/u);
-  const completedJobs = REQUIRED_VERIFICATION_JOBS.map(name => ({ name, status: 'completed', conclusion: 'success' }));
+  await assert.rejects(run(workflowSha, certifiedSha), /Verify certification attempt mismatch/u);
+  const completedJobs = REQUIRED_VERIFICATION_JOBS.map(name => ({ name, status: 'completed', conclusion: 'success', run_id: verify.id, head_sha: verify.head_sha, run_attempt: verify.run_attempt }));
   const tag = 'backend-v' + cert('full').identity.version;
   t.mock.method(globalThis, 'fetch', async input => {
     const path = decodeURIComponent(new URL(input).pathname);
@@ -233,7 +239,7 @@ test('a successful freshness gate that skipped every publication step emits no d
   await writeFile(output, '');
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const run = { ...buildRun(), head_sha: head };
-  const env = { GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_EVENT_NAME: 'workflow_run',
+  const env = { GITHUB_REPOSITORY: context.repository, GITHUB_REPOSITORY_ID: String(context.repositoryId), GITHUB_REPOSITORY_OWNER_ID: String(context.ownerId), GITHUB_EVENT_NAME: 'workflow_run',
     GITHUB_REF: 'refs/heads/main', CODEXIA_PUBLISHER_RUN_ID: '100', GH_TOKEN: 'fixture-read',
     RUNNER_TEMP: root, GITHUB_OUTPUT: output };
   const invoke = async (steps, artifacts = [], conclusion = 'success') => verifyBackendPushHandoff({

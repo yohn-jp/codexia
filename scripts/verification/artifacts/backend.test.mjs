@@ -72,15 +72,16 @@ test('backend PR artifacts bind both tested profiles to the merged PR source and
 });
 
 test('main build receipt binds the exact source tree, artifacts and partial rerun attempts',()=>{
+  const context = { repository: 'yohn-jp/codexia', repositoryId: 42, ownerId: 10 };
   const receipt=buildBackendBuildReceipt({sourceSha:sha,workflowRunId:123,workflowRunNumber:450,sourceTree:'c'.repeat(40),artifacts:[
     {profile:'core',id:10,digest,producerAttempt:1,archiveSha256:'d'.repeat(64)},
     {profile:'full',id:12,digest:'sha256:'+'e'.repeat(64),producerAttempt:3,archiveSha256:'f'.repeat(64)},
-  ]});
+  ]},context);
   assert.equal(receipt.format,'codexia-backend-build/v1');
   const completionReceipt=buildBackendBuildReceipt({sourceSha:sha,workflowRunId:123,workflowRunNumber:450,sourceTree:'c'.repeat(40),event:'workflow_run',artifacts:[
     {profile:'core',id:10,digest,producerAttempt:1,archiveSha256:'d'.repeat(64)},
     {profile:'full',id:12,digest:'sha256:'+'e'.repeat(64),producerAttempt:3,archiveSha256:'f'.repeat(64)},
-  ]});
+  ]},context);
   assert.equal(completionReceipt.event,'workflow_run');
   assert.equal(receipt.version,readComponentVersion('backend','450'));
   assert.equal(receipt.artifacts.core.producerAttempt,1);
@@ -88,5 +89,5 @@ test('main build receipt binds the exact source tree, artifacts and partial reru
   assert.throws(()=>buildBackendBuildReceipt({sourceSha:sha,workflowRunId:123,workflowRunNumber:450,sourceTree:'c'.repeat(40),artifacts:[
     {profile:'core',id:10,digest,producerAttempt:1,archiveSha256:'d'.repeat(64)},
     {profile:'core',id:12,digest:'sha256:'+'e'.repeat(64),producerAttempt:3,archiveSha256:'f'.repeat(64)},
-  ]}),/Duplicate/);
+  ]},context),/Duplicate/);
 });

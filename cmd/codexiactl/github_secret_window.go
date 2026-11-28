@@ -76,7 +76,7 @@ func (g *githubControl) authorizeSecretWriteWindow(ctx context.Context, o operat
 		}
 		// CreateEnvVariable is a create-only POST. A concurrent client that also
 		// saw absence receives a conflict and cannot replace the first owner.
-		resp, err := g.client.Actions.CreateEnvVariable(ctx, githubOwner, githubRepo, githubBootstrapEnvironment,
+		resp, err := g.client.Actions.CreateEnvVariable(ctx, g.target.Owner, deploymentRepositoryName, githubBootstrapEnvironment,
 			github.ActionsCreateVariableRequest{Name: githubSettingsWriterVariable, Value: operationID})
 		if err != nil || githubStatus(resp) != http.StatusCreated {
 			return nil, errors.Join(errGitHubSettingsWriterUnavailable, githubFailure("claim "+githubSettingsWriterVariable+" (retain the checkpoint and reobserve)", resp, err))
@@ -91,7 +91,7 @@ func (g *githubControl) authorizeSecretWriteWindow(ctx context.Context, o operat
 }
 
 func (g *githubControl) settingsOperation(ctx context.Context) (string, bool, error) {
-	value, resp, err := g.client.Actions.GetEnvVariable(ctx, githubOwner, githubRepo, githubBootstrapEnvironment, githubSettingsWriterVariable)
+	value, resp, err := g.client.Actions.GetEnvVariable(ctx, g.target.Owner, deploymentRepositoryName, githubBootstrapEnvironment, githubSettingsWriterVariable)
 	if githubStatus(resp) == http.StatusNotFound {
 		return "", false, nil
 	}
@@ -137,7 +137,7 @@ func (w *githubSecretWriteWindow) release(ctx context.Context) error {
 		return err
 	}
 	g := w.control
-	resp, err := g.client.Actions.DeleteEnvVariable(ctx, githubOwner, githubRepo, githubBootstrapEnvironment, githubSettingsWriterVariable)
+	resp, err := g.client.Actions.DeleteEnvVariable(ctx, g.target.Owner, deploymentRepositoryName, githubBootstrapEnvironment, githubSettingsWriterVariable)
 	if err == nil && githubStatus(resp) == http.StatusNoContent {
 		return nil
 	}

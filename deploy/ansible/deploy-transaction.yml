@@ -26,7 +26,7 @@
 - name: Require the pulled image to retain the certified immutable digest
   ansible.builtin.assert:
     that:
-      - codexia_image in (codexia_image_digests.stdout | from_json) or ((codexia_lifecycle_fixture | default(false) | bool) and ('localhost:5000/yohn-jp/codexia-backend@' + codexia_image.split('@')[-1]) in (codexia_image_digests.stdout | from_json))
+      - codexia_image in (codexia_image_digests.stdout | from_json) or ((codexia_lifecycle_fixture | default(false) | bool) and ((codexia_fixture_image_repository + '@') + codexia_image.split('@')[-1]) in (codexia_image_digests.stdout | from_json))
     fail_msg: Pulled OCI image does not contain the certified immutable digest.
   when: not (codexia_lifecycle_fixture | default(false) | bool)
 
@@ -192,7 +192,7 @@
       - codexia_installed_image_digests | length == 1
     fail_msg: The installed API image has no unique canonical GHCR digest; rollout admission fails closed.
   vars:
-    codexia_installed_image_digests: "{{ codexia_current_api_repo_digests.stdout | from_json | select('match', '^' + ('localhost:5000/yohn-jp/codexia-backend' if (codexia_lifecycle_fixture | default(false) | bool) else 'ghcr\\.io/yohn-jp/codexia-backend') + '@sha256:[a-f0-9]{64}$') | list }}"
+    codexia_installed_image_digests: "{{ codexia_current_api_repo_digests.stdout | from_json | select('match', codexia_image_pattern) | list }}"
   when:
     - codexia_current_container_exists.rc == 0
     - not (codexia_lifecycle_fixture | default(false) | bool)
@@ -200,7 +200,7 @@
 - name: Require the exact immutable running image reference in the disposable registry
   ansible.builtin.assert:
     that:
-      - codexia_current_api_image_name.stdout is match('^(localhost:5000|ghcr\\.io)/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - codexia_current_api_image_name.stdout is match(codexia_image_pattern) or codexia_current_api_image_name.stdout is match('^' + (codexia_fixture_image_repository | regex_escape) + '@sha256:[a-f0-9]{64}$')
       - codexia_current_api_image_name.stdout in (codexia_current_api_repo_digests.stdout | from_json)
     fail_msg: The disposable API image reference is not bound to its exact immutable local registry digest.
   when:
@@ -211,7 +211,7 @@
   ansible.builtin.assert:
     that:
       - codexia_current_api_unit_images | length == 1
-      - codexia_current_api_unit_images[0] is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - codexia_current_api_unit_images[0] is match(codexia_image_pattern)
       - codexia_current_api_unit_images[0] == codexia_current_api_image_name.stdout
       - codexia_lifecycle_fixture | default(false) | bool or codexia_current_api_unit_images[0] in (codexia_current_api_repo_digests.stdout | from_json)
     fail_msg: A deployment must retain the exact admitted running API image in the regular prior Quadlet for rollback.
@@ -224,7 +224,7 @@
       - "{{ repo_root }}/scripts/deployment/admission/validate.mjs"
       - --admit
       - "{{ codexia_deployment_certificate_file }}"
-      - "{{ {'image': (codexia_current_api_repo_digests.stdout | from_json | select('match', '^ghcr\\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$') | list | first), 'identity': (codexia_current_identity_result.stdout | from_json)} | to_json | b64encode }}"
+      - "{{ {'image': (codexia_current_api_repo_digests.stdout | from_json | select('match', codexia_image_pattern) | list | first), 'identity': (codexia_current_identity_result.stdout | from_json)} | to_json | b64encode }}"
       - "{{ codexia_verified_main_sha }}"
       - "{{ codexia_deployed_ui_epoch | string }}"
   delegate_to: localhost
@@ -464,7 +464,7 @@
         unit_sha256="$(sha256sum < "$active_unit")" || stale_admission 'the prior API Quadlet could not be hashed'
         [[ "$unit_sha256" == "$admitted_unit_sha256  -" ]] || stale_admission 'the prior API Quadlet changed'
         mapfile -t rollback_images < <(sed -n 's/^Image=//p' "$active_unit")
-        [[ ${{ '{' }}#rollback_images[@]} == 1 && "${rollback_images[0]}" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] ||
+        [[ ${{ '{' }}#rollback_images[@]} == 1 && "${rollback_images[0]}" == "$CODEXIA_IMAGE_REPOSITORY@"* && "${rollback_images[0]#*@}" =~ ^sha256:[a-f0-9]{64}$ ]] ||
           stale_admission 'the prior API Quadlet no longer has a unique immutable image'
         rollback_image="${rollback_images[0]}"
         read -r current_container_id _ current_image current_running <<< "$current_container"
@@ -518,7 +518,7 @@
            "$(stat -c %a -- "$setup_unit")" == 600 &&
            "$(sed -n 's/^Image=//p' "$setup_unit")" == "$candidate_image" ]] ||
           stale_admission 'the prepared owner setup image changed'
-        [[ "$(cat -- "$state_dir/owner-setup.intent")" == "$approved_cluster:$approved_database:$candidate_image" ]] ||
+        [[ "$(cat -- "$state_dir/owner-setup.intent")" == "$CODEXIA_TARGET_REPOSITORY:$CODEXIA_TARGET_REPOSITORY_ID:$CODEXIA_TARGET_OWNER_ID:$approved_cluster:$approved_database:$candidate_image" ]] ||
           stale_admission 'the fresh installation identity changed'
         [[ "$(cat -- "$state_dir/owner-setup.promoted")" == activation-ready ]] ||
           stale_admission 'the owner activation readiness marker changed'
@@ -636,6 +636,10 @@
       const { isDeepStrictEqual } = require('node:util');
       const [releasePath, unitPath, expectedImage, liveIdentityJson] = process.argv.slice(2);
       const value = JSON.parse(fs.readFileSync(releasePath, 'utf8'));
+      const repositoryBound = ['repository', 'repositoryId', 'ownerId'].some(key => Object.hasOwn(value, key));
+      if (repositoryBound && (value.repository !== process.env.CODEXIA_TARGET_REPOSITORY ||
+          value.repositoryId !== Number(process.env.CODEXIA_TARGET_REPOSITORY_ID) ||
+          value.ownerId !== Number(process.env.CODEXIA_TARGET_OWNER_ID))) process.exit(2);
       const liveIdentity = JSON.parse(liveIdentityJson);
       const unit = fs.readFileSync(unitPath, 'utf8');
       const digests = [...unit.matchAll(/^Environment=CODEXIA_AUTH_SETTINGS_SHA256=([^\r\n]*)$/gm)].map(match => match[1]);
@@ -756,6 +760,9 @@
         throw new Error('Invalid transaction state');
       };
       fs.writeFileSync(target, JSON.stringify({format: 'codexia-deploy-transaction/v1', phase: 'pending',
+        repository: process.env.CODEXIA_TARGET_REPOSITORY,
+        repositoryId: Number(process.env.CODEXIA_TARGET_REPOSITORY_ID),
+        ownerId: Number(process.env.CODEXIA_TARGET_OWNER_ID),
         hadUnit: asBoolean(hadUnit), tunnelWasActive: asBoolean(tunnelWasActive),
         apiLinkCreated: asBoolean(apiLinkCreated), tunnelLinkCreated: asBoolean(tunnelLinkCreated),
         tunnelHeldForActivation: asBoolean(tunnelHeldForActivation),
@@ -938,6 +945,9 @@
         recoveryOperationId, recoveryEvidenceSha256] = process.argv.slice(2);
       if (!/^[a-f0-9]{64}$/.test(authSettingsSha256)) process.exit(2);
       process.stdout.write(JSON.stringify({format: 'codexia-push-deployment/v1', image, previousImage,
+        repository: process.env.CODEXIA_TARGET_REPOSITORY,
+        repositoryId: Number(process.env.CODEXIA_TARGET_REPOSITORY_ID),
+        ownerId: Number(process.env.CODEXIA_TARGET_OWNER_ID),
         identity: JSON.parse(identity), authMode: "better-auth", authSettingsSha256,
         ...(backupRunId && {backupRunId}),
         ...(recoveryOperationId && {recoveryOperationId, recoveryEvidenceSha256})}) + '\n');

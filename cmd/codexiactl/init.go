@@ -31,22 +31,24 @@ func runInit(ctx context.Context) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	if state.RepositoryID != 0 && (state.HostID != vm.HostID || state.RepositoryID != targetRepositoryID) {
-		return refused("Checkpoint belongs to a different VM or repository")
-	}
 	tty.Notice("Target VM " + vm.HostID + ", administrator " + vm.User + ", sshd host key " + vm.HostFingerprint + ".")
 	gh, err := githubLogin(ctx, tty, githubAppClientID)
 	if err != nil {
 		return err
 	}
 	defer closeGitHub(ctx, gh)
+	settings, err := gh.selectTarget(ctx, tty, vm, state)
+	if err != nil {
+		return err
+	}
+	if err := gh.verifyOIDC(ctx); err != nil {
+		return err
+	}
 	snapshot, err := gh.Observe(ctx)
+	if err := validateProtectedCloudflareTarget(snapshot, gh.target, settings.PublicOrigin); err != nil {
+		return err
+	}
 	if errors.Is(err, errGitHubProtection) && !vm.CodexiaPresent {
-		// Validate the released contract before permitting an optional
-		// repository-side protection update.
-		if _, contractErr := productionSettings(ctx, snapshot.MainSHA, true); contractErr != nil {
-			return contractErr
-		}
 		changed, offerErr := gh.OfferMissingMainRestriction(ctx, tty)
 		if offerErr != nil {
 			return offerErr
@@ -58,14 +60,13 @@ func runInit(ctx context.Context) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	tty.Notice(fmt.Sprintf("Repository yohn-jp/codexia (%d), main %s.", targetRepositoryID, snapshot.MainSHA))
-	settings, err := productionSettings(ctx, snapshot.MainSHA, true)
-	if err != nil {
-		return err
+	if snapshot.MainSHA != gh.approvedSHA {
+		return refused("GitHub main changed after deployment target confirmation")
 	}
-	c := workflowController{github: gh, operator: tty, store: store, state: state,
+	c := workflowController{github: gh, operator: tty, store: store, state: state, target: gh.target,
 		sha: snapshot.MainSHA, hostID: vm.HostID, origin: settings.PublicOrigin}
-	c.state.HostID, c.state.RepositoryID = vm.HostID, targetRepositoryID
+	c.state.HostID = vm.HostID
+	c.state.bindTarget(gh.target)
 	defer func() {
 		cleanupErr := c.finishSettingsWindow(ctx, resultErr)
 		if cleanupErr != nil {
@@ -83,6 +84,9 @@ func runInit(ctx context.Context) (resultErr error) {
 		return err
 	}
 	c.state.MainSHA = c.sha
+	if err := c.store.Save(c.state); err != nil {
+		return err
+	}
 	if err := c.requireIdle(ctx, gh); err != nil {
 		return err
 	}
@@ -146,7 +150,7 @@ func managementInputsExist(env githubEnvironment, names []string, sshSecret stri
 
 func (c *workflowController) prepareInputs(ctx context.Context, gh *githubControl, o operator, vm vmObservation,
 	settings productionContract, snapshot githubSnapshot) error {
-	tailnet, err := prepareTailnet(ctx, o, vm, false)
+	tailnet, err := prepareTailnet(ctx, o, vm, gh, snapshot, false)
 	if err != nil {
 		return err
 	}
@@ -154,7 +158,7 @@ func (c *workflowController) prepareInputs(ctx context.Context, gh *githubContro
 	if err != nil {
 		return err
 	}
-	edge, err := observeCloudflare(ctx, o, settings.PublicOrigin)
+	edge, err := observeCloudflare(ctx, o, gh.target, settings)
 	if err != nil {
 		return err
 	}
@@ -181,7 +185,7 @@ func (c *workflowController) reconcilePrevious(ctx context.Context, gh *githubCo
 		}
 	}
 	id, operation := c.state.RunID, c.state.Operation
-	c.operator.Notice("Resuming verification of " + runLink(id) + ".")
+	c.operator.Notice("Resuming verification of " + c.target.runLink(id) + ".")
 	done, err := c.wait(ctx, operation, c.state.MainSHA, id)
 	if !done {
 		return err
@@ -248,7 +252,7 @@ func (c *workflowController) reconcileUnknownRun(ctx context.Context, gh *github
 	if c.state.Operation == "management" || c.state.Operation == "lifecycle" {
 		for _, run := range runs {
 			if run.Status != "completed" {
-				return needsAction("Observe the pending protected workflow before re-planning: " + runLink(run.ID))
+				return needsAction("Observe the pending protected workflow before re-planning: " + c.target.runLink(run.ID))
 			}
 		}
 		if err := requireApproval(c.operator, "The earlier read-only dispatch has no known result. Discard its local record and request a new observation?"); err != nil {
@@ -266,7 +270,7 @@ func (c *workflowController) requireIdle(ctx context.Context, gh *githubControl)
 	}
 	for _, run := range runs {
 		if run.Status != "completed" {
-			return needsAction("A protected deployment workflow is already in progress: " + runLink(run.ID))
+			return needsAction("A protected deployment workflow is already in progress: " + c.target.runLink(run.ID))
 		}
 	}
 	return nil
@@ -288,7 +292,7 @@ func (c *workflowController) install(ctx context.Context, gh *githubControl, set
 		return err
 	}
 	if next != publishFrontend {
-		c.operator.Notice(receipt.reviewSummary(id))
+		c.operator.Notice(receipt.reviewSummary(c.target, id))
 		if err := requireApproval(c.operator, "Run R4 through the existing protected Bootstrap workflow?"); err != nil {
 			return err
 		}
@@ -348,7 +352,7 @@ func (c *workflowController) install(ctx context.Context, gh *githubControl, set
 	if err != nil {
 		return err
 	}
-	c.operator.Notice(receipt.reviewSummary(id))
+	c.operator.Notice(receipt.reviewSummary(c.target, id))
 	if err := requireApproval(c.operator, "Run protected R5 owner-setup on the normal HTTPS origin and prepare the encrypted handoff?"); err != nil {
 		return err
 	}
@@ -451,7 +455,7 @@ func (c *workflowController) publishInitialFrontend(ctx context.Context) error {
 		(receipt.frontendReady() && c.state.FrontendRunID > 0 && c.state.FrontendTarget == receipt.Plan.Target.FrontendArtifactSHA) {
 		return nil
 	}
-	c.operator.Notice(receipt.reviewSummary(id))
+	c.operator.Notice(receipt.reviewSummary(c.target, id))
 	if err := requireApproval(c.operator, "Publish the certified Full Frontend on the normal Worker for initial enrollment?"); err != nil {
 		return err
 	}
@@ -495,7 +499,7 @@ func requireFresh(receipt lifecycleReceipt) error {
 }
 
 func (c *workflowController) deliver(ctx context.Context, gh *githubControl, settings productionContract, receipt lifecycleReceipt, handoff *ownerHandoff) error {
-	if !receipt.setupForDelivery() || !fullImage.MatchString(receipt.Evidence.Candidate.BackendImage) {
+	if !receipt.setupForDelivery() || !c.target.matchesFullImage(receipt.Evidence.Candidate.BackendImage) {
 		return refused("The setup API, Frontend and grant do not have verified live evidence")
 	}
 	current, err := gh.Observe(ctx)
@@ -520,7 +524,10 @@ func (c *workflowController) deliver(ctx context.Context, gh *githubControl, set
 	}
 	handoff.BackendImage = receipt.Evidence.Candidate.BackendImage
 	handoff.GrantBindingSHA = receipt.Evidence.Host.Database.OwnerSetupCheckpoint.GrantBindingSHA
-	if err := handoff.Deliver(ctx, c.operator, settings.PublicOrigin, settings.ServiceUID); err != nil {
+	if err := handoff.Deliver(ctx, c.operator, c.target, settings.PublicOrigin, settings.ServiceUID); err != nil {
+		if errors.Is(err, errHandoffUnavailable) {
+			c.operator.Notice("Owner recovery instructions: " + c.target.URL() + "/blob/main/deploy/ansible/AUTH-RUNTIME.md#first-owner-through-the-browser")
+		}
 		return err
 	}
 	c.operator.Notice("SETUP_PENDING. The Owner can enroll on " + settings.PublicOrigin + "/console/setup. ACTIVE: false. ACCEPTED: false.")

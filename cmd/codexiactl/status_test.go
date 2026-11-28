@@ -36,7 +36,7 @@ func TestStatusDoesNotUseSuccessBeforeNewerFailureOrDeployment(t *testing.T) {
 		{"newer-mutation", []githubRunSummary{newerMutation, older}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			report := statusReport{MainSHA: githubTestSHA, PublicOrigin: origin, Phase: "UNKNOWN", Active: "unknown", Accepted: "unknown"}
+			report := statusReport{target: githubTestTarget, MainSHA: githubTestSHA, PublicOrigin: origin, Phase: "UNKNOWN", Active: "unknown", Accepted: "unknown"}
 			reader := &statusFixtureWorkflow{receipt: receipt}
 			observeExistingReceipt(context.Background(), reader, host, tc.runs, now, &report)
 			if tc.wantEvidence {
@@ -56,7 +56,7 @@ func TestStatusDoesNotUseSuccessBeforeNewerFailureOrDeployment(t *testing.T) {
 }
 
 func statusFixtureReceipt(host, origin string, observed time.Time) lifecycleReceipt {
-	r := lifecycleReceipt{SourceSHA: githubTestSHA, RunID: 41, Attempt: 1, Management: "bootstrap", PlanSHA: strings.Repeat("c", 64)}
+	r := lifecycleReceipt{Repository: githubTestTarget.FullName(), RepositoryID: githubTestTarget.RepoID, OwnerID: githubTestTarget.OwnerID, SourceSHA: githubTestSHA, RunID: 41, Attempt: 1, Management: "bootstrap", PlanSHA: strings.Repeat("c", 64)}
 	r.Request.Intent, r.Plan.Intent = "install", "install"
 	r.Request.BackendPublisherRunID, r.Request.Frontend.RunID, r.Request.Frontend.ArtifactID, r.Request.Frontend.VerifyRunID = 5, 6, 7, 8
 	r.Request.Frontend.ArtifactDigest = strings.Repeat("d", 64)
@@ -67,6 +67,7 @@ func statusFixtureReceipt(host, origin string, observed time.Time) lifecycleRece
 	r.Plan.Observation.State = lifecycleState{M: "ready", H: "ready", D: "compatible", A: "pending", B: "absent", F: "absent", T: "none"}
 	r.Plan.Observation.Binding.HostID = host
 	r.Evidence.Edge.Origin = origin
+	r.Evidence.Candidate.BackendImage = githubTestTarget.imageRepository() + "@sha256:" + strings.Repeat("b", 64)
 	return r
 }
 

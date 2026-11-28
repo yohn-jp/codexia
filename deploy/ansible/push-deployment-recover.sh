@@ -46,8 +46,15 @@ flock --exclusive --nonblock 9 || {
 if ! recovery="$(node - "$intent" "$state_dir/rollback-release.json" "$state_dir/rollback-api.container" "$release_state" "$active_unit" <<'NODE'
 const fs = require('node:fs');
 const { createHash } = require('node:crypto');
+const { CODEXIA_TARGET_REPOSITORY: repository, CODEXIA_TARGET_REPOSITORY_ID: repositoryId,
+  CODEXIA_TARGET_OWNER_ID: ownerId } = process.env;
+const owner = /^([A-Za-z0-9-]+)\/codexia$/.exec(repository ?? '')?.[1];
+if (!owner || !/^[1-9][0-9]*$/.test(repositoryId ?? '') || !/^[1-9][0-9]*$/.test(ownerId ?? '')) process.exit(2);
+const imageRepository = 'ghcr.io/' + owner.toLowerCase() + '/codexia-backend';
+const matchesTarget = record => record.repository === repository &&
+  record.repositoryId === Number(repositoryId) && record.ownerId === Number(ownerId);
 const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-if (value.format !== 'codexia-deploy-transaction/v1' || !['pending', 'committed'].includes(value.phase) ||
+if (!matchesTarget(value) || value.format !== 'codexia-deploy-transaction/v1' || !['pending', 'committed'].includes(value.phase) ||
     typeof value.hadUnit !== 'boolean' || typeof value.tunnelWasActive !== 'boolean' ||
     typeof value.apiLinkCreated !== 'boolean' || typeof value.tunnelLinkCreated !== 'boolean' ||
     typeof value.releasePresent !== 'boolean' ||
@@ -69,7 +76,7 @@ function reviewedReleaseImage(unitPath, releasePath) {
   const [image] = images;
   const [digest] = digests;
   const [file] = files;
-  if (images.length !== 1 || !/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/.test(image) ||
+  if (images.length !== 1 || !image.startsWith(imageRepository + '@') || !/^sha256:[a-f0-9]{64}$/.test(image.slice(imageRepository.length + 1)) ||
       modes.length !== 1 || modes[0] !== 'better-auth' ||
       digests.length !== 1 || !/^[a-f0-9]{64}$/.test(digest) || files.length !== 1 ||
       !file.startsWith('/') || !file.endsWith('/.config/codexia-auth/runtime-' + digest + '.env')) process.exit(2);
@@ -79,6 +86,8 @@ function reviewedReleaseImage(unitPath, releasePath) {
   const releaseInfo = fs.lstatSync(releasePath, { throwIfNoEntry: false });
   if (!releaseInfo?.isFile()) process.exit(2);
   const release = JSON.parse(fs.readFileSync(releasePath, 'utf8'));
+  const hasRepositoryBinding = ['repository', 'repositoryId', 'ownerId'].some(key => Object.hasOwn(release, key));
+  if ((hasRepositoryBinding || value.phase === 'committed') && !matchesTarget(release)) process.exit(2);
   if (release.authMode !== 'better-auth' || release.authSettingsSha256 !== digest || release.image !== image) process.exit(2);
   if (value.phase === 'committed' &&
       (release.format !== 'codexia-push-deployment/v1' ||

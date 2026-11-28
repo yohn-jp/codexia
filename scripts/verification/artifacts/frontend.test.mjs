@@ -81,8 +81,8 @@ test('frontend promotion selects only the newest same-repository workflow run an
 });
 
 test('frontend selector preselects exact pending main proof, but pending proof cannot satisfy deployment',()=>{
-  const current={id:51,run_number:9,path:'.github/workflows/verify.yml',event:'push',head_branch:'main',head_sha:sourceSha,status:'completed',conclusion:'success',repository:{id:42,full_name:'yohn-jp/codexia'},head_repository:{id:42}};
-  const expected={sourceSha,repository:'yohn-jp/codexia',repositoryId:42};
+  const current={id:51,run_number:9,path:'.github/workflows/verify.yml',event:'push',head_branch:'main',head_sha:sourceSha,status:'completed',conclusion:'success',repository:{id:42,full_name:'yohn-jp/codexia',owner:{id:10}},head_repository:{id:42,full_name:'yohn-jp/codexia',owner:{id:10}}};
+  const expected={sourceSha,repository:'yohn-jp/codexia',repositoryId:42,ownerId:10};
   assert.equal(selectExactMainVerifyRun([current],expected),current);
   const pending={...current,status:'in_progress',conclusion:null};
   assert.equal(selectExactMainVerifyRun([pending],expected),pending);

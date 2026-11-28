@@ -6,6 +6,7 @@ import { isIP } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { actionsRepository, assertReleaseRepositoryBinding } from '../../github/repository.mjs';
 import { promisify } from 'node:util';
 import { assertFrontendIdentity, readFrontendReleaseConfiguration } from '../frontend/verify-compatibility.mjs';
 import { readRegularFile } from '../../shared/read-regular-file.mjs';
@@ -34,6 +35,27 @@ function parseOrigin(origin) {
     /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])$/u.test(parsed.hostname) && !isIP(parsed.hostname),
   'Deployment requires a valid HTTPS application origin');
   return parsed;
+}
+
+export function protectedCloudflareTarget(env = process.env) {
+  const target = JSON.parse(env.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET || 'null');
+  const keys = ['repository', 'repositoryId', 'ownerId', 'origin',
+    'accountId', 'zoneId', 'tunnelId', 'authorPolicyId', 'ciPolicyId',
+    'tunnelTeamName', 'publicProtocolEnabled'];
+  assert.ok(target && keys.every(key => Object.hasOwn(target, key)) &&
+    Object.keys(target).length === keys.length, 'Invalid protected Cloudflare target');
+  assertReleaseRepositoryBinding(target, actionsRepository(env));
+  assert.equal(target.origin, env.CODEXIA_PUBLIC_ORIGIN, 'Protected Cloudflare origin differs from the certified source');
+  return target;
+}
+
+export function deploymentEdgeFromEnvironment(env = process.env, fetchImpl = fetch) {
+  return createDeploymentEdge({
+    ...protectedCloudflareTarget(env),
+    readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN,
+    accessEnv: env,
+    fetchImpl,
+  });
 }
 
 function candidateTag(artifactDigest) {
@@ -417,8 +439,8 @@ export function createDeploymentEdge({
       access: relevantPolicies.sort((a, b) => a.path.localeCompare(b.path)), tunnel: tunnel.config,
     };
     const ingressDigest = `sha256:${createHash('sha256').update(JSON.stringify(canonical(topology))).digest('hex')}`;
-    return { observedAt: new Date().toISOString(), origin: target.origin, deployment, ingressDigest,
-      ...(lifecycle ? { scriptPresent, workerId, workerNeverDeployed: normalWorker?.deployed_on === null,
+    return { observedAt: new Date().toISOString(), origin: target.origin, deployment, ingressDigest, workerId,
+      ...(lifecycle ? { scriptPresent, workerNeverDeployed: normalWorker?.deployed_on === null,
         routesReady: scriptPresent && routePlan.length > 0,
         publicProtocolEnabled } : {}) };
   }
@@ -478,4 +500,14 @@ export function createDeploymentEdge({
 
   return { observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, assertWorkerArtifact, deployForOwnerEnrollment,
     readInitialWorkerControls };
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  try {
+    assert.equal(process.argv[2], 'observe-ingress');
+    await deploymentEdgeFromEnvironment().observeIngress();
+  } catch (error) {
+    console.error('Protected Cloudflare ingress validation failed:', error.message);
+    process.exitCode = 1;
+  }
 }

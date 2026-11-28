@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { actionsRepository, assertArtifactRunRepository, matchesRunRepository, releaseRepositoryBinding } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -12,7 +13,6 @@ import { readComponentVersion } from '../../release/components/version.mjs';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 import { paginateActionsInventory } from '../../github/paginate-actions.mjs';
 
-const REPOSITORY = 'yohn-jp/codexia';
 const PROFILES = ['core', 'full'];
 // Current Core/Full archives are approximately 117/250 MB. Bound the input
 // and extraction separately; no unverified archive reaches docker load.
@@ -82,7 +82,7 @@ export function assertBackendProducerAttempt(selected, jobs, expected) {
     'Backend artifact does not belong to its declared producer attempt');
 }
 
-export function buildBackendBuildReceipt({sourceSha,workflowRunId,workflowRunNumber,sourceTree,artifacts,event='push'}){
+export function buildBackendBuildReceipt({sourceSha,workflowRunId,workflowRunNumber,sourceTree,artifacts,event='push'},context){
   assert.ok(['push','workflow_run'].includes(event),'Invalid main backend artifact producer event');
   assert.match(sourceSha??'',/^[a-f0-9]{40}$/u);
   assert.match(sourceTree??'',/^[a-f0-9]{40}$/u);
@@ -90,7 +90,7 @@ export function buildBackendBuildReceipt({sourceSha,workflowRunId,workflowRunNum
     assert.ok(Number.isSafeInteger(value)&&value>0,label+' is invalid');
   assert.ok(Array.isArray(artifacts)&&artifacts.length===2,'Expected Core and Full backend artifacts');
   const receipt={format:'codexia-backend-build/v1',event,sourceSha,version:readComponentVersion('backend',String(workflowRunNumber)),
-    workflowRunId,workflowRunNumber,sourceTree,artifacts:{}};
+    workflowRunId,workflowRunNumber,sourceTree,...releaseRepositoryBinding(context),artifacts:{}};
   for(const artifact of artifacts){
     assert.ok(['core','full'].includes(artifact.profile),'Invalid backend artifact profile');
     assert.ok(!receipt.artifacts[artifact.profile],'Duplicate backend artifact profile');
@@ -113,7 +113,7 @@ async function sha256File(filename){
 }
 
 export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={}) {
-  assert.equal(env.GITHUB_REPOSITORY, REPOSITORY);
+  const context = actionsRepository(env);
   assert.ok(['push','workflow_run'].includes(env.GITHUB_EVENT_NAME),'Backend publication must use verified main source');
   assert.equal(env.GITHUB_REF, 'refs/heads/main');
   const expected = {runId:positiveInteger(env.GITHUB_RUN_ID,'Backend workflow run ID'),
@@ -123,12 +123,12 @@ export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={
   assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),expected.sourceSha,'Backend publish checkout source mismatch');
   const token = env.GH_TOKEN;
   assert.ok(typeof token === 'string' && token.length > 0, 'GitHub Actions read token required');
-  const github = createGitHubOctokit({ token, fetchImpl });
+  const github = createGitHubOctokit({ ...context, token, fetchImpl });
   const destination = env.CODEXIA_BACKEND_ARTIFACT_DIR;
   assert.ok(typeof destination === 'string' && path.isAbsolute(destination), 'Backend artifact destination must be absolute');
   const manifestPath=env.CODEXIA_BACKEND_ARTIFACT_MANIFEST;
   assert.ok(typeof manifestPath==='string'&&path.isAbsolute(manifestPath),'Backend artifact manifest path must be absolute');
-  const [owner, repo] = REPOSITORY.split('/');
+  const { owner, repo, repository } = context;
   const [run,artifacts,jobs] = await Promise.all([
     github.rest.actions.getWorkflowRun({ owner, repo, run_id: expected.runId }).then(response => response.data),
     paginateActionsInventory(github, github.rest.actions.listWorkflowRunArtifacts,
@@ -136,6 +136,8 @@ export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={
     paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRun,
       { owner, repo, run_id: expected.runId, filter: 'latest' }, 'jobs'),
   ]);
+  assert.ok(matchesRunRepository(run, context), 'Backend build repository mismatch');
+  assert.equal(run.path, '.github/workflows/backend-release.yml', 'Backend build workflow mismatch');
   const selected = selectBackendArtifacts(run,artifacts,jobs,expected);
   const attempts = new Map(await Promise.all([...new Set(selected.map(item=>item.producerAttempt))].map(async attempt=>[
     attempt,await paginateActionsInventory(github, github.rest.actions.listJobsForWorkflowRunAttempt,
@@ -145,7 +147,8 @@ export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={
   // peak memory bounded by a single compressed image archive.
   for (const item of selected) assertBackendProducerAttempt(item,attempts.get(item.producerAttempt),expected);
   for (const item of selected) {
-    const archive = await downloadArtifact(item.artifact,REPOSITORY,token,fetchImpl,{maxArchive:MAX_IMAGE_ARCHIVE,downloadTimeoutMs:180_000});
+    assertArtifactRunRepository(item.artifact, run);
+    const archive = await downloadArtifact(item.artifact,repository,token,fetchImpl,{maxArchive:MAX_IMAGE_ARCHIVE,downloadTimeoutMs:180_000});
     const files = await extractArtifactFiles(archive,path.join(destination,item.profile),{maxArchive:MAX_IMAGE_ARCHIVE,maxUncompressed:MAX_IMAGE_BYTES});
     assert.deepEqual(files,[IMAGE_FILE],'Unexpected backend artifact contents');
     item.archiveSha256=await sha256File(path.join(destination,item.profile,IMAGE_FILE));
@@ -155,7 +158,7 @@ export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={
     workflowRunNumber:positiveInteger(env.GITHUB_RUN_NUMBER,'Backend workflow run number'),
     sourceTree:execFileSync('git',['rev-parse','HEAD^{tree}'],{encoding:'utf8'}).trim(),
     event:env.GITHUB_EVENT_NAME,artifacts:selected.map(item=>({profile:item.profile,id:item.artifact.id,digest:item.artifact.digest,
-      producerAttempt:item.producerAttempt,archiveSha256:item.archiveSha256}))});
+      producerAttempt:item.producerAttempt,archiveSha256:item.archiveSha256}))},context);
   await mkdir(path.dirname(manifestPath),{recursive:true});
   await writeFile(manifestPath,JSON.stringify(manifest,null,2)+'\n',{mode:0o600});
   return selected;

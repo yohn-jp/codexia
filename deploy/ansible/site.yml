@@ -5,11 +5,16 @@
   gather_facts: false
   serial: 1
   any_errors_fatal: true
+  vars_files: [repository-vars.yml]
   vars:
     repo_root: "{{ playbook_dir }}/../.."
     home: "{{ codexia_service_home | default(ansible_facts.user_dir | default('')) }}"
     quadlet_dir: "{{ home }}/.config/containers/systemd"
     service_runtime_env:
+      CODEXIA_IMAGE_REPOSITORY: "{{ codexia_image_repository }}"
+      CODEXIA_TARGET_REPOSITORY: "{{ codexia_target_repository }}"
+      CODEXIA_TARGET_REPOSITORY_ID: "{{ codexia_target_repository_id }}"
+      CODEXIA_TARGET_OWNER_ID: "{{ codexia_target_owner_id }}"
       HOME: "{{ home }}"
       XDG_CONFIG_HOME: "{{ home }}/.config"
       XDG_DATA_HOME: "{{ home }}/.local/share"
@@ -168,7 +173,8 @@
         that:
           - ansible_facts.user_id == 'codexia'
           - codexia_service_user == 'codexia'
-          - codexia_image is match('^ghcr\\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+          - codexia_image_repository | length > 0
+          - codexia_image is match(codexia_image_pattern)
           - codexia_source_sha is match('^[a-f0-9]{40}$')
           - codexia_profile == 'full'
           - codexia_verified_main_sha is match('^[a-f0-9]{40}$')
@@ -192,7 +198,9 @@
           - inventory_hostname == 'localhost'
           - ansible_connection == 'local'
           - lookup('ansible.builtin.env', 'GITHUB_ACTIONS') == 'true'
-          - lookup('ansible.builtin.env', 'GITHUB_REPOSITORY') == 'yohn-jp/codexia'
+          - codexia_actions_repository is match('^[A-Za-z0-9-]+/codexia$')
+          - codexia_target_repository_id is match('^[1-9][0-9]*$')
+          - codexia_target_owner_id is match('^[1-9][0-9]*$')
           - lookup('ansible.builtin.env', 'GITHUB_EVENT_NAME') in ['pull_request', 'workflow_dispatch']
           - lookup('ansible.builtin.env', 'GITHUB_RUN_ID') is match('^[1-9][0-9]*$')
           - lookup('ansible.builtin.env', 'GITHUB_SHA') is match('^[a-f0-9]{40}$')

@@ -3,10 +3,12 @@ import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { discoverPublication, discoverRequest } from './discover.mjs';
 
+const context = { repository: 'yohn-jp/codexia', owner: 'yohn-jp', repo: 'codexia', repositoryId: 1450072993, ownerId: 405 };
+
 const source = 'a'.repeat(40);
 const head = 'b'.repeat(40);
 function fixture(component) {
-  const repo = { full_name: 'yohn-jp/codexia' };
+  const repo = { full_name: context.repository, id: context.repositoryId, owner: { id: context.ownerId } };
   const run = { id: 41, run_attempt: 2, head_sha: source, path: '.github/workflows/' + component + '-release.yml',
     event: 'workflow_run', head_branch: 'main', repository: repo, head_repository: repo,
     status: 'completed', conclusion: component === 'backend' ? 'success' : 'failure' };
@@ -14,7 +16,7 @@ function fixture(component) {
     name: component === 'backend' ? 'codexia-backend-deployment-certificate-' + source + '-run-41-attempt-2'
       : 'codexia-frontend-' + source + '-attempt-1' };
   const readers = {
-    main: head, history: [head, source], currentSource: () => true,
+    main: head, context, history: [head, source], currentSource: () => true,
     runs: async (_, sha) => sha === head ? [] : [run],
     artifacts: async () => [archive], jobs: async () => [{ name: 'Build and verify UI assets', run_attempt: 1, conclusion: 'success' }],
     verify: async () => 43,
@@ -55,7 +57,7 @@ test('rejects superseded source, ambiguous jobs, expired artifacts and non-main 
 
 test('the production REST reader recovers a first-install pair even with an unavailable ordinary frontend', async () => {
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  const repo = { full_name: 'yohn-jp/codexia', id: 1450072993 };
+  const repo = { full_name: context.repository, id: context.repositoryId, owner: { id: context.ownerId } };
   const calls = [];
   const fetchImpl = async (input, options) => {
     assert.equal(options.method, 'GET');
@@ -88,14 +90,16 @@ test('the production REST reader recovers a first-install pair even with an unav
     return Response.json({ total_count: 1, ...data });
   };
   const request = await discoverRequest({
-    GH_TOKEN: 'fixture', CODEXIA_REPOSITORY_ID: String(repo.id), GITHUB_SHA: sha, CODEXIA_PREFLIGHT_INTENT: 'install',
+    GH_TOKEN: 'fixture', GITHUB_REPOSITORY: context.repository, GITHUB_REPOSITORY_ID: String(context.repositoryId),
+    GITHUB_REPOSITORY_OWNER_ID: String(context.ownerId), GITHUB_SHA: sha, CODEXIA_PREFLIGHT_INTENT: 'install',
   }, fetchImpl);
   assert.equal(calls.length, 6);
   assert.deepEqual(request, { backendPublisherRunId: 10, frontend: {
     runId: 11, verifyRunId: 12, artifactId: 15, artifactDigest: 'e'.repeat(64),
   }, intent: 'install', window: null });
   const recoveryEnv = {
-    GH_TOKEN: 'fixture', CODEXIA_REPOSITORY_ID: String(repo.id), GITHUB_SHA: sha, CODEXIA_PREFLIGHT_INTENT: 'restore',
+    GH_TOKEN: 'fixture', GITHUB_REPOSITORY: context.repository, GITHUB_REPOSITORY_ID: String(context.repositoryId),
+    GITHUB_REPOSITORY_OWNER_ID: String(context.ownerId), GITHUB_SHA: sha, CODEXIA_PREFLIGHT_INTENT: 'restore',
     CODEXIA_WINDOW_START: '2026-11-24T00:00:00.000Z', CODEXIA_WINDOW_END: '2026-11-24T01:00:00.000Z',
   };
   await assert.rejects(discoverRequest(recoveryEnv, fetchImpl), /existing approved window ID/u);

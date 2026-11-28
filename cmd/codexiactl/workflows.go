@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	targetRepositoryID    = 1450072993
 	bootstrapEnvironment  = "codexia-bootstrap"
 	productionEnvironment = "codexia-production"
 	bootstrapFile         = "production-bootstrap.yml"
@@ -55,6 +54,7 @@ type checkpointWriter interface {
 }
 
 type workflowController struct {
+	target              githubTarget
 	github              workflowGitHub
 	operator            operator
 	store               checkpointWriter
@@ -63,8 +63,8 @@ type workflowController struct {
 	sha, hostID, origin string
 }
 
-func runLink(id int64) string {
-	return "https://github.com/yohn-jp/codexia/actions/runs/" + strconv.FormatInt(id, 10)
+func (t githubTarget) runLink(id int64) string {
+	return t.URL() + "/actions/runs/" + strconv.FormatInt(id, 10)
 }
 
 func (c *workflowController) currentMain(ctx context.Context) error {
@@ -106,9 +106,9 @@ func (c *workflowController) dispatch(ctx context.Context, operation string, inp
 	}
 	c.state.RunID = id
 	if err := c.store.Save(c.state); err != nil {
-		return 0, fmt.Errorf("could not checkpoint workflow %s", runLink(id))
+		return 0, fmt.Errorf("could not checkpoint workflow %s", c.target.runLink(id))
 	}
-	c.operator.Notice("Follow " + runLink(id) + " and use GitHub for independent Environment approval.")
+	c.operator.Notice("Follow " + c.target.runLink(id) + " and use GitHub for independent Environment approval.")
 	return id, nil
 }
 
@@ -156,30 +156,30 @@ func (c *workflowController) wait(ctx context.Context, operation, sha string, id
 					continue
 				}
 			}
-			return false, fmt.Errorf("cannot confirm workflow %s: %w", runLink(id), err)
+			return false, fmt.Errorf("cannot confirm workflow %s: %w", c.target.runLink(id), err)
 		}
 		if run.Attempt != 1 {
-			return run.Status == "completed", refused("Workflow was rerun. Review " + runLink(id) + " and generate new lifecycle evidence")
+			return run.Status == "completed", refused("Workflow was rerun. Review " + c.target.runLink(id) + " and generate new lifecycle evidence")
 		}
 		if run.Status == "completed" {
 			if run.Conclusion != "success" {
-				return true, fmt.Errorf("%s: %w", runLink(id), verifyJobs(run, spec, nil))
+				return true, fmt.Errorf("%s: %w", c.target.runLink(id), verifyJobs(run, spec, nil))
 			}
 			jobs, err := c.github.Jobs(ctx, id, run.Attempt)
 			if err != nil {
-				return false, fmt.Errorf("could not verify jobs in %s: %w", runLink(id), err)
+				return false, fmt.Errorf("could not verify jobs in %s: %w", c.target.runLink(id), err)
 			}
 			if err := verifyJobs(run, spec, jobs); err != nil {
-				return true, fmt.Errorf("%s: %w", runLink(id), err)
+				return true, fmt.Errorf("%s: %w", c.target.runLink(id), err)
 			}
 			return true, nil
 		}
 		if run.Status != lastStatus {
-			c.operator.Notice(fmt.Sprintf("Workflow %s is %s.", runLink(id), stateValue(run.Status)))
+			c.operator.Notice(fmt.Sprintf("Workflow %s is %s.", c.target.runLink(id), stateValue(run.Status)))
 			lastStatus = run.Status
 		}
 		if err := sleepContext(ctx, waitFor); err != nil {
-			return false, needsAction("Workflow " + runLink(id) + " is unresolved. Run init again to resume observation")
+			return false, needsAction("Workflow " + c.target.runLink(id) + " is unresolved. Run init again to resume observation")
 		}
 		waitFor = min(waitFor+2*time.Second, 15*time.Second)
 	}
@@ -219,13 +219,13 @@ func (c *workflowController) preflight(ctx context.Context, management string) (
 	if id == 0 {
 		return lifecycleReceipt{}, 0, err
 	}
-	receipt, evidenceErr := readReceipt(ctx, c.github, id)
+	receipt, evidenceErr := readReceipt(ctx, c.github, c.target, id)
 	if err != nil {
 		if evidenceErr == nil && len(receipt.Plan.Blockers) > 0 {
-			c.operator.Notice("Lifecycle blockers in " + runLink(id) + ": " + safeBlockers(receipt.Plan.Blockers))
+			c.operator.Notice("Lifecycle blockers in " + c.target.runLink(id) + ": " + safeBlockers(receipt.Plan.Blockers))
 		}
 		if evidenceErr == nil && (receipt.Plan.Observation.State.A == "ready" || receipt.Plan.Observation.State.A == "unprepared") &&
-			receipt.validate(c.sha, id, management, c.hostID, c.origin, time.Now()) == nil {
+			receipt.validate(c.target, c.sha, id, management, c.hostID, c.origin, time.Now()) == nil {
 			return receipt, id, errExistingOwner
 		}
 		return lifecycleReceipt{}, id, err
@@ -236,18 +236,18 @@ func (c *workflowController) preflight(ctx context.Context, management string) (
 	if err := c.currentMain(ctx); err != nil {
 		return lifecycleReceipt{}, id, err
 	}
-	return receipt, id, receipt.validate(c.sha, id, management, c.hostID, c.origin, time.Now())
+	return receipt, id, receipt.validate(c.target, c.sha, id, management, c.hostID, c.origin, time.Now())
 }
 
-func readReceipt(ctx context.Context, github workflowGitHub, id int64) (lifecycleReceipt, error) {
+func readReceipt(ctx context.Context, github workflowGitHub, target githubTarget, id int64) (lifecycleReceipt, error) {
 	var receipt lifecycleReceipt
 	name := fmt.Sprintf("lifecycle-preflight-%d-1", id)
 	raw, err := github.Artifact(ctx, id, name, "codexia-lifecycle-preflight.json")
 	if err != nil {
-		return receipt, fmt.Errorf("read immutable Preflight receipt from %s: %w", runLink(id), err)
+		return receipt, fmt.Errorf("read immutable Preflight receipt from %s: %w", target.runLink(id), err)
 	}
 	if json.Unmarshal(raw, &receipt) != nil {
-		return receipt, refused("Invalid protected Preflight receipt in " + runLink(id))
+		return receipt, refused("Invalid protected Preflight receipt in " + target.runLink(id))
 	}
 	return receipt, nil
 }

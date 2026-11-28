@@ -6,6 +6,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
+const repositoryBinding = { repository: 'yohn-jp/codexia', repositoryId: 401, ownerId: 502 };
+
 const recoveryScript = new URL('../../../deploy/ansible/push-deployment-recover.sh', import.meta.url);
 
 function fixture({ phase = 'pending', health = 'healthy' } = {}) {
@@ -33,7 +35,7 @@ function fixture({ phase = 'pending', health = 'healthy' } = {}) {
       `EnvironmentFile=${settingsFile}`,
       '',
     ].join('\n');
-    return { unit, settingsFile, record: { format: 'codexia-push-deployment/v1', image, authMode: 'better-auth', authSettingsSha256 } };
+    return { unit, settingsFile, record: { format: 'codexia-push-deployment/v1', ...repositoryBinding, image, authMode: 'better-auth', authSettingsSha256 } };
   };
   const previous = releaseFixture(previousImage, 'https://codexia.example.test');
   const candidate = releaseFixture(candidateImage, 'https://candidate.example.test');
@@ -44,6 +46,7 @@ function fixture({ phase = 'pending', health = 'healthy' } = {}) {
   writeFileSync(path.join(stateDir, 'host.lock'), '');
   writeFileSync(path.join(stateDir, 'deploy-transaction.json'), JSON.stringify({
     format: 'codexia-deploy-transaction/v1',
+    ...repositoryBinding,
     phase,
     hadUnit: true,
     tunnelWasActive: true,
@@ -100,6 +103,9 @@ esac
     candidate,
     env: {
       ...process.env,
+      CODEXIA_TARGET_REPOSITORY: repositoryBinding.repository,
+      CODEXIA_TARGET_REPOSITORY_ID: String(repositoryBinding.repositoryId),
+      CODEXIA_TARGET_OWNER_ID: String(repositoryBinding.ownerId),
       CODEXIA_PUSH_STATE_DIR: stateDir,
       CODEXIA_PUSH_QUADLET_DIR: quadletDir,
       CODEXIA_TEST_LOG: logFile,
@@ -416,5 +422,20 @@ test('committed recovery retains its evidence when the live release cannot be re
         rmSync(target.root, { recursive: true, force: true });
       }
     });
+  }
+});
+
+test('CLI-10 cannot recover transaction evidence from another repository ID', () => {
+  const target = fixture();
+  try {
+    const result = spawnSync('bash', [recoveryScript.pathname], {
+      encoding: 'utf8', env: { ...target.env, CODEXIA_TARGET_REPOSITORY_ID: '818' },
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Invalid deployment transaction/u);
+    assert.equal(existsSync(target.logFile), false);
+    assert.equal(existsSync(path.join(target.stateDir, 'deploy-transaction.json')), true);
+  } finally {
+    rmSync(target.root, { recursive: true, force: true });
   }
 });

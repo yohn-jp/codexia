@@ -42,6 +42,10 @@ var (
 )
 
 type cloudflareTarget struct {
+	Repository            string `json:"repository"`
+	RepositoryID          int64  `json:"repositoryId"`
+	OwnerID               int64  `json:"ownerId"`
+	Origin                string `json:"origin"`
 	AccountID             string `json:"accountId"`
 	ZoneID                string `json:"zoneId"`
 	TunnelID              string `json:"tunnelId"`
@@ -68,14 +72,15 @@ type cloudflareObservation struct {
 	ConnectorIDs []string
 	AccountID    string
 
-	target       cloudflareTarget
-	host         string
-	operator     operator
-	api          cloudflareAPI
-	serviceToken zero_trust.ServiceToken
-	provisioning [32]byte
-	readToken    [32]byte
-	workerToken  [32]byte
+	target         cloudflareTarget
+	routesContract []byte
+	host           string
+	operator       operator
+	api            cloudflareAPI
+	serviceToken   zero_trust.ServiceToken
+	provisioning   [32]byte
+	readToken      [32]byte
+	workerToken    [32]byte
 }
 
 func newCloudflareAPI(secret []byte, baseURL string) cloudflareAPI {
@@ -202,8 +207,8 @@ func (api cloudflareAPI) findZone(ctx context.Context, host string) (zones.Zone,
 	return candidates[0], nil
 }
 
-func observeCloudflare(ctx context.Context, o operator, publicOrigin string) (*cloudflareObservation, error) {
-	origin, err := url.Parse(publicOrigin)
+func observeCloudflare(ctx context.Context, o operator, repo githubTarget, settings productionContract) (*cloudflareObservation, error) {
+	origin, err := url.Parse(settings.PublicOrigin)
 	if err != nil || origin.Scheme != "https" || origin.Hostname() != origin.Host || origin.User != nil ||
 		origin.Path != "" || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" ||
 		!strings.Contains(origin.Host, ".") || !cloudflareHost.MatchString(origin.Host) {
@@ -225,7 +230,7 @@ func observeCloudflare(ctx context.Context, o operator, publicOrigin string) (*c
 	if err != nil {
 		return nil, err
 	}
-	observed, err := api.observeEdge(ctx, origin.Host, zone)
+	observed, err := api.observeEdge(ctx, origin.Host, zone, repo, settings.edge)
 	if err != nil {
 		return nil, err
 	}
@@ -235,8 +240,14 @@ func observeCloudflare(ctx context.Context, o operator, publicOrigin string) (*c
 	return observed, nil
 }
 
-func (api cloudflareAPI) observeEdge(ctx context.Context, host string, zone zones.Zone) (*cloudflareObservation, error) {
-	target := cloudflareTarget{AccountID: zone.Account.ID, ZoneID: zone.ID}
+func (api cloudflareAPI) observeEdge(ctx context.Context, host string, zone zones.Zone, repo githubTarget, contract cloudflareContract) (*cloudflareObservation, error) {
+	if !repo.valid() {
+		return nil, refused("Cloudflare resources must belong to a verified deployment repository and origin")
+	}
+	target := cloudflareTarget{
+		Repository: repo.FullName(), RepositoryID: repo.RepoID, OwnerID: repo.OwnerID, Origin: "https://" + host,
+		AccountID: zone.Account.ID, ZoneID: zone.ID,
+	}
 	account := cloudflare.F(target.AccountID)
 	zoneID := cloudflare.F(target.ZoneID)
 	records, err := cloudflareList("DNS records (DNS Read)", func(page int) (*pagination.V4PagePaginationArray[dns.RecordResponse], error) {
@@ -278,10 +289,10 @@ func (api cloudflareAPI) observeEdge(ctx context.Context, host string, zone zone
 		connectorIDs = append(connectorIDs, connector.ID)
 	}
 	slices.Sort(connectorIDs)
-	if err := api.checkWorker(ctx, host, target); err != nil {
+	if err := api.checkWorker(ctx, host, target, contract.routes); err != nil {
 		return nil, err
 	}
-	serviceToken, err := api.checkAccessAndTunnel(ctx, host, &target)
+	serviceToken, err := api.checkAccessAndTunnel(ctx, host, &target, contract)
 	if err != nil {
 		return nil, err
 	}
@@ -290,10 +301,10 @@ func (api cloudflareAPI) observeEdge(ctx context.Context, host string, zone zone
 		return nil, err
 	}
 	return &cloudflareObservation{Target: string(encoded), Connectors: len(connectorIDs) > 0, ConnectorIDs: connectorIDs,
-		AccountID: target.AccountID, target: target, host: host, api: api, serviceToken: serviceToken}, nil
+		AccountID: target.AccountID, target: target, routesContract: contract.routes, host: host, api: api, serviceToken: serviceToken}, nil
 }
 
-func (api cloudflareAPI) checkWorker(ctx context.Context, host string, target cloudflareTarget) error {
+func (api cloudflareAPI) checkWorker(ctx context.Context, host string, target cloudflareTarget, routesContract []byte) error {
 	account := cloudflare.F(target.AccountID)
 	resources, err := cloudflareList("Worker inventory (Workers Scripts Read)", func(page int) (*pagination.V4PagePaginationArray[workers.Worker], error) {
 		return api.workers.Beta.Workers.List(ctx, workers.BetaWorkerListParams{AccountID: account,
@@ -325,7 +336,7 @@ func (api cloudflareAPI) checkWorker(ctx context.Context, host string, target cl
 		return errors.New("Cloudflare Worker route inventory was not verified")
 	}
 	var manifest cloudflareRoutes
-	if json.Unmarshal(productionCloudflareRoutes, &manifest) != nil || len(manifest.Routes) == 0 || len(manifest.OriginRoutes) == 0 {
+	if json.Unmarshal(routesContract, &manifest) != nil || len(manifest.Routes) == 0 || len(manifest.OriginRoutes) == 0 {
 		return errors.New("Cloudflare route contract is unavailable in the certified CLI")
 	}
 	return manifest.check(host, routes.Result)
@@ -333,4 +344,22 @@ func (api cloudflareAPI) checkWorker(ctx context.Context, host string, target cl
 
 func cloudflareDrift(reason string) error {
 	return refused("Cloudflare " + reason + ". Reconcile using the existing Terraform workspace or account-owned Access policy, then observe again")
+}
+
+func validateProtectedCloudflareTarget(snapshot githubSnapshot, repo githubTarget, origin string) error {
+	for _, environment := range []string{bootstrapEnvironment, productionEnvironment} {
+		value, exists := selectEnvironment(snapshot, environment).Variables[edgeTarget]
+		if !exists {
+			continue
+		}
+		var stored cloudflareTarget
+		if json.Unmarshal([]byte(value), &stored) != nil || stored.Repository == "" ||
+			stored.RepositoryID == 0 || stored.OwnerID == 0 || stored.Origin == "" {
+			return refused(environment + "/" + edgeTarget + " lacks the required repository and origin binding. Reobserve the edge in doctor and have the repository settings owner review the existing target, then register the verified repository and origin in the same protected Variable at " + repo.URL() + "/settings/environments")
+		}
+		if stored.Repository != repo.FullName() || stored.RepositoryID != repo.RepoID || stored.OwnerID != repo.OwnerID || stored.Origin != origin {
+			return refused(environment + "/" + edgeTarget + " belongs to a different repository or origin. Reconcile the environment with the independently verified Cloudflare account, zone and origin before continuing")
+		}
+	}
+	return nil
 }

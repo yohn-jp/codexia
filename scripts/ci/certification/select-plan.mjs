@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { actionsRepository, assertArtifactRunRepository, matchesRunRepository } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -14,11 +15,13 @@ assert.ok(GH_TOKEN, 'Read token is required');
 assert.ok(GITHUB_OUTPUT, 'GitHub output path is required');
 assert.ok(RUNNER_TEMP, 'Runner temporary directory is required');
 
-assert.equal(GITHUB_REPOSITORY, 'yohn-jp/codexia', 'Unexpected repository');
+const context = actionsRepository();
 const github = createGitHubOctokit({ token: GH_TOKEN });
-const [owner, repo] = GITHUB_REPOSITORY.split('/');
+const { owner, repo } = context;
 const run = (await github.rest.actions.getWorkflowRun({ owner, repo, run_id: Number(GITHUB_RUN_ID) })).data;
 assert.equal(String(run.id), GITHUB_RUN_ID, 'Workflow run ID mismatch');
+assert.ok(matchesRunRepository(run, context, { sameHead: run.event !== 'pull_request' }), 'Verification repository mismatch');
+assert.equal(run.path, '.github/workflows/verify.yml', 'Verification workflow path mismatch');
 assert.equal(run.head_sha, CODEXIA_EXPECTED_SHA, 'Workflow run source SHA mismatch');
 const identity = { runId: GITHUB_RUN_ID, sourceSha: CODEXIA_EXPECTED_SHA };
 const [artifacts, jobs] = await Promise.all([
@@ -28,6 +31,8 @@ const [artifacts, jobs] = await Promise.all([
     { owner, repo, run_id: Number(GITHUB_RUN_ID), filter: 'latest' }, 'jobs'),
 ]);
 const planArtifact = selectLatestPlanArtifact(artifacts, jobs, identity);
+assertArtifactRunRepository(planArtifact, run);
+for (const artifact of artifacts.filter(item => item.name.startsWith('ci-evidence-'))) assertArtifactRunRepository(artifact, run);
 const inventoryPath = path.join(RUNNER_TEMP, 'ci-artifact-inventory.json');
 await mkdir(path.dirname(inventoryPath), { recursive: true });
 await writeFile(inventoryPath, `${JSON.stringify({ identity, artifacts, jobs }, null, 2)}\n`, { mode: 0o600 });

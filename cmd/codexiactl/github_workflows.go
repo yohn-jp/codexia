@@ -95,11 +95,10 @@ func (g *githubControl) Dispatch(ctx context.Context, file, sha string, inputs m
 			return 0, err
 		}
 	}
-	current, err := g.Main(ctx)
-	if err != nil {
+	if err := g.requireApprovedTarget(ctx, false); err != nil {
 		return 0, err
 	}
-	if current != sha {
+	if g.approvedSHA != sha {
 		return 0, errGitHubTarget
 	}
 	requestInputs := make(map[string]any, len(inputs))
@@ -107,7 +106,7 @@ func (g *githubControl) Dispatch(ctx context.Context, file, sha string, inputs m
 		requestInputs[key] = value
 	}
 	wantRun := true
-	run, resp, err := g.client.Actions.CreateWorkflowDispatchEventByFileName(ctx, githubOwner, githubRepo, file, github.CreateWorkflowDispatchEventRequest{
+	run, resp, err := g.client.Actions.CreateWorkflowDispatchEventByFileName(ctx, g.target.Owner, deploymentRepositoryName, file, github.CreateWorkflowDispatchEventRequest{
 		Ref: "main", Inputs: requestInputs, ReturnRunDetails: &wantRun,
 	})
 	if err != nil {
@@ -128,7 +127,7 @@ func (g *githubControl) Run(ctx context.Context, file, sha string, id int64) (gi
 	if !githubWorkflowAllowed(file) || !githubSHA.MatchString(sha) || id <= 0 {
 		return githubRun{}, errGitHubTarget
 	}
-	run, resp, err := g.client.Actions.GetWorkflowRunByID(ctx, githubOwner, githubRepo, id)
+	run, resp, err := g.client.Actions.GetWorkflowRunByID(ctx, g.target.Owner, deploymentRepositoryName, id)
 	if err != nil {
 		failure := githubFailure(fmt.Sprintf("read workflow run %d", id), resp, err)
 		if githubStatus(resp) == http.StatusNotFound {
@@ -136,19 +135,19 @@ func (g *githubControl) Run(ctx context.Context, file, sha string, id int64) (gi
 		}
 		return githubRun{}, failure
 	}
-	if !githubRunBelongs(run, file) || run.GetID() != id || run.GetHeadSHA() != sha {
+	if !g.githubRunBelongs(run, file) || run.GetID() != id || run.GetHeadSHA() != sha {
 		return githubRun{}, errGitHubTarget
 	}
 	return githubRun{Status: run.GetStatus(), Conclusion: run.GetConclusion(), Attempt: run.GetRunAttempt()}, nil
 }
 
-func githubRunBelongs(run *github.WorkflowRun, file string) bool {
-	return githubRunMatches(run, file, "workflow_dispatch")
+func (g *githubControl) githubRunBelongs(run *github.WorkflowRun, file string) bool {
+	return g.githubRunMatches(run, file, "workflow_dispatch")
 }
 
-func githubRunMatches(run *github.WorkflowRun, file, event string) bool {
+func (g *githubControl) githubRunMatches(run *github.WorkflowRun, file, event string) bool {
 	return run.GetID() > 0 && run.GetRunAttempt() > 0 && run.GetEvent() == event &&
-		run.GetRepository().GetID() == githubRepoID && run.GetHeadRepository().GetID() == githubRepoID &&
+		g.target.matchesRepository(run.GetRepository()) && g.target.matchesRepository(run.GetHeadRepository()) &&
 		run.GetHeadBranch() == "main" && run.GetPath() == githubWorkflowPath(file) && githubSHA.MatchString(run.GetHeadSHA())
 }
 
@@ -156,18 +155,18 @@ func (g *githubControl) Jobs(ctx context.Context, id int64, attempt int) (map[st
 	if id <= 0 || attempt != 1 {
 		return nil, errors.New("GitHub workflow job evidence must come from the original attempt")
 	}
-	run, resp, err := g.client.Actions.GetWorkflowRunByID(ctx, githubOwner, githubRepo, id)
+	run, resp, err := g.client.Actions.GetWorkflowRunByID(ctx, g.target.Owner, deploymentRepositoryName, id)
 	if err != nil {
 		return nil, githubFailure(fmt.Sprintf("recheck producer for jobs of run %d", id), resp, err)
 	}
 	file := path.Base(run.GetPath())
-	if !githubWorkflowAllowed(file) || !githubRunBelongs(run, file) || run.GetID() != id ||
+	if !githubWorkflowAllowed(file) || !g.githubRunBelongs(run, file) || run.GetID() != id ||
 		run.GetRunAttempt() != attempt || run.GetStatus() != "completed" {
 		return nil, errors.New("GitHub workflow job producer is not its completed original attempt")
 	}
 	jobs := make(map[string]string)
 	for page := 1; page != 0; {
-		list, resp, err := g.client.Actions.ListWorkflowJobsAttempt(ctx, githubOwner, githubRepo, id, int64(attempt), &github.ListOptions{Page: page, PerPage: 100})
+		list, resp, err := g.client.Actions.ListWorkflowJobsAttempt(ctx, g.target.Owner, deploymentRepositoryName, id, int64(attempt), &github.ListOptions{Page: page, PerPage: 100})
 		if err != nil {
 			return nil, githubFailure(fmt.Sprintf("read jobs for workflow run %d attempt %d", id, attempt), resp, err)
 		}
@@ -221,7 +220,7 @@ func (g *githubControl) StatusHistory(ctx context.Context) ([]githubRunSummary, 
 }
 
 func (g *githubControl) recentWorkflowRuns(ctx context.Context, file, event string) ([]githubRunSummary, error) {
-	list, resp, err := g.client.Actions.ListWorkflowRunsByFileName(ctx, githubOwner, githubRepo, file, &github.ListWorkflowRunsOptions{
+	list, resp, err := g.client.Actions.ListWorkflowRunsByFileName(ctx, g.target.Owner, deploymentRepositoryName, file, &github.ListWorkflowRunsOptions{
 		Branch: "main", Event: event, ListOptions: github.ListOptions{PerPage: 30},
 	})
 	if err != nil {
@@ -232,7 +231,7 @@ func (g *githubControl) recentWorkflowRuns(ctx context.Context, file, event stri
 	}
 	result := make([]githubRunSummary, 0, len(list.WorkflowRuns))
 	for _, run := range list.WorkflowRuns {
-		if !githubRunMatches(run, file, event) {
+		if !g.githubRunMatches(run, file, event) {
 			return nil, errors.New("GitHub returned a workflow run for a different target")
 		}
 		result = append(result, githubRunSummary{ID: run.GetID(), File: file, Status: run.GetStatus(),
@@ -246,16 +245,16 @@ func (g *githubControl) Artifact(ctx context.Context, id int64, name, member str
 	if id <= 0 || name != fmt.Sprintf("lifecycle-preflight-%d-1", id) || member != "codexia-lifecycle-preflight.json" {
 		return nil, errors.New("GitHub artifact is outside the lifecycle Preflight receipt contract")
 	}
-	run, resp, err := g.client.Actions.GetWorkflowRunByID(ctx, githubOwner, githubRepo, id)
+	run, resp, err := g.client.Actions.GetWorkflowRunByID(ctx, g.target.Owner, deploymentRepositoryName, id)
 	if err != nil {
 		return nil, githubFailure(fmt.Sprintf("read the producer of lifecycle receipt %d", id), resp, err)
 	}
-	if !githubRunBelongs(run, "production-preflight.yml") || run.GetID() != id || run.GetRunAttempt() != 1 || run.GetStatus() != "completed" {
+	if !g.githubRunBelongs(run, "production-preflight.yml") || run.GetID() != id || run.GetRunAttempt() != 1 || run.GetStatus() != "completed" {
 		return nil, errors.New("GitHub lifecycle receipt producer does not match the completed original Preflight attempt")
 	}
 	var selected *github.Artifact
 	for page := 1; page != 0; {
-		list, resp, err := g.client.Actions.ListWorkflowRunArtifacts(ctx, githubOwner, githubRepo, id, &github.ListOptions{Page: page, PerPage: 100})
+		list, resp, err := g.client.Actions.ListWorkflowRunArtifacts(ctx, g.target.Owner, deploymentRepositoryName, id, &github.ListOptions{Page: page, PerPage: 100})
 		if err != nil {
 			return nil, githubFailure(fmt.Sprintf("list artifacts for workflow run %d", id), resp, err)
 		}
@@ -273,11 +272,11 @@ func (g *githubControl) Artifact(ctx context.Context, id int64, name, member str
 	if selected == nil || selected.GetID() <= 0 || selected.Expired == nil || selected.GetExpired() ||
 		selected.GetSizeInBytes() <= 0 || selected.GetSizeInBytes() > githubArtifactMax ||
 		!githubArtifactDigest.MatchString(selected.GetDigest()) ||
-		producer.GetID() != id || producer.GetRepositoryID() != githubRepoID || producer.GetHeadRepositoryID() != githubRepoID ||
+		producer.GetID() != id || producer.GetRepositoryID() != g.target.RepoID || producer.GetHeadRepositoryID() != g.target.RepoID ||
 		producer.GetHeadSHA() != run.GetHeadSHA() || producer.GetHeadBranch() != "main" {
 		return nil, errors.New("GitHub workflow artifact has missing or mismatched attested metadata")
 	}
-	location, resp, err := g.client.Actions.DownloadArtifact(ctx, githubOwner, githubRepo, selected.GetID(), 0)
+	location, resp, err := g.client.Actions.DownloadArtifact(ctx, g.target.Owner, deploymentRepositoryName, selected.GetID(), 0)
 	if err != nil {
 		return nil, githubFailure("obtain a download for the lifecycle Preflight receipt", resp, err)
 	}

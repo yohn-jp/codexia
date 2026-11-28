@@ -25,7 +25,7 @@ all:
         codexia_database_initialization_approved: false
         # On a fresh database, supply the reviewed immutable Full digest and
         # approve database initialization. Podman fetches that digest when missing.
-        # codexia_auth_bootstrap_image: ghcr.io/yohn-jp/codexia-backend@sha256:<digest>
+        # codexia_auth_bootstrap_image: ghcr.io/<deployment-owner>/codexia-backend@sha256:<digest>
         codexia_auth_runtime_approved: false
         codexia_auth_database_url_file: /private/codexia-auth-database-url
         codexia_auth_secret_file: /private/codexia-auth-secret

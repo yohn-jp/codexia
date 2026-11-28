@@ -186,6 +186,7 @@ test('protected socket provisioning recovers its recorded writer and Tunnel afte
   ].join('\n'));
   const run = (args, overrides = {}) => spawnSync('bash', [socketStage, ...args], { encoding: 'utf8', env: {
     ...process.env, HOME: fixture.home, PATH: `${fixture.bin}:${process.env.PATH}`, FIXTURE_IMAGE: image,
+    CODEXIA_IMAGE_REPOSITORY: 'ghcr.io/yohn-jp/codexia-backend',
     FIXTURE_API: api, FIXTURE_TUNNEL: tunnel, FIXTURE_DROPIN: dropin, FIXTURE_DATABASE: database,
     FIXTURE_CLUSTER: '123456:42', ...overrides,
   } });
@@ -333,7 +334,7 @@ test('the protected run shares the deploy lock and recovers both services after 
   const launcher = path.join(fixture.bin, 'run-backup-fixture');
   await mkdir(localBin, { recursive: true });
   await writeFile(path.join(fixture.stateDir, 'deployed-release.json'), JSON.stringify({
-    image: 'ghcr.io/yohn-jp/codexia-backend@' + digest,
+    image: 'ghcr.io/isolated-org/codexia-backend@' + digest,
     identity: { format: 'codexia-backend-identity/v1', profile: 'full', sourceSha: source },
   }), { mode: 0o600 });
   await Promise.all(['trace', 'api', 'tunnel'].map(name => writeFile(path.join(fixture.directory, name), '')));
@@ -404,6 +405,13 @@ test('the protected run shares the deploy lock and recovers both services after 
   const killed = invoke('before-publication', run);
   assert.equal(killed.signal, 'SIGKILL', killed.stderr);
   assert.deepEqual((await readFile(trace, 'utf8')).trim().split('\n'), ['manual-start ' + run + ' ' + source + ' ' + digest, 'backup']);
+  const intent = path.join(fixture.stateDir, 'backup-transaction');
+  const expectedIntent = await readFile(intent, 'utf8');
+  await writeFile(intent, expectedIntent.replace('isolated-org', 'yohn-jp'));
+  const foreign = invoke('recover', 'recover');
+  assert.equal(foreign.status, 1);
+  assert.match(foreign.stderr, /committed deployment/u);
+  await writeFile(intent, expectedIntent);
   const recovered = invoke('recover', 'recover');
   assert.equal(recovered.status, 0, recovered.stderr);
   assert.match(await readFile(trace, 'utf8'), new RegExp('manual-interrupted ' + run));
@@ -712,7 +720,7 @@ else if (verb === 'exec' && args.includes('sh')) {
 else if (verb === 'rm' || verb === 'volume' && action === 'rm') delete state.resources[args.at(-1)];
 save();
 `);
-    const candidate = `ghcr.io/yohn-jp/codexia-backend@sha256:${'a'.repeat(64)}`;
+    const candidate = `ghcr.io/isolated-org/codexia-backend@sha256:${'a'.repeat(64)}`;
     const ledger = 'sha256:' + 'b'.repeat(64);
     const run = async (options, {
       wrongDatabase = false, wrongHistory = false, emptyDatabase = false, emptyHistory = false,
@@ -731,6 +739,7 @@ save();
         encoding: 'utf8',
         env: {
           ...process.env, HOME: fixture.home, CODEXIA_PUSH_STATE_DIR: fixture.stateDir,
+          CODEXIA_IMAGE_REPOSITORY: 'ghcr.io/isolated-org/codexia-backend',
           PATH: `${fixture.bin}:${process.env.PATH}`,
           DRILL_FIXTURE_RESOURCES: scratch, DRILL_FIXTURE_COMMANDS: commands,
           DRILL_FIXTURE_LEDGER: ledgerResult, DRILL_FIXTURE_BAD_RESTORE: wrongDatabase ? '1' : '',
@@ -755,6 +764,9 @@ save();
     assert.equal(basic.calls.filter(call => call.includes('--entrypoint') && call.includes('node')).length, 0);
 
     const readOnlyArgs = ['--candidate-full-image', candidate, '--candidate-ledger', ledger];
+    const foreign = await run(['--candidate-full-image', candidate.replace('isolated-org', 'yohn-jp'), '--candidate-ledger', ledger]);
+    assert.equal(foreign.status, 1);
+    assert.deepEqual(foreign.calls, []);
     const readOnly = await run(readOnlyArgs);
     assert.equal(readOnly.status, 0, readOnly.stderr);
     assert.ok(readOnly.stdout.includes(`Isolated candidate ledger verified: ${ledger}`));

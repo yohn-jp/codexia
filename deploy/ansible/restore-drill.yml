@@ -47,7 +47,7 @@
   ansible.builtin.assert:
     that:
       - codexia_restore_candidate_image is string
-      - codexia_restore_candidate_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - codexia_restore_candidate_image is match(codexia_image_pattern)
       - codexia_restore_candidate_ledger is string
       - codexia_restore_candidate_ledger is match('^sha256:[a-f0-9]{64}$')
       - codexia_restore_candidate_settings is string
@@ -68,6 +68,8 @@
              '--candidate-api-ready', '--candidate-runtime-settings', codexia_restore_candidate_settings,
              '--candidate-introspection-secret-file', codexia_restore_candidate_introspection_secret_file]
              if codexia_restore_candidate_image is defined else []) }}
+  environment:
+    CODEXIA_IMAGE_REPOSITORY: "{{ codexia_image_repository }}"
   register: codexia_restore_drill_result
   changed_when: true
   delegate_to: localhost

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { actionsRepository, assertReleaseRepositoryBinding, deploymentRepository, matchesRepository } from '../../github/repository.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -7,8 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { backendPublicationFromEnvironment, buildComponentReleaseRecord } from './record-model.mjs';
 import { createGitHubOctokit } from '../../github/octokit.mjs';
 
-const repository='yohn-jp/codexia';
-const digest=/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
 const semver=/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 
 export function componentReleaseTagFromEnvironment(component,env=process.env){
@@ -32,6 +31,7 @@ export function frontendProducerFromEnvironment(env=process.env,identity){
 }
 
 export function componentReleaseRecordFromEnvironment(env=process.env){
+  const context=actionsRepository(env);
   const sha=env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA;
   assert.match(sha??'',/^[a-f0-9]{40}$/u,'Component release source SHA is invalid');
   const component=process.argv[2];
@@ -40,10 +40,9 @@ export function componentReleaseRecordFromEnvironment(env=process.env){
     const identity=JSON.parse(readFileSync(new URL('../../../app/dist/desktop/update-identity.json',import.meta.url),'utf8'));
     const producer=frontendProducerFromEnvironment(env,identity);
     const mainTree=execFileSync('git',['rev-parse','HEAD^{tree}'],{encoding:'utf8'}).trim();
-    return buildComponentReleaseRecord(component,sha,identity,producer,mainTree);
+    return buildComponentReleaseRecord(component,sha,identity,producer,mainTree,context);
   }
   const core=env.CODEXIA_CERTIFIED_IMAGE,full=env.CODEXIA_CERTIFIED_FULL_IMAGE;
-  assert.match(core??'',digest);assert.match(full??'',digest);assert.notEqual(core,full);
   const compatibility=JSON.parse(readFileSync(new URL('../../../deploy/update-compatibility.json',import.meta.url),'utf8'));
   const producer={core,full,compatibility,event:env.CODEXIA_BACKEND_PRODUCER_EVENT,publication:backendPublicationFromEnvironment(env,sha)};
   if(producer.event==='pull_request'){
@@ -58,12 +57,12 @@ export function componentReleaseRecordFromEnvironment(env=process.env){
     producer.receipt=JSON.parse(readFileSync(manifest,'utf8'));
     producer.mainTree=execFileSync('git',['rev-parse','HEAD^{tree}'],{encoding:'utf8'}).trim();
   }
-  return buildComponentReleaseRecord(component,sha,null,producer);
+  return buildComponentReleaseRecord(component,sha,null,producer,undefined,context);
 }
 
 async function main(){
   const env=process.env;
-  assert.equal(env.GITHUB_REPOSITORY,repository);
+  const context=actionsRepository(env);
   assert.equal(env.GITHUB_REF,'refs/heads/main');
   assert.ok(['push','workflow_run'].includes(env.GITHUB_EVENT_NAME),'Component release requires main or verified completion');
   const token=env.GH_TOKEN;assert.ok(token);
@@ -71,11 +70,14 @@ async function main(){
   const expectedTag=componentReleaseTagFromEnvironment(process.argv[2],env);
   const release=componentReleaseRecordFromEnvironment(env);
   assert.equal(release.tag,expectedTag,'Component release metadata differs from the trusted producer version');
-  await recordComponentRelease(release,{github});
+  await recordComponentRelease(release,{github,context});
 }
 
-export async function assertComponentReleaseRecorded(release,{github}){
-  const [owner,repo]=repository.split('/');
+export async function assertComponentReleaseRecorded(release,{github,context}){
+  assertReleaseRepositoryBinding(release.metadata, context);
+  const { owner, repo } = deploymentRepository(context.repository);
+  const { data: current } = await github.rest.repos.get({ owner, repo });
+  assert.ok(matchesRepository(current, context), 'Component release target repository changed');
   const {data:ref}=await github.rest.git.getRef({owner,repo,ref:'tags/'+release.tag});
   assert.equal(ref?.object?.type,'commit');
   assert.equal(ref.object.sha,release.targetSha,'Component version already belongs to a different source');
@@ -87,11 +89,14 @@ export async function assertComponentReleaseRecorded(release,{github}){
 
 // Shared immutable tag and release writer. The caller must first certify the
 // producer and verify the deployed identity in its protected release lane.
-export async function recordComponentRelease(release,{github}){
+export async function recordComponentRelease(release,{github,context}){
   const expectedTag=release.tag;
   assert.match(expectedTag,/^(?:frontend|backend)-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u);
   assert.match(release.targetSha,/^[a-f0-9]{40}$/u);
-  const [owner,repo]=repository.split('/');
+  assertReleaseRepositoryBinding(release.metadata, context);
+  const { owner, repo } = deploymentRepository(context.repository);
+  const { data: current } = await github.rest.repos.get({ owner, repo });
+  assert.ok(matchesRepository(current, context), 'Component release target repository changed');
   const readOrMissing=async operation=>{
     try{return (await operation()).data;}
     catch(error){
@@ -115,7 +120,7 @@ export async function recordComponentRelease(release,{github}){
       draft:false,prerelease:false,make_latest:'false'});}
     catch(error){throw new Error('Component release API request failed'+(Number.isSafeInteger(error?.status)?': HTTP '+error.status:''),{cause:error});}
   }
-  await assertComponentReleaseRecorded(release,{github});
+  await assertComponentReleaseRecorded(release,{github,context});
   console.log('Recorded '+release.title+' from '+release.targetSha);
 }
 

@@ -405,7 +405,7 @@ func (o *cloudflareObservation) verifyCloudflareCredential(ctx context.Context, 
 		return errors.New("Cloudflare read token did not verify the selected DNS and Tunnel identity")
 	}
 	readTarget := o.target
-	return api.verifyCloudflareReadScopes(ctx, o.host, &readTarget)
+	return api.verifyCloudflareReadScopes(ctx, o.host, &readTarget, o.routesContract)
 }
 
 func (o *cloudflareObservation) verifyCloudflareTokenPolicy(ctx context.Context, candidate cloudflareAPI, plan cloudflarePermissionPlan) error {
@@ -462,8 +462,8 @@ func (o *cloudflareObservation) verifyCloudflareTokenPolicy(ctx context.Context,
 	return nil
 }
 
-func (api cloudflareAPI) verifyCloudflareReadScopes(ctx context.Context, host string, target *cloudflareTarget) error {
-	if err := api.checkWorker(ctx, host, *target); err != nil {
+func (api cloudflareAPI) verifyCloudflareReadScopes(ctx context.Context, host string, target *cloudflareTarget, routesContract []byte) error {
+	if err := api.checkWorker(ctx, host, *target, routesContract); err != nil {
 		return err
 	}
 	account := cloudflare.F(target.AccountID)
