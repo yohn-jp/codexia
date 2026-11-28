@@ -240,7 +240,11 @@ record_api_startup_timing() {
   summary=$(node - "$stage" "$started_at" "$listen_at" "$health_json" "$exec_start_us" "$active_enter_us" <<'STARTUP_TIMING'
 const [stage, startedAt, listenAt, healthJson, execStartUsText, activeEnterUsText] = process.argv.slice(2);
 function timestampNs(value) {
-  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/u.exec(value);
+  const normalized = value.replace(
+    /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(\.\d{1,9})? \+0000 UTC$/u,
+    (_whole, date, time, fraction = "") => date + "T" + time + fraction + "Z",
+  );
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/u.exec(normalized);
   if (!match) throw new Error("Unexpected UTC timestamp: " + value);
   const baseMs = Date.parse(match[1] + "Z");
   if (!Number.isFinite(baseMs)) throw new Error("Invalid UTC timestamp: " + value);
