@@ -134,15 +134,22 @@ test('Biome selects shipped JS/TS changes and config, but not unrelated CI or na
   assert.equal(biomeJob.steps.find(step => step.name === 'Run exact-source Biome CI and emit Lint-only SARIF').run, 'node scripts/ci/execution/group.mjs biome');
 });
 
-test('Types evidence retains the trace report and omits the rendered Pages package', () => {
-  const upload = workflow.jobs.types.steps.find(({ with: options }) => options?.name?.startsWith('ci-evidence-types-'));
-  assert.ok(upload);
-  const root = '${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}';
-  assert.deepEqual(upload.with.path.trim().split('\n'), [
-    root,
-    `!${root}/requirements-trace/strictdoc/html/**`,
-    `!${root}/requirements-trace/strictdoc/json/**`,
-  ]);
+test('certification and optional diagnostic uploads have separate roots', () => {
+  for (const definition of [workflow, profileWorkflow]) {
+    for (const job of Object.values(definition.jobs)) {
+      for (const step of job.steps ?? []) {
+        const name = step.with?.name;
+        if (typeof name !== 'string' || !name.startsWith('ci-evidence-')) continue;
+        assert.ok(step.with.path.endsWith('-receipt'), 'Certification consumes only staged receipts');
+        assert.equal(step['continue-on-error'], undefined);
+        assert.equal(step.with['if-no-files-found'], 'error');
+        const diagnostic = job.steps.find(candidate => candidate.with?.name === name.replace('ci-evidence-', 'ci-diagnostics-'));
+        assert.ok(diagnostic, 'Diagnostic output remains separately available');
+        assert.equal(diagnostic['continue-on-error'], true);
+        assert.equal(diagnostic.with['if-no-files-found'], 'ignore');
+      }
+    }
+  }
 });
 
 test('the certified graph covers every declared obligation and admits trace-owned tests within the twenty-two-job cap', () => {

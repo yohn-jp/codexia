@@ -7,6 +7,7 @@ import { CONFORMANCE_TASKS, VERIFICATION_GROUPS, requiredBuildProfile, requiresW
 import { planDigest, validateVerificationPlan } from '../impact/plan.mjs';
 import { assertProfileReceipt } from '../evidence/profile-artifact.mjs';
 import { runBounded } from './parallel.mjs';
+import { stageCertificationReceipt } from '../evidence/stage-receipt.mjs';
 import { withBrowserFixture } from '../browser/fixture.mjs';
 import { assertTaskProducerInventory, sanitizeProducerArguments, selectEquivalentTaskProofs } from '../evidence/input-proof.mjs';
 import { captureCoverageInputClosure, coverageInputProof, coverageInvocation, coverageRuntime } from '../evidence/coverage-inputs.mjs';
@@ -252,6 +253,7 @@ if (process.env.GITHUB_RUN_ID !== undefined) {
 }
 const report = { group, sha, planDigest: digest, ...(workflowIdentity ?? {}), timing: { concurrency: limit, preparationSeconds, executionSeconds }, ...(profileArtifact ? {profileArtifact} : {}), results: reportResults, ...(producerInventory ? { producerInventory } : {}) };
 writeFileSync(path.join(reportDirectory, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
+if (process.env.GITHUB_ACTIONS === 'true') await stageCertificationReceipt(reportDirectory, report);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
   `| Validation | Result | Seconds |\n| --- | --- | ---: |\n${results.map(item => `| ${item.task} | ${item.status} | ${item.seconds.toFixed(1)} |`).join('\n')}\n`);
 if (results.some(item => item.status !== 'passed')) process.exitCode = 1;
