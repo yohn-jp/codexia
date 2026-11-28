@@ -482,7 +482,7 @@ function files(root) {
   }
   walk(root); return result;
 }
-function repairStrictDocViewLinks(htmlRoot) {
+function publishStrictDocLinks(htmlRoot, sourceSha) {
   const paths = files(htmlRoot).filter(name => /\.sdoc(?:-DEEP-TRACE|-TRACE|-TABLE)?\.html$/u.test(name));
   const anchors = new Map(paths.map(name => {
     const source = readFileSync(join(htmlRoot, name), 'utf8');
@@ -491,7 +491,9 @@ function repairStrictDocViewLinks(htmlRoot) {
   for (const name of paths) {
     const file = join(htmlRoot, name);
     const source = readFileSync(file, 'utf8');
-    const updated = source.replace(/\bhref="((?:\.\.?\/)*[^"#?:]*?\.sdoc)-(?:DEEP-TRACE|TRACE|TABLE)\.html#([^"]+)"/gu, (link, document, fragment) => {
+    // Published design references resolve against the same source as the export.
+    const sourceLinks = source.replace(/(href="https:\/\/github\.com\/yohn-jp\/codexia\/(?:blob|tree)\/)main(?=\/)/gu, `$1${sourceSha}`);
+    const updated = sourceLinks.replace(/\bhref="((?:\.\.?\/)*[^"#?:]*?\.sdoc)-(?:DEEP-TRACE|TRACE|TABLE)\.html#([^"]+)"/gu, (link, document, fragment) => {
       const documentPath = resolve(dirname(file), `${document}.html`);
       const viewPath = resolve(dirname(file), link.slice(6, link.indexOf('#')));
       const decoded = decodeURIComponent(fragment);
@@ -526,7 +528,7 @@ export function packSpecifications(site, output, sourceSha, receipt = { status: 
   const dest = join(site, 'requirements');
   assert.ok(!existsSync(dest), 'Requirements destination must not exist');
   for (const folder of ['html', 'json']) { files(join(output, folder)); mkdirSync(dest, { recursive: true }); cpSync(join(output, folder), join(dest, folder), { recursive: true, errorOnExist: true }); }
-  repairStrictDocViewLinks(join(dest, 'html'));
+  publishStrictDocLinks(join(dest, 'html'), sourceSha);
   const indexPath = join(dest, 'html/index.html');
   const index = readFileSync(indexPath, 'utf8');
   assert.match(index, /<body\b[^>]*>/iu, 'StrictDoc index has no body');

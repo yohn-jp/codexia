@@ -90,7 +90,7 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     assert.equal((await page.goto(`${base}/`)).status(), 200);
     const search = page.getByPlaceholder('設計文書を検索');
     for (const [query, document] of [
-      ['資格情報', 'REQUIREMENT-REGISTER.sdoc.html'],
+      ['資格情報', 'INITIAL-DEPLOYMENT-FLOW.sdoc.html'],
       ['REQ-OPS-004', 'REQUIREMENT-REGISTER.sdoc.html'],
       ['codexiactl', 'CODEXIACTL.sdoc.html'],
     ]) {
@@ -100,7 +100,7 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
       const target = await result.getAttribute('href');
       assert.equal((await page.request.get(new URL(target, base).toString())).status(), 200);
     }
-    await search.fill('資格情報');
+    await search.fill('REQ-OPS-004');
     await page.locator('#design-search .pagefind-ui__result-link[href$="/REQUIREMENT-REGISTER.sdoc.html"]').first().click();
     await page.locator('[data-uid="REQ-OPS-004"]').waitFor({state:'attached'});
     assert.equal((await page.goto(`${base}/requirements/html/requirements/REQUIREMENT-REGISTER.md-TRACE.html#REQ-CORE-001`)).status(), 200);
