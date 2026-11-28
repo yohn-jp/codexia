@@ -221,7 +221,7 @@ MID: 6770277bef8aa1c9ac5153050b913c1a
 STATEMENT: >>>
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `wrangler` | `4.162.0` | edge/frontend・Workers | **要検証**: Edge配信・デプロイ設定の契約を確認 |
+| `wrangler` | `4.168.0` | edge/frontend・Workers | **要検証**: Edge配信・デプロイ設定の契約を確認 |
 <<<
 
 [[/SECTION]]
@@ -241,10 +241,13 @@ STATEMENT: >>>
 | Node.js | root `engines.node >=24`、Verifyでは`24.22.3`、Backend OCIはNode 24 digest固定 | **連動**: 実行版・型定義・CIイメージ・本番OCIを別々に更新しない。Node 26への移行を承認し実証した後で`@types/node` 26へ進む |
 | Go | `cmd/codexiactl/go.mod` の `1.27.4`。Verify とタグ配布が `actions/setup-go` `v7.1.0` で同じ宣言を使用 | **採用**: Linux amd64 の独立した初回配備用バイナリ。race test、vet、CGO 無効の build、リリース provenance を確認 |
 | Swift OpenAPI Generator | `ios/CodexiaTransport/Package.resolved`: generator `1.14.4`, runtime `1.13.4`, URLSession `1.4.0` | **連動**: TypeSpec由来のOpenAPI 3.1から全operation IDを照合し、再生成、Swift契約テスト、Simulatorを確認 |
+| Swift HTTP Types | `ios/CodexiaEditor`・`ios/CodexiaTransport` の exact `1.8.0`、SwiftPM 3箇所で同じ revision | **連動**: OpenAPI runtime/generatorとの型互換、Swift contract・Simulatorの受入が必要。独立して旧版に戻さない |
+| Swift Crypto | `ios/CodexiaEditor/Package.swift` Linux用 exact `5.2.0` | **連動**: Swift 6.2以上が前提。CryptographyおよびLinux Swift test、`Package.resolved` の依存閉包を検査。iOSのCryptoKitへ二重導入しない |
+| OpenAPIKit | Swift OpenAPI Generator 1.14.4が`6.1.0`からの互換範囲を要求、解決版は`6.4.0` | **制約**: OpenAPIKit 7系は現行generatorのメジャー制約外。公式generatorが対応した場合に連動更新し、生成結果を比較 |
 | Ajv | Fastify 5.12.8の推移依存 `8.20.0`、`ajv-formats` `3.0.1` | **連動**: `pnpm-lock.yaml` に従い、FastifyのDraft-07検証とserializerを隔離routeで確認 |
 | pnpm | root `pnpm@12.21.0`、CIとBackend Dockerfileで一致 | **連動**: 同期更新、lockfileの互換性・Corepack・キャッシュキーを検証 |
 | uv | `scripts/shared/python-env.sh`で公式Linux/macOSのx86-64/ARM64 release `0.13.10` と各配布SHA-256を固定 | **採用**: 全有効Python導入経路の共通標準。StrictDoc、Graphify、Ansible/Mitogen、S3 SDK、Hugging Face CLI、iOS PyYAMLの既存依存を維持し、実行環境別の受入と導入時間を確認する。旧StrictDoc OCI実験は凍結・廃止予定 |
-| Ansible Core | `deploy/ansible/requirements.txt`で`2.21.6` | **要検証**: Python・Mitogen・実ホスト・IaC検証環境の整合を確認 |
+| Ansible Core | `deploy/ansible/requirements.txt`で`2.21.6` | **制約・連動更新**: 2.22系の管理ノードはPython 3.13以上が必要だが現行CIの一部はPython 3.12を使用。Mitogen 0.3.55と実ホストを含めPython runtimeを先に整合し、2.22へ更新する |
 | StrictDoc | `scripts/strictdoc/requirements.in`で`0.32.1`、推移依存は`requirements.lock.txt`でexact pin | 要求MarkdownからHTML/JSONを生成し、双方向trace verifierを実行 | **連動**: parser、JSON構造、HTML再現性を再検証してからツールとlockを一括更新 |
 | GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v7.1.0` | **連動**: 対象workflowの実行環境とアクションの固定版を同時検証する。GitHub Actions全体を一律更新せず、依存・ランナー互換性と実ジョブで確認 |
 | Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql]==0.9.120` | **採用**: 独立ツールの固定版。出力互換性、候補索引、hubラベル、ブラウザー探索をRepository Audit Pagesの検証対象にする |
@@ -277,10 +280,10 @@ STATEMENT: >>>
 | `filippo.io/age` | `v1.3.2` | Owner Setup Grant の既存 age envelope。受取人の照合と一時鍵を確認 |
 | `charm.land/huh/v2` | `v2.0.3` | MIT。非秘密フォーム・選択。明示 TTY、Context、拒否・中断・既定値、line mode との意味同等性を検証 |
 | `charm.land/lipgloss/v2` | `v2.1.1` | MIT。共通表示・style。端末 capability、狭幅、色なし、機械出力との分離を検証 |
-| `charm.land/bubbletea/v2` | `v2.0.2` | MIT。Huh の内部描画基盤。CLI が直接使う API はフォームのシグナル処理を CLI に統一し、取消と EOF の区別、端末環境の受け渡し、背景色の照会に限定 |
+| `charm.land/bubbletea/v2` | `v2.1.3` | MIT。Huh の内部描画基盤。CLI が直接使う API はフォームのシグナル処理を CLI に統一し、取消と EOF の区別、端末環境の受け渡し、背景色の照会に限定 |
 
 Huh v2.0.3 の宣言は Bubble Tea v2.0.2、Bubbles v2.0.0、Lip Gloss v2.0.1。
-解決版は Bubble Tea v2.0.2、Bubbles v2.0.0、Lip Gloss v2.1.1。
+解決版は Bubble Tea v2.1.3、Bubbles v2.0.0、Lip Gloss v2.1.1。
 Bubbles は推移依存として扱い、秘密入力と TTY の境界には既存の `golang.org/x/term` を使う。
 <<<
 

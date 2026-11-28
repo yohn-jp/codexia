@@ -2,7 +2,7 @@
 import PackageDescription
 
 #if os(Linux)
-let cryptoPackages: [Package.Dependency] = [.package(url: "https://github.com/apple/swift-crypto", exact: "3.12.3")]
+let cryptoPackages: [Package.Dependency] = [.package(url: "https://github.com/apple/swift-crypto", exact: "5.2.0")]
 let cryptoProducts: [Target.Dependency] = [.product(name: "Crypto", package: "swift-crypto")]
 #else
 let cryptoPackages: [Package.Dependency] = []
@@ -16,7 +16,7 @@ let package = Package(
     dependencies: [
         .package(path: "../CodexiaTransport"),
     ] + cryptoPackages + [
-        .package(url: "https://github.com/apple/swift-http-types", exact: "1.7.0"),
+        .package(url: "https://github.com/apple/swift-http-types", exact: "1.8.0"),
         .package(url: "https://github.com/apple/swift-openapi-runtime", exact: "1.13.4"),
     ],
     targets: [
