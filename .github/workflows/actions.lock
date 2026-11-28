@@ -35,7 +35,7 @@ workflows:
         - 'github/codeql-action@v4'
     '.github/workflows/codexiactl-auto-release.yml':
         - 'actions/checkout@v7.0.1'
-        - 'actions/github-script@v8'
+        - 'actions/github-script@v9'
     '.github/workflows/deployment-config.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-node@v7.1.0'
@@ -164,9 +164,9 @@ dependencies:
         commit: 'sha1-9000827ccba6bdab643e8b6fd33ac0654aef8333'
         owner_id: 44036562
         repo_id: 192626254
-    'actions/github-script@v8':
-        ref: 'v8'
-        commit: 'sha1-ed597411d8f924073f98dfc5c65a23a2325f34cd'
+    'actions/github-script@v9':
+        ref: 'v9'
+        commit: 'sha1-3a2844b7e9c422d3c10d287c895573f7108da1b3'
         owner_id: 44036562
         repo_id: 205262760
     'actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5':
