@@ -28,7 +28,6 @@
     that:
       - codexia_image in (codexia_image_digests.stdout | from_json) or ((codexia_lifecycle_fixture | default(false) | bool) and ((codexia_fixture_image_repository + '@') + codexia_image.split('@')[-1]) in (codexia_image_digests.stdout | from_json))
     fail_msg: Pulled OCI image does not contain the certified immutable digest.
-  when: not (codexia_lifecycle_fixture | default(false) | bool)
 
 - name: Create a stopped metadata container without executing the candidate image
   ansible.builtin.command:
@@ -88,6 +87,9 @@
   ansible.builtin.stat:
     path: "{{ quadlet_dir }}/codexia-api.container"
     follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   register: codexia_current_api_unit
 
 - name: Require the existing API unit before an image-only update
@@ -862,6 +864,7 @@
           exit 1
         fi
       fi
+      profile_checkpoint transaction_prepare
       # Hold publication across reboot before creating activation links or
       # stopping the writer. R3/R6 approval is rechecked before opening it.
       if ! gate_control close ||
@@ -943,6 +946,7 @@
         echo 'Product publication gate did not open; deployment transaction remains pending if rollback is unverified' >&2
         exit 1
       fi
+      profile_checkpoint publication
       if ! node - "$candidate_image" "$current_image" "$candidate_identity" "$auth_settings_digest" "$backup_run_id" "$recovery_operation_id" "$recovery_evidence_sha256" > "$release_state.tmp" <<'NODE'
       const [image, previousImage, identity, authSettingsSha256, backupRunId,
         recoveryOperationId, recoveryEvidenceSha256] = process.argv.slice(2);
@@ -981,6 +985,7 @@
         exit 1
       fi
       rm -f -- "$transaction_intent" "$transaction_intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json" || echo 'Committed deployment cleanup was incomplete; next deployment will finish it' >&2
+      profile_checkpoint commit
       echo "UPDATED $candidate_image"
   args:
     executable: /bin/bash

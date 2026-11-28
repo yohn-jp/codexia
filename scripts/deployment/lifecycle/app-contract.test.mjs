@@ -412,7 +412,10 @@ test('image selection binds the exact-source Full artifact and verified publicat
   assert.match(fixture, /Cleanup check failed at script line/u, 'fixture cleanup failures must identify their failed check');
   assert.match(fixture, /cleanup-errors-bounded\.log/u, 'cleanup diagnostics must be included in the run artifact');
   assert.match(fixture, /Last sanitized fixture log/u);
-  assert.match(fixture, /Cloudflare Tunnel unit/u);
-  assert.match(fixture, /cloudflareTunnel:\{status:'NOT_STARTED'/u);
+  assert.match(fixture, /managementConnector:\{status:'LOOPBACK_FIXTURE'/u,
+    'the fixture must distinguish host readiness from live Cloudflare acceptance');
+  assert.match(fixture, /codexia-api-gate status\)" == open/u);
+  assert.match(fixture, /http:\/\/127\.0\.0\.1:18080\/health\/ready[^\n]+\n  assert_fixture_management_continues/u,
+    'observed product readiness must use the publication socket alongside management continuity');
   assert.match(fixture, /apiContainer!==previous\.apiContainer/u);
 });
