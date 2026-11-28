@@ -32,10 +32,8 @@ func githubLogin(ctx context.Context, o operator, clientID string) (*githubContr
 		return nil, needsAction("This build has no valid official GitHub App Client ID. Download the current verified release at " + officialReleaseURL +
 			". If the release is affected, ask the yohn-jp maintainer to check CODEXIACTL_GITHUB_APP_CLIENT_ID and the official App settings at " + githubAppSettingsURL)
 	}
-	o.Notice("Before signing in, install the official CodexiaCTL App at " + githubAppInstallationURL +
-		". On your account or organization, choose Only select repositories and grant access to the intended codexia repository.")
-	o.Notice(githubPermissionNotice)
-	if err := requireApproval(o, "Start GitHub Device Flow for the official CodexiaCTL App? The browser code expires within 15 minutes."); err != nil {
+	o.Notice("First use only: install the official App for the intended codexia repository at " + githubAppInstallationURL)
+	if err := requireConfirmation(o, "Sign in with GitHub Device Flow?"); err != nil {
 		return nil, err
 	}
 	credential, err := githubDeviceAccess(ctx, o, clientID, githubHTTPClient(20*time.Second))
@@ -54,7 +52,7 @@ func githubLogin(ctx context.Context, o operator, clientID string) (*githubContr
 	}
 	control.actor = user.GetLogin()
 	control.appClientID = clientID
-	o.Notice("Signed in to GitHub as " + control.actor + ". Checking repositories delegated to the CodexiaCTL App.")
+	reportResult(o, successText, "Signed in as "+control.actor)
 	return control, nil
 }
 
@@ -75,9 +73,10 @@ func (g *githubControl) selectTarget(ctx context.Context, o operator, vm vmObser
 	if err != nil {
 		return productionContract{}, err
 	}
-	o.Notice(fmt.Sprintf("Target %s (owner ID %d, repository ID %d, installation %d), GitHub user %s, protected main %s, public origin %s, VM %s.",
+	reportResult(o, headingText, "Deployment target")
+	o.Notice(fmt.Sprintf("Repository: %s\nOwner / repository / installation IDs: %d / %d / %d\nGitHub user: %s\nProtected main: %s\nPublic origin: %s\nVM: %s",
 		g.target.FullName(), g.target.OwnerID, g.target.RepoID, g.target.InstallationID, g.actor, sha, settings.PublicOrigin, vm.HostID))
-	if err := requireApproval(o, "Confirm the observed deployment repository and VM?"); err != nil {
+	if err := requireConfirmation(o, "Confirm the observed deployment repository and VM?"); err != nil {
 		return productionContract{}, err
 	}
 	g.approvedSHA = sha

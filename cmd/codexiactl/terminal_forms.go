@@ -167,3 +167,19 @@ func privateNotice(o operator, message string) error {
 	}
 	return needsAction("This operation requires a private controlling SSH terminal.")
 }
+
+// Routine read-only confirmation may use the observed-choice form. Protected
+// write approval continues through requireApproval and the explicit line input.
+func requireConfirmation(o operator, prompt string) error {
+	if choice, ok := o.(interface{ ConfirmChoice(string) (bool, error) }); ok {
+		accepted, err := choice.ConfirmChoice(prompt)
+		if err != nil {
+			return err
+		}
+		if !accepted {
+			return needsAction("Confirmation declined")
+		}
+		return nil
+	}
+	return requireApproval(o, prompt)
+}

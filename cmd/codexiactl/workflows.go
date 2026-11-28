@@ -174,7 +174,7 @@ func (c *workflowController) wait(ctx context.Context, operation, sha string, id
 			if err := verifyJobs(run, spec, jobs); err != nil {
 				return true, fmt.Errorf("%s: %w", c.target.runLink(id), err)
 			}
-			c.operator.Notice(spec.label + " jobs verified: " + c.target.runLink(id) + ".")
+			reportResult(c.operator, successText, spec.label+" jobs verified: "+c.target.runLink(id))
 			return true, nil
 		}
 		if run.Status != lastStatus {
