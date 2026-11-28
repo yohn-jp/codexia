@@ -705,7 +705,8 @@ function validateChangeSetOperations(
 }
 
 class PostgresTransaction implements PersistenceTransaction {
-  readonly changedProjects = new Set<ProjectId>();
+  private readonly pendingProjectVersions = new Set<ProjectId>();
+  private readonly finalizedProjectVersions = new Set<ProjectId>();
 
   constructor(
     private readonly client: PoolClient,
@@ -721,7 +722,18 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   private markChanged(projectId: ProjectId): void {
-    this.changedProjects.add(projectId);
+    if (!this.finalizedProjectVersions.has(projectId)) this.pendingProjectVersions.add(projectId);
+  }
+
+  async finalizeProjectVersions(projectId?: ProjectId): Promise<void> {
+    this.ensureWritable();
+    const projects = [...this.pendingProjectVersions].filter(id => projectId === undefined || id === projectId).sort();
+    if (projects.length === 0) return;
+    for (const id of projects) {
+      this.pendingProjectVersions.delete(id);
+      this.finalizedProjectVersions.add(id);
+    }
+    await this.query('UPDATE project SET version = version + 1, updated_at = clock_timestamp() WHERE id = ANY($1::uuid[])', [projects]);
   }
 
   async *scanOpenWorkExport<K extends keyof OpenWorkExportRows>(
@@ -1363,7 +1375,8 @@ class PostgresTransaction implements PersistenceTransaction {
     if (!result.rows[0])
       throw conflict('project', command.projectId, command.expectedVersion, (await this.getProject(command.projectId))?.version ?? null);
     this.markChanged(command.projectId);
-    return { ...mapProject(result.rows[0]), version: asNumber(result.rows[0].version) + 1 };
+    const project = mapProject(result.rows[0]);
+    return this.finalizedProjectVersions.has(command.projectId) ? project : { ...project, version: project.version + 1 };
   }
 
   async assertProjectVersion(projectId: ProjectId, expectedVersion?: number): Promise<void> {
@@ -3092,12 +3105,7 @@ export class PostgresPersistence implements Persistence {
       await client.query('BEGIN');
       const transaction = new PostgresTransaction(client, false);
       const result = await work(transaction);
-      const changedProjects = [...transaction.changedProjects].sort();
-      if (changedProjects.length > 0) {
-        await client.query('UPDATE project SET version = version + 1, updated_at = clock_timestamp() WHERE id = ANY($1::uuid[])', [
-          changedProjects,
-        ]);
-      }
+      await transaction.finalizeProjectVersions();
       await client.query('COMMIT');
       return result;
     } catch (error) {
