@@ -32,7 +32,7 @@
     "prune:auth-revocations": "node dist/prune-auth-revocations.js"
   },
   "dependencies": {
-    "@better-auth/core": "1.7.26",
+    "@better-auth/core": "1.7.28",
     "@better-auth/oauth-provider": "catalog:production",
     "@better-auth/passkey": "catalog:production",
     "@codexia/contracts": "workspace:*",

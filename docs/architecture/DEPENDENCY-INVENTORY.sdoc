@@ -59,14 +59,14 @@ STATEMENT: >>>
 | `@playwright/test` | `1.65.1` | root・ブラウザーE2E | **連動**: CIのブラウザーイメージとPlaywrightバージョン、ブラウザー実体を一致させる |
 | `playwright-core` | `1.65.1` | edge/product-site・公開静的サイトのブラウザー検証専用 | **連動**: rootのPlaywrightと一致させる。独立npm lockfileで固定し、公開資産に含めない |
 | `@types/node` | `^24.19.2` | root・Node型 | **連動**: 現行実行Node 24系。26系への変更で型検査に失敗したため独立更新しない |
-| `@types/react` | `^19.3.0` | root/app・React型 | **連動**: React 19の型とランタイムを一緒に検証 |
+| `@types/react` | `^19.3.2` | root/app・React型 | **連動**: React 19の型とランタイムを一緒に検証 |
 | `@types/react-dom` | `^19.3.0` | root/app・React DOM型 | **連動**: React DOM 19と合わせる |
 | `typescript` | `7.0.2` | root・native型検査、宣言emit、HTTPルートのAST検査 | ambient型の自動取り込みに依存せず、共通tsconfigで`types: ["node"]`を明示する。HTTPルート検査が使うnative AST APIはunstableのため、compilerを厳密指定し、更新時はルート契約テストも検証する |
-| `@babel/parser` | `7.29.15` | root devDependency・StrictDocのJS/TSテスト登録のAST解析 | **検証専用**: traverseと同じ版を固定。更新時はTEST-IDと登録位置の解決、コメント・重複の拒否を検証 |
-| `@babel/traverse` | `7.29.15` | root devDependency・StrictDocのAST走査とテストランナーのbinding解決 | **検証専用**: parserと同じ版を固定。更新時はNode.js・Playwrightの登録検出と実行結果の照合を検証 |
+| `@babel/parser` | `8.1.3` | root devDependency・StrictDocのJS/TSテスト登録のAST解析 | **検証専用**: traverseと同じ版を固定。更新時はTEST-IDと登録位置の解決、コメント・重複の拒否を検証 |
+| `@babel/traverse` | `8.1.3` | root devDependency・StrictDocのAST走査とテストランナーのbinding解決 | **検証専用**: parserと同じ版を固定。更新時はNode.js・Playwrightの登録検出と実行結果の照合を検証 |
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
-| `@redocly/cli` | `2.82.0` | `packages/http-contract`・OpenAPI lint | **既存採用**: CLI 2のcustom rulesで生成OpenAPI 3.1を検査。実API適合は別途検証 |
+| `@redocly/cli` | `2.83.0` | `packages/http-contract`・OpenAPI lint | **既存採用**: CLI 2のcustom rulesで生成OpenAPI 3.1を検査。実API適合は別途検証 |
 | `orval` | `8.49.0` | app・OpenAPI 3.1からDesktop Web用fetch clientとZod DTOを生成 | **開発専用**: pnpmの公開経過時間ポリシーを満たす版を固定。更新時は選択したoperationのmethod/path照合、再生成差分、Zod検証、appの型検査とテストを確認 |
 | `@typespec/compiler` | `1.18.0` | `packages/http-contract`・wire契約compile | **連動**: HTTP/OpenAPI TypeSpecライブラリと同一releaseで更新 |
 | `@typespec/http` | `1.18.0` | `packages/http-contract`・HTTP method/path/parameter binding | **連動**: compilerとOpenAPI3 emitterに同期 |
@@ -88,10 +88,10 @@ MID: c8637f1567cf5e0668a8ba59ce64c019
 STATEMENT: >>>
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `better-auth` | `1.7.26` | app/API・認証の正本 | **連動**: Better Auth本体と公式プラグイン・coreを同系列の整合する版で更新 |
-| `@better-auth/core` | `1.7.26` | API・Better Auth | **連動**: Better Auth本体と同期 |
-| `@better-auth/oauth-provider` | `1.7.26` | app/API・OAuth Provider | **連動**: Better Auth本体と同期 |
-| `@better-auth/passkey` | `1.7.26` | app/API・Passkey | **連動**: Better Auth本体と同期、登録・検証の実証必須 |
+| `better-auth` | `1.7.28` | app/API・認証の正本 | **連動**: Better Auth本体と公式プラグイン・coreを同系列の整合する版で更新 |
+| `@better-auth/core` | `1.7.28` | API・Better Auth | **連動**: Better Auth本体と同期 |
+| `@better-auth/oauth-provider` | `1.7.28` | app/API・OAuth Provider | **連動**: Better Auth本体と同期 |
+| `@better-auth/passkey` | `1.7.28` | app/API・Passkey | **連動**: Better Auth本体と同期、登録・検証の実証必須 |
 | `oauth4webapi` | `3.8.9` | app・Web公開クライアントのDiscovery、PKCE、認可応答およびトークン交換 | **既存採用**: 実行時依存とpeer依存を持たないESM。更新時はBetter Authとの認証フローをChromiumで実行し、公開面・移行期に別途必要なブラウザー証明は [LINK: DOC-VERIFICATION-E2E-EXECUTION, E2E execution] に従い、Core/Fullのビルドと依存閉包を検証 |
 | `@simplewebauthn/server` | `13.3.3` | API・WebAuthnの直接依存宣言 | **整理対象＋制約**: ソースに直接importの確認なし。14.1.0への更新はBetter Authの型推論に関するTS2742で失敗。直接依存が不要なら削除し、必要なら上流との整合を解決 |
 | `fastify` | API `^5.12.8` / HTTP contract `5.12.8` | API・単一認可境界、生成schemaの検証用Fastify harness | **連動**: contract harnessは本番APIと同じ実解決版でAjv/serializer方言を検査 |
@@ -120,13 +120,13 @@ STATEMENT: >>>
 | --- | --- | --- | --- |
 | `react` | `^19.3.1`（Publishing peer `^19.1.0`） | app・Story・Semantic・Publishing | **連動**: React DOM・型と整合 |
 | `react-dom` | `^19.3.1`（Publishing peer `^19.1.0`） | app・Story・Semantic・Publishing | **連動**: Reactと整合 |
-| `react-resizable-panels` | `4.24.1` | app・パネル | **既存採用**: Desktop配置・ドラッグ・復元・popover下のseparatorをブラウザーで検証 |
-| `@codemirror/commands` | `^6.11.1` | app・編集コマンド | **要検証** |
-| `@codemirror/merge` | `6.12.3` | app・差分表示 | **要検証** |
+| `react-resizable-panels` | `4.24.2` | app・パネル | **既存採用**: Desktop配置・ドラッグ・復元・popover下のseparatorをブラウザーで検証 |
+| `@codemirror/commands` | `^6.11.2` | app・編集コマンド | **要検証** |
+| `@codemirror/merge` | `6.13.0` | app・差分表示 | **要検証** |
 | `@codemirror/state` | `^6.7.6` | app・編集状態 | **要検証** |
-| `@codemirror/view` | `^6.43.15` | app・編集画面 | **要検証** |
-| `@headless-tree/core` | `1.8.0` | app・アウトライン | **連動**: Reactアダプターと一緒に更新 |
-| `@headless-tree/react` | `1.8.0` | app・アウトライン | **連動**: coreと一緒に更新 |
+| `@codemirror/view` | `^6.44.0` | app・編集画面 | **要検証** |
+| `@headless-tree/core` | `1.8.1` | app・アウトライン | **連動**: Reactアダプターと一緒に更新 |
+| `@headless-tree/react` | `1.8.1` | app・アウトライン | **連動**: coreと一緒に更新 |
 | `@xstate/react` | `6.1.0` | app・保存／復旧、Native ChangeSet review、本人認証管理のactorとReact 19の接続 | **連動**: React peerは19を含み、XState `^5.28.0`と互換。各機能の統合を併せて検証 |
 | `xstate` | `5.33.4` | app・保存／復旧、Native ChangeSet review、本人認証管理の状態機械とasync actor | **連動**: v5 stable。公式React adapter 6.1.0とReact 19のpeer整合を検証 |
 | `@vitejs/plugin-react` | `^6.3.0` | app・フロントビルド | **要検証**: Vite・Reactビルドとの互換性を一緒に確認 |

@@ -12,7 +12,7 @@ const RUNNERS = new Map([
   ['@playwright/test', 'playwright'],
   ['playwright/test', 'playwright'],
 ]);
-const traverse = traverseModule.default;
+const traverse = typeof traverseModule === 'function' ? traverseModule : traverseModule.default;
 
 export function testIdsFromName(name) {
   if (typeof name !== 'string') return [];
@@ -222,7 +222,7 @@ async function analyzeFile(file, root, findings, violations, active, cache) {
     ast = parse(source, {
       sourceType: 'unambiguous',
       errorRecovery: false,
-      plugins: ['typescript', 'jsx', 'decorators-legacy', 'importAttributes'],
+      plugins: ['typescript', ...(/\.(?:tsx|jsx)$/u.test(file) ? ['jsx'] : []), 'decorators-legacy', 'importAttributes'],
     });
   } catch (error) {
     violations.push(`${relativeFile} could not be parsed for TEST-ID discovery: ${error.message}`);
