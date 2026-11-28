@@ -24,7 +24,7 @@ func openTerminal() (*terminal, error) {
 		return nil, errors.New("an interactive SSH terminal is required")
 	}
 	if !term.IsTerminal(fd) {
-		unix.Close(fd)
+		_ = unix.Close(fd)
 		return nil, errors.New("an interactive SSH terminal is required")
 	}
 	return &terminal{fd: fd, ctx: context.Background()}, nil
@@ -130,7 +130,7 @@ func (t *terminal) writeGrant(grant []byte) error {
 }
 
 func (t *terminal) wait(events int16) error {
-	fds := []unix.PollFd{{Fd: int32(t.fd), Events: events}}
+	fds := []unix.PollFd{{Fd: int32(t.fd), Events: events}} //nolint:gosec // The descriptor is a Linux signed int returned by open(2).
 	for {
 		if err := t.ctx.Err(); err != nil {
 			return err

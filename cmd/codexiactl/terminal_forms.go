@@ -109,7 +109,7 @@ func (t *terminal) runForm(field huh.Field) error {
 	if err != nil {
 		return needsAction("Could not open the controlling SSH terminal for the form. Reconnect with a PTY and rerun the command.")
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	var canceledBy string
 	keys := huh.NewDefaultKeyMap()
 	keys.Quit.SetKeys("ctrl+c", "ctrl+d", "esc")

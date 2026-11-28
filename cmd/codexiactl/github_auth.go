@@ -22,10 +22,12 @@ var (
 const githubPermissionNotice = "GitHub requires Metadata and Contents read, Actions and Environments read/write, and Administration read for OIDC settings. " +
 	"Changing branch restrictions requires Administration write with separate approval. The official App maintainer configures these permissions."
 
-const githubAppInstallationURL = "https://github.com/apps/codexiactl/installations/new"
-const githubAppSettingsURL = "https://github.com/organizations/yohn-jp/settings/apps"
-const githubDeviceURL = "https://github.com/login/device"
-const officialReleaseURL = "https://github.com/" + officialDistribution + "/releases"
+const (
+	githubAppInstallationURL = "https://github.com/apps/codexiactl/installations/new"
+	githubAppSettingsURL     = "https://github.com/organizations/yohn-jp/settings/apps"
+	githubDeviceURL          = "https://github.com/login/device"
+	officialReleaseURL       = "https://github.com/" + officialDistribution + "/releases"
+)
 
 func githubLogin(ctx context.Context, o operator, clientID string) (*githubControl, error) {
 	if !githubAppClientIDPattern.MatchString(clientID) {
@@ -86,7 +88,7 @@ func (g *githubControl) selectTarget(ctx context.Context, o operator, vm vmObser
 func githubDeviceAccess(ctx context.Context, o operator, clientID string, client *http.Client) ([]byte, error) {
 	cfg := oauth2.Config{
 		ClientID: clientID,
-		Endpoint: oauth2.Endpoint{
+		Endpoint: oauth2.Endpoint{ //nolint:gosec // Public GitHub OAuth endpoints carry no hardcoded credentials.
 			DeviceAuthURL: "https://github.com/login/device/code",
 			TokenURL:      "https://github.com/login/oauth/access_token",
 			AuthStyle:     oauth2.AuthStyleInParams,

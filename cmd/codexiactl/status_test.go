@@ -35,14 +35,20 @@ func TestStatusDoesNotUseSuccessBeforeNewerFailureOrDeployment(t *testing.T) {
 	now := time.Date(2026, 11, 27, 10, 0, 0, 0, time.UTC)
 	observed := now.Add(-time.Minute)
 	receipt := statusFixtureReceipt(host, origin, observed)
-	older := githubRunSummary{ID: 41, File: preflightFile, SHA: githubTestSHA, Status: "completed", Conclusion: "success",
-		CreatedAt: observed.Add(-time.Minute), UpdatedAt: observed.Add(5 * time.Second)}
-	newerFailed := githubRunSummary{ID: 42, File: preflightFile, SHA: githubTestSHA, Status: "completed", Conclusion: "failure",
-		CreatedAt: observed.Add(30 * time.Second), UpdatedAt: observed.Add(40 * time.Second)}
+	older := githubRunSummary{
+		ID: 41, File: preflightFile, SHA: githubTestSHA, Status: "completed", Conclusion: "success",
+		CreatedAt: observed.Add(-time.Minute), UpdatedAt: observed.Add(5 * time.Second),
+	}
+	newerFailed := githubRunSummary{
+		ID: 42, File: preflightFile, SHA: githubTestSHA, Status: "completed", Conclusion: "failure",
+		CreatedAt: observed.Add(30 * time.Second), UpdatedAt: observed.Add(40 * time.Second),
+	}
 	newerDispatchFailedFirst := newerFailed
 	newerDispatchFailedFirst.CreatedAt, newerDispatchFailedFirst.UpdatedAt = observed.Add(time.Second), observed.Add(2*time.Second)
-	newerMutation := githubRunSummary{ID: 43, File: "backend-deployment-handoff.yml", Status: "completed", Conclusion: "failure",
-		CreatedAt: observed.Add(30 * time.Second), UpdatedAt: observed.Add(40 * time.Second)}
+	newerMutation := githubRunSummary{
+		ID: 43, File: "backend-deployment-handoff.yml", Status: "completed", Conclusion: "failure",
+		CreatedAt: observed.Add(30 * time.Second), UpdatedAt: observed.Add(40 * time.Second),
+	}
 	for _, tc := range []struct {
 		name         string
 		runs         []githubRunSummary

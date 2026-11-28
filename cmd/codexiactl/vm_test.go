@@ -17,15 +17,15 @@ func TestBootstrapKeyPreservesExistingAuthorizedKeys(t *testing.T) {
 	if err := os.Mkdir(directory, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(directory, 0o750); err != nil {
+	if err := os.Chmod(directory, 0o750); err != nil { //nolint:gosec // Exercise a valid existing SSH directory mode regardless of the test process umask.
 		t.Fatal(err)
 	}
 	path := filepath.Join(directory, "authorized_keys")
 	original := "# account provisioning left a comment without a newline"
-	if err := os.WriteFile(path, []byte(original), 0o640); err != nil {
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0o640); err != nil {
+	if err := os.Chmod(path, 0o640); err != nil { //nolint:gosec // The fixture verifies that a preexisting group-readable file keeps its mode.
 		t.Fatal(err)
 	}
 	_, public, err := newSSHIdentity()
@@ -37,7 +37,7 @@ func TestBootstrapKeyPreservesExistingAuthorizedKeys(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	current, err := os.ReadFile(path)
+	current, err := os.ReadFile(path) //nolint:gosec // Verify only the controlled test fixture's existing file.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestBootstrapKeyRefusesLinks(t *testing.T) {
 	if err := installAuthorizedKey(context.Background(), home, ".ssh/authorized_keys", public, os.Getuid()); err == nil {
 		t.Fatal("accepted a hard-linked authorized_keys")
 	}
-	actual, err := os.ReadFile(target)
+	actual, err := os.ReadFile(target) //nolint:gosec // Compare the synthetic file outside the test's temporary home.
 	if err != nil || string(actual) != "original" {
 		t.Fatalf("external file changed: %q %v", actual, err)
 	}
@@ -266,7 +266,7 @@ func TestBootstrapKeyInstalledOnlyReadsAuthorizedKeys(t *testing.T) {
 	if found, err := vm.BootstrapKeyInstalled(public); !found || err != nil {
 		t.Fatalf("exact appended key = %v, %v", found, err)
 	}
-	actual, err := os.ReadFile(pin)
+	actual, err := os.ReadFile(pin) //nolint:gosec // Compare the synthetic file under the test's temporary home.
 	if err != nil || string(actual) != string(original)+"restrict "+public+" codexiactl-bootstrap\n" {
 		t.Fatalf("lookup changed the existing bytes: %q, %v", actual, err)
 	}

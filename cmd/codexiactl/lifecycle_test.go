@@ -83,8 +83,10 @@ func TestRequiredWorkflowJobsMustActuallyRun(t *testing.T) {
 func TestDispatchRemembersAmbiguousResponsesWithoutResending(t *testing.T) {
 	store := &memoryCheckpoint{}
 	gh := &fakeWorkflow{dispatchError: errGitHubDispatchUnknown}
-	c := workflowController{github: gh, store: store, operator: acceptingOperator{}, sha: strings.Repeat("a", 40),
-		state: checkpoint{HostID: strings.Repeat("b", 64), RepositoryID: githubTestTarget.RepoID}}
+	c := workflowController{
+		github: gh, store: store, operator: acceptingOperator{}, sha: strings.Repeat("a", 40),
+		state: checkpoint{HostID: strings.Repeat("b", 64), RepositoryID: githubTestTarget.RepoID},
+	}
 	if _, err := c.dispatch(context.Background(), "management", nil); err == nil {
 		t.Fatal("missing dispatch response must fail")
 	}
@@ -133,12 +135,15 @@ func (f *fakeWorkflow) Dispatch(context.Context, string, string, map[string]stri
 	f.dispatches++
 	return 0, f.dispatchError
 }
+
 func (f *fakeWorkflow) Run(context.Context, string, string, int64) (githubRun, error) {
 	panic("unexpected Run")
 }
+
 func (f *fakeWorkflow) Jobs(context.Context, int64, int) (map[string]string, error) {
 	panic("unexpected Jobs")
 }
+
 func (f *fakeWorkflow) Artifact(context.Context, int64, string, string) ([]byte, error) {
 	panic("unexpected Artifact")
 }
@@ -216,8 +221,12 @@ func TestCorrelateLostResponseByExactReviewedPreflight(t *testing.T) {
 
 func TestRejectsHiddenAutomationAndCredentialsOnCommandLine(t *testing.T) {
 	for _, args := range [][]string{
-		{"init", "--yes"}, {"init", "--force"}, {"init", "--token", "token"}, {"init", "--json"},
-		{"status", "--owner-grant", "grant"}, {"doctor", "--plan"},
+		{"init", "--yes"},
+		{"init", "--force"},
+		{"init", "--token", "token"},
+		{"init", "--json"},
+		{"status", "--owner-grant", "grant"},
+		{"doctor", "--plan"},
 	} {
 		if _, accepted := parseInvocation(args); accepted {
 			t.Fatalf("unexpected arguments accepted: %v", args[:2])

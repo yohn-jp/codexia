@@ -24,8 +24,10 @@ func TestGitHubFindsInstalledCodexiaAcrossPages(t *testing.T) {
 		return x
 	}
 	repo := func(id, ownerID int, owner, name string, push bool) map[string]any {
-		return map[string]any{"id": id, "name": name, "full_name": owner + "/" + name, "default_branch": "main",
-			"owner": map[string]any{"login": owner, "id": ownerID}, "permissions": map[string]any{"push": push}}
+		return map[string]any{
+			"id": id, "name": name, "full_name": owner + "/" + name, "default_branch": "main",
+			"owner": map[string]any{"login": owner, "id": ownerID}, "permissions": map[string]any{"push": push},
+		}
 	}
 	g := newTestGitHubFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

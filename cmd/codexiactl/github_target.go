@@ -12,9 +12,11 @@ import (
 	"github.com/google/go-github/v93/github"
 )
 
-const deploymentRepositoryName = "codexia"
-const officialDistribution = "yohn-jp/codexia"
-const githubInstallationsURL = "https://github.com/settings/installations"
+const (
+	deploymentRepositoryName = "codexia"
+	officialDistribution     = "yohn-jp/codexia"
+	githubInstallationsURL   = "https://github.com/settings/installations"
+)
 
 var githubOwnerName = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$`)
 

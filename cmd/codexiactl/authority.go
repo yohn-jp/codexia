@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // GitHub's Git object IDs use SHA-1 by protocol.
 	_ "embed"
 	json "encoding/json/v2"
 	"fmt"
@@ -196,7 +196,7 @@ func validDNSHostname(host string) bool {
 			return false
 		}
 		for _, char := range label {
-			if !(char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-') {
+			if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
 				return false
 			}
 		}
@@ -223,8 +223,9 @@ func (g *githubControl) readSourceFile(ctx context.Context, sha, path string) ([
 
 // GitHub represents repository blobs using Git's SHA-1 object identifier.
 func sourceBlobSHA(data []byte) string {
-	digest := sha1.New()
-	fmt.Fprintf(digest, "blob %d\x00", len(data))
-	digest.Write(data)
+	digest := sha1.New() //nolint:gosec // Compare the Git blob ID under an independently authenticated source revision.
+	// Standard hash writes always return nil.
+	_, _ = fmt.Fprintf(digest, "blob %d\x00", len(data))
+	_, _ = digest.Write(data)
 	return fmt.Sprintf("%x", digest.Sum(nil))
 }

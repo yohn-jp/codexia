@@ -27,11 +27,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const serviceUID = 1001
-const maxAuthorizedKeys = 1024 * 1024
+const (
+	serviceUID        = 1001
+	maxAuthorizedKeys = 1024 * 1024
+)
 
-var unixUsername = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
-var machineIDPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
+var (
+	unixUsername     = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+	machineIDPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
+)
 
 type vmObservation struct {
 	User            string
@@ -212,7 +216,7 @@ func supportedAuthorizedKeys(config []string, home string) string {
 func commandOutput(ctx context.Context, path string, args ...string) ([]byte, error) {
 	bounded, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	return exec.CommandContext(bounded, path, args...).Output()
+	return exec.CommandContext(bounded, path, args...).Output() //nolint:gosec // Callers supply fixed absolute binaries and pass sshd-derived values as individual arguments.
 }
 
 func (vm vmObservation) ConfirmPin(o operator, address string) (string, error) {
@@ -349,7 +353,7 @@ func (vm vmObservation) BootstrapKeyInstalled(public string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	content, err := readAuthorizedKeys(context.Background(), file, vm.uid, unix.LOCK_SH)
 	if err != nil {
 		return false, err
@@ -366,7 +370,7 @@ func installAuthorizedKey(ctx context.Context, home, path, public string, uid in
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	original, err := readAuthorizedKeys(ctx, file, uid, unix.LOCK_EX)
 	if err != nil {
 		return err
@@ -402,7 +406,7 @@ func openAuthorizedKeys(home string, uid int, create bool) (*os.File, error) {
 	if err != nil {
 		return nil, errors.New("the administrator home must be owned by the administrator and have secure directory permissions")
 	}
-	defer unix.Close(homeFD)
+	defer func() { _ = unix.Close(homeFD) }()
 	dirFD, err := openOwnedDirectory(homeFD, ".ssh", uid)
 	if errors.Is(err, unix.ENOENT) {
 		if !create {
@@ -416,7 +420,7 @@ func openAuthorizedKeys(home string, uid int, create bool) (*os.File, error) {
 	if err != nil {
 		return nil, errors.New("administrator .ssh must be a real, securely owned directory")
 	}
-	defer unix.Close(dirFD)
+	defer func() { _ = unix.Close(dirFD) }()
 
 	flags := unix.O_NOFOLLOW | unix.O_CLOEXEC | unix.O_NONBLOCK
 	if create {
@@ -456,7 +460,7 @@ func openOwnedDirectory(parent int, path string, uid int) (int, error) {
 	}
 	var info unix.Stat_t
 	if err := unix.Fstat(fd, &info); err != nil || int(info.Uid) != uid || info.Mode&0o022 != 0 {
-		unix.Close(fd)
+		_ = unix.Close(fd)
 		return -1, errors.New("unsafe SSH directory permissions or ownership")
 	}
 	return fd, nil
