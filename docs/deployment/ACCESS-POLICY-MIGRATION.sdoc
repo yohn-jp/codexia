@@ -12,9 +12,10 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: 02eb923d864ca895105f135251381165
 STATEMENT: >>>
-[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が管理経路と公開ゲートの契約を所有する。正式運用には統合実サービス受入を要する。
-
-Supply `access_policy_id` for the existing account-owned reusable Allow policy. For ZENPRAX, use `7ea377b8-7f00-4273-9fba-dbc01bdabf21` (Allow-ZENPRAX team). Verify the policy's identity rules and inherited session duration before applying. Remove the old `allowed_emails` input from local tfvars and automation. Terraform 1.7+ is required for the non-destructive `removed` block. Back up state, run plan, and verify the old policy is forgotten without destruction and the application attaches the shared policy at precedence 1. Do not apply an older revision after the live migration. The CI identity applications are managed by this module; their reusable Service Auth policy remains account-owned. Supply `access_ci_policy_id` (ZENPRAX: `79278a25-76f8-494b-8aee-d3381a70fcab`) and import both existing applications before planning. Preserve their AUDs; never attach Service Auth to the parent application. Delete the obsolete policy only after all application references are removed. Never import the shared policy into this module's ownership.
+Use [LINK: DOC-DEPLOYMENT-CODEXIACTL-43-cloudflare管理認証配備用資格製品-access-を分離, CodexiaCTL] for adoption of Codexia's Cloudflare resources.
+The account owner retains the reusable author Allow policy and its identity provider and session settings.
+Record the existing app IDs, AUDs and policy attachments as non-secret comparison evidence. Preserve legacy Terraform state under restricted custody as migration evidence.
+Keep the independently authenticated VM session available until the new SSH route and the closed publication gate pass the [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, integrated acceptance].
 <<<
 
 [[SECTION]]
@@ -25,15 +26,23 @@ TITLE: Adopt existing CI identity applications
 [TEXT]
 MID: b1ffe3c1afa96af2bdb273f2770bc111
 STATEMENT: >>>
-Back up private Terraform state. In ZENPRAX, the backend probe application ID is `5f5c9d0c-5f67-40c2-a6e6-1ec127dcfaab`; frontend is `33639d42-6c4f-4355-9fc8-cdc4adbf389f`. Import the existing applications (not the account-owned policies) with the same private tfvars:
+From the trusted VM session, run `codexiactl init --plan` or `codexiactl doctor`.
+Confirm the repository and the certified public and management hostnames, and review the observed account, zone, Tunnel, Access applications and policy attachments.
+With the fixed cf version, the read-only commands can report an incomplete observation when a Workers route or custom domain inventory requires a verified limited SDK credential.
+Record that limitation and resolve any independent target, scope or policy conflict before proceeding.
 
-```sh
-terraform import 'cloudflare_zero_trust_access_application.identity_probe["backend"]' "accounts/$ACCOUNT_ID/$BACKEND_PROBE_APP_ID"
-terraform import 'cloudflare_zero_trust_access_application.identity_probe["frontend"]' "accounts/$ACCOUNT_ID/$FRONTEND_PROBE_APP_ID"
-terraform plan
-```
+Use `codexiactl init` for changes. Review each purpose, scope and expiry before approving temporary credential issuance, and review the resource diff before approving changes.
+Keep each probe app's ID and AUD and the author-only parent.
+Check that the exact-path Tunnel rules from `identity-probes.json` precede the catch-all and accept only each probe's AUD and the author AUD.
+Check that the product Service Auth policy matches its exact repository and purpose tag and that the separate management app accepts only the two SSH tags for the selected repository.
+Run the protected production preflight before changing an existing deployment and repeat it after the change.
+Stop on an unresolved policy attachment or unexpected app replacement. Keep existing valid credentials until the replacement passes its intended access check.
 
-Require a non-destructive plan preserving the two AUDs and author-only parent. The exact-path Tunnel rules in `identity-probes.json` must precede the catch-all; only each path's own probe AUD and the author AUD are admitted there. Confirm the shared CI policy selects only the designated service token. Run the protected production preflight before and after changes. Never apply a plan that replaces existing apps or broadens Service Auth to other paths.
+After an interrupted issuance or registration, retain the CLI checkpoint and repeat observation in the same trusted VM session and exclusive Settings window.
+Compare the recorded repository, account, Environment and purpose against the Cloudflare inventory and the protected GitHub settings before retrying.
+An existing issuance record with unknown registration or a missing one-time secret requires reconciliation before another credential can be requested.
+Use the authorized account operation to determine whether the exact issuance was unused and may be retired. Verify expiry or retirement before replacing an ambiguous temporary credential.
+Use a protected access check to confirm an existing GitHub Secret. Its name alone does not prove that the value was stored or can authenticate.
 <<<
 
 [[/SECTION]]
@@ -46,15 +55,19 @@ TITLE: Gated Access-independent OAuth and MCP paths
 [TEXT]
 MID: 5bb75d9a7d1cb22beccd0dd831d035fe
 STATEMENT: >>>
-`public_oauth_edge_enabled` and `passkey_oauth_runtime_ready` both default to `false`. The first creates narrow Access path applications with a Bypass/Everyone policy and removes Tunnel Access-JWT validation only for the matching exact API routes. Terraform requires the second explicit operator confirmation before it can plan the public routes. Set them only after the Passkey-first Better Auth runtime, registered owner and limited MCP OAuth clients, API admission, and remote MCP acceptance have been verified. A Terraform variable is an operator attestation; it does not prove that a runtime or Cloudflare account is actually ready.
+Public OAuth and MCP paths require verified Passkey-first Better Auth runtime, a registered owner, limited MCP OAuth clients, API admission and remote MCP acceptance.
+Before authorizing the exact-path transition, check the observed Bypass policies, Tunnel ingress and the product publication state.
+The change stages the expected Tunnel routing before enabling the corresponding Bypass applications.
 
-`public-protocol-paths.json` is the route allowlist. It includes only `/mcp`, the exact protected-resource and OAuth discovery metadata paths, JWKS, OAuth authorization/token/introspection/revocation/userinfo/consent endpoints, the login method and session reads, Passkey authentication options/verification, and fixed upstream OIDC sign-in/callback endpoints. The dedicated OAuth UI has exact Access paths for `/oauth/login`, `/oauth/consent`, and `/oauth/assets/*`; these static paths do not get Tunnel ingress entries. It does not include OAuth client registration, auth administration, Passkey management, project/data API routes, or wildcard `/api/auth/*`. The API continues to enforce OAuth token, session, scope, project and object authorization. The author application, the two CI identity applications and their AUDs are unchanged. The existing catch-all Tunnel rule continues to require the author AUD.
+`public-protocol-paths.json` is the route allowlist. It includes only `/mcp`, the exact protected-resource and OAuth discovery metadata paths, JWKS, OAuth authorization/token/introspection/revocation/userinfo/consent endpoints, the login method and session reads, Passkey authentication options/verification, and fixed upstream OIDC sign-in/callback endpoints. The dedicated OAuth UI has exact Access paths for `/oauth/login`, `/oauth/consent`, and `/oauth/assets/*`; these static paths do not get Tunnel ingress entries. It does not include OAuth client registration, auth administration, Passkey management, project/data API routes, or wildcard `/api/auth/*`. The API continues to enforce OAuth token, session, scope, project and object authorization. Preserve the author application, the two CI identity applications and their AUDs. The catch-all Tunnel rule requires the author AUD.
 
 Cloudflare documents that a more specific app path takes precedence without inheriting the hostname's parent policy, and that a Bypass/Everyone rule disables Access enforcement for that path. The OAuth login and consent pages use a dedicated Vite entry whose HTML and hashed assets stay under `/oauth/assets/*`. The Bypass entries cover only these two pages and that asset prefix; generic `/assets/*`, the Desktop UI route and all other static content stay behind the parent Access application. The retired `/mobile/` route has no Access exception or compatibility alias. Do not claim remote end-to-end OAuth acceptance from source review or metadata alone. See [Application paths](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/) and [Bypass a public endpoint](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/common-policies/#bypass-a-public-endpoint).
 
-The shared zone's WAF and rate-limit rules remain outside this Terraform module. If an interactive challenge affects an allowed protocol path, the zone rule owner must review a narrow method/path exception that preserves the rule's other predicates and all rate controls. Do not skip the whole hostname, `/api/*`, `/api/auth/*`, or all requests to a public route.
+The zone owner controls the shared WAF and rate-limit rules. If an interactive challenge affects an allowed protocol path, the zone rule owner must review a narrow method/path exception that preserves the rule's other predicates and all rate controls. Do not skip the whole hostname, `/api/*`, `/api/auth/*`, or all requests to a public route.
 
-Before any authorized apply, review the live state and plan to confirm that only the new exact-path Access apps and the expected Tunnel ingress entries change. The deployment workflow runs Terraform formatting, initialization without a backend and validation only. It never applies this configuration. For rollback, set `public_oauth_edge_enabled = false`; Terraform orders Tunnel Access-JWT validation back into place before removing the Bypass applications. Do not alter Cloudflare state or use a production token as part of source-only verification.
+Require a reviewed diff limited to the named exact-path Access apps and the corresponding Tunnel ingress.
+For rollback, verify that origin-side Access JWT validation is restored before removing the Bypass applications.
+Source verification uses isolated fixtures and preserves the live deployment.
 
 After a separately authorized edge change, run `pnpm verify:public-oauth-edge` with only `CODEXIA_PUBLIC_ORIGIN` set. This read-only probe sends no Access service token, cookie or bearer token. It checks the exact resource metadata audience and scope ceiling, OAuth/OIDC discovery and JWKS, the two required login reads, the dedicated login/consent HTML and every directly referenced `/oauth/assets/*` file, the expected `/mcp` 401 challenge, anonymous denial of `/api/projects`, and continued Access protection of `/desktop`. It does not complete an OAuth authorization code flow; use the disposable OAuth integration acceptance for that.
 <<<

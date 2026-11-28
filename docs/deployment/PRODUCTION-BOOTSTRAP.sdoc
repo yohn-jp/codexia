@@ -27,7 +27,10 @@ MID: 70dea02104b62424998e7344b56480c5
 STATEMENT: >>>
 Use the [LINK: DOC-DEPLOYMENT-CODEXIACTL, initial deployment CLI] from a pinned OpenSSH session on the target Ubuntu 26.04 x86-64 VM. It prepares the inputs below and invokes the existing protected workflows. The individual steps in this runbook are available for diagnosis and independent recovery. Operator approval and owner enrollment remain mandatory; Environment reviewers and Prevent self-review are optional. Both deployment Environments must restrict deployment to branch main only.
 
-On your trusted workstation, select a published immutable official CLI version from the [Codexia releases](https://github.com/yohn-jp/codexia/releases), including when deploying a fork. The download and attestation repository below is the **official CLI publisher**, not the deployment repository. Replace `vX.Y.Z` with that exact tag and use an up-to-date GitHub CLI to verify the release and the binary's provenance.
+On your trusted workstation, select a published immutable official CLI version that has passed the single Tunnel deployment acceptance, including when deploying a fork.
+Keep formal operation on hold if the [Codexia releases](https://github.com/yohn-jp/codexia/releases) lack an accepted version.
+Use the official CLI publisher for the download and attestation.
+Set `vX.Y.Z` to the exact accepted tag and use an up-to-date GitHub CLI to verify the release and binary provenance.
 
 ```sh
 tag=vX.Y.Z
@@ -54,7 +57,13 @@ chmod 0700 codexiactl-linux-amd64
 
 The release identifies its official source and version. The official publisher provisions the public Codexia GitHub App and binds its public Client ID to release builds using `CODEXIACTL_GITHUB_APP_CLIENT_ID`. On the official App installation page, choose **Only select repositories** and select the intended `codexia` repository. In the browser Device Flow, sign in as a user authorized to operate that repository. The CLI confirms one discovered repository or prompts you to choose among eligible repositories. Review the selected repository, protected `main`, VM and public origin before approving. The same steps apply to the publisher's repository and to forks. See the [App installation page](https://github.com/apps/codexiactl/installations/new) and the [LINK: DOC-DEPLOYMENT-CODEXIACTL-41-github公式-app-による認証配備対象の発見, GitHub authentication and target discovery contract].
 
-Keep your existing verified SSH connection available and have an independently verified host key fingerprint ready to compare with the observed keys. The CLI uses Cloudflare’s official headless Device Flow, provisions the required limited credentials, and verifies the host connector from the independently pinned session. If optional Environment reviewers are configured, use the GitHub approval UI for the runs the CLI identifies. Use `doctor` to identify missing prerequisites or permissions and `status` for the latest verified lifecycle observation. After an interrupted invocation, run `init` again from the same VM and administrator account. Resolve reported state conflicts through the owning protected workflow or recovery runbook before retrying.
+Keep your existing verified SSH connection available and have an independently verified host key fingerprint ready to compare with the observed keys. The CLI uses Cloudflare’s official headless Device Flow and verifies the host connector from the independently pinned session. If optional Environment reviewers are configured, use the GitHub approval UI for the runs the CLI identifies.
+Use `doctor` to identify missing prerequisites and `status` for the latest verified lifecycle observation.
+The read-only inspection can report that the selected CLI version could not complete Workers route and domain inventory.
+For an authorized deployment, use the credential and resource approvals within `init` to complete that observation and review the exact changes.
+Resolve other target and permission conflicts before continuing.
+After interruption, retain the checkpoint and resume `init` from the same VM and administrator account after reconciling any pending operation reported by the CLI.
+Follow the [LINK: DOC-DEPLOYMENT-ACCESS-POLICY-MIGRATION, Access policy migration] for interrupted provider credential issuance.
 
 After the CLI confirms the normal frontend and the registration-only API and hands off the Owner Setup Grant, the owner opens the normal `/console/setup` page. Use the existing protected procedures below after owner registration.
 
@@ -85,7 +94,7 @@ Use GitHub Environments restricted to branch main; required reviewers and Preven
 
 The controller builds a single-host Ansible inventory in a private runner directory. R4 verifies the active host connector and installs the closed publication gate. On a fresh target the VM generates the PostgreSQL admin, application and auth-role passwords, Better Auth secret and OAuth introspection secret. On an existing target, the VM checks its existing identities and values. Missing credentials with existing data, a connector identity mismatch, a UID conflict or an unverified DB state require reconciliation before proceeding.
 
-Before enabling these workflows on an existing installation, review the repository and owner IDs, the main source's origin and the live Cloudflare topology. Add the reviewed binding to the existing Cloudflare target Variable in both protected Environments. Leave the independently verified credentials in their protected locations. The workflow rejects the old unbound target and any value copied from another repository. Use a fresh lifecycle Preflight after reconciling the Variables.
+Before enabling these workflows on an existing installation, review the repository and owner IDs, the main source's origin and the live Cloudflare topology. Review and reconcile the protected Cloudflare target through the [LINK: DOC-DEPLOYMENT-CODEXIACTL, CLI registration process]. Existing credentials stay in their protected Environments while their use is verified. The workflow rejects an unbound target or a value copied from another repository. Use a fresh lifecycle Preflight after reconciling the Variables.
 
 For an existing VM, preserve its independently authenticated SSH path during migration. After the new management route, its two authorization boundaries, and the closed publication gate are demonstrated, the owner approves removal of the old connector and its dedicated credentials. If an interrupted deployment still has a journal from the old runtime, use the source that created the journal and the existing protected recovery procedure before this cleanup.
 <<<
