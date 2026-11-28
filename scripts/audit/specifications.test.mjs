@@ -14,7 +14,7 @@ test('[TEST-TRC-08-001] projects obligations, reverse surfaces, and evidence lin
     mkdirSync(join(output, 'json'), { recursive: true });
     writeFileSync(join(output, 'html/index.html'), '<html><body>Requirements</body></html>');
     writeFileSync(join(output, 'html/docs/requirements/REQUIREMENT-REGISTER.sdoc-TRACE.html'),
-      '<html><body><p id="verified">Trace</p><a href="./REQUIREMENT-REGISTER.sdoc-TRACE.html#meaning">Meaning</a><a href="./REQUIREMENT-REGISTER.sdoc-TRACE.html#verified">Verified</a></body></html>');
+      '<html><body><p id="verified">Trace</p><a href="./REQUIREMENT-REGISTER.sdoc-TRACE.html#meaning">Meaning</a><a href="#meaning">In-page meaning</a><a href="./REQUIREMENT-REGISTER.sdoc-TRACE.html#verified">Verified</a></body></html>');
     writeFileSync(join(output, 'html/docs/requirements/REQUIREMENT-REGISTER.sdoc.html'),
       '<html><body><p id="meaning">Meaning</p><a href="https://github.com/yohn-jp/codexia/blob/main/docs/design/screen-catalog.json">Model</a></body></html>');
     writeFileSync(join(output, 'json/index.json'), '{}');
@@ -50,7 +50,7 @@ test('[TEST-TRC-08-001] projects obligations, reverse surfaces, and evidence lin
     packSpecifications(site, output, sha, { status: 'CERTIFIED', sourceSha: sha, repository: 'yohn-jp/codexia', runId: '43', attempt: 2, job: 'types', task: 'requirements-trace', runUrl: 'https://github.com/yohn-jp/codexia/actions/runs/43', artifactId: 987, artifactDigest: 'sha256:' + 'd'.repeat(64), passedCaseIds: ['TEST-TRC-01-001'] });
     assert.equal(verifySpecifications(site, sha).sourceSha, sha);
     const publishedTrace = readFileSync(join(site, 'requirements/html/docs/requirements/REQUIREMENT-REGISTER.sdoc-TRACE.html'), 'utf8');
-    assert.match(publishedTrace, /REQUIREMENT-REGISTER\.sdoc\.html#meaning/u);
+    assert.equal((publishedTrace.match(/REQUIREMENT-REGISTER\.sdoc\.html#meaning/gu) ?? []).length, 2);
     assert.match(publishedTrace, /REQUIREMENT-REGISTER\.sdoc-TRACE\.html#verified/u);
     const publishedDoc = readFileSync(join(site, 'requirements/html/docs/requirements/REQUIREMENT-REGISTER.sdoc.html'), 'utf8');
     assert.ok(publishedDoc.includes(`github.com/yohn-jp/codexia/blob/${sha}/docs/design/screen-catalog.json`));

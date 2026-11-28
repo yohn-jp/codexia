@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, posix, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decoratePage } from '../pages-ui/navigation.mjs';
 import { isNativeSpecification, isDesignProjectionModel } from '../ci/evidence/task-inputs.mjs';
@@ -493,12 +493,15 @@ function publishStrictDocLinks(htmlRoot, sourceSha) {
     const source = readFileSync(file, 'utf8');
     // Published design references resolve against the same source as the export.
     const sourceLinks = source.replace(/(href="https:\/\/github\.com\/yohn-jp\/codexia\/(?:blob|tree)\/)main(?=\/)/gu, `$1${sourceSha}`);
-    const updated = sourceLinks.replace(/\bhref="((?:\.\.?\/)*[^"#?:]*?\.sdoc)-(?:DEEP-TRACE|TRACE|TABLE)\.html#([^"]+)"/gu, (link, document, fragment) => {
-      const documentPath = resolve(dirname(file), `${document}.html`);
-      const viewPath = resolve(dirname(file), link.slice(6, link.indexOf('#')));
+    const viewSuffix = /-(?:DEEP-TRACE|TRACE|TABLE)\.html$/u;
+    const updated = sourceLinks.replace(/\bhref="((?:\.\.?\/)*[^"#?:]*?\.sdoc-(?:DEEP-TRACE|TRACE|TABLE)\.html)?#([^"]+)"/gu, (link, reference, fragment) => {
+      const view = reference ?? basename(file);
+      if (!viewSuffix.test(view)) return link;
+      const document = view.replace(viewSuffix, '.html');
       const decoded = decodeURIComponent(fragment);
-      if (anchors.get(viewPath)?.has(decoded) || !anchors.get(documentPath)?.has(decoded)) return link;
-      return `href="${document}.html#${fragment}"`;
+      if (anchors.get(resolve(dirname(file), view))?.has(decoded) ||
+          !anchors.get(resolve(dirname(file), document))?.has(decoded)) return link;
+      return `href="${document}#${fragment}"`;
     });
     if (updated !== source) writeFileSync(file, updated);
   }
