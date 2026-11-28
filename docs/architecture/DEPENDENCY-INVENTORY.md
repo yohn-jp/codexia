@@ -164,6 +164,17 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `golang.org/x/term` | `v0.48.0` | TTY 専用の非表示端末入力。非対話実行と機械向け出力からの分離を確認 |
 | `filippo.io/age` | `v1.3.2` | Owner Setup Grant の既存 age envelope。受取人の照合と一時鍵を確認 |
 
+### codexiactl の採用済み設計・実装時に登録する依存
+
+以下は [採用決定](DEPENDENCY-POLICY.md#codexiactlhuh-v2--lip-gloss-v2を採用) の初期基準版であり、上の表の現行 `go.mod` 宣言ではない。実装時に最新安定版と実解決版を確認し、同じ PR で直接依存表へ移す。
+
+| モジュール | 初期基準版 | 所有・用途と更新時の確認 |
+| --- | --- | --- |
+| `charm.land/huh/v2` | `v2.0.3` | CodexiaCTL の非秘密フォーム・選択。明示 TTY、Context、拒否・中断・既定値、line mode との意味同等性を検証 |
+| `charm.land/lipgloss/v2` | `v2.1.1` | CodexiaCTL の共通表示・style。端末 capability、狭幅、色なし、機械出力との分離を検証 |
+
+Bubble Tea/Bubbles 等は Huh の推移依存として扱い、解決版の互換性を検証する。Go の toolchain と依存の実バージョンは `go.mod`/`go.sum` に従い、既存の `golang.org/x/term` による秘密入力・TTY 境界を維持する。
+
 ## アップデートの審査・記録
 
 1. **候補の事実**: package名、マニフェスト宣言、lockfile解決版、registryの`latest`、利用ランタイム、変更する依存範囲（peer／transitive含む）を特定する。`^`、`~`は既に最新版という証拠ではない。
