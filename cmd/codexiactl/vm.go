@@ -229,23 +229,38 @@ func (vm vmObservation) confirmHostFingerprint(o operator) (string, error) {
 	if vm.verifiedPin != nil && *vm.verifiedPin != "" {
 		return *vm.verifiedPin, nil
 	}
-	for _, key := range vm.hostKeys {
-		o.Notice(fmt.Sprintf("Effective VM OpenSSH host key %s %s", key.Type(), ssh.FingerprintSHA256(key)))
+	if len(vm.hostKeys) == 0 {
+		return "", refused("No effective OpenSSH host keys are available. Check the sshd HostKey settings on this VM")
 	}
-	fingerprint, err := o.Ask("Enter the SHA256 host fingerprint independently verified on your SSH client or VM provider console.")
+	selected := 0
+	if len(vm.hostKeys) > 1 {
+		options := make([]string, len(vm.hostKeys))
+		for i, key := range vm.hostKeys {
+			options[i] = key.Type() + " " + ssh.FingerprintSHA256(key)
+		}
+		var err error
+		selected, err = selectOption(o, "Choose the OpenSSH host key that matches the fingerprint on your trusted SSH client or VM provider console.", options)
+		if err != nil {
+			return "", err
+		}
+		if selected < 0 || selected >= len(vm.hostKeys) {
+			return "", refused("Choose one of this VM's observed OpenSSH host keys")
+		}
+	}
+	key := vm.hostKeys[selected]
+	fingerprint := ssh.FingerprintSHA256(key)
+	approved, err := o.Confirm("Does the independently verified fingerprint on your trusted SSH client or provider console match " +
+		key.Type() + " " + fingerprint + " exactly?")
 	if err != nil {
 		return "", err
 	}
-	fingerprint = strings.TrimSpace(fingerprint)
-	for _, key := range vm.hostKeys {
-		if ssh.FingerprintSHA256(key) == fingerprint {
-			if vm.verifiedPin != nil {
-				*vm.verifiedPin = fingerprint
-			}
-			return fingerprint, nil
-		}
+	if !approved {
+		return "", refused("The OpenSSH fingerprint was not independently confirmed. Verify the SSH host on your trusted workstation or provider console before restarting")
 	}
-	return "", refused("independently verified fingerprint does not match an effective VM OpenSSH host key")
+	if vm.verifiedPin != nil {
+		*vm.verifiedPin = fingerprint
+	}
+	return fingerprint, nil
 }
 
 func (vm vmObservation) pinForFingerprint(address, fingerprint string) (string, error) {

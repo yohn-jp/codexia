@@ -8,20 +8,42 @@ import (
 	"time"
 )
 
+const (
+	vmStage = iota + 1
+	githubStage
+	tailnetStage
+	cloudflareStage
+	settingsStage
+	managementStage
+	bootstrapStage
+	frontendStage
+	ownerSetupStage
+	handoffStage
+)
+
+func reportStage(o operator, step int, detail string) {
+	if presentation, ok := o.(interface{ Stage(int, string) }); ok {
+		presentation.Stage(step, detail)
+		return
+	}
+	o.Notice(fmt.Sprintf("[%02d/10] %s", step, detail))
+}
+
 func runInit(ctx context.Context) (resultErr error) {
 	if !releaseVersion.MatchString(version) || !sourceHash.MatchString(source) {
 		return needsAction("Use the provenance-verified immutable GitHub Release binary to run init")
 	}
+	tty, err := openTerminal()
+	if err != nil {
+		return needsAction("Open an interactive SSH session with a controlling terminal on the target VM and run codexiactl init")
+	}
+	defer tty.Close()
+	tty.bindContext(ctx)
+	reportStage(tty, vmStage, "Checking the local OpenSSH session, OS, clock and administrator access")
 	vm, err := observeVM(ctx)
 	if err != nil {
 		return err
 	}
-	tty, err := openTerminal()
-	if err != nil {
-		return needsAction("init requires an interactive SSH terminal")
-	}
-	defer tty.Close()
-	tty.bindContext(ctx)
 	store, err := openCheckpoint(vm.HostID)
 	if err != nil {
 		return err
@@ -31,7 +53,8 @@ func runInit(ctx context.Context) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	tty.Notice("Target VM " + vm.HostID + ", administrator " + vm.User + ", sshd host key " + vm.HostFingerprint + ".")
+	tty.Notice("VM observed: " + vm.HostID + ", administrator " + vm.User + ", sshd host key " + vm.HostFingerprint + ", clock " + vm.Clock + ".")
+	reportStage(tty, githubStage, "Authenticate with the official App and confirm the deployment repository")
 	gh, err := githubLogin(ctx, tty, githubAppClientID)
 	if err != nil {
 		return err
@@ -61,8 +84,9 @@ func runInit(ctx context.Context) (resultErr error) {
 		return err
 	}
 	if snapshot.MainSHA != gh.approvedSHA {
-		return refused("GitHub main changed after deployment target confirmation")
+		return refused("GitHub main changed after deployment target confirmation. Run codexiactl init again and review the new source")
 	}
+	tty.Notice("Verified the selected repository's main, OIDC subject and Environment restrictions.")
 	c := workflowController{github: gh, operator: tty, store: store, state: state, target: gh.target,
 		sha: snapshot.MainSHA, hostID: vm.HostID, origin: settings.PublicOrigin}
 	c.state.HostID = vm.HostID
@@ -95,14 +119,16 @@ func runInit(ctx context.Context) (resultErr error) {
 	if vm.CodexiaPresent {
 		management := existingManagement(snapshot)
 		if management == "" {
-			return needsAction("Existing Codexia resources were detected and neither protected SSH configuration is complete. Verify the installation through the recovery runbook")
+			return needsAction("Existing Codexia resources were detected and neither protected SSH configuration is complete. Verify the installation through " +
+				c.target.URL() + "/blob/main/docs/deployment/PROTECTED-RECOVERY.md")
 		}
-		receipt, _, err := c.preflight(ctx, management)
+		tty.Notice("Existing Codexia resources detected. Observe the protected lifecycle before changing provider or repository settings.")
+		receipt, id, err := c.preflight(ctx, management)
 		if err != nil {
 			return err
 		}
 		if _, err := receipt.initialOperation(); err != nil {
-			return err
+			return c.lifecycleBlocker(id, err)
 		}
 	}
 	if err := c.prepareInputs(ctx, gh, tty, vm, settings, snapshot); err != nil {
@@ -150,6 +176,7 @@ func managementInputsExist(env githubEnvironment, names []string, sshSecret stri
 
 func (c *workflowController) prepareInputs(ctx context.Context, gh *githubControl, o operator, vm vmObservation,
 	settings productionContract, snapshot githubSnapshot) error {
+	reportStage(o, tailnetStage, "Verify this VM's Tailnet, runner access policy and repository OIDC trust")
 	tailnet, err := prepareTailnet(ctx, o, vm, gh, snapshot, false)
 	if err != nil {
 		return err
@@ -158,6 +185,8 @@ func (c *workflowController) prepareInputs(ctx context.Context, gh *githubContro
 	if err != nil {
 		return err
 	}
+	o.Notice("Verified the Tailnet node, CI policy and effective OpenSSH pin for " + tailnet.Address + ".")
+	reportStage(o, cloudflareStage, "Verify the existing edge for "+settings.PublicOrigin)
 	edge, err := observeCloudflare(ctx, o, gh.target, settings)
 	if err != nil {
 		return err
@@ -166,6 +195,7 @@ func (c *workflowController) prepareInputs(ctx context.Context, gh *githubContro
 	if err := verifyInitialEdge(ctx, vm, edge); err != nil {
 		return err
 	}
+	reportStage(o, settingsStage, "Compare checked VM and provider values against the selected repository's protected inputs")
 	if err := c.requireIdle(ctx, gh); err != nil {
 		return err
 	}
@@ -277,6 +307,7 @@ func (c *workflowController) requireIdle(ctx context.Context, gh *githubControl)
 }
 
 func (c *workflowController) install(ctx context.Context, gh *githubControl, settings productionContract) error {
+	reportStage(c.operator, managementStage, "Check pinned administrator SSH and sudo through GitHub Actions, then inspect the certified pair")
 	if err := requireApproval(c.operator, "Run the protected read-only administrator SSH and sudo check?"); err != nil {
 		return err
 	}
@@ -289,9 +320,11 @@ func (c *workflowController) install(ctx context.Context, gh *githubControl, set
 	}
 	next, err := receipt.initialOperation()
 	if err != nil {
-		return err
+		return c.lifecycleBlocker(id, err)
 	}
+	c.operator.Notice("Verified the management connection and a certified candidate pair in " + c.target.runLink(id) + ".")
 	if next != publishFrontend {
+		reportStage(c.operator, bootstrapStage, "Review the candidate and the approved database operation")
 		c.operator.Notice(receipt.reviewSummary(c.target, id))
 		if err := requireApproval(c.operator, "Run R4 through the existing protected Bootstrap workflow?"); err != nil {
 			return err
@@ -315,26 +348,32 @@ func (c *workflowController) install(ctx context.Context, gh *githubControl, set
 		if err != nil {
 			return err
 		}
+	} else {
+		reportStage(c.operator, bootstrapStage, "Existing VM and Auth evidence make another R4 dispatch unnecessary")
 	}
 	// With setup already running, a fresh bootstrap receipt can authorize
 	// delivery. The canonical on-host reader rechecks the live API and grant.
 	if next == publishFrontend && receipt.setupForDelivery() && c.state.OwnerSetupRunID > 0 {
+		reportStage(c.operator, frontendStage, "The certified Frontend is already live")
+		reportStage(c.operator, ownerSetupStage, "The recorded Owner setup has a verified live grant")
 		return c.deliver(ctx, gh, settings, receipt, nil)
 	}
 	if err := c.publishInitialFrontend(ctx); err != nil {
 		return err
 	}
+	reportStage(c.operator, ownerSetupStage, "Verify the live Frontend and decide how to deliver the Owner grant")
 	receipt, id, err = c.preflight(ctx, "bootstrap")
 	if err != nil {
 		return err
 	}
 	if _, err := receipt.initialOperation(); err != nil {
-		return err
+		return c.lifecycleBlocker(id, err)
 	}
 	if !receipt.frontendReady() {
-		return needsAction("The certified Frontend was not observed on the normal Worker")
+		return needsAction("The certified Frontend was not observed on the normal Worker. Review the edge evidence and candidate in " + c.target.runLink(id))
 	}
 	if receipt.setupForDelivery() && c.state.OwnerSetupRunID > 0 {
+		c.operator.Notice("The recorded Owner setup has a verified live grant.")
 		return c.deliver(ctx, gh, settings, receipt, nil)
 	}
 	if err := c.requireSettingsWindow(ctx, gh); err != nil {
@@ -405,13 +444,13 @@ func (c *workflowController) install(ctx context.Context, gh *githubControl, set
 	}); err != nil {
 		return err
 	}
-	after, _, err := c.preflight(ctx, "bootstrap")
+	after, afterID, err := c.preflight(ctx, "bootstrap")
 	if err != nil {
 		return err
 	}
 	// The approved pair must still be the one being served after R5.
 	if after.Plan.Target != receipt.Plan.Target || !after.setupForDelivery() {
-		return refused("Post-setup evidence did not establish the same certified Frontend, setup-only API and live encrypted grant")
+		return refused("Post-setup evidence did not establish the same certified Frontend, setup-only API and live encrypted grant. Review " + c.target.runLink(afterID))
 	}
 	return c.deliver(ctx, gh, settings, after, handoff)
 }
@@ -440,19 +479,21 @@ func (c *workflowController) selectOwnerHandoff(receipt lifecycleReceipt, existi
 }
 
 func (c *workflowController) publishInitialFrontend(ctx context.Context) error {
+	reportStage(c.operator, frontendStage, "Verify the runtime SSH identity and the certified Frontend on the normal Worker")
 	receipt, id, err := c.preflight(ctx, "runtime")
 	if err != nil {
 		return err
 	}
 	op, err := receipt.initialOperation()
 	if err != nil {
-		return err
+		return c.lifecycleBlocker(id, err)
 	}
 	if op != publishFrontend {
-		return refused("R4 completion was not established by the runtime Preflight")
+		return refused("R4 completion was not established by the runtime Preflight. Review " + c.target.runLink(id))
 	}
 	if receipt.setupForDelivery() ||
 		(receipt.frontendReady() && c.state.FrontendRunID > 0 && c.state.FrontendTarget == receipt.Plan.Target.FrontendArtifactSHA) {
+		c.operator.Notice("The certified Frontend is already live. No publish workflow was dispatched.")
 		return nil
 	}
 	c.operator.Notice(receipt.reviewSummary(c.target, id))
@@ -499,6 +540,7 @@ func requireFresh(receipt lifecycleReceipt) error {
 }
 
 func (c *workflowController) deliver(ctx context.Context, gh *githubControl, settings productionContract, receipt lifecycleReceipt, handoff *ownerHandoff) error {
+	reportStage(c.operator, handoffStage, "Verify the live grant and deliver it to the Owner")
 	if !receipt.setupForDelivery() || !c.target.matchesFullImage(receipt.Evidence.Candidate.BackendImage) {
 		return refused("The setup API, Frontend and grant do not have verified live evidence")
 	}
@@ -531,6 +573,7 @@ func (c *workflowController) deliver(ctx context.Context, gh *githubControl, set
 		return err
 	}
 	c.operator.Notice("SETUP_PENDING. The Owner can enroll on " + settings.PublicOrigin + "/console/setup. ACTIVE: false. ACCEPTED: false.")
-	c.operator.Notice("The Owner enrolls in their browser. Continue activation through the protected production Bootstrap runbook.")
+	c.operator.Notice("After the Owner enrolls in their browser, use the protected preparation and activation steps at " +
+		c.target.URL() + "/blob/main/docs/deployment/PRODUCTION-BOOTSTRAP.md#run-r4-and-r5.")
 	return nil
 }

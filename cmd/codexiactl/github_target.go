@@ -202,26 +202,25 @@ func chooseGitHubTarget(o operator, candidates []githubTarget, state checkpoint)
 	}
 	switch len(candidates) {
 	case 0:
-		return githubTarget{}, needsAction("No eligible codexia repository was found. Install the official Codexia GitHub App on the intended account using Only select repositories, grant the authenticated user write access to that codexia repository and run the command again. Manage access at " + githubInstallationsURL + ". " + githubPermissionNotice)
+		return githubTarget{}, needsAction("No eligible codexia repository was found. Open " + githubAppInstallationURL +
+			", select the intended account or organization, then choose Only select repositories and add codexia. Check for a pending approval or suspended installation at " +
+			githubInstallationsURL + ". Ensure the signed-in user can write to the repository and its default branch is main, then retry. " + githubPermissionNotice)
 	case 1:
 		return candidates[0], nil
 	}
+	options := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
-		o.Notice(fmt.Sprintf("%d — %s (owner %d, installation %d)", candidate.RepoID, candidate.FullName(), candidate.OwnerID, candidate.InstallationID))
+		options = append(options, fmt.Sprintf("%s (repository %d, owner %d, installation %d)",
+			candidate.FullName(), candidate.RepoID, candidate.OwnerID, candidate.InstallationID))
 	}
-	answer, err := o.Ask("Select a deployment from the displayed repository IDs, or press Enter to cancel:")
+	index, err := selectOption(o, "Select the GitHub deployment repository", options)
 	if err != nil {
 		return githubTarget{}, err
 	}
-	if answer == "" {
-		return githubTarget{}, needsAction("GitHub deployment target selection was cancelled")
+	if index < 0 || index >= len(candidates) {
+		return githubTarget{}, refused("Select exactly one repository from the observed candidates")
 	}
-	for _, candidate := range candidates {
-		if strconv.FormatInt(candidate.RepoID, 10) == answer {
-			return candidate, nil
-		}
-	}
-	return githubTarget{}, refused("Select exactly one repository ID from the observed candidates")
+	return candidates[index], nil
 }
 
 func (g *githubControl) verifyDelegation(ctx context.Context, admin bool) error {

@@ -250,6 +250,26 @@ func TestFreshTailnetProfileNeverReauthenticatesExistingProfile(t *testing.T) {
 	}
 }
 
+func TestTailscaleManagementTokenAcceptsScopedAccessWithoutEnrollmentKeys(t *testing.T) {
+	for _, tc := range []struct {
+		token string
+		valid bool
+	}{
+		{"tskey-api-fixtureCNTRL-0123456789", true},
+		{"tskey-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", true},
+		{"tskey-auth-fixtureCNTRL-0123456789", false},
+		{"tskey-client-fixtureCNTRL-0123456789", false},
+		{"tskey-scim-fixtureCNTRL-0123456789", false},
+		{"tskey-webhook-fixtureCNTRL-0123456789", false},
+		{"tskey-short", false},
+		{"", false},
+	} {
+		if got := tailnetToken.MatchString(tc.token); got != tc.valid {
+			t.Errorf("management token format %q accepted = %v, want %v", tc.token, got, tc.valid)
+		}
+	}
+}
+
 func TestTailscaleErrorsDoNotExposeProviderResponses(t *testing.T) {
 	const token = "mock-private-credential"
 	err := tailnetAPIError("read the Tailnet policy", ts.APIError{

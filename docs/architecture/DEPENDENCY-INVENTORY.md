@@ -163,17 +163,13 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 | `golang.org/x/sys` | `v0.50.0` | Linux ファイル操作とローカル排他。既存ファイルの所有権、モード、symlink 拒否を確認 |
 | `golang.org/x/term` | `v0.48.0` | TTY 専用の非表示端末入力。非対話実行と機械向け出力からの分離を確認 |
 | `filippo.io/age` | `v1.3.2` | Owner Setup Grant の既存 age envelope。受取人の照合と一時鍵を確認 |
+| `charm.land/huh/v2` | `v2.0.3` | MIT。非秘密フォーム・選択。明示 TTY、Context、拒否・中断・既定値、line mode との意味同等性を検証 |
+| `charm.land/lipgloss/v2` | `v2.1.1` | MIT。共通表示・style。端末 capability、狭幅、色なし、機械出力との分離を検証 |
+| `charm.land/bubbletea/v2` | `v2.0.2` | MIT。Huh の内部描画基盤。CLI が直接使う API はフォームのシグナル処理を CLI に統一し、取消と EOF の区別、端末環境の受け渡し、背景色の照会に限定 |
 
-### codexiactl の採用済み設計・実装時に登録する依存
-
-以下は [採用決定](DEPENDENCY-POLICY.md#codexiactl-terminal-ux) の初期基準版であり、上の表の現行 `go.mod` 宣言ではない。実装時に最新安定版と実解決版を確認し、同じ PR で直接依存表へ移す。
-
-| モジュール | 初期基準版 | 所有・用途と更新時の確認 |
-| --- | --- | --- |
-| `charm.land/huh/v2` | `v2.0.3` | CodexiaCTL の非秘密フォーム・選択。明示 TTY、Context、拒否・中断・既定値、line mode との意味同等性を検証 |
-| `charm.land/lipgloss/v2` | `v2.1.1` | CodexiaCTL の共通表示・style。端末 capability、狭幅、色なし、機械出力との分離を検証 |
-
-Bubble Tea/Bubbles 等は Huh の推移依存として扱い、解決版の互換性を検証する。Go の toolchain と依存の実バージョンは `go.mod`/`go.sum` に従い、既存の `golang.org/x/term` による秘密入力・TTY 境界を維持する。
+Huh v2.0.3 の宣言は Bubble Tea v2.0.2、Bubbles v2.0.0、Lip Gloss v2.0.1。
+解決版は Bubble Tea v2.0.2、Bubbles v2.0.0、Lip Gloss v2.1.1。
+Bubbles は推移依存として扱い、秘密入力と TTY の境界には既存の `golang.org/x/term` を使う。
 
 ## アップデートの審査・記録
 

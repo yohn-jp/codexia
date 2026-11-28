@@ -115,13 +115,13 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 }
 
 func reportError(ctx context.Context, stderr io.Writer, err error) int {
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || errors.Is(err, errTerminalInterrupt) {
 		return 130
 	}
 	if err == nil {
 		return 0
 	}
-	fmt.Fprintln(stderr, "codexiactl:", err)
+	printTerminalLine(stderr, errorText, "codexiactl: "+err.Error())
 	switch {
 	case errors.Is(err, errCheckpointUnsafe), errors.Is(err, errGitHubTarget), errors.Is(err, errExistingOwner):
 		return 3
