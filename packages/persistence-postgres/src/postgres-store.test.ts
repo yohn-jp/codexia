@@ -714,9 +714,7 @@ test('native restore retains confirmed evidence across an unambiguous edit outsi
   const initial = await createDocument(project.id, '😀文🧭証拠');
   const edited = await persistence.transaction(transaction =>
     transaction.saveDocument(
-      saveCommand(project.id, initial.document.id, initial.revision.id, '😁🪶文🧭証拠', [
-        { fromUtf16: 0, toUtf16: 2, insert: '😁🪶' },
-      ]),
+      saveCommand(project.id, initial.document.id, initial.revision.id, '😁🪶文🧭証拠', [{ fromUtf16: 0, toUtf16: 2, insert: '😁🪶' }]),
     ),
   );
   const evidenceId = randomUUID() as EvidenceId;
@@ -802,9 +800,7 @@ test('native restore requires review when repeating text makes the retained anch
   const initial = await createDocument(project.id, '前🧭後');
   const edited = await persistence.transaction(transaction =>
     transaction.saveDocument(
-      saveCommand(project.id, initial.document.id, initial.revision.id, '前🧭🧭後', [
-        { fromUtf16: 3, toUtf16: 3, insert: '🧭' },
-      ]),
+      saveCommand(project.id, initial.document.id, initial.revision.id, '前🧭🧭後', [{ fromUtf16: 3, toUtf16: 3, insert: '🧭' }]),
     ),
   );
   const evidenceId = randomUUID() as EvidenceId;
