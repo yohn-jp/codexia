@@ -44,6 +44,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Trust only the checked-out workspace inside the browser container
+        run: |
+          printf 'GIT_CONFIG_COUNT=1\nGIT_CONFIG_KEY_0=safe.directory\nGIT_CONFIG_VALUE_0=%s\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       - name: Build and verify exact-source static assets
         env:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
