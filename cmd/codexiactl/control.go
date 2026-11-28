@@ -167,11 +167,7 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 	if err := validateServiceAuthRegistration(snapshot, c.state.CloudflareServiceAuth); err != nil {
 		return err
 	}
-	desired, err := observedProtectedVariables(snapshot, vm, managementHostname, pin, edge.Target)
-	if err != nil {
-		return err
-	}
-	variables, err := missingVariables(snapshot, desired)
+	variables, err := plannedProtectedVariables(snapshot, vm, managementHostname, pin, edge.Target)
 	if err != nil {
 		return err
 	}
@@ -184,7 +180,18 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 		return ensureCloudflareConnector(ctx, o, edge)
 	}
 	for _, item := range variables {
-		o.Notice("Add missing Variable " + item.environment + "/" + item.name)
+		description := "Add missing Variable "
+		if item.update {
+			description = "Migrate verified Variable "
+		}
+		label := item.environment + "/" + item.name
+		if item.update && (item.name == "CODEXIA_BOOTSTRAP_HOST" || item.name == "CODEXIA_DEPLOY_HOST") {
+			label += " from " + item.previous + " to " + item.value
+		}
+		o.Notice(description + label)
+	}
+	if slices.ContainsFunc(variables, func(write protectedVariableWrite) bool { return write.update }) {
+		o.Notice("Migrate the independently verified VM host key and unchanged Cloudflare resource identity to " + managementHostname + ". Current Variable values will be checked before each write.")
 	}
 	for _, item := range secrets {
 		o.Notice("Add missing Secret " + item.environment + "/" + item.name)
@@ -192,8 +199,8 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 	if c.state.BootstrapPublicKey != "" {
 		o.Notice("A previously issued bootstrap SSH identity requires reconciliation with authorized_keys.")
 	}
-	o.Notice("This change requires write access to the selected GitHub Environments. Existing values stay in place. New bootstrap SSH credentials also add a dedicated public key to this administrator's authorized_keys.")
-	if err := requireApproval(o, "Register the missing inputs shown above for "+c.target.FullName()+"?"); err != nil {
+	o.Notice("This change requires write access to the selected GitHub Environments. Existing Secrets stay in place. New bootstrap SSH credentials also add a dedicated public key to this administrator's authorized_keys.")
+	if err := requireApproval(o, "Apply the protected input changes shown above for "+c.target.FullName()+"?"); err != nil {
 		return err
 	}
 	if err := c.requireSettingsWindow(ctx, control); err != nil {
@@ -209,16 +216,12 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 	if err := validateServiceAuthRegistration(snapshot, c.state.CloudflareServiceAuth); err != nil {
 		return err
 	}
-	desired, err = observedProtectedVariables(snapshot, vm, managementHostname, pin, edge.Target)
-	if err != nil {
-		return err
-	}
-	freshVariables, err := missingVariables(snapshot, desired)
+	freshVariables, err := plannedProtectedVariables(snapshot, vm, managementHostname, pin, edge.Target)
 	if err != nil {
 		return err
 	}
 	freshSecrets := missingSecrets(snapshot)
-	if !settingsApprovalMatches(variables, freshVariables) || !settingsApprovalMatches(secrets, freshSecrets) {
+	if !slices.Equal(variables, freshVariables) || !settingsApprovalMatches(secrets, freshSecrets) {
 		return refused("The protected input inventory changed before the exclusive writer window. Review the new plan before writing")
 	}
 	variables, secrets = freshVariables, freshSecrets
@@ -238,7 +241,14 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 		if err := c.currentMain(ctx); err != nil {
 			return err
 		}
-		if err := control.PutVariable(ctx, input.environment, input.name, input.value, nil); err != nil {
+		var expected *string
+		if input.update {
+			if err := requireCloudflarePublicationClosed(ctx, vm); err != nil {
+				return err
+			}
+			expected = &input.previous
+		}
+		if err := control.PutVariable(ctx, input.environment, input.name, input.value, expected); err != nil {
 			return err
 		}
 	}
@@ -254,7 +264,7 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 	if err != nil {
 		return err
 	}
-	remaining, err := missingVariables(updated, desired)
+	remaining, err := plannedProtectedVariables(updated, vm, managementHostname, pin, edge.Target)
 	if err != nil {
 		return err
 	}
