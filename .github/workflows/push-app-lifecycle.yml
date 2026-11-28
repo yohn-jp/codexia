@@ -247,7 +247,7 @@ jobs:
             enabled=true
           elif [[ -n "$BASE_SHA" ]]; then
             status=0
-            git diff --quiet "$BASE_SHA"...HEAD -- deploy/ansible/benchmark-backup-extraction.py || status=$?
+            git diff --quiet "$BASE_SHA"...HEAD -- deploy/ansible/backup-extract-runtime.sh deploy/ansible/benchmark-backup-extraction.py || status=$?
             case "$status" in 0) ;; 1) enabled=true ;; *) exit "$status" ;; esac
           fi
           echo "CODEXIA_BENCHMARK_BACKUP_RUNTIME=$enabled" >> "$GITHUB_ENV"

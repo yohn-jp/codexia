@@ -89,9 +89,9 @@
         timed start_worker systemctl --user start "$unit" && systemctl --user is-active --quiet "$unit"
     }
     extract_release() {
-      podman run --rm --pull=never --network=none --read-only --cap-drop=all --security-opt=no-new-privileges \
-        --image-volume=ignore --entrypoint=tar "$BACKUP_IMAGE" -cf - -C / app -C /usr/local bin/node |
-        tar -xf - --no-same-owner -C "$1"
+      bash -s -- "$BACKUP_IMAGE" "$1" <<'RUNTIME_EXTRACTOR'
+    {{ lookup('ansible.builtin.file', playbook_dir + '/backup-extract-runtime.sh') }}
+    RUNTIME_EXTRACTOR
     }
     verify_release() {
       (cd "$1" && ./bin/node --input-type=module -e '
