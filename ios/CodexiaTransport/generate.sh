@@ -8,22 +8,32 @@ contract="$workspace/packages/http-contract/openapi/codexia.openapi.yaml"
 sources="$package/Sources/CodexiaAPI/Generated"
 mkdir -p "$package/.build"
 scratch=$(mktemp -d "$package/.build/codexia-generate.XXXXXXXX")
-trap 'rm -rf "$scratch"' EXIT
+trap 'wait; rm -rf "$scratch"' EXIT
+
+# Build the locked executable while TypeSpec prepares its input.
+swift build --package-path "$package" --force-resolved-versions --jobs 4 --product swift-openapi-generator &
+generator_pid=$!
 
 (cd "$workspace" && pnpm --filter @codexia/http-contract generate:openapi)
 python3 "$package/normalize-openapi.py" "$contract" "$scratch/openapi.yaml" "$scratch/expected"
 
+wait "$generator_pid"
+bin_path=$(swift build --package-path "$package" --force-resolved-versions --show-bin-path)
 generate() {
   mkdir "$1"
-  swift run --package-path "$package" --force-resolved-versions --jobs 4 swift-openapi-generator generate \
+  "$bin_path/swift-openapi-generator" generate \
     "$scratch/openapi.yaml" --config "$package/openapi-generator-config.yaml" --output-directory "$1"
   python3 "$package/check-operation-manifest.py" "$scratch/expected" \
     "$1/Types+Operations.swift" "$1/Client.swift"
 }
 
+if [[ "${1:-}" == --check ]]; then
+  generate "$scratch/repeat" &
+  repeat_pid=$!
+fi
 generate "$scratch/source"
 if [[ "${1:-}" == --check ]]; then
-  generate "$scratch/repeat"
+  wait "$repeat_pid"
   diff -ru "$scratch/source" "$scratch/repeat"
 fi
 
