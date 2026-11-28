@@ -674,6 +674,10 @@ test('Better Auth 1.7.x accepts only one operator-granted first owner and preser
   const ownerHeaders = new Headers({ cookie: ownerCookie, origin: apiOrigin });
   const webClientId = bootstrapConfig.ownerClientIds[0]!;
   const iosClientId = bootstrapConfig.ownerClientIds[1]!;
+  // The disposable auth listener runs on HTTP, but the registered public
+  // redirect belongs to the reviewed production HTTPS origin. The OAuth
+  // acceptance exercises the code flow without navigating to that callback.
+  const approvedWebRedirect = new URL('/desktop', migrationEnvironment.CODEXIA_PUBLIC_ORIGIN!).href;
   const oauthRuntime = bootstrapRuntime;
   const registerOAuthClient = async (
     clientId: string,
@@ -682,7 +686,7 @@ test('Better Auth 1.7.x accepts only one operator-granted first owner and preser
   const ownerScope = `openid ${CODEXIA_OWNER_SCOPE} offline_access`;
   const webClient = await registerOAuthClient(webClientId, {
     client_name: 'Codexia Acceptance Web',
-    redirect_uris: [`${apiOrigin}/desktop`],
+    redirect_uris: [approvedWebRedirect],
     resources: [oauthRuntime.audience],
     scope: ownerScope,
     token_endpoint_auth_method: 'none',
@@ -730,7 +734,7 @@ test('Better Auth 1.7.x accepts only one operator-granted first owner and preser
   const authorizationParams = new URLSearchParams({
     response_type: 'code',
     client_id: webClientId,
-    redirect_uri: `${apiOrigin}/desktop`,
+    redirect_uri: approvedWebRedirect,
     scope: ownerScope,
     resource: oauthRuntime.audience,
     state,
@@ -755,7 +759,7 @@ test('Better Auth 1.7.x accepts only one operator-granted first owner and preser
   assert.ok(oauthQuery.includes('sig='), 'the consent request must be signed by the OAuth provider');
   const consentContext = await oauthRuntime.getConsentContext(ownerHeaders, oauthQuery);
   assert.deepEqual(consentContext.requestedScopes, ['openid', CODEXIA_OWNER_SCOPE, 'offline_access']);
-  assert.equal(consentContext.redirectUri, `${apiOrigin}/desktop`);
+  assert.equal(consentContext.redirectUri, approvedWebRedirect);
   const consent = await fetch(`${oauthRuntime.issuer}/oauth2/consent`, {
     method: 'POST',
     headers: new Headers({ cookie: ownerCookie, origin: apiOrigin, 'content-type': 'application/json' }),
@@ -776,7 +780,7 @@ test('Better Auth 1.7.x accepts only one operator-granted first owner and preser
       grant_type: 'authorization_code',
       client_id: webClientId,
       code,
-      redirect_uri: `${apiOrigin}/desktop`,
+      redirect_uri: approvedWebRedirect,
       code_verifier: verifier,
       resource: oauthRuntime.audience,
     }),
