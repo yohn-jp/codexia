@@ -184,7 +184,7 @@ MID: 8f447941b2456cfc370386de74a3a722
 STATEMENT: >>>
 TypeSpec 1.18.0 で直接生成する形式を **OpenAPI 3.1.0** とする。
 OpenAPIの安定版3.2.1と3.1系の3.1.2は、当該emitterの `openapi-versions` が受理する列挙値に含まれない。
-3.2.0は生成でき、Redocly 2.82.0、oasdiff 1.39.0、Orval 8.49.0でCodexiaの操作を処理できる。
+3.2.0は生成でき、当時のRedocly 2.82.0、oasdiff 1.39.0、Orval 8.49.0でCodexiaの操作を処理できる。
 Swift OpenAPI Generator 1.14.4は3.2.1を拒否する。
 3.2.0の予備対応では、TypeSpecがストリームに出力する `itemSchema` がSwiftのoperation応答型に反映されず、未型付けの `HTTPBody` になる。
 採用中のFastify変換器も3.1.0を入力とする。

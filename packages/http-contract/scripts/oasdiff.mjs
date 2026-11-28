@@ -5,15 +5,15 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const VERSION = "1.39.0";
+const VERSION = "1.41.0";
 const RELEASE = `https://github.com/oasdiff/oasdiff/releases/download/v${VERSION}`;
 const ASSETS = {
-  "linux-x64": { file: "oasdiff_1.39.0_linux_amd64.tar.gz", sha256: "71a85930728f367a2086077b7ae1411319421549d18473a3e8258b6451520433", binary: "oasdiff" },
-  "linux-arm64": { file: "oasdiff_1.39.0_linux_arm64.tar.gz", sha256: "481db7d891d916f13df277b2ef8bbb95477702827710e49fe22cef69c359c780", binary: "oasdiff" },
-  "darwin-x64": { file: "oasdiff_1.39.0_darwin_all.tar.gz", sha256: "fe88d9950324d3b0ebeaf8e0d3a210b64cb099a0f55fce5ee5a22b276df0eac4", binary: "oasdiff" },
-  "darwin-arm64": { file: "oasdiff_1.39.0_darwin_all.tar.gz", sha256: "fe88d9950324d3b0ebeaf8e0d3a210b64cb099a0f55fce5ee5a22b276df0eac4", binary: "oasdiff" },
-  "win32-x64": { file: "oasdiff_1.39.0_windows_amd64.tar.gz", sha256: "956a73df88e03efdf3fcc5f327446cc176fefe4adcea1978b0fef464a1ee8901", binary: "oasdiff.exe" },
-  "win32-arm64": { file: "oasdiff_1.39.0_windows_arm64.tar.gz", sha256: "5699ac9dc74b432f78990cd369ff2bec3a79302c58e923c1ec823e47a86ddb82", binary: "oasdiff.exe" },
+  "linux-x64": { file: "oasdiff_1.41.0_linux_amd64.tar.gz", sha256: "96365453163118e6503eb71742643d9ee67f91aedbaadd1a1ce9c6213e3b71c7", binary: "oasdiff" },
+  "linux-arm64": { file: "oasdiff_1.41.0_linux_arm64.tar.gz", sha256: "8d4b8ddd467440885675db918e229ab8db330111c6428eb864e7eb766a7f4071", binary: "oasdiff" },
+  "darwin-x64": { file: "oasdiff_1.41.0_darwin_all.tar.gz", sha256: "0452671a98a290ab7c5e49b274fdc77b34c5cdb595b4305cfdb64ae011f7f1ee", binary: "oasdiff" },
+  "darwin-arm64": { file: "oasdiff_1.41.0_darwin_all.tar.gz", sha256: "0452671a98a290ab7c5e49b274fdc77b34c5cdb595b4305cfdb64ae011f7f1ee", binary: "oasdiff" },
+  "win32-x64": { file: "oasdiff_1.41.0_windows_amd64.tar.gz", sha256: "dcacaa482ba2e5a783c7e5c7682a96e1d0d65180a897fc66f13e66dc814a7a83", binary: "oasdiff.exe" },
+  "win32-arm64": { file: "oasdiff_1.41.0_windows_arm64.tar.gz", sha256: "3f09d256bf3344b0afafef1e7955c235326f6980055d11867702d97f24559a1b", binary: "oasdiff.exe" },
 };
 
 function fail(message) {
