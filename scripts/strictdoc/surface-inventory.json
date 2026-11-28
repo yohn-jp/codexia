@@ -14,7 +14,7 @@
     "method": "The verifier reads method/path operation registrations from the generated Fastify HTTP contract artifact. Tool names and named SQL objects remain source-derived from the listed files.",
     "discovery": "Read from the Fastify route artifact generated from the current TypeSpec source and compared to classifications in this manifest.",
     "nativeIos": "ios",
-    "iac": "deploy/cloudflare/terraform",
+    "iac": "deploy/cloudflare",
     "ansible": "deploy/ansible"
   },
   "classifications": [
@@ -155,57 +155,152 @@
     },
     {
       "kind": "iacResource",
-      "id": "cloudflare_dns_record.codexia",
+      "id": "cloudflareAccess.probe:/api/version",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
     {
       "kind": "iacResource",
-      "id": "cloudflare_worker_version.candidate",
+      "id": "cloudflareAccess.probe:/desktop/update-identity.json",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
     {
       "kind": "iacResource",
-      "id": "cloudflare_worker.frontend",
+      "id": "cloudflareAccess.protocol:/.well-known/oauth-authorization-server/api/auth",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
     {
       "kind": "iacResource",
-      "id": "cloudflare_workers_route.frontend",
+      "id": "cloudflareAccess.protocol:/.well-known/oauth-protected-resource/api",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
     {
       "kind": "iacResource",
-      "id": "cloudflare_workers_route.origin",
+      "id": "cloudflareAccess.protocol:/.well-known/openid-configuration/api/auth",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
     {
       "kind": "iacResource",
-      "id": "cloudflare_zero_trust_access_application.codexia",
+      "id": "cloudflareAccess.protocol:/api/auth/callback/workspace-oidc",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
     {
       "kind": "iacResource",
-      "id": "cloudflare_zero_trust_access_application.identity_probe",
+      "id": "cloudflareAccess.protocol:/api/auth/codexia/auth-methods",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
     {
       "kind": "iacResource",
-      "id": "cloudflare_zero_trust_access_application.public_protocol",
+      "id": "cloudflareAccess.protocol:/api/auth/get-session",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
     {
       "kind": "iacResource",
-      "id": "cloudflare_zero_trust_tunnel_cloudflared_config.codexia",
+      "id": "cloudflareAccess.protocol:/api/auth/jwks",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
     {
       "kind": "iacResource",
-      "id": "cloudflare_zero_trust_tunnel_cloudflared.codexia",
+      "id": "cloudflareAccess.protocol:/api/auth/oauth2/authorize",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
     {
       "kind": "iacResource",
-      "id": "terraform_data.public_oauth_edge_readiness",
+      "id": "cloudflareAccess.protocol:/api/auth/oauth2/consent",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/api/auth/oauth2/consent-context",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/api/auth/oauth2/introspect",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/api/auth/oauth2/revoke",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/api/auth/oauth2/token",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/api/auth/oauth2/userinfo",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/api/auth/passkey/generate-authenticate-options",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/api/auth/passkey/verify-authentication",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/api/auth/sign-in/social",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/api/auth/sign-in/sso",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/api/auth/sso/callback/codexia-owner-oidc",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/mcp",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/oauth/assets/*",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/oauth/consent",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareAccess.protocol:/oauth/login",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareRoute.origin:/.well-known/*",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareRoute.origin:/api*",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareRoute.origin:/health*",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareRoute.origin:/mcp*",
+      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflareRoute.static:/*",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
     {

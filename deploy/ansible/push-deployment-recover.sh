@@ -11,10 +11,10 @@ unit_dir="${CODEXIA_PUSH_QUADLET_DIR:?Push deployment Quadlet directory is requi
 
 active_unit="$unit_dir/codexia-api.container"
 api_wants_link="$unit_dir/default.target.wants/codexia-api.service"
-tunnel_wants_link="$unit_dir/default.target.wants/codexia-tunnel.service"
 intent="$state_dir/deploy-transaction.json"
 release_state="$state_dir/deployed-release.json"
 lock_file="$state_dir/host.lock"
+gate_helper=/usr/local/sbin/codexia-api-gate
 
 [[ ! -e "$state_dir/cutover-transaction.json" && ! -L "$state_dir/cutover-transaction.json" ]] || {
   echo 'Coordinated API epoch maintenance is pending; ordinary deployment is blocked' >&2
@@ -54,15 +54,19 @@ const imageRepository = 'ghcr.io/' + owner.toLowerCase() + '/codexia-backend';
 const matchesTarget = record => record.repository === repository &&
   record.repositoryId === Number(repositoryId) && record.ownerId === Number(ownerId);
 const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-if (!matchesTarget(value) || value.format !== 'codexia-deploy-transaction/v1' || !['pending', 'committed'].includes(value.phase) ||
-    typeof value.hadUnit !== 'boolean' || typeof value.tunnelWasActive !== 'boolean' ||
-    typeof value.apiLinkCreated !== 'boolean' || typeof value.tunnelLinkCreated !== 'boolean' ||
+if (value.format === 'codexia-deploy-transaction/v1') {
+  console.error('Legacy v1 Tunnel deployment transaction predates product publication-gate state and cannot be translated safely. Keep all transaction and rollback files intact. Follow the existing protected deployment recovery using the exact prior source revision that wrote this pending v1 journal, then rerun current recovery.');
+  process.exit(2);
+}
+if (!matchesTarget(value) || value.format !== 'codexia-deploy-transaction/v2' || !['pending', 'committed'].includes(value.phase) ||
+    typeof value.hadUnit !== 'boolean' || typeof value.gateWasOpen !== 'boolean' ||
+    typeof value.apiLinkCreated !== 'boolean' || typeof value.gateHeldForActivation !== 'boolean' ||
     typeof value.releasePresent !== 'boolean' ||
-    (value.tunnelHeldForActivation !== undefined && typeof value.tunnelHeldForActivation !== 'boolean') ||
+    (!value.hadUnit && value.gateWasOpen) || (value.gateHeldForActivation && value.gateWasOpen) ||
     (value.backupRunId !== undefined && (typeof value.backupRunId !== 'string' ||
       !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value.backupRunId)))) process.exit(2);
 if ((value.recoveryOperationId !== undefined || value.recoveryEvidenceSha256 !== undefined) &&
-    (value.hadUnit || value.tunnelWasActive || value.releasePresent || typeof value.recoveryOperationId !== 'string' ||
+    (value.hadUnit || value.gateWasOpen || value.releasePresent || !value.gateHeldForActivation || typeof value.recoveryOperationId !== 'string' ||
       !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value.recoveryOperationId) ||
       typeof value.recoveryEvidenceSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.recoveryEvidenceSha256))) process.exit(2);
 function reviewedReleaseImage(unitPath, releasePath) {
@@ -104,30 +108,35 @@ if (value.phase === 'committed') {
   if (!value.releasePresent) process.exit(2);
   releaseImage = reviewedReleaseImage(process.argv[4], process.argv[3]);
 }
-process.stdout.write([value.format, value.phase, value.hadUnit, value.tunnelWasActive,
-  value.apiLinkCreated, value.tunnelLinkCreated, value.releasePresent,
-  releaseImage || '-', value.backupRunId ?? '-', value.recoveryOperationId !== undefined,
-  value.tunnelHeldForActivation === true].join('\n'));
+process.stdout.write([value.format, value.phase, value.hadUnit, value.gateWasOpen,
+  value.apiLinkCreated, value.releasePresent, releaseImage || '-', value.backupRunId ?? '-',
+  value.recoveryOperationId !== undefined, value.gateHeldForActivation].join('\n'));
 NODE
 )"
 then
-  echo 'Invalid deployment transaction or prior release snapshot. Verify the committed release. Recover older deployments using their recording release; recovery state retained.' >&2
+  echo 'Invalid deployment transaction or prior release snapshot. Verify the committed release; recovery state retained.' >&2
   exit 1
 fi
 mapfile -t recovery_fields <<< "$recovery"
-[[ "${recovery_fields[0]:-}" == codexia-deploy-transaction/v1 && ${#recovery_fields[@]} == 11 ]] || {
+[[ "${recovery_fields[0]:-}" == codexia-deploy-transaction/v2 && ${#recovery_fields[@]} == 10 ]] || {
   echo 'Invalid deployment transaction intent' >&2
   exit 1
 }
 
 if [[ "${recovery_fields[1]}" == committed ]]; then
-  committed_image="${recovery_fields[7]}"
+  committed_image="${recovery_fields[6]}"
+  gate_state="$(sudo -n "$gate_helper" status)" || {
+    echo 'Committed deployment publication gate is not canonical; recovery state retained' >&2
+    exit 1
+  }
   if ! source_path="$(systemctl --user show --property=SourcePath --value codexia-api.service)" ||
      [[ "$source_path" != "$active_unit" ]] ||
      ! systemctl --user is-active --quiet codexia-api.service ||
      ! running="$(podman inspect --format '{{.State.Running}} {{.State.Health.Status}} {{.ImageName}}' codexia-api)" ||
-     [[ "$running" != "true healthy $committed_image" ]]; then
-    echo 'Committed deployment does not match the healthy active release; recovery state retained' >&2
+     [[ "$running" != "true healthy $committed_image" ]] ||
+     [[ "$gate_state" != open ]] ||
+     ! curl --fail --silent --show-error --max-time 3 http://127.0.0.1:18081/health/ready >/dev/null; then
+    echo 'Committed deployment does not match the healthy API and open publication gate; recovery state retained' >&2
     exit 1
   fi
   rm -f -- "$intent" "$intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json"
@@ -137,16 +146,14 @@ if [[ "${recovery_fields[1]}" == committed ]]; then
 fi
 
 had_unit="${recovery_fields[2]}"
-tunnel_was_active="${recovery_fields[3]}"
+gate_was_open="${recovery_fields[3]}"
 api_link_created="${recovery_fields[4]}"
-tunnel_link_created="${recovery_fields[5]}"
-release_present="${recovery_fields[6]}"
-previous_image="${recovery_fields[7]}"
-restored_publication="${recovery_fields[9]}"
-activation_tunnel_fenced="${recovery_fields[10]}"
+release_present="${recovery_fields[5]}"
+previous_image="${recovery_fields[6]}"
+gate_held_for_activation="${recovery_fields[9]}"
 [[ "$previous_image" == '-' ]] && previous_image=''
 stop_loaded_unit(){
-  local unit="$1" load_state active_status
+  local unit="$1" load_state active_state
   load_state="$(systemctl --user show --property=LoadState --value "$unit")" || {
     echo "Could not inspect systemd load state for $unit" >&2
     return 1
@@ -157,13 +164,11 @@ stop_loaded_unit(){
         echo "Could not stop $unit" >&2
         return 1
       }
-      if systemctl --user is-active --quiet "$unit"; then
-        echo "$unit remains active after stop" >&2
+      active_state="$(systemctl --user show --property=ActiveState --value "$unit")" || {
+        echo "Could not verify the post-stop activity of $unit" >&2
         return 1
-      else
-        active_status=$?
-      fi
-      [[ "$active_status" == 3 ]] || {
+      }
+      [[ "$active_state" == inactive ]] || {
         echo "Could not verify that $unit is inactive" >&2
         return 1
       }
@@ -172,8 +177,8 @@ stop_loaded_unit(){
       return 2
       ;;
     masked)
-      [[ "$unit" == codexia-tunnel.service && ( "$restored_publication" == true || "$activation_tunnel_fenced" == true ) ]] || return 1
-      [[ "$(systemctl --user show --property=ActiveState --value "$unit")" == inactive ]]
+      echo "Unexpected masked systemd unit during deployment recovery: $unit" >&2
+      return 1
       ;;
     *)
       echo "Unexpected systemd load state for $unit: $load_state" >&2
@@ -181,10 +186,11 @@ stop_loaded_unit(){
       ;;
   esac
 }
-api_load_status=0
-stop_loaded_unit codexia-tunnel.service || api_load_status=$?
-[[ "$api_load_status" == 0 || "$api_load_status" == 2 ]] || {
-  echo 'Could not stop and verify the application Tunnel; recovery intent retained' >&2
+# The validated pending intent owns closure even if the previous systemctl
+# invocation stopped midway. Only a verified closed gate permits writer changes.
+sudo -n "$gate_helper" close &&
+  [[ "$(sudo -n "$gate_helper" status)" == closed ]] || {
+  echo 'Could not close and verify the product publication gate; recovery intent retained' >&2
   exit 1
 }
 api_load_status=0
@@ -250,17 +256,7 @@ else
     }
     rm -f -- "$api_wants_link"
   fi
-  if [[ "$tunnel_link_created" == true && ( -e "$tunnel_wants_link" || -L "$tunnel_wants_link" ) ]]; then
-    [[ -L "$tunnel_wants_link" && "$(readlink -- "$tunnel_wants_link")" == ../codexia-tunnel.service ]] || {
-      echo 'Unexpected Tunnel activation link during interrupted deployment recovery' >&2
-      exit 1
-    }
-    rm -f -- "$tunnel_wants_link"
-  fi
   systemctl --user daemon-reload
-  if [[ "$restored_publication" == true || "$activation_tunnel_fenced" == true ]]; then
-    systemctl --user unmask codexia-tunnel.service
-  fi
 fi
 
 if [[ "$release_present" == true ]]; then
@@ -273,11 +269,30 @@ else
   rm -f -- "$release_state"
 fi
 
-if [[ "$tunnel_was_active" == true && "$had_unit" == true ]]; then
-  systemctl --user start codexia-tunnel.service
+if [[ "$had_unit" == true ]]; then
+  curl --fail --silent --show-error --max-time 3 http://127.0.0.1:18081/health/ready >/dev/null || {
+    echo 'Prior API did not recover at its host loopback readiness endpoint; recovery intent retained' >&2
+    exit 1
+  }
+  if [[ "$gate_was_open" == true ]]; then
+    sudo -n "$gate_helper" open && [[ "$(sudo -n "$gate_helper" status)" == open ]] || {
+      echo 'Prior API recovered, but its recorded open publication gate did not; recovery intent retained' >&2
+      exit 1
+    }
+  elif [[ "$gate_held_for_activation" == true ]]; then
+    [[ "$(sudo -n "$gate_helper" status)" == closed ]] || {
+      echo 'Approved activation recovery requires the product publication gate to stay closed; recovery intent retained' >&2
+      exit 1
+    }
+  fi
+else
+  [[ "$(sudo -n "$gate_helper" status)" == closed ]] || {
+    echo 'An API-less recovered target must keep the product publication gate closed; recovery intent retained' >&2
+    exit 1
+  }
 fi
-if [[ "${recovery_fields[8]}" != '-' ]]; then
-  "$HOME/.local/bin/codexia-backup-control" deploy-interrupted "${recovery_fields[8]}" || {
+if [[ "${recovery_fields[7]}" != '-' ]]; then
+  "$HOME/.local/bin/codexia-backup-control" deploy-interrupted "${recovery_fields[7]}" || {
     echo 'Backup run reconciliation is pending; deployment recovery state retained' >&2
     exit 1
   }

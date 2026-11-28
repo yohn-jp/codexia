@@ -12,7 +12,7 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: b1fef2b6e9d2ce183b8b4532bb1c7014
 STATEMENT: >>>
-**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が管理経路と公開ゲートの契約を所有する。正式運用には統合実サービス受入を要する。
 
 BKC-001 through BKC-010 are enabled by an operator on a single-owner installation. The Fastify routes and executor share the `codexia_backup` operational schema on PostgreSQL. The executor has no HTTP listener. Ansible applies the [journal upgrade](https://github.com/yohn-jp/codexia/blob/main/deploy/backup/operational-schema-667-upgrade.sql) to recognized earlier schemas and preserves existing settings.
 <<<
@@ -29,7 +29,7 @@ After an installation reaches ACTIVE, select `provision-backups` in the existing
 
 The stage reads the deployed release record, checks the healthy Full image and extracts its Node runtime and executor. It sets up the private PostgreSQL socket and dedicated SCRAM logins, applies the operational schema or its journal upgrade, generates the local sealing key once and attaches only the API credential, public key and policy to the existing API. It starts the user service under the shared deployment lock and checks its database heartbeat. Reapplying the stage adopts matching settings. A mismatch in existing credentials, policy or release identity requires protected maintenance. Keep the original keys and journal when adopting an existing installation. After a compatible image update, the deployment transaction selects the committed executor version. The operator may prune inactive extracted runtime directories during maintenance.
 
-If private socket provisioning is interrupted, repeat `provision-backups` on the same VM. The protected operation uses the deployment journal to verify the PostgreSQL cluster, committed API and socket configuration before resuming the writer and restoring its previous Tunnel state. When PostgreSQL is stopped or its container is absent, recovery checks the recorded cluster and the effective database, volume and network units before starting PostgreSQL. Older journals without the unit digest require the operator to restore the recorded database to a running state before retrying. Retain the journal if verification fails and resolve the recorded mismatch through protected maintenance.
+If private socket provisioning is interrupted, repeat `provision-backups` on the same VM. The protected operation uses the deployment journal to verify the PostgreSQL cluster, committed API and socket configuration before resuming the writer and restoring its previous publication gate state. When PostgreSQL is stopped or its container is absent, recovery checks the recorded cluster and the effective database, volume and network units before starting PostgreSQL. Older journals without the unit digest require the operator to restore the recorded database to a running state before retrying. Retain the journal if verification fails and resolve the recorded mismatch through protected maintenance.
 
 For example, the following policy permits one destination and one manual maintenance window.
 

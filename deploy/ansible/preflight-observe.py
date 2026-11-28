@@ -46,9 +46,16 @@ def command(args, allowed=(0,), stdin=None):
 
 # The read-only observer and the locked owner and activation operations bind Podman IDs.
 # Lookup metadata only. Never request secret contents.
-BASE_SECRETS = ("codexia-tunnel-token", "codexia-postgres-admin-password", "codexia-postgres-app-password")
+BASE_SECRETS = ("codexia-postgres-admin-password", "codexia-postgres-app-password")
 AUTH_SECRETS = ("codexia-auth-database-url", "codexia-auth-secret", "codexia-oauth-introspection-client-secret")
 OPTIONAL_SECRET = "codexia-oidc-client-secret"
+LEGACY_TUNNEL_SECRET = "codexia-tunnel-token"
+LEGACY_TUNNEL_CONTAINER = "codexia-tunnel"
+SYSTEM_UNITS = {
+    "codexia-api.socket": Path("/usr/local/lib/systemd/system/codexia-api.socket"),
+    "codexia-api-gate.service": Path("/usr/local/lib/systemd/system/codexia-api-gate.service"),
+    "codexia-cloudflared.service": Path("/etc/systemd/system/codexia-cloudflared.service"),
+}
 
 
 def secret_identities():
@@ -90,6 +97,74 @@ def private_text(path):
     require(info is not None and stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid())
     require(info.st_size <= 1024 * 1024)
     return path.read_text(encoding="utf-8")
+
+
+def publication_gate_state():
+    try:
+        result = subprocess.run(["sudo", "-n", "/usr/local/sbin/codexia-api-gate", "status"],
+                                text=True, capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    if result.returncode == 0 and result.stdout.strip() in ("open", "closed"):
+        return result.stdout.strip()
+    return "unknown"
+
+
+def publication_gate_closed():
+    require(publication_gate_state() == "closed")
+
+
+def system_unit_evidence(expected):
+    require(isinstance(expected, dict) and set(expected) == set(SYSTEM_UNITS))
+    require(all(isinstance(value, str) and re.fullmatch(RAW_HASH, value) for value in expected.values()))
+    hashes = {}
+    matches = True
+    drift = False
+    for name, path in SYSTEM_UNITS.items():
+        info = metadata(path)
+        if info is None:
+            matches = False
+            continue
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_gid == 0 and
+                stat.S_IMODE(info.st_mode) == 0o644)
+        observed = hashlib.sha256(path.read_bytes()).hexdigest()
+        hashes[name] = observed
+        mismatch = observed != expected[name]
+        drift |= mismatch
+        matches &= not mismatch
+    try:
+        connector_status = subprocess.run(["systemctl", "is-active", "codexia-cloudflared.service"],
+                                          text=True, capture_output=True, timeout=30, check=False)
+        connector_active = connector_status.returncode == 0 and connector_status.stdout.strip() == "active"
+    except (OSError, subprocess.SubprocessError):
+        connector_active = False
+    try:
+        ready = subprocess.run(["curl", "--noproxy", "*", "--silent", "--show-error", "--max-time", "3",
+                                "--output", "/dev/null", "--write-out", "%{http_code}",
+                                "http://127.0.0.1:2000/ready"], text=True, capture_output=True,
+                               timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        ready = None
+    connector_ready = connector_active and ready is not None and ready.returncode == 0 and ready.stdout.strip() == "200"
+    gate = publication_gate_state() if set(hashes) == set(SYSTEM_UNITS) and matches else "unknown"
+    return {"unitHashes": hashes, "unitsMatch": matches and set(hashes) == set(SYSTEM_UNITS),
+            "unitsDrift": drift,
+            "gateState": gate, "connectorActive": connector_active, "connectorReady": connector_ready}
+
+
+def legacy_tunnel_present(units):
+    unit = units / "codexia-tunnel.container"
+    user_unit_state = subprocess.run(["systemctl", "--user", "show", "--property=LoadState", "--value",
+                                      "codexia-tunnel.service"], text=True, capture_output=True,
+                                     timeout=30, check=False)
+    container = subprocess.run(["podman", "container", "exists", LEGACY_TUNNEL_CONTAINER],
+                               capture_output=True, timeout=30, check=False)
+    secret = subprocess.run(["podman", "secret", "exists", LEGACY_TUNNEL_SECRET],
+                            capture_output=True, timeout=30, check=False)
+    require(container.returncode in (0, 1) and secret.returncode in (0, 1) and
+            user_unit_state.returncode in (0, 4))
+    return (metadata(unit) is not None or container.returncode == 0 or secret.returncode == 0 or
+            (user_unit_state.returncode == 0 and user_unit_state.stdout.strip() != "not-found"))
 
 
 def no_duplicate_keys(pairs):
@@ -288,12 +363,6 @@ def require_recovery_worker_stopped():
             (fields.get("LoadState") == "not-found" or fields.get("UnitFileState") in ("disabled", "masked")))
 
 
-def require_tunnel_inactive():
-    _, state = command(["systemctl", "--user", "show", "--property=ActiveState", "--value",
-                        "codexia-tunnel.service"])
-    require(state == "inactive" and command(["podman", "container", "exists", "codexia-tunnel"], (0, 1))[0] == 1)
-
-
 def verify_recovery_handoff(expected_digest, operation_id, image, source_sha, lock_fd):
     home = Path.home()
     state_dir = home / ".local/state/codexia-deploy"
@@ -307,7 +376,8 @@ def verify_recovery_handoff(expected_digest, operation_id, image, source_sha, lo
     require(datetime.fromisoformat(record["window"]["notBefore"]) <= now <=
             datetime.fromisoformat(record["window"]["notAfter"]))
     require_recovery_worker_stopped()
-    require_tunnel_inactive()
+    publication_gate_closed()
+    require(not legacy_tunnel_present(Path.home() / ".config/containers/systemd"))
     verify_secret_identities(record["target"]["secretSetSha256"], lock_fd)
     database = json_sql("codexia", """SELECT json_build_object('clusterId', system_identifier::text,
         'databaseOid', (SELECT oid::text FROM pg_database WHERE datname=current_database()))
@@ -357,11 +427,15 @@ def observe_transaction(state_dir):
     path = state_dir / "deploy-transaction.json"
     if metadata(path) is not None:
         data = json.loads(private_text(path))
-        require(matches_repository(data) and data.get("format") == "codexia-deploy-transaction/v1"
+        if data.get("format") == "codexia-deploy-transaction/v1":
+            raise ValueError("Legacy v1 Tunnel transaction requires protected recovery using the exact source revision that created it")
+        require(matches_repository(data) and data.get("format") == "codexia-deploy-transaction/v2"
                 and data.get("phase") in ("pending", "committed"))
         require(all(type(data.get(k)) is bool for k in
-                    ("hadUnit", "tunnelWasActive", "apiLinkCreated", "tunnelLinkCreated", "releasePresent")))
-        return {"format": "codexia-deploy-transaction/v1", "phase": data["phase"], "sha256": digest(data)}
+                    ("hadUnit", "gateWasOpen", "apiLinkCreated", "gateHeldForActivation", "releasePresent")))
+        require(not (not data["hadUnit"] and data["gateWasOpen"]) and
+                not (data["gateWasOpen"] and data["gateHeldForActivation"]))
+        return {"format": "codexia-deploy-transaction/v2", "phase": data["phase"], "sha256": digest(data)}
     # An orphan temporary journal or rollback snapshot is not proof of a clean slot.
     for name in ("deploy-transaction.json.tmp", "deployed-release.json.tmp",
                  "rollback-api.container", "rollback-release.json"):
@@ -558,6 +632,7 @@ def observe():
     state_dir = home / ".local/state/codexia-deploy"
     auth_dir = home / ".config/codexia-auth"
     units = home / ".config/containers/systemd"
+    system_evidence = system_unit_evidence(facts["systemUnits"])
     lock = state_dir / "host.lock"
     lock_info = metadata(lock)
     lock_handle = None
@@ -589,7 +664,8 @@ def observe():
                                                       auth_dir / "runtime.env")))
             return {**base, "H": "partial", "database": {"state": "absent", "authState": "absent"},
                     "backend": {"state": "absent"}, "transaction": None,
-                    "topology": {"accountPresent": True, "storagePresent": False, "hostReady": facts["hostReady"]}}
+                    "topology": {"accountPresent": True, "storagePresent": False, "hostReady": facts["hostReady"],
+                                 "systemUnits": system_evidence}}
         require(stat.S_ISDIR(store.st_mode))
         require(command(["podman", "info", "--format", "{{.Host.Security.Rootless}}"])[1] == "true")
 
@@ -599,7 +675,8 @@ def observe():
         networks = existence("network", ("codexia", "codexia-data"))
         volumes = existence("volume", ("codexia-postgres", "codexia-data", "codexia-history"))
         secrets = existence("secret", BASE_SECRETS)
-        containers = existence("container", ("codexia-db", "codexia-api", "codexia-tunnel"))
+        containers = existence("container", ("codexia-db", "codexia-api"))
+        legacy_tunnel = legacy_tunnel_present(units)
         if not lock_handle:
             require(not containers["codexia-api"] and not residue and transaction is None)
         drift = False
@@ -632,6 +709,7 @@ def observe():
         topology = {"accountPresent": True, "storagePresent": True, "hostReady": facts["hostReady"], "uid": account.pw_uid,
                     "gid": account.pw_gid, "networks": networks, "volumes": volumes,
                     "secrets": secrets, "containers": containers, "baseEvidence": facts["baseEvidence"],
+                    "systemUnits": system_evidence, "legacyTunnelPresent": legacy_tunnel,
                     "unitHashes": unit_hashes, "networkHashes": network_hashes, "volumeHashes": volume_hashes,
                     "secretHashes": secret_hashes, "containerHashes": container_hashes}
         # Reuse the already validated full-writer observation rather than
@@ -668,16 +746,16 @@ def observe():
         observe_restore = transaction is None and os.environ.get("CODEXIA_OBSERVE_RECOVERY") == "true"
         observe_adoption = transaction is None and os.environ.get("CODEXIA_OBSERVE_ADOPTION") == "true"
         clean_restore = bool(lock_handle is not None and backend["state"] == "absent" and not residue and
-                             not containers["codexia-api"] and not containers["codexia-tunnel"])
+                             not containers["codexia-api"] and not legacy_tunnel)
         if observe_restore:
             recovery = read_recovery_handoff(state_dir)
         if observe_adoption:
             require(clean_restore and not observe_restore)
-            require_tunnel_inactive()
+            publication_gate_closed()
         if recovery is not None:
             require(clean_restore)
             require_recovery_worker_stopped()
-            require_tunnel_inactive()
+            publication_gate_closed()
             require(set(BASE_SECRETS + AUTH_SECRETS).issubset(secret_hashes) and
                     digest(secret_hashes) == recovery[0]["target"]["secretSetSha256"])
         database = observe_database(volumes, containers, state_dir, auth_dir, full,
@@ -701,8 +779,10 @@ def observe():
                 backend = {"state": "fault", "databaseAbsent": True}
         elif full:
             require(database.get("clusterId") == writer["database"]["clusterId"])
-        base_unknown = facts["baseDrift"] or (containers["codexia-tunnel"] and not facts["baseEvidence"]["tunnel"])
-        h = "drift" if drift else "unknown" if base_unknown else "ready" if facts["hostReady"] and all(networks.values()) and all(volumes.values()) \
+        base_unknown = facts["baseDrift"] or legacy_tunnel
+        publication_ready = (system_evidence["unitsMatch"] and system_evidence["gateState"] in ("open", "closed")
+                             and system_evidence["connectorActive"] and system_evidence["connectorReady"])
+        h = "drift" if drift or system_evidence["unitsDrift"] else "unknown" if base_unknown else "ready" if facts["hostReady"] and publication_ready and all(networks.values()) and all(volumes.values()) \
             and all(secrets.values()) and containers["codexia-db"] and facts["baseEvidence"]["database"] \
             and set(unit_hashes) == set(facts["quadlets"]) else "partial"
         result = {**base, "H": h, "database": database, "backend": backend,

@@ -18,8 +18,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const privateStateDirectory = ".codexiactl"
-const maxCheckpointSize = 16 * 1024
+const (
+	privateStateDirectory = ".codexiactl"
+	maxCheckpointSize     = 16 * 1024
+)
 
 var (
 	errCheckpointBusy   = errors.New("another codexiactl init is running for this administrator and VM")
@@ -31,25 +33,26 @@ var (
 )
 
 type checkpoint struct {
-	RepositoryID       int64              `json:"repositoryId"`
-	Owner              string             `json:"owner"`
-	OwnerID            int64              `json:"ownerId"`
-	InstallationID     int64              `json:"installationId"`
-	HostID             string             `json:"hostId"`
-	MainSHA            string             `json:"mainSha"`
-	Operation          string             `json:"operation,omitempty"`
-	StartedAt          time.Time          `json:"startedAt,omitzero"`
-	RunID              int64              `json:"runId,omitzero"`
-	PreflightRunID     int64              `json:"preflightRunId,omitzero"`
-	Pending            bool               `json:"pending,omitzero"`
-	GateOriginal       map[string]*string `json:"gateOriginal,omitempty"`
-	BootstrapPublicKey string             `json:"bootstrapPublicKey,omitempty"`
-	BootstrapKeyWrite  string             `json:"bootstrapKeyWrite,omitempty"`
-	SettingsWriterID   string             `json:"settingsWriterId,omitempty"`
-	FrontendRunID      int64              `json:"frontendRunId,omitzero"`
-	FrontendTarget     string             `json:"frontendTarget,omitempty"`
-	OwnerSetupRunID    int64              `json:"ownerSetupRunId,omitzero"`
-	EphemeralRecipient string             `json:"ephemeralRecipient,omitempty"`
+	RepositoryID          int64                           `json:"repositoryId"`
+	Owner                 string                          `json:"owner"`
+	OwnerID               int64                           `json:"ownerId"`
+	InstallationID        int64                           `json:"installationId"`
+	HostID                string                          `json:"hostId"`
+	MainSHA               string                          `json:"mainSha"`
+	Operation             string                          `json:"operation,omitempty"`
+	StartedAt             time.Time                       `json:"startedAt,omitzero"`
+	RunID                 int64                           `json:"runId,omitzero"`
+	PreflightRunID        int64                           `json:"preflightRunId,omitzero"`
+	Pending               bool                            `json:"pending,omitzero"`
+	GateOriginal          map[string]*string              `json:"gateOriginal,omitempty"`
+	BootstrapPublicKey    string                          `json:"bootstrapPublicKey,omitempty"`
+	BootstrapKeyWrite     string                          `json:"bootstrapKeyWrite,omitempty"`
+	SettingsWriterID      string                          `json:"settingsWriterId,omitempty"`
+	CloudflareServiceAuth map[string]cfServiceAuthReceipt `json:"cloudflareServiceAuth,omitempty"`
+	FrontendRunID         int64                           `json:"frontendRunId,omitzero"`
+	FrontendTarget        string                          `json:"frontendTarget,omitempty"`
+	OwnerSetupRunID       int64                           `json:"ownerSetupRunId,omitzero"`
+	EphemeralRecipient    string                          `json:"ephemeralRecipient,omitempty"`
 }
 
 type checkpointDisk struct {
@@ -77,9 +80,9 @@ func openPrivateStateDirectory(home string, create bool) (*os.File, error) {
 	if err != nil {
 		return nil, errCheckpointUnsafe
 	}
-	defer unix.Close(homeFD)
+	defer func() { _ = unix.Close(homeFD) }()
 	var info unix.Stat_t
-	if err := unix.Fstat(homeFD, &info); err != nil || info.Uid != uint32(os.Geteuid()) || info.Mode&0o022 != 0 {
+	if err := unix.Fstat(homeFD, &info); err != nil || int(info.Uid) != os.Geteuid() || info.Mode&0o022 != 0 {
 		return nil, errCheckpointUnsafe
 	}
 	if create {
@@ -99,8 +102,8 @@ func openPrivateStateDirectory(home string, create bool) (*os.File, error) {
 	if err != nil {
 		return nil, errCheckpointUnsafe
 	}
-	if err := unix.Fstat(dir, &info); err != nil || info.Uid != uint32(os.Geteuid()) || info.Mode&0o7777 != 0o700 {
-		unix.Close(dir)
+	if err := unix.Fstat(dir, &info); err != nil || int(info.Uid) != os.Geteuid() || info.Mode&0o7777 != 0o700 {
+		_ = unix.Close(dir)
 		return nil, errCheckpointUnsafe
 	}
 	return os.NewFile(uintptr(dir), privateStateDirectory), nil
@@ -124,12 +127,12 @@ func openCheckpointAt(home, hostID string) (*checkpointStore, error) {
 	}
 	lock, err := openStateFile(dir, hostID+".lock", unix.O_RDWR|unix.O_CREAT)
 	if err != nil {
-		dir.Close()
+		_ = dir.Close()
 		return nil, errCheckpointUnsafe
 	}
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		lock.Close()
-		dir.Close()
+		_ = lock.Close()
+		_ = dir.Close()
 		if errors.Is(err, unix.EWOULDBLOCK) {
 			return nil, errCheckpointBusy
 		}
@@ -145,8 +148,8 @@ func openStateFile(dir *os.File, name string, flags int) (*os.File, error) {
 	}
 	var info unix.Stat_t
 	if err := unix.Fstat(fd, &info); err != nil || info.Mode&unix.S_IFMT != unix.S_IFREG ||
-		info.Mode&0o7777 != 0o600 || info.Uid != uint32(os.Geteuid()) || info.Nlink != 1 {
-		unix.Close(fd)
+		info.Mode&0o7777 != 0o600 || int(info.Uid) != os.Geteuid() || info.Nlink != 1 {
+		_ = unix.Close(fd)
 		return nil, errCheckpointUnsafe
 	}
 	return os.NewFile(uintptr(fd), name), nil
@@ -164,7 +167,7 @@ func readCheckpoint(hostID string) (checkpoint, error) {
 	if err != nil {
 		return checkpoint{}, err
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	return loadCheckpoint(dir, hostID)
 }
 
@@ -183,7 +186,7 @@ func loadCheckpoint(dir *os.File, hostID string) (checkpoint, error) {
 	if err != nil {
 		return checkpoint{}, errCheckpointUnsafe
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, maxCheckpointSize+1))
 	if err != nil || len(data) > maxCheckpointSize {
 		return checkpoint{}, errCheckpointUnsafe
@@ -214,7 +217,7 @@ func (s *checkpointStore) Save(value checkpoint) error {
 		return errCheckpointUnsafe
 	}
 	dirFD := int(s.dir.Fd())
-	defer unix.Unlinkat(dirFD, tmp, 0)
+	defer func() { _ = unix.Unlinkat(dirFD, tmp, 0) }()
 	if err := unix.Renameat(dirFD, tmp, dirFD, s.hostID+".json"); err != nil {
 		return errCheckpointUnsafe
 	}
@@ -270,6 +273,15 @@ func (c checkpoint) validFor(hostID string) bool {
 		key, comment, options, rest, err := ssh.ParseAuthorizedKey([]byte(c.BootstrapPublicKey))
 		if err != nil || key.Type() != ssh.KeyAlgoED25519 || comment != "" || len(options) != 0 || len(rest) != 0 ||
 			strings.TrimSuffix(string(ssh.MarshalAuthorizedKey(key)), "\n") != c.BootstrapPublicKey {
+			return false
+		}
+	}
+	for key, receipt := range c.CloudflareServiceAuth {
+		environment, idInput, _ := strings.Cut(key, "/")
+		if (environment != bootstrapEnvironment && environment != productionEnvironment) ||
+			(idInput != sshAccessClientID && idInput != cloudflareProbeID) ||
+			!cloudflareID.MatchString(receipt.AccountID) || !cloudflareID.MatchString(receipt.ZoneID) ||
+			!cloudflareUUID.MatchString(receipt.TokenID) || receipt.StartedAt.IsZero() || c.SettingsWriterID == "" {
 			return false
 		}
 	}

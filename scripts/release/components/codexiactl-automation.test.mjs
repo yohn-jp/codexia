@@ -60,11 +60,45 @@ function fixture({tags = [], files = ['cmd/codexiactl/main.go'], current = sha, 
 }
 
 test('release inputs and latest version are deterministic', () => {
-  assert.ok(isCodexiactlReleaseInput('cmd/codexiactl/main.go'));
+  for (const file of ['cmd/codexiactl/main.go', 'cmd/codexiactl/.golangci.yml', 'cmd/codexiactl/quality-toolchain.json']) {
+    assert.ok(isCodexiactlReleaseInput(file), file);
+  }
   assert.ok(isCodexiactlReleaseInput('scripts/release/components/codexiactl-automation.mjs'));
   assert.ok(!isCodexiactlReleaseInput('packages/api/src/server.ts'));
   assert.equal(latestCodexiactlTag([tag(3), tag(12), tag(9)]).patch, 12);
   assert.equal(latestCodexiactlTag([]), null);
+});
+
+test('CLI verification rejects an altered analyzer archive before extraction or execution', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'codexiactl-lint-pin-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const modulePath = join(directory, 'cmd', 'codexiactl');
+  mkdirSync(modulePath, { recursive: true });
+  writeFileSync(join(modulePath, 'go.mod'), 'module codexiactl-build-fixture\n\ngo 1.2.3\n');
+  writeFileSync(join(modulePath, 'quality-toolchain.json'), JSON.stringify({ golangciLint: { version: '2.15.0', sha256: '1'.repeat(64) } }));
+  const executable = (name, body) => writeFileSync(join(directory, name), '#!/bin/bash\n' + body, { mode: 0o700 });
+  executable('git', `echo '${sha}'\n`);
+  executable('go', '[[ "$*" == "env GOVERSION" ]] || exit 98\necho go1.2.3\n');
+  executable('curl', `while (($#)); do
+    if [[ "$1" == --output ]]; then
+      printf 'altered archive' > "$2"
+      [[ "$3" == 'https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-linux-amd64.tar.gz' ]]
+      exit
+    fi
+    shift
+  done
+  exit 98\n`);
+  executable('tar', 'echo "Extracted unverified archive" >&2\nexit 99\n');
+  const verify = fileURLToPath(new URL('../../ci/execution/verify-codexiactl.sh', import.meta.url));
+  const result = spawnSync('bash', [verify], {
+    cwd: directory,
+    env: { PATH: directory + delimiter + process.env.PATH },
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stdout, /golangci-lint-2\.15\.0-linux-amd64\.tar\.gz: FAILED/u);
+  assert.doesNotMatch(result.stderr, /Extracted unverified archive/u);
 });
 
 test('every exact-match contract input selects a new official CLI release', async () => {
@@ -95,10 +129,11 @@ test('release binary admission requires the publisher variable to match the offi
   const modulePath = join(directory, 'cmd', 'codexiactl');
   mkdirSync(modulePath, { recursive: true });
   writeFileSync(join(modulePath, 'go.mod'), 'module codexiactl-build-fixture\n\ngo 1.2.3\n');
+  writeFileSync(join(modulePath, 'quality-toolchain.json'), JSON.stringify({ golangciLint: { version: '2.15.0', sha256: '1'.repeat(64) } }));
   const executable = (name, body) => writeFileSync(join(directory, name), '#!/bin/bash\n' + body, { mode: 0o700 });
   executable('git', `echo '${sha}'\n`);
   executable('go', '[[ "$*" == "env GOVERSION" ]] || exit 98\necho go1.2.3\n');
-  executable('gofmt', 'echo "Reached build verification" >&2\nexit 97\n');
+  executable('curl', 'echo "Reached build verification" >&2\nexit 97\n');
   executable('gh', [
     '[[ "$1 $2 $3 $4" == "api --hostname github.com apps/codexiactl" ]] || exit 98',
     '[[ -n "$CODEXIACTL_FIXTURE_OFFICIAL_ID" ]] || exit 1',

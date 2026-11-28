@@ -157,11 +157,32 @@ assert_setup_unit_or_clean() {
   fi
 }
 
-assert_tunnel_stopped() {
-  local status=0 active
-  active="$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" || status=$?
-  [[ ( "$status" == 0 || "$status" == 4 ) && "$active" == inactive ]] ||
-    die 'Activation preparation requires a stopped setup Tunnel'
+gate_control() {
+  sudo -n /usr/local/sbin/codexia-api-gate "$@"
+}
+
+assert_publication_gate_closed() {
+  [[ "$(gate_control status)" == closed ]] || die 'This owner setup operation requires a closed product publication gate'
+}
+
+assert_management_connector_ready() {
+  [[ "$(systemctl is-active codexia-cloudflared.service)" == active ]] ||
+    die 'Owner setup requires the independent host Cloudflare connector'
+  curl --noproxy '*' --fail --silent --show-error --max-time 3 http://127.0.0.1:2000/ready >/dev/null ||
+    die 'Owner setup requires the ready host Cloudflare connector'
+}
+
+open_publication_gate() {
+  assert_management_connector_ready
+  gate_control open && [[ "$(gate_control status)" == open ]] || {
+    gate_control close >/dev/null 2>&1 || true
+    die 'The owner setup API did not open the verified product publication gate'
+  }
+}
+
+close_publication_gate() {
+  gate_control close && [[ "$(gate_control status)" == closed ]] ||
+    die 'Could not close and verify the product publication gate'
 }
 
 verify_setup_api() {
@@ -290,11 +311,17 @@ case "$operation" in
     systemctl --user daemon-reload
     systemctl --user start codexia-api.service
     if ! verify_setup_api; then
+      close_publication_gate
       systemctl --user stop codexia-api.service
       die 'The setup-only API did not prove readiness and disabled application routes'
     fi
-    systemctl --user start codexia-tunnel.service
-    printf '%s\n' 'Setup-only API and Tunnel started. Check the approved browser origin before delivering the encrypted grant.'
+    curl --noproxy '*' --fail --silent --show-error --max-time 3 http://127.0.0.1:18081/health/ready >/dev/null || {
+      close_publication_gate
+      systemctl --user stop codexia-api.service
+      die 'The setup-only API is not ready at its host loopback endpoint'
+    }
+    open_publication_gate
+    printf '%s\n' 'Setup-only API is published through the verified gate. Check the approved browser origin before delivering the encrypted grant.'
     ;;
   --export-handoff)
     [[ $# == 4 && "$3" =~ ^age1[0-9a-z]+$ && "$4" =~ ^[a-f0-9]{64}$ ]] &&
@@ -302,19 +329,8 @@ case "$operation" in
     assert_installation
     assert_setup_unit_or_clean
     verify_setup_api --pending || die 'The setup API did not prove readiness and required business-route denial'
-    systemctl --user is-active --quiet codexia-tunnel.service &&
-      python3 -c '
-import http.client
-connection = http.client.HTTPConnection("127.0.0.1", 2000, timeout=5)
-try:
-    connection.request("GET", "/ready")
-    raise SystemExit(0 if connection.getresponse().status == 200 else 1)
-except OSError:
-    raise SystemExit(1)
-finally:
-    connection.close()
-' ||
-      die 'The canonical Tunnel has no live Cloudflare connection'
+    assert_management_connector_ready
+    [[ "$(gate_control status)" == open ]] || die 'The setup API is not published through the product gate'
     grant="$(live_grant_binding)"
     [[ "$grant" == "$4" ]] || die 'The outstanding Owner grant no longer matches the reviewed binding'
     "$HOME/.local/bin/codexia-preflight-observe" export-owner-handoff 9 "$3" "$grant" ||
@@ -340,7 +356,7 @@ finally:
     if present "$promoted"; then
       private_file "$promoted" || die 'Owner activation preparation evidence is not a private regular file'
       "$HOME/.local/bin/codexia-require-clean-api-target"
-      assert_tunnel_stopped
+      assert_publication_gate_closed
       run_image /app/node_modules/@codexia/api/dist/verify-auth-clients.js
       exit 0
     fi
@@ -350,7 +366,7 @@ finally:
       # A previous attempt may have removed the unit just before reloading.
       systemctl --user daemon-reload
       "$HOME/.local/bin/codexia-require-clean-api-target"
-      assert_tunnel_stopped
+      assert_publication_gate_closed
     fi
     # An interrupted atomic runtime promotion already has the derived subject.
     # The normal read-only verifier binds it to the enrolled owner and clients.
@@ -361,12 +377,13 @@ finally:
       owner="$(run_image "$operator_script" --prepare-activation)"
       [[ "$owner" =~ ^[a-f0-9-]{36}$ ]] || die 'Could not verify the enrolled owner and approved OAuth clients'
       if present "$unit"; then
-        systemctl --user stop codexia-tunnel.service codexia-api.service
+        close_publication_gate
+        systemctl --user stop codexia-api.service
         rm -f -- "$unit"
         systemctl --user daemon-reload
       fi
       "$HOME/.local/bin/codexia-require-clean-api-target"
-      assert_tunnel_stopped
+      assert_publication_gate_closed
       settings="$(mktemp "$config_dir/.runtime.XXXXXX")"
       cat -- "$runtime" >"$settings"
       printf 'CODEXIA_OAUTH_OWNER_SUBJECT=%s\n' "$owner" >>"$settings"

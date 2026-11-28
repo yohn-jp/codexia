@@ -91,15 +91,15 @@ func main() {
 func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	i, valid := parseInvocation(args)
 	if !valid {
-		fmt.Fprint(stderr, usage)
+		_, _ = fmt.Fprint(stderr, usage)
 		return 3
 	}
 	switch i.command {
 	case "help":
-		fmt.Fprint(stdout, usage)
+		_, _ = fmt.Fprint(stdout, usage)
 		return 0
 	case "version":
-		fmt.Fprintf(stdout, "codexiactl %s (%s)\n", version, source)
+		_, _ = fmt.Fprintf(stdout, "codexiactl %s (%s)\n", version, source)
 		return 0
 	}
 	code := 0

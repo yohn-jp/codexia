@@ -33,6 +33,7 @@
           - codexia_preflight_observation_file is defined
           - codexia_preflight_observation_file is match('^/[^\\r\\n]+$')
           - codexia_preflight_auth_schema_query is defined
+          - codexia_preflight_system_units is mapping
           - not ansible_check_mode
     - name: Resolve the rootless account before changing observation identity
       ansible.builtin.command:
@@ -57,7 +58,6 @@
       ansible.builtin.set_fact:
         lifecycle_base_drift: false
         lifecycle_database_verified: false
-        lifecycle_tunnel_verified: false
         lifecycle_writer: null
         lifecycle_volume_layout: null
     - name: Verify the installed runtime using the existing read-only checks
@@ -75,18 +75,6 @@
                   no_log: true
             - ansible.builtin.set_fact:
                 lifecycle_database_verified: true
-          rescue:
-            - ansible.builtin.set_fact:
-                lifecycle_base_drift: true
-        - name: Verify an existing Tunnel container
-          when: inspect_containers.results[2].rc == 0
-          block:
-            - ansible.builtin.include_tasks:
-                file: verify-base-tunnel-container.yml
-                apply:
-                  no_log: true
-            - ansible.builtin.set_fact:
-                lifecycle_tunnel_verified: true
           rescue:
             - ansible.builtin.set_fact:
                 lifecycle_base_drift: true
@@ -149,7 +137,8 @@
             and (inspect_linger.stdout | default('') == 'yes'),
           'baseDrift': lifecycle_base_drift, 'volumeLayout': lifecycle_volume_layout,
           'quadlets': codexia_preflight_quadlets,
-          'baseEvidence': {'database': lifecycle_database_verified, 'tunnel': lifecycle_tunnel_verified}} | to_json,
+          'systemUnits': codexia_preflight_system_units,
+          'baseEvidence': {'database': lifecycle_database_verified}} | to_json,
         'CODEXIA_WRITER_OBSERVATION': lifecycle_writer | to_json,
         'CODEXIA_OBSERVE_RECOVERY': (codexia_preflight_recovery | default(false) | bool) | ternary('true', 'false'),
         'CODEXIA_OBSERVE_ADOPTION': (codexia_preflight_adoption | default(false) | bool) | ternary('true', 'false'),

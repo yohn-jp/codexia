@@ -14,8 +14,7 @@ socket_in_db=/run/codexia-backup-postgresql
 hba_in_db=/run/codexia-backup-pg_hba.conf
 db_service=codexia-db.service
 api_service=codexia-api.service
-tunnel_service=codexia-tunnel.service
-format=codexia-backup-socket/v1
+format=codexia-backup-socket/v2
 identity_sql='SELECT system_identifier || chr(58) || oid FROM pg_control_system(), pg_database WHERE datname=current_database()'
 
 fail(){ printf '%s\n' "$1" >&2; exit 1; }
@@ -70,8 +69,8 @@ if exists "$intent"; then
       (.previousDatabaseUnitsDigest == null or (.previousDatabaseUnitsDigest | type == "string" and test("^[a-f0-9]{64}$"))) and
       (.previousSocket | type == "string" and test("^[^[:cntrl:]]+$")) and
       (.previousHba | type == "string" and test("^/[^[:cntrl:]]+$")) and
-      (.tunnelActive | type == "boolean")' "$intent" >/dev/null ||
-    fail 'Unrecognized deployment transaction; socket recovery refused'
+      (.previousGate == "open" or .previousGate == "closed")' "$intent" >/dev/null ||
+    fail 'Unrecognized deployment transaction; retain it for recovery using its originating protected release'
   resuming=true
 elif [[ "$recovery_only" == --recover-only ]]; then
   exit 0
@@ -171,16 +170,19 @@ verify_api(){
   [[ "$running" == "true healthy $live_image" && "${live_image#sha256:}" == "${image_id#sha256:}" &&
      "$(systemctl --user show "$api_service" --property=SourcePath --value)" == "$units/codexia-api.container" ]]
 }
+gate_control(){ sudo -n /usr/local/sbin/codexia-api-gate "$@"; }
+require_management(){ systemctl is-active --quiet codexia-cloudflared.service; }
 stop_writer(){
-  local status=0
-  systemctl --user is-active --quiet "$tunnel_service" || status=$?
-  case "$status" in 0) systemctl --user stop "$tunnel_service" || return 1 ;; 3|4) ;; *) return 1 ;; esac
-  systemctl --user stop "$api_service" &&
+  require_management &&
+    gate_control close &&
+    [[ "$(gate_control status)" == closed ]] &&
+    systemctl --user stop "$api_service" &&
     [[ "$(systemctl --user show "$api_service" -p ActiveState --value)" == inactive ]]
 }
 resume_writer(){
-  systemctl --user start "$api_service" && verify_api || return 1
-  if [[ "$tunnel_active" == true ]]; then systemctl --user start "$tunnel_service" || return 1; fi
+  require_management && systemctl --user start "$api_service" && verify_api || return 1
+  if [[ "$previous_gate" == open && "$(gate_control status)" != open ]]; then gate_control open || return 1; fi
+  [[ "$(gate_control status)" == "$previous_gate" ]]
 }
 restart_database(){
   local observed_units
@@ -199,9 +201,9 @@ write_intent() (
   temporary="$(mktemp "$state/.backup-socket.XXXXXXXX")"
   trap 'rm -f -- "$temporary"' EXIT
   jq -n --arg format "$format" --arg phase "$1" --arg authority "$authority" --arg recipe "$recipe" --arg database "$database_identity" \
-    --arg previousSocket "$previous_socket" --arg previousHba "$previous_hba" --argjson tunnelActive "$tunnel_active" \
+    --arg previousSocket "$previous_socket" --arg previousHba "$previous_hba" --arg previousGate "$previous_gate" \
     --arg previousDatabaseUnitsDigest "$previous_database_units_digest" \
-    '{$format, $phase, $authority, $recipe, $database, $previousSocket, $previousHba, $tunnelActive} +
+    '{$format, $phase, $authority, $recipe, $database, $previousSocket, $previousHba, $previousGate} +
      if $previousDatabaseUnitsDigest == "" then {} else {$previousDatabaseUnitsDigest} end' > "$temporary" &&
     sync -f "$temporary" && mv -T -- "$temporary" "$intent" && sync -f "$state"
 )
@@ -246,7 +248,7 @@ if [[ "$resuming" == true ]]; then
     fail 'Socket transaction no longer matches the recorded host, release or PostgreSQL cluster'
   previous_socket="$(jq -er .previousSocket "$intent")"
   previous_hba="$(jq -er .previousHba "$intent")"
-  tunnel_active="$(jq -r .tunnelActive "$intent")"
+  previous_gate="$(jq -er .previousGate "$intent")"
   previous_database_units_digest="$(jq -r '.previousDatabaseUnitsDigest // ""' "$intent")"
   if [[ "$database_running" == false ]]; then
     [[ -n "$previous_database_units_digest" ]] || fail 'Legacy socket transaction requires the recorded PostgreSQL cluster to be running'
@@ -260,9 +262,9 @@ if [[ "$resuming" == true ]]; then
   fi
 else
   systemctl --user is-active --quiet "$api_service" && verify_api || fail 'Socket provisioning requires the healthy committed API'
-  tunnel_status=0
-  systemctl --user is-active --quiet "$tunnel_service" || tunnel_status=$?
-  case "$tunnel_status" in 0) tunnel_active=true ;; 3|4) tunnel_active=false ;; *) fail 'Cannot observe the Tunnel before socket provisioning' ;; esac
+  require_management || fail 'Management Tunnel connector is unavailable'
+  previous_gate="$(gate_control status)" || fail 'Cannot observe publication gate before socket provisioning'
+  [[ "$previous_gate" == open || "$previous_gate" == closed ]] || fail 'Publication gate state is invalid'
   previous_socket="$(admin_query 'SHOW unix_socket_directories')"
   previous_hba="$(admin_query 'SHOW hba_file')"
   [[ "$previous_socket" =~ ^[^[:cntrl:]]+$ && "$previous_hba" =~ ^/[^[:cntrl:]]+$ ]] || fail 'Cannot observe prior PostgreSQL socket settings'

@@ -119,6 +119,25 @@ test('the CodexiaCTL binary is validated by Verify and independently released at
   assert.match(dispatcher, /createWorkflowDispatch/u);
 });
 
+test('Go quality inputs select the existing task and bind its existing Go cache', () => {
+  const sha = 'a'.repeat(40);
+  const base = 'b'.repeat(40);
+  for (const file of ['cmd/codexiactl/.golangci.yml', 'cmd/codexiactl/quality-toolchain.json',
+    'scripts/ci/execution/verify-codexiactl.sh']) {
+    const plan = createVerificationPlan({ files: [file], event: 'pull_request', sha, base });
+    assert.deepEqual(plan.tasks, ['coverage', 'codexiactl-linux'], file);
+    assert.equal(plan.full_model_oci, false, file);
+  }
+  for (const file of ['docs/architecture/DEPENDENCY-INVENTORY.sdoc', 'docs/architecture/DEPENDENCY-POLICY.sdoc',
+    'docs/verification/TEST-ARCHITECTURE-OPTIMIZATION.sdoc', 'docs/verification/CI-CD.sdoc']) {
+    assert.ok(createVerificationPlan({ files: [file], event: 'pull_request', sha, base }).tasks.includes('codexiactl-linux'), file);
+  }
+  const setup = workflow.jobs.unit.steps.find(step => step.uses?.startsWith('actions/setup-go@'));
+  assert.match(setup.with['cache-dependency-path'], /cmd\/codexiactl\/\.golangci\.yml/u);
+  assert.match(setup.with['cache-dependency-path'], /cmd\/codexiactl\/quality-toolchain\.json/u);
+  assert.match(setup.with['cache-dependency-path'], /cmd\/codexiactl\/go\.sum/u);
+});
+
 test('Biome selects shipped JS/TS changes and config, but not unrelated CI or native sources', () => {
   const sha = 'a'.repeat(40);
   const base = 'b'.repeat(40);

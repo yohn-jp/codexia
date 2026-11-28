@@ -85,7 +85,7 @@ export async function assertProbeDenied(endpoint, origin, credentials, fetchImpl
   }
 }
 
-// Terraform's identity-probes.json is checked against these paths by the release gate.
+// The certified identity-probes.json is checked against these paths by the release gate.
 export const IDENTITY_PROBE_PATHS=Object.freeze({backend:'/api/version',frontend:'/desktop/update-identity.json'});
 /** Canonical exact-path identity probe for protected frontend release preflight.
  * @template Backend, Frontend

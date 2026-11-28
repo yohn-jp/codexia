@@ -1,4 +1,15 @@
 ---
+- name: Observe the canonical rootless bridge gateways used by the publication proxy
+  ansible.builtin.command:
+    argv: [podman, network, inspect, --format, "{% raw %}{{range .Subnets}}{{println .Gateway}}{{end}}{% endraw %}", "{{ item }}"]
+  loop: [codexia, codexia-data]
+  register: owner_setup_bridge_gateways
+  changed_when: false
+  failed_when: >-
+    owner_setup_bridge_gateways.rc != 0 or
+    owner_setup_bridge_gateways.stdout_lines | length != 1 or
+    owner_setup_bridge_gateways.stdout is not match('^[0-9]{1,3}([.][0-9]{1,3}){3}$')
+
 - name: Stage the private nonsecret setup-only OAuth configuration
   ansible.builtin.copy:
     content: "CODEXIA_OWNER_SETUP_WEB_REDIRECT_URIS={{ codexia_owner_setup_web_redirect_uris | join(',') }}\n"
@@ -7,6 +18,8 @@
     force: false
 
 - name: Stage the exact immutable setup-only Quadlet for the protected API slot
+  vars:
+    owner_setup_publication_peers: "{{ owner_setup_bridge_gateways.results | map(attribute='stdout') | list | join(',') }}"
   ansible.builtin.template:
     src: "{{ repo_root }}/deploy/ansible/owner-setup.container.j2"
     dest: "{{ home }}/.config/codexia-auth/owner-setup.container"

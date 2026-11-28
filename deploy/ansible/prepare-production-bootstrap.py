@@ -5,8 +5,6 @@ This operation never opens a network connection or writes to the target VM.
 """
 from __future__ import annotations
 
-import base64
-import binascii
 import ipaddress
 import json
 import os
@@ -129,25 +127,6 @@ def prepare(env: dict[str, str]) -> dict[str, str]:
         runtime_key = required(env, "CODEXIA_RUNTIME_SSH_PUBLIC_KEY")
         if not re.fullmatch(r"ssh-ed25519 [A-Za-z0-9+/]+={0,2}", runtime_key):
             raise InvalidBootstrapInput("Protected runtime SSH public key is invalid")
-        tunnel = env.get("CODEXIA_TUNNEL_TOKEN", "")
-        if tunnel:
-            if not re.fullmatch(r"[!-~]{1,8192}", tunnel):
-                raise InvalidBootstrapInput("Expected a single Tunnel connector token")
-            try:
-                target = json.loads(required(env, "CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"))
-                credential = json.loads(base64.b64decode(tunnel + "=" * (-len(tunnel) % 4), validate=True))
-                if (target["repository"] != repository or target["repositoryId"] != int(repository_id) or
-                    target["ownerId"] != int(owner_id) or target["origin"] != profile["publicOrigin"] or
-                    target["origin"] != required(env, "CODEXIA_PUBLIC_ORIGIN") or
-                    not target["accountId"] or not target["tunnelId"] or
-                    credential["a"] != target["accountId"] or credential["t"] != target["tunnelId"]):
-                    raise ValueError
-            except (binascii.Error, UnicodeError, ValueError, KeyError, TypeError) as exc:
-                raise InvalidBootstrapInput("Tunnel connector token does not match the protected Cloudflare target") from exc
-            tunnel_file = control / "tunnel-token"
-            with open(tunnel_file, "x", opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
-                output.write(tunnel)
-            vars_["codexia_tunnel_token_file"] = str(tunnel_file)
         vars_.update({
             "codexia_create_service_account": True, "codexia_host_approved": True,
             "codexia_secrets_approved": True, "codexia_base_approved": True, "codexia_auth_runtime_approved": True,

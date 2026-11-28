@@ -1,0 +1,37 @@
+version: "2"
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  tests: true
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - errorlint
+    - unused
+    - ineffassign
+    - bodyclose
+    - noctx
+    - gosec
+    - testifylint
+    - nolintlint
+  settings:
+    gocognit:
+      min-complexity: 25
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/yohn-jp/codexia
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false

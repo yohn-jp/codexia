@@ -40,7 +40,7 @@ func TestRequiredJobsMatchCheckedOutProductionWorkflows(t *testing.T) {
 		t.Run(tc.operation, func(t *testing.T) {
 			spec := operations[tc.operation]
 			filename := filepath.Join("..", "..", ".github", "workflows", spec.file)
-			workflow, err := os.ReadFile(filename)
+			workflow, err := os.ReadFile(filename) //nolint:gosec // Reads an embedded application workflow allowlist entry from the test checkout.
 			if err != nil {
 				t.Fatal(err)
 			}

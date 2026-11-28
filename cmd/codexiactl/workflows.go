@@ -30,19 +30,33 @@ type workflowOperation struct {
 }
 
 var operations = map[string]workflowOperation{
-	"management": {label: "Management connection check", file: bootstrapFile, inputs: map[string]string{"mode": "preflight"},
-		jobs: []string{"Protected production controller (preflight)"}},
-	"lifecycle": {label: "Lifecycle Preflight", file: preflightFile, inputs: map[string]string{"mode": "lifecycle", "intent": "install"},
-		jobs: []string{"Verify certified candidate pair before observing the production host",
+	"management": {
+		label: "Management connection check", file: bootstrapFile, inputs: map[string]string{"mode": "preflight"},
+		jobs: []string{"Protected production controller (preflight)"},
+	},
+	"lifecycle": {
+		label: "Lifecycle Preflight", file: preflightFile, inputs: map[string]string{"mode": "lifecycle", "intent": "install"},
+		jobs: []string{
+			"Verify certified candidate pair before observing the production host",
 			"Observe the pinned production host without mutation",
-			"Compute the read-only lifecycle plan from fresh host and certified candidate evidence"}},
-	"bootstrap": {label: "R4 Bootstrap", file: bootstrapFile, inputs: map[string]string{"mode": "bootstrap", "approval_phrase": "BOOTSTRAP_CODEXIA"},
-		jobs: []string{"Derive the existing runtime SSH public key before R4", "Protected production controller (bootstrap)",
-			"Protected runtime operation (bootstrap)"}},
-	"frontend": {label: "R5 Frontend publication", file: frontendFile, inputs: map[string]string{"approval_phrase": "PUBLISH_INITIAL_FRONTEND"},
-		jobs: []string{"Publish canonical frontend for initial owner enrollment"}},
-	"owner-setup": {label: "R5 Owner setup", file: bootstrapFile, inputs: map[string]string{"mode": "owner-setup", "approval_phrase": "OWNER_SETUP_CODEXIA"},
-		jobs: []string{"Protected production controller (owner-setup)"}},
+			"Compute the read-only lifecycle plan from fresh host and certified candidate evidence",
+		},
+	},
+	"bootstrap": {
+		label: "R4 Bootstrap", file: bootstrapFile, inputs: map[string]string{"mode": "bootstrap", "approval_phrase": "BOOTSTRAP_CODEXIA"},
+		jobs: []string{
+			"Derive the existing runtime SSH public key before R4", "Protected production controller (bootstrap)",
+			"Protected runtime operation (bootstrap)",
+		},
+	},
+	"frontend": {
+		label: "R5 Frontend publication", file: frontendFile, inputs: map[string]string{"approval_phrase": "PUBLISH_INITIAL_FRONTEND"},
+		jobs: []string{"Publish canonical frontend for initial owner enrollment"},
+	},
+	"owner-setup": {
+		label: "R5 Owner setup", file: bootstrapFile, inputs: map[string]string{"mode": "owner-setup", "approval_phrase": "OWNER_SETUP_CODEXIA"},
+		jobs: []string{"Protected production controller (owner-setup)"},
+	},
 }
 
 type workflowGitHub interface {

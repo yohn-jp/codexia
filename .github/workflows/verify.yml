@@ -307,7 +307,17 @@ jobs:
         continue-on-error: true
         with:
           go-version-file: cmd/codexiactl/go.mod
-          cache-dependency-path: cmd/codexiactl/go.sum
+          cache-dependency-path: |
+            cmd/codexiactl/go.mod
+            cmd/codexiactl/go.sum
+            cmd/codexiactl/.golangci.yml
+            cmd/codexiactl/quality-toolchain.json
+            cmd/codexiactl/**/*.go
+            cmd/codexiactl/assets/**
+            cmd/codexiactl/release-contract.json
+            deploy/cloudflare/*.json
+            scripts/ci/execution/verify-codexiactl.sh
+            .github/workflows/*.yml
       - name: Run selected validations
         env:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}

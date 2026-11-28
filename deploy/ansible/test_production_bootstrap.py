@@ -1,9 +1,7 @@
 """Production controller tests using independent disposable SSH identities."""
-import base64
 import importlib.util
 import json
 from pathlib import Path
-import stat
 import subprocess
 import tempfile
 import unittest
@@ -37,10 +35,6 @@ class ControllerTests(unittest.TestCase):
         self.binding = {"repository": self.env["GITHUB_REPOSITORY"], "repositoryId": 401, "ownerId": 502}
         self.env["CODEXIA_PUBLIC_ORIGIN"] = json.loads(Path(__file__).resolve().parents[1]
                                                         .joinpath("production.json").read_text())["publicOrigin"]
-        self.target = {**self.binding, "origin": self.env["CODEXIA_PUBLIC_ORIGIN"],
-                       "accountId": "a" * 32, "tunnelId": "eb001547-7cb9-4f78-8742-789d122e65f3"}
-        self.tunnel_token = base64.b64encode(json.dumps({"a": self.target["accountId"], "t": self.target["tunnelId"],
-                                                       "s": "fixture"}).encode()).decode()
         self.receipt = {**self.binding, "sourceSha": self.env["GITHUB_SHA"], "runId": 10, "attempt": 2,
                         "candidateBackend": {"identity": {"profile": "full"}, "verifyRun": self.binding, "image": self.image}}
 
@@ -48,8 +42,6 @@ class ControllerTests(unittest.TestCase):
         self.env["CODEXIA_BOOTSTRAP_MODE"] = mode
         if mode == "bootstrap":
             self.env["CODEXIA_RUNTIME_SSH_PUBLIC_KEY"] = " ".join((self.tmp / "runtime.pub").read_text().split()[:2])
-            self.env["CODEXIA_TUNNEL_TOKEN"] = self.tunnel_token
-            self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"] = json.dumps(self.target)
         if mode == "owner-setup":
             self.env["CODEXIA_OWNER_SETUP_AGE_RECIPIENT"] = "age1fixture"
         (self.tmp / "codexia-lifecycle-candidate.json").write_text(json.dumps(self.receipt))
@@ -68,7 +60,7 @@ class ControllerTests(unittest.TestCase):
     def test_access_only_needs_connection(self):
         target, values, runtime = self.prepare()
         self.assertEqual(runtime["codexia_stage"], "inspect")
-        self.assertFalse((target / "tunnel-token").exists())
+        self.assertEqual(sorted(f.name for f in target.iterdir()), ["inventory.yml", "runtime-vars.json"])
         self.assertNotIn("codexia_secrets_approved", values)
 
     def test_bootstrap_generates_inventory_and_binds_certified_image(self):
@@ -79,23 +71,12 @@ class ControllerTests(unittest.TestCase):
         self.assertIs(runtime["codexia_database_initialization_approved"], True)
         self.assertNotIn("codexia_owner_setup_age_recipient", values)
         self.assertEqual(runtime["codexia_auth_bootstrap_image"], self.image)
-        token = Path(values["codexia_tunnel_token_file"])
-        self.assertEqual(stat.S_IMODE(token.stat().st_mode), 0o600)
-        self.assertEqual(token.read_text(), self.tunnel_token)
-        self.assertEqual(sorted(f.name for f in target.iterdir()), ["inventory.yml", "runtime-vars.json", "tunnel-token"])
-        self.assertNotIn(self.tunnel_token, (target / "inventory.yml").read_text())
-
-    def test_existing_installation_can_adopt_its_tunnel_without_resupply(self):
-        self.mutation()
-        self.env.pop("CODEXIA_TUNNEL_TOKEN")
-        _, values, _ = self.prepare()
-        self.assertNotIn("codexia_tunnel_token_file", values)
+        self.assertEqual(sorted(f.name for f in target.iterdir()), ["inventory.yml", "runtime-vars.json"])
 
     def test_preparation_does_not_need_r4_or_handoff_secrets(self):
         self.mutation("prepare-activation")
         _, values, _ = self.prepare()
         self.assertFalse(values["codexia_owner_setup_edge_approved"])
-        self.assertNotIn("codexia_tunnel_token_file", values)
 
     def test_owner_setup_uses_only_handoff_recipient(self):
         self.mutation("owner-setup")
@@ -132,20 +113,8 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "independent"):
             self.prepare()
 
-    def test_refuses_token_for_another_cloudflare_target(self):
-        self.mutation()
-        self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"] = json.dumps({**self.target, "accountId": "b" * 32})
-        with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "Cloudflare target"):
-            self.prepare()
-
     def test_refuses_same_name_certificate_for_another_repository_id(self):
         self.mutation()
         self.env["GITHUB_REPOSITORY_ID"] = "818"
         with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "different repository"):
-            self.prepare()
-
-    def test_refuses_cloudflare_target_from_another_repository(self):
-        self.mutation()
-        self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"] = json.dumps({**self.target, "repositoryId": 818})
-        with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "Cloudflare target"):
             self.prepare()

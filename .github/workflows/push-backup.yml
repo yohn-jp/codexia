@@ -6,6 +6,12 @@ on:
       - scripts/shared/python-env.sh
       - deploy/backup/**
       - deploy/ansible/deploy.yml
+      - deploy/ansible/deploy-transaction.yml
+      - deploy/ansible/codexia-api-gate*
+      - deploy/ansible/backup-postgres-socket.sh
+      - deploy/ansible/backup-runtime.yml
+      - deploy/ansible/backup-release.yml
+      - deploy/systemd/**
       - deploy/ansible/restore-drill.yml
       - deploy/ansible/push-deployment-recover.sh
       - scripts/deployment/recovery/backup.test.mjs
@@ -17,6 +23,12 @@ on:
       - scripts/shared/python-env.sh
       - deploy/backup/**
       - deploy/ansible/deploy.yml
+      - deploy/ansible/deploy-transaction.yml
+      - deploy/ansible/codexia-api-gate*
+      - deploy/ansible/backup-postgres-socket.sh
+      - deploy/ansible/backup-runtime.yml
+      - deploy/ansible/backup-release.yml
+      - deploy/systemd/**
       - deploy/ansible/restore-drill.yml
       - deploy/ansible/push-deployment-recover.sh
       - scripts/deployment/recovery/backup.test.mjs

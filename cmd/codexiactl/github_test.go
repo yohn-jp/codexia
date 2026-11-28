@@ -21,8 +21,10 @@ import (
 	"golang.org/x/crypto/nacl/box"
 )
 
-const githubTestSHA = "0123456789012345678901234567890123456789"
-const githubTestAppID = "fixture-client-id"
+const (
+	githubTestSHA   = "0123456789012345678901234567890123456789"
+	githubTestAppID = "fixture-client-id"
+)
 
 var githubTestTarget = githubTarget{Owner: "yohn-jp", OwnerID: 299811358, RepoID: 1450072993, InstallationID: 317}
 
@@ -73,6 +75,36 @@ func githubTestJSON(t *testing.T, w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestGitHubInitialInputsUseSeparateSSHServiceAuthAndNoTailscaleOrTunnelToken(t *testing.T) {
+	t.Parallel()
+	for _, environment := range []string{githubBootstrapEnvironment, githubProductionEnvironment} {
+		for _, name := range []string{sshAccessClientID, sshAccessSecret, "CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN", "CODEXIA_ACCESS_CLIENT_ID", "CODEXIA_ACCESS_CLIENT_SECRET"} {
+			if !githubInputAllowed(environment, name, githubCommonSecrets, githubBootstrapSecrets, githubProductionSecrets) {
+				t.Errorf("%s/%s is outside the protected input contract", environment, name)
+			}
+		}
+	}
+	for _, name := range []string{"CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"} {
+		if !githubInputAllowed(githubProductionEnvironment, name, githubCommonSecrets, githubBootstrapSecrets, githubProductionSecrets) {
+			t.Errorf("production/%s is outside the protected input contract", name)
+		}
+		if githubInputAllowed(githubBootstrapEnvironment, name, githubCommonSecrets, githubBootstrapSecrets, githubProductionSecrets) {
+			t.Errorf("bootstrap unexpectedly accepts %s", name)
+		}
+	}
+	for _, legacy := range []struct{ environment, name string }{
+		{githubBootstrapEnvironment, "TS_OAUTH_CLIENT_ID"},
+		{githubProductionEnvironment, "TS_OAUTH_CLIENT_ID"},
+		{githubBootstrapEnvironment, "CODEXIA_TUNNEL_TOKEN"},
+		{githubProductionEnvironment, "CODEXIA_TUNNEL_TOKEN"},
+	} {
+		if githubInputAllowed(legacy.environment, legacy.name, githubCommonVariables, githubBootstrapVariables, githubProductionVariables) ||
+			githubInputAllowed(legacy.environment, legacy.name, githubCommonSecrets, githubBootstrapSecrets, githubProductionSecrets) {
+			t.Errorf("legacy input %s/%s remains allowed", legacy.environment, legacy.name)
+		}
 	}
 }
 
@@ -189,7 +221,8 @@ func TestGitHubRecentPreservesDispatchIdentityWithoutExposingRunTitleInJSON(t *t
 		}
 		runs := []any{}
 		if strings.HasSuffix(r.URL.Path, "/production-bootstrap.yml/runs") {
-			runs = append(runs, map[string]any{"id": 3921, "head_branch": "main", "head_sha": githubTestSHA,
+			runs = append(runs, map[string]any{
+				"id": 3921, "head_branch": "main", "head_sha": githubTestSHA,
 				"path": ".github/workflows/production-bootstrap.yml", "event": "workflow_dispatch",
 				"run_attempt": 1, "status": "in_progress", "display_title": title,
 				"repository": githubTestRepository(githubTestTarget, nil), "head_repository": githubTestRepository(githubTestTarget, nil),
@@ -218,8 +251,8 @@ func TestGitHubSecretsUseSealedBoxAndPreserveExisting(t *testing.T) {
 			present := false
 			writes := 0
 			lock := new(githubTestSettingsVariable)
-			const name = "CODEXIA_TUNNEL_TOKEN"
-			const secret = "fixture credential must never be echoed"
+			const name = "CODEXIA_SSH_ACCESS_CLIENT_SECRET"
+			const secret = "fixture credential must never be echoed" //nolint:gosec // Deliberately public negative canary for the sealed-box test.
 			g := newTestGitHub(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == githubTestLockPath && r.Method == http.MethodPost {
 					// Inject a write completed by the previous settings owner just
@@ -407,8 +440,10 @@ func TestGitHubAdditiveBranchRestrictionWithOrWithoutReviewers(t *testing.T) {
 					if reviewers {
 						rules = append(rules, map[string]any{"type": "required_reviewers", "prevent_self_review": true, "reviewers": []any{map[string]any{"type": "User", "reviewer": map[string]any{"id": 123}}}})
 					}
-					githubTestJSON(t, w, map[string]any{"id": 92, "name": "codexia-bootstrap", "protection_rules": rules,
-						"deployment_branch_policy": map[string]any{"protected_branches": false, "custom_branch_policies": true}})
+					githubTestJSON(t, w, map[string]any{
+						"id": 92, "name": "codexia-bootstrap", "protection_rules": rules,
+						"deployment_branch_policy": map[string]any{"protected_branches": false, "custom_branch_policies": true},
+					})
 				case strings.Contains(r.URL.Path, "/environments/codexia-bootstrap/deployment-branch-policies"):
 					branch := map[string]any{"id": 93, "name": "main", "type": "branch"}
 					if r.Method == http.MethodPost {
@@ -461,6 +496,7 @@ func (*githubTestOperator) Ask(string) (string, error)     { return "", nil }
 func (*githubTestOperator) Secret(string) ([]byte, error) {
 	return nil, errors.New("unexpected secret prompt")
 }
+
 func (o *githubTestOperator) Notice(message string) {
 	o.notices = append(o.notices, message)
 }

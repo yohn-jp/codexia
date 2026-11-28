@@ -89,6 +89,9 @@ on:
       - deploy/backup/**
       - deploy/postgres/**
       - deploy/quadlet/**
+      - deploy/systemd/**
+      - cmd/codexiactl/assets/codexia-cloudflared.service
+      - scripts/deployment/ssh/install-cloudflared.sh
       - docs/deployment/PUSH-DEPLOYMENT.sdoc
       - docs/deployment/IAC.sdoc
       - scripts/deployment/lifecycle/app*.mjs

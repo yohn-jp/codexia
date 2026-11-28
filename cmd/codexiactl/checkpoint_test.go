@@ -19,7 +19,11 @@ func TestCheckpointRoundTripAndLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	if _, err := openCheckpointAt(home, host); !errors.Is(err, errCheckpointBusy) {
 		t.Fatalf("concurrent access got %v", err)
 	}
@@ -77,7 +81,11 @@ func TestCheckpointRejectsCorruptAndSymlinkedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	checkpointPath := filepath.Join(home, ".codexiactl", host+".json")
 	if err := os.WriteFile(checkpointPath, []byte(`{"repositoryId":123,"repositoryId":124}`), 0o600); err != nil {
 		t.Fatal(err)

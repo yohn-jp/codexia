@@ -29,8 +29,10 @@ var (
 	githubArtifactMemberName = regexp.MustCompile(`^[A-Za-z0-9_-]+\.json$`)
 )
 
-const githubArtifactMax = 4 << 20
-const githubBackendHandoffFile = "backend-deployment-handoff.yml"
+const (
+	githubArtifactMax        = 4 << 20
+	githubBackendHandoffFile = "backend-deployment-handoff.yml"
+)
 
 type githubRun struct {
 	Status, Conclusion string
@@ -234,9 +236,11 @@ func (g *githubControl) recentWorkflowRuns(ctx context.Context, file, event stri
 		if !g.githubRunMatches(run, file, event) {
 			return nil, errors.New("GitHub returned a workflow run for a different target")
 		}
-		result = append(result, githubRunSummary{ID: run.GetID(), File: file, Status: run.GetStatus(),
+		result = append(result, githubRunSummary{
+			ID: run.GetID(), File: file, Status: run.GetStatus(),
 			Conclusion: run.GetConclusion(), SHA: run.GetHeadSHA(), Attempt: run.GetRunAttempt(),
-			DisplayTitle: run.GetDisplayTitle(), CreatedAt: run.GetCreatedAt().Time, UpdatedAt: run.GetUpdatedAt().Time})
+			DisplayTitle: run.GetDisplayTitle(), CreatedAt: run.GetCreatedAt().Time, UpdatedAt: run.GetUpdatedAt().Time,
+		})
 	}
 	return result, nil
 }
@@ -292,7 +296,7 @@ func (g *githubControl) Artifact(ctx context.Context, id int64, name, member str
 		// Transport errors can contain the signed URL. Never propagate it.
 		return nil, errors.New("GitHub artifact download failed")
 	}
-	defer download.Body.Close()
+	defer func() { _ = download.Body.Close() }()
 	if download.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub artifact download failed (HTTP %d)", download.StatusCode)
 	}
@@ -328,7 +332,7 @@ func githubArtifactMember(raw []byte, digest, member string) ([]byte, error) {
 	if err != nil {
 		return nil, errors.New("GitHub workflow receipt could not be opened")
 	}
-	defer entry.Close()
+	defer func() { _ = entry.Close() }()
 	content, err := io.ReadAll(io.LimitReader(entry, int64(file.UncompressedSize64)+1))
 	if err != nil || uint64(len(content)) != file.UncompressedSize64 {
 		return nil, errors.New("GitHub workflow receipt could not be read safely")

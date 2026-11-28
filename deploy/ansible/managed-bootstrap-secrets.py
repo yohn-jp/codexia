@@ -14,13 +14,14 @@ import sys
 import tempfile
 from urllib.parse import unquote, urlsplit
 
-TUNNEL = "codexia-tunnel-token"
 ADMIN = "codexia-postgres-admin-password"
 APP = "codexia-postgres-app-password"
 AUTH_URL = "codexia-auth-database-url"
 AUTH = "codexia-auth-secret"
 INTROSPECTION = "codexia-oauth-introspection-client-secret"
-NAMES = (TUNNEL, ADMIN, APP, AUTH_URL, AUTH, INTROSPECTION)
+LEGACY_TUNNEL_SECRET = "codexia-tunnel-token"
+LEGACY_TUNNEL_CONTAINER = "codexia-tunnel"
+NAMES = (ADMIN, APP, AUTH_URL, AUTH, INTROSPECTION)
 
 
 def require(ok, message):
@@ -60,8 +61,6 @@ def auth_password(url):
 
 
 def validate(values, installing):
-    tunnel = values[TUNNEL].removesuffix("\n")
-    require(len(tunnel) <= 8192 and re.fullmatch(r"[!-~]+", tunnel), "Invalid Tunnel credential")
     database = [values[name].removesuffix("\n") for name in (ADMIN, APP)]
     require(all(re.fullmatch(r"[A-Fa-f0-9]{64}", value) for value in database),
             "Invalid base database credential")
@@ -73,9 +72,7 @@ def validate(values, installing):
             "Invalid Auth or introspection credential")
 
 
-def value_for(name, tunnel):
-    if name == TUNNEL:
-        return tunnel
+def value_for(name):
     value = secrets.token_hex(32)
     if name == AUTH_URL:
         return f"postgresql://codexia_auth_runtime:{value}@codexia-db:5432/codexia"
@@ -91,9 +88,15 @@ def require_fresh(home, missing, installing):
                  home / ".config/containers/systemd/default.target.wants/codexia-api.service"]
     require(not any(os.path.lexists(path) for path in residues)
             and not any(exists("volume", name) for name in ("codexia-postgres", "codexia-data", "codexia-history"))
-            and not any(exists("container", name) for name in ("codexia-db", "codexia-api"))
-            and (TUNNEL not in missing or not exists("container", "codexia-tunnel")),
+            and not any(exists("container", name) for name in ("codexia-db", "codexia-api")),
             "Data, runtime or installation state with missing credentials requires independent recovery")
+
+
+def require_legacy_tunnel_retired():
+    require(not exists("container", LEGACY_TUNNEL_CONTAINER),
+            "The legacy rootless Tunnel container requires owner-approved one-time retirement after pinned management SSH and publication-gate acceptance; no resource was changed")
+    require(not exists("secret", LEGACY_TUNNEL_SECRET),
+            "The legacy Podman Tunnel credential requires owner-approved one-time retirement after pinned management SSH and publication-gate acceptance; no resource was changed")
 
 
 def read_identities(path):
@@ -120,7 +123,7 @@ def record_identities(state, path, identities):
         os.unlink(tmp)
 
 
-def converge(home, admitted, tunnel, installing):
+def converge(home, admitted, installing):
     state = home / ".local/state/codexia-deploy"
     info = state.lstat()
     require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid(), "Unsafe deployment state directory")
@@ -133,6 +136,7 @@ def converge(home, admitted, tunnel, installing):
             "deploy-transaction.json", "deploy-transaction.json.tmp", "deployed-release.json.tmp",
             "rollback-api.container", "rollback-release.json", "cutover-transaction.json", "backup-transaction")),
             "An existing deployment or backup transaction requires recovery")
+        require_legacy_tunnel_retired()
         machine = Path("/etc/machine-id").read_text().strip()
         require(re.fullmatch(r"[a-f0-9]{32}", machine)
                 and hashlib.sha256(machine.encode()).hexdigest() == admitted["host"],
@@ -154,12 +158,7 @@ def converge(home, admitted, tunnel, installing):
         if missing:
             require_fresh(home, missing, installing)
         values = {name: pair[1] for name, pair in observed.items()}
-        if tunnel and TUNNEL in values:
-            require(tunnel.removesuffix("\n") == values[TUNNEL].removesuffix("\n"),
-                    "The supplied Tunnel credential differs from the installed credential")
-        if TUNNEL in missing:
-            require(tunnel, "A fresh connector requires the protected Tunnel credential")
-        values.update({name: value_for(name, tunnel) for name in missing})
+        values.update({name: value_for(name) for name in missing})
         validate(values, installing)
         for name in missing:
             podman("secret", "create", name, "-", data=values[name])
@@ -181,7 +180,7 @@ if __name__ == "__main__":
         else:
             require(len(sys.argv) == 3 and sys.argv[2] in ("install", "adopt"), "Invalid bootstrap operation")
             changed = converge(Path(os.environ["HOME"]), json.loads(sys.argv[1]),
-                               sys.stdin.read(8194), sys.argv[2] == "install")
+                               sys.argv[2] == "install")
             print("INITIALIZED" if changed else "VERIFIED")
     except (OSError, ValueError, KeyError, IndexError, TypeError, subprocess.SubprocessError):
         # Do not print parsing/subprocess exceptions; they may include secret input.

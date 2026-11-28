@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { isIP } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { actionsRepository, assertReleaseRepositoryBinding } from '../../github/repository.mjs';
 import { promisify } from 'node:util';
 import { assertFrontendIdentity, readFrontendReleaseConfiguration } from '../frontend/verify-compatibility.mjs';
-import { readRegularFile } from '../../shared/read-regular-file.mjs';
 import { assertProbeDenied, IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, readLiveJson } from '../../verification/infrastructure/identity-probe-client.mjs';
 
 const readConfig = async name => JSON.parse(await readFile(new URL(`../../../deploy/cloudflare/${name}.json`, import.meta.url), 'utf8'));
@@ -20,12 +20,15 @@ const [identities, routes, protocols] = await Promise.all([
 ]);
 const worker = 'codexia-frontend';
 const publicationControls = ['_headers', '_redirects'];
-const frontendAssets = fileURLToPath(new URL('../../../app/dist/', import.meta.url));
+const root = fileURLToPath(new URL('../../../', import.meta.url));
 const identityPaths = Object.values(identities).map(({ path }) => path);
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const hexId = /^[a-f0-9]{32}$/u;
 const workerIdPattern = /^[a-zA-Z0-9_-]{1,128}$/u;
 const api = 'https://api.cloudflare.com/client/v4';
+const publicationService = 'http://127.0.0.1:18080';
+const managementService = 'ssh://127.0.0.1:22';
+const serviceTokenTag = 'codexia-scope';
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
 function parseOrigin(origin) {
@@ -41,11 +44,12 @@ export function protectedCloudflareTarget(env = process.env) {
   const target = JSON.parse(env.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET || 'null');
   const keys = ['repository', 'repositoryId', 'ownerId', 'origin',
     'accountId', 'zoneId', 'tunnelId', 'authorPolicyId', 'ciPolicyId',
-    'tunnelTeamName', 'publicProtocolEnabled'];
+    'sshHostname', 'sshPolicyId', 'tunnelTeamName', 'publicProtocolEnabled'];
   assert.ok(target && keys.every(key => Object.hasOwn(target, key)) &&
     Object.keys(target).length === keys.length, 'Invalid protected Cloudflare target');
   assertReleaseRepositoryBinding(target, actionsRepository(env));
   assert.equal(target.origin, env.CODEXIA_PUBLIC_ORIGIN, 'Protected Cloudflare origin differs from the certified source');
+  assert.equal(target.sshHostname, env.CODEXIA_MANAGEMENT_HOSTNAME, 'Protected SSH hostname differs from the certified source');
   return target;
 }
 
@@ -64,15 +68,15 @@ function candidateTag(artifactDigest) {
   return `frontend-${artifactDigest.slice(7)}`;
 }
 
-async function readCertifiedPublicationControls(directory = frontendAssets) {
-  return Object.fromEntries(await Promise.all(publicationControls.map(async name =>
-    [name, sha256(await readRegularFile(join(directory, name), { encoding: null }))])));
+function publicationControl(assets, name) {
+  const bytes = assets.get(name);
+  assert.ok(Buffer.isBuffer(bytes), 'Missing certified frontend publication control');
+  return bytes;
 }
 
 async function runWranglerUpload({ accountId, workerToken, tag }) {
   const output = await mkdtemp(join(tmpdir(), 'codexia-frontend-wrangler-'));
   const outputFile = join(output, 'versions.ndjson');
-  const root = fileURLToPath(new URL('../../../', import.meta.url));
   try {
     await promisify(execFile)(join(root, 'edge/frontend/node_modules/.bin/wrangler'), [
       'versions', 'upload', '--config', join(root, 'edge/frontend/wrangler.jsonc'), '--tag', tag,
@@ -94,41 +98,105 @@ async function runWranglerUpload({ accountId, workerToken, tag }) {
   }
 }
 
-async function runInitialWorkerUpload({ accountId, workerId, workerToken, tag, initialControls }) {
-  const scratch = await mkdtemp(join(tmpdir(), 'codexia-first-worker-version-'));
-  const root = fileURLToPath(new URL('../../../', import.meta.url));
-  const infra = join(root, 'deploy/cloudflare/terraform');
-  const assets = join(root, 'app/dist');
-  try {
-    const config = JSON.parse(await readFile(join(root, 'edge/frontend/wrangler.jsonc'), 'utf8'));
-    assert.ok(/^\d{4}-\d{2}-\d{2}$/u.test(config.compatibility_date), 'Invalid frontend compatibility date');
-    await Promise.all([
-      ...['versions.tf', '.terraform.lock.hcl'].map(name => copyFile(join(infra, name), join(scratch, name))),
-      copyFile(join(infra, 'initial-frontend-version/main.tf'), join(scratch, 'main.tf')),
-      ...publicationControls.map(name => copyFile(join(assets, name), join(scratch, name))),
-      cp(assets, join(scratch, 'assets'), { recursive: true,
-        filter: source => publicationControls.every(name => source !== join(assets, name)) }),
-      writeFile(join(scratch, 'candidate.auto.tfvars.json'), JSON.stringify({ account_id: accountId,
-        worker_id: workerId, tag, compatibility_date: config.compatibility_date }), { mode: 0o600, flag: 'wx' }),
-    ]);
-    assert.deepEqual(await readCertifiedPublicationControls(scratch), initialControls,
-      'Initial Worker publication controls changed before upload');
-    const run = (...args) => promisify(execFile)('terraform', args, {
-      cwd: scratch, timeout: 10 * 60_000,
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_IN_AUTOMATION: '1',
-        CLOUDFLARE_API_TOKEN: workerToken },
-    });
-    await run('init', '-backend=false', '-input=false', '-lockfile=readonly', '-no-color');
-    await run('apply', '-input=false', '-auto-approve', '-no-color');
-    const { stdout } = await run('output', '-raw', 'version_id');
-    const versionId = stdout.trim();
-    assert.ok(uuid.test(versionId), 'Invalid staged first Worker version UUID');
-    return versionId;
-  } catch {
-    throw new Error('The initial Worker candidate upload could not be verified');
-  } finally {
-    await rm(scratch, { recursive: true, force: true });
+// The first version must be created without a deployment, even when no
+// previous version exists. Do not use a script upload or wrangler deploy here.
+// https://developers.cloudflare.com/workers/static-assets/direct-upload/
+export async function runInitialWorkerUpload({
+  accountId, workerId, workerToken, tag, assets, fetchImpl = fetch, mimeLookup,
+}) {
+  assert.ok(hexId.test(accountId) && workerIdPattern.test(workerId), 'Invalid initial Worker target');
+  assert.ok(typeof workerToken === 'string' && workerToken.length > 0 && workerToken.trim() === workerToken,
+    'Missing Worker publication credential');
+  assert.match(tag, /^frontend-[a-f0-9]{64}$/u);
+  assert.ok(assets instanceof Map, 'Initial Worker upload requires the certified frontend archive');
+  const { stdout } = await promisify(execFile)('git', ['show', 'HEAD:edge/frontend/wrangler.jsonc'], { cwd: root, timeout: 10_000 });
+  const config = JSON.parse(stdout);
+  assert.equal(config.name, worker);
+  assert.equal(config.workers_dev, false);
+  assert.equal(config.preview_urls, false);
+  assert.match(config.compatibility_date, /^\d{4}-\d{2}-\d{2}$/u);
+  assert.equal(config.assets.html_handling, 'none');
+  assert.equal(config.assets.not_found_handling, 'none');
+
+  const lookup = mimeLookup ?? createRequire(new URL('../../../edge/frontend/package.json', import.meta.url))('mime-types').lookup;
+  const modules = publicationControls.map(name => ({
+    name, content_type: 'text/plain', content_base64: publicationControl(assets, name).toString('base64'),
+  }));
+  const manifest = {};
+  const byHash = new Map();
+  for (const [name, bytes] of assets) {
+    if (publicationControls.includes(name)) continue;
+    const hash = sha256(bytes.toString('base64') + extname(name).slice(1)).slice(0, 32);
+    const type = lookup(name) || 'application/null';
+    const previous = byHash.get(hash);
+    assert.ok(!previous || (previous.bytes.equals(bytes) && previous.type === type), 'Ambiguous frontend asset hash');
+    byHash.set(hash, { bytes, type });
+    manifest['/' + name] = { hash, size: bytes.length };
   }
+  assert.ok(byHash.size > 0, 'No frontend assets to upload');
+
+  // Keep credentials and server response bodies out of diagnostics, including
+  // when the fetch implementation throws an error with request details.
+  async function post(label, path, token, body, { allowMissingResult = false } = {}) {
+    let response, envelope;
+    try {
+      const headers = { Authorization: 'Bearer ' + token };
+      if (!(body instanceof FormData)) headers['Content-Type'] = 'application/json';
+      response = await fetchImpl(api + path, {
+        method: 'POST', headers, body: body instanceof FormData ? body : JSON.stringify(body),
+        redirect: 'error', signal: AbortSignal.timeout(120_000),
+      });
+      envelope = await response.json();
+    } catch {
+      throw new Error('Cloudflare ' + label + ' response could not be verified');
+    }
+    const result = envelope?.result;
+    // Only a successful intermediate asset upload may omit its result.
+    const validResult = result !== null && typeof result === 'object' && !Array.isArray(result);
+    assert.ok(response.ok && envelope?.success === true && !envelope.errors?.length &&
+      (validResult || (allowMissingResult && response.status === 200 && result == null)), 'Cloudflare ' + label + ' failed');
+    return { status: response.status, result: result ?? {} };
+  }
+  const validJwt = value => typeof value === 'string' && value.length > 0 && value.trim() === value;
+  const account = '/accounts/' + accountId + '/workers';
+  const { result: session } = await post('asset upload session', account + '/scripts/' + worker + '/assets-upload-session',
+    workerToken, { manifest });
+  assert.ok(validJwt(session.jwt) && Array.isArray(session.buckets), 'Invalid asset upload session');
+  const requested = new Set();
+  for (const bucket of session.buckets) {
+    assert.ok(Array.isArray(bucket) && bucket.length > 0, 'Invalid asset upload bucket');
+    for (const hash of bucket) {
+      assert.ok(byHash.has(hash) && !requested.has(hash), 'Invalid or duplicate requested asset hash');
+      requested.add(hash);
+    }
+  }
+  let completionJwt = session.buckets.length === 0 ? session.jwt : undefined;
+  for (let index = 0; index < session.buckets.length; index++) {
+    const form = new FormData();
+    for (const hash of session.buckets[index]) {
+      const { bytes, type } = byHash.get(hash);
+      form.append(hash, new Blob([bytes.toString('base64')], { type }), hash);
+    }
+    const last = index === session.buckets.length - 1;
+    const { result, status } = await post('asset upload', account + '/assets/upload?base64=true', session.jwt, form,
+      { allowMissingResult: !last });
+    if (last) {
+      assert.ok(status === 201 && validJwt(result.jwt), 'Missing completed asset upload token');
+      completionJwt = result.jwt;
+    } else {
+      assert.ok(status === 200 && !result.jwt, 'Asset upload completed before all requested buckets');
+    }
+  }
+  const { result: version } = await post('initial Worker version', account + '/workers/' +
+    encodeURIComponent(workerId) + '/versions?deploy=false', workerToken, {
+    compatibility_date: config.compatibility_date,
+    annotations: { 'workers/tag': tag },
+    assets: { jwt: completionJwt, config: { html_handling: 'none', not_found_handling: 'none' } },
+    modules,
+  });
+  assert.ok(uuid.test(version.id) && Array.isArray(version.urls) && version.urls.length === 0,
+    'Invalid or publicly addressable staged first Worker version');
+  return version.id;
 }
 
 function canonical(value) {
@@ -149,7 +217,7 @@ function allowsHostname(pattern, hostname) {
 
 function assertPolicyIds(policies, expected) {
   assert.ok(Array.isArray(policies) && policies.length === expected.length, 'Cloudflare Access application policies differ from the intended boundary');
-  for (const [index, [decision, id]] of expected.entries()) {
+  for (const [index, [decision, id, tags]] of expected.entries()) {
     const policy = policies.find(item => Number(item.precedence) === index + 1);
     assert.ok(policy?.decision === decision && (!id || policy.id === id), 'Cloudflare Access application policy decision or identity changed');
     if (decision === 'bypass') {
@@ -157,20 +225,26 @@ function assertPolicyIds(policies, expected) {
       assert.ok(!policy.require?.length && !policy.exclude?.length, 'Cloudflare protocol Bypass policy constraints changed');
     }
     if (decision === 'non_identity') {
-      assert.ok(policy.include?.length === 1 && uuid.test(policy.include[0]?.service_token?.token_id),
-        'Cloudflare CI policy must select a single identity probe service token');
+      assert.ok(!policy.require?.length && !policy.exclude?.length && Array.isArray(policy.include),
+        'Cloudflare Service Auth policy constraints changed');
+      assert.deepEqual(policy.include.map(canonical).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+        tags.toSorted().map(value => ({ service_token_tag: { key: serviceTokenTag, value } })),
+        'Cloudflare Service Auth policy must select only the repository and purpose tags');
     }
   }
 }
 
 export function createDeploymentEdge({
-  origin, accountId, zoneId, tunnelId,
-  authorPolicyId, ciPolicyId, tunnelTeamName, publicProtocolEnabled,
+  origin, accountId, zoneId, tunnelId, repositoryId,
+  authorPolicyId, ciPolicyId, sshHostname, sshPolicyId, tunnelTeamName, publicProtocolEnabled,
   readToken, workerToken, accessEnv = process.env, fetchImpl = fetch,
   uploadVersion = runWranglerUpload, uploadInitialVersion = runInitialWorkerUpload,
-  readInitialWorkerControls = readCertifiedPublicationControls,
+  readInitialWorkerAssets,
 }) {
   const target = parseOrigin(origin);
+  const managementHost = parseOrigin('https://' + sshHostname).hostname;
+  assert.ok(sshHostname === managementHost && managementHost !== target.hostname &&
+    Number.isSafeInteger(repositoryId) && repositoryId > 0, 'Invalid certified SSH hostname or repository identity');
   assert.ok(hexId.test(accountId) && hexId.test(zoneId) && uuid.test(tunnelId),
     'Cloudflare deployment resource IDs are invalid');
   const accountPath = `/accounts/${accountId}`;
@@ -296,8 +370,11 @@ export function createDeploymentEdge({
     assert.ok((before?.versionId ?? null) === previousVersionId, 'Active Worker version changed before candidate upload');
     assert.ok(typeof workerToken === 'string' && workerToken.length > 0 && workerToken.trim() === workerToken,
       'Missing Cloudflare credential for candidate upload');
-    const initialControls = initial ? await readInitialWorkerControls() : undefined;
-    const versionId = initial ? await uploadInitialVersion({ accountId, workerId: initial.workerId, workerToken, tag, initialControls })
+    const assets = initial ? await readInitialWorkerAssets?.(artifactDigest) : undefined;
+    if (initial) assert.ok(assets instanceof Map, 'Initial Worker upload requires the certified frontend archive');
+    const initialControls = initial ? Object.fromEntries(publicationControls.map(name =>
+      [name, sha256(publicationControl(assets, name))])) : undefined;
+    const versionId = initial ? await uploadInitialVersion({ accountId, workerId: initial.workerId, workerToken, tag, assets, fetchImpl })
       : await uploadVersion({ accountId, workerToken, tag });
     const [staged, after] = await Promise.all([
       assertStaged({ versionId, artifactDigest, initialWorkerId: initial?.workerId, initialControls }),
@@ -349,11 +426,12 @@ export function createDeploymentEdge({
   }
 
   async function observeIngress({ lifecycle = false } = {}) {
-    assert.ok(uuid.test(authorPolicyId) && uuid.test(ciPolicyId) && authorPolicyId !== ciPolicyId &&
+    const policyIds = [authorPolicyId, ciPolicyId, sshPolicyId];
+    assert.ok(policyIds.every(id => uuid.test(id)) && new Set(policyIds).size === policyIds.length &&
       typeof publicProtocolEnabled === 'boolean' && /^[a-z0-9-]+$/u.test(tunnelTeamName ?? ''),
     'Access policy IDs, Tunnel team and protocol ingress setting must be pinned');
     const host = target.hostname;
-    // Terraform iterates the JSON-decoded map in lexicographic key order.
+    // Match the canonical protocol entry order before the protected catch-all.
     const enabledProtocols = publicProtocolEnabled ? Object.keys(protocols).sort().map(key => protocols[key]) : [];
     const expectedPaths = ['', ...identityPaths, ...enabledProtocols.map(item => item.path)];
     // Positive absence requires an authenticated inventory, not a 404, failed
@@ -365,12 +443,14 @@ export function createDeploymentEdge({
     if (normalWorker) {
       assertPrivateWorker(normalWorker.subdomain);
     }
-    const [dns, workerRoutes, domains, applications, tunnel, deployment] = await Promise.all([
+    const [dns, managementDns, workerRoutes, domains, applications, tunnel, deployment] = await Promise.all([
       list('proxied application DNS', `${zonePath}/dns_records?name=${host}`),
+      list('proxied SSH DNS', `${zonePath}/dns_records?name=${managementHost}`),
       result('Worker routes', `${zonePath}/workers/routes`),
       Promise.all([
         list('Worker custom domains', `${accountPath}/workers/domains?service=${worker}`),
         list('Worker custom domains for application', `${accountPath}/workers/domains?hostname=${host}`),
+        list('Worker custom domains for SSH', `${accountPath}/workers/domains?hostname=${managementHost}`),
       ]),
       list('Access applications', `${accountPath}/access/apps`),
       result('Tunnel configuration', `${accountPath}/cfd_tunnel/${tunnelId}/configurations`),
@@ -378,8 +458,12 @@ export function createDeploymentEdge({
     ]);
     assert.ok(dns.length === 1 && dns[0].name === host && dns[0].proxied === true && dns[0].type === 'CNAME' &&
       dns[0].content === `${tunnelId}.cfargotunnel.com`, 'Application DNS must be the pinned proxied Tunnel CNAME');
+    assert.ok(managementDns.length === 1 && managementDns[0].name === managementHost && managementDns[0].proxied === true &&
+      managementDns[0].type === 'CNAME' && managementDns[0].content === dns[0].content,
+    'SSH DNS must point to the same pinned proxied Tunnel');
     assert.ok(domains.every(items => items.length === 0), 'Worker custom domains permit alternate ingress');
     assert.ok(Array.isArray(workerRoutes), 'Cloudflare Worker route inventory is invalid');
+    assert.ok(workerRoutes.every(route => !allowsHostname(route.pattern, managementHost)), 'Worker routes overlap the SSH hostname');
     const relevantRoutes = workerRoutes.filter(route => route.script === worker || allowsHostname(route.pattern, host));
     const canonicalRoutes = [
       ...routes.routes.map(path => ({ pattern: host + path, script: worker })),
@@ -393,8 +477,8 @@ export function createDeploymentEdge({
 
     const relevantApps = applications.filter(app => [app.domain, ...(app.self_hosted_domains ?? []),
       ...(app.destinations ?? []).filter(destination => destination.type === 'public').map(destination => destination.uri),
-    ].some(domain => typeof domain === 'string' && allowsHostname(domain, host)));
-    assert.deepEqual(relevantApps.map(app => app.domain).sort(), expectedPaths.map(path => host + path).sort(),
+    ].some(domain => typeof domain === 'string' && (allowsHostname(domain, host) || allowsHostname(domain, managementHost))));
+    assert.deepEqual(relevantApps.map(app => app.domain).sort(), [...expectedPaths.map(path => host + path), managementHost].sort(),
       'Cloudflare Access application paths differ from the reviewed topology');
     const relevantPolicies = await Promise.all(relevantApps.map(async app => {
       const domains = [...(app.self_hosted_domains ?? []),
@@ -402,15 +486,18 @@ export function createDeploymentEdge({
       assert.ok(app.type === 'self_hosted' && uuid.test(app.id) && /^[a-f0-9]{64}$/u.test(app.aud) &&
         domains.every(domain => domain === app.domain) && !(app.destinations ?? []).some(destination => destination.overrides?.length),
       'Cloudflare Access application identity or destinations are invalid');
-      const path = app.domain.slice(host.length);
+      const management = app.domain === managementHost;
+      const path = management ? null : app.domain.slice(host.length);
       const policies = await list('Access policies', `${accountPath}/access/apps/${app.id}/policies`);
-      const expected = path === '' ? [['allow', authorPolicyId]]
-        : identityPaths.includes(path) ? [['non_identity', ciPolicyId], ['allow', authorPolicyId]]
-          : [['bypass']];
+      const expected = management
+        ? [['non_identity', sshPolicyId, ['bootstrap', 'production'].map(stage => `repo-${repositoryId}-ssh-codexia-${stage}`)]]
+        : path === '' ? [['allow', authorPolicyId]]
+          : identityPaths.includes(path) ? [['non_identity', ciPolicyId, [`repo-${repositoryId}-probe-codexia-production`]], ['allow', authorPolicyId]]
+            : [['bypass']];
       assertPolicyIds(policies, expected);
       return { path, app, policies: policies.sort((a, b) => a.precedence - b.precedence) };
     }));
-    const audits = Object.fromEntries(relevantPolicies.map(({ path, app }) => [path, app.aud]));
+    const audits = Object.fromEntries(relevantPolicies.map(({ path, app }) => [path ?? managementHost, app.aud]));
     const expectedIngress = [
       ...enabledProtocols.filter(entry => entry.tunnelPath).map(entry => [entry.tunnelPath, null]),
       ...Object.values(identities).map(({ path, tunnelPath }) => [tunnelPath, [audits[path], audits['']].sort()]),
@@ -418,11 +505,11 @@ export function createDeploymentEdge({
     ];
     const ingress = tunnel.config?.ingress;
     assert.ok(tunnel.tunnel_id === tunnelId && tunnel.account_id === accountId && tunnel.source === 'cloudflare' && Array.isArray(ingress) &&
-      ingress.length === expectedIngress.length + 1, 'Cloudflare Tunnel authority or ingress list differs from the reviewed topology');
+      ingress.length === expectedIngress.length + 2, 'Cloudflare Tunnel authority or ingress list differs from the reviewed topology');
     for (const [index, [path, aud]] of expectedIngress.entries()) {
       const item = ingress[index];
       const access = item.originRequest?.access;
-      assert.ok(item.hostname === host && (item.path || null) === path && item.service === 'http://codexia-api:3000' &&
+      assert.ok(item.hostname === host && (item.path || null) === path && item.service === publicationService &&
         item.originRequest?.httpHostHeader === host, 'Cloudflare Tunnel ingress endpoint differs from the reviewed topology');
       if (aud) {
         assert.ok(access?.required === true && access.teamName === tunnelTeamName && Array.isArray(access.audTag) &&
@@ -432,11 +519,17 @@ export function createDeploymentEdge({
         assert.ok(!access || access.required === false, 'Cloudflare public protocol Tunnel entry has unexpected Access settings');
       }
     }
+    const sshIngress = ingress.at(-2);
+    const sshAccess = sshIngress.originRequest?.access;
+    assert.ok(sshIngress.hostname === managementHost && !sshIngress.path && sshIngress.service === managementService &&
+      sshAccess?.required === true && sshAccess.teamName === tunnelTeamName && Array.isArray(sshAccess.audTag) &&
+      sshAccess.audTag.length === 1 && sshAccess.audTag[0] === audits[managementHost],
+    'Cloudflare SSH ingress target or Access audience differs from the reviewed topology');
     assert.ok(!ingress.at(-1).hostname && !ingress.at(-1).path && ingress.at(-1).service === 'http_status:404',
       'Cloudflare Tunnel must end with an unconditional 404');
     const workerId = normalWorker?.id ?? null;
-    const topology = { dns: dns[0].id, workerId, workerRoutes: routePlan,
-      access: relevantPolicies.sort((a, b) => a.path.localeCompare(b.path)), tunnel: tunnel.config,
+    const topology = { dns: dns[0].id, managementDns: managementDns[0].id, workerId, workerRoutes: routePlan,
+      access: relevantPolicies.sort((a, b) => a.app.domain.localeCompare(b.app.domain)), tunnel: tunnel.config,
     };
     const ingressDigest = `sha256:${createHash('sha256').update(JSON.stringify(canonical(topology))).digest('hex')}`;
     return { observedAt: new Date().toISOString(), origin: target.origin, deployment, ingressDigest, workerId,
@@ -498,8 +591,7 @@ export function createDeploymentEdge({
     return { ...after, frontendState, frontend, backend };
   }
 
-  return { observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, assertWorkerArtifact, deployForOwnerEnrollment,
-    readInitialWorkerControls };
+  return { observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, assertWorkerArtifact, deployForOwnerEnrollment };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

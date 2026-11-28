@@ -17,7 +17,7 @@ func testPTY(t *testing.T) (*terminal, int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { unix.Close(master) })
+	t.Cleanup(func() { _ = unix.Close(master) })
 	if err := unix.IoctlSetPointerInt(master, unix.TIOCSPTLCK, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -30,13 +30,13 @@ func testPTY(t *testing.T) (*terminal, int) {
 		t.Fatal(err)
 	}
 	tty := &terminal{fd: slave, ctx: context.Background()}
-	t.Cleanup(func() { tty.Close() })
+	t.Cleanup(func() { _ = tty.Close() })
 	return tty, master
 }
 
 func waitForTTYPrompt(t *testing.T, master int) {
 	t.Helper()
-	status, err := unix.Poll([]unix.PollFd{{Fd: int32(master), Events: unix.POLLIN}}, 2_000)
+	status, err := unix.Poll([]unix.PollFd{{Fd: int32(master), Events: unix.POLLIN}}, 2_000) //nolint:gosec // The signed kernel descriptor is returned by open(2) in testPTY.
 	if err != nil || status != 1 {
 		t.Fatalf("PTY did not receive prompt: %v", err)
 	}

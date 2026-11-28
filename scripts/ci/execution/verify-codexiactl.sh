@@ -12,11 +12,6 @@ fi
 source_sha=$(git rev-parse HEAD)
 version=${CODEXIACTL_BUILD_VERSION:-dev}
 client_id=${CODEXIACTL_BUILD_APP_CLIENT_ID:-}
-cloudflare_client_id=${CODEXIACTL_BUILD_CLOUDFLARE_CLIENT_ID:-}
-if [[ -n "$cloudflare_client_id" && ! "$cloudflare_client_id" =~ ^[A-Za-z0-9_-]{16,128}$ ]]; then
-  echo 'Invalid official Cloudflare OAuth client ID.' >&2
-  exit 1
-fi
 if [[ ! "$source_sha" =~ ^[a-f0-9]{40}$ || "$source_sha" != "${CODEXIACTL_BUILD_SOURCE:-$source_sha}" ]] ||
    [[ "$version" != dev && ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
   echo 'Invalid codexiactl release source or version.' >&2
@@ -43,27 +38,62 @@ if [[ "$version" != dev ]]; then
   fi
 fi
 
-unformatted=$(gofmt -l "$module")
-if [[ -n "$unformatted" ]]; then
-  printf 'Go files that need gofmt:\n%s\n' "$unformatted" >&2
+scratch_dir=$(mktemp -d)
+trap 'rm -rf -- "$scratch_dir"' EXIT
+tool_pin=$(jq -er '.golangciLint | [.version, .sha256] | @tsv' "$module/quality-toolchain.json")
+IFS=$'\t' read -r lint_version lint_digest <<< "$tool_pin"
+if [[ ! "$lint_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || ! "$lint_digest" =~ ^[a-f0-9]{64}$ ]]; then
+  echo 'Invalid golangci-lint release pin.' >&2
   exit 1
 fi
+started=$SECONDS
+archive_name="golangci-lint-$lint_version-linux-amd64"
+archive="$scratch_dir/$archive_name.tar.gz"
+curl --silent --show-error --fail --location --retry 3 --max-time 120 --proto '=https' --proto-redir '=https' \
+  --output "$archive" "https://github.com/golangci/golangci-lint/releases/download/v$lint_version/$archive_name.tar.gz"
+printf '%s  %s\n' "$lint_digest" "$archive" | sha256sum --check --strict
+tar -xzf "$archive" -C "$scratch_dir" "$archive_name/golangci-lint"
+lint="$scratch_dir/$archive_name/golangci-lint"
+"$lint" version
+printf 'Go analyzer setup: %ss\n' "$((SECONDS - started))"
+
+started=$SECONDS
 go -C "$module" mod tidy -diff
 go -C "$module" mod verify
+go -C "$module" list -mod=readonly -m all
+printf 'Go dependency verification: %ss\n' "$((SECONDS - started))"
+
+started=$SECONDS
+(
+  cd "$module"
+  "$lint" config verify --config .golangci.yml
+  "$lint" fmt --config .golangci.yml --diff
+  CGO_ENABLED=1 "$lint" run --config .golangci.yml ./...
+)
+printf 'Go format and lint: %ss\n' "$((SECONDS - started))"
+
+started=$SECONDS
 CGO_ENABLED=1 go -C "$module" vet -mod=readonly ./...
 CGO_ENABLED=1 go -C "$module" test -mod=readonly -race -count=1 ./...
+printf 'Go vet and race tests: %ss\n' "$((SECONDS - started))"
 
+started=$SECONDS
 if [[ $# -eq 1 ]]; then
   mkdir -p -- "$1"
   stage_dir=$(realpath -- "$1")
 else
-  stage_dir=$(mktemp -d)
-  trap 'rm -rf -- "$stage_dir"' EXIT
+  stage_dir="$scratch_dir"
 fi
 asset=codexiactl-linux-amd64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go -C "$module" build \
+export CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1
+package_modules=$(go -C "$module" list -mod=readonly -deps -f '{{with .Module}}{{.Path}}{{end}}' .)
+if grep -Ex 'github\.com/stretchr/testify|github\.com/google/go-cmp|github\.com/golangci/golangci-lint(/v[0-9]+)?|golang\.org/x/(tools|vuln)|mvdan\.cc/gofumpt' <<< "$package_modules"; then
+  echo 'A Go test or analysis module entered the CLI release package closure.' >&2
+  exit 1
+fi
+go -C "$module" build \
   -mod=readonly -trimpath -buildvcs=true \
-  -ldflags "-X main.version=$version -X main.source=$source_sha -X main.githubAppClientID=$client_id -X main.cloudflareOAuthClientID=$cloudflare_client_id" \
+  -ldflags "-X main.version=$version -X main.source=$source_sha -X main.githubAppClientID=$client_id" \
   -o "$stage_dir/$asset" .
 
 program_headers=$(readelf -lW "$stage_dir/$asset")
@@ -88,3 +118,4 @@ fi
 cd "$stage_dir"
 sha256sum "$asset" > "$asset.sha256"
 sha256sum --check --strict "$asset.sha256"
+printf 'Go release build and smoke: %ss\n' "$((SECONDS - started))"

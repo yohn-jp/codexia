@@ -21,12 +21,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const maxEnvelopeSize = 16 * 1024
-const maxGrantPayloadSize = 4 * 1024
+const (
+	maxEnvelopeSize     = 16 * 1024
+	maxGrantPayloadSize = 4 * 1024
+)
 
 var (
 	errHandoffUnavailable  = errors.New("the live Owner Setup Grant and its recipient binding could not be verified. Follow the independently approved reissue procedure if the grant or its binding is unavailable")
-	errHandoffNeedsConsent = errors.New("Owner handoff requires an independently verified recipient or explicit same-Owner VM trust")
+	errHandoffNeedsConsent = errors.New("owner handoff requires an independently verified recipient or explicit same-Owner VM trust")
 	ownerGrantKey          = regexp.MustCompile(`^"[A-Za-z0-9_-]{43}"$`)
 )
 
@@ -80,7 +82,7 @@ func chooseHandoff(o operator, existingRecipient string) (*ownerHandoff, error) 
 		}
 	}
 	if !validAgeRecipient(recipient) {
-		return nil, errors.New("The Owner age recipient is invalid. Verify the complete age1… public recipient with the Owner before resuming")
+		return nil, errors.New("the Owner age recipient is invalid. Verify the complete age1… public recipient with the Owner before resuming")
 	}
 	approved, err := o.Confirm("I independently verified the Owner controls the private key for " + recipient + ". Deliver to this recipient?")
 	if err != nil {
@@ -138,6 +140,7 @@ func readOwnerEnvelope(ctx context.Context, target githubTarget, image, recipien
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	runtime := "/run/user/" + uid
+	//nolint:gosec // Executable, account and flags are fixed. Deliver validates the image, recipient and grant binding as individual arguments.
 	cmd := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "-H", "-u", serviceName, "--", "/usr/bin/env",
 		"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "CODEXIA_IMAGE_REPOSITORY="+target.imageRepository(),
 		"CODEXIA_TARGET_REPOSITORY="+target.FullName(), "CODEXIA_TARGET_REPOSITORY_ID="+strconv.FormatInt(target.RepoID, 10),
@@ -225,7 +228,7 @@ func saveOwnerEnvelope(home string, envelope []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer directory.Close()
+	defer func() { _ = directory.Close() }()
 	name := "owner-setup-" + strings.ToLower(rand.Text()) + ".age"
 	const message = "could not stage the encrypted handoff in the administrator's private directory"
 	if err := writeStateFile(directory, name, envelope); err != nil {

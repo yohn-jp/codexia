@@ -37,7 +37,7 @@ func TestTerminalSessionHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tty.Close()
+	defer func() { _ = tty.Close() }()
 	tty.bindContext(ctx)
 	switch scenario {
 	case "confirm":
@@ -107,10 +107,14 @@ func startTerminalSession(t *testing.T, scenario, terminalType string, cols uint
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
-	s.cmd = exec.CommandContext(ctx, os.Args[0], "-test.run=^TestTerminalSessionHelper$")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cmd = exec.CommandContext(ctx, executable, "-test.run=^TestTerminalSessionHelper$") //nolint:gosec // Re-executes the current test binary with one fixed Go test selector.
 	s.cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 3}
 	s.cmd.ExtraFiles = []*os.File{file}
 	s.cmd.Env = slices.DeleteFunc(os.Environ(), func(entry string) bool {
@@ -175,7 +179,7 @@ func (s *terminalSession) waitFor(t *testing.T, value string) {
 		if bytes.Contains(s.output, []byte(value)) {
 			return
 		}
-		_, err := unix.Poll([]unix.PollFd{{Fd: int32(s.master), Events: unix.POLLIN}}, 50)
+		_, err := unix.Poll([]unix.PollFd{{Fd: int32(s.master), Events: unix.POLLIN}}, 50) //nolint:gosec // The signed kernel descriptor is returned by open(2) in testPTY.
 		if err != nil && !errors.Is(err, unix.EINTR) {
 			t.Fatal(err)
 		}
@@ -356,7 +360,7 @@ func TestTerminalRedirectedJSONIsOnePlainDocument(t *testing.T) {
 	}
 	var report statusReport
 	decoder := json.NewDecoder(&s.stdout)
-	if err := decoder.Decode(&report); err != nil || report.SchemaVersion != 1 || report.Active != "unknown" || report.Accepted != "unknown" || len(report.Blockers) == 0 {
+	if err := decoder.Decode(&report); err != nil || report.SchemaVersion != 2 || report.Active != "unknown" || report.Accepted != "unknown" || len(report.Blockers) == 0 {
 		t.Fatalf("missing plain failure report: %v, %+v", err, report)
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {

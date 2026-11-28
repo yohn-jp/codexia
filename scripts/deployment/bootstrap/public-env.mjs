@@ -4,6 +4,7 @@ const profile = JSON.parse(readFileSync(new URL('../../../deploy/production.json
 const origin = profile.publicOrigin;
 const settings = {
   CODEXIA_PUBLIC_ORIGIN: origin,
+  CODEXIA_MANAGEMENT_HOSTNAME: profile.managementHostname,
   VITE_CODEXIA_OAUTH_ISSUER: origin + '/api/auth',
   VITE_CODEXIA_OAUTH_CLIENT_ID: profile.webClientId,
   VITE_CODEXIA_API_AUDIENCE: origin + '/api',

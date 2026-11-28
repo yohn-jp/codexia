@@ -17,15 +17,15 @@ func TestBootstrapKeyPreservesExistingAuthorizedKeys(t *testing.T) {
 	if err := os.Mkdir(directory, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(directory, 0o750); err != nil {
+	if err := os.Chmod(directory, 0o750); err != nil { //nolint:gosec // Exercise a valid existing SSH directory mode regardless of the test process umask.
 		t.Fatal(err)
 	}
 	path := filepath.Join(directory, "authorized_keys")
 	original := "# account provisioning left a comment without a newline"
-	if err := os.WriteFile(path, []byte(original), 0o640); err != nil {
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0o640); err != nil {
+	if err := os.Chmod(path, 0o640); err != nil { //nolint:gosec // The fixture verifies that a preexisting group-readable file keeps its mode.
 		t.Fatal(err)
 	}
 	_, public, err := newSSHIdentity()
@@ -37,7 +37,7 @@ func TestBootstrapKeyPreservesExistingAuthorizedKeys(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	current, err := os.ReadFile(path)
+	current, err := os.ReadFile(path) //nolint:gosec // Verify only the controlled test fixture's existing file.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestBootstrapKeyRefusesLinks(t *testing.T) {
 	if err := installAuthorizedKey(context.Background(), home, ".ssh/authorized_keys", public, os.Getuid()); err == nil {
 		t.Fatal("accepted a hard-linked authorized_keys")
 	}
-	actual, err := os.ReadFile(target)
+	actual, err := os.ReadFile(target) //nolint:gosec // Compare the synthetic file outside the test's temporary home.
 	if err != nil || string(actual) != "original" {
 		t.Fatalf("external file changed: %q %v", actual, err)
 	}
@@ -132,15 +132,21 @@ func TestVMSelectsAnIndependentlyKnownEffectiveKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	vm := vmObservation{hostKeys: []ssh.PublicKey{key}}
-	if _, err := vm.pinForFingerprint("100.64.0.15", "SHA256:wrong"); err == nil {
+	const host = "codexia-ssh.example.test"
+	if _, err := vm.pinForFingerprint(host, "SHA256:wrong"); err == nil {
 		t.Fatal("trusted a fingerprint before comparing it")
 	}
-	pin, err := vm.pinForFingerprint("100.64.0.15", ssh.FingerprintSHA256(key))
+	pin, err := vm.pinForFingerprint(host, ssh.FingerprintSHA256(key))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pin != "100.64.0.15 "+public {
+	if pin != host+" "+public {
 		t.Fatalf("unexpected known_hosts line: %q", pin)
+	}
+	for _, invalid := range []string{"100.64.0.15", "codexia-ssh.example.test.", "codexia..example.test", "ssh.example.test:22"} {
+		if _, err := vm.pinForFingerprint(invalid, ssh.FingerprintSHA256(key)); err == nil {
+			t.Errorf("accepted a noncanonical management hostname %q", invalid)
+		}
 	}
 }
 
@@ -200,13 +206,16 @@ func TestExistingKnownHostsRecordsRetainTheirFormatting(t *testing.T) {
 		t.Fatal(err)
 	}
 	vm := vmObservation{hostKeys: []ssh.PublicKey{key}}
-	const host = "codexia.example.ts.net"
-	pin := "# retained comment\n" + host + ",100.64.0.15 " + public + " VPS host key\n"
+	const host = "codexia-ssh.example.test"
+	pin := "# retained comment\n" + host + " " + public + " VPS host key\n"
 	if err := vm.verifyKnownHosts(host, pin); err != nil {
 		t.Fatal(err)
 	}
-	if err := vm.verifyKnownHosts("100.64.0.20", pin); err == nil {
+	if err := vm.verifyKnownHosts("codexia-other.example.test", pin); err == nil {
 		t.Fatal("an unrelated host was accepted")
+	}
+	if err := vm.verifyKnownHosts(host, strings.Replace(pin, host+" ", host+",codexia-alt.example.test ", 1)); err == nil {
+		t.Fatal("a shared host alias was accepted as a compatible pin")
 	}
 	if err := vm.verifyKnownHosts(host, pin+"@revoked "+host+" "+public+"\n"); err == nil {
 		t.Fatal("a revoked pin was accepted")
@@ -257,7 +266,7 @@ func TestBootstrapKeyInstalledOnlyReadsAuthorizedKeys(t *testing.T) {
 	if found, err := vm.BootstrapKeyInstalled(public); !found || err != nil {
 		t.Fatalf("exact appended key = %v, %v", found, err)
 	}
-	actual, err := os.ReadFile(pin)
+	actual, err := os.ReadFile(pin) //nolint:gosec // Compare the synthetic file under the test's temporary home.
 	if err != nil || string(actual) != string(original)+"restrict "+public+" codexiactl-bootstrap\n" {
 		t.Fatalf("lookup changed the existing bytes: %q, %v", actual, err)
 	}

@@ -1,6 +1,6 @@
 ---
 # Read-only admission shared with the canonical base-runtime container validators.
-# The disposable lifecycle fixture has its own isolated base admission and omits Tunnel.
+# The disposable lifecycle fixture has its own isolated base admission.
 - name: Inspect every canonical base Quadlet without following links
   ansible.builtin.stat:
     path: "{{ quadlet_dir }}/{{ item }}"
@@ -15,7 +15,6 @@
     - codexia-data.volume
     - codexia-history.volume
     - codexia-db.container
-    - codexia-tunnel.container
   register: codexia_deploy_base_quadlets
   changed_when: false
 
@@ -29,20 +28,18 @@
     fail_msg: The deployed base Quadlet is missing or differs from its reviewed repository source.
   loop: "{{ codexia_deploy_base_quadlets.results }}"
 
-- name: Read generated service origins for PostgreSQL and Tunnel
+- name: Read the generated PostgreSQL service origin
   ansible.builtin.command:
-    argv: [systemctl, --user, show, --property=SourcePath, --value, "{{ item }}.service"]
-  loop: [codexia-db, codexia-tunnel]
-  register: codexia_deploy_base_sources
+    argv: [systemctl, --user, show, --property=SourcePath, --value, codexia-db.service]
+  register: codexia_deploy_base_db_source
   changed_when: false
 
-- name: Require base services to originate from canonical rootless Quadlets
+- name: Require PostgreSQL to originate from its canonical rootless Quadlet
   ansible.builtin.assert:
     that:
-      - item.rc == 0
-      - item.stdout == quadlet_dir + '/' + item.item + '.container'
-    fail_msg: A base systemd service is not generated from its canonical rootless Quadlet.
-  loop: "{{ codexia_deploy_base_sources.results }}"
+      - codexia_deploy_base_db_source.rc == 0
+      - codexia_deploy_base_db_source.stdout == quadlet_dir + '/codexia-db.container'
+    fail_msg: PostgreSQL is not generated from its canonical rootless Quadlet.
 
 - name: Reuse the canonical PostgreSQL container image, secret, network and volume checks
   ansible.builtin.include_tasks: verify-base-db-container.yml
@@ -57,13 +54,28 @@
   changed_when: false
   failed_when: codexia_deploy_base_networks.rc != 0 or codexia_deploy_base_networks.stdout != item.expected
 
-- name: Observe whether the existing Tunnel container requires runtime validation
+- name: Require the independent host Cloudflare connector
+  ansible.builtin.command:
+    argv: [systemctl, is-active, codexia-cloudflared.service]
+  register: codexia_deploy_cloudflared
+  changed_when: false
+  failed_when: codexia_deploy_cloudflared.rc != 0 or codexia_deploy_cloudflared.stdout != 'active'
+
+- name: Require the product gate to be explicitly open or closed
+  ansible.builtin.command:
+    argv: [sudo, -n, /usr/local/sbin/codexia-api-gate, status]
+  register: codexia_deploy_publication_gate
+  changed_when: false
+  failed_when: codexia_deploy_publication_gate.rc != 0 or codexia_deploy_publication_gate.stdout not in ['open', 'closed']
+
+- name: Reject an obsolete rootless application Tunnel
   ansible.builtin.command:
     argv: [podman, container, exists, codexia-tunnel]
-  register: codexia_deploy_base_tunnel_container
+  register: codexia_deploy_legacy_tunnel
   changed_when: false
-  failed_when: codexia_deploy_base_tunnel_container.rc not in [0, 1]
+  failed_when: codexia_deploy_legacy_tunnel.rc not in [0, 1]
 
-- name: Reuse canonical Tunnel runtime validation when a container already exists
-  ansible.builtin.include_tasks: verify-base-tunnel-container.yml
-  when: codexia_deploy_base_tunnel_container.rc == 0
+- name: Require the rootless application Tunnel to be retired
+  ansible.builtin.assert:
+    that: codexia_deploy_legacy_tunnel.rc == 1
+    fail_msg: The obsolete rootless application Tunnel remains; the Cloudflare host connector is the only deployment path.

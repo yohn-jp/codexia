@@ -3,6 +3,6 @@ flowchart LR
     HOST --> SSH["専用Access Service Auth / 共用Tunnel / pinned SSH"]
     SSH --> ANS["Ansible: inspect / host / secrets / base / auth-runtime / deploy"]
     ANS --> QUAD["rootless Quadlet + PostgreSQL"]
-    ADMIN --> EDGE["Cloudflare Terraform / Access policy"]
+    ADMIN --> EDGE["CodexiaCTL / 公式 cf Device Flow"]
     EDGE --> ROUTE["製品公開 routing"]
     EDGE --> SSH
