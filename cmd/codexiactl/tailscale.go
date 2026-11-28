@@ -347,7 +347,7 @@ func inspectTailnetWithApproval(ctx context.Context, client *ts.Client, local lo
 	if keyID == "" {
 		for _, mismatch := range mismatches {
 			if o != nil {
-				o.Notice("Tailscale OIDC trust mismatch: " + mismatch)
+				reportResult(o, warningText, "Tailscale OIDC trust mismatch: "+mismatch)
 			}
 		}
 		if clientID != "" {

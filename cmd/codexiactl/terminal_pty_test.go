@@ -73,6 +73,14 @@ func TestTerminalSessionHelper(t *testing.T) {
 		if err == nil {
 			err = tty.writeGrant([]byte("fixture-owner-grant"))
 		}
+	case "guided":
+		reportStage(tty, githubStage, "Inspect repository")
+		reportResult(tty, successText, "GitHub connected")
+		reportResult(tty, warningText, "OIDC trust mismatch")
+		err = requireConfirmation(tty, "Confirm observed target")
+		if err == nil {
+			fmt.Print("approved")
+		}
 	case "notice":
 		tty.Notice("Target: codexia\x1b[2J\x07\r\u009b; 状態の確認 VM scoped-repository-identity")
 	}
@@ -356,5 +364,27 @@ func TestTerminalRedirectedJSONIsOnePlainDocument(t *testing.T) {
 	}
 	if len(s.output) != 0 || s.stderr.Len() == 0 {
 		t.Fatalf("unexpected diagnostic streams: tty=%q stderr=%q", s.output, &s.stderr)
+	}
+}
+
+// Exercise the same rendering and routine confirmation path used by doctor,
+// with stdout redirected and the user's TERM=xterm-256color environment.
+func TestTerminalGuidedInspectionUsesSemanticColors(t *testing.T) {
+	for _, noColor := range []bool{false, true} {
+		s := startTerminalSession(t, "guided", "xterm-256color", 120, noColor)
+		s.waitFor(t, "Confirm observed target")
+		s.send(t, "\r")
+		if code := s.finish(t); code == 0 || s.stdout.String() == "approved" {
+			t.Fatalf("default confirmation unexpectedly authorized: %d", code)
+		}
+		for _, label := range []string{"GitHub App and repository", "OK | GitHub connected", "BLOCKED | OIDC trust mismatch"} {
+			if !bytes.Contains(s.output, []byte(label)) {
+				t.Fatalf("missing %q in %q", label, s.output)
+			}
+		}
+		if colored := bytes.Contains(s.output, []byte("\x1b[36m")) || bytes.Contains(s.output, []byte("\x1b[1;36m")) || bytes.Contains(s.output, []byte("\x1b[32m")) || bytes.Contains(s.output, []byte("\x1b[1;32m")); colored == noColor {
+			t.Fatalf("unexpected semantic color output (NO_COLOR=%v): %q", noColor, s.output)
+		}
+		s.checkRestored(t)
 	}
 }

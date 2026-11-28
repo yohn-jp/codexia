@@ -35,19 +35,38 @@ func (t *terminal) bindContext(ctx context.Context) { t.ctx = ctx }
 func (t *terminal) Close() error { return unix.Close(t.fd) }
 
 func (t *terminal) Stage(step int, message string) {
-	t.print(headingText, fmt.Sprintf("%02d  %s | %s", step, stageNames[step-1], message))
+	t.print(headingText, fmt.Sprintf("\n%02d  %s\n    %s", step, stageNames[step-1], message))
 }
 
 func (t *terminal) Notice(message string) {
 	t.print(bodyText, message)
 }
 
+func (t *terminal) Result(role textRole, message string) {
+	t.print(role, message)
+}
+
+func (t *terminal) ConfirmChoice(prompt string) (bool, error) {
+	if !supportsForms(t.fd) {
+		return t.Confirm(prompt)
+	}
+	if err := unix.IoctlSetInt(t.fd, unix.TCFLSH, unix.TCIFLUSH); err != nil {
+		return false, errors.New("cannot clear pending SSH terminal input before confirmation")
+	}
+	choice, err := t.Select(prompt, []string{"Continue"})
+	return err == nil && choice == 0, err
+}
+
 func (t *terminal) print(role textRole, message string) {
 	width, _, _ := term.GetSize(t.fd)
+	_ = t.write([]byte(terminalLine(t.displayRole(role), width, message) + "\n"))
+}
+
+func (t *terminal) displayRole(role textRole) textRole {
 	if _, noColor := os.LookupEnv("NO_COLOR"); noColor || !supportsForms(t.fd) {
-		role = bodyText
+		return bodyText
 	}
-	_ = t.write([]byte(terminalLine(role, width, message) + "\n"))
+	return role
 }
 
 func (t *terminal) PrivateNotice(message string) error {
@@ -56,7 +75,7 @@ func (t *terminal) PrivateNotice(message string) error {
 
 func (t *terminal) askLine(prompt string) (string, error) {
 	width, _, _ := term.GetSize(t.fd)
-	if err := t.write([]byte(terminalLine(bodyText, width, prompt) + " ")); err != nil {
+	if err := t.write([]byte(terminalLine(t.displayRole(headingText), width, prompt) + " ")); err != nil {
 		return "", err
 	}
 	line, err := t.readLine()

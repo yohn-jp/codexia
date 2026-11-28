@@ -4,7 +4,7 @@ Provision a VM, enroll its first owner through the normal frontend and activate 
 
 ## Guided initial deployment
 
-Use the [initial deployment CLI](CODEXIACTL.md) from a pinned OpenSSH session on the target Ubuntu 26.04 x86-64 VM. It prepares the inputs below and invokes the existing protected workflows. The individual steps in this runbook are available for diagnosis and independent recovery. Independent Environment approvals and owner enrollment remain mandatory.
+Use the [initial deployment CLI](CODEXIACTL.md) from a pinned OpenSSH session on the target Ubuntu 26.04 x86-64 VM. It prepares the inputs below and invokes the existing protected workflows. The individual steps in this runbook are available for diagnosis and independent recovery. Operator approval and owner enrollment remain mandatory; Environment reviewers and Prevent self-review are optional. Both deployment Environments must restrict deployment to branch main only.
 
 On your trusted workstation, select a published immutable official CLI version from the [Codexia releases](https://github.com/yohn-jp/codexia/releases), including when deploying a fork. The download and attestation repository below is the **official CLI publisher**, not the deployment repository. Replace `vX.Y.Z` with that exact tag and use an up-to-date GitHub CLI to verify the release and the binary's provenance.
 
@@ -33,7 +33,7 @@ chmod 0700 codexiactl-linux-amd64
 
 The release identifies its official source and version. The official publisher provisions the public Codexia GitHub App and binds its public Client ID to release builds using `CODEXIACTL_GITHUB_APP_CLIENT_ID`. On the official App installation page, choose **Only select repositories** and select the intended `codexia` repository. In the browser Device Flow, sign in as a user authorized to operate that repository. The CLI confirms one discovered repository or prompts you to choose among eligible repositories. Review the selected repository, protected `main`, VM and public origin before approving. The same steps apply to the publisher's repository and to forks. See the [App installation page](https://github.com/apps/codexiactl/installations/new) and the [GitHub authentication and target discovery contract](CODEXIACTL.md#41-github公式-app-による認証配備対象の発見).
 
-Keep your existing verified SSH connection available and have an independently verified host key fingerprint ready to compare with the observed keys. The CLI guides Tailscale device enrollment and prompts for scoped Tailscale and Cloudflare management credentials. Have the protected Environment reviewers available on GitHub for the runs the CLI identifies. Use `doctor` to identify missing prerequisites or permissions and `status` for the latest verified lifecycle observation. After an interrupted invocation, run `init` again from the same VM and administrator account. Resolve reported state conflicts through the owning protected workflow or recovery runbook before retrying.
+Keep your existing verified SSH connection available and have an independently verified host key fingerprint ready to compare with the observed keys. The CLI guides Tailscale device enrollment and prompts for scoped Tailscale and Cloudflare management credentials. If optional Environment reviewers are configured, use the GitHub approval UI for the runs the CLI identifies. Use `doctor` to identify missing prerequisites or permissions and `status` for the latest verified lifecycle observation. After an interrupted invocation, run `init` again from the same VM and administrator account. Resolve reported state conflicts through the owning protected workflow or recovery runbook before retrying.
 
 After the CLI confirms the normal frontend and the registration-only API and hands off the Owner Setup Grant, the owner opens the normal `/console/setup` page. Use the existing protected procedures below after owner registration.
 
@@ -42,7 +42,7 @@ Before changing protected GitHub Settings, arrange an exclusive administrative w
 
 ## Establish deployment access
 
-Use protected GitHub Environments with required reviewers and deployment restricted to main. The VM must be reachable over the tailnet and the independent administrator must have noninteractive sudo. Obtain the VM's SSH host key through the provider console or an independently authenticated channel. Provision the administrator's public SSH key on that account. Provision a separate deployment identity for the rootless service. R4 derives its public half inside the runtime Environment, installs it on the target, and verifies a real runtime login against the same VM identity.
+Use GitHub Environments restricted to branch main; required reviewers and Prevent self-review are optional. Explicit operator approvals remain mandatory. The VM must be reachable over the tailnet and the independent administrator must have noninteractive sudo. Obtain the VM's SSH host key through the provider console or an independently authenticated channel. Provision the administrator's public SSH key on that account. Provision a separate deployment identity for the rootless service. R4 derives its public half inside the runtime Environment, installs it on the target, and verifies a real runtime login against the same VM identity.
 
 | Location | Inputs | Who supplies them |
 | --- | --- | --- |

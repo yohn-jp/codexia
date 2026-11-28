@@ -355,32 +355,45 @@ func TestGitHubArtifactDownloadDoesNotSendAuthorization(t *testing.T) {
 	}
 }
 
-func TestGitHubEnvironmentNeedsIndependentApprovalBeforeWrites(t *testing.T) {
+func TestGitHubEnvironmentProtectionDoesNotRequireReviewers(t *testing.T) {
 	t.Parallel()
-	g := newTestGitHub(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Errorf("attempted mutation at %s", r.URL.Path)
-		}
-		if strings.HasSuffix(r.URL.Path, "/environments/codexia-bootstrap") {
-			githubTestJSON(t, w, map[string]any{
-				"id": 92, "name": "codexia-bootstrap",
-				"protection_rules":         []any{map[string]any{"type": "required_reviewers", "prevent_self_review": false, "reviewers": []any{map[string]any{"type": "User", "reviewer": map[string]any{"id": 123}}}}},
-				"deployment_branch_policy": map[string]any{"protected_branches": false, "custom_branch_policies": true},
+	for _, tc := range []struct {
+		name      string
+		reviewers []any
+		branch    string
+		wantErr   bool
+	}{
+		{name: "single operator", branch: "main"},
+		{name: "optional reviewer", branch: "main", reviewers: []any{map[string]any{"type": "required_reviewers", "prevent_self_review": true}}},
+		{name: "wrong branch", branch: "develop", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newTestGitHub(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Errorf("unexpected mutation at %s", r.URL.Path)
+				}
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/environments/codexia-bootstrap"):
+					githubTestJSON(t, w, map[string]any{
+						"id": 92, "name": "codexia-bootstrap", "protection_rules": tc.reviewers,
+						"deployment_branch_policy": map[string]any{"protected_branches": false, "custom_branch_policies": true},
+					})
+				case strings.HasSuffix(r.URL.Path, "/deployment-branch-policies"):
+					githubTestJSON(t, w, map[string]any{"total_count": 1, "branch_policies": []any{map[string]any{"name": tc.branch, "type": "branch"}}})
+				default:
+					t.Errorf("unexpected request %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
 			})
-			return
-		}
-		if !githubTestProtection(t, w, r) {
-			t.Errorf("unexpected request %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	})
-	err := g.PutVariable(context.Background(), githubBootstrapEnvironment, "CODEXIA_BOOTSTRAP_ENABLED", "true", nil)
-	if !errors.Is(err, errGitHubProtection) {
-		t.Fatalf("invalid protection must block a write, got %v", err)
+			err := g.requireProtection(context.Background(), githubBootstrapEnvironment)
+			if (err != nil) != tc.wantErr || (tc.wantErr && !errors.Is(err, errGitHubProtection)) {
+				t.Fatalf("unexpected protection result: %v", err)
+			}
+		})
 	}
 }
 
-func TestGitHubAdditiveBranchRestrictionRequiresExistingReviewers(t *testing.T) {
+func TestGitHubAdditiveBranchRestrictionWithOrWithoutReviewers(t *testing.T) {
 	t.Parallel()
 	for _, reviewers := range []bool{true, false} {
 		t.Run(fmt.Sprintf("reviewers=%v", reviewers), func(t *testing.T) {
@@ -401,7 +414,7 @@ func TestGitHubAdditiveBranchRestrictionRequiresExistingReviewers(t *testing.T) 
 					if r.Method == http.MethodPost {
 						var body github.CreateDeploymentBranchPolicyRequest
 						err := json.NewDecoder(r.Body).Decode(&body)
-						if !reviewers || err != nil || body.Name != "main" || body.Type == nil || *body.Type != "branch" {
+						if err != nil || body.Name != "main" || body.Type == nil || *body.Type != "branch" {
 							t.Error("unexpected branch policy mutation")
 							w.WriteHeader(http.StatusUnprocessableEntity)
 							return
@@ -424,7 +437,7 @@ func TestGitHubAdditiveBranchRestrictionRequiresExistingReviewers(t *testing.T) 
 			})
 			operator := new(githubTestOperator)
 			changed, err := g.OfferMissingMainRestriction(context.Background(), operator)
-			if err != nil || changed != reviewers || created > 1 || (created == 1) != reviewers {
+			if err != nil || !changed || created != 1 {
 				t.Fatalf("unexpected outcome changed=%v created=%d err=%v", changed, created, err)
 			}
 		})

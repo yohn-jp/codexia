@@ -20,6 +20,7 @@ const (
 	detailText
 	warningText
 	errorText
+	successText
 )
 
 func terminalStyle(role textRole, dark bool) lipgloss.Style {
@@ -76,7 +77,9 @@ func terminalLine(role textRole, width int, message string) string {
 	// Without a background report, leave color choice to the terminal palette.
 	switch role {
 	case headingText:
-		return lipgloss.NewStyle().Bold(true).Render(message)
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Cyan).Render(message)
+	case successText:
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Green).Render(message)
 	case warningText:
 		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Yellow).Render(message)
 	case errorText:
@@ -90,7 +93,7 @@ func printTerminalLine(w io.Writer, role textRole, message string) {
 	if f, ok := w.(*os.File); ok && term.IsTerminal(int(f.Fd())) && supportsForms(int(f.Fd())) {
 		width, _, _ := term.GetSize(int(f.Fd()))
 		if _, noColor := os.LookupEnv("NO_COLOR"); !noColor {
-			_, _ = lipgloss.Fprintln(w, terminalLine(role, width, message))
+			_, _ = fmt.Fprintln(w, terminalLine(role, width, message))
 			return
 		}
 		_, _ = fmt.Fprintln(w, terminalLine(bodyText, width, message))
@@ -103,4 +106,22 @@ var stageNames = [...]string{
 	"VM", "GitHub App and repository", "Tailscale", "Cloudflare", "Protected inputs",
 	"Management SSH and certified candidates", "R4 Bootstrap", "R5 Frontend",
 	"R5 Owner setup", "Handoff",
+}
+
+// reportResult assigns presentation semantics at the observed result, not by
+// parsing provider messages. Plain operators retain the same textual evidence.
+func reportResult(o operator, role textRole, message string) {
+	switch role {
+	case successText:
+		message = "OK | " + message
+	case warningText:
+		message = "BLOCKED | " + message
+	case errorText:
+		message = "ERROR | " + message
+	}
+	if presentation, ok := o.(interface{ Result(textRole, string) }); ok {
+		presentation.Result(role, message)
+		return
+	}
+	o.Notice(message)
 }

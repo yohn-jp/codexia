@@ -9,7 +9,7 @@ import (
 
 // OfferMissingMainRestriction can add a branch policy to an empty list.
 // The Environment upsert replaces existing reviewer and protection settings
-// and has no conditional-write contract. Reviewer setup stays with the maintainer.
+// and has no conditional-write contract. Optional reviewers stay with the maintainer.
 func (g *githubControl) OfferMissingMainRestriction(ctx context.Context, o operator) (bool, error) {
 	repo, err := g.repository(ctx)
 	if err != nil {
@@ -41,7 +41,7 @@ func (g *githubControl) OfferMissingMainRestriction(ctx context.Context, o opera
 		if !eligible {
 			return changed, fmt.Errorf("%w: %s changed since the branch restriction was approved", errGitHubProtection, env)
 		}
-		// POST adds just this entry, leaving independent reviews and existing policies owned by GitHub.
+		// POST adds just this entry, leaving optional reviewers and existing policies owned by GitHub.
 		branch := "branch"
 		policy, resp, err := g.client.Repositories.CreateDeploymentBranchPolicy(ctx, g.target.Owner, deploymentRepositoryName, env, github.CreateDeploymentBranchPolicyRequest{
 			Name: "main", Type: &branch,
@@ -66,7 +66,7 @@ func (g *githubControl) hasEmptyBranchPolicy(ctx context.Context, name string) (
 		return false, err
 	}
 	policy := env.GetDeploymentBranchPolicy()
-	if !githubIndependentReview(env) || !policy.GetCustomBranchPolicies() || policy.GetProtectedBranches() {
+	if !policy.GetCustomBranchPolicies() || policy.GetProtectedBranches() {
 		return false, nil
 	}
 	rules, resp, err := g.client.Repositories.ListDeploymentBranchPolicies(ctx, g.target.Owner, deploymentRepositoryName, name, &github.ListOptions{PerPage: 2})

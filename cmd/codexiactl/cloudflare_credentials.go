@@ -29,9 +29,13 @@ const (
 	cloudflareWorkerRole   = "CLOUDFLARE_API_TOKEN"
 )
 
-var errCloudflareMintUnavailable = errors.New("Cloudflare Account API Tokens Write and exact deployment scopes were not verified")
+var errCloudflareMintUnavailable = errors.New("Cloudflare account token issuance authority and exact deployment scopes were not verified")
 
 func (o *cloudflareObservation) Close() {
+	if o.closeAuth != nil {
+		o.closeAuth()
+		o.closeAuth = nil
+	}
 	o.api = cloudflareAPI{}
 	o.operator = nil
 	o.provisioning, o.readToken, o.workerToken = [32]byte{}, [32]byte{}, [32]byte{}
@@ -141,18 +145,31 @@ func (o *cloudflareObservation) permissionPlan(role string) cloudflarePermission
 	if role == cloudflareReadRole {
 		return cloudflarePermissionPlan{
 			name:        "codexia-deployment-read-" + o.target.ZoneID[:8],
-			description: "Workers Scripts Read, Cloudflare Tunnel Read and Access: Apps and Policies Read for the selected account; DNS Read and Workers Routes Read for the selected zone",
+			description: "Workers Content Read-Only, Cloudflare Tunnel Read and Access: Apps and Policies Read for the selected account; DNS Read and Workers Routes Read for the selected zone",
 			permissions: map[string][]string{
-				cloudflareAccountScope: {"Workers Scripts Read", "Cloudflare Tunnel Read", "Access: Apps and Policies Read"},
+				cloudflareAccountScope: {"Workers Content Read-Only", "Cloudflare Tunnel Read", "Access: Apps and Policies Read"},
 				cloudflareZoneScope:    {"DNS Read", "Workers Routes Read"},
 			},
 		}
 	}
 	return cloudflarePermissionPlan{
 		name:        "codexia-worker-publication-" + o.target.AccountID[:8],
-		description: "Workers Scripts Edit for the selected account",
-		permissions: map[string][]string{cloudflareAccountScope: {"Workers Scripts Write"}},
+		description: "Workers Editor for the selected account",
+		permissions: map[string][]string{cloudflareAccountScope: {"Workers Editor"}},
 	}
+}
+
+// A peer Environment may already hold a token issued under the former exact
+// contract. Preserve its exact policy when recovering that existing token,
+// but never issue a new token under the legacy, broader Workers roles.
+func (o *cloudflareObservation) legacyPermissionPlan(role string) cloudflarePermissionPlan {
+	plan := o.permissionPlan(role)
+	if role == cloudflareReadRole {
+		plan.permissions[cloudflareAccountScope][0] = "Workers Scripts Read"
+	} else {
+		plan.permissions[cloudflareAccountScope][0] = "Workers Scripts Write"
+	}
+	return plan
 }
 
 func (o *cloudflareObservation) apiCredential(ctx context.Context, role string, existing bool) ([]byte, error) {
@@ -163,6 +180,9 @@ func (o *cloudflareObservation) apiCredential(ctx context.Context, role string, 
 		value, err = o.mintCloudflareToken(ctx, plan)
 		if err != nil && !errors.Is(err, errCloudflareMintUnavailable) {
 			return nil, err
+		}
+		if errors.Is(err, errCloudflareMintUnavailable) && o.closeAuth != nil {
+			return nil, needsAction("Cloudflare OAuth could not establish automatic token issuance or a token with that stable name already exists. Review the account token inventory and the granted authority before retrying; no alternate token will be created automatically")
 		}
 	}
 	if len(value) == 0 {
@@ -186,7 +206,7 @@ func (o *cloudflareObservation) apiCredential(ctx context.Context, role string, 
 		clear(value)
 		return nil, errors.New("Cloudflare management, read and Worker publication credentials must be distinct")
 	}
-	if err := o.verifyCloudflareCredential(ctx, value, role); err != nil {
+	if err := o.verifyCloudflareCredential(ctx, value, role, existing); err != nil {
 		clear(value)
 		return nil, err
 	}
@@ -198,28 +218,61 @@ func (o *cloudflareObservation) apiCredential(ctx context.Context, role string, 
 	return value, nil
 }
 
+// checkOAuthTokenAuthority uses the actual account endpoints, not an assumed
+// relationship between OAuth scopes and API token permissions. Read-only
+// checks never call this function. No tokens are minted during this check.
+func (o *cloudflareObservation) checkOAuthTokenAuthority(ctx context.Context, requirements cloudflareAuthRequirements) error {
+	groups, err := o.api.permissionGroups(ctx, o.target.AccountID, true)
+	if err != nil {
+		return needsAction("Cloudflare OAuth could not read the selected account token permission catalog. Confirm that the publisher client and your Cloudflare role support account token management, or explicitly choose the temporary management token fallback")
+	}
+	if requirements.readMint {
+		if _, _, err := o.exactTokenPolicies(groups, o.permissionPlan(cloudflareReadRole), true); err != nil {
+			return needsAction("Cloudflare OAuth did not establish selectable deployment-read permissions")
+		}
+	}
+	if requirements.workerWrite {
+		if _, _, err := o.exactTokenPolicies(groups, o.permissionPlan(cloudflareWorkerRole), true); err != nil {
+			return needsAction("Cloudflare OAuth did not establish selectable Worker publication permissions")
+		}
+	}
+	_, err = cloudflareList("account token inventory", func(page int) (*pagination.V4PagePaginationArray[shared.Token], error) {
+		return o.api.accountTokens.List(ctx, accounts.TokenListParams{AccountID: cloudflare.F(o.target.AccountID),
+			IncludeExpired: cloudflare.F(true), Page: cloudflare.F(float64(page)), PerPage: cloudflare.F(float64(cloudflarePageSize))})
+	})
+	if err != nil {
+		return needsAction("Cloudflare OAuth could not read the selected account token inventory. No GitHub input registration was attempted")
+	}
+	return nil
+}
+
 func (o *cloudflareObservation) mintCloudflareToken(ctx context.Context, plan cloudflarePermissionPlan) ([]byte, error) {
 	account := cloudflare.F(o.target.AccountID)
 	api := o.api.accountTokens
-	current, err := api.Verify(ctx, accounts.TokenVerifyParams{AccountID: account})
-	if err != nil {
-		if cloudflareAuthorizationDenied(err) {
+	// Only manually supplied account API tokens have an account token ID.
+	// An OAuth bearer is authorized by the provider's account-scoped token
+	// APIs and selectable permission catalog; Verify cannot identify it.
+	if o.closeAuth == nil {
+		current, err := api.Verify(ctx, accounts.TokenVerifyParams{AccountID: account})
+		if err != nil {
+			if cloudflareAuthorizationDenied(err) {
+				return nil, errCloudflareMintUnavailable
+			}
+			return nil, cloudflareError("account token authority", err)
+		}
+		if current.Status != "active" || !cloudflareID.MatchString(current.ID) {
 			return nil, errCloudflareMintUnavailable
 		}
-		return nil, cloudflareError("account token authority", err)
-	}
-	if current.Status != "active" || !cloudflareID.MatchString(current.ID) {
-		return nil, errCloudflareMintUnavailable
-	}
-	currentMetadata, err := api.Get(ctx, current.ID, accounts.TokenGetParams{AccountID: account})
-	if err != nil {
-		if cloudflareAuthorizationDenied(err) {
+		currentMetadata, err := api.Get(ctx, current.ID, accounts.TokenGetParams{AccountID: account})
+		if err != nil {
+			if cloudflareAuthorizationDenied(err) {
+				return nil, errCloudflareMintUnavailable
+			}
+			return nil, cloudflareError("account token authority metadata", err)
+		}
+		if currentMetadata.ID != current.ID || !hasCloudflareTokenWrite(currentMetadata, o.target.AccountID) {
 			return nil, errCloudflareMintUnavailable
 		}
-		return nil, cloudflareError("account token authority metadata", err)
-	}
-	if currentMetadata.ID != current.ID || !hasCloudflareTokenWrite(currentMetadata, o.target.AccountID) {
-		return nil, errCloudflareMintUnavailable
 	}
 	groups, err := o.api.permissionGroups(ctx, o.target.AccountID, true)
 	if err != nil {
@@ -380,10 +433,14 @@ func matchesCloudflareTokenPolicies(policies []shared.TokenPolicy, expected map[
 	return len(observed) == len(expected)
 }
 
-func (o *cloudflareObservation) verifyCloudflareCredential(ctx context.Context, value []byte, role string) error {
+func (o *cloudflareObservation) verifyCloudflareCredential(ctx context.Context, value []byte, role string, existing bool) error {
 	api := newCloudflareAPI(value, o.api.baseURL)
 	account := cloudflare.F(o.target.AccountID)
-	if err := o.verifyCloudflareTokenPolicy(ctx, api, o.permissionPlan(role)); err != nil {
+	plans := []cloudflarePermissionPlan{o.permissionPlan(role)}
+	if existing {
+		plans = append(plans, o.legacyPermissionPlan(role))
+	}
+	if err := o.verifyCloudflareTokenPolicy(ctx, api, plans); err != nil {
 		return err
 	}
 	workers, err := api.workers.Beta.Workers.List(ctx, workers.BetaWorkerListParams{AccountID: account, PerPage: cloudflare.F(int64(1))})
@@ -408,7 +465,7 @@ func (o *cloudflareObservation) verifyCloudflareCredential(ctx context.Context, 
 	return api.verifyCloudflareReadScopes(ctx, o.host, &readTarget, o.routesContract)
 }
 
-func (o *cloudflareObservation) verifyCloudflareTokenPolicy(ctx context.Context, candidate cloudflareAPI, plan cloudflarePermissionPlan) error {
+func (o *cloudflareObservation) verifyCloudflareTokenPolicy(ctx context.Context, candidate cloudflareAPI, plans []cloudflarePermissionPlan) error {
 	account := cloudflare.F(o.target.AccountID)
 	accountToken, accountErr := candidate.accountTokens.Verify(ctx, accounts.TokenVerifyParams{AccountID: account})
 	accountOwned := accountErr == nil
@@ -452,14 +509,21 @@ func (o *cloudflareObservation) verifyCloudflareTokenPolicy(ctx context.Context,
 	if err != nil {
 		return cloudflareError("deployment token permission catalog with "+authority, err)
 	}
-	_, expected, err := o.exactTokenPolicies(groups, plan, false)
-	if err != nil {
+	knownPolicy := false
+	for _, plan := range plans {
+		_, expected, err := o.exactTokenPolicies(groups, plan, false)
+		if err != nil {
+			continue
+		}
+		knownPolicy = true
+		if matchesCloudflareTokenPolicies(metadata.Policies, expected) {
+			return nil
+		}
+	}
+	if !knownPolicy {
 		return errors.New("Cloudflare permission catalog did not establish the deployment role's exact permission IDs and scope")
 	}
-	if !matchesCloudflareTokenPolicies(metadata.Policies, expected) {
-		return refused("Cloudflare deployment token policy differs from the required permissions for the selected account and zone: " + plan.description)
-	}
-	return nil
+	return refused("Cloudflare deployment token policy differs from the required permissions for the selected account and zone: " + plans[0].description)
 }
 
 func (api cloudflareAPI) verifyCloudflareReadScopes(ctx context.Context, host string, target *cloudflareTarget, routesContract []byte) error {

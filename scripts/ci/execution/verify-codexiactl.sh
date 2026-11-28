@@ -12,6 +12,11 @@ fi
 source_sha=$(git rev-parse HEAD)
 version=${CODEXIACTL_BUILD_VERSION:-dev}
 client_id=${CODEXIACTL_BUILD_APP_CLIENT_ID:-}
+cloudflare_client_id=${CODEXIACTL_BUILD_CLOUDFLARE_CLIENT_ID:-}
+if [[ -n "$cloudflare_client_id" && ! "$cloudflare_client_id" =~ ^[A-Za-z0-9_-]{16,128}$ ]]; then
+  echo 'Invalid official Cloudflare OAuth client ID.' >&2
+  exit 1
+fi
 if [[ ! "$source_sha" =~ ^[a-f0-9]{40}$ || "$source_sha" != "${CODEXIACTL_BUILD_SOURCE:-$source_sha}" ]] ||
    [[ "$version" != dev && ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
   echo 'Invalid codexiactl release source or version.' >&2
@@ -58,7 +63,7 @@ fi
 asset=codexiactl-linux-amd64
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go -C "$module" build \
   -mod=readonly -trimpath -buildvcs=true \
-  -ldflags "-X main.version=$version -X main.source=$source_sha -X main.githubAppClientID=$client_id" \
+  -ldflags "-X main.version=$version -X main.source=$source_sha -X main.githubAppClientID=$client_id -X main.cloudflareOAuthClientID=$cloudflare_client_id" \
   -o "$stage_dir/$asset" .
 
 program_headers=$(readelf -lW "$stage_dir/$asset")

@@ -39,6 +39,7 @@ func runInit(ctx context.Context) (resultErr error) {
 	}
 	defer tty.Close()
 	tty.bindContext(ctx)
+	reportResult(tty, headingText, "CodexiaCTL | "+version+" | guided installation")
 	reportStage(tty, vmStage, "Checking the local OpenSSH session, OS, clock and administrator access")
 	vm, err := observeVM(ctx)
 	if err != nil {
@@ -86,7 +87,7 @@ func runInit(ctx context.Context) (resultErr error) {
 	if snapshot.MainSHA != gh.approvedSHA {
 		return refused("GitHub main changed after deployment target confirmation. Run codexiactl init again and review the new source")
 	}
-	tty.Notice("Verified the selected repository's main, OIDC subject and Environment restrictions.")
+	reportResult(tty, successText, "Selected repository, main, OIDC and Environment restrictions verified")
 	c := workflowController{github: gh, operator: tty, store: store, state: state, target: gh.target,
 		sha: snapshot.MainSHA, hostID: vm.HostID, origin: settings.PublicOrigin}
 	c.state.HostID = vm.HostID
@@ -187,7 +188,7 @@ func (c *workflowController) prepareInputs(ctx context.Context, gh *githubContro
 	}
 	o.Notice("Verified the Tailnet node, CI policy and effective OpenSSH pin for " + tailnet.Address + ".")
 	reportStage(o, cloudflareStage, "Verify the existing edge for "+settings.PublicOrigin)
-	edge, err := observeCloudflare(ctx, o, gh.target, settings)
+	edge, err := observeCloudflare(ctx, o, gh.target, settings, cloudflareRequirementsFor(snapshot))
 	if err != nil {
 		return err
 	}
