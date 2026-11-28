@@ -12,6 +12,8 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: 09ca9997e09d927460349d3585f2874e
 STATEMENT: >>>
+**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+
 **種別: 正本・規範的設計。** PostgreSQL schema を変更せず、特別なデータ統合を必要としない範囲の API/Core/module 機能を、承認済み main の検証・配布から自動的に本番へ適用する経路を定める。「自動」は **検証済み互換 digest だけを保護されたデプロイ制御が適用すること**であり、未知の migration や認証・保存形式の破壊を無条件で取り込むことではない。
 
 [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, 本番Deploymentライフサイクル] が通常更新と初回activation・非互換停止・復旧の経路選択、共通排他、保守状態を所有する。本書は通常の互換更新に限定する。純新規のR4〜R6には事前バックアップを要求しない。ACTIVE後の運用受入を済ませ、R8のBackend更新時はConsoleで確定した通常バックアップ設定と同じVM内実行主体を使用する。GitHubへバックアップ設定・復号鍵を渡さない。
@@ -57,7 +59,7 @@ STATEMENT: >>>
 | 再構築可能な cache/model データ | **条件付き** | 派生データとして再作成可能で、Core 執筆の妨げにならないこと |
 | Secret、サービス ID、Access policy の変更 | **画像更新と分離** | IaC / セキュリティの独立承認と実環境での適合確認 |
 
-ソース証明 → 不変 digest → 互換性 → 管理経路 → host lock → writer 停止 → 変更前バックアップ → image 切替 → readiness → Tunnel → 実利用の観測を維持する。どこかが未検証なら次の段階へ進まない。データ model・schema の変更は [LINK: DOC-ARCHITECTURE-DATA-MODEL, PostgreSQL ドメイン設計] の変更管理に従う。
+ソース証明 → 不変 digest → 互換性 → 管理経路 → host lock → 製品公開ゲート閉鎖・writer 停止 → 変更前バックアップ → image 切替 → readiness → 製品公開ゲート開放 → 実利用の観測を維持する。どこかが未検証なら次の段階へ進まない。データ model・schema の変更は [LINK: DOC-ARCHITECTURE-DATA-MODEL, PostgreSQL ドメイン設計] の変更管理に従う。
 <<<
 
 [[/SECTION]]
@@ -74,11 +76,11 @@ STATEMENT: >>>
 
 [Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/update-2.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=update-2)
 
-writer quiesce は API コンテナーと Tunnel の停止を確認する。バックアップは host lock を保持した状態で PostgreSQL と history を対象に作成し、age 暗号化後の checksum と manifest を確認する。失敗したら候補を起動しない。
+移行後の writer quiesce は製品公開ゲートの listener/転送 service の閉鎖と API コンテナーの停止を確認する。基盤 Tunnel は管理接続のため稼働を維持する。バックアップは host lock を保持した状態で PostgreSQL と history を対象に作成し、age 暗号化後の checksum と manifest を確認する。失敗したら候補を起動しない。
 
 以前の Quadlet を戻すだけで **DB が元の内容に復元されたと判断しない**。通常更新は DB migration を行わない設計であり、新版が行う書込みについても永続化契約に従う。schema/format の maintenance は暗号化バックアップ、隔離 restore drill、旧 writer 停止中の migration、実データの確認を伴う独立作業である。
 
-runner や SSH が途中で消えた場合は、`~/.local/state/codexia-deploy` の durable transaction intent / release record / 実稼働 digest を再観測する。推測で新たな更新を開始しない。旧版 health と identity を確認できない間は Tunnel を停止し、明示的な復旧判断を待つ。
+runner や SSH が途中で消えた場合は、`~/.local/state/codexia-deploy` の durable transaction intent / release record / 実稼働 digest を再観測する。推測で新たな更新を開始しない。旧版 health と identity を確認できない間は製品公開ゲートを閉鎖し、管理接続は維持して明示的な復旧判断を待つ。
 <<<
 
 [[/SECTION]]

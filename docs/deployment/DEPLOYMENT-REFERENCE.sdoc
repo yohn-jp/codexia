@@ -12,6 +12,8 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: dc6778fd1b635a92f566b48764f15dab
 STATEMENT: >>>
+**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+
 **Normative lifecycle transitions:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, Deployment lifecycle] owns cross-component state classification, route selection, first Backend activation, maintenance and recovery. [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, Initial deployment] and [LINK: DOC-DEPLOYMENT-UPDATE-FLOW, Compatible backend update / rollback] define the required state machines. Runbooks describe how to operate the approved transition; the current script is implementation evidence, not the design authority.
 
 **Protected production entrypoints:** [LINK: DOC-DEPLOYMENT-PRODUCTION-BOOTSTRAP, GitHub Actions Bootstrap workflow] handles approved initial host, database and Better Auth convergence. [LINK: DOC-DEPLOYMENT-PUSH-DEPLOYMENT, Push deployment] handles independently certified application activation and compatible updates. R5 publishes the certified ordinary Frontend before enrollment; R6 activates only the compatible Backend. An incompatible installed pair is rejected without mutation.

@@ -12,6 +12,8 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: 8bd6eaef94959f7fada84b2c9309e995
 STATEMENT: >>>
+**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+
 Run from the separate bootstrap SSH account after host inspection and before application initialization. That account needs the declared Ansible privilege escalation to root; the rootless service account does not receive sudo. Ansible switches to the service account for all Podman and user-systemd operations, and uses root only for the protected PostgreSQL initializer under `/etc/codexia`. Use a private inventory and a reviewed checkout. Run the [LINK: DOC-DEPLOYMENT-ANSIBLE-BASE-SECRETS, `secrets` stage] first.
 
 ```sh

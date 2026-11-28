@@ -12,6 +12,8 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: b942199ec2093f8781017bf00a00ca44
 STATEMENT: >>>
+**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+
 > Owner setup supports a same-origin browser enrollment through the setup-only Fastify runtime. An operator must validate the VM and Cloudflare boundary before handing off credentials. The existing SSH enrollment path remains available during the transition. Design authority is [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, Initial deployment] and [LINK: DOC-DESIGN-ADMIN-SCREEN-FLOW, Owner security].
 
 The [LINK: DOC-DESIGN-ADMIN-SCREEN-FLOW, owner security screen flow] defines owner-visible credential and session management; the [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, initial deployment flow] owns staged enrollment and its approval gates.

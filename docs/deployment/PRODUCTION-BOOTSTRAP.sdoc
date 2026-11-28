@@ -12,7 +12,9 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: 12f0d31e9e43198819376eae71605c19
 STATEMENT: >>>
-Provision a VM, enroll its first owner through the normal frontend and activate the certified Backend. The activation ends at ACTIVE. Complete the independent restore drill after configuring backups to establish operational acceptance. [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, Initial deployment] owns the input and recovery contract. [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, Deployment lifecycle] owns route selection. The management path is GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet.
+**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+
+Provision a VM, enroll its first owner through the normal frontend and activate the certified Backend. The activation ends at ACTIVE. Complete the independent restore drill after configuring backups to establish operational acceptance. [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, Initial deployment] owns the input and recovery contract. [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, Deployment lifecycle] owns route selection. The accepted replacement management path is GitHub Actions → Cloudflare Access Service Auth → Cloudflare Tunnel → pinned OpenSSH → Ansible → rootless Podman Quadlet. The pre-migration operations and input examples below remain implementation observations until the qualification and integration gates pass.
 <<<
 
 [[SECTION]]
