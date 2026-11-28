@@ -25,9 +25,9 @@ MID: 19176d70877c472e5dafc3416df97daa
 STATEMENT: >>>
 Go 製の独立した一時的なインストーラー `codexiactl` を対象 VM の SSH セッションから起動する。VM の観測、認証の誘導、必要な外部資源の特定、制御面の入力整備、既存保護 Workflow の起動・監視、本人登録の案内を一連の対話として実行する。人間が入力名・ID・Run ID・公開鍵・Token を複数の管理画面の間で転記する運用を通常経路にしない。人間に残す操作は、外部アカウントの認証・委任、権限や対象の選択、明示的な変更承認、Owner の本人 Passkey 登録、必要な独立復旧受入に限定する。外部 API が値の取得を許さない場合の限定的な初期資格情報入力は許容する。
 
-CLI の実行主体は対象 VM に対し独立に認証済みの配備運用者である。CLI は root として常時動作しない。初回管理接続を可能にするための公式 cloudflared の導入・単一 Tunnel connector の基盤起動・必要な公開鍵登録だけが対象 VM 上の許可された初期準備であり、必要時に限定して sudo を使う。管理接続は DB/API の起動や製品公開に依存しない。Codexia の host/base/secrets/auth-runtime、DB の初期化、Quadlet、API/Tunnel の構成は従来どおり Runner 上の Ansible に委譲する。Cloudflare IaC は既存 Terraform の管理面で適用する。移行後の通常配備は GitHub Actions → Cloudflare Access Service Auth → Cloudflare Tunnel → pinned OpenSSH → Ansible → rootless Podman Quadlet の一経路であり、CLI を必要としない。採用済み目標と移行の停止条件は [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, Deployment lifecycle] に従う。
+CLI の実行主体は対象 VM に対し独立に認証済みの配備運用者である。CLI は root として常時動作しない。初回管理接続を可能にするための公式 cloudflared の導入・単一 Tunnel connector の基盤起動・必要な公開鍵登録だけが対象 VM 上の許可された初期準備であり、必要時に限定して sudo を使う。管理接続は DB/API の起動や製品公開に依存しない。Codexia の host/base/secrets/auth-runtime、DB の初期化、Quadlet、API/Tunnel の構成は従来どおり Runner 上の Ansible に委譲する。Cloudflare 固有資源は §4.3 に従い CodexiaCTL が公式 cf で構築・収束させる。移行後の通常配備は GitHub Actions → Cloudflare Access Service Auth → Cloudflare Tunnel → pinned OpenSSH → Ansible → rootless Podman Quadlet の一経路であり、CLI を必要としない。採用済み目標と移行の停止条件は [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, Deployment lifecycle] に従う。
 
-CLI を常駐 agent、self-hosted runner、独自 scheduler、pull updater、Ansible/Terraform/SSH の代替実装、バックアップ・復元エンジンにしてはならない。第二の API/DB/運用台帳、第二の Bootstrap Workflow、設定同期用 Workflow、独自の認定機構は作らない。CLI による外部入力の登録は既存配備制御面に対する一時的な操作である。通常の Web Console と MCP にこれらの権限を付与しない。
+CLI を常駐 agent、self-hosted runner、独自 scheduler、pull updater、Ansible/SSH や汎用 IaC エンジンの代替実装、バックアップ・復元エンジンにしてはならない。第二の API/DB/運用台帳、第二の Bootstrap Workflow、設定同期用 Workflow、独自の認定機構は作らない。CLI による外部入力の登録は既存配備制御面に対する一時的な操作である。通常の Web Console と MCP にこれらの権限を付与しない。
 
 | 実行面 | 所有する責務 |
 | --- | --- |
@@ -35,7 +35,7 @@ CLI を常駐 agent、self-hosted runner、独自 scheduler、pull updater、Ans
 | 対象 VM の CLI | 観測、初期管理接続準備、各サービスの認証・設定、dispatch、結果の照合、再開 |
 | GitHub Actions | exact-source 認定、Environment 承認、release/配備制御、R4/R5/R6/R8 |
 | Ansible / systemd / Quadlet | VM 構成、秘密生成、DB/Auth、サービス、host lock、トランザクション |
-| 既存 Terraform | Cloudflare の DNS、Tunnel ingress、Access、Worker/route の所望状態 |
+| CodexiaCTL（公式 cf） | Codexia 固有の DNS、単一 Tunnel ingress、Access、空 Worker/route の所望状態。共有資源と既存 release を管理しない |
 | PostgreSQL / Better Auth / Web Console | アプリケーション状態、本人登録・認証、稼働後の操作 |
 | 独立復旧担当 | 復旧秘密、バックアップ保全と独立復元、既存データ復旧判断 |
 
@@ -45,7 +45,7 @@ flowchart TD
     C --> G["公式 GitHub App: 認証・対象 codexia 発見・Environment 設定"]
     C --> T["Cloudflare: 公式 cf Device Flow / 単一 Tunnel"]
     C --> F["Cloudflare: 既存 edge と資格情報"]
-    F --> I["既存 Terraform 管理面: 必要時のみ承認・適用"]
+    F --> I["公式 cf: 既存資源を照合・必要差分のみ承認後に適用"]
     C --> P["GitHub Actions: preflight / protected dispatch"]
     P --> A["Runner → Access Service Auth → Tunnel → pinned SSH → Ansible"]
     A --> V["対象 VM: DB / Auth / Quadlet"]
@@ -188,7 +188,7 @@ STATEMENT: >>>
 | --- | --- | --- |
 | 01 VM | 現在の SSH ユーザー、OS、CPU、時刻、sudo、既存 sshd の有効設定・公開 host key、既存 connector・公開ゲートの状態、既存 Codexia 資源の非破壊観測 | 対象 VM の同一性が確認でき、独立に認証した管理経路が残る。root・service account を bootstrap 管理者にしない |
 | 02 GitHub | §4.1 の Device Flow、公式 App installation とユーザーの権限の共通部分から `codexia` を発見し確認、owner/repo ID、main SHA、既存 Environment/protection、Variables/Secrets の名前、workflow と正本を取得 | 一意に承認された対象に固定。必要な権限・保護・現行 CLI 対応契約が成立。他の repo の入力・証跡を利用しない |
-| 03 Cloudflare | §4.3 の公式 cf Device Flow。production origin に対応する account/zone、Tunnel、Access apps/policies、Worker/routes の読取り、用途別の不足資格の発行・検証 | ブラウザー認証だけで完了。対象と権限の一致。既存 Terraform の承認済み所望状態を再観測 |
+| 03 Cloudflare | §4.3 の公式 cf Device Flow。production origin に対応する account/zone、Tunnel、Access apps/policies、Worker/routes の読取り・不足分の構築と必要差分の収束、用途別の不足資格の発行・検証 | ブラウザー認証だけで完了。対象と権限の一致。認定 source の所望状態と適用後の実資源を再観測 |
 | 04 管理接続基盤 | §4.2 に従い、製品公開ゲートが閉じた状態で公式 cloudflared を準備し、確認済みの単一 Tunnel と SSH 専用 Access を検証する | DB/API 不在でも connector が稼働。対象 VM の SSH pin と両保護 Environment の資格情報を準備可能。製品公開は遮断 |
 | 05 制御面登録 | §5 の差分を提示。bootstrap 管理鍵と runtime 鍵を分離し、必要な公開鍵・pin・外部資格情報・Environment 入力を登録 | GitHub の登録結果、公開鍵の対応、protection、既存設定の非破壊を確認。Secrets の存在は実接続の代用にしない |
 | 06 管理接続 / 候補認定 | Protected production bootstrap の `mode=preflight` を dispatch。main の認定済み Full Backend と互換 Frontend を既存証拠から選択可能であることを確認 | 管理 SSH / sudo / host pin の実証、認定 source・artifact が確定。欠落時は正規 CI を待つか認定を起動し、公開・証明を自作しない |
@@ -269,7 +269,7 @@ STATEMENT: >>>
 
 公式 CLI の release source と配備対象の main source は別の識別子である。公式バイナリは公式配布元の immutable Release と attestation により検証する。配備対象については、選択した repo の保護 main の exact SHA で、CLI が呼ぶ既存 Workflow・dispatch inputs・保護条件・証跡/構成 schema・route/identity/protocol の契約が公式 CLI Release の対応契約と一致することを検証する。従来の source/契約照合を維持し、契約上許容された配備固有の公開値（選択 repo の `deploy/production.json` 等）だけを区別して扱う。公式 repo と Fork の main SHA が同一である必要はない。Fork が自ら出す Verify 成功だけで未知・非互換の CLI 制御契約を受理しない。契約比較不能・不適合の場合は対応する公式 CLI Release または対応契約へ更新するよう案内し、書込み前に停止する。
 
-公開 origin 等の配備固有値は選択 repo の認定 source の既存公開設定から取得して検証し、同じ値を build・配備・probes・Terraform 管理資源・Owner 認証に結合する。公式 origin、Cloudflare account/zone、管理 hostname、Access credential を他の repo に引き継がない。対象固有値を CLI の別設定に複製しない。
+公開 origin 等の配備固有値は選択 repo の認定 source の既存公開設定から取得して検証し、同じ値を build・配備・probes・CTL 管理資源・Owner 認証に結合する。公式 origin、Cloudflare account/zone、管理 hostname、Access credential を他の repo に引き継がない。対象固有値を CLI の別設定に複製しない。
 
 対象の repo/owner ID と exact SHA は既存の認定・公開・配備全体の共通境界とする。Workflow の同一 repo/main 判定、API URL、run/job/attempt/artifact/attestation、GHCR namespace/digest、release、certificate、Ansible に渡す証拠、復旧・再開の binding には、選択 repo または実行時に検証した同じ GitHub repository context を使用する。公式リポジトリの固定 owner/ID、公式の product image、公式 origin、他 repo の成功 run を Fork の認定・配備対象に代用しない。公式の CLI 配布・開発者向け公開物など本来 upstream が所有する入口は配備入口と分離する。既存の exact-source certification、Environment/main 保護、GitHub の認定用 OIDC identity・SSH host pin、操作ごとの明示承認、host lock、R0–R8 の経路判定を弱めず、公式と Fork の二重実装、別 Workflow、別配備 controller、認定機構の追加を行わない。
 
@@ -305,7 +305,7 @@ TITLE: 4.3 Cloudflare（管理認証、配備用資格、製品 Access を分離
 [TEXT]
 MID: 131559357b98e22b0012a2a668b39a11
 STATEMENT: >>>
-**採用決定:** Cloudflare 認証・API 操作は Cloudflare 公式 `cf` を一時アダプターとして利用し、`cf auth login --device --no-browser` による本人同意から必要な資格情報の自動発行・検証・GitHub 登録までを一貫して完了させる。自作 OAuth Client、Client ID の publisher variable、PKCE callback server、SSH local forwarding、手動 API Token template/input fallback を廃止する。第三者の Device Authorization Grant は公式非対応であり、公式 cf の対応 flow と混同しない。`cf` 1.0 RC は候補であり、未実測の API/flag/version を確定値にしない。固定された正式配布物の help、scope catalogue、実 grant、JSON schema を実装前の先行適格性試験で照合する。
+**採用決定:** Cloudflare 認証・API 操作は Cloudflare 公式 `cf` を一時アダプターとして利用し、`cf auth login --device --no-browser` による本人同意から必要な資格情報の自動発行・検証・GitHub 登録までを一貫して完了させる。自作 OAuth Client、Client ID の publisher variable、PKCE callback server、SSH local forwarding、手動 API Token template/input fallback を廃止する。第三者の Device Authorization Grant は公式非対応であり、公式 cf の対応 flow と混同しない。`cf` 1.0 RC は候補であり、未実測の API/flag/version を確定値にしない。固定された正式配布物の help、scope catalogue、実 grant、JSON schema を実装と反復する実サービス適格性試験で照合する。
 
 `doctor` / `init --plan` は公式の read-only scopes のみで対象を観測し、`init` は不足入力に応じて必要な追加権限だけを本人承認にかける。Account API Token の発行に公式の `account_api_tokens:create` と対象 account の API Token Provisioning 等の権限、発行する全 permission group を包含する grant が必要である。scope の具体的な名前は公式 cf の固定版が受理するものと実際の grant を照合して確定する。権限不足を広範な token で回避しない。CLI 内部の OAuth token を抽出せず、公式 cf の公開コマンドの構造化出力だけを使用する。認証プロファイル・HOME・XDG・keyring の影響を隔離し、既存利用者の資格情報を読まず、既存環境変数由来の API token を継承しない。実行結果の秘密を TTY、引数、CI 出力、永続的な設定ファイルに出さない。公式 logout/revoke と一時領域の消去を正常・失敗・中断で確認する。
 
@@ -316,7 +316,13 @@ STATEMENT: >>>
 | Tunnel connector | `GET /accounts/{account_id}/cfd_tunnel/{tunnel_id}/token`。対象 account/zone/単一 Tunnel の一致を検証して取得。既存 connector token を無断 rotation しない |
 | GitHub | 既存 App で選択 repo の Environment public key を取得し、sealed box で該当 Secret を登録。read-back 不可の値は実アクセスで照合 |
 
-Cloudflare IaC の所有先は既存 Terraform。事前に承認済みの SSH 専用 hostname、app、専用再利用可能 Service Auth policy と製品用 probe policy を用意する。token 自動発行と policy 許可を両立するため、公式の `service_token_tag` selector による repository ID・用途・Environment を一つの tag value に結合した完全一致方式を先行適格性試験の候補とする。個別 tag の複数 Include による OR 認可で scope を広げない。管理 app は bootstrap と production の各完全一致値に限定し、製品 probe は別の値と policy に限定する。固定 Terraform provider の schema・scope と権限境界、別 repo/別用途 token の拒否を実証してから確定する。tag を作成・付替え可能な主体がその認可を与え得ることを考慮し、任意 token、account 共通タグ、any-valid-token、作者 Allow、Bypass を管理アプリに許可しない。代替として明示 ID の既存 Terraform 承認済み適用を自動連携する方式は、手動 token/ID 転記が不要であることを実証できる場合のみ比較対象にする。CTL は Terraform 管理資源を API で独自管理せず、VM 上で Terraform を実行しない。Terraform の初回構築・変更の独立承認は維持するが、認定済み edge 所望状態に対して資格情報の手動作成を要求しない。存在・一致・アクセスを実観測してから次へ進む。
+Codexia 固有の Cloudflare edge 資源（単一 remotely managed Tunnel と ingress、製品・管理 hostname の DNS、Access application と専用 policy、空の通常 frontend Worker と routes）の唯一の構築・変更入口は CodexiaCTL の承認済み `init` とする。認定 source の既存 `deploy/production.json`、`deploy/cloudflare/ui-routes.json`、`identity-probes.json`、`public-protocol-paths.json` および本正本を所望状態とし、同じ契約から計画・適用・再観測を行う。Cloudflare の実状態が資源 ID の正本であり、独立 state backend や管理台帳は持たない。アカウント共通 IdP、共有 reusable Allow/Service Auth policy の規則、zone/WAF、他 repo/hostname の資源は account owner の所有のまま読み取り・照合のみを行う。共有 policy への attachment と専用 policy は区別する。通常 Worker の asset/version/deployment は既存 protected Frontend release の責務で、CTL に移さない。
+
+`doctor` / `init --plan` は変更を一切行わない。`init` は認定 source と owner/repo ID、account/zone、正確な hostname/path、既存 resource ID/AUD を照合し、必要な追加権限と具体的な差分を表示して本人の承認を得た後に公式 `cf` の公開コマンドを利用する。完全一致する既存資源は無変更で再利用し、存在しない Codexia 専用資源だけを作成する。重複、他用途、所有・依存不明、認可不一致は推測で上書きせず安全停止する。必要な変更は対象 ID と所有が確認できた場合のみ最小差分で行い、API 応答と独立した再読取り・実アクセスを確認する。Terraform state は非破壊の移管用証跡として秘密扱いで保全し、apply/destroy/import を新経路の前提または fallback にしない。既存 Tunnel/Access app/Worker の ID、AUD、既存 version と有効資格、他サービスの route を維持し、全面再作成しない。複数資源の変更は fail-closed の順序を守る。管理 DNS/ingress は専用 Access が有効な状態で接続し、製品の公開は独立 gate と既存 R5/R6/R8 admission に従う。OAuth/MCP Bypass は既存の exact-path のみ、runtime 受入後に限り有効化し、解除時は先に origin の Access JWT 検証を復帰する。Worker routes と scriptless exclusions は既存契約を維持する。
+
+統合移行では Terraform 管理資源の等価な実装と実サービス受入を行い、従来の Terraform 構成、provider lock、tfvars、初回 Worker version 用 module、Terraform を使う release/CI/検証・運用経路を撤去する。通常のリリースは既存 Wrangler を維持する。未配備 Worker の初回 version は既存 protected Frontend release が公式 Worker Versions/Assets API 等で未配備のまま作成し、認定資産・`_headers`/`_redirects`・tag・version ID・未配備状態を照合してから既存 admission で昇格する。初回 upload のための `wrangler deploy` による即時公開は不可。移行中の旧実装は未移行記録であり、第二の正規経路とはしない。固定 cf の schema、必要 grant、作成・更新・再実行の挙動、既存資源の ID/AUD 維持、拒否と中断後の再開、認定前に公開されない初回 version を対象 owner が承認した既存環境で検証する。別の検証用 account/zone/VM/repo は必須とせず、コード実装と実検証を反復してよい。未検証事項を合格にせず、統合実サービス受入・CI 認定が成功するまで正式公開しない。
+
+token 自動発行と policy 許可を両立するため、公式の `service_token_tag` selector による repository ID・用途・Environment を一つの tag value に結合した完全一致方式を先行適格性試験の候補とする。個別 tag の複数 Include による OR 認可で scope を広げない。管理 app は bootstrap と production の各完全一致値に限定し、製品 probe は別の値と policy に限定する。公式 cf 固定版の schema・scope と権限境界、別 repo/別用途 token の拒否を実証してから確定する。tag を作成・付替え可能な主体がその認可を与え得ることを考慮し、任意 token、account 共通タグ、any-valid-token、作者 Allow、Bypass を管理アプリに許可しない。明示 ID の専用 policy 添付を代替とする場合も公式 cf で自動連携し、手動 token/ID 転記を要求しない。存在・一致・アクセスを実観測してから次へ進む。
 
 既存 Secret が使用可能な場合は継続使用する。Secret 本体を再取得できない Service Token については、欠落した用途だけ新規 token を承認の下で発行・限定許可・実接続を確認して登録し、同じ目的の旧 token の廃止は新 token の動作確認後に限定する。失敗や応答喪失は既存の inventory と receipt を再観測して安全停止し、重複発行・手動 token 貼付けで成功扱いにしない。長命の広範な管理 token を GitHub や VM に残さない。Owner の本人認証は別の責務である。
 <<<
@@ -429,7 +435,7 @@ MID: 096b117f38ddd66ec37f42d7b27020b5
 STATEMENT: >>>
 Go の標準 crypto/net/http、維持されている GitHub の公式または成熟 SDK と Cloudflare 公式 cf、Libsodium 互換 sealed box、age の既存実装を使う。CLI parser 等も [LINK: DOC-ARCHITECTURE-DEPENDENCY-POLICY, 依存選定方針] に従う。protocol、暗号、SSH、IaC、DB/Backup を再実装しない。依存の採用・固定バージョンは実装 PR で公式機能と検証を示し register を更新する。CLI に必要な既存公式 GitHub App と cf/cloudflared の認証・配布・認定を実装受入に含める。独自 Cloudflare App は廃止する。新規の helper script、常駐 service、別 Workflow を追加して既存の手動運用を温存することを完成としない。既存 Workflow の個別操作を独立復旧/診断のために維持し、正常初回導入で要求していた管理画面転記や別々の手動 dispatch を CLI 経由に置き換える。
 
-**先行適格性ゲート（実装着手条件）:** 既存正本を修正しただけでは旧 v0.1.6 を受入済みにしない。公式 cf の固定候補版・runtime、実 Device Flow（追加ターミナル・SSH 転送なし）、必要 scope の実 grant、Account API Token 発行と権限/metadata/実アクセス、Access Service Token の自動発行・限定許可、Tunnel token 取得、保護された GitHub Environment への実 sealed secret 登録・利用・失効を、対象 owner が明示承認した Cloudflare account/zone、対象 repo/Environment、対応 VM で実証してから製品認証実装へ進む。既存の本番予定環境を先行適格性の対象にできる。試験資格と既存資格を識別し、既存の有効資格・承認・保護を維持したまま、試験で発行・登録した資格の失効を確認する。管理経路の先行適格性は Deployment lifecycle の独立ゲートと並行して実施できる。公開仕様の確認、SDK の存在、mock、fixture、ローカルプロキシ試行は実サービス合格を意味しない。実証できないときは未成立として停止し、要件を弱めない。
+**実サービス適格性ゲート（統合受入条件）:** 既存正本を修正しただけでは旧 v0.1.6 を受入済みにしない。公式 cf の固定候補版・runtime、実 Device Flow（追加ターミナル・SSH 転送なし）、必要 scope の実 grant、Account API Token 発行と権限/metadata/実アクセス、Access Service Token の自動発行・限定許可、Tunnel token 取得、保護された GitHub Environment への実 sealed secret 登録・利用・失効を、対象 owner が明示承認した Cloudflare account/zone、対象 repo/Environment、対応 VM で実証する。製品認証実装と検証は反復できるが、実証が成立するまで統合受入・正式公開へ進まない。既存の本番予定環境を先行適格性の対象にできる。試験資格と既存資格を識別し、既存の有効資格・承認・保護を維持したまま、試験で発行・登録した資格の失効を確認する。管理経路の先行適格性は Deployment lifecycle の独立ゲートと並行して実施できる。公開仕様の確認、SDK の存在、mock、fixture、ローカルプロキシ試行は実サービス合格を意味しない。実証できないときは該当項目を未成立として報告し、独立作業を進め、統合受入・公開は停止する。要件を弱めない。
 
 **統合受入・リリース:** 以下を対象 owner が明示承認した実環境で実証する。先行適格性を実施した既存環境を統合受入にも使用できる。先行適格性の証拠と、実装を統合した候補の受入証拠をそれぞれ記録し、統合受入の成功後に正式運用へ移行する。対象バージョン・source SHA・実行主体・scope・対象を結合した秘匿済み実行証拠を既存 PR/認定 artifact に残す。新しい常設 Workflow、受入台帳、管理サービスを作らない。既存の自動タグ/Publish CodexiaCTL は実装完了と現行候補の実受入を確認できるよう既存認定境界に統合し、未検証の候補をタグ発行・正式公開・配備可能として扱わない。設計変更だけで既存欠陥版を再発行しない。移行中は既存の自動タグ付けと Publish CodexiaCTL の入口を一時停止する。設計 PR 自体は文書・関連モデル・既存検証の合格をもって統合可能とし、製品の先行適格性・統合受入とは区別する。一時停止解除は正本に合致する実装・受入と同じ変更で行い、恒久的な別 release controller や手動採番経路を追加しない。
 
@@ -442,7 +448,7 @@ Go の標準 crypto/net/http、維持されている GitHub の公式または�
 | CLI-05 | R4/R5 の各境界で切断/中断/応答喪失から再開。既存 owner/DB/有効鍵/資格を再生成しない。二重 dispatch、別 VM、未知 DB、既存 writer、失われた age handoff を安全に処理 |
 | CLI-06 | CLI 終了後に管理 token/一時鍵が残らず、通常配備が CLI 非依存。保全未受入で R8 が停止し、独立受入後は既存の compatible update が実際に成功 |
 | CLI-07 | plan/status/doctor は構成を変更せず、JSON/log に秘密がない。失敗した実ステップ・不足する権限・対象 run を表示し、不明状態を成功としない |
-| CLI-08 | リポジトリと運用入口を照合し、CLI と重複する設定同期・手作業だけの通常経路を除去。Ansible/Terraform/Actions/認定/復旧の正本が二重化されていない |
+| CLI-08 | リポジトリと運用入口を照合し、CLI と重複する設定同期・手作業だけの通常経路を除去。CTL/cf、Ansible/Actions/認定/復旧の正本が二重化されず、旧 Terraform 実装と依存が撤去されている |
 | CLI-09 | 同じ公式バイナリと公式 App で公式 repo および他の個人/Organization の `codexia` を検出し、対象を選択して初回導入を完走する。0/1/複数候補、全ページ取得、取消・停止中 installation・非対象名・権限不足・未設定 App・別 repo checkpoint・別 repo からの証跡を検証。PAT や任意 URL での迂回は不可 |
 | CLI-10 | 配備対象ごとに owner/repo ID、Environment、公開 origin、管理 hostname、Access app・credential、host pin、証跡と product image を一貫して分離。不適合契約・別 repo/用途の token・誤った Environment への資格登録/使用・古い証拠・改名/移転・別 repo への書込みを拒否する。管理 Access app が同一 VM の両 Environment token を受理することと、OS 利用者の鍵・権限の分離を独立に検証する。公式 CLI の配布主体と対象 repo の product publication を分離し、Fork で公式 CLI の自動発行を行わない。実 GitHub App/Fork/VM での受入と既存公式 repo の回帰確認は模擬 API/CI と区別する |
 | CLI-11 | §2.2 の対話・表示契約を Huh/Lip Gloss の実ビルドと隔離した PTY/SSH で実証する。40/80 桁等の狭幅と resize、明暗・NO_COLOR・TERM=dumb/line mode、候補選択/取消/EOF/不正入力、既定 No、Ctrl+C/SIGTERM/SIGHUP/SSH 切断、terminal mode/cursor の復元、stdin/stdout redirect・JSON 分離、制御文字注入、秘密・grant・code の秘匿と明示承認前の無変更を確認する。既存 CLI の受入と同じ control/exit semantics を保ち、描画 snapshot や模擬 HTTP だけで実端末を合格としない |

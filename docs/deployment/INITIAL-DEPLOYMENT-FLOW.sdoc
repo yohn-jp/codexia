@@ -59,7 +59,7 @@ STATEMENT: >>>
 | `deploy` | protected GitHub Environment と証明済み Full digest | migration・auth・origin・API ready | durable transaction record に従い復旧 |
 | 公開受入 | 実 VM、Cloudflare、実ブラウザー、独立復元ホスト | API・OAuth・reboot・バックアップの観測 | fixture 成功だけで受入扱いしない |
 
-移行後の管理経路は **GitHub Actions → Cloudflare Access Service Auth → Cloudflare Tunnel → pinned OpenSSH → Ansible → rootless Podman Quadlet**。[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Tunnel と製品公開分離] の受入・撤去条件に従う。公開 UI/認証入口は Cloudflare **Workers Static Assets**、API origin は Cloudflare Tunnel。`/console`と`/console/setup`は通常の `codexia-frontend` Worker の同じFull静的アーカイブ・Desktopアプリルートであり、登録キー検証はVMのFastify/Better AuthとPostgreSQLが担当する。初回登録専用Worker・Environment・Terraform経路切替・別Frontendビルドを設けない。Cloudflare Terraform / Access policy は別承認・別検証を要する。MCP は管理 VM の初期構築経路ではない。
+移行後の管理経路は **GitHub Actions → Cloudflare Access Service Auth → Cloudflare Tunnel → pinned OpenSSH → Ansible → rootless Podman Quadlet**。[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Tunnel と製品公開分離] の受入・撤去条件に従う。公開 UI/認証入口は Cloudflare **Workers Static Assets**、API origin は Cloudflare Tunnel。`/console`と`/console/setup`は通常の `codexia-frontend` Worker の同じFull静的アーカイブ・Desktopアプリルートであり、登録キー検証はVMのFastify/Better AuthとPostgreSQLが担当する。初回登録専用Worker・Environment・別 edge 経路切替・別Frontendビルドを設けない。Codexia 固有 Cloudflare 資源は CTL §4.3 の承認・検証を要し、共有 Access policy は account owner の管理とする。MCP は管理 VM の初期構築経路ではない。
 <<<
 
 [[/SECTION]]
@@ -129,7 +129,7 @@ TITLE: 宣言的な初期化と公開の責務分離
 [TEXT]
 MID: 662dcb86ea0f88c75e168c2620c2fdf6
 STATEMENT: >>>
-**採用済み設計:** Gitでレビューした共通設定と保護環境の承認で新規VMへ`bootstrap`一操作で`host → secrets → base → auth-runtime`を順序どおり収束させる。初回キーはAnsible管理下で安全に生成・配送するが、ownerをAnsibleは作成しない。通常Frontendを配備し、同じFull Backend imageをcanonical API slotのsetup-onlyモードで起動する。本人による通常Workers上の `/console/setup` / Better AuthでのPasskey登録を経て、保護されたactivation preparationでowner/clientを照合しsetup-onlyを停止した後、別途承認された本番activationに進む。通常FrontendやTerraform経路の再配備・切替は不要。新規・復旧・通常更新を混同せず、再適用は冪等。秘密情報や既存データを無条件に初期化しない。既存VMで専用DBの不在が確認された場合も、[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-db不在時の再初期化r4, R4のDB不在時再初期化] に従い同じ新規導入を実行する。
+**採用済み設計:** Gitでレビューした共通設定と保護環境の承認で新規VMへ`bootstrap`一操作で`host → secrets → base → auth-runtime`を順序どおり収束させる。初回キーはAnsible管理下で安全に生成・配送するが、ownerをAnsibleは作成しない。通常Frontendを配備し、同じFull Backend imageをcanonical API slotのsetup-onlyモードで起動する。本人による通常Workers上の `/console/setup` / Better AuthでのPasskey登録を経て、保護されたactivation preparationでowner/clientを照合しsetup-onlyを停止した後、別途承認された本番activationに進む。通常Frontendや edge 経路の再配備・切替は不要。新規・復旧・通常更新を混同せず、再適用は冪等。秘密情報や既存データを無条件に初期化しない。既存VMで専用DBの不在が確認された場合も、[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-db不在時の再初期化r4, R4のDB不在時再初期化] に従い同じ新規導入を実行する。
 
 **運用受入:** `bootstrap` は `host`、`secrets`、`base`、承認済みの `auth-runtime` を順に実行する。新規導入で承認を明示すると、同一オリジンの setup-only API と暗号化した一回限りのキー配送を構成できる。[LINK: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME, 認証運用手順]に従い、Cloudflare 経路、使い捨て VM と実ブラウザーで受入を確認する。`inspect`、個別ステージ、`deploy-lifecycle-fixture`、`restore-drill` は引き続き利用できる。
 

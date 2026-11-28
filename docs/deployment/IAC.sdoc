@@ -18,7 +18,7 @@ The accepted replacement backend delivery path is **GitHub Actions → Cloudflar
 
 The canonical production tasks are in [LINK: DOC-DEPLOYMENT-ANSIBLE-PUSH-DEPLOYMENT, Ansible] and the Quadlet definitions in [Quadlet](https://github.com/yohn-jp/codexia/blob/main/deploy/quadlet). The protected production workflow verifies a certified immutable Full GHCR digest and its provenance, serializes deployment under a rootless host lock, requires a verified encrypted backup for compatible image changes and probes readiness. Pull-request validation receives no production credentials.
 
-対象 VM の SSH セッションから実行する [LINK: DOC-DEPLOYMENT-CODEXIACTL, codexiactl] は初回の管理接続準備、外部認証、GitHub の保護入力整備と既存 operation の起動に限定する。Ansible は従来どおり Runner で実行し、CLI は Ansible の代替構成管理・常駐配備主体ではない。
+対象 VM の SSH セッションから実行する [LINK: DOC-DEPLOYMENT-CODEXIACTL, codexiactl] は初回の管理接続準備、外部認証、Codexia 固有 Cloudflare 資源の公式 cf による構築・収束、GitHub の保護入力整備と既存 operation の起動を担当する。共有 Cloudflare 資源と通常 release は管理しない。Terraform を別の構成管理経路として維持しない。Ansible は従来どおり Runner で実行し、CLI は Ansible の代替構成管理・常駐配備主体ではない。
 <<<
 
 [[SECTION]]
