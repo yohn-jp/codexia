@@ -176,7 +176,7 @@ func cfScopeSetAllowed(scopes []string) bool {
 	return len(slices.Compact(ordered)) == len(scopes)
 }
 
-var cfDeviceChallenge = regexp.MustCompile(`(?m)^To authorize cf, please visit:\s*(https://[^\s]+)\s*and enter the code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})[\t \r]*\n`)
+var cfDeviceChallenge = regexp.MustCompile(`(?m)^To authorize cf, please visit:\s*(https://[^\s]+)\s*and enter the code:\s*([A-Za-z0-9]{8})[\t \r]*\n`)
 
 type cfDevicePrompt struct {
 	tty     io.Writer

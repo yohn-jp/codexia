@@ -85,8 +85,8 @@ func TestCloudflareDevicePromptOnlyForwardsOfficialBrowserChallenge(t *testing.T
 	prompt := cfDevicePrompt{tty: &tty}
 	lines := []string{
 		"Starting login. Fixture diagnostic with confidential value.\nTo authorize cf, please visit:\n",
-		"\n  https://dash.cloudflare.com/device\n\nand enter the code:\n",
-		"\n  WXYZ-0123\n\n",
+		"\n  https://dash.cloudflare.com/oauth2/device/verify\n\nand enter the code:\n",
+		"\n  jPqK6Qvs\n\n",
 		"Set CLOUDFLARE_API_TOKEN to retry.\n",
 	}
 	for _, chunk := range lines {
@@ -94,14 +94,14 @@ func TestCloudflareDevicePromptOnlyForwardsOfficialBrowserChallenge(t *testing.T
 		require.NoError(t, err)
 	}
 	require.True(t, prompt.shown)
-	require.Contains(t, tty.String(), "https://dash.cloudflare.com/device")
-	require.Contains(t, tty.String(), "WXYZ-0123")
+	require.Contains(t, tty.String(), "https://dash.cloudflare.com/oauth2/device/verify")
+	require.Contains(t, tty.String(), "jPqK6Qvs")
 	require.NotContains(t, tty.String(), "confidential")
 	require.NotContains(t, tty.String(), "CLOUDFLARE_API_TOKEN")
 
 	tty.Reset()
 	invalid := cfDevicePrompt{tty: &tty}
-	_, err := invalid.Write([]byte("To authorize cf, please visit:\n https://dash.cloudflare.com.invalid/device\n and enter the code:\n WXYZ-0123\n"))
+	_, err := invalid.Write([]byte("To authorize cf, please visit:\n https://dash.cloudflare.com.invalid/device\n and enter the code:\n jPqK6Qvs\n"))
 	require.Error(t, err)
 	require.Empty(t, tty.String())
 }
@@ -137,7 +137,7 @@ case "$2" in
     [[ "$3 $4 $5 $6" == "--device --no-browser --no-use-keyring --scopes" ]]
     shift 6
     [[ "$*" == "` + strings.Join(cfReadScopes, " ") + `" ]]
-    printf '\nTo authorize cf, please visit:\n\n  https://dash.cloudflare.com/fixture\n\nand enter the code:\n\n  WXYZ-0123\n' >&2
+    printf '\nTo authorize cf, please visit:\n\n  https://dash.cloudflare.com/fixture\n\nand enter the code:\n\n  jPqK6Qvs\n' >&2
     printf 'unstructured provider output holding fixture-login-secret\n' >&2
     touch authenticated
     ;;
@@ -165,7 +165,7 @@ esac
 	require.Error(t, runtime.setAccount("00000000000000000000000000000002"))
 	challenge, err := os.ReadFile(private.Name())
 	require.NoError(t, err)
-	require.Contains(t, string(challenge), "WXYZ-0123")
+	require.Contains(t, string(challenge), "jPqK6Qvs")
 	require.NotContains(t, string(challenge), "fixture-login-secret")
 	require.NoError(t, runtime.logout(t.Context()))
 	require.NoFileExists(t, filepath.Join(dir, "authenticated"))
