@@ -474,6 +474,8 @@ def inspect_file(name,data=None):
   basename=os.path.basename(path)
   try:
     parent_fd=os.open(parent,os.O_RDONLY|os.O_DIRECTORY|os.O_CLOEXEC|os.O_NOFOLLOW)
+  except FileNotFoundError:
+    return True
   except OSError:
     abort('a Cloudflare connector destination directory could not be opened without following links')
   parent_st=os.fstat(parent_fd)
