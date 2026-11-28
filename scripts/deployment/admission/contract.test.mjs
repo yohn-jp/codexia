@@ -545,10 +545,30 @@ test('production admission reuses canonical runtime validators and checks exact 
   assert.deepEqual(checks.find(task => task.name === 'Require the independent host Cloudflare connector')['ansible.builtin.command'].argv,
     ['systemctl', 'is-active', 'codexia-cloudflared.service']);
   const networks = checks.find(task => task.name === 'Verify the canonical private network isolation before deployment');
-  assert.deepEqual(networks.loop.map(value => value.expected), ['codexia|bridge|false', 'codexia-data|bridge|true']);
+  assert.deepEqual(networks['ansible.builtin.command'].argv.slice(0, 4), ['podman', 'network', 'inspect', '--format']);
+  assert.match(networks['ansible.builtin.command'].argv[4], /\.Name.*\.Driver.*\.Internal/u);
+  assert.deepEqual(networks['ansible.builtin.command'].argv.slice(5), ['codexia', 'codexia-data']);
+  assert.match(networks.failed_when, /codexia-data\|bridge\|true/u);
+  assert.match(networks.failed_when, /codexia\|bridge\|false/u);
   const shell = transactionStages.find(task => task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'].cmd;
   assert.match(shell, /systemctl --user show --property=SourcePath --value codexia-db\.service/u);
   assert.match(shell, /gate_state="\$\(gate_control status\)"/u);
+});
+
+test('unchanged API skips redundant systemd reload but repairs the missing activation link', () => {
+  const shell = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'].cmd;
+  const start = shell.indexOf('if [[ "$unchanged" == true ]]; then');
+  const end = shell.indexOf('if [[ "$had_unit" == true ]] && ! "$backup_control" deploy-check;', start);
+  assert.ok(start >= 0 && end > start, 'the canonical no-op branch must exist');
+  const noOp = shell.slice(start, end);
+  const linkCondition = noOp.indexOf('if [[ "$api_link_created" == true ]]; then');
+  const reload = noOp.indexOf('systemctl --user daemon-reload');
+  const linkConditionEnd = noOp.indexOf('fi', linkCondition + 1);
+  assert.ok(linkCondition >= 0 && reload > linkCondition && linkConditionEnd > reload,
+    'systemd reload must be conditional on activation-link repair');
+  assert.ok(noOp.includes('systemctl --user is-active --quiet codexia-api.service'));
+  assert.ok(noOp.includes('State.Health.Status') && noOp.includes('grep -Fxq healthy'));
+  assert.ok(noOp.includes('if [[ "$repaired" == true ]]; then echo "REPAIRED'));
 });
 
 test('first activation verifies the initialized database under both explicit approvals without Console backup', () => {

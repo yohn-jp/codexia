@@ -403,12 +403,14 @@ db_verifier_bin=$(as_service mktemp -d "$service_home/.codexia-db-verifier.XXXXX
 as_service tee "$db_verifier_bin/podman" >/dev/null <<'MOCK_PODMAN'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" == secret && "${2:-}" == inspect && "${3:-}" == --format &&
-      "${5:-}" == "${CODEXIA_TEST_REPLACED_DB_SECRET:-}" ]]; then
-  current_id=$(/usr/bin/podman "$@")
-  replaced_id=0000000000000000000000000
-  [[ -n "$current_id" && "$current_id" != "$replaced_id" ]]
-  printf '%s\n' "$replaced_id"
+if [[ "${1:-}" == secret && "${2:-}" == inspect &&
+      "${3:-}" == codexia-postgres-admin-password &&
+      "${4:-}" == codexia-postgres-app-password &&
+      -z "${5:-}" && -n "${CODEXIA_TEST_REPLACED_DB_SECRET:-}" ]]; then
+  /usr/bin/podman "$@" | jq --arg name "$CODEXIA_TEST_REPLACED_DB_SECRET" '
+    if any(.[]; .Spec.Name == $name) then
+      map(if .Spec.Name == $name then .ID = "0000000000000000000000000" else . end)
+    else error("missing requested secret in batch inspection") end'
   exit 0
 fi
 exec /usr/bin/podman "$@"
@@ -443,8 +445,10 @@ as_service rm -- "$db_verifier_bin/podman"
 as_service rmdir -- "$db_verifier_bin"
 db_verifier_bin=
 
-test "$(podman network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' codexia-data)" = 'codexia-data|bridge|true'
-test "$(podman network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' codexia)" = 'codexia|bridge|false'
+# Mirror the production one-shot network admission against real rootless Podman.
+expected_networks=$(printf '%s\n' 'codexia|bridge|false' 'codexia-data|bridge|true' | LC_ALL=C sort)
+observed_networks=$(podman network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' codexia codexia-data | LC_ALL=C sort)
+test "$observed_networks" = "$expected_networks"
 for volume in codexia-postgres codexia-data codexia-history; do
   test "$(podman volume inspect --format '{{.Name}}' "$volume")" = "$volume"
 done

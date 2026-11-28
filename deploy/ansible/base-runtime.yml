@@ -31,21 +31,18 @@
   changed_when: false
   failed_when: base_runtime_rootless.rc != 0 or base_runtime_rootless.stdout != 'true'
 - name: Require all fixed base secret identities in one read-only module invocation
-  # Preserve the original fail-closed presence check for every secret, while
-  # avoiding four separate Ansible task/module round-trips per convergence.
+  # Inspect all names in one Podman call; reject absent, additional, or
+  # partially resolved names before any runtime resource mutation.
   ansible.builtin.command:
-    argv:
-      - /bin/sh
-      - -eu
-      - -c
-      - >-
-        for secret in codexia-postgres-admin-password codexia-postgres-app-password; do
-          podman secret exists "$secret";
-        done
-    expand_argument_vars: false
+    argv: [podman, secret, inspect, codexia-postgres-admin-password, codexia-postgres-app-password]
   register: base_runtime_secrets
   changed_when: false
-  failed_when: base_runtime_secrets.rc != 0
+  failed_when: >-
+    base_runtime_secrets.rc != 0 or
+    ((base_runtime_secrets.stdout | from_json |
+      map(attribute='Spec.Name') | list | sort) !=
+     (['codexia-postgres-admin-password', 'codexia-postgres-app-password'] | sort))
+  no_log: true
 - name: Observe fixed network identities before any runtime mutation
   ansible.builtin.command:
     argv: [podman, network, exists, "{{ item }}"]

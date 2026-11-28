@@ -316,6 +316,80 @@ agree; (b) every selected task is proven or blocked/fails, never silently skippe
 profile identities are preserved; (e) test-only and unrelated changes no longer
 start expensive lanes; and (f) comparable actual CI demonstrates improved queue,
 runner and wall-clock behavior. A budget alone never authorizes dropping proof.
+
+Deployment optimization decision record (2026-11-28, disposable CI only):
+The following observations use independently isolated, exact-HEAD App/Auth
+lifecycle runs. They establish *relative costs in hosted disposable runners*,
+not production Cloudflare Tunnel/SSH speedups. Each experimental PR completed
+Verify, real-rootless App/Auth transitions and the deployment lifecycle CI.
+Superseded drafts are historical evidence, not release-authorized code.
+
+**Adopted implementation candidates (production-target PR #1057, NOT yet deployed):**
+- **Batch read-only Podman admissions (origin #1048):** Replace repeated
+  presence/identity subprocesses with one exact-name metadata inspection for
+  fixed PostgreSQL and Better Auth secrets, one full names-and-IDs snapshot for
+  the preflight observer, and one inspection each for current API state and
+  both private networks. Compare exact names, Secret IDs and current container
+  references; reject missing/duplicate identities and non-healthy API state.
+  Retain fresh checks inside the host lock, stopped-image identity, immutable
+  digest, signed source proof, backup gates and rollback. This is not a cache
+  of prior admissions and has no measured end-to-end speedup yet.
+- **Conditional systemd regeneration on exact no-op (#1057):** A matching
+  active Quadlet and existing canonical activation link require no repeated
+  `systemctl --user daemon-reload`; regenerate when a missing link is repaired
+  or the candidate unit is changed. Always recheck active service and Podman
+  health, under the same host lock. Do not interpret a single-run speed change
+  as proven production acceleration.
+
+**Rejected or deferred alternatives (do not implement without a new decision):**
+- **Remove Mitogen: REJECTED (#1053, run 46149726738).** On same-host
+  same-digest A/B, App `linear` took 14.765s/14.973s against Mitogen
+  8.566s/8.586s; Auth `linear` took 12.081s/12.106s against Mitogen
+  6.979s/6.971s. Keep current pinned `mitogen_linear`, rootless ACL
+  handling, pipelining and ControlPersist. Third-party-strategy deprecation
+  requires separate future compatibility work, not a performance-driven
+  strategy switch.
+- **Skip registry pull in favor of local digest: REJECTED (#1051,
+  run 46149677485).** The four interleaved App measurements were pull
+  91ms/83ms versus local inspect 90ms/87ms. No meaningful advantage was
+  observed, and local cache identity cannot certify fresh registry/provenance
+  admission. Keep the certified immutable pull.
+- **Skip no-intent deployment/backup recovery: REJECTED (#1054,
+  run 46149551649).** On App, canonical recovery took 31-33ms versus
+  separate guard-only checks 42-44ms; on Auth, recovery took 24-27ms
+  versus guards 33-34ms. Those separate checks also cannot safely replace
+  host-lock recovery of newly pending intents. Retain both helpers.
+- **Reuse outside-lock health or identity inside lock: REJECTED (#1052,
+  run 46149689828).** Same-digest App measurements: live state rechecks
+  320ms, release binding 178ms, auth snapshot/unit compare 38ms, auth
+  client verification 1,155ms, final no-op service/health 227ms;
+  Auth equivalents were 280ms/173ms/33ms/931ms/187ms. These are
+  mandatory current-state/authorization checks, not disposable overhead;
+  an outside-lock snapshot is vulnerable to TOCTOU. Safe consolidation
+  must preserve a second lock-held read.
+- **Split or bypass the canonical transaction: DEFERRED (#1055,
+  run 46149463101).** Same-digest App measured Ansible wall 6,012ms,
+  checkpointed 1,126ms, residual 4,886ms; Auth measured 9,102ms,
+  checkpointed 1,746ms, residual 7,356ms. During compatible update,
+  App measured 15,861ms/9,247ms (residual 6,614ms), Auth
+  24,609ms/14,208ms (residual 10,401ms). Residual includes controller,
+  per-task module and post-lock work; it is NOT purely pre-lock time or
+  an achievable saving. Optimize unneeded invocations while preserving
+  single-writer serialization, durable intent, recovery, backup admission,
+  publication gate, and rollback. No alternative transaction authority.
+- **Omit the auth-client verification or other admission guards:
+  REJECTED.** Although the same-digest auth-client validation is around
+  0.9-1.2s (#1052), this is a security and database-consistency proof,
+  not a redundant status fetch. Never downgrade it to an unverified
+  state-derived shortcut.
+
+**Qualification for adopted changes:** Full exact-head Verify and App/Auth
+first-activation, compatible update, unchanged digest, missing-link repair,
+failed-candidate rollback, interrupted transaction recovery, and private
+backup/secret drift tests must pass. Compare identical case names and
+runner class before claiming measured savings. Non-adopted experiments
+remain unmerged and must be closed with their measured results.
+
 <<<
 
 [[/SECTION]]
