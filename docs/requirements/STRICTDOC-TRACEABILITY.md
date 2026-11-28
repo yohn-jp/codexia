@@ -17,10 +17,10 @@
 1. 各`REQ-*`は個別のMarkdown見出しとStrictDoc metadataで管理する。変換時に最新accepted registerと各設計ownerを照合し、`REQ-UI-001`のDesktop React Web / iOS SwiftUI境界を含む現行の要求文と参照を維持した。
 2. `REQ-*` の既存IDは変更・再利用しない。`O01/O02` 等の個々の検証義務もrelation可能なnodeまたは検証IDとして管理する。
 3. 同一要求をMarkdown表とStrictDoc nodeで**並行編集しない**。Requirement registerだけを編集し、HTML/JSONを生成物として扱う。
-4. 既存の自由文・Mermaid・API/DB/External設計のMarkdown全文を機械的にStrictDoc固有dialectへ変換しない。必要な領域正本をURL/UIDで参照する。
+4. 今後の目標は [StrictDocによる設計正本の全面移行](../architecture/SPECIFICATION-TOOLCHAIN.md#strictdocによる設計正本の全面移行採用済み方針) に従うnative SDocへの移行である。既存の自由文・Mermaid・API/DB/External設計を機械的に変換したり、専門契約を写経したりしない。現行の台帳/Grammar/参照は移行受入までは正本・検証入力のままとし、受入後は新正本に一本化する。
 5. 生成されたHTML、matrix、JSON、ReqIFは派生物。公開済み表に誤りがあれば要求源と関連付けを直し、生成物を手編集しない。
 
-**Authoring形式:** StrictDoc 0.32.1の拡張Markdown exportを実測した。Grammarは`REQUIREMENT`と`TEST` nodeを定義し、CIは同一sourceから2回HTML/JSONを生成し、HTMLの検索timestamp、確認済みのMarkdown document MID、およびStrictDoc検索indexのkey順と、生成元Python `set`に由来するdocument membership配列順だけを正規化する。membershipの値と他の出力は比較に残す。別のStrictDoc versionやMarkdown機能を使う場合は再評価する。
+**Authoring形式:** StrictDoc 0.32.1の拡張Markdown exportを実測した。現行Grammarは`REQUIREMENT`、`OBLIGATION`、`TEST` nodeを定義し、CIは同一sourceから2回HTML/JSONを生成し、HTMLの検索timestamp、確認済みのMarkdown document MID、およびStrictDoc検索indexのkey順と、生成元Python `set`に由来するdocument membership配列順だけを正規化する。membershipの値と他の出力は比較に残す。別のStrictDoc versionやMarkdown機能を使う場合は再評価する。
 
 TEST nodeには、`Execution scope`として`TRACE_NODE`、`TRACE_BROWSER`、`PRODUCT`のいずれかを記録する。テスト実装のネイティブ登録には、安定したTEST-IDを文字列リテラルの`[TEST-ID]` prefixとして置く。AST discoveryは登録からID、source path、行、表示名を導出する。複数の独立したTEST-IDを一つのテストケースが検証する場合は、登録タイトルの先頭に異なるID prefixを連続して置き、各IDを同じsource registrationへ結ぶ。Requirement RegisterのTEST nodeには`Case name`や`File` relationを複製せず、source位置を手入力しない。
 

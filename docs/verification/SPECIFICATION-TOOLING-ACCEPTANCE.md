@@ -14,7 +14,7 @@
 | LikeC4 | Structurizr DSL | 構成要素・接続・信頼境界のモデルと静的ビュー。既存Mermaid状態図を別正本にしない |
 | Threagile | OWASP Threat Dragon | リスク/緩和策と実検証要求をコード管理し、CIでモデルを再評価する |
 | k6 | Artillery | API/DB/MCP/streamの性能budgetを仕様から定義し、閾値で合否判定 |
-| StrictDoc静的HTML + Scalar | VitePress中心 | 要求・source・test・schemaをGitHub Pagesの**既存唯一の公開者**から表示 |
+| StrictDoc静的HTML + Scalar | VitePress中心 | 設計文書全体・要求・source・test・schemaをGitHub Pagesの**既存唯一の公開者**から表示する採用目標。現在の公開は既存受入状態に従う |
 | 既存Actions exact-source evidence | Allureを証拠の第二正本にする | run/job/attempt/artifact identityと結果の厳密な結合 |
 
 ## CI validationと適合段階
@@ -87,6 +87,22 @@ HTTP契約の検証は既存Verifyの `unit-http-contract` と `typecheck-http-c
 | 配備/初期化 | OCI startup、ready、drain、migration確認 | Core/Full、アプリ/DBバージョン固定 |
 
 PRでは小さな回帰チェック、長時間/高負荷は適切に隔離した条件下で実行。書込を含む試験は使い捨てDBと無権限ネットワークに限定する。
+
+## StrictDoc全面移行の受入
+
+[採用済み全面移行方針](../architecture/SPECIFICATION-TOOLCHAIN.md#strictdocによる設計正本の全面移行採用済み方針) の移行受入を以下に定める。既存G0/G7、TRC、CI/CD・Pagesの受入を置換・緩和しない。Phase 0の試行と全量移行完了を区別する。現行のMarkdown/Grammarは領域受入までは有効である。
+
+| ゲート | 必須証明 |
+| --- | --- |
+| SDOC-01 対象・所有権 | 移行時のmainのGit treeから全設計候補を棚卸し。規範、提案、runbook、歴史、索引、専門モデル/ツール入力、対象外を分類し、旧正本→新正本と消費先・参照の対応を記録する。全規範的設計の欠落、未分類、二重編集可能な正本を残さない。 |
+| SDOC-02 公式機能・代表試行 | 固定版と採用候補版の公式仕様・互換性を照合。要求台帳と異種設計（配備/CLI、認可表、UX表・状態図、DB詳細、CI、Impeccable入力）でnative SDoc・共有Grammar・標準HTML/JSONを実際に生成し、表、コード、図、本文、日本語、検索、リンク、relation、外部モデル参照を確認する。欠落や回避のための独自拡張が必要なら代替製品を比較し採用判断を行う。全量移行前に必須機能を証明する。 |
+| SDOC-03 意味・識別子保存 | 旧正本と新正本を領域ごとに照合し、要求・正常異常・禁止・例外・採用理由・未採用状態の意味を保存。移行前の全REQ/OBL/TEST UID、MID、relations、既存の検証義務・source識別子・適用状態を照合し、欠落、重複、無断の新規要件・状態昇格を拒否する。新IDは必要な追跡対象に限定し、基準IDを特定時点の件数で固定しない。 |
+| SDOC-04 消費先 | StrictDoc config、旧Markdown正規表現・単一台帳を前提とする検証、Architecture AtlasのMermaid抽出、UX Simulatorの表/遷移抽出、Pagesの固定HTMLパス/anchor、外部ツール（Impeccable等）、CTLの互換性・Release入力、CI/証明のpath参照を棚卸しして実際の消費経路を切り替える。専門モデルまたは標準の構造化出力を優先し、表示用の表の再解析や新たな第二の状態/判定実装を作らない。承認・観測・認可・実行の責務は変更しない。 |
+| SDOC-05 CI・証拠 | 既存single machine authority・requirements-trace・input closure・exact-source Certificationを使用し、.sdoc/.sgra、外部モデル・asset・設定・lock・生成器と実際の依存を登録する。追加・削除・移動・共通Grammarの変更を漏らさず、旧Markdown基準の固定パス/拡張子に起因する未実行や過剰実行を防ぐ。純粋な説明変更を不要な製品OCI/E2Eの理由にしない。実装消費契約の変更には既存必須検証を適用する。新しい常設パイプライン・認定系統を作らない。従来と比較した実測をPRに記録し、無根拠なCI性能悪化を許容しない。 |
+| SDOC-06 閲覧・公開 | 標準HTML/JSONと既存専門ツールの派生図・API出力を同一source SHAから生成し、既存の唯一のRepository Audit Pagesに収録。既存Portal、Atlas、UX Simulator、Scalar、追跡・逆引き・未達表示、利用中のリンク/UIDを維持する。2回の生成比較は既知の非意味的差分だけを明示的に扱い、内容や関係の差を隠さない。既存の公開境界、機密・資格情報・local pathの排除、PR artifactとブラウザーsmoke、main公開後のlive確認を維持する。設計の全収録と公開範囲は区別する。 |
+| SDOC-07 撤去 | 領域受入と同時に旧編集正本を廃止し、入口/必須外部形式は参照または必要な派生物とする。不要になったMarkdown抽出・同期・一時変換コードを撤去。HTML/JSON/図など派生物は手編集せず原則Git管理しない。追加した型・属性・依存は必要性と削減した管理対象を説明する。 |
+
+受入証拠は対象のsource SHAと結合してPR・既存CI artifactに記録する。未実施、部分成功、未知、未公開を成功と扱わない。設計決定の採用だけでいずれのゲートもPASSにしない。StrictDocは要求・文書の管理基盤であり、実製品・本番運用の認定は既存の各責務に残る。
 
 ## GitHub Pagesへの公開
 

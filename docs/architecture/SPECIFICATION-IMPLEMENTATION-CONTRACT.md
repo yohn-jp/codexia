@@ -57,4 +57,6 @@ iOSのSwift生成は [iOS設計](IOS-SWIFTUI-ARCHITECTURE.md) が所有し、ど
 
 ## 設計と実装の完了状態
 
+StrictDocの全設計文書への拡張は後続の採用済み [全面移行方針](SPECIFICATION-TOOLCHAIN.md#strictdocによる設計正本の全面移行採用済み方針) と [受入](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md#strictdoc全面移行の受入) に従う。既存SPEC-01/DOC-01/TRACE-01の要求・公開・追跡証拠を保持し、移行の適格性検証後に領域移行を並列化できる。過去のworkstream完了は全面移行の完了を意味しない。
+
 本書のworkstreamは**Issue化され、各Issueの受入が後続PRで証明されて初めて実装完了**となる。設計書を追加しただけでXState、S3 API、StrictDoc、TypeSpec、MCP v2等が動作していると報告しない。未実装・BLOCKED・PARTIAL・DEVIATION・VERIFIEDを区別し、全量TRACE-01はこれらを隠さず列挙する。
