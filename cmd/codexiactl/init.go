@@ -188,7 +188,7 @@ func (c *workflowController) prepareInputs(ctx context.Context, gh *githubContro
 	}
 	o.Notice("Verified the Tailnet node, CI policy and effective OpenSSH pin for " + tailnet.Address + ".")
 	reportStage(o, cloudflareStage, "Verify the existing edge for "+settings.PublicOrigin)
-	edge, err := observeCloudflare(ctx, o, gh.target, settings, true)
+	edge, err := observeCloudflare(ctx, o, gh.target, settings, cloudflareRequirementsFor(snapshot))
 	if err != nil {
 		return err
 	}

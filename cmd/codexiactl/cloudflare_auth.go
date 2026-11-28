@@ -33,6 +33,33 @@ var cloudflareInspectionScopes = []string{
 	"access.read", "access-service-token.read", "workers-scripts.read",
 }
 
+// Derive extra authority from the protected input inventory. An existing
+// deployment credential is reused; a missing peer copy needs metadata read,
+// not new-token issuance. Unknown inventory is treated as missing.
+type cloudflareAuthRequirements struct {
+	tunnel, tokenPolicy, mint bool
+}
+
+func cloudflareRequirementsFor(snapshot githubSnapshot) cloudflareAuthRequirements {
+	var requirements cloudflareAuthRequirements
+	for _, input := range missingSecrets(snapshot) {
+		switch input.name {
+		case "CODEXIA_TUNNEL_TOKEN":
+			requirements.tunnel = true
+		case cloudflareReadRole, cloudflareWorkerRole:
+			requirements.tokenPolicy = true
+			if !snapshot.Bootstrap.Secrets[input.name] && !snapshot.Production.Secrets[input.name] {
+				requirements.mint = true
+			}
+		}
+	}
+	return requirements
+}
+
+func (r cloudflareAuthRequirements) readOnly() bool {
+	return !r.tunnel && !r.tokenPolicy && !r.mint
+}
+
 type cloudflareTemplatePermission struct {
 	Key  string `json:"key"`
 	Type string `json:"type"`
@@ -41,7 +68,7 @@ type cloudflareTemplatePermission struct {
 // The provider documents these short template keys. Tunnel and Access
 // service-token keys are not documented; the form explicitly requires their
 // addition instead of silently pretending that the template is complete.
-func cloudflareManagementTemplate(provision bool) string {
+func cloudflareManagementTemplate(requirements cloudflareAuthRequirements) string {
 	permissions := []cloudflareTemplatePermission{
 		{Key: "zone", Type: "read"},
 		{Key: "dns", Type: "read"},
@@ -50,17 +77,21 @@ func cloudflareManagementTemplate(provision bool) string {
 		{Key: "access", Type: "read"},
 	}
 	name := "CodexiaCTL temporary inspection"
-	if provision {
-		permissions = append(permissions, cloudflareTemplatePermission{Key: "account_api_tokens", Type: "edit"})
+	if !requirements.readOnly() {
 		name = "CodexiaCTL temporary provisioning"
+	}
+	if requirements.mint {
+		permissions = append(permissions, cloudflareTemplatePermission{Key: "account_api_tokens", Type: "edit"})
+	} else if requirements.tokenPolicy {
+		permissions = append(permissions, cloudflareTemplatePermission{Key: "account_api_tokens", Type: "read"})
 	}
 	encoded, _ := json.Marshal(permissions)
 	query := url.Values{"to": {"/:account/api-tokens"}, "permissionGroupKeys": {string(encoded)}, "name": {name}}
 	return "https://dash.cloudflare.com/?" + query.Encode()
 }
 
-func cloudflareManagementCredential(ctx context.Context, o operator, host string, provision bool) ([]byte, func(), error) {
-	if !provision && cloudflareOAuthClientPattern.MatchString(cloudflareOAuthClientID) {
+func cloudflareManagementCredential(ctx context.Context, o operator, host string, requirements cloudflareAuthRequirements) ([]byte, func(), error) {
+	if requirements.readOnly() && cloudflareOAuthClientPattern.MatchString(cloudflareOAuthClientID) {
 		choice, err := selectOption(o, "Cloudflare authentication for "+host, []string{
 			"Browser OAuth (read-only, requires SSH local forwarding)", "Temporary account API token",
 		})
@@ -75,17 +106,25 @@ func cloudflareManagementCredential(ctx context.Context, o operator, host string
 	}
 	reportResult(o, headingText, "Create one temporary account API token")
 	o.Notice("Open the template in your browser. Select the account and zone containing " + host + " and a short expiry.")
-	if err := privateNotice(o, cloudflareManagementTemplate(provision)); err != nil {
+	if err := privateNotice(o, cloudflareManagementTemplate(requirements)); err != nil {
 		return nil, nil, err
 	}
 	o.Notice("Review prefilled Zone, DNS, Workers Routes, Workers Scripts and account Access: Apps and Policies (Read).")
-	if provision {
-		o.Notice("Add Account > Cloudflare Tunnel Edit and Access: Service Tokens Read; confirm Account API Tokens Edit for scoped deployment-token issuance. Do not select all accounts or all zones.")
+	if requirements.tunnel {
+		o.Notice("Add Account > Cloudflare Tunnel Edit and Access: Service Tokens Read.")
 	} else {
-		o.Notice("Add Account > Cloudflare Tunnel Read and Access: Service Tokens Read. Do not select all accounts or all zones.")
+		o.Notice("Add Account > Cloudflare Tunnel Read and Access: Service Tokens Read.")
 	}
-	o.Notice("Paste the generated token here; it is used only for this session. Revoke it when finished.")
-	secret, err := readCloudflareSecret(o, "Temporary Cloudflare account token")
+	if requirements.mint {
+		o.Notice("Confirm Account API Tokens Edit for scoped deployment-token issuance.")
+	} else if requirements.tokenPolicy {
+		o.Notice("Confirm Account API Tokens Read for deployment-token metadata verification.")
+	}
+	if requirements.tokenPolicy {
+		o.Notice("If reusing a user-owned deployment token, use "+cloudflareTokensPage+" instead with the same user, the listed edge permissions, and User API Tokens Read. Existing policy verification still applies.")
+	}
+	o.Notice("Do not select all accounts or all zones. Paste the temporary token here; revoke it after the session.")
+	secret, err := readCloudflareSecret(o, "Temporary Cloudflare management token")
 	return secret, nil, err
 }
 

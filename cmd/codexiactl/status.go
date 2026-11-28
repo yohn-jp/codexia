@@ -146,12 +146,12 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 		report.Blockers = append(report.Blockers, "github-environment-or-permission-unverified")
 		reportResult(tty, warningText, snapshotErr.Error())
 	}
-	if snapshotErr == nil && oidcErr == nil && targetErr == nil {
-		reportResult(tty, successText, "Repository, Environment restrictions and immutable OIDC verified")
-	}
 	if snapshot.MainSHA != gh.approvedSHA {
 		report.Blockers = append(report.Blockers, "github-target-or-contract-unverified")
 		return refused("GitHub main changed after deployment target confirmation")
+	}
+	if snapshotErr == nil && oidcErr == nil && targetErr == nil {
+		reportResult(tty, successText, "Repository, Environment restrictions and immutable OIDC verified")
 	}
 	runs, historyErr := gh.StatusHistory(ctx)
 	if historyErr != nil {
@@ -275,7 +275,7 @@ func inspectProviders(ctx context.Context, o operator, vm vmObservation, gh *git
 	}
 	if tailErr != nil {
 		report.Blockers = append(report.Blockers, "tailnet-identity-or-policy-unverified")
-		reportResult(o, warningText, "Tailscale check: " + tailErr.Error())
+		reportResult(o, warningText, "Tailscale check: "+tailErr.Error())
 		failures = append(failures, tailErr)
 	} else {
 		report.TailnetAddress = tailnet.Address
@@ -289,24 +289,26 @@ func inspectProviders(ctx context.Context, o operator, vm vmObservation, gh *git
 		}
 		if pinErr != nil {
 			report.Blockers = append(report.Blockers, "ssh-host-pin-unverified")
-			reportResult(o, warningText, "SSH identity check: " + pinErr.Error())
+			reportResult(o, warningText, "SSH identity check: "+pinErr.Error())
 			failures = append(failures, pinErr)
+		} else {
+			reportResult(o, successText, "Tailnet identity, CI trust and SSH host pin verified")
 		}
 	}
 	// Cloudflare discovery is independent of a failed Tailscale trust check.
 	// Continue gathering read-only evidence instead of requiring another doctor
 	// invocation merely to discover the next missing prerequisite.
 	reportStage(o, cloudflareStage, "Inspect DNS, Tunnel, Access and Workers")
-	edge, edgeErr := observeCloudflare(ctx, o, gh.target, settings, false)
+	edge, edgeErr := observeCloudflare(ctx, o, gh.target, settings, cloudflareAuthRequirements{})
 	if edgeErr != nil {
 		report.Blockers = append(report.Blockers, "cloudflare-edge-unverified")
-		reportResult(o, warningText, "Cloudflare check: " + edgeErr.Error())
+		reportResult(o, warningText, "Cloudflare check: "+edgeErr.Error())
 		failures = append(failures, edgeErr)
 	} else {
 		defer edge.Close()
 		if verifyErr := verifyInitialEdge(ctx, vm, edge); verifyErr != nil {
 			report.Blockers = append(report.Blockers, "edge-initial-install-unverified")
-			reportResult(o, warningText, "Cloudflare edge check: " + verifyErr.Error())
+			reportResult(o, warningText, "Cloudflare edge check: "+verifyErr.Error())
 			failures = append(failures, verifyErr)
 		} else {
 			reportResult(o, successText, "Cloudflare edge verified")

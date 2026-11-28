@@ -9,8 +9,8 @@ import (
 )
 
 func TestCloudflareManagementTemplateUsesDocumentedPermissionKeys(t *testing.T) {
-	for _, provision := range []bool{false, true} {
-		u, err := url.Parse(cloudflareManagementTemplate(provision))
+	for _, requirements := range []cloudflareAuthRequirements{{}, {tunnel: true}, {tokenPolicy: true}, {tokenPolicy: true, mint: true}} {
+		u, err := url.Parse(cloudflareManagementTemplate(requirements))
 		if err != nil || u.Scheme != "https" || u.Host != "dash.cloudflare.com" || u.Query().Get("to") != "/:account/api-tokens" {
 			t.Fatalf("invalid official account template: %v", err)
 		}
@@ -19,14 +19,14 @@ func TestCloudflareManagementTemplateUsesDocumentedPermissionKeys(t *testing.T) 
 			t.Fatal(err)
 		}
 		want := 5
-		if provision {
+		if requirements.tokenPolicy {
 			want++
 		}
 		if len(permissions) != want || u.Query().Has("accountId") || u.Query().Has("zoneId") {
 			t.Fatal("unexpected template resource or permission selection")
 		}
 		for _, permission := range permissions {
-			if permission.Type != "read" && (!provision || permission.Key != "account_api_tokens" || permission.Type != "edit") {
+			if permission.Type != "read" && (!requirements.mint || permission.Key != "account_api_tokens" || permission.Type != "edit") {
 				t.Fatalf("unexpected permission: %+v", permission)
 			}
 		}
@@ -65,5 +65,31 @@ func TestCloudflareOAuthCallbackAcceptsOnlyMatchingSingleLoopbackCode(t *testing
 		}
 	default:
 		t.Fatal("valid callback was not delivered")
+	}
+}
+
+// No token-management grant is requested when the required credentials exist.
+func TestCloudflareAuthRequirementsFollowMissingCredentials(t *testing.T) {
+	snapshot := githubSnapshot{
+		Bootstrap:  githubEnvironment{Secrets: map[string]bool{}},
+		Production: githubEnvironment{Secrets: map[string]bool{}},
+	}
+	for _, input := range protectedSecrets() {
+		selectEnvironment(snapshot, input.environment).Secrets[input.name] = true
+	}
+	if got := cloudflareRequirementsFor(snapshot); !got.readOnly() {
+		t.Fatalf("unexpected provisioning authority: %+v", got)
+	}
+	delete(snapshot.Bootstrap.Secrets, cloudflareReadRole)
+	if got := cloudflareRequirementsFor(snapshot); !got.tokenPolicy || got.mint || got.tunnel {
+		t.Fatalf("peer-copy requires metadata read only: %+v", got)
+	}
+	delete(snapshot.Production.Secrets, cloudflareReadRole)
+	if got := cloudflareRequirementsFor(snapshot); !got.tokenPolicy || !got.mint || got.tunnel {
+		t.Fatalf("missing deployment token requires issuance: %+v", got)
+	}
+	delete(snapshot.Bootstrap.Secrets, "CODEXIA_TUNNEL_TOKEN")
+	if got := cloudflareRequirementsFor(snapshot); !got.tunnel {
+		t.Fatalf("missing connector token requires retrieval: %+v", got)
 	}
 }

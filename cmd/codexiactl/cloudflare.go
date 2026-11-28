@@ -208,14 +208,14 @@ func (api cloudflareAPI) findZone(ctx context.Context, host string) (zones.Zone,
 	return candidates[0], nil
 }
 
-func observeCloudflare(ctx context.Context, o operator, repo githubTarget, settings productionContract, provision bool) (*cloudflareObservation, error) {
+func observeCloudflare(ctx context.Context, o operator, repo githubTarget, settings productionContract, requirements cloudflareAuthRequirements) (*cloudflareObservation, error) {
 	origin, err := url.Parse(settings.PublicOrigin)
 	if err != nil || origin.Scheme != "https" || origin.Hostname() != origin.Host || origin.User != nil ||
 		origin.Path != "" || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" ||
 		!strings.Contains(origin.Host, ".") || !cloudflareHost.MatchString(origin.Host) {
 		return nil, refused("Cloudflare requires the reviewed HTTPS production origin")
 	}
-	secret, closeAuth, err := cloudflareManagementCredential(ctx, o, origin.Host, provision)
+	secret, closeAuth, err := cloudflareManagementCredential(ctx, o, origin.Host, requirements)
 	if err != nil {
 		return nil, err
 	}
