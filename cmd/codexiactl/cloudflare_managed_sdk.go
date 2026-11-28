@@ -332,7 +332,7 @@ func (o *cloudflareObservation) converge(ctx context.Context, snapshot githubSna
 	req := o.cloudflareRequirements
 	req.accountTokenCreate = true
 	req.zoneID = p.spec.ZoneID
-	if err := o.authorizeManagedSession(ctx, req); err != nil {
+	if err := o.replaceManagedSession(ctx, req); err != nil {
 		return err
 	}
 	defer func() {
@@ -370,7 +370,7 @@ func (o *cloudflareObservation) converge(ctx context.Context, snapshot githubSna
 		managedEdgeRequirements(plan, &req)
 		if req.managedAccess || req.managedDNS || req.managedTunnel ||
 			req.workerScriptsWrite != requiresWorkerWrite || req.routeWrite != requiresRouteWrite {
-			if err := o.authorizeManagedSession(ctx, req); err != nil {
+			if err := o.replaceManagedSession(ctx, req); err != nil {
 				return err
 			}
 		}
@@ -418,13 +418,26 @@ func (o *cloudflareObservation) newManagedSDK(ctx context.Context, role string) 
 	return newCloudflareAPI(secret, cloudflareAPIBase), nil
 }
 
-func (o *cloudflareObservation) authorizeManagedSession(ctx context.Context, requirements cfDeviceRequirements) error {
+func (o *cloudflareObservation) replaceManagedSession(ctx context.Context, requirements cfDeviceRequirements) error {
 	p := o.managed
-	runtime, ok := o.cf.(*cfRuntime)
-	if !ok || runtime.accountID != p.spec.AccountID {
-		return refused("Cloudflare scope changes require the existing isolated cf session for the selected account")
+	runtime, err := startCloudflareSession(ctx, o.operator, p.spec.Host, p.spec.ManagementHost, requirements)
+	if err != nil {
+		return err
 	}
-	return runtime.deviceLogin(ctx, o.operator, p.spec.Host, p.spec.ManagementHost, requirements)
+	if err := runtime.setAccount(p.spec.AccountID); err != nil {
+		_ = runtime.close()
+		return err
+	}
+	if o.closeAuth != nil {
+		o.closeAuth()
+	}
+	o.closeAuth = func() {
+		if err := runtime.close(); err != nil {
+			o.operator.Notice("Official cf session cleanup could not be fully verified")
+		}
+	}
+	o.cf, p.cf = runtime, runtime
+	return nil
 }
 
 func managedEdgeRequirements(plan []string, req *cfDeviceRequirements) {
