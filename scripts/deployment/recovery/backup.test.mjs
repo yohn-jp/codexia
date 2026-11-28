@@ -130,7 +130,7 @@ test('a stopped enabled backup executor resumes before and after the release sym
   }
 });
 
-test('protected socket provisioning recovers its recorded writer and Tunnel after an interrupted PostgreSQL restart', async t => {
+async function createProtectedSocketFixture(t) {
   const fixture = await createFixture();
   t.after(() => rm(fixture.directory, { recursive: true, force: true }));
   const socketStage = path.join(root, 'deploy/ansible/backup-postgres-socket.sh');
@@ -146,13 +146,12 @@ test('protected socket provisioning recovers its recorded writer and Tunnel afte
   await mkdir(units, { recursive: true });
   await mkdir(socketParent, { recursive: true, mode: 0o700 });
   await mkdir(socketDir, { mode: 0o755 });
-  const socket = createServer();
-  await new Promise((resolve, reject) => socket.once('error', reject).listen(path.join(socketDir, '.s.PGSQL.5432'), resolve));
-  t.after(() => socket.close());
   for (const state of [api, tunnel]) await writeFile(state, 'active');
   await writeFile(database, 'default');
   for (const name of ['codexia-api.container', 'codexia-db.container', 'codexia-postgres.volume']) {
-    await writeFile(path.join(units, name), name + '\n', { mode: 0o600 });
+    const contents = name === 'codexia-db.container'
+      ? `Image=docker.io/library/postgres:17-bookworm@sha256:${'c'.repeat(64)}\n` : name + '\n';
+    await writeFile(path.join(units, name), contents, { mode: 0o600 });
   }
   const releaseFile = path.join(fixture.stateDir, 'deployed-release.json');
   const release = JSON.stringify({ format: 'codexia-push-deployment/v1', image: 'ghcr.io/yohn-jp/codexia-backend@' + image,
@@ -160,12 +159,20 @@ test('protected socket provisioning recovers its recorded writer and Tunnel afte
   await writeFile(releaseFile, release, { mode: 0o600 });
   await writeFile(path.join(fixture.bin, 'podman'), [
     '#!/bin/sh', 'case "$*" in',
-    '  info*) printf "true\\n";;', '  port*) ;;', '  wait*) printf "0\\n";;', '  "unshare stat"*) printf "999:999:755\\n";;',
+    '  info*) printf "true\\n";;', '  port*) [ "$(cat "$FIXTURE_DATABASE")" != absent ];;',
+    '  wait*) printf "0\\n";;', '  "unshare stat"*) printf "999:999:755\\n";;',
+    '  "container exists codexia-db") [ "$(cat "$FIXTURE_DATABASE")" != absent ];;',
     '  "volume inspect"*) printf "codexia-postgres|/fixture/pg\\n";;',
     '  "inspect"*Mounts*) printf "codexia-postgres|/fixture/pg\\n";;',
+    '  "inspect"*PortBindings*) printf "null\\n";;',
     '  "image inspect"*) printf "%s\\n" "$FIXTURE_IMAGE";;',
     '  "inspect"*codexia-api) printf "true healthy %s\\n" "$FIXTURE_IMAGE";;',
-    '  "exec codexia-db"*system_identifier*) printf "%s\\n" "$FIXTURE_CLUSTER";;',
+    '  "inspect"*State.Running*codexia-db)',
+    '    case "$(cat "$FIXTURE_DATABASE")" in stopped) echo false;; absent) exit 125;; *) echo true;; esac;;',
+    '  "run"*"--entrypoint=pg_controldata"*) printf "Database system identifier: %s\\n" "$FIXTURE_OFFLINE_CLUSTER";;',
+    '  "exec codexia-db"*system_identifier*)',
+    '    case "$(cat "$FIXTURE_DATABASE")" in stopped|absent|unreachable) exit 125;; esac',
+    '    printf "%s\\n" "$FIXTURE_CLUSTER";;',
     '  "exec codexia-db"*unix_socket_directories*)',
     '    if [ "$(cat "$FIXTURE_DATABASE")" = socket ]; then echo /var/run/postgresql,/run/codexia-backup-postgresql; else echo /var/run/postgresql; fi;;',
     '  "exec codexia-db"*"SHOW hba_file"*)',
@@ -176,20 +183,34 @@ test('protected socket provisioning recovers its recorded writer and Tunnel afte
     '#!/bin/sh', 'shift', 'case "$*" in',
     '  *codexia-api.service*) state="$FIXTURE_API";;', '  *codexia-tunnel.service*) state="$FIXTURE_TUNNEL";;', 'esac',
     'case "$1:$*" in', '  show:*UnitFileState*) echo disabled;;', '  show:*backup-executor*) echo inactive;;',
+    '  show:*codexia-db.service*FragmentPath*) echo "$XDG_RUNTIME_DIR/systemd/generator/codexia-db.service";;',
+    '  show:*codexia-db.service*SourcePath*) echo "$HOME/.config/containers/systemd/codexia-db.container";;',
+    '  show:*codexia-db.service*ActiveState*) echo failed;;',
     '  show:*SourcePath*) echo "$HOME/.config/containers/systemd/codexia-api.container";;', '  show:*) cat "$state";;',
     '  is-active:*) [ "$(cat "$state")" = active ] || exit 3;;',
     '  stop:*) printf inactive > "$state";;', '  start:*) printf active > "$state";;', '  daemon-reload:*|reset-failed:*) ;;',
-    '  restart:*)', '    if [ "$FIXTURE_INTERRUPT" = true ]; then kill -KILL "$PPID"; exit 1; fi',
+    '  restart:*)', '    if [ "$FIXTURE_INTERRUPT" = true ]; then',
+    '      if [ -n "$FIXTURE_INTERRUPTED_DATABASE" ]; then printf "%s" "$FIXTURE_INTERRUPTED_DATABASE" > "$FIXTURE_DATABASE"; fi',
+    '      kill -KILL "$PPID"; exit 1', '    fi',
     '    if [ "$FIXTURE_FAIL_CONFIGURE" = true ] && [ -f "$FIXTURE_DROPIN" ]; then exit 1; fi',
     '    if [ -f "$FIXTURE_DROPIN" ]; then printf socket > "$FIXTURE_DATABASE"; else printf default > "$FIXTURE_DATABASE"; fi;;',
     '  *) exit 2;;', 'esac', '',
   ].join('\n'));
   const run = (args, overrides = {}) => spawnSync('bash', [socketStage, ...args], { encoding: 'utf8', env: {
     ...process.env, HOME: fixture.home, PATH: `${fixture.bin}:${process.env.PATH}`, FIXTURE_IMAGE: image,
+    XDG_RUNTIME_DIR: path.join(fixture.directory, 'systemd-runtime'),
     CODEXIA_IMAGE_REPOSITORY: 'ghcr.io/yohn-jp/codexia-backend',
     FIXTURE_API: api, FIXTURE_TUNNEL: tunnel, FIXTURE_DROPIN: dropin, FIXTURE_DATABASE: database,
-    FIXTURE_CLUSTER: '123456:42', ...overrides,
+    FIXTURE_CLUSTER: '123456:42', FIXTURE_OFFLINE_CLUSTER: '123456', ...overrides,
   } });
+  return { run, socketDir, dropin, transaction, database, api, tunnel, releaseFile, release };
+}
+
+test('protected socket provisioning recovers its recorded writer and Tunnel after an interrupted PostgreSQL restart', async t => {
+  const { run, socketDir, dropin, transaction, database, api, tunnel, releaseFile, release } = await createProtectedSocketFixture(t);
+  const socket = createServer();
+  await new Promise((resolve, reject) => socket.once('error', reject).listen(path.join(socketDir, '.s.PGSQL.5432'), resolve));
+  t.after(() => socket.close());
   assert.equal(run([], { FIXTURE_INTERRUPT: 'true' }).signal, 'SIGKILL');
   assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v1/u);
   assert.equal(await readFile(api, 'utf8'), 'inactive');
@@ -224,6 +245,38 @@ test('protected socket provisioning recovers its recorded writer and Tunnel afte
   assert.notEqual(run(['--recover-only']).status, 0);
   assert.equal(await readFile(transaction, 'utf8'), ordinaryTransaction);
   assert.equal(await readFile(api, 'utf8'), 'active');
+});
+
+test('protected socket recovery restores the prior writer after PostgreSQL stops during restart', async t => {
+  for (const interruptedState of ['stopped', 'absent']) {
+    await t.test(interruptedState, async t => {
+      const { run, dropin, transaction, database, api, tunnel } = await createProtectedSocketFixture(t);
+      assert.equal(run([], { FIXTURE_INTERRUPT: 'true', FIXTURE_INTERRUPTED_DATABASE: interruptedState }).signal, 'SIGKILL');
+      assert.equal(await readFile(database, 'utf8'), interruptedState);
+      assert.notEqual(run(['--recover-only'], { FIXTURE_OFFLINE_CLUSTER: '54321' }).status, 0);
+      assert.equal(await readFile(database, 'utf8'), interruptedState);
+      assert.equal(await readFile(api, 'utf8'), 'inactive');
+      assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
+
+      const recovered = run(['--recover-only']);
+      assert.equal(recovered.status, 0, recovered.stderr);
+      assert.equal(await readFile(database, 'utf8'), 'default');
+      assert.equal(await readFile(api, 'utf8'), 'active');
+      assert.equal(await readFile(tunnel, 'utf8'), 'active');
+      await assert.rejects(readFile(dropin), { code: 'ENOENT' });
+      await assert.rejects(readFile(transaction), { code: 'ENOENT' });
+    });
+  }
+});
+
+test('protected socket recovery keeps its journal when PostgreSQL is running but unreachable', async t => {
+  const { run, transaction, database, api, tunnel } = await createProtectedSocketFixture(t);
+  assert.equal(run([], { FIXTURE_INTERRUPT: 'true', FIXTURE_INTERRUPTED_DATABASE: 'unreachable' }).signal, 'SIGKILL');
+  assert.notEqual(run(['--recover-only']).status, 0);
+  assert.equal(await readFile(database, 'utf8'), 'unreachable');
+  assert.equal(await readFile(api, 'utf8'), 'inactive');
+  assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
+  assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v1/u);
 });
 
 test('restored target fingerprints are read-only and require quiescence under the inherited lock', async t => {

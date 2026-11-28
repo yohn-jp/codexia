@@ -65,10 +65,38 @@ if exists "$intent"; then
 elif [[ "$recovery_only" == --recover-only ]]; then
   exit 0
 fi
-database_ports="$(podman port codexia-db)"
-[[ -z "$database_ports" ]] || fail 'Database port is published'
-database_identity="$(admin_query "$identity_sql")"
-[[ "$database_identity" =~ ^[0-9]+:[0-9]+$ ]] || fail 'Unable to identify the initialized PostgreSQL cluster'
+volume="$(podman volume inspect --format '{{.Name}}|{{.Mountpoint}}' codexia-postgres)"
+[[ "$volume" == codexia-postgres\|/* ]] || fail 'Database volume is not canonical'
+verify_database_container(){
+  local mount ports
+  mount="$(podman inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}|{{.Source}}{{end}}{{end}}' codexia-db)" &&
+    ports="$(podman inspect --format '{{json .HostConfig.PortBindings}}' codexia-db)" &&
+    [[ "$mount" == "$volume" ]] && jq -e '. == null or . == {}' <<<"$ports" >/dev/null
+}
+database_running=true
+if [[ "$resuming" == true ]]; then
+  exists_status=0
+  podman container exists codexia-db || exists_status=$?
+  case "$exists_status" in
+    0)
+      database_running="$(podman inspect --format '{{.State.Running}}' codexia-db)"
+      [[ "$database_running" == true || "$database_running" == false ]] || fail 'Unable to observe PostgreSQL container state'
+      verify_database_container || fail 'Database container does not use the committed host volume or exposes a port'
+      ;;
+    1) database_running=false ;;
+    *) fail 'Unable to observe the PostgreSQL container' ;;
+  esac
+else
+  verify_database_container || fail 'Database container does not use the committed host volume or exposes a port'
+fi
+if [[ "$database_running" == true ]]; then
+  database_ports="$(podman port codexia-db)"
+  [[ -z "$database_ports" ]] || fail 'Database port is published'
+  database_identity="$(admin_query "$identity_sql")" || fail 'Unable to identify the running PostgreSQL cluster'
+  [[ "$database_identity" =~ ^[0-9]+:[0-9]+$ ]] || fail 'Unable to identify the initialized PostgreSQL cluster'
+else
+  database_identity="$(jq -er .database "$intent")"
+fi
 
 if [[ ! -e "$directory" && ! -L "$directory" ]]; then install -d -m 0700 -- "$directory"; fi
 private_directory "$directory" || fail 'Invalid private backup socket parent'
@@ -121,9 +149,6 @@ image="$(jq -er 'select(.format == "codexia-push-deployment/v1" and .identity.fo
   fail 'Committed image differs from the reviewed image repository'
 image_id="$(podman image inspect --format '{{.Id}}' "$image")"
 [[ "${image_id#sha256:}" =~ ^[a-f0-9]{64}$ ]] || fail 'Committed Full image is unavailable'
-volume="$(podman volume inspect --format '{{.Name}}|{{.Mountpoint}}' codexia-postgres)"
-mount="$(podman inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}|{{.Source}}{{end}}{{end}}' codexia-db)"
-[[ "$volume" == codexia-postgres\|/* && "$mount" == "$volume" ]] || fail 'Database container does not use the committed host volume'
 authority="$({ sha256sum -- /etc/machine-id "$release" "$units/codexia-api.container" "$units/codexia-db.container" "$units/codexia-postgres.volume" &&
   printf '%s\n' "$volume"; } | sha256)"
 recipe="$(printf '%s\n%s\n' "$dropin_contents" "$expected_hba" | sha256)"
@@ -161,16 +186,37 @@ write_intent() (
 )
 clear_intent(){ rm -- "$intent" && sync -f "$state"; }
 verify_previous_database(){
-  [[ "$(admin_query "$identity_sql")" == "$database_identity" &&
-     "$(admin_query 'SHOW unix_socket_directories')" == "$previous_socket" && "$(admin_query 'SHOW hba_file')" == "$previous_hba" ]]
+  verify_database_container &&
+    [[ "$(admin_query "$identity_sql")" == "$database_identity" &&
+       "$(admin_query 'SHOW unix_socket_directories')" == "$previous_socket" && "$(admin_query 'SHOW hba_file')" == "$previous_hba" ]]
 }
 restore_previous(){
   stop_writer || return 1
   if exists "$dropin"; then
     verify_dropin && rm -- "$dropin" && sync -f "${dropin%/*}" && systemctl --user daemon-reload || return 1
   fi
-  if ! verify_previous_database; then restart_database && verify_previous_database || return 1; fi
+  if [[ "$database_running" == false ]] || ! verify_previous_database; then
+    restart_database && verify_previous_database || return 1
+  fi
   resume_writer && clear_intent
+}
+
+verify_stopped_database(){
+  local unit_state fragment image control
+  unit_state="$(systemctl --user show "$db_service" --property=ActiveState --value)" &&
+    [[ "$unit_state" == inactive || "$unit_state" == failed ]] || return 1
+  [[ "$(systemctl --user show "$db_service" --property=SourcePath --value)" == "$units/codexia-db.container" ]] || return 1
+  fragment="$(systemctl --user show "$db_service" --property=FragmentPath --value)" || return 1
+  [[ "$fragment" == "${XDG_RUNTIME_DIR:?}/systemd/generator/$db_service" ]] || return 1
+  image="$(sed -n 's/^Image=//p' "$units/codexia-db.container")" &&
+    [[ "$image" =~ ^docker\.io/library/postgres:17-bookworm@sha256:[a-f0-9]{64}$ ]] || return 1
+  # Check the recorded cluster before restarting, including when Quadlet has
+  # removed the previous container. Do not let PostgreSQL initialize a volume.
+  control="$(LC_ALL=C podman run --rm --pull=never --network=none --read-only --cap-drop=all \
+    --security-opt=no-new-privileges --user 999:999 --image-volume=ignore --env LC_ALL=C \
+    --volume "${volume#*|}/pgdata:/var/lib/postgresql/data:ro" --entrypoint=pg_controldata "$image" \
+    /var/lib/postgresql/data)" || return 1
+  [[ "$(awk '/^Database system identifier:/ { print $NF }' <<<"$control")" == "${database_identity%%:*}" ]]
 }
 
 if [[ "$resuming" == true ]]; then
@@ -180,6 +226,10 @@ if [[ "$resuming" == true ]]; then
   previous_socket="$(jq -er .previousSocket "$intent")"
   previous_hba="$(jq -er .previousHba "$intent")"
   tunnel_active="$(jq -r .tunnelActive "$intent")"
+  if [[ "$database_running" == false ]]; then
+    verify_stopped_database || fail 'Stopped PostgreSQL does not match the recorded cluster and Quadlet'
+    write_intent rollback
+  fi
   if [[ "$(jq -er .phase "$intent")" == rollback ]]; then
     restore_previous || fail 'Prior socket and writer recovery requires operator attention'
     printf '%s\n' PRIVATE_BACKUP_SOCKET_RECOVERED
