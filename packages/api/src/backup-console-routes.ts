@@ -192,7 +192,7 @@ function expectedRevision(request: FastifyRequest): number {
 
 export function registerBackupConsole(
   server: FastifyInstance,
-  auth: ReturnType<typeof createBetterAuthRuntime>,
+  auth: Pick<ReturnType<typeof createBetterAuthRuntime>, 'checkOwnerSession' | 'toHeaders'>,
   options: BackupConsoleOptions | undefined,
   isDraining: () => boolean,
 ) {

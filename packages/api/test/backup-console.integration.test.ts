@@ -610,15 +610,15 @@ test('a manual backup that misses its window is blocked while an admitted interr
     { ...scope, addressing: 'path-style', credentialMode: 'operator-role', offVmPolicy: 'required', schedule: 'disabled' },
   ]);
   await admin.query("UPDATE codexia_backup.state SET active_revision = 1, active_health = 'ready'");
-  const ownerAuth = {
-    checkOwnerSession: async () => ({ status: 200 as const }),
+  const ownerAuth: Parameters<typeof registerBackupConsole>[1] = {
+    checkOwnerSession: async () => ({ status: 200 }),
     toHeaders: () => new Headers(),
-  } as Parameters<typeof registerBackupConsole>[1];
+  };
   registerBackupConsole(server, ownerAuth, { store: new BackupConsoleStore(api), policy }, () => false);
   const control = new BackupConsoleControl({
     pool: worker,
     policy,
-    config: { privateKeyFiles: [] },
+    config: backupExecutorConfigSchema.parse({}),
     python: '/unused',
     transferScript: '/unused',
     receiptDirectory: '/unused',
