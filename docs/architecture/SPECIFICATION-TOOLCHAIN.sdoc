@@ -219,7 +219,7 @@ STATEMENT: >>>
 | 既存のStrictDoc拡張Markdown要求台帳と領域別Markdown設計書 | ネイティブSDocの文書体系・要求relationとsource/TEST/evidence trace | 既存REQ/OBL/TESTのUID/MID・関係を保持し、設計正本を二重編集しない。移行前後の受入は下記に従う |
 | 既存Architecture AtlasはMermaidを抽出し単一のRepository Audit Pagesへ公開 | LikeC4の構成ビューとStrictDoc/Scalarを同一公開者に統合 | 状態遷移は承認済み領域契約・専門モデルが正本。移行後はMarkdownフェンスを正本とする抽出に依存せず、LikeC4の構成図とMermaidの状態図を別責務で維持 |
 
-認証/principal（ANON、OWNER-SESSION、OWNER-API、MCP-CLIENT、SHARE-READER、SETUP、OPERATOR）やPostgreSQL単一正本、作者による承認、Core/Full、Tailscale管理経路、既存のexact-source CI基準は**変更しない**。
+認証/principal（ANON、OWNER-SESSION、OWNER-API、MCP-CLIENT、SHARE-READER、SETUP、OPERATOR）やPostgreSQL単一正本、作者による承認、Core/Full、既存の管理経路の認可境界、exact-source CI基準は**ツールチェーン移行によって変更しない**。管理経路そのものの後続採用決定は [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Tunnel 管理経路] が所有する。
 <<<
 
 [[/SECTION]]

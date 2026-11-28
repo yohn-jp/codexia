@@ -126,7 +126,7 @@ STATEMENT: >>>
 - [LINK: DOC-VERIFICATION-ARCHITECTURE-ATLAS, Architecture Atlas] は、構造・信頼境界と運用トポロジーをLikeC4モデルからネイティブに表示する。画面・状態遷移、配備・更新手順、ER図は領域設計書のMermaidから表示する。
 - **Threagile**は攻撃者、脅威、資産分類、リスクと対策・残留リスクを所有する。LikeC4の全構造を別の独立した真実として再記載しない。モデル間の対応は `EXT-*`/`REQ-AUTH-*` 等で参照し、データフロー/境界の相違をCI/レビューの逸脱として記録する。
 - C4図/脅威図は「この通信・リスクが設計上存在する」を示す。実環境にEdge ruleが適用されている証明や攻撃不能の証明にはならない。
-- 初期のリスク対象: OAuthとMCPのissuer/resource mismatch、BOLA、セッション混同、share-readerの拡張、偽のDB receipt、Cloudflare/Workers・Tailscale管理プレーン交錯、backup鍵/復元、公開Pagesの機密漏えい。
+- 初期のリスク対象: OAuthとMCPのissuer/resource mismatch、BOLA、セッション混同、share-readerの拡張、偽のDB receipt、Cloudflare/Workers製品経路・専用管理SSH経路の認可境界交錯、backup鍵/復元、公開Pagesの機密漏えい。
 <<<
 
 [[/SECTION]]
