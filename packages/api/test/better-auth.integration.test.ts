@@ -846,7 +846,8 @@ test('[TEST-MCPV-004-003] Better Auth PKCE MCP client lists and invokes tools th
 });
 
 for (const forceBackendClose of [true, false]) {
-  test(`Better Auth fixture teardown closes an active proxied response with ${forceBackendClose ? 'forced' : 'graceful'} backend shutdown`, async () => {
+  const shutdownMode = forceBackendClose ? 'forced' : 'graceful';
+  test(`Better Auth fixture teardown closes an active proxied response with ${shutdownMode} backend shutdown`, async () => {
     const { createServer: createHttpServer } = await import('node:http');
     const { setTimeout: deadline } = await import('node:timers/promises');
     const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
