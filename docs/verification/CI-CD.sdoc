@@ -342,6 +342,83 @@ Configuration-only changes cannot be accepted on an empty changed-file scan alon
 [[/SECTION]]
 
 [[SECTION]]
+MID: 1f95a6108fbb49dbb178b2d0b85140ba
+UID: DOC-VERIFICATION-CI-CD-go-quality-gate
+TITLE: Go quality gate — CodexiaCTL
+
+[TEXT]
+MID: 9af763bd28994ce9b4a2c96d4c0694f1
+STATEMENT: >>>
+**採用済み目標:** `cmd/codexiactl` の Lint、Formatter、import 整理は golangci-lint v2 を唯一の共通設定で管理する。[LINK: DOC-ARCHITECTURE-DEPENDENCY-POLICY-go-engineering, 依存選定] の版・更新規約に従い、`cmd/codexiactl/.golangci.yml` を設定の正本とする。現行 `codexiactl-linux` タスク、`scripts/ci/execution/verify-codexiactl.sh`、Verify の既存 job と保護された CLI publisher を利用し、新しい常設 Workflow、別の認定、独立 release controller は作らない。現行の公開停止を変更しない。
+
+| 有効化する検査 | 役割 |
+| --- | --- |
+| govet / staticcheck | Go の誤用、潜在的不具合・非推奨 API |
+| errcheck / errorlint | error 未処理、比較・wrap の誤用 |
+| unused / ineffassign | 未使用コード、無効代入 |
+| bodyclose / noctx | HTTP body close と request context |
+| gosec | Go 固有の危険な実装 |
+| testifylint | assert/require の意味と使用方法 |
+| nolintlint | 例外理由・対象 linter の明示 |
+| gocognit | 認知的複雑性。候補上限 25 を read-only で実測し、有益な責務分離で是正可能と確認後に enforce |
+| gofumpt / goimports | Go formatting と import 組織。golangci-lint 内包版のみ |
+
+初期設定の骨格（v2 の schema を公式 `golangci-lint config verify` で検証し、複雑性ルールは初期計測・修復後に enable へ加える）:
+
+```yaml
+version: "2"
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  tests: true
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - errorlint
+    - unused
+    - ineffassign
+    - bodyclose
+    - noctx
+    - gosec
+    - testifylint
+    - nolintlint
+  settings:
+    gocognit:
+      min-complexity: 25
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/yohn-jp/codexia
+```
+
+Linter の既定集合に依存せず allowlist を明示する。全ルール一括有効化、行数/関数長/コメント率、全 `t.Parallel`、定数抽出や全 field 初期化の機械的強制は採用しない。新ルールは全 applicable Go scope の診断数、代表的反例と誤検知、cold/warm elapsed time を計測し評価する。コード分割は責務・不変条件によって行う。広域除外、test ファイル一律除外、既存コードの恒久的 grandfathering、出力上限による見逃し、無根拠の nolint を禁止する。誤検知は最小の箇所・linter・具体的な根拠を記載する。CI は `--fix` を使わず、対象 module で non-mutating format check と lint を実施し、失敗時は認定を拒否する。Formatter は単一の内包版を使い、独立 gofmt と go vet は format/analysis の等価性を確認できた場合のみ重複実行を除去する。Race Detector、実 build、既存 CLI 契約テストは別の証明であり削除しない。
+
+| 既存タスク内の検証 | 契約 |
+| --- | --- |
+| toolchain 準備 | `go.mod` の exact Go version と、Go 解析互換性のある公式 golangci-lint stable release を版・配布 SHA-256 で固定。untrusted 配布物/未固定 latest を使わない。製品 module へ分析ツールの依存を入れない |
+| 依存 | `go mod tidy -diff`、`go mod verify`、readonly module resolution、`go list -m all`。Go module 用の Dependabot 検知を既存設定へ追加 |
+| 品質 | module root の config verify、`golangci-lint fmt --diff` と `golangci-lint run` 等で全 module の format/lint を非変更検証。固定版の実 CLI と終了コードで gate を証明 |
+| 振る舞い | `go test -mod=readonly -race -count=1 ./...`、fuzz seeds、API fixture と PTY 等。既存の Go vet と重複削減は検出範囲の等価性を証明してから |
+| build・認定 | 既存 exact-source Linux amd64、CGO_ENABLED=0、build metadata/source SHA、checksum、artifact provenance、CLI smoke と保護 publisher の契約を維持。通常 build の package dependency graph に Testify、go-cmp、分析ツールがないことを確認 |
+
+固定ツール版、digest、設定、Go module/checksum、対象ソース・テスト、実行 recipe、producer workflow、環境条件を既存 impact selector と task input closure の同じ正本に含める。既存の CLI release contract と自動発行入力選択にも必要な入力を反映する。設定・ツールだけの変更も選択され、full main の対象検証が維持され、無関係な PR では既存選択条件に従い追加実行されないことを意味的に証明する。キャッシュは Go version、OS/arch、module checksum、分析 tool version/config と実入力に束縛する。導入前後の cold/warm の setup、lint、test、build と critical path を同条件で計測し、無意味な二重実行・別 cache・常設 job を増やさない。証跡の再利用は全閉包・実 producer と一致するものだけ既存認定が許可する。開発品質ツールの合格は本番認証・資源収束・SSH・公開 gate の実サービス受入を証明しない。
+
+**Security:** CodeQL（データフロー）、Gitleaks（secret）、Trivy（依存/配布物）、gosec（Go 実装）を相補的に維持する。govulncheck は Go vulnerability DB に対する到達可能性を補完する条件付き採用。固定版の toolchain 対応、DB の到達性・freshness、source/binary mode と検出対象、脆弱性検出/非検出/通信・ツール失敗の終了コードを実際に証明してから、既存 security scan の責務と重複しない箇所に統合する。JSON/SARIF 等の機械出力で exit code が脆弱性検出を示さない場合は構造化された検出結果を明示的に gate に投影し、report 生成成功だけを脆弱性なしとしない。DB 更新は Git SHA と独立するため、過去の exact-source proof を理由に最新の必須スキャンを省略しない。formatter の診断は security alert にしない。SARIF を採用する場合は固定版の対応形式・カテゴリ・exact SHA・権限を検証し、CodeQL 等の独立 alert producer を上書きしない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
 MID: d1ccd0bdcdd979e84a8bb8b6b25be5c8
 UID: DOC-VERIFICATION-CI-CD-github-hosted-runner-and-browser-image-policy
 TITLE: GitHub-hosted runner and browser image policy
