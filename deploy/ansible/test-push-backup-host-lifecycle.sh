@@ -67,7 +67,7 @@ await assert.rejects(query(url.href, 'SELECT 1'));
 SOCKET_NODE
   }
   local started
-  started=$(date +%s%3N)
+  started=$(monotonic_ms)
   verify_socket_client
   record_phase_timing private_socket_verify_before_restart "$started"
   local prior_container
@@ -76,23 +76,23 @@ SOCKET_NODE
   rootless_systemctl is-active --quiet codexia-backup-executor.service
   [[ "$(rootless_podman inspect --format '{{.Image}} {{.State.Health.Status}}' codexia-api)" == "$image healthy" ]]
   rootless sudo -n /usr/local/sbin/codexia-api-gate close
-  started=$(date +%s%3N)
+  started=$(monotonic_ms)
   rootless_systemctl stop codexia-backup-executor.service codexia-api.service
   [[ "$(rootless_systemctl show codexia-api.service -p ActiveState --value)" == inactive &&
      "$(rootless_systemctl show codexia-api.service -p Result --value)" == success &&
      "$(rootless_systemctl show codexia-backup-executor.service -p ActiveState --value)" == inactive ]]
   record_phase_timing private_socket_stop_api_executor "$started"
-  started=$(date +%s%3N)
+  started=$(monotonic_ms)
   rootless_systemctl restart codexia-db.service
   rootless timeout 60s podman wait --condition=healthy codexia-db >/dev/null
   record_phase_timing private_socket_recover_postgres "$started"
-  started=$(date +%s%3N)
+  started=$(monotonic_ms)
   verify_socket_client
   record_phase_timing private_socket_verify_after_restart "$started"
   # Earlier successful fixture starts consume the same three-start budget.
   # Clear the counter only for the healthy API we just stopped deliberately.
   rootless_systemctl reset-failed codexia-api.service
-  started=$(date +%s%3N)
+  started=$(monotonic_ms)
   rootless_systemctl start codexia-api.service codexia-backup-executor.service
   [[ "$(rootless_podman inspect --format '{{.Id}}' codexia-api)" != "$prior_container" &&
      "$(rootless_podman inspect --format '{{.Image}} {{.State.Health.Status}}' codexia-api)" == "$image healthy" ]]
@@ -165,13 +165,13 @@ SYSTEMCTL
     return 1
   fi
   assert_fixture_management_continues
-  started=$(date +%s%3N)
+  started=$(monotonic_ms)
   rootless "$runner" recover
   [[ "$(rootless sudo -n /usr/local/sbin/codexia-api-gate status)" == open ]]
   assert_fixture_management_continues
   [[ "$(backup_fixture_query -c "SELECT state || ':' || reason_code FROM codexia_backup.runs WHERE id = '$run_id'")" == UNKNOWN:manual_interrupted ]]
   record_phase_timing interrupted_backup_api_recovery "$started"
-  started=$(date +%s%3N)
+  started=$(monotonic_ms)
   rootless_systemctl start codexia-backup-executor.service
   rootless test ! -e "$state/backup-transaction"
   record_phase_timing interrupted_backup_start_executor "$started"
