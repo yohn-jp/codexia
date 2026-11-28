@@ -46,11 +46,17 @@ YAML
     rootless "$runtime/bin/node" --env-file="$settings/database.env" --input-type=module - "$runtime/app" <<'SOCKET_NODE'
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
-const {Pool} = createRequire(createRequire(process.argv[2] + '/package.json').resolve('@codexia/api'))('pg');
+const {Client} = createRequire(createRequire(process.argv[2] + '/package.json').resolve('@codexia/api'))('pg');
 const url = new URL(process.env.CODEXIA_BACKUP_EXECUTOR_DATABASE_URL);
 async function query(connectionString, sql) {
-  const pool = new Pool({connectionString, connectionTimeoutMillis: 4000});
-  try { return (await pool.query(sql)).rows; } finally { await pool.end(); }
+  // A missing SCRAM password can reject connect() while the socket is still open.
+  const client = new Client({connectionString, connectionTimeoutMillis: 4000});
+  try {
+    await client.connect();
+    return (await client.query(sql)).rows;
+  } finally {
+    await client.end();
+  }
 }
 assert.deepEqual(await query(url.href, 'SELECT inet_client_addr() IS NULL AS socket'), [{socket:true}]);
 await assert.rejects(query(url.href, 'CREATE TABLE codexia_backup.ungranted (id integer)'), {code:'42501'});
@@ -60,13 +66,38 @@ url.password = '';
 await assert.rejects(query(url.href, 'SELECT 1'));
 SOCKET_NODE
   }
+  local started
+  started=$(date +%s%3N)
   verify_socket_client
+  record_phase_timing private_socket_verify_before_restart "$started"
+  local prior_container
+  prior_container="$(rootless_podman inspect --format '{{.Id}}' codexia-api)"
+  rootless_systemctl is-active --quiet codexia-api.service
+  rootless_systemctl is-active --quiet codexia-backup-executor.service
+  [[ "$(rootless_podman inspect --format '{{.Image}} {{.State.Health.Status}}' codexia-api)" == "$image healthy" ]]
   rootless sudo -n /usr/local/sbin/codexia-api-gate close
+  started=$(date +%s%3N)
   rootless_systemctl stop codexia-backup-executor.service codexia-api.service
+  [[ "$(rootless_systemctl show codexia-api.service -p ActiveState --value)" == inactive &&
+     "$(rootless_systemctl show codexia-api.service -p Result --value)" == success &&
+     "$(rootless_systemctl show codexia-backup-executor.service -p ActiveState --value)" == inactive ]]
+  record_phase_timing private_socket_stop_api_executor "$started"
+  started=$(date +%s%3N)
   rootless_systemctl restart codexia-db.service
   rootless timeout 60s podman wait --condition=healthy codexia-db >/dev/null
+  record_phase_timing private_socket_recover_postgres "$started"
+  started=$(date +%s%3N)
   verify_socket_client
+  record_phase_timing private_socket_verify_after_restart "$started"
+  # Earlier successful fixture starts consume the same three-start budget.
+  # Clear the counter only for the healthy API we just stopped deliberately.
+  rootless_systemctl reset-failed codexia-api.service
+  started=$(date +%s%3N)
   rootless_systemctl start codexia-api.service codexia-backup-executor.service
+  [[ "$(rootless_podman inspect --format '{{.Id}}' codexia-api)" != "$prior_container" &&
+     "$(rootless_podman inspect --format '{{.Image}} {{.State.Health.Status}}' codexia-api)" == "$image healthy" ]]
+  rootless_systemctl is-active --quiet codexia-backup-executor.service
+  record_phase_timing private_socket_start_api_executor "$started"
   curl --noproxy '*' --fail --silent --show-error --max-time 3 http://127.0.0.1:18081/health/ready >/dev/null
   rootless sudo -n /usr/local/sbin/codexia-api-gate open
   assert_fixture_management_continues
@@ -97,7 +128,7 @@ verify_backup_host_lifecycle(){
   local state="$fixture_home/.local/state/codexia-deploy"
   local runner="$fixture_home/.local/bin/codexia-backup-runner"
   local destination="$fixture_home/.local/state/codexia-backup-mount"
-  local fault="$state/backup-fault-bin" before run_id code required_run
+  local fault="$state/backup-fault-bin" before run_id code required_run started
   before="$(rootless sha256sum "$state/deployed-release.json")"
   run_id="$(cat /proc/sys/kernel/random/uuid)"
   rootless install -d -m 0700 "$fault"
@@ -134,12 +165,16 @@ SYSTEMCTL
     return 1
   fi
   assert_fixture_management_continues
+  started=$(date +%s%3N)
   rootless "$runner" recover
   [[ "$(rootless sudo -n /usr/local/sbin/codexia-api-gate status)" == open ]]
   assert_fixture_management_continues
   [[ "$(backup_fixture_query -c "SELECT state || ':' || reason_code FROM codexia_backup.runs WHERE id = '$run_id'")" == UNKNOWN:manual_interrupted ]]
+  record_phase_timing interrupted_backup_api_recovery "$started"
+  started=$(date +%s%3N)
   rootless_systemctl start codexia-backup-executor.service
   rootless test ! -e "$state/backup-transaction"
+  record_phase_timing interrupted_backup_start_executor "$started"
   observe_runtime backup-interruption-recovery "$prior_key"
 
   backup_fixture_query -c "UPDATE codexia_backup.state SET active_revision = 2, active_usable = true, active_health = 'ready'"

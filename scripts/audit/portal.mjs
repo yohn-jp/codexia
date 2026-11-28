@@ -265,11 +265,24 @@ function verifyOutputs(directory,outputs,allowed,extra=[]) {
   return names;
 }
 
-function assertFragment(target) {
+function assertFragment(target, fragmentsByPath) {
   if (!target.fragment) return;
-  const content=readFileSync(target.path,'utf8');
+  let anchors = fragmentsByPath.get(target.path);
+  if (!anchors) {
+    const content = readPageFile(target.path, 'utf8');
+    anchors = new Set();
+    for (const match of content.matchAll(/\b(?:id|name)\s*=\s*(?:"([^"]*)"|'([^']*)')/gu)) {
+      anchors.add(match[1] ?? match[2]);
+    }
+    fragmentsByPath.set(target.path, anchors);
+  }
+  if (anchors.has(target.fragment)) return;
+  // The original literal matcher also accepts overlapping matches inside quoted text.
+  // Retain it for index misses without retaining the complete HTML of every target.
+  const content = readPageFile(target.path, 'utf8');
   const fragment=target.fragment.replace(/[.*+?^${}()|[\]\\]/gu,'\\$&');
   assert.ok(new RegExp(`(?:\\bid|\\bname)\\s*=\\s*(["'])${fragment}\\1`,'u').test(content),'Internal HTML fragment target is missing');
+  anchors.add(target.fragment);
 }
 
 export function generate(siteDir, sourceSha, originValue) {
@@ -358,7 +371,7 @@ function verifyAuditArtifacts(site,audit) {
   return { readySnapshots, readyReviews };
 }
 
-function validateRegistry(site,manifest,audit,origin) {
+function validateRegistry(site,manifest,audit,origin,fragmentsByPath) {
   const base=['/','/requirements/html/','/requirements/traceability/',...(existsSync(page(site,'/api/'))?['/api/']:[]),...(existsSync(join(site,'ux','manifest.json'))?['/ux/']:[]),'/architecture/','/graph/','/ci/','/security/','/audit/','/graph/communities.html'];
   const snapshotRoutes=Object.keys(audit.snapshots).filter(sha=>audit.snapshots[sha].status!=='blocked').sort().map(sha=>`/snapshots/${sha}/`);
   const reviewRoutes=Object.entries(audit.reviews??{}).filter(([,review])=>['ready','partial'].includes(review.status)).map(([sha])=>sha).sort().map(sha=>`/reviews/${sha}/`);
@@ -396,7 +409,7 @@ function validateRegistry(site,manifest,audit,origin) {
     for (const link of item.internalLinks) {
       const local=localTarget(site,target,link,origin);
       assert.ok(local && existsSync(local.path),'Registered internal link is missing');
-      assertFragment(local);
+      assertFragment(local, fragmentsByPath);
     }
   }
   const requirements=manifest.routes.find(item=>item.route==='/requirements/html/');
@@ -596,7 +609,8 @@ export function verify(siteDir, originValue) {
   assert.ok(manifest.siteOrigin===origin && typeof manifest.sourceSha==='string' && SHA.test(manifest.sourceSha),'Invalid site manifest identity');
   const audit = JSON.parse(readFileSync(join(site,'manifest.json'),'utf8'));
   verifyAuditArtifacts(site,audit);
-  validateRegistry(site,manifest,audit,origin);
+  const fragmentsByPath = new Map();
+  validateRegistry(site,manifest,audit,origin,fragmentsByPath);
   for (const {absolute,rel} of files) {
     if (!/\.html?$/iu.test(rel)) continue;
     const html=readFileSync(absolute,'utf8');
@@ -604,7 +618,7 @@ export function verify(siteDir, originValue) {
       const target=localTarget(site,absolute,match[2],origin);
       if (target) {
         assert.ok(existsSync(target.path),`Broken internal link in generated HTML: ${rel} ${match[2]}`);
-        assertFragment(target);
+        assertFragment(target, fragmentsByPath);
       }
     }
   }

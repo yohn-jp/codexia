@@ -602,6 +602,9 @@ importers:
       '@codexia/module-mcp':
         specifier: workspace:*
         version: link:../../modules/mcp
+      '@fastify/fast-json-stringify-compiler':
+        specifier: 5.2.0
+        version: 5.2.0
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1

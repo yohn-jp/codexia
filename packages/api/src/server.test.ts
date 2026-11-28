@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import type {
   ActionResult,
   ChangeOperation,
@@ -29,9 +30,11 @@ import type {
   PersistenceReader,
 } from '@codexia/persistence-contracts';
 import { createPostgresPersistence, migratePostgresDatabase } from '@codexia/persistence-postgres';
+import SerializerSelector from '@fastify/fast-json-stringify-compiler';
 import { fromNodeHeaders } from 'better-auth/node';
+import type { FastifyInstance } from 'fastify';
 import { advertisePublicClientTokenAuth } from './better-auth.js';
-import { httpContract } from './http-contract.js';
+import { httpContract, httpContractSchemaController } from './http-contract.js';
 import { JobHistoryError, JobHistoryStore, type WorkerJobLifecycle } from './job-history-store.js';
 import type { createOAuthMcpAuthenticator } from './oauth-mcp.js';
 import { type ApiServerOptions, createServer, start } from './server.js';
@@ -664,6 +667,40 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
   };
 }
 
+const contractSchemas = Object.fromEntries(structuredClone(httpContract.schemas).map(schema => [schema.$id, schema]));
+
+// Each server keeps its own hooks, stores and listener. Only functions compiled
+// against the fixed contract and default options can be shared across fixtures.
+function reuseContractCompiler<Schemas, Options, Route, Compiled extends object>(
+  build: (schemas: Schemas, options: Options) => (route: Route) => Compiled,
+  defaults: NoInfer<Options>,
+) {
+  let compile: ((route: Route) => Compiled) | undefined;
+  const cache = new Map<string, Compiled>();
+  return (schemas: Schemas, options: Options) => {
+    if (!isDeepStrictEqual(schemas, contractSchemas) || !isDeepStrictEqual(options, defaults)) return build(schemas, options);
+    compile ??= build(structuredClone(schemas), defaults);
+    const compileContract = compile;
+    return (route: Route) => {
+      // Fastify supplies the generated JSON schema, method, URL, HTTP part, status and media type.
+      const key = JSON.stringify(route);
+      let compiled = cache.get(key);
+      if (!compiled) {
+        compiled = compileContract(route);
+        cache.set(key, compiled);
+      }
+      return compiled;
+    };
+  };
+}
+
+const buildValidator = httpContractSchemaController?.compilersFactory?.buildValidator;
+assert.ok(buildValidator);
+const fixtureCompilers = {
+  buildValidator: reuseContractCompiler(buildValidator, { customOptions: {}, plugins: [] }),
+  buildSerializer: reuseContractCompiler(SerializerSelector(), undefined),
+};
+
 async function startCustomApi(
   store: CoreStore,
   staticDir: string,
@@ -692,6 +729,8 @@ async function startCustomApi(
     ...(explicitIdentity ? { betterAuth: defaults.betterAuth } : defaults),
     ...options,
   });
+  const { fastify } = (server as typeof server & { codexia: { fastify: FastifyInstance } }).codexia;
+  fastify.setSchemaController({ compilersFactory: fixtureCompilers });
   await new Promise<void>(resolveListen => server.listen(0, '127.0.0.1', resolveListen));
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
