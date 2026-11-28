@@ -117,7 +117,6 @@ test('deployment-credential-free workflow revalidates on main and has no target 
   assert.equal(manual.environment, undefined);
   assert.deepEqual(manual.permissions, { contents: 'read', actions: 'read', packages: 'read' });
   assert.equal(manual.permissions['id-token'], undefined);
-  assert.equal(manual.steps.some(step => step.uses?.startsWith('tailscale/')), false);
   assert.equal(manual.steps.some(step => /ansible-playbook|deploy-production|codexia_stage:\s*deploy/u.test(step.run ?? '')), false);
   for (const step of manual.steps) {
     for (const value of Object.values(step.env ?? {})) assert.doesNotMatch(String(value), /secrets\./u);

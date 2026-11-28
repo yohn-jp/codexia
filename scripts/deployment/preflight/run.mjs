@@ -70,12 +70,22 @@ export async function readLifecycleHost({ inventory, targetHost, sshDirectory = 
     assert.ok(query);
     const quadlets = {};
     for (const name of ['codexia.network','codexia-data.network','codexia-postgres.volume',
-      'codexia-data.volume','codexia-history.volume','codexia-db.container','codexia-tunnel.container']) {
+      'codexia-data.volume','codexia-history.volume','codexia-db.container','codexia-api.container']) {
       quadlets[name] = createHash('sha256').update(await readFile(new URL('../../../deploy/quadlet/' + name, import.meta.url))).digest('hex');
+    }
+    const systemUnits = {};
+    const systemUnitSources = {
+      'codexia-api.socket': '../../../deploy/systemd/codexia-api.socket',
+      'codexia-api-gate.service': '../../../deploy/systemd/codexia-api-gate.service',
+      'codexia-cloudflared.service': '../../../cmd/codexiactl/assets/codexia-cloudflared.service',
+    };
+    for (const [name, source] of Object.entries(systemUnitSources)) {
+      systemUnits[name] = createHash('sha256').update(await readFile(new URL(source, import.meta.url))).digest('hex');
     }
     await writeFile(vars, JSON.stringify({
       codexia_preflight_observation_file: out, codexia_preflight_auth_schema_query: query,
-      codexia_preflight_quadlets: quadlets, codexia_preflight_recovery: recovery,
+      codexia_preflight_quadlets: quadlets, codexia_preflight_system_units: systemUnits,
+      codexia_preflight_recovery: recovery,
        codexia_preflight_adoption: adoption,
     }), { mode: 0o600, flag: 'wx' });
     await run('ansible-playbook', ['-i', inventory,

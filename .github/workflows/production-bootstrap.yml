@@ -138,12 +138,31 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Load reviewed production OAuth settings
+        run: node scripts/deployment/bootstrap/public-env.mjs
+      - name: Install checksum-pinned cloudflared client
+        shell: bash
+        env:
+          CLOUDFLARED_SHA256: 51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.11.0/cloudflared-linux-amd64 \
+            --output "$RUNNER_TEMP/cloudflared"
+          printf '%s  %s\n' "$CLOUDFLARED_SHA256" "$RUNNER_TEMP/cloudflared" | sha256sum --check --status
+          chmod 0700 "$RUNNER_TEMP/cloudflared"
+          "$RUNNER_TEMP/cloudflared" version | grep -F '2026.11.0'
       - name: Prepare existing protected runtime SSH identity
         id: runtime
         env:
           CODEXIA_DEPLOY_HOST: ${{ vars.CODEXIA_DEPLOY_HOST }}
           CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
           CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_MANAGEMENT_HOSTNAME: ${{ env.CODEXIA_MANAGEMENT_HOSTNAME }}
         run: bash deploy/ansible/prepare-deploy-ssh.sh
       - name: Export only the public half of the existing runtime credential
         id: public-key
@@ -170,7 +189,6 @@ jobs:
       contents: read
       actions: read
       packages: read
-      id-token: write
     steps:
       - name: Validate reviewed main and independent approvals before acquiring privileged credentials
         env:
@@ -244,6 +262,18 @@ jobs:
           set -euo pipefail
           bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt
           echo "$RUNNER_TEMP/codexia-ansible/bin" >> "$GITHUB_PATH"
+      - name: Install checksum-pinned cloudflared client
+        shell: bash
+        env:
+          CLOUDFLARED_SHA256: 51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.11.0/cloudflared-linux-amd64 \
+            --output "$RUNNER_TEMP/cloudflared"
+          printf '%s  %s\n' "$CLOUDFLARED_SHA256" "$RUNNER_TEMP/cloudflared" | sha256sum --check --status
+          chmod 0700 "$RUNNER_TEMP/cloudflared"
+          "$RUNNER_TEMP/cloudflared" version | grep -F '2026.11.0'
       - name: Prepare private inventory, exact secret inputs, pinned SSH identity, and run-scoped approvals
         id: control
         env:
@@ -251,30 +281,20 @@ jobs:
           CODEXIA_BOOTSTRAP_HOST: ${{ vars.CODEXIA_BOOTSTRAP_HOST }}
           CODEXIA_BOOTSTRAP_SSH_USER: ${{ vars.CODEXIA_BOOTSTRAP_SSH_USER }}
           CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS }}
-          CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY }}
-          CODEXIA_TUNNEL_TOKEN: ${{ inputs.mode == 'bootstrap' && secrets.CODEXIA_TUNNEL_TOKEN || '' }}
           CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_MANAGEMENT_HOSTNAME: ${{ env.CODEXIA_MANAGEMENT_HOSTNAME }}
+          CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY }}
           CODEXIA_OWNER_SETUP_AGE_RECIPIENT: ${{ inputs.mode == 'owner-setup' && vars.CODEXIA_OWNER_SETUP_AGE_RECIPIENT || '' }}
           CODEXIA_RUNTIME_SSH_PUBLIC_KEY: ${{ needs.runtime-identity.outputs.public-key }}
           CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED: ${{ inputs.mode == 'bootstrap' && inputs.initialize_database && vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED == 'true' }}
         run: |
           "$RUNNER_TEMP/codexia-ansible/bin/python" deploy/ansible/prepare-production-bootstrap.py
-      - name: Require immutable GitHub OIDC claims for Tailscale
-        env:
-          CODEXIA_TAILSCALE_CLIENT_ID: ${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}
-          CODEXIA_TAILSCALE_ENVIRONMENT: codexia-bootstrap
-        run: node scripts/deployment/preflight/tailscale-oidc.mjs
-      - name: Connect to the protected Tailnet with GitHub OIDC
-        uses: tailscale/github-action@v4
-        with:
-          oauth-client-id: ${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}
-          audience: ${{ format('api.tailscale.com/{0}', vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID) }}
-          tags: tag:ci
-          ping: ${{ steps.control.outputs.host }}
       - name: Verify the independent bootstrap identity and noninteractive sudo
         env:
           CONTROL_SSH_CONFIG: ${{ steps.control.outputs.ssh_config }}
           EXPECTED_USER: ${{ steps.control.outputs.user }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           actual=$(ssh -F "$CONTROL_SSH_CONFIG" codexia-bootstrap-target 'id -un')
@@ -293,6 +313,8 @@ jobs:
         env:
           CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.control.outputs.host }}
           ANSIBLE_HOST_KEY_CHECKING: 'True'
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: node scripts/deployment/preflight/run.mjs bootstrap-host
       - name: Bind runtime SSH acceptance to the observed VM
         if: inputs.mode != 'preflight'
@@ -324,6 +346,8 @@ jobs:
           CONTROL: ${{ steps.control.outputs.control }}
           OPERATION: ${{ inputs.mode }}
           ANSIBLE_HOST_KEY_CHECKING: 'True'
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
@@ -356,12 +380,16 @@ jobs:
     environment: codexia-production
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Load reviewed production OAuth settings
+        run: node scripts/deployment/bootstrap/public-env.mjs
       - name: Admit post-ACTIVE backup maintenance on current main
         if: inputs.mode == 'provision-backups'
         env:
@@ -375,29 +403,33 @@ jobs:
             { echo 'Backup maintenance cannot consume lifecycle approvals.' >&2; exit 1; }
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = "$GITHUB_SHA"
           bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt
+      - name: Install checksum-pinned cloudflared client
+        shell: bash
+        env:
+          CLOUDFLARED_SHA256: 51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.11.0/cloudflared-linux-amd64 \
+            --output "$RUNNER_TEMP/cloudflared"
+          printf '%s  %s\n' "$CLOUDFLARED_SHA256" "$RUNNER_TEMP/cloudflared" | sha256sum --check --status
+          chmod 0700 "$RUNNER_TEMP/cloudflared"
+          "$RUNNER_TEMP/cloudflared" version | grep -F '2026.11.0'
       - name: Prepare existing protected runtime SSH identity
         id: runtime
         env:
           CODEXIA_DEPLOY_HOST: ${{ vars.CODEXIA_DEPLOY_HOST }}
           CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
           CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}
+          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
+          CODEXIA_MANAGEMENT_HOSTNAME: ${{ env.CODEXIA_MANAGEMENT_HOSTNAME }}
         run: bash deploy/ansible/prepare-deploy-ssh.sh
-      - name: Require immutable GitHub OIDC claims for Tailscale
-        env:
-          CODEXIA_TAILSCALE_CLIENT_ID: ${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}
-          CODEXIA_TAILSCALE_ENVIRONMENT: codexia-production
-        run: node scripts/deployment/preflight/tailscale-oidc.mjs
-      - name: Connect the existing protected management plane
-        uses: tailscale/github-action@v4
-        with:
-          oauth-client-id: ${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}
-          audience: ${{ format('api.tailscale.com/{0}', vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID) }}
-          tags: tag:ci
-          ping: ${{ steps.runtime.outputs.host }}
       - name: Prove the runtime credential reaches the same rootless service account and VM
         if: inputs.mode == 'bootstrap'
         env:
           EXPECTED_HOST_ID: ${{ needs.bootstrap.outputs.host-id }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           [[ "$EXPECTED_HOST_ID" =~ ^[a-f0-9]{64}$ ]]
@@ -413,6 +445,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ANSIBLE_HOST_KEY_CHECKING: 'True'
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           umask 077

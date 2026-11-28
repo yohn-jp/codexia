@@ -45,7 +45,7 @@ test('handoff consumer verifies successful same-repository main publication befo
   const deploy = handoff.jobs['deploy-production'];
   assert.deepEqual(deploy.needs, ['verify-handoff']);
   assert.equal(deploy.environment.name, 'codexia-production');
-  assert.equal(deploy.permissions['id-token'], 'write');
+  assert.equal(deploy.permissions['id-token'], undefined, 'Cloudflare service auth replaces runner OIDC');
   assert.equal(deploy.concurrency.group, 'codexia-production');
   assert.equal(deploy.concurrency['cancel-in-progress'], false);
   assert.equal(deploy.concurrency.queue, 'max');
@@ -55,6 +55,16 @@ test('handoff consumer verifies successful same-repository main publication befo
   const verifiedSource = '${{ needs.verify-handoff.outputs.verified-main-sha }}';
   assert.equal(deployCheckout.with.ref, "${{ github.event_name == 'workflow_dispatch' && github.sha || needs.verify-handoff.outputs.verified-main-sha }}");
   const converge = deploy.steps.find(step => step.name === 'Converge certified backend digest');
+  const ssh = deploy.steps.find(step => step.name === 'Prepare pinned SSH identity');
+  assert.equal(ssh.env.CODEXIA_MANAGEMENT_HOSTNAME, '${{ env.CODEXIA_MANAGEMENT_HOSTNAME }}');
+  const connection = deploy.steps.find(step => step.name === 'Verify pinned public-key SSH as codexia');
+  assert.equal(connection.env.CF_ACCESS_CLIENT_ID, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}');
+  assert.equal(connection.env.CF_ACCESS_CLIENT_SECRET, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}');
+  assert.equal(converge.env.CF_ACCESS_CLIENT_ID, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}');
+  assert.equal(converge.env.CF_ACCESS_CLIENT_SECRET, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}');
+  const cloudflared = deploy.steps.find(step => step.name === 'Install checksum-pinned cloudflared client');
+  assert.ok(cloudflared.run.includes('cloudflared/releases/download/2026.11.0/cloudflared-linux-amd64'));
+  assert.equal(cloudflared.env.CLOUDFLARED_SHA256, '51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd');
   assert.equal(converge.env.CODEXIA_VERIFIED_MAIN_SHA, verifiedSource);
   assert.doesNotMatch(deploy.if, /CODEXIA_PUSH_DEPLOYMENT_ENABLED/u,
     'Environment-scoped variables must not be evaluated before Environment attachment');
@@ -77,7 +87,6 @@ test('handoff consumer verifies successful same-repository main publication befo
     "github.event_name == 'workflow_run' && steps.freshness.outputs.current == 'true'",
   ].includes(step.if)), 'Stale or disabled deployments must not connect to the target or run Ansible');
   const recheck = deploy.steps.find(step => step.run === 'node scripts/deployment/handoff/recheck-verify.mjs');
-  const ssh = deploy.steps.find(step => step.name === 'Connect to the Tailnet using GitHub OIDC');
   assert.ok(recheck && ssh && deploy.steps.indexOf(recheck) > deploy.steps.indexOf(freshness) &&
     deploy.steps.indexOf(recheck) < deploy.steps.indexOf(ssh) &&
     deploy.steps.indexOf(recheck) < deploy.steps.indexOf(converge),

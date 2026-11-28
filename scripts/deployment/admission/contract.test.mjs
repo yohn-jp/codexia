@@ -10,7 +10,7 @@ const require = createRequire(new URL('../../../packages/core/package.json', imp
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../../../.github/workflows/backend-release.yml', import.meta.url), 'utf8'));
 const handoff = parse(readFileSync(new URL('../../../.github/workflows/backend-deployment-handoff.yml', import.meta.url), 'utf8'));
-const tailscale = parse(readFileSync(new URL('../../../.github/workflows/tailscale-connectivity.yml', import.meta.url), 'utf8'));
+const preflight = parse(readFileSync(new URL('../../../.github/workflows/production-preflight.yml', import.meta.url), 'utf8'));
 const site = parse(readFileSync(new URL('../../../deploy/ansible/site.yml', import.meta.url), 'utf8'))[0];
 const transactionTasks = parse(readFileSync(new URL('../../../deploy/ansible/deploy-transaction.yml', import.meta.url), 'utf8'));
 
@@ -18,7 +18,7 @@ test('pull request backend validation cannot obtain production credentials or de
   const validation = workflow.jobs['build-test'];
   assert.ok(validation, 'backend PR validation job is required');
   assert.equal(validation.environment, undefined, 'PR validation must not attach a production Environment');
-  assert.equal(validation.permissions['id-token'], undefined, 'PR validation must not mint a Tailnet identity');
+  assert.equal(validation.permissions['id-token'], undefined, 'PR validation must not receive a production identity');
   for (const step of validation.steps) {
     for (const value of Object.values(step.env ?? {})) {
       assert.doesNotMatch(String(value), /secrets\./u, 'PR validation must not read GitHub Environment secrets');
@@ -35,16 +35,11 @@ test('production deployment consumes the verified Full digest and provenance cer
   assert.match(deploy.if, /needs\.verify-handoff\.outputs\.certified-full-image != ''/u);
   assert.match(deploy.if, /needs\.verify-handoff\.outputs\.deployment-certificate != ''/u);
 
-  const tailscale = deploy.steps.find(step => step.uses === 'tailscale/github-action@v4');
-  assert.ok(tailscale, 'production deployment must establish the Tailnet connection');
-  assert.equal(tailscale.with['oauth-client-id'], '${{ vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID }}');
-  assert.equal(tailscale.with.audience,
-    "${{ format('api.tailscale.com/{0}', vars.TS_OAUTH_CLIENT_ID || secrets.TS_OAUTH_CLIENT_ID) }}");
-
   const ssh = deploy.steps.find(step => step.name === 'Prepare pinned SSH identity');
   assert.ok(ssh, 'production deployment must prepare its dedicated SSH key and pinned host key');
   assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_PRIVATE_KEY, '${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}');
   assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS, '${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}');
+  assert.equal(ssh.env.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET, '${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}');
   assert.equal(ssh.run, 'bash deploy/ansible/prepare-deploy-ssh.sh');
 
   const liveUi = deploy.steps.find(step => step.name === 'Verify deployed frontend epoch and Access boundary for certified backend recovery');
@@ -860,21 +855,23 @@ test('the recovery launcher audits sanitized counts without sending its one-use 
   assert.match(launcher, /durably recorded in PostgreSQL/u);
 });
 
-test('main-only manual Tailnet diagnostic verifies pinned SSH as codexia without joining PR validation or deployment', () => {
-  assert.deepEqual(Object.keys(tailscale.on), ['workflow_dispatch']);
-  const job = tailscale.jobs.connectivity;
+test('production lifecycle preflight establishes Cloudflare SSH only for main in a protected Environment', () => {
+  const job = preflight.jobs['lifecycle-host'];
   assert.match(job.if, /github.ref == 'refs\/heads\/main'/u, 'PR refs must not receive the deployment SSH secret');
   assert.match(job.if, /github.event.repository.name == 'codexia'/u);
   assert.match(job.if, /github.event.repository.default_branch == 'main'/u);
-  assert.equal(job.environment, 'codexia-production');
-  const ssh = job.steps.find(step => step.name === 'Verify pinned public-key SSH as codexia');
-  assert.ok(ssh, 'the manual Tailnet diagnostic must authenticate SSH, not only test TCP/22');
-  const target = job.steps.find(step => step.id === 'target');
-  assert.equal(target.env.CODEXIA_DEPLOY_SSH_PRIVATE_KEY, '${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}');
-  assert.equal(target.env.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS, '${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}');
-  assert.equal(target.run, 'bash deploy/ansible/prepare-deploy-ssh.sh');
-  assert.match(ssh.run, /ssh -F .*codexia-ssh\/config.*codexia-target.*id -un/u);
-  assert.doesNotMatch(ssh.run, /ansible-playbook|podman (?:pull|run|rm)|CODEXIA_PUSH_DEPLOYMENT_ENABLED/u);
+  assert.equal(job.permissions['id-token'], undefined, 'management uses a scoped Access Service Token');
+  assert.ok(job.environment.includes('codexia-bootstrap') && job.environment.includes('codexia-production'));
+  const ssh = job.steps.find(step => step.name === 'Prepare runtime pinned SSH');
+  assert.ok(ssh);
+  assert.equal(ssh.env.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET, '${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}');
+  assert.equal(ssh.env.CODEXIA_MANAGEMENT_HOSTNAME, '${{ env.CODEXIA_MANAGEMENT_HOSTNAME }}');
+  assert.equal(ssh.env.CODEXIA_SSH_ACCESS_CLIENT_ID, undefined, 'transport tokens are only available to SSH child processes');
+  assert.equal(ssh.run, 'bash deploy/ansible/prepare-deploy-ssh.sh');
+  assert.ok(job.steps.some(step => step.name === 'Install checksum-pinned cloudflared client'));
+  const access = job.steps.find(step => step.name === 'Verify independent bootstrap identity and noninteractive sudo');
+  assert.equal(access.env.CF_ACCESS_CLIENT_ID, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}');
+  assert.equal(access.env.CF_ACCESS_CLIENT_SECRET, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}');
 });
 
 test('the declared VM must resolve to a protected SSH pin in both diagnosis and deployment', t => {
@@ -883,31 +880,58 @@ test('the declared VM must resolve to a protected SSH pin in both diagnosis and 
   const key = path.join(directory, 'fixture');
   assert.equal(spawnSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key]).status, 0);
   const publicKey = readFileSync(key + '.pub', 'utf8').trim();
-  const host = 'new-vm.example.test';
+  const host = 'ssh.example.test';
   const pins = host + ' ' + publicKey;
   const script = new URL('../../../deploy/ansible/prepare-deploy-ssh.sh', import.meta.url).pathname;
+  const targetContract = JSON.stringify({
+    repository: 'yohn-jp/codexia', repositoryId: 401, ownerId: 502,
+    sshHostname: host, sshPolicyId: 'policy-789',
+  });
+  const targetMismatchesManagementHostname = JSON.stringify({
+    repository: 'yohn-jp/codexia', repositoryId: 401, ownerId: 502,
+    sshHostname: 'other.example.test', sshPolicyId: 'policy-789',
+  });
   function prepare(knownHosts, target) {
     const runner = mkdtempSync(path.join(directory, 'runner-'));
     const output = path.join(runner, 'output');
+    const cloudflared = path.join(runner, 'cloudflared');
+    writeFileSync(cloudflared, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
     const result = spawnSync('bash', [script], { encoding: 'utf8', env: {
       ...process.env, RUNNER_TEMP: runner, GITHUB_OUTPUT: output, CODEXIA_DEPLOY_HOST: target,
+      CODEXIA_MANAGEMENT_HOSTNAME: host,
+      GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_REPOSITORY_ID: '401', GITHUB_REPOSITORY_OWNER_ID: '502',
+      CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: targetContract,
       CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: knownHosts, CODEXIA_DEPLOY_SSH_PRIVATE_KEY: readFileSync(key, 'utf8'),
     } });
-    return { result, runner, output };
+    return { result, runner, output, cloudflared };
   }
-  for (const target of ['', host]) {
-    const { result, runner, output } = prepare(pins, target);
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(readFileSync(output, 'utf8'), 'host=' + host + '\n');
-    const config = spawnSync('ssh', ['-G', '-F', path.join(runner, 'codexia-ssh/config'), 'codexia-target'], { encoding: 'utf8' });
-    assert.equal(config.status, 0);
-    for (const line of ['hostname ' + host, 'user codexia', 'stricthostkeychecking true', 'identitiesonly yes',
-      'globalknownhostsfile /dev/null', 'userknownhostsfile ' + path.join(runner, 'codexia-ssh/known_hosts')]) {
-      assert.ok(config.stdout.split('\n').includes(line), line);
-    }
+  const prepared = prepare(pins, host);
+  assert.equal(prepared.result.status, 0, prepared.result.stderr);
+  assert.equal(readFileSync(prepared.output, 'utf8'), 'host=' + host + '\n');
+  const config = spawnSync('ssh', ['-G', '-F', path.join(prepared.runner, 'codexia-ssh/config'), 'codexia-target'], { encoding: 'utf8' });
+  assert.equal(config.status, 0);
+  for (const line of ['hostname ' + host, 'user codexia', 'stricthostkeychecking true', 'identitiesonly yes',
+    'globalknownhostsfile /dev/null', 'userknownhostsfile ' + path.join(prepared.runner, 'codexia-ssh/known_hosts'),
+    'proxycommand test -n "$CF_ACCESS_CLIENT_ID" && test -n "$CF_ACCESS_CLIENT_SECRET" && BROWSER=/usr/bin/false "' + prepared.cloudflared + '" access ssh --hostname %h']) {
+    assert.ok(config.stdout.split('\n').includes(line), line);
   }
+  assert.notEqual(prepare(pins, '').result.status, 0, 'host must be explicitly declared');
+  assert.notEqual(prepare(pins, '192.0.2.1').result.status, 0, 'management transport must use a DNS name');
   assert.notEqual(prepare(pins, 'different.example.test').result.status, 0);
   assert.notEqual(prepare(pins, 'invalid\nHost other').result.status, 0);
-  assert.notEqual(prepare(pins + '\nother.example.test ' + publicKey, '').result.status, 0);
-  assert.equal(prepare(pins + '\nother.example.test ' + publicKey, host).result.status, 0);
+  assert.notEqual(prepare('other.example.test ' + publicKey, host).result.status, 0,
+    'the reviewed management hostname must match an explicit pinned host key');
+  const targetEnvironment = {
+    ...process.env, RUNNER_TEMP: directory, GITHUB_OUTPUT: path.join(directory, 'invalid-output'), CODEXIA_DEPLOY_HOST: host,
+    CODEXIA_MANAGEMENT_HOSTNAME: host,
+    CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: targetMismatchesManagementHostname,
+    GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_REPOSITORY_ID: '401', GITHUB_REPOSITORY_OWNER_ID: '502',
+    CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: pins,
+    CODEXIA_DEPLOY_SSH_PRIVATE_KEY: readFileSync(key, 'utf8'),
+  };
+  const targetRunner = path.join(directory, 'target-runner');
+  mkdirSync(targetRunner);
+  writeFileSync(path.join(targetRunner, 'cloudflared'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+  targetEnvironment.RUNNER_TEMP = targetRunner;
+  assert.notEqual(spawnSync('bash', [script], { encoding: 'utf8', env: targetEnvironment }).status, 0);
 });
