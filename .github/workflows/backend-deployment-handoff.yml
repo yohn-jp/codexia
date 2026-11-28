@@ -74,7 +74,7 @@ jobs:
         run: node scripts/deployment/handoff/verify-push.mjs
       - name: Read the immutable runtime Preflight receipt
         if: github.event_name == 'workflow_dispatch'
-        uses: ./.github/actions/reviewed-preflight
+        uses: $/.github/actions/reviewed-preflight
         with:
           run-id: ${{ inputs.preflight_run_id }}
           management: runtime
@@ -255,7 +255,7 @@ jobs:
           password: ${{ github.token }}
       - name: Read the immutable runtime Preflight receipt
         if: github.event_name == 'workflow_dispatch' && steps.freshness.outputs.current == 'true'
-        uses: ./.github/actions/reviewed-preflight
+        uses: $/.github/actions/reviewed-preflight
         with:
           run-id: ${{ inputs.preflight_run_id }}
           management: runtime

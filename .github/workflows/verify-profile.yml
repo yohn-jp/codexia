@@ -75,8 +75,22 @@ jobs:
         if: always()
         with:
           name: ci-evidence-build-${{ inputs.profile }}
-          path: ${{ runner.temp }}/ci-evidence/build-${{ inputs.profile }}
+          path: ${{ runner.temp }}/ci-evidence/build-${{ inputs.profile }}-receipt
           if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        continue-on-error: true
+        with:
+          name: ci-diagnostics-build-${{ inputs.profile }}
+          path: |
+            ${{ runner.temp }}/ci-evidence/build-${{ inputs.profile }}
+            !${{ runner.temp }}/ci-evidence/build-${{ inputs.profile }}/report.json
+            !${{ runner.temp }}/ci-evidence/build-${{ inputs.profile }}/**/browser-coverage.json
+            !${{ runner.temp }}/ci-evidence/build-${{ inputs.profile }}/requirements-trace/strictdoc/trace-report.json
+            !${{ runner.temp }}/ci-evidence/build-${{ inputs.profile }}/requirements-trace/strictdoc/html/**
+            !${{ runner.temp }}/ci-evidence/build-${{ inputs.profile }}/requirements-trace/strictdoc/json/**
+          if-no-files-found: ignore
           retention-days: 7
   browser:
     name: browser-${{ matrix.group }}
@@ -212,8 +226,22 @@ jobs:
         if: always()
         with:
           name: ci-evidence-browser-${{ matrix.group }}
-          path: ${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}
+          path: ${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}-receipt
           if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        continue-on-error: true
+        with:
+          name: ci-diagnostics-browser-${{ matrix.group }}
+          path: |
+            ${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}
+            !${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}/report.json
+            !${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}/**/browser-coverage.json
+            !${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}/requirements-trace/strictdoc/trace-report.json
+            !${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}/requirements-trace/strictdoc/html/**
+            !${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}/requirements-trace/strictdoc/json/**
+          if-no-files-found: ignore
           retention-days: 7
     # All browser lanes use the Git-capable immutable Chromium Ubuntu image.
     container:

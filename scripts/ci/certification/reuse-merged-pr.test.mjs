@@ -5,8 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { mergeCandidate, assertCandidatePlan, assertCompactNeeds, readReusableMainEvidence, verifyReusableMainProof, verifyReusableDedicatedProof, DEDICATED_PROOFS } from './reuse-merged-pr.mjs';
-import { createVerificationPlan, planDigest } from '../impact/plan.mjs';
+import { mergeCandidate, assertCandidatePlan, assertCompactNeeds, readReusableMainEvidence, selectMergedTaskReuse, verifyReusableMainProof, verifyReusableDedicatedProof, DEDICATED_PROOFS } from './reuse-merged-pr.mjs';
+import { createVerificationPlan, planDigest, validateVerificationPlan } from '../impact/plan.mjs';
+import { taskInvocation } from '../evidence/task-inputs.mjs';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from '../impact/contract.mjs';
 
 const sourceSha = 'a'.repeat(40), base = 'b'.repeat(40), head = 'c'.repeat(40), tree = 'd'.repeat(40);
@@ -312,4 +313,56 @@ test('push backup reuse requires exact pre-merge lock and recovery proof', async
   job.completed_at = end;
   state.prRun.conclusion = 'failure';
   await assert.rejects(verifyReusableDedicatedProof(args), /not successful/);
+});
+
+// Affected evidence may be inspected for task candidates but can never certify
+// the complete main graph or turn absent execution receipts into successful tasks.
+test('affected PR without original task receipts falls back to main execution', () => {
+  const evidence = { receipt: { sourceSha: 'a'.repeat(40) }, plan: { mode: 'affected' },
+    jobs: [{ name: 'types-sources', conclusion: 'success', run_attempt: 1 }],
+    reports: [{ group: 'types-sources', workflowRunId: 1, workflowAttempt: 1, results: [] }] };
+  assert.equal(selectMergedTaskReuse(evidence, () => true), undefined);
+});
+
+test('affected merged PR can contribute only original selected read-only task receipts', async () => {
+  // Use the canonical selector to find an affected plan with a typecheck
+  // obligation, rather than duplicating its workspace membership.
+  const selected = fixture(['modules/story/src/story.test.ts']);
+  if (selected.plan.mode !== 'affected') {
+    assert.fail('Expected a module-only affected plan');
+  }
+  const evidence = await readReusableMainEvidence({ ...selected.args, allowAffected: true });
+  const report = evidence.reports.find(item => item.group === 'types-sources');
+  assert.ok(report);
+  const runtime = { platform: 'linux', arch: 'x64', nodeVersion: 'v24.0.0', execPath: '/opt/node/bin/node',
+    cwd: '/home/runner/work/codexia/codexia', imageOS: 'ubuntu24', imageVersion: 'fixture' };
+  const closure = Object.fromEntries(['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers']
+    .map(name => [name, 'e'.repeat(64)]));
+  Object.assign(report, { workflowRunId: evidence.receipt.runId, workflowAttempt: evidence.receipt.attempt,
+    workflowJob: 'types', workflowRef: '.github/workflows/verify.yml', workflowSha: head });
+  for (const result of report.results) {
+    const task = result.task;
+    result.invocations = [taskInvocation(task, runtime.execPath)];
+    result.inputProof = { format: 'codexia-ci-task-input-proof/v2', mode: 'task-execution', task, status: 'passed',
+      sourceSha: report.sha, planDigest: report.planDigest, workflowRunId: report.workflowRunId,
+      workflowAttempt: report.workflowAttempt, workflowJob: report.workflowJob, runtime, inputClosure: closure };
+  }
+  report.producerInventory = {
+    format: 'codexia-ci-task-producer-inventory/v1', group: report.group,
+    sourceSha: report.sha, planDigest: report.planDigest, workflowRunId: report.workflowRunId,
+    workflowAttempt: report.workflowAttempt, workflowJob: report.workflowJob,
+    workflowRef: report.workflowRef, workflowSha: report.workflowSha,
+    runner: { os: 'Linux', arch: 'X64', nodeVersion: runtime.nodeVersion, imageOS: runtime.imageOS, imageVersion: runtime.imageVersion },
+    selectedTasks: report.results.map(item => item.task),
+    taskInvocations: report.results.map(({ task, status, invocations, inputProof }) => ({ task, status, invocations, inputProof })),
+    groupInvocations: [],
+  };
+  const reusable = selectMergedTaskReuse(evidence, task => task.startsWith('typecheck-'));
+  assert.ok(reusable?.proofs.length > 0);
+  const main = createVerificationPlan({ files: selected.plan.files, event: 'push', sha: sourceSha, base });
+  assert.deepEqual(validateVerificationPlan({ ...main, mergedTaskReuse: reusable }).tasks, main.tasks);
+  assert.equal(planDigest({ ...main, mergedTaskReuse: reusable }), planDigest(main));
+  assert.equal(selectMergedTaskReuse(evidence, () => false), undefined);
+  report.workflowAttempt++;
+  assert.equal(selectMergedTaskReuse(evidence, () => true), undefined);
 });

@@ -69,7 +69,7 @@ jobs:
             GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0='' \
             GIT_CONFIG_KEY_1=credential.https://github.com.helper GIT_CONFIG_VALUE_1="!\"$helper\"" \
             swift package --package-path ios/CodexiaTransport --force-resolved-versions resolve
-      - uses: ./.github/actions/generate-swift-api
+      - uses: $/.github/actions/generate-swift-api
         with:
           check: ${{ matrix.lane == 'macos-contract' }}
       - name: Record generated OpenAPI digest

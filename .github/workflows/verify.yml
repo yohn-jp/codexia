@@ -70,6 +70,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
+          CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/ci/certification/reuse-merged-pr.mjs plan
       - uses: actions/upload-artifact@v7.0.2
         with:
@@ -134,8 +135,22 @@ jobs:
         if: always()
         with:
           name: ci-evidence-biome
-          path: ${{ runner.temp }}/ci-evidence/biome
+          path: ${{ runner.temp }}/ci-evidence/biome-receipt
           if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        continue-on-error: true
+        with:
+          name: ci-diagnostics-biome
+          path: |
+            ${{ runner.temp }}/ci-evidence/biome
+            !${{ runner.temp }}/ci-evidence/biome/report.json
+            !${{ runner.temp }}/ci-evidence/biome/**/browser-coverage.json
+            !${{ runner.temp }}/ci-evidence/biome/requirements-trace/strictdoc/trace-report.json
+            !${{ runner.temp }}/ci-evidence/biome/requirements-trace/strictdoc/html/**
+            !${{ runner.temp }}/ci-evidence/biome/requirements-trace/strictdoc/json/**
+          if-no-files-found: ignore
           retention-days: 7
   unit:
     name: unit-${{ matrix.group }}
@@ -306,8 +321,22 @@ jobs:
         if: always()
         with:
           name: ci-evidence-unit-${{ matrix.group }}
-          path: ${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}
+          path: ${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}-receipt
           if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        continue-on-error: true
+        with:
+          name: ci-diagnostics-unit-${{ matrix.group }}
+          path: |
+            ${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}
+            !${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}/report.json
+            !${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}/**/browser-coverage.json
+            !${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}/requirements-trace/strictdoc/trace-report.json
+            !${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}/requirements-trace/strictdoc/html/**
+            !${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}/requirements-trace/strictdoc/json/**
+          if-no-files-found: ignore
           retention-days: 7
   types:
     name: types-${{ matrix.group }}
@@ -387,12 +416,22 @@ jobs:
         if: always()
         with:
           name: ci-evidence-types-${{ matrix.group }}
-          # The trace report already carries the output hashes. Pages publishes the rendered files.
+          path: ${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}-receipt
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        continue-on-error: true
+        with:
+          name: ci-diagnostics-types-${{ matrix.group }}
           path: |
             ${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}
+            !${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}/report.json
+            !${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}/**/browser-coverage.json
+            !${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}/requirements-trace/strictdoc/trace-report.json
             !${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}/requirements-trace/strictdoc/html/**
             !${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}/requirements-trace/strictdoc/json/**
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
   profile_core:
     name: profile-core
@@ -454,8 +493,22 @@ jobs:
         if: always()
         with:
           name: ci-evidence-oci-${{ matrix.profile }}
-          path: ${{ runner.temp }}/ci-evidence/oci-${{ matrix.profile }}
+          path: ${{ runner.temp }}/ci-evidence/oci-${{ matrix.profile }}-receipt
           if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        continue-on-error: true
+        with:
+          name: ci-diagnostics-oci-${{ matrix.profile }}
+          path: |
+            ${{ runner.temp }}/ci-evidence/oci-${{ matrix.profile }}
+            !${{ runner.temp }}/ci-evidence/oci-${{ matrix.profile }}/report.json
+            !${{ runner.temp }}/ci-evidence/oci-${{ matrix.profile }}/**/browser-coverage.json
+            !${{ runner.temp }}/ci-evidence/oci-${{ matrix.profile }}/requirements-trace/strictdoc/trace-report.json
+            !${{ runner.temp }}/ci-evidence/oci-${{ matrix.profile }}/requirements-trace/strictdoc/html/**
+            !${{ runner.temp }}/ci-evidence/oci-${{ matrix.profile }}/requirements-trace/strictdoc/json/**
+          if-no-files-found: ignore
           retention-days: 7
   certification:
     name: certification

@@ -38,7 +38,7 @@ jobs:
           xcodebuild -version | grep -E '^Xcode 27\.'
           xcrun --sdk iphonesimulator --show-sdk-version | grep -E '^27(\.|$)'
           swift --version
-      - uses: ./.github/actions/generate-swift-api
+      - uses: $/.github/actions/generate-swift-api
       - name: Test state model
         if: ${{ matrix.lane == 'state-model' }}
         working-directory: ios/CodexiaEditor
@@ -152,7 +152,7 @@ jobs:
           with open(environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               print("variant=" + ("configured" if origin else "unconfigured-proof"), file=out)
           PY
-      - uses: ./.github/actions/generate-swift-api
+      - uses: $/.github/actions/generate-swift-api
       - name: Archive native app for iPhone
         env:
           API_ORIGIN: ${{ inputs.api_origin }}
