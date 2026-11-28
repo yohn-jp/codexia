@@ -2,27 +2,55 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 )
 
 func TestDifferentCommitWithSameDeploymentContractAllowsFork(t *testing.T) {
+	const specification = "docs/deployment/CODEXIACTL.sdoc"
+	const legacySpecification = "docs/deployment/CODEXIACTL.md"
+	canonicalDocs := []string{
+		specification,
+		"docs/deployment/ANSIBLE-AUTH-RUNTIME.sdoc",
+		"docs/deployment/ANSIBLE-BASE-RUNTIME.sdoc",
+		"docs/deployment/ANSIBLE-BASE-SECRETS.sdoc",
+		"docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc",
+		"docs/deployment/BACKUP-CONSOLE-OPERATIONS.sdoc",
+		"docs/deployment/ACCESS-POLICY-MIGRATION.sdoc",
+	}
 	officialSHA := strings.Repeat("a", 40)
 	forkSHA := strings.Repeat("b", 40)
 	contractBlob := strings.Repeat("c", 40)
+	legacySpecificationSHA := strings.Repeat("e", 40)
+	controlDriftSHA := strings.Repeat("f", 40)
 	forkChangedPath := "scripts/deployment/preflight/run.mjs"
 	officialPath := "/repos/yohn-jp/codexia/git/trees/" + officialSHA
-	forkPath := "/repos/Fork-Org/codexia/git/trees/" + forkSHA
-	drift := false
+	forkTreePrefix := "/repos/Fork-Org/codexia/git/trees/"
+	driftedDocs := make(map[string]string)
+	for i, path := range canonicalDocs {
+		driftedDocs[fmt.Sprintf("%040x", i+1)] = path
+	}
 	g := newTestGitHubFixture(t, func(w http.ResponseWriter, r *http.Request) {
-		isFork := r.URL.Path == forkPath
-		if !isFork && r.URL.Path != officialPath {
-			t.Errorf("contract fetched from unexpected exact source: %s", r.URL.Path)
+		controlBlob := contractBlob
+		ref := strings.TrimPrefix(r.URL.Path, forkTreePrefix)
+		driftedDoc := driftedDocs[ref]
+		switch r.URL.Path {
+		case officialPath, forkTreePrefix + forkSHA, forkTreePrefix + legacySpecificationSHA:
+		case forkTreePrefix + controlDriftSHA:
+			controlBlob = forkSHA
+		default:
+			if driftedDoc == "" {
+				t.Errorf("contract fetched from unexpected exact source: %s", r.URL.Path)
+				http.NotFound(w, r)
+				return
+			}
 		}
-		entries := make([]map[string]any, 0, len(releaseContractPaths)+2)
+		entries := make([]map[string]any, 0, len(releaseContractPaths)+len(canonicalDocs)+2)
 		for _, path := range releaseContractPaths {
-			if path == "deploy/production.json" {
+			if path == "deploy/production.json" || path == legacySpecification || slices.Contains(canonicalDocs, path) {
 				continue
 			}
 			if strings.HasSuffix(path, "/") {
@@ -30,9 +58,15 @@ func TestDifferentCommitWithSameDeploymentContractAllowsFork(t *testing.T) {
 			}
 			entries = append(entries, map[string]any{"path": path, "mode": "100644", "type": "blob", "sha": contractBlob})
 		}
-		controlBlob := contractBlob
-		if isFork && drift {
-			controlBlob = forkSHA
+		for _, path := range canonicalDocs {
+			blob := contractBlob
+			if path == specification && ref == legacySpecificationSHA {
+				path = legacySpecification
+			}
+			if path == driftedDoc {
+				blob = forkSHA
+			}
+			entries = append(entries, map[string]any{"path": path, "mode": "100644", "type": "blob", "sha": blob})
 		}
 		entries = append(entries,
 			map[string]any{"path": forkChangedPath, "mode": "100644", "type": "blob", "sha": controlBlob},
@@ -51,8 +85,21 @@ func TestDifferentCommitWithSameDeploymentContractAllowsFork(t *testing.T) {
 	if err := requireCompatibleContract(official, fork); err != nil {
 		t.Fatal(err)
 	}
-	drift = true
-	fork, err = contractTree(ctx, g.client, "Fork-Org", "codexia", forkSHA)
+	for ref, changedPath := range driftedDocs {
+		t.Run(changedPath, func(t *testing.T) {
+			fork, err := contractTree(ctx, g.client, "Fork-Org", "codexia", ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := requireCompatibleContract(official, fork); err == nil || !strings.Contains(err.Error(), changedPath) {
+				t.Fatalf("incompatible deployment document accepted: %v", err)
+			}
+		})
+	}
+	if _, err := contractTree(ctx, g.client, "Fork-Org", "codexia", legacySpecificationSHA); err == nil || !strings.Contains(err.Error(), specification) {
+		t.Fatalf("tree without the SDoc specification accepted: %v", err)
+	}
+	fork, err = contractTree(ctx, g.client, "Fork-Org", "codexia", controlDriftSHA)
 	if err != nil {
 		t.Fatal(err)
 	}

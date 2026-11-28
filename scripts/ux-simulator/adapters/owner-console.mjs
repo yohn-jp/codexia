@@ -1,4 +1,4 @@
-import { control, gap, records, sourceAt, sourceRef, transition } from './owner-source.mjs';
+import { catalogLocation, control, gap, records, sourceAt, sourceRef, transition } from './owner-source.mjs';
 
 const entry = 'app/src/console/ConsoleEntry.tsx';
 const setup = 'app/src/console/ConsoleSetup.tsx';
@@ -9,7 +9,6 @@ const identity = 'app/src/settings/IdentityManagementPanel.tsx';
 const identityView = 'app/src/settings/OwnerIdentityPanel.tsx';
 const session = 'app/src/console/console-session.ts';
 const consentClient = 'app/src/settings/owner-security-client.ts';
-const catalog = 'docs/design/SCREEN-CONTROL-CATALOG.md';
 const setupRefreshHandler = `onClick={() => {
                 void run(async () => {
                   await refresh();
@@ -136,7 +135,6 @@ export function projectConsole(source) {
     ['CON-33.A', backup, '保全履歴', "href={backupQuery(href, 'history', { run: run.runId, cursor })}", 'link'],
     ['CON-34.A', backup, '復旧の証拠', 'useBackupRead(backupConsoleClient.recovery)', 'status'],
   ];
-  const setupAuthor = sourceAt(source, catalog, '| CON-01 |');
   const screens = records(
     screen(source, routes, 'CON-00', entry, /\bif\s*\(\s*route\s*===\s*(['"])home\1\s*\)/u, [
       { id: 'console-navigation', role: 'navigation', label: '管理コンソール', source: sourceRef(sourceAt(source, entry, '<nav aria-label="管理コンソール">')) },
@@ -221,13 +219,13 @@ export function projectConsole(source) {
   const gaps = records(
     ...['CON-00', 'CON-01', 'CON-02', 'CON-03', 'CON-10', 'CON-11', 'CON-20', 'CON-21', ...backupRoutes.map(([id]) => id)]
       .filter((id) => !screens.some((item) => item.id === id))
-      .map((id) => gap({ id, platform: 'console', status: 'unextracted', reason: 'The canonical route or source view for ' + id + ' could not be located; no implementation behavior is inferred.', location: sourceAt(source, catalog, '| ' + id + ' |') })),
-    gap({ id: 'CON-20.A', platform: 'console', reason: 'OIDC registration, validation, owner-link and activation controls are not implemented in the current owner view.', location: sourceAt(source, catalog, '| CON-20.A |') }),
-    gap({ id: 'CON-21.A', platform: 'console', reason: 'The current view lists stored consent only; grant revocation control is not implemented.', location: sourceAt(source, catalog, '| CON-21.A |') }),
+      .map((id) => gap({ id, platform: 'console', status: 'unextracted', reason: 'The canonical route or source view for ' + id + ' could not be located; no implementation behavior is inferred.', location: catalogLocation(source, id) })),
+    gap({ id: 'CON-20.A', platform: 'console', reason: 'OIDC registration, validation, owner-link and activation controls are not implemented in the current owner view.', location: catalogLocation(source, 'CON-20.A') }),
+    gap({ id: 'CON-21.A', platform: 'console', reason: 'The current view lists stored consent only; grant revocation control is not implemented.', location: catalogLocation(source, 'CON-21.A') }),
     ...backupControlDefinitions.filter(([id]) => !controls.some(item => item.id === id))
       .map(([id]) => gap({ id, platform: 'console', status: 'unextracted',
         reason: 'The backup view or control binding for ' + id + ' could not be located.',
-        location: sourceAt(source, catalog, '| ' + id + ' |') })),
+        location: catalogLocation(source, id) })),
   );
   return { screens, controls, transitions, gaps };
 }

@@ -10,7 +10,7 @@ test('CodeQL and Trivy accept only owned analyzable inputs on exact PR deltas', 
   for (const [files, codeql, trivy] of [
     [['ios/CodexiaApp/Sources/CodexiaApp.swift', 'ios/CodexiaEditor/Package.swift'], false, true],
     [['.github/workflows/ios-api.yml', 'ios/CodexiaTransport/Sources/CodexiaAPI/Client.swift'], false, true],
-    [['docs/authoring.md'], false, false],
+    [['docs/authoring.sdoc'], false, false],
     [['packages/core/src/operation-records.test.ts'], true, false],
     [['modules/mcp/src/context-manifest.test.ts'], true, false],
     [['app/src/workspace/persistence.test.ts'], true, false],

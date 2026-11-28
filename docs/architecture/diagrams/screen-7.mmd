@@ -1,0 +1,10 @@
+flowchart TD
+    ENTRY["WRT-01から読む"] --> GUARD{"原稿遷移を保護?"}
+    GUARD -->|いいえ| EDIT["元の編集へ"]
+    GUARD -->|はい| PAGE["同じRevisionを読む"]
+    PAGE -->|縦書/横書/組版| STYLE["表示のみ再構成"]
+    STYLE --> PAGE
+    PAGE -->|ページ切替| PAGE
+    PAGE -->|知識リンク| REF["根拠参照 / 復帰位置記録"]
+    REF --> PAGE
+    PAGE -->|編集へ戻る| EDIT

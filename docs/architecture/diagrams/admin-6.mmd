@@ -1,0 +1,18 @@
+flowchart TD
+    HOME["/console 管理トップ"] --> STATUS["CON-30 /console/backups<br/>設定・保全状態"]
+    STATUS --> CFG["CON-31 /console/backups/destination<br/>接続先・write-only資格情報"]
+    CFG --> DRAFT["Draftを保存"]
+    DRAFT --> PROBE["CON-32 /console/backups/verification<br/>S3接続検証要求"]
+    PROBE -->|FAILED / BLOCKED| CFG
+    PROBE -->|PASSED 同一revision| CONFIRM["再認証・対象/影響を確認"]
+    CONFIRM --> ACTIVE{"有効化の実行結果を再取得"}
+    ACTIVE -->|PENDING / UNKNOWN| ACTIVE
+    ACTIVE -->|ACTIVE| STATUS
+    ACTIVE -->|REJECTED / CONFLICT| CFG
+    STATUS --> HIST["CON-33 /console/backups/history<br/>run/remote receipt"]
+    HIST --> RECOVERY["CON-34 /console/backups/recovery<br/>独立復旧の証拠と運用導線"]
+    RECOVERY -->|本番復元要求| BLOCK["Webでは禁止<br/>保護された運用プレーンを参照"]
+    STATUS -->|明示確認| REQUEST["手動バックアップを要求<br/>202 = 受付のみ"]
+    REQUEST -->|実行中・接続断| HIST
+    HIST --> STATUS
+    STATUS --> HOME

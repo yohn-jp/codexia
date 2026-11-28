@@ -19,7 +19,7 @@ import {
 } from './contract.mjs';
 import { THREAGILE_IMAGE } from './constants.mjs';
 export const THREAT_MODEL_PATH = 'docs/architecture/threagile/model.yaml';
-export const THREAT_MODEL_DOC_PATH = 'docs/architecture/THREAT-MODEL.md';
+export const THREAT_MODEL_DOC_PATH = 'docs/architecture/THREAT-MODEL.sdoc';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const LIKEC4_BIN = join(ROOT, 'scripts/architecture/node_modules/.bin/likec4');
 const DOCKER_TIMEOUT = 120_000;
@@ -102,7 +102,7 @@ export async function verifyArchitecture(evidenceDirectory, options = {}) {
 
   const modelFile = join(root, LIKEC4_SOURCE_PATH);
   const threatModelFile = join(root, THREAT_MODEL_PATH);
-  const designFile = join(root, 'docs/architecture/SYSTEM-DESIGN.md');
+  const designFile = join(root, 'docs/architecture/SYSTEM-DESIGN.sdoc');
   const threatDocFile = join(root, THREAT_MODEL_DOC_PATH);
   const toolLockFile = join(root, 'scripts/architecture/package-lock.json');
   const modelSource = await readFile(modelFile, 'utf8');
@@ -212,7 +212,7 @@ export async function verifyArchitecture(evidenceDirectory, options = {}) {
       LIKEC4_SOURCE_PATH,
       THREAT_MODEL_PATH,
       THREAT_MODEL_DOC_PATH,
-      'docs/architecture/SYSTEM-DESIGN.md',
+      'docs/architecture/SYSTEM-DESIGN.sdoc',
       'scripts/architecture/package-lock.json',
     ];
     const report = {

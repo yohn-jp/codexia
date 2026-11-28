@@ -1,0 +1,16 @@
+flowchart TD
+    OPEN["目次・構成panel"] --> TREE["階層を表示 / 検索 / 展開"]
+    TREE -->|選択| GUARD{"IME/Draft離脱を保護?"}
+    GUARD -->|はい| OPEN_DOC["同じ作品の対象documentを読む"]
+    GUARD -->|いいえ| BLOCK["元の原稿に留まり理由を表示"]
+    OPEN_DOC -->|認可OK| WRITE["WRT-01本文"]
+    OPEN_DOC -->|対象が消失| TREE
+    TREE -->|作成| CREATE["親/種類/名前と冪等ID"]
+    TREE -->|改名/移動/並替| CHANGE["expectedVersionと循環検査"]
+    TREE -->|削除| CONFIRM["対象と履歴保持を確認"]
+    CONFIRM --> CHANGE
+    CREATE --> RESULT{"DB receiptと階層は一致?"}
+    CHANGE --> RESULT
+    RESULT -->|はい| TREE
+    RESULT -->|stale/拒否/不明| RECHECK["再取得 / 元の階層を保持"]
+    RECHECK --> TREE

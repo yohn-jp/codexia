@@ -1,0 +1,121 @@
+[DOCUMENT]
+MID: e05e7a4f81e6f88ad5cfa8e363dbfe90
+TITLE: Better Auth runtime provisioning
+UID: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: b942199ec2093f8781017bf00a00ca44
+STATEMENT: >>>
+> Owner setup supports a same-origin browser enrollment through the setup-only Fastify runtime. An operator must validate the VM and Cloudflare boundary before handing off credentials. The existing SSH enrollment path remains available during the transition. Design authority is [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, Initial deployment] and [LINK: DOC-DESIGN-ADMIN-SCREEN-FLOW, Owner security].
+
+The [LINK: DOC-DESIGN-ADMIN-SCREEN-FLOW, owner security screen flow] defines owner-visible credential and session management; the [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, initial deployment flow] owns staged enrollment and its approval gates.
+
+`codexia_stage=auth-runtime` is an explicitly approved stage before standalone API activation. Set `codexia_auth_runtime_approved: true` after reviewing the private control-node inputs. The stage verifies the canonical PostgreSQL container. On a pristine database, set `codexia_database_initialization_approved: true` and `codexia_auth_bootstrap_image` to the reviewed immutable Full digest. Rootless Podman pulls this exact digest if it is missing. The canonical initializer applies the application schema first under the shared host lock. The stage then provisions the restricted `codexia_auth_runtime` role, the separate `codexia_auth` schema and protected secrets. The isolated enrollment launcher applies the Better Auth migrations. The public API remains stopped until protected deployment.
+
+The role is restricted to login without superuser, role-creation, database-creation, replication, or RLS-bypass attributes. It has no membership in or grants to other roles, and the stage checks effective access to existing non-system schemas, tables, and sequences. The schema is owned by `codexia_auth_runtime`; the role gets no access to Core or public application tables. PostgreSQL's built-in `PUBLIC` defaults are left unchanged, so the stage does not revoke public schema usage or database temporary-object privileges from other roles. Runtime migrations must be run separately as this role after the schema has been provisioned.
+
+For standalone file-based provisioning, supply `codexia_auth_database_url_file`, `codexia_auth_secret_file`, and `codexia_oauth_introspection_client_secret_file` as regular control-node files owned by the invoking identity and mode `0400` or `0600`. Supply the OIDC issuer, client ID, and `codexia_oidc_client_secret_file` together when retaining upstream OIDC; omit all three for Passkey-only authentication. The URL must identify `codexia_auth_runtime` on `codexia-db:5432/codexia`, with no query or fragment. Use the same secret bytes for subsequent applies. The stage never rotates or replaces an existing Podman secret; it refuses mismatches. An initial partial secret set can be resumed only while the auth schema does not yet exist. Once a schema exists, every declared secret must exist and match before the stage continues.
+
+Secret bytes are read with `no_log`, passed through standard input, and stored as rootless Podman secrets. The private `~/.config/codexia-auth/runtime.env` contains only nonsecret configuration. The stage leaves the active API and its credentials running. PostgreSQL backups include schemas and rows. PostgreSQL roles and Podman secrets require separate recovery, so escrow the protected values through the approved external secret authority.
+<<<
+
+[[SECTION]]
+MID: 3f2b9856d94c83ce34f6f3a6f7aac70a
+UID: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME-first-owner-through-the-browser
+TITLE: First owner through the browser
+
+[TEXT]
+MID: a4c1ebf90318bab84b6e7acb5aea889f
+STATEMENT: >>>
+Protected R4 reads the public origin, Web and iOS client IDs, introspection ID and Desktop callback from the [production configuration](https://github.com/yohn-jp/codexia/blob/main/deploy/production.json). It generates the confidential introspection secret on the VM for a fresh installation. R5 checks the certified Web callback and browser origin before opening registration. The native callback is `jp.yohn.codexia:/oauth2redirect`.
+
+Before setting `codexia_owner_setup_edge_approved: true`, verify the Access protections for `/console/setup`, `/api/auth/codexia/setup/*`, and the Better Auth registration options and verification paths. The browser and the Tunnel route must use the same production HTTPS origin and RP ID. Validate the edge rate controls and keep the API container port unpublished. The static route and its API requests must both pass Access for the intended browser. The normal Full frontend on `codexia-frontend` serves `/console/setup`; do not create a dedicated setup Worker or change UI routes for enrollment. These settings do not modify Cloudflare.
+
+Use [LINK: DOC-DEPLOYMENT-PRODUCTION-BOOTSTRAP, Protected production Bootstrap] to stage a fresh installation and then approve owner setup. Configure the intended owner's verified public recipient in `CODEXIA_OWNER_SETUP_AGE_RECIPIENT`. Bootstrap records the approved installation against the repository name and immutable repository and owner IDs, PostgreSQL cluster, logical database and certified Full image before initializing the pristine application schema. It stages the restricted Auth schema and setup configuration. The subsequent owner setup operation issues one 24-hour key and starts the setup-only API and Tunnel. PostgreSQL stores only the key's digest. Ansible receives only the operation result. The host stores the encrypted envelope at `~/.local/state/codexia-deploy/owner-setup.age`, mode `0600`.
+
+Use the protected operator channel to give that envelope to the intended owner. The recipient decrypts it in a private session and pastes the key into the browser form at the included `/console/setup` URL. Paste the key into the form only. Confirm that disabled business and OAuth paths fail closed before handing over the envelope. The browser displays the enrolled and OAuth client readiness states. A replay, expired grant, restored owner database or a repeat bootstrap never creates another owner.
+
+On the VM, the rootless service operator can inspect nonsecret setup state and its grant ID. If the key is lost, expired, or committed without a complete encrypted handoff, an independent operator approval authorizes replacing that exact prior ID. A pending handoff marker or missing envelope stops setup resumption while the grant remains unconsumed. The replacement operation writes the encrypted envelope and invalidates the previous grant. An older encrypted envelope can lack the recipient and grant binding. Start from a fresh reviewed R5 plan and run the current protected Owner setup operation to stage the current operator and observer. An unbound envelope stops that run at the binding check. After staging, use the independently approved exact-ID replacement below with the intended recipient.
+
+
+For the independent VM-side commands, set `CODEXIA_TARGET_REPOSITORY`, `CODEXIA_TARGET_REPOSITORY_ID` and `CODEXIA_TARGET_OWNER_ID` in the service operator's environment from the approved R5 plan and GitHub repository identity. Set `CODEXIA_IMAGE_REPOSITORY` to the reviewed `ghcr.io/<lowercase-owner>/codexia-backend` namespace. The launchers also check the certified immutable Full digest.
+```sh
+~/.local/bin/codexia-owner-setup --inspect <reviewed-full-image-digest>
+~/.local/bin/codexia-owner-setup --replace-explicitly-approved <reviewed-full-image-digest> <previous-grant-id> <owner-age-recipient>
+```
+
+After the owner registers a Passkey, run protected Bootstrap mode `prepare-activation`. It uses the existing `--prepare-activation` operator command to verify the enrolled owner and approved clients, stop the setup-only API and Tunnel, and derive the normal runtime owner subject from PostgreSQL. A retry after the settings were written verifies the same owner and clients against the live database before marking the clean slot ready. The protected fresh R6 deployment checks compatibility, the confirmed installation intent, and separate approvals. Existing-data recovery requires independent preservation before activation. Retain the same already-published normal frontend and canonical routes. Clear the temporary enrollment approval after preparation.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 6f64a8d6997d79ac25a2cbb092d540ac
+UID: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME-legacy-initial-owner-and-oauth-client-registration
+TITLE: Legacy initial owner and OAuth client registration
+
+[TEXT]
+MID: 5202e2dacb0b0536ad258ba3ed109fde
+STATEMENT: >>>
+Initial owner registration runs on the clean target before the first API activation. Both first-owner launchers hold the deployment lock and verify the absence of an API container, unit and deployment records. Existing owners who have lost a device use [LINK: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME-existing-owner-device-loss-recovery, device-loss recovery].
+
+For declarative staging, set `codexia_auth_enrollment_files_dir` to an absolute private directory on the control node containing `bootstrap.env`, `tls.crt`, and `tls.key` with mode 0400 or 0600 and ownership by the invoking user. Ansible installs these files as the service user while `codexia_auth_registration_pending` is true and removes the VM copies when that setting becomes false. Open an SSH session as the bootstrap administrator using the VM's pinned host key and the local forwarding option `-L 127.0.0.1:8443:127.0.0.1:8443`. In that session, enter the service environment before invoking any launcher:
+
+```sh
+runtime_dir="/run/user/$(id -u codexia)"
+sudo -Hu codexia env XDG_RUNTIME_DIR="$runtime_dir" DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" bash -c 'cd "$HOME" && exec bash'
+```
+
+For a Passkey-first installation, set `codexia_auth_registration_pending: true`, omit `codexia_oauth_owner_subject`, and provide `codexia_auth_passkey_bootstrap_owner_id`, `codexia_auth_passkey_bootstrap_owner_email`, and `codexia_auth_passkey_bootstrap_owner_name`. Omit all three OIDC settings for a Passkey-only installation. The setup hostname must be a strict subdomain of the staged production authentication hostname (for example, `bootstrap.api.example.test` for `api.example.test`); the browser uses the production hostname as the stable WebAuthn RP ID while the ceremony origin remains the exact isolated setup origin. After `auth-runtime` succeeds, use the operator session and service shell above to run `~/.local/bin/codexia-grant-passkey-owner --apply <reviewed-full-image-digest>`. Capture the one-time grant from that terminal output; it expires after ten minutes and is stored only as a digest. With the SSH forward open, run `~/.local/bin/codexia-register-auth --apply <reviewed-full-image-digest>`. Open `https://<bootstrap-host>:8443/passkey` in a trusted browser, enter the grant, and create the owner Passkey. Continue to register the reviewed OAuth clients. The result provides the stable owner ID and client identifiers. Close the launcher and SSH forward, then rerun `auth-runtime` with registration no longer pending, the returned owner ID as `codexia_oauth_owner_subject`, and the three passkey-bootstrap variables omitted. Only then follow the separately approved protected push activation.
+
+For an OIDC-first installation, configure all three OIDC settings, omit the Passkey bootstrap variables and provide the immutable owner subject in `bootstrap.env`.
+
+1. For the optional OIDC path, choose the production API origin and its exact Desktop Web HTTPS redirect URI. Do not add a `/mobile/` Web redirect; native iOS uses the separately provisioned public client and the exact `jp.yohn.codexia:/oauth2redirect` callback owned by `ios/CodexiaTransport/Sources/CodexiaTransport/OAuthConfiguration.swift` and `packages/api/src/setup-oauth-clients.ts`. Generate three distinct client IDs and a high-entropy introspection secret of at least 32 characters. Keep the secret in the protected `codexia_oauth_introspection_client_secret_file`. Set `codexia_auth_runtime_approved: true` and `codexia_auth_registration_pending: true`. Omit `codexia_oauth_owner_subject` on this first pass. Existing deployed client registrations must be inventoried and reviewed separately; do not revoke a client based only on callback URI.
+2. Choose a dedicated bootstrap hostname distinct from the production API host. Register `https://<bootstrap-host>:8443/api/auth/callback/workspace-oidc` with the configured IdP client. Protect the registration listener with the pinned SSH management connection. On the operator workstation, resolve the dedicated hostname to `127.0.0.1` and use a TLS certificate for that hostname trusted by the operator browser. Store the certificate and private key as `tls.crt` and `tls.key` under `/home/codexia/.config/codexia-auth`. Store the following reviewed values in `bootstrap.env` in that directory. Use mode `0600` for all three files and ownership by `codexia`.
+
+   ```dotenv
+   CODEXIA_AUTH_BOOTSTRAP_ORIGIN=https://<bootstrap-host>:8443
+   CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT=<immutable-IdP-subject>
+   CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS=https://<production-host>/desktop
+   ```
+
+   Obtain the exact IdP subject from the approved identity authority. The bootstrap uses the issuer configured by `auth-runtime` and compares the issuer and subject on the verified ID token. The native redirect is `jp.yohn.codexia:/oauth2redirect`.
+3. With the operator SSH forward open, use the service shell above to run `~/.local/bin/codexia-register-auth --apply <reviewed-full-image-digest>`. Use the immutable Full image identified by the verified release certificate from the protected publication. The launcher fetches the specified digest if necessary. The candidate image runs the existing migration against the isolated auth schema and serves the TLS registration page for at most 15 minutes. Keep the temporary origin off the application Tunnel. In the operator browser, open the bootstrap origin, select the sign-in button, follow the link to the configured IdP, then register the approved clients. The result contains the internal Better Auth owner ID and three public client identifiers. Repeating the operation with identical inputs verifies existing records and returns the same identifiers.
+4. Stop the launcher and close the SSH forward. Remove the temporary callback from the IdP and remove `bootstrap.env` and the temporary TLS files from the host. Preserve the production IdP callback `https://<production-host>/api/auth/callback/workspace-oidc`. Rerun `auth-runtime` with the same secret files and client IDs, `codexia_auth_registration_pending: false`, and the returned internal `codexia_oauth_owner_subject`. Follow the [LINK: DOC-DEPLOYMENT-PUSH-DEPLOYMENT-first-application-activation, protected push activation], with both first-install approvals. On the isolated test host, verify discovery and an owner-authorized `/api/session` through the deployed instance. Production provider and VM acceptance are tracked in [#168](https://github.com/yohn-jp/codexia/issues/168).
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 13e29989163f492a7f83fc99085734ee
+UID: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME-standalone-mcp-oauth-configuration
+TITLE: Standalone MCP OAuth configuration
+
+[TEXT]
+MID: 670f2498a80963ea1cb04bd1df6ad2c6
+STATEMENT: >>>
+After owner enrollment, configure `codexia_oauth_mcp_client_ids` and `codexia_oauth_mcp_project_assignments` together for separately approved, registered MCP clients. The IDs are comma-separated. The assignments map each client to a nonempty list of existing PostgreSQL project UUIDs. Owner and introspection clients have distinct IDs. The stage writes both settings to the private runtime snapshot. The API verifies registered clients and existing project assignments at startup. Leave both settings omitted to keep MCP OAuth clients disabled.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 8c99165b5a5abea76349f1fa068ead7e
+UID: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME-existing-owner-device-loss-recovery
+TITLE: Existing owner device-loss recovery
+
+[TEXT]
+MID: 9fdd56ad10555bbf86f336ade0506aac
+STATEMENT: >>>
+Recovery applies only to the exact `CODEXIA_OAUTH_OWNER_SUBJECT` already staged for a healthy Better Auth deployment. Prepare private `bootstrap.env`, `tls.crt`, and `tls.key` files owned by `codexia`, with `bootstrap.env` containing only the dedicated `CODEXIA_AUTH_BOOTSTRAP_ORIGIN=https://<bootstrap-host>:8443`. The setup hostname must be a strict subdomain of the staged production authentication hostname, so the replacement credential remains valid on the production Passkey RP. Open the pinned operator SSH connection and use the service shell described above to run `~/.local/bin/codexia-grant-passkey-recovery --apply <reviewed-full-image-digest>`. This explicit transaction revokes every owner session and every stored OAuth access and refresh grant, including `offline_access`, then prints one ten-minute grant stored by digest. The transaction also writes a durable `codexia_auth.passkey_recovery_audit` record with the owner ID, timestamp, revocation counts, and grant expiry; the one-use grant is never included in that record. The launcher writes the same sanitized event to the system journal under `codexia-passkey-recovery`, without logging the grant. A second grant cannot be issued until the active grant expires.
+
+With the operator SSH forward open, run `~/.local/bin/codexia-recover-passkey --apply <reviewed-full-image-digest>`. Open the dedicated HTTPS setup page, enter the one-time grant, and register a replacement Passkey for the existing owner ID. Close the launcher and SSH forward and remove the temporary bootstrap and TLS files. Sign in again through the normal production login page. Recovery does not create an author, delete or migrate manuscript data, change the configured owner ID, or register OAuth clients.
+<<<
+
+[[/SECTION]]

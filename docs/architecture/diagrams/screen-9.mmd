@@ -1,0 +1,16 @@
+flowchart TD
+    ENTRY["保存・復旧状態へ"] --> TYPE{"保護とDB状態を分類"}
+    TYPE -->|Local書込失敗| LOCAL["下書き再保護 / quota対応"]
+    TYPE -->|Revision競合| CONFLICT["自分のDraftとDB最新版を比較"]
+    TYPE -->|API応答不明| RECEIPT["同一operation IDでreceipt照合"]
+    TYPE -->|認証失効| LOGIN["原稿を保護して再認証"]
+    LOCAL --> CHECK{"回復できた?"}
+    RECEIPT --> CHECK
+    LOGIN --> CHECK
+    CONFLICT --> CHOICE{"作者が明示的に判断"}
+    CHOICE -->|Draftを保って再保存| REBASE["versionを確認して新save"]
+    CHOICE -->|Draftを破棄| CONFIRM["最終確認"]
+    CONFIRM --> EDIT["最新版の編集へ"]
+    REBASE --> CHECK
+    CHECK -->|はい| EDIT
+    CHECK -->|不明/未完| ENTRY

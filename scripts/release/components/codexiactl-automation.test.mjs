@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
@@ -65,6 +65,28 @@ test('release inputs and latest version are deterministic', () => {
   assert.ok(!isCodexiactlReleaseInput('packages/api/src/server.ts'));
   assert.equal(latestCodexiactlTag([tag(3), tag(12), tag(9)]).patch, 12);
   assert.equal(latestCodexiactlTag([]), null);
+});
+
+test('every exact-match contract input selects a new official CLI release', async () => {
+  const paths = JSON.parse(readFileSync(new URL('../../../cmd/codexiactl/release-contract.json', import.meta.url), 'utf8'));
+  assert.ok(paths.includes('cmd/codexiactl/release-contract.json'));
+  assert.ok(paths.includes('docs/deployment/ANSIBLE-BASE-RUNTIME.sdoc'));
+  assert.ok(!paths.includes('deploy/production.json'));
+  assert.equal(new Set(paths).size, paths.length);
+  for (const path of paths) {
+    const file = path.endsWith('/') ? path + 'fixture' : path;
+    const f = fixture({ tags: [tag(2)], published: completeRelease('v0.1.2'), files: [file] });
+    assert.ok(isCodexiactlReleaseInput(file), file);
+    assert.equal(await releaseVerifiedCodexiactl(f.params), 'dispatched', file);
+    assert.deepEqual(f.calls.filter(c => c[0] === 'create'), [['create', 'refs/tags/v0.1.3', sha]], file);
+    assert.deepEqual(f.calls.filter(c => c[0] === 'dispatch'), [['dispatch', 'v0.1.3']], file);
+  }
+  for (const file of ['deploy/production.json', 'docs/authoring.sdoc', 'docs/deployment/ANSIBLE-BASE-RUNTIME.sdoc.bak',
+    'scripts/deployment-other/example.mjs', 'packages/api/src/server.ts']) {
+    const f = fixture({ tags: [tag(2)], published: completeRelease('v0.1.2'), files: [file] });
+    assert.equal(await releaseVerifiedCodexiactl(f.params), 'unaffected', file);
+    assert.ok(!f.calls.some(c => c[0] === 'create' || c[0] === 'dispatch'), file);
+  }
 });
 
 test('release binary admission requires the publisher variable to match the official public App', t => {

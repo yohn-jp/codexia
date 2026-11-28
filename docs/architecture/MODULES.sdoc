@@ -1,0 +1,95 @@
+[DOCUMENT]
+MID: a6747da85863eb81d0235b47c370b9c6
+TITLE: Trusted modules
+UID: DOC-ARCHITECTURE-MODULES
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 566a2f4b71eee3a7c8c04450312b7e14
+STATEMENT: >>>
+The module runtime composes trusted built-in packages around public Core contracts. JavaScript imports and child processes are not security sandboxes for untrusted third-party code. External plugin isolation belongs to the [LINK: DOC-ARCHITECTURE-PLUGIN-PLATFORM, Plugin platform proposal].
+<<<
+
+[[SECTION]]
+MID: 026ad297281248b0afc7628ffc91f2ee
+UID: DOC-ARCHITECTURE-MODULES-feature-ownership
+TITLE: Feature ownership
+
+[TEXT]
+MID: 54f64885661644abce3af6ecef81ef97
+STATEMENT: >>>
+| Module | Responsibility |
+| --- | --- |
+| Story | Narrative entities, hierarchy, bible, plots and related proposals |
+| NLP | Tokenization, linguistic analysis and shared tokenizer capabilities |
+| Diagnostics | Snapshot-bound narrative diagnostics and reviewable findings |
+| Semantic | Embeddings, vector indexes, retrieval and reranking |
+| Speaker | Speaker attribution, correction and statistical training |
+| Assistant | Local deterministic review, source-bound context/prompt previews, review proposals; no provider runtime |
+| Publishing | Export, publication metadata and controlled reader sharing |
+| MCP | Stdio and Streamable HTTP tool adapters using shared actions |
+| Search | Lightweight lexical index, terminology registry and editor links |
+
+Profiles select packages at build time. The Core profile excludes optional modules. Full includes the module composition. Module resolution rejects unknown modules, cycles, incompatible contracts and missing required capabilities.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 16f266e44bd2284d0fff3c1367437f49
+UID: DOC-ARCHITECTURE-MODULES-lifecycle
+TITLE: Lifecycle
+
+[TEXT]
+MID: 7e9c6d1f55d135d947d0cc3e13944094
+STATEMENT: >>>
+| State | Contract |
+| --- | --- |
+| Absent | Package, native dependencies, browser assets and weights are outside the profile closure |
+| Disabled | No initialization, routes/actions, jobs, timers, workers or model load |
+| Enabled-idle | Declared surfaces are available; heavy resources remain unallocated |
+| Active | Bounded jobs/resources are allocated on demand and support cancellation and drain |
+
+A manifest declares identity/version, contract compatibility, dependencies/capabilities, browser/server/worker entries, state schemas and resource metadata. Metadata resolution does not import module code. Enabling an absent module requires a compatible image; the runtime does not install packages.
+
+A shared capability provider owns compatible model/tokenizer allocations. Consumers lease that provider instead of independently loading the same model. Releasing the last consumer drains the relevant process. Worker jobs carry snapshot and job identities, deadlines and bounded input/output. Workers return results or proposals; they have no independent manuscript write authority and do not inherit unnecessary credentials.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: a652e3b35d379c4cac8f4e62ed0a19fb
+UID: DOC-ARCHITECTURE-MODULES-data-and-permission-boundaries
+TITLE: Data and permission boundaries
+
+[TEXT]
+MID: 9609bfc699f0a323ee39f31d007daac8
+STATEMENT: >>>
+Author corrections, settings, dictionaries, accepted small-model parameters and publication metadata use author-approved Core operations and PostgreSQL module records. Indexes, vectors, downloaded weights and generated diagnostics are derived caches. Disabling a module releases its resources without deleting author data. Re-enabling can rebuild derivatives from the selected snapshot.
+
+Browser contributions use host-owned panels and permitted snapshot-scoped actions. Closing or switching a contribution aborts requests and disposes mounts. Route, UI and MCP availability derive from the same resolved capabilities; disabled features cannot retain hidden write endpoints.
+
+[LINK: DOC-ARCHITECTURE-MCP-FIRST, MCP-first creative architecture] governs AI integration. Internal Assistant provider SDKs, external model transmission, model selection, generation queues and streaming endpoints are retired. Keep local assistant computations without reviving an outbound API. External generative inference belongs to authenticated MCP clients; keep the server-side action admission boundary. Do not extend provider execution. Shared context, editing, MCP and review must work without Assistant or a configured provider; the target MCP surface must not trigger internal generative inference.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 41e80ddd24a72fe93bf5271b77c1fa65
+UID: DOC-ARCHITECTURE-MODULES-one-time-source-compatibility-and-normal-work-import
+TITLE: One-time source compatibility and normal work import
+
+[TEXT]
+MID: 24eeff528f577ed65d574d8723e6ded7
+STATEMENT: >>>
+The ordinary end-user workflow is the PostgreSQL [LINK: DOC-AUTHORING-PORTABLE, portable work archive]. For one-time conversion of old Git/Scriptorium data, follow the [LINK: DOC-ARCHITECTURE-CORE-portable-work-import-export-and-backup, archived converter procedure]. Review the converter's proposed changes and any unresolved records before exporting the work. Human corrections remain authoritative even when stored beside disposable vectors.
+
+Keep source copies for pending local commits, provisional browser work and records that the portable archive does not carry. Keep secrets and private source data out of public fixtures.
+<<<
+
+[[/SECTION]]

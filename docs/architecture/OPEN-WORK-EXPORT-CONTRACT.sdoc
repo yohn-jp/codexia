@@ -1,0 +1,150 @@
+[DOCUMENT]
+MID: f0360dd684d17c984a196dd7a988c3f6
+TITLE: 離脱用作品エクスポートの実装契約
+UID: DOC-ARCHITECTURE-OPEN-WORK-EXPORT-CONTRACT
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 0ce30cadf9af31591c8574ef8932ae5c
+STATEMENT: >>>
+**種別は採用済みの規範的設計。Windows と非本番 Cloudflare Tunnel での受入計測を要する。**
+本書は [LINK: DOC-AUTHORING-PORTABLE-離脱用オープンエクスポート契約req-data-006, REQ-DATA-006 の正本] に従い、離脱用 ZIP の HTTP、認可、画面、資源管理を定める。
+対象読者は API、Desktop Web、永続化の担当者。
+現行の JSON 交換と import の変更、ZIP import、運用バックアップは対象外とする。
+<<<
+
+[[SECTION]]
+MID: 5751feee1ad325f737275aefb8738588
+UID: DOC-ARCHITECTURE-OPEN-WORK-EXPORT-CONTRACT-http-と認可
+TITLE: HTTP と認可
+
+[TEXT]
+MID: a450f2408fa472faa5164137e1b8d051
+STATEMENT: >>>
+[LINK: DOC-ARCHITECTURE-API-CONTRACT, HTTP 契約]および [TypeSpec](https://github.com/yohn-jp/codexia/blob/main/packages/http-contract/src/routes-persistence.tsp)に、次の読み取り操作を追加する。
+
+| 項目 | 契約 |
+| --- | --- |
+| メソッドとパス | `GET /api/v1/persistence/projects/{projectId}/open-export` |
+| operation ID | `persistence_project_open_export_get` |
+| 入力 | 既存の `PersistenceId`。本文とクエリーは不要 |
+| 成功 | `200`、`application/zip` のバイナリ本文、`Content-Disposition: attachment`、確定済みの `Content-Length` |
+| エラー | `400` 入力不正、`401` 認証なしまたは失効、`403` principal 不適格、`404` 作品不存在または作品アクセス不可、`409` 必須の収録データに欠損、`413` 成果物上限超過、`503` 実行枠不足、スナップショット取得失敗または生成期限超過、`500` ZIP 生成の内部エラー。既存の `ApiError` を使う |
+| キャッシュと転送 | `Cache-Control: private, no-store, no-transform`。HTTP の追加圧縮を使わず、`Content-Length` は ZIP のバイト数を示す |
+| ファイル名 | `codexia-work-<projectId>.zip` |
+
+容量超過は `OPEN_WORK_EXPORT_LIMIT`、実行枠不足は `OPEN_WORK_EXPORT_BUSY`、生成期限超過は `OPEN_WORK_EXPORT_TIMEOUT` を返す。
+
+[LINK: DOC-ARCHITECTURE-ROUTE-AUTHORIZATION-CONTRACT, 経路認可]では `OWNER-API` とし、既存の作者認証、オリジン制限および対象作品の認可を再利用する。
+許可する資格は、既存の API audience、登録済み owner client、owner subject および `codexia:api` を検証した Better Auth の OAuth bearer とする。
+公開 reader、MCP 用の OAuth bearer および上流 IdP のトークンは拒否する。
+資源の割り当ては認可の後に行う。
+生成終了時にも応答を書き始める前に既存の認証および作品アクセスの判定を再利用し、失効や取り消しを検出した場合には ZIP を破棄する。
+
+実装時に有効な API epoch への追加操作として扱い、既存の archive と import のワイヤ契約を維持する。
+旧クライアントは既存操作を使用できる。
+同一 epoch で許容される後方互換の追加として、既存操作の削除、入出力の変更および認可境界の変更を含めない。 [LINK: DOC-ARCHITECTURE-API-CONTRACT-操作の追加変更廃止, API の追加手続き]
+Desktop Web が旧サーバーに接続し ZIP 操作が 404 を返した場合、その操作の取得不可を表示する。
+作品へのアクセス不可を含む 404 は同じ表示にし、作品の存在やサーバーの対応状況を推測させない。
+既存の API epoch 判定はそのまま使用し、ZIP 専用の能力判定は追加しない。
+OpenAPI 差分、新サーバーと旧クライアント、旧サーバーと新クライアントの両組み合わせを検証する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 6fced86b97d058cf1381e8ab824bbef6
+UID: DOC-ARCHITECTURE-OPEN-WORK-EXPORT-CONTRACT-画面
+TITLE: 画面
+
+[TEXT]
+MID: 0c9d786f3c9b74db9c2d4e46efc125e8
+STATEMENT: >>>
+Desktop Web の作品パネル [LINK: DOC-DESIGN-SCREEN-CONTROL-CATALOG, LIB-01.E] に「離脱用 ZIP をダウンロード」を追加する。
+既存の JSON 操作には交換用途を表示する。
+操作開始時に選択中の作品 ID を固定し、処理中は同じ操作の再起動を抑止し、キャンセルを提供する。
+キャンセルやパネル離脱ではクライアントの受信を中断する。
+不完全な応答、期限超過、容量超過、認証失効を画面に表示し、受信完了の状態へ遷移させない。
+容量超過では「上限を超えたため、離脱用 ZIP を作成できませんでした」と表示する。
+実行枠不足や依存先の一時障害では、作者が改めて実行できるようにする。
+`200` のメディア型が `application/zip` で、宣言された応答長が上限内のときに受信を続ける。
+受信量が宣言値を超えた時点で中断し、転送の正常終了時に実測値が宣言値と一致する場合にだけ保存用のファイルをブラウザーへ渡す。
+状態表示は「ZIP の受信完了」とし、ブラウザーによる保存先とファイル書き込みの成否はブラウザーが所有する。
+Native iOS の操作追加は凍結解除後に [LINK: DOC-ARCHITECTURE-IOS-SWIFTUI-ARCHITECTURE, Native 契約]で扱う。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 5c28e6bc13d9a326291a8ecafb84af0d
+UID: DOC-ARCHITECTURE-OPEN-WORK-EXPORT-CONTRACT-スナップショットと資源上限
+TITLE: スナップショットと資源上限
+
+[TEXT]
+MID: 6c1c32573929d47926a80da6cd420604
+STATEMENT: >>>
+既存の永続化 reader が保持する単一の PostgreSQL 読み取りスナップショットから、現行文書、保持された全 Revision、回復可能な論理削除文書、Knowledge、Evidence および許可された作者所有レコードを取得する。
+既存の読み取り境界と機密除外規約を用い、上限付き一覧しか持たないデータ種別には同じ reader 内で終端を確認できるページングを追加する。
+ページ間で順序キーが同値になる場合も、同じスナップショット内の安定した識別子で順序を確定する。
+収録データの全ページを終端まで読み、必要な本文、ID、参照とファイルの対応がそろってから ZIP を確定する。
+契約で認める未解決の Evidence は原記録と状態を収録し、収録必須の本文が取得できない場合は `409` で生成を打ち切る。
+本文および構造化出力の UTF-8 バイト数と SHA-256 は実際に ZIP へ格納する内容から計算する。
+パスは作品データから得たタイトルの安全な表示部分に、衝突しない識別子を組み合わせる。
+manifest、README および同梱スキーマの公開配布先を作品ポータビリティの正本に記載する。
+
+| 制約 | 初期実装と検証の暫定値 |
+| --- | --- |
+| ZIP の最終サイズ | 128 MiB。ヘッダー、中央ディレクトリおよび終端レコードを含む |
+| 展開後のバイト数の合計 | 128 MiB。全エントリの内容を含む |
+| ZIP エントリ数 | 32,000。ディレクトリ、manifest、同梱文書を含む |
+| ZIP 形式 | UTF-8 の通常 ZIP。上限を従来の ZIP のサイズおよびエントリ数の範囲に収め、ZIP64 を要求しない |
+| 1 API プロセスの同時実行 | 1。待ち行列を持たず、枠が空くまでは `503` を返す |
+| 認可後の実行枠取得から応答ヘッダー送信まで | 60 秒。スナップショット取得、ZIP 確定、スナップショット解放および再認可を含む |
+| 応答送信開始から完了まで | 300 秒 |
+
+容量の三つの上限を独立に数え、いずれかを超える時点で生成を打ち切って `413` を返す。
+manifest の除外区分は正本が定める機密除外などに限り、容量や期限に合わせて本文、Revision、その他の収録データを省くことは認めない。
+ヘッダー送信前の生成期限超過は `503` とし、送信開始後の期限超過や切断では転送を中断する。
+
+サーバーはバックプレッシャーのある書き込みで非公開の一時領域に ZIP を生成する。
+DB の読み取りと構造化 JSON の生成にはバイト数を制限したページまたはチャンクを使い、manifest の作業領域を含めて一時資源の使用量を計測する。
+一時ファイルの総量は実行枠ごとに有界とし、生成期限やキャンセルを DB クエリーとファイル書き込みへ伝える。
+完成後にスナップショットを解放し、再認可を通過してから、確定した一時ファイルを送信する。
+応答完了、失敗、キャンセルまたは切断時は、DB 接続、ストリームおよび一時ファイルを片付けた後で実行枠を解放する。
+再起動後はそのプロセスが所有する残留ファイルを新規受付前に回収する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 2a15575c563c5d0919e3ccda67257779
+UID: DOC-ARCHITECTURE-OPEN-WORK-EXPORT-CONTRACT-上限値を確定する計測
+TITLE: 上限値を確定する計測
+
+[TEXT]
+MID: b685e53db15e7b83da532aaef644cecf
+STATEMENT: >>>
+表の暫定値で、Windows 標準展開と Desktop Web の全応答受信を検証する。
+作品の規模は、承認されたサイズと件数の集計、または合成データの規模想定を明記し、原稿や作者の識別子を計測用に持ち出さない。
+製品と同じ構成の PostgreSQL にその規模を再現し、DB、API、Edge、Windows の Chromium の構成と使用した作品規模を記録する。 [LINK: DOC-PERFORMANCE-PERFORMANCE-MEASUREMENT, 性能計測]
+
+| 計測対象 | 採用の判断に使う結果 |
+| --- | --- |
+| 代表規模と上限付近 | 8 MiB を超える作品と複数ページの履歴を含める。長文と圧縮しにくい本文、多数の小さい Revision、回復可能な論理削除文書、Knowledge と Evidence の密度を個別に変える。三つの容量上限ごとに直前、等値、直後を検証する |
+| 生成と配信の時間 | Cloudflare Tunnel を通る非本番の同等な経路で、通常時と実行枠が埋まる条件の応答開始時刻、DB スナップショットの時間、送信時間を測る。生成期限超過時に Edge が切断する前に `503` が届くこと、および最大サイズの送信が Edge とアプリケーションの期限に収まる回線条件を確認する。128 MiB を 300 秒で送るには本文だけで平均約 0.43 MiB/s が必要になる。 [LINK: DOC-ARCHITECTURE-EXTERNAL-INTERFACES, 外部インターフェース契約] |
+| 資源と他操作への影響 | DB の取得行数とバイト数、接続占有時間、API とブラウザーのピーク RSS、一時領域の最大使用量、操作の同時実行中の原稿保存の時間を測る。API プロセス数を含む配備の資源予算に収まることを確認する |
+| 成果物の完全性 | 同時編集を含む成功例で、Windows 標準展開、独立した ZIP 展開器および JSON Schema 検証器を使う。収録種別ごとに、展開した全件の件数、ID、参照、UTF-8 本文バイト列およびハッシュを同一スナップショットの期待値と照合する |
+| 異常からの復帰 | 容量超過、同時要求、DB 停止、生成または送信の期限超過、キャンセル、途中切断、再認可の失敗を発生させる。ZIP の受信完了が表示されず、DB 接続と一時資源を解放した後に、次の要求を処理できることを確認する |
+
+暫定値は、代表規模と境界条件を実測してから確定する。
+必要な離脱データの取得を現行方式の上限によって恒久的に妨げてはならない。
+代表規模の作品を完全な ZIP として返せることを実測し、含まれるデータ、Windows での展開互換性、Edge と配備の資源予算を守る範囲で上限を調整する。
+これらの条件を同時に満たせない場合は、条件を満たせなかった作品規模と資源制約を記録し、完全な取得経路を確定するまで受入を保留する。
+<<<
+
+[[/SECTION]]

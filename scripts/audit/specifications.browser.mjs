@@ -64,6 +64,7 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
   const root = path.resolve(process.env.CODEXIA_PAGES_SITE ?? '');
   assert.ok(process.env.CODEXIA_PAGES_SITE, 'CODEXIA_PAGES_SITE is required');
   const registry = JSON.parse(await readFile(path.join(root, 'site-manifest.json'), 'utf8'));
+  assert.deepEqual(registry.designSearch, { version: '1.6.0', sourceSha: registry.sourceSha });
   assert.equal(registry.likec4?.sourceSha, registry.sourceSha);
   assert.equal(registry.likec4?.publication, 'public');
   assert.equal(registry.routes.find(item => item.route === '/requirements/html/')?.generationStatus, 'ready');
@@ -71,7 +72,9 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
   const types = {'.html':'text/html', '.css':'text/css', '.js':'text/javascript', '.mjs':'text/javascript', '.json':'application/json', '.svg':'image/svg+xml'};
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
-    const name = url.pathname.endsWith('/') ? `${url.pathname}index.html` : url.pathname;
+    if (!url.pathname.startsWith('/codexia/')) { res.writeHead(404).end(); return; }
+    const pathname = url.pathname.slice('/codexia'.length);
+    const name = pathname.endsWith('/') ? `${pathname}index.html` : pathname;
     const file = path.resolve(root, `.${decodeURIComponent(name)}`);
     if (!file.startsWith(root + path.sep)) { res.writeHead(403).end(); return; }
     try { res.setHeader('Content-Type', types[path.extname(file)] ?? 'application/octet-stream'); res.end(await readFile(file)); }
@@ -83,14 +86,32 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     browser = await chromium.launch({headless:true, executablePath:process.env.CODEXIA_E2E_CHROMIUM});
     const page = await browser.newPage();
     await page.route('https://api.github.com/**', route => route.abort());
-    const base = `http://127.0.0.1:${server.address().port}`;
+    const base = `http://127.0.0.1:${server.address().port}/codexia`;
     assert.equal((await page.goto(`${base}/`)).status(), 200);
+    const search = page.getByPlaceholder('設計文書を検索');
+    for (const [query, document] of [
+      ['資格情報', 'INITIAL-DEPLOYMENT-FLOW.sdoc.html'],
+      ['REQ-OPS-004', 'REQUIREMENT-REGISTER.sdoc.html'],
+      ['codexiactl', 'CODEXIACTL.sdoc.html'],
+    ]) {
+      await search.fill(query);
+      const result = page.locator(`#design-search .pagefind-ui__result-link[href$="/${document}"]`).first();
+      await result.waitFor({ state: 'visible' });
+      const target = await result.getAttribute('href');
+      assert.equal((await page.request.get(new URL(target, base).toString())).status(), 200);
+    }
+    await search.fill('REQ-OPS-004');
+    await page.locator('#design-search .pagefind-ui__result-link[href$="/REQUIREMENT-REGISTER.sdoc.html"]').first().click();
+    await page.locator('[data-uid="REQ-OPS-004"]').waitFor({state:'attached'});
+    assert.equal((await page.goto(`${base}/requirements/html/requirements/REQUIREMENT-REGISTER.md-TRACE.html#REQ-CORE-001`)).status(), 200);
+    await page.waitForURL(/REQUIREMENT-REGISTER\.sdoc-TRACE\.html#REQ-CORE-001/u);
+    await page.goto(`${base}/`);
     const link = page.locator('a[href="requirements/html/"]').first();
     assert.equal(await link.count(), 1);
     await link.click();
     assert.match(page.url(), /\/requirements\/html\/$/u);
     await page.getByRole('link', { name: 'Development Portal', exact: true }).waitFor({ state: 'visible' });
-    assert.equal((await page.goto(`${base}/requirements/html/requirements/REQUIREMENT-REGISTER.md-TRACE.html`)).status(), 200);
+    assert.equal((await page.goto(`${base}/requirements/html/docs/requirements/REQUIREMENT-REGISTER.sdoc-TRACE.html`)).status(), 200);
     assert.match(await page.locator('body').innerText(), /REQ-CORE-001/u);
     assert.equal((await page.goto(`${base}/`)).status(), 200);
     const traceLink = page.locator('a[href="requirements/traceability/"]').first();

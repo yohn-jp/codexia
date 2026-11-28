@@ -20,7 +20,7 @@ all:
         codexia_secrets_approved: false
         codexia_base_approved: false
         # After ACTIVE, enable the VM backup runtime in the protected base operation.
-        # Supply the public age recipient and allowed policy per deploy/backup/CONSOLE.md.
+        # Supply the public age recipient and allowed policy per docs/deployment/BACKUP-CONSOLE-OPERATIONS.sdoc.
         codexia_backup_runtime_approved: false
         codexia_database_initialization_approved: false
         # On a fresh database, supply the reviewed immutable Full digest and

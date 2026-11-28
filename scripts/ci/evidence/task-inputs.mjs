@@ -11,72 +11,51 @@ import { isTraceTestSource } from '../../strictdoc/test-source-path.mjs';
 const sha256 = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const testFilePattern = /\.(?:test|spec)\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx)$/u;
 const dependencyPath = file => /(?:^|\/)(?:package\.json|package-lock\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.node-version|\.nvmrc)$/u.test(file) ||
-  file === 'tests/conformance/http/requirements.lock.txt';
+  file === 'tests/conformance/http/requirements.lock.txt' || file === 'scripts/strictdoc/requirements.lock.txt';
 export const ROOT_VERIFICATION_DOCUMENTS = Object.freeze([
-  'docs/deployment/BACKUP.md',
-  'docs/deployment/IAC.md',
-  'docs/deployment/IOS-CLIENT.md',
-  'docs/deployment/PUSH-DEPLOYMENT.md',
-  'docs/deployment/PUSH-HOST-CI.md',
-  'docs/deployment/README.md',
+  'docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc',
+  'docs/deployment/BACKUP.sdoc',
+  'docs/deployment/IAC.sdoc',
+  'docs/deployment/IOS-CLIENT.sdoc',
+  'docs/deployment/PUSH-DEPLOYMENT.sdoc',
+  'docs/deployment/PUSH-HOST-CI.sdoc',
+  'docs/deployment/DEPLOYMENT-REFERENCE.sdoc',
 ]);
-export const REQUIREMENTS_TRACE_DOCUMENTS = Object.freeze([
-  'docs/architecture/API-AUTHN-AUTHZ.md',
-  'docs/architecture/API-CONTRACT.md',
-  'docs/architecture/BACKUP-CONSOLE-CONTRACT.md',
-  'docs/architecture/CORE.md',
-  'docs/architecture/DATA-MODEL.md',
-  'docs/architecture/DOCUMENTATION-AUTHORITY.md',
-  'docs/architecture/EXTERNAL-INTERFACES.md',
-  'docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md',
-  'docs/architecture/MCP-FIRST.md',
-  'docs/architecture/MCP-OAUTH.md',
-  'docs/architecture/MCP-V2-MIGRATION.md',
-  'docs/architecture/MODULES.md',
-  'docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.md',
-  'docs/architecture/SPECIFICATION-IMPLEMENTATION-CONTRACT.md',
-  'docs/architecture/SPECIFICATION-TOOLCHAIN.md',
-  'docs/architecture/SYSTEM-DESIGN.md',
-  'docs/deployment/BACKUP.md',
-  'docs/deployment/INITIAL-DEPLOYMENT-FLOW.md',
-  'docs/deployment/README.md',
-  'docs/deployment/UPDATE-FLOW.md',
-  'docs/design/ADMIN-SCREEN-FLOW.md',
-  'docs/design/INTERACTION-CONTRACT.md',
-  'docs/design/SCREEN-CONTROL-CATALOG.md',
-  'docs/design/SCREEN-STATE-ATLAS.md',
-  'docs/design/UX-CONTRACT.md',
-  'docs/design/XSTATE-STATE-MACHINE-CONTRACT.md',
-  'docs/performance/README.md',
-  'docs/requirements/README.md',
-  'docs/requirements/REQUIREMENT-REGISTER.md',
-  'docs/requirements/STRICTDOC-GRAMMAR.gra.md',
-  'docs/requirements/STRICTDOC-TRACEABILITY.md',
-  'docs/verification/CI-CD.md',
-  'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
-  'docs/verification/TEST-ARCHITECTURE-OPTIMIZATION.md',
-  'docs/verification/TRACEABILITY-REGISTER.md',
+export const CODEXIACTL_SPECIFICATIONS = Object.freeze([
+  'docs/deployment/CODEXIACTL.sdoc',
+  'docs/deployment/ANSIBLE-AUTH-RUNTIME.sdoc',
+  'docs/deployment/ANSIBLE-BASE-RUNTIME.sdoc',
+  'docs/deployment/ANSIBLE-BASE-SECRETS.sdoc',
+  'docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc',
+  'docs/deployment/BACKUP-CONSOLE-OPERATIONS.sdoc',
+  'docs/deployment/ACCESS-POLICY-MIGRATION.sdoc',
 ]);
+const codexiactlSpecifications = new Set(CODEXIACTL_SPECIFICATIONS);
+export function isNativeSpecification(file) {
+  return /^docs\/.*\.(?:sdoc|sgra)$/u.test(file) || /^docs\/.*\/_assets\//u.test(file);
+}
+export function isDesignProjectionModel(file) {
+  return /^docs\/(?:architecture\/diagrams\/[^/]+\.(?:mmd|json)|design\/screen-(?:catalog|journeys)\.json)$/u.test(file);
+}
 export const UX_PROJECTION_DOCUMENTS = Object.freeze([
-  'docs/design/UX-SIMULATOR-CONTRACT.md',
-  'docs/design/SCREEN-CONTROL-CATALOG.md',
-  'docs/design/SCREEN-STATE-ATLAS.md',
-  'docs/design/USER-SCREEN-FLOW.md',
-  'docs/design/ADMIN-SCREEN-FLOW.md',
-  'docs/design/UX-CONTRACT.md',
-  'docs/design/INTERACTION-CONTRACT.md',
-  'docs/design/XSTATE-STATE-MACHINE-CONTRACT.md',
-  'docs/design/MOBILE-AUTHORING.md',
+  'docs/design/UX-SIMULATOR-CONTRACT.sdoc',
+  'docs/design/SCREEN-CONTROL-CATALOG.sdoc',
+  'docs/design/SCREEN-STATE-ATLAS.sdoc',
+  'docs/design/USER-SCREEN-FLOW.sdoc',
+  'docs/design/ADMIN-SCREEN-FLOW.sdoc',
+  'docs/design/UX-CONTRACT.sdoc',
+  'docs/design/INTERACTION-CONTRACT.sdoc',
+  'docs/design/XSTATE-STATE-MACHINE-CONTRACT.sdoc',
+  'docs/design/MOBILE-AUTHORING.sdoc',
   'app/DESIGN.md',
-  'docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md',
-  'docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.md',
-  'docs/architecture/API-CONTRACT.md',
-  'docs/architecture/BACKUP-CONSOLE-CONTRACT.md',
-  'docs/requirements/REQUIREMENT-REGISTER.md',
-  'docs/requirements/STRICTDOC-TRACEABILITY.md',
+  'docs/architecture/IOS-SWIFTUI-ARCHITECTURE.sdoc',
+  'docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc',
+  'docs/architecture/API-CONTRACT.sdoc',
+  'docs/architecture/BACKUP-CONSOLE-CONTRACT.sdoc',
+  'docs/requirements/REQUIREMENT-REGISTER.sdoc',
+  'docs/requirements/STRICTDOC-TRACEABILITY.sdoc',
 ]);
 const rootVerificationDocuments = new Set(ROOT_VERIFICATION_DOCUMENTS);
-const requirementsTraceDocuments = new Set(REQUIREMENTS_TRACE_DOCUMENTS);
 const uxProjectionDocuments = new Set(UX_PROJECTION_DOCUMENTS);
 export const REQUIREMENTS_TRACE_SURFACE_FILES = Object.freeze([
   '.github/workflows/backend-deployment-handoff.yml',
@@ -100,7 +79,7 @@ export const REQUIREMENTS_TRACE_SURFACE_FILES = Object.freeze([
 const requirementsTraceSurfaces = new Set(REQUIREMENTS_TRACE_SURFACE_FILES);
 
 export function isRequirementsTraceInput(file) {
-  return requirementsTraceDocuments.has(file) || requirementsTraceSurfaces.has(file) || isFastifyGenerationInput(file) ||
+  return isNativeSpecification(file) || isDesignProjectionModel(file) || uxProjectionDocuments.has(file) || requirementsTraceSurfaces.has(file) || isFastifyGenerationInput(file) ||
     isTraceTestSource(file) ||
     (file.startsWith('ios/') && /\.swift$/u.test(file)) ||
     (file.startsWith('deploy/ansible/') && /\.ya?ml$/u.test(file)) ||
@@ -111,16 +90,17 @@ export function isRequirementsTraceInput(file) {
 export function isNonExecutableDocumentation(file) {
   if (rootVerificationDocuments.has(file)) return false;
   return file === 'AGENTS.md' || file === 'CONTRIBUTING.md' || file === 'LICENSE' ||
-    /^docs\/.*\.md$/u.test(file) || /^README(?:\.[a-z-]+)?\.md$/iu.test(file);
+    isNativeSpecification(file) || isDesignProjectionModel(file) || /^docs\/.*\.md$/u.test(file) || /^README(?:\.[a-z-]+)?\.md$/iu.test(file);
 }
 export function isTaskInputDocument(file, task) {
   if (!isNonExecutableDocumentation(file)) return true;
   if (Object.hasOwn(CONFORMANCE_TASKS, task) && (file === 'AGENTS.md' ||
-      file === 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md' ||
-      file === (task === 'http-conformance' ? 'docs/architecture/HTTP-PLATFORM-MIGRATION.md' : 'docs/architecture/MCP-V2-MIGRATION.md'))) return true;
-  if (task === 'requirements-trace' && requirementsTraceDocuments.has(file)) return true;
-  if (task === 'codexiactl-linux' && file === 'docs/deployment/CODEXIACTL.md') return true;
-  return task === 'unit-root' && uxProjectionDocuments.has(file);
+      file === 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.sdoc' ||
+      file === (task === 'http-conformance' ? 'docs/architecture/HTTP-PLATFORM-MIGRATION.sdoc' : 'docs/architecture/MCP-V2-MIGRATION.sdoc'))) return true;
+  if (task === 'requirements-trace' && isRequirementsTraceInput(file)) return true;
+  if (task === 'codexiactl-linux' && codexiactlSpecifications.has(file)) return true;
+  if (task === 'architecture-g5' && (file.startsWith('docs/architecture/') || isDesignProjectionModel(file))) return true;
+  return task === 'unit-root' && (uxProjectionDocuments.has(file) || isDesignProjectionModel(file));
 }
 const DB_CONTRACT_TOOLCHAIN = JSON.parse(readFileSync(new URL('../../../packages/persistence-postgres/tests/db-contract/toolchain.json', import.meta.url), 'utf8'));
 const POSTGRES_CI_IMAGE = DB_CONTRACT_TOOLCHAIN.postgresImage;
@@ -176,7 +156,7 @@ export function taskInvocation(task, executable = process.execPath) {
   if (task === 'requirements-trace') return {
     executable,
     arguments: ['scripts/strictdoc/verify.mjs'],
-    environmentKeys: ['CODEXIA_CI_REPORT_DIR', 'CODEXIA_CI_SOURCE_SHA', 'CODEXIA_CI_TASK', 'STRICTDOC_BIN'],
+    environmentKeys: ['CODEXIA_CI_REPORT_DIR', 'CODEXIA_CI_SOURCE_SHA', 'CODEXIA_CI_TASK', 'CODEXIA_STRICTDOC_PUBLIC', 'STRICTDOC_BIN'],
   };
   if (task.startsWith('unit-')) return { executable, arguments: ['scripts/ci/execution/workspace.mjs', 'unit', task.slice(5)], environmentKeys };
   if (task.startsWith('typecheck-')) return { executable, arguments: ['scripts/ci/execution/workspace.mjs', 'typecheck', task.slice(10)], environmentKeys };
@@ -203,6 +183,7 @@ function taskEnvironment(task, group, runtime) {
     LANG: 'runner-default', LC_ALL: 'runner-default' };
   if (task === 'requirements-trace') Object.assign(env, {
     CODEXIA_CI_TASK: task,
+    CODEXIA_STRICTDOC_PUBLIC: '1',
     STRICTDOC_VERSION: '0.32.1',
     PYTHON_VERSION: '3.12',
     PLAYWRIGHT_BROWSER: 'chromium',

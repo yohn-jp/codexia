@@ -1,0 +1,103 @@
+[
+  {
+    "id": "journey-100",
+    "label": "ENTRY/AUTH",
+    "summary": "起動→login→同意→Library、取消、失効、不正scope、DB不可と未認証",
+    "screens": [
+      "ENTRY-01",
+      "AUTH-01",
+      "AUTH-02"
+    ]
+  },
+  {
+    "id": "journey-101",
+    "label": "LIB/OUT",
+    "summary": "再開、作成、取込/書出、構成選択/変更/削除確認、対象不存在、戻る",
+    "screens": [
+      "LIB-01",
+      "OUT-01"
+    ]
+  },
+  {
+    "id": "journey-102",
+    "label": "WRT/READ/REC",
+    "summary": "原稿→保護→保存→receipt、追加入力、離脱guard、競合、応答不明→同一ID照合、quota失敗、Revision比較/復元、元のselection/scroll",
+    "screens": [
+      "WRT-01",
+      "READ-01",
+      "WRT-02",
+      "REC-01"
+    ]
+  },
+  {
+    "id": "journey-103",
+    "label": "KNO",
+    "summary": "候補/根拠→原稿→戻る、stale anchor、統合確認/競合。KNO-03未採用",
+    "screens": [
+      "KNO-01",
+      "KNO-02"
+    ]
+  },
+  {
+    "id": "journey-104",
+    "label": "REV/TOOL/JOB",
+    "summary": "閲覧→承認→適用、拒否、module無効/局所失敗、非同期不明、通知/閉じる",
+    "screens": [
+      "REV-01",
+      "REV-02",
+      "TOOL-01",
+      "JOB-01"
+    ]
+  },
+  {
+    "id": "journey-105",
+    "label": "DISPLAY/PREF",
+    "summary": "Workspace・組版・外観・設定、作業文脈、失効、native固有設定",
+    "screens": [
+      "DISPLAY-01",
+      "PREF-01"
+    ]
+  },
+  {
+    "id": "journey-106",
+    "label": "CON-00〜03",
+    "summary": "初回キー→本人登録→確定→公開待ち→login、取消/期限切れ/不明、既存owner/復旧時拒否、setup-only境界",
+    "screens": [
+      "CON-00",
+      "CON-01",
+      "CON-02",
+      "CON-03"
+    ]
+  },
+  {
+    "id": "journey-107",
+    "label": "CON-10/11/20/21",
+    "summary": "認証手段/セッション、fresh確認、OIDC検証/有効化、OAuth同意/失効、拒否",
+    "screens": [
+      "CON-10",
+      "CON-11",
+      "CON-20",
+      "CON-21"
+    ]
+  },
+  {
+    "id": "journey-108",
+    "label": "CON-30〜34",
+    "summary": "draft→probe→activate→run→保全receipt→独立復旧証拠、412/422、secret非表示、重複・不明、未確認",
+    "screens": [
+      "CON-30",
+      "CON-31",
+      "CON-32",
+      "CON-33",
+      "CON-34"
+    ]
+  },
+  {
+    "id": "journey-109",
+    "label": "PUB",
+    "summary": "公開読書、失効、不存在、private操作禁止、採用済みPublishing作者側操作",
+    "screens": [
+      "PUB-01"
+    ]
+  }
+]

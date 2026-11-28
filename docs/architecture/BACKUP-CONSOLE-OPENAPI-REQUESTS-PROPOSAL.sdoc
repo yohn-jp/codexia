@@ -1,0 +1,73 @@
+[DOCUMENT]
+MID: d5d50b1388c69d52d0f775b7e3c15dda
+TITLE: Backup Console の OpenAPI リクエスト条件の訂正
+UID: DOC-ARCHITECTURE-BACKUP-CONSOLE-OPENAPI-REQUESTS-PROPOSAL
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 189c74f44cb2bb0a1633ed93cb4a927f
+STATEMENT: >>>
+**種別は承認済みの API epoch 5 設計。** HTTP ワイヤ契約と Backup Console の所有者を対象とする。
+扱う変更は、公開 OpenAPI の JSON 本文と `Idempotency-Key` の訂正である。
+<<<
+
+[[SECTION]]
+MID: 2a965f35f4199e6f61d7e96e3e089a7a
+UID: DOC-ARCHITECTURE-BACKUP-CONSOLE-OPENAPI-REQUESTS-PROPOSAL-実際の受付条件
+TITLE: 実際の受付条件
+
+[TEXT]
+MID: 43aa1fc7dcc385716b5b9af290462b14
+STATEMENT: >>>
+Backup Console の4つの POST は、`Idempotency-Key` で保存済みの操作または実行を識別する。
+設定操作は対象 revision と検証済み probe に束縛され、手動バックアップは承認済みの維持管理時間帯と影響確認に束縛される。
+認可された所有者は、応答が途絶えても同じキーと入力で操作の受付を再確認できる。 [LINK: DOC-ARCHITECTURE-BACKUP-CONSOLE-CONTRACT, バックアップ管理契約] · [受付と検証](https://github.com/yohn-jp/codexia/blob/main/packages/api/src/backup-console-routes.ts) · [永続化と再実行](https://github.com/yohn-jp/codexia/blob/main/packages/api/src/backup-console-store.ts)
+
+| POST パス | Operation ID | 実装で必須の JSON 本文 | 現行 OpenAPI のキー必須指定 |
+| --- | --- | --- | --- |
+| `/api/console/backups/config/probes` | `backup_console_config_probes_post` | `revision` | 任意 |
+| `/api/console/backups/config/activate` | `backup_console_config_activate_post` | `revision`、`probeId`、`confirmed: true` | 任意 |
+| `/api/console/backups/config/disable` | `backup_console_config_disable_post` | `revision`、`confirmed: true` | 任意 |
+| `/api/console/backups/runs` | `backup_console_runs_post` | `maintenanceWindowId`、`confirmed: true` | 必須 |
+
+`revision` は `1` から `2147483647` の整数で、`probeId` は UUID。
+`maintenanceWindowId` は英数字、`_`、`-` の1〜64文字。
+ランタイムは全4操作で同じ文字集合の16〜128文字を `Idempotency-Key` に要求し、本文に未知フィールドを含むリクエストを `422` で拒否する。
+現行の TypeSpec は本文を必須とするが、JSON オブジェクト内のフィールドとキーの文字集合や長さには制約を定義していない。 [TypeSpec 入力定義](https://github.com/yohn-jp/codexia/blob/main/packages/http-contract/src/routes-backup-console.tsp)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 020d3d97f5557db0f0008df498ccb224
+UID: DOC-ARCHITECTURE-BACKUP-CONSOLE-OPENAPI-REQUESTS-PROPOSAL-互換性の判定
+TITLE: 互換性の判定
+
+[TEXT]
+MID: 63558c56cbeefb33821cc38ada29caaf
+STATEMENT: >>>
+oasdiff の検出対象には、本文の必須プロパティの追加、任意だったキーの必須化、およびキーパターンの追加が含まれる。
+実行時の受付条件は維持するが、生成クライアントで必須となるプロパティが増える。
+実装前に初回本番導入前であることを確認し、基準 SHA と `ERR` の完全照合を行う。 [LINK: DOC-ARCHITECTURE-API-COMPATIBILITY-TRANSITION-PROPOSAL, API epoch 5 契約是正]
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 82ed724a969e66035b773b25b88deb31
+UID: DOC-ARCHITECTURE-BACKUP-CONSOLE-OPENAPI-REQUESTS-PROPOSAL-受入条件
+TITLE: 受入条件
+
+[TEXT]
+MID: 5a6684ef42e78acbcd93db2e7e463d66
+STATEMENT: >>>
+1. TypeSpec に表の 4 操作の本文とキーの条件を記述する。生成 OpenAPI の差分で、操作、本文のプロパティ、未知フィールドの拒否、キーの必須指定とパターンを照合する。
+2. 隔離 PostgreSQL を使う実 API で、正常な受付、必須フィールドやキーの欠落、不正形式、未知フィールド、同じキーでの再送と異なる入力での拒否を確認する。owner session、CSRF および再認証は採用済みの認可契約に従う。 [LINK: DOC-ARCHITECTURE-BACKUP-CONSOLE-CONTRACT, バックアップ管理契約]
+<<<
+
+[[/SECTION]]

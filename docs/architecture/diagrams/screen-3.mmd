@@ -1,0 +1,11 @@
+flowchart TD
+    OPEN["/oauth/consent"] --> LOAD["signed requestとclient/scopeを読み込む"]
+    LOAD --> VERIFY{"owner sessionと登録情報が適合?"}
+    VERIFY -->|不一致| DENY["許可disabled / 再認証へ"]
+    VERIFY -->|適合| REVIEW["client名・scope・期限を表示"]
+    REVIEW -->|許可| GRANT["API同意をserverへ提出"]
+    REVIEW -->|拒否| REFUSE["拒否をserverへ提出"]
+    GRANT --> RESULT{"検証済みredirectか"}
+    REFUSE --> RESULT
+    RESULT -->|はい| CALLBACK["登録済みcallbackへ"]
+    RESULT -->|いいえ| ERROR["元の要求を再確認 / 認証へ"]

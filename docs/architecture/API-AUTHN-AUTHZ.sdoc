@@ -1,0 +1,371 @@
+[DOCUMENT]
+MID: 85dd114dc6d8d8a9d9d5b65f3fd52642
+TITLE: API authentication and authorization
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 83e20335408a2233f3eb44a3f705807f
+STATEMENT: >>>
+**Path-by-path normative authorization:** [LINK: DOC-ARCHITECTURE-ROUTE-AUTHORIZATION-CONTRACT, Route authorization contract] owns the principal/HTTP method/edge/API resource matrix. User flows and button-level requirements are in [LINK: DOC-DESIGN-SCREEN-CONTROL-CATALOG, Screen control catalog]. These contracts specialize, rather than replace, Better Auth and PostgreSQL authorization invariants below.
+
+**Normative authentication contract.** The owner UI's entrypoints and current-vs-target states are defined by [LINK: DOC-DESIGN-ADMIN-SCREEN-FLOW, Admin screen flows]; external authentication interfaces conform to [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, System design]. Target requirements in this document are not claims of deployed acceptance.
+
+> This document describes standalone OAuth admission and the accepted Passkey-first requirements. Production rollout evidence is tracked separately.
+> This contract specializes [LINK: DOC-ARCHITECTURE-CORE, Core architecture] and [LINK: DOC-ARCHITECTURE-INTERNAL-BOUNDARIES, Internal boundaries]. Better Auth runs inside the Fastify API and supports Passkey sign-in with optional upstream OIDC federation. Cloudflare Access can protect static UI entry as described in [Deployment](https://github.com/yohn-jp/codexia/blob/main/docs/deployment/README.md). Better Auth issues the API credentials for authors and registered MCP clients.
+<<<
+
+[[SECTION]]
+MID: 0d5b46156b8b9cb3ebe192f4df48468c
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-decision-and-trust-boundaries
+TITLE: Decision and trust boundaries
+
+[TEXT]
+MID: 0e84261a3b3d803f8eec374dbda51316
+STATEMENT: >>>
+Codexia has one API authorization boundary regardless of client presentation. Desktop Web and installed SwiftUI native iOS clients obtain an **API-specific OAuth access token** from Codexia's embedded Better Auth OAuth Provider. Better Auth authenticates the human through a Passkey or, optionally, a configured upstream OIDC provider. The API authenticates the token, resolves a principal, and independently authorizes each operation and its target objects. It does not delegate data authorization to Cloudflare Access, the Tunnel, a UI bundle, an application signature, or a client-supplied project ID.
+
+| Component | Responsibility |
+| --- | --- |
+| Cloudflare Access on the static Workers UI | Optional **UI entry** restriction; not an API authorization grant |
+| Desktop Web | OAuth public client; obtain API access without bundling secrets |
+| Native SwiftUI iOS | Separate OAuth public client; system sign-in and Keychain protected refresh token |
+| Optional upstream OIDC provider | Alternative human sign-in; validated assertions are mapped to the existing Better Auth owner, never directly to API author grants |
+| Better Auth inside Fastify | Maintain Codexia sessions, OAuth clients/consent, authorization codes, refresh state, API JWT signing keys and OAuth metadata |
+| Cloudflare Edge/Tunnel | HTTPS routing and transport to the private API; not proof of application identity |
+| Codexia Fastify API admission | Token verification, trusted principal creation, authorization, origin/CSRF rules, request lifecycle, and error handling |
+| Persistence/Core | Canonical project-scoped data, revision and proposal enforcement; never accept an unverified client identity |
+
+The upstream OIDC issuer is **deploy-time configuration in the current implementation**. The accepted target allows the owner to stage an issuer within the operator's approved origins. Codexia activates the staged provider only after verification of the existing owner's identity and explicit approval. Better Auth is Codexia's downstream authorization server within the API process; it is not a separate IAM service. A self-hosted backend can change the upstream provider without changing the client protocol.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: cbb1dd17f290529f377a92f6f96ef6ad
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-protocol-and-credential-contract
+TITLE: Protocol and credential contract
+
+[TEXT]
+MID: 4ceffed1e643ea64438ea6f5f739dcdb
+STATEMENT: >>>
+- **OAuth 2.0 Authorization Code with PKCE (S256)** is required for browser and iOS clients using the Codexia OAuth provider. Better Auth establishes the user session by Passkey or optional upstream OIDC federation before the embedded authorization server completes the public-client grant. Register distinct downstream public clients and exact redirect URIs for Web and iOS. iOS invokes the system authentication session, not an embedded WebView login form.
+- Upstream OIDC establishes an authenticated Better Auth user. **An upstream ID token or access token is not a Codexia API bearer credential**. Only a downstream access token issued by Better Auth for the configured Codexia API audience may be presented in `Authorization: Bearer`.
+- The downstream API resource-server contract is signed JWT access tokens using RFC 9068, including `typ: at+jwt`. Better Auth's JWT plugin publishes signing keys; Fastify verifies signature, issuer, API audience, type, expiry, issue time, token ID, client ID, subject and required scope, then performs confidential online introspection so revoked sessions, refresh state, and exact individual token revocations are reflected.
+- When an upstream OIDC provider is enabled, Better Auth's maintained OIDC federation plugin performs Discovery, ID-token signature, issuer, audience, nonce and time validation. For owner-managed OIDC, the protected runtime defines the allowed HTTPS origins and the owner stages provider credentials under that boundary. Do not trust a client-selected issuer during sign-in, accept `alg=none`, or silently fall back when discovery, JWKS or introspection is unavailable.
+- Use a stable identity key such as **(`iss`, `sub`)**. E-mail addresses are display/verification attributes, not a secure or stable authorization primary key. In dedicated single-author mode, bind the accepted identity to the explicitly configured owner; a valid token for a different identity does **not** acquire owner rights.
+- Prefer short-lived access tokens; clients renew through the Codexia OAuth provider's refresh flow. Never publish refresh tokens in browser assets, logs, the IPA, a CI artifact or GitHub Secrets. Logout/revocation semantics must match the tested provider behavior; JWT signature validation alone cannot guarantee instant revocation.
+<<<
+
+[[SECTION]]
+MID: 7a2573a143db8a6b53146a5571a8715d
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-http-contract-ownership
+TITLE: HTTP contract ownership
+
+[TEXT]
+MID: a74ed1854c05e11d419b84ddcc218c74
+STATEMENT: >>>
+The [TypeSpec contract](https://github.com/yohn-jp/codexia/blob/main/packages/http-contract/src/main.tsp) defines Codexia-owned HTTP adapters and their credential requirements.
+Better Auth owns the OAuth, Passkey and session protocol schemas it implements.
+Its official OpenAPI generator is for isolated contract inspection.
+The development API reference publishes statically approved contract definitions and does not initiate sign-in, take credentials or call the installed API.
+
+The owner-session confirmation adapter is available only through the normal API.
+It requires the owner session cookie and an exact same-origin request.
+The setup-only listener admits only the operations needed for enrollment, including its separately guarded Better Auth Passkey routes.
+The [LINK: DOC-ARCHITECTURE-ROUTE-AUTHORIZATION-CONTRACT, route authorization contract] defines the applicable conditions in each mode.
+<<<
+
+[[/SECTION]]
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 0642174d11308809007f0822412b9ffe
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-api-authorization-including-bola
+TITLE: API authorization (including BOLA)
+
+[TEXT]
+MID: 02181368e7e6fd948fd2c3783a3a0431
+STATEMENT: >>>
+Authentication and OAuth scopes are **necessary but not sufficient** for resource access. Central admission resolves an authenticated principal with a trusted author/permission context, then checks the action and actual resource ownership/membership. Do not derive membership, project choice, author approval or permissions solely from `projectId`, a document path, an ID in a payload, `email`, or client-side UI state.
+
+For **every** API and module operation that references a project, document, hierarchy node, revision, proposal, approval, action, snapshot, attachment, Evidence item, job, inbox entry, recent-activity cursor or export:
+
+1. Resolve the caller's authenticated identity and allowed project/resource scope on the server.
+2. Check the requested operation's permission **and** membership/ownership of the exact target object, including nested parent relationships. Recheck identifiers in URL, query, body and linked objects; enumeration and bulk endpoints must filter server-side.
+3. Reject cross-project and cross-author references without exposing another user's data. A guessed UUID or a successful `GET /api/session` is not authorization.
+4. For mutations, preserve the existing PostgreSQL-scoped revision/version preconditions, idempotency identity and atomic write checks. A later change of permissions or object scope must not be bypassed by a previously prepared proposal or stale snapshot.
+5. Preserve restricted MCP/external-agent grants. An OAuth bearer for an **authenticated author** must be explicitly distinguished from the existing read/compute/propose-only MCP bearer. Neither a generic bearer, Cloudflare assertion, nor a provider scope string implicitly authorizes `approve`, `apply`, author-only jobs or manuscript modification.
+
+Authorization is enforced on the API boundary and again wherever a transaction must close a time-of-check/time-of-use window. It is not implemented as scattered controller-local `if (owner)` checks. A policy engine (Cerbos/OpenFGA) is not required for the current single-author domain; adopt one only if concrete project-sharing requirements justify it.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 02f27f25541ec97fa4825fd91c068e26
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-browser-ios-and-transport-constraints
+TITLE: Browser, iOS and transport constraints
+
+[TEXT]
+MID: d180454b6271e078ee40ef6f7bdd4127
+STATEMENT: >>>
+The two frontends use the **same API token validation and resource authorization contract**, not necessarily identical login UI or token storage.
+
+- Current production serves the static UI and `/api/*` from one Access-protected hostname. Moving to a separately addressable API requires an explicit Cloudflare routing/Access policy change; **the existing deployment does not already have a public Access-independent API**. Keep the origin and PostgreSQL private throughout the transition.
+- The Web UI remains Access-protected as a delivery policy. Its API sign-in is a distinct OAuth flow unless the selected identity provider supports SSO. Browser tokens must not be persisted in `localStorage` or IndexedDB. A same-origin BFF/HttpOnly session may be evaluated if browser token handling warrants it; do not invent a second authorization authority or distribute server client credentials to the browser.
+- Cross-origin browser fetches require a deliberately scoped CORS/preflight policy for the configured Web UI origin. Reject wildcard credentialed CORS, reflection of arbitrary origins and unauthorized writes. For cookie-authenticated routes retain CSRF/origin protections; for bearer-authenticated routes do not substitute an `Origin` check for token validation. Differentiate browser navigation, bearer, cookie and MCP credentials without ambiguous privilege promotion.
+- Tunnel and Cloudflare WAF/rate limits remain defense in depth. A sideloaded IPA is publicly inspectable and is **not** an authentication factor. No shared client secret or static API owner token is embedded.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 740e8ad39888ee696ea0addb768d495d
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-implementation-ownership-and-dependencies
+TITLE: Implementation ownership and dependencies
+
+[TEXT]
+MID: e205954632acc78590b83d03a9d33c55
+STATEMENT: >>>
+Fastify admission in `packages/api` owns the request lifecycle, failure semantics, and restricted MCP bearer path. Reuse project authorization, persistence preconditions and the proposal boundary.
+
+Use Better Auth, Generic OAuth and OAuth Provider maintained plugins for protocol, session, client, token and key management. Use the existing `jose` verifier for API JWT profile validation and the official OAuth introspection endpoint for online token status. Do not hand-write discovery, token issuance, signature verification or a second auth router. Reuse Fastify 5 and the existing API admission boundary.
+
+Better Auth admits the enrolled owner through registered author clients and admits MCP clients through their explicit project assignments and limited scopes. Verification and introspection outages fail closed.
+OWNER-API and MCP-CLIENT use the same resource-server verifier and read the space-delimited `scope` claim issued by Better Auth. Each applies its own subject, client, and scope policy before online introspection. The API distinguishes invalid and inactive credentials from unavailable signing keys and unavailable token status.
+<<<
+
+[[SECTION]]
+MID: 3847234485d20a519de7c5962bf0be60
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-better-auth-standalone-owner-bearer
+TITLE: Better Auth standalone owner bearer
+
+[TEXT]
+MID: c73877561ad08c9825f86d34a10b4867
+STATEMENT: >>>
+Standalone Better Auth requires `CODEXIA_AUTH_DATABASE_URL`, `CODEXIA_PUBLIC_ORIGIN`, `CODEXIA_AUTH_SECRET`, `CODEXIA_OAUTH_INTROSPECTION_CLIENT_ID`, `CODEXIA_OAUTH_INTROSPECTION_CLIENT_SECRET`, `CODEXIA_OAUTH_OWNER_SUBJECT`, and comma-separated `CODEXIA_OAUTH_OWNER_CLIENT_IDS`. The `CODEXIA_OIDC_ISSUER`, `CODEXIA_OIDC_CLIENT_ID`, and `CODEXIA_OIDC_CLIENT_SECRET` settings are configured together only for upstream OIDC. `CODEXIA_API_AUDIENCE` defaults to `<public-origin>/api`. Standalone MCP uses a separate client allowlist and explicit project assignments for the limited `mcp:read`, `mcp:compute`, and `mcp:propose` scopes. Supply secrets through protected runtime configuration. The owner subject is the stable Better Auth user ID associated with the enrolled Passkey or linked OIDC account. The API requires both verified owner identity and a registered public client for author scope.
+
+The Better Auth Generic OAuth callback route was observed in the signed-out PostgreSQL fixture as `<CODEXIA_PUBLIC_ORIGIN>/api/auth/callback/workspace-oidc`. Register that exact HTTPS URI with the selected upstream provider for the configured public origin. The fixture used loopback HTTP only for its local synthetic IdP/API and does not qualify a production provider configuration. Google Workspace is the first intended provider; no Google client secret, provider-side callback registration, or real Google login has been configured or tested in this change.
+
+Auth tables live in the independent PostgreSQL `codexia_auth` schema. The runtime database role `codexia_auth_runtime` must own that schema and have only required database/schema privileges; it must have no `CREATE` on `public` or data privileges on non-auth tables/sequences. Production startup does not run migrations or create roles/schemas. After schema and grants are provisioned, run `pnpm --filter @codexia/api build`, then `pnpm --filter @codexia/api migrate:auth -- --apply` with protected `CODEXIA_*` runtime configuration loaded. The command verifies `current_schema() = codexia_auth`, `current_user = codexia_auth_runtime`, and schema ownership; calls Better Auth's official `$context.runMigrations()`; creates the app-owned `oauth_jwt_access_token_revocation` table in the same schema; and never creates a role or schema.
+
+Revocation rows expire logically at their token's `expires_at`; API admission and introspection ignore them as soon as that timestamp passes. The revoke handler also removes expired rows when it records a new revocation, but idle deployments cannot rely on that opportunistic cleanup. Build the API and run `pnpm --filter @codexia/api prune:auth-revocations -- --apply` during the existing low-traffic database maintenance window, with the protected auth database configuration loaded; weekly is the recommended operator cadence. The command requires the `codexia_auth_runtime` role to own and use `codexia_auth`, and deletes only expired rows. It does not require stopping API admission. No scheduler invokes it: if an installation is idle or an operator skips maintenance, expired rows remain stored but have no authorization effect until the next explicit prune.
+
+Register distinct Web and iOS public OAuth clients with exact redirect URIs, `token_endpoint_auth_method: none`, Authorization Code + Refresh Token, PKCE required, the exact API resource, and only intended scopes. Register a separate confidential client for API introspection; keep its secret only in protected runtime storage. Set `CODEXIA_OAUTH_OWNER_SUBJECT` to the established internal owner user ID and `CODEXIA_OAUTH_OWNER_CLIENT_IDS` to the registered public client IDs. Unauthenticated dynamic registration is disabled.
+
+Clients send `Authorization: Bearer <access_token>` to the existing `/api/*` API origin. The token grants the configured internal owner the existing author operations, and `/api/session` reports `{ authenticated: true, authorScope: "owner" }`. Other subjects and missing scopes receive 403. Invalid access tokens and unknown keys receive 401. Unavailable verification or introspection dependencies fail closed. PostgreSQL project and object transaction guards apply to every author operation.
+
+Better Auth 1.7.26's official revocation endpoint returns `unsupported_token_type` for a signed JWT access token. The existing endpoint is wrapped by a narrow RFC 7009 adapter: after Better Auth authenticates a registered client, the adapter verifies the RFC 9068 token and records its exact issuer, `jti`, client, subject, session, and expiry in PostgreSQL. It returns the RFC success response for unknown and foreign-client tokens without recording them. API admission and OAuth introspection consult that exact record, so revoking one access token does not revoke sibling tokens or the login session; expiry and logout retain their existing behavior. The PostgreSQL fixture verifies token denial, inactive introspection, client ownership, harmless unknown responses, expired-token handling, and no sibling-token effect.
+
+Cross-origin Web requests are optional and use `CODEXIA_CORS_ALLOWED_ORIGINS`, a comma-separated list of exact normalized HTTPS origins. An unset list permits same-origin requests only. The API returns `Access-Control-Allow-Origin` only for a configured exact origin, limits preflight methods to the requested supported method, and allows only the request's explicitly listed supported headers. It never enables credentialed CORS or reflects arbitrary origins. Cross-origin protected API calls use bearer authorization and omit browser credentials; any cross-origin cookie is denied. `Authorization`, `Content-Type`, `Idempotency-Key`, `X-Client-Id`, `X-Codexia-Recent-Activity-Order`, and `Prefer` are the supported request headers. Cookie-based mutation remains same-origin protected.
+<<<
+
+[[/SECTION]]
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: f3db26ea8855e18f528ef9d4ff63660c
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-accepted-target-passkey-first-authentication-and-identity-management
+TITLE: Accepted target: Passkey-first authentication and identity management
+
+[TEXT]
+MID: 0013eafe84dfacb5d96735eb6ae6d70e
+STATEMENT: >>>
+**Status: normative target.** Existing API protocol, principal, ownership and manuscript boundaries apply. The scope is a single standalone owner, excluding multi-tenant identity, SAML, SCIM, new organization roles and a separate identity service.
+<<<
+
+[[SECTION]]
+MID: f5e85b4b0b67174e1cb724473d683079
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-outcome-and-identity-invariants
+TITLE: Outcome and identity invariants
+
+[TEXT]
+MID: 017be49a48002ac74474c3756dff5c6f
+STATEMENT: >>>
+- A person never enters, copies, generates, or persists a static Codexia API token to use Desktop Web, native iOS, or remote MCP. "Remove access tokens" means **remove manually managed long-lived standalone tokens**; short-lived OAuth access JWTs, rotating refresh tokens, server-side sessions and OAuth grants remain protocol requirements.
+- Better Auth in the existing Fastify process and PostgreSQL `codexia_auth` schema is the single standalone identity authority. A durable internal Better Auth `user.id` is the accepted owner subject. Passkeys and optional OIDC `(issuer, subject)` accounts attach to that same internal user; changing a device or an IdP does not change author/project ownership.
+- Passkey is the default human sign-in, independent of any OIDC service. OIDC is optional, must be explicitly configured by the already authenticated owner, and must never be needed for Passkey-only startup. No public self-registration, unapproved owner creation, implicit email-account linking, automatic second owner or downgrade to legacy token login.
+- Retain distinct registered OAuth public clients for Web and iOS, short-lived API-audience `at+jwt` tokens, PKCE S256, signed metadata, audience and scope checks, online introspection, exact-token revocation and the existing CSRF/origin boundaries. The browser retains the current in-memory access token; the iOS target uses OS system authentication and a Keychain-protected refresh token. Neither needs a new native Passkey bridge or a cookie-based API rewrite.
+- Better Auth is the OAuth authorization server for the MCP Streamable HTTP protected resource. Keep the existing `oauthProvider()`, `mcp:read` / `mcp:compute` / `mcp:propose` limits, client allowlists, project assignments and `external-mcp` principal. MCP admission relies on the API's OAuth checks.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 3ba5d1a7bd0316af8b32f487d1887afc
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-maintained-better-auth-components-and-persistence
+TITLE: Maintained Better Auth components and persistence
+
+[TEXT]
+MID: be906c2e5e59a667c7a96942ad585a57
+STATEMENT: >>>
+| Area | Chosen authority / bounded change |
+| --- | --- |
+| Passkey | Add the official `@better-auth/passkey` server and client plugins and their maintained `passkey` table via the existing explicit `migrate:auth` workflow. Configure exact HTTPS origin and stable RP ID derived from the public authentication hostname; never derive trusted RP/origin from arbitrary request headers. Enforce user verification on registration and authentication. |
+| OIDC federation | Replace the fixed mandatory `genericOAuth` provider with the maintained `@better-auth/sso` OIDC registration/management path when fully migrated; there must not be two independently writable provider authorities. Do not enable SAML or organization provisioning. The single owner's provider selection uses a fixed registered provider ID, not email-domain guessing. |
+| Downstream OAuth | Keep `@better-auth/oauth-provider` and JWT signing, existing consent and client registry, resource metadata, introspection, token revocation and shared API admission. Do not install `@better-auth/mcp` alongside `oauthProvider()`; replacing the provider is a separate, explicitly justified migration, not a prerequisite. |
+| Users / accounts | Preserve the internal owner user ID and bound OAuth owner subject. Store identities as exact `(issuer, sub)` links; no email match, IdP claim alone, client-supplied owner, or `accountLinking.trustedProviders` grants ownership. |
+| Config / secrets | `CODEXIA_OIDC_*` cease being mandatory startup inputs in the target. Public origin, owner ID, signing/DB secrets, downstream client IDs, API resource and allowed external IdP origins retain explicit operator authority. Persist provider records in the restricted auth schema using maintained plugin tables. Secrets are write-only in UI/API responses, never emitted in logs, frontend builds, telemetry or public artifacts; protect database/backup access and allow credential rotation. |
+| Schema / lifecycle | Keep explicit offline schema migrations and least-privilege `codexia_auth_runtime`. No startup migration, new database, second auth router, hidden fallback or Core schema mutation. Existing auth rows, OAuth clients, signing keys, sessions and recovery journal remain intact across migrations. |
+
+For OIDC runtime registration, constrain Better Auth SSO's defaults: only the exactly verified owner may register/update/delete a provider (`providersLimit` and `guardProviderMutation`), initially **at most one active provider**; arbitrary authenticated users must get 403. Set `disableImplicitSignUp` **and** use `resolveUser` to reject unknown users even if a caller submits `requestSignUp: true`. A link is permitted only for an owner-initiated, short-lived, single-use, session-bound enrollment transaction and a fully verified IdP `issuer + sub`; return the existing internal owner ID and preserve the profile. Reject subjects already linked to other users and unapproved issuer changes; require a fresh owner reauthentication for trust-boundary changes. Provider deletion and rotation must not silently replace owner identity.
+
+SSO Discovery fetches may require an IdP origin in Better Auth `trustedOrigins`. That list is also used for CSRF/redirect trust: **never automatically append an arbitrary URL from the settings form**. Accept only operator-approved exact HTTPS issuer origins for registration and server egress; reject loopback, link-local, private-address, userinfo, fragments, redirect chains and DNS rebinding to forbidden ranges. Validate exact Discovery issuer and signed ID-token issuer, audience, nonce, time and subject. If the pinned plugin cannot implement these controls without broadening CSRF trust, block new provider activation rather than substituting custom token verification or trusting the UI. The issuer origin allowlist is a deployment-controlled precondition displayed by the form.
+
+[LINK: DOC-ARCHITECTURE-OWNER-OIDC-MANAGEMENT-CONTRACT, Owner-managed OIDC registration and activation] defines the management operations, exact provider selection, enrollment transaction and acceptance evidence. Availability requires proof that maintained Better Auth interfaces bind the initiating owner session, the candidate revision and verified OIDC state, then consume the enrollment and bind the upstream account in one PostgreSQL transaction.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 573ae363672cefcca08af4da5847adb4
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-first-owner-enrollment-ongoing-credentials-and-recovery
+TITLE: First-owner enrollment, ongoing credentials and recovery
+
+[TEXT]
+MID: 099342aa08b7a1c385a2ea9e8df0ab28
+STATEMENT: >>>
+1. An already established Better Auth owner signing in through the current OIDC link may add a Passkey to their **existing** Better Auth user. The owner mapping is checked before and after the WebAuthn ceremony; no new user row or project ownership mapping is created.
+2. **Agreed target:** On an explicitly approved fresh installation, Ansible initiates creation of a CSPRNG-backed 256-bit **single-use, 24-hour** setup key, but does **not** register an owner. The operator delivers the key to the intended person through a protected out-of-band channel. The person opens the Cloudflare Workers Static Assets `/console/setup` screen, supplies the key and explicitly completes the maintained Better Auth Passkey ceremony. The API confirms the assertion and atomically binds exactly one internal owner and consumes the key in PostgreSQL. The existing local-CLI/temporary-container/SSH-forward registration is current implementation, **not** the target user journey. No public self-registration, reusable bootstrap API token or owner creation on first anonymous visit.
+3. Normal Passkey registration requires an authenticated session, owner authorization and fresh verification. Provide listing, naming, adding and removal. Do not allow the last usable login method to be deleted while active. Require either a second independently usable Passkey or a verified linked OIDC fallback before declaring migration complete; a hardware key is supported but never required solely to enable login.
+4. Device loss recovery is **operator-mediated**, not an evergreen emergency bearer. Through the existing protected VM administration path, an explicit audit-logged recovery transaction revokes the owner's sessions and affected grants, issues one short-lived enrollment challenge tied to the same owner ID and consumes it once. No endpoint accepts email ownership, a static API token or an arbitrary IdP subject as recovery evidence. Failure does not delete manuscript data or change author identity.
+5. Reauthentication is mandatory for passkey deletion, provider issuer/client changes, and changing session/consent policy. Session invalidation and refreshed client grants must match the actual Better Auth behavior; never report a JWT as revoked merely because a UI logout occurred.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 772194b95c66fefd9569cb72a96dd755
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-initial-setup-admission-and-installation-state-contract
+TITLE: Initial setup admission and installation state contract
+
+[TEXT]
+MID: 6a949cf99c9b14da379ddaa9dd5ef2a0
+STATEMENT: >>>
+- **Boundary:** Workers serves only the UI and `/console` routes. The existing VM Fastify/Better Auth process owns setup admission, Passkey registration and all writes to the restricted `codexia_auth` schema. The setup-only runtime is the same authenticated backend with a restricted route set, **not** a new IAM server, independent author database, second token authority or publicly exposed management SSH.
+- **DB state machine:** `NEW_APPROVED` (explicitly new and genuinely empty), `SETUP_PENDING` (key issued, no owner), `OWNER_ENROLLED` (owner and credential committed, normal API not yet activated), `ACTIVE`, and `RECOVERY_REQUIRED` or `BLOCKED`. These are logical contracts, not necessarily new database enum values. State comes from the trusted PostgreSQL identity and deployment record, never a client flag or whether the VM filesystem appears empty. Once any owner exists, every first-owner create operation fails closed regardless of Ansible reruns or VM replacement.
+- **Key issuance:** A reviewed, explicitly approved Ansible bootstrap action invokes a bounded application initialization operation after verifying the database is new and no owner/registration exists. It obtains 32 CSPRNG bytes, persists only a high-entropy digest, issue/expiry/consumed metadata, and exports the raw secret **only once** through a protected operator-to-owner handoff. Idempotent reapplication cannot rotate, print, reset or reopen an existing key. No raw key in Git, Podman env, Workers artifacts, Ansible facts, Terraform state, CI logs, URL, referrer, browser persistent storage or analytics. Expiry or lost-key reissue requires independent operator approval, with the old grant revoked; **never** automatic owner recreation.
+- **Browser admission:** The key is entered in a dedicated form; request transport must be HTTPS, exact allowed origin, CSRF-protected and rate-limited. Validation creates at most a short-lived **setup-scoped** transaction, not a standard bearer token/owner session. The browser then explicitly invokes the official Better Auth WebAuthn creation ceremony with RP ID/origin and user verification enforced. The backend holds the single-owner invariant under concurrent requests, ties a ceremony to the exact pending transaction and consumes the grant with the verified owner creation. No partial user row receives owner authorization, even if a request is interrupted. Duplicate/expired/replayed grants fail; an ambiguous network result is resolved through server state, not assumed to have failed.
+- **Setup-only exposure:** Before full activation, Cloudflare Tunnel may transport the *narrow* setup endpoints required for state, key validation, WebAuthn registration and readiness. All manuscript APIs, MCP, normal author mutations, unrestricted OAuth dynamic client registration and infrastructure controls are denied. The static UI and these endpoints must be reachable through an explicitly reviewed Cloudflare Access/path policy; **Access identity never replaces the setup key**. WebAuthn RP ID and public origin must be identical to the eventual production owner sign-in contract. Publishing the Workers asset alone does not expose a backend endpoint.
+- **Client provisioning:** Once owner registration is verified, the same API/Better Auth identity authority registers or checks the predefined Web/iOS public PKCE clients and the confidential introspection client against reviewed redirect/resource/scope inputs. Secret-bearing setup is server-side; neither Ansible-generated owner records nor browser-provided arbitrary client definitions are allowed. Owner-managed optional OIDC can be configured after normal login through `/console/identity`. Full API activation requires the separate protected delivery approval and compatibility/certificate validation. The [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, deployment lifecycle] defines when existing-data activation requires independent preservation.
+- **Recovery:** On a replacement VM with restored PostgreSQL/auth data, reuse the identical Better Auth owner ID, Passkeys, sessions/key material as applicable, approved OAuth clients, auth schema and protected secrets. Do **not** mint a fresh first-owner grant. Loss of Passkey without loss of the owner database uses the separately authorized existing-owner recovery transaction, revokes affected sessions/grants and restores a credential to the **same** owner; it never creates a new owner. Unknown or partially restored data blocks both normal activation and first-owner registration.
+
+The route and view/operation/error UX are owned by [LINK: DOC-DESIGN-ADMIN-SCREEN-FLOW, Admin screen flows]; the SSH-to-Ansible prerequisites, setup-only-to-production transition and existing-data recovery are owned by [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, Initial deployment flows]. Existing SSH-forward enrollment commands remain documented as current behavior until replaced; a design change alone is not proof of functioning production setup.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: b4edfffd38cb50bc62faf4b2b656fee9
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-settings-ux-and-api-behavior
+TITLE: Settings UX and API behavior
+
+[TEXT]
+MID: 5025d5be0b0c09731be382bea34d0cc5
+STATEMENT: >>>
+**Target routing:** Cloudflare Workers Static Assets hosts `/console` (owner home), `/console/setup` (first owner only), `/console/security` (Passkeys and sessions), `/console/identity` (linked IdP and OAuth client/consent management), and **`/console/backups` (owner-managed S3 backup destination, verification, run status and recovery evidence)**. The backup console routes use OWNER-SESSION and server-side fresh reauthentication for credential changes, activation/disable and manual runs; they do **not** issue OPERATOR, SSH, Podman, PostgreSQL administrator, or S3 IAM privileges. [LINK: DOC-ARCHITECTURE-BACKUP-CONSOLE-CONTRACT, Backup console contract] owns those details. An owner OAuth API bearer or MCP token never grants access to these routes. Reuse the existing Desktop settings design and shared typed commands/policy; the former Mobile settings UI has been removed and is not a compatibility target. The currently implemented Desktop dialog remains until its entrypoint is moved or linked to the console. Browser WebAuthn launches only on an explicit user action; the accepted iOS target uses native system authentication. A missing authenticator or provider does not erase local writing once already authenticated.
+
+| Screen / state | Required user-visible actions and explanations |
+| --- | --- |
+| Passkeys | List nickname, creation / last-use information **when provided** by Better Auth, and device metadata when reliable; add, rename and revoke each; show the current device when known, never invent its identity; explain failed/cancelled WebAuthn and reauthentication. |
+| Linked sign-in methods | Show Passkey and optional OIDC independently, including a clear "not configured" state, link verification, current usable fallbacks and the consequence of disabling a method. |
+| Sessions / OAuth consents | Show active sessions, revoke a selected session or other sessions, inspect/revoke own downstream OAuth app grants; explain that token invalidation may require actual revocation and introspection, not just local UI cleanup. |
+| Provider management | Owner-only: display name, exact issuer/discovery endpoint, Client ID, **write-only** Client Secret, generated read-only callback URL, approval/verification state and last check, test connection, stage changes, activate, rotate secret, disable and remove. No state change or secret display until explicit commit/confirmation. |
+| Failure / lockout | Distinguish unsupported WebAuthn, cancelled challenge, wrong origin, expired session, unverified issuer, invalid credential, last-method removal denial and OAuth outage. Preserve unsaved manuscript drafts through login or expiry transitions; never present a partial config as active. |
+
+Server policy is authoritative: deny non-owner provider and passkey mutations even when invoked without the UI; enforce same-origin session + CSRF and recent owner reauthentication. Provider staging and activation must be atomic and auditable, must not break currently working Passkeys, and a failed connection test must leave the previous active provider unchanged. Do not store provider secrets or recovery grants in browser storage. Keep the OAuth client/consent UI read-only or revoke-only until existing environment-backed client allowlists and project assignments are replaced in **one** authoritative migration; do not introduce a second writable permissions store.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: f6be68dd7d2bcf54326694603bc06764
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-edge-exposure-and-access-control-deployment-prerequisite-not-implied-by-code
+TITLE: Edge exposure and access control (deployment prerequisite, not implied by code)
+
+[TEXT]
+MID: 3c5e617cd0c0d04ffe086bb1424f8d5c
+STATEMENT: >>>
+The existing production deployment uses an Access-protected hostname and an origin-side Access assertion. That is **not already** an Access-independent API. Before declaring remote MCP or native OAuth accepted, update the Cloudflare/Tunnel and origin policy explicitly:
+
+- The public HTTPS `/mcp` protected resource, `/.well-known/oauth-protected-resource` variants, OAuth authorization-server/OIDC discovery, JWKS, and required `/api/auth/*` endpoints must be reachable **without Cloudflare Access cookies, service tokens, HTML login redirects or JWT assertions**. The API's own authentication, rate limiting, input validation and OAuth protocol responses remain mandatory. Authenticated `/api/*` data operations must never become anonymously authorized.
+- Prefer explicit **path-scoped Access application overrides** on the existing origin when they can be verified end-to-end; a separate API hostname is an alternative only with explicit Web same-origin/PKCE, CORS, session, callback, mobile and rollout changes. Do not assume merely adding a Worker/Tunnel route bypasses an Access application. Maintain the current static UI entry policy unless separately approved.
+- The agreed `/console/setup` design uses the same production HTTPS origin for WebAuthn and connects the Worker UI to a **setup-only** Fastify mode before the author API is active. Review and test the route-specific Access behavior independently: a permitted setup browser must reach only the setup endpoints; without a valid single-use key it cannot create an owner. Access-protected assets must not silently become public, and a working static route does not imply a reachable API. Never expose SSH/Tailscale or a general API merely to make first enrollment convenient.
+- For an unauthenticated MCP request, return the API/MCP-standard 401 and `WWW-Authenticate` metadata instead of an Access redirect; publish correct exact-audience protected-resource metadata; successfully complete Discovery, authorization, consent, token/refresh, introspection, expiration and revocation without Access identity. Public metadata is not permission to invoke an MCP tool.
+- Keep TLS, origin isolation, existing proposal/approval enforcement, private PostgreSQL and WAF/rate controls. Verify authorization with and without Access cookies to exclude credential confusion; never accept Cloudflare headers as owner proof in Better Auth mode.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: a66a66e293c1260610c7878e7aab53c4
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-legacy-token-retirement-and-rollout
+TITLE: Legacy token retirement and rollout
+
+[TEXT]
+MID: 87d6d0b5daee58ab1ac621457d3beef3
+STATEMENT: >>>
+- Phase A — Add maintained Passkey plugin, explicit auth-schema migration, owner-preserving enrollment and recovery. Remove upstream OIDC as a **configuration prerequisite** only after Passkey-only bootstrap and existing-owner continuity are proven.
+- Phase B — Complete Desktop Web /console settings and optional owner-controlled OIDC registration, linking, test/activation and recovery. Preserve the fixed OIDC path until existing accounts are safely linked; then remove `genericOAuth` as a separate login authority. Do not use email-linked account migration.
+- Phase C — Prove Browser, iOS and remote MCP against Better Auth with only OAuth credentials. Implement and separately verify Access-independent API reachability, complete consent/grants, limited MCP clients, scope/project restrictions and publisher/deployment contracts. No unrestricted dynamic OAuth client registration is added.
+- Phase D — Retire static-token issuance and admission, legacy grant issuers, and Access-derived API owner authorization. Update Quadlet, Ansible, environment, secrets, CI, docs and tests together. Cutover requires a tested one-way rollout, a protected database backup and operator recovery.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 0a009d9426a16b353aab12a086c48ed4
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-definition-of-done--executable-acceptance-matrix
+TITLE: Definition of done — executable acceptance matrix
+
+[TEXT]
+MID: 804b91b0692dadd9b47c04e761dd4f56
+STATEMENT: >>>
+| ID | Evidence required |
+| --- | --- |
+| AUTH-01 | Fresh empty `codexia_auth` schema, no `CODEXIA_OIDC_*`: operator-granted Passkey-first owner registration, restart, sign-in and author API authorization succeed; public signup, duplicate owner and replayed/expired bootstrap challenge fail. |
+| AUTH-02 | Existing OIDC owner, projects and signed tokens survive auth-schema migration; registering Passkey attaches to same internal owner; missing/forged/wrong RP/origin/challenge/user-verification WebAuthn assertions fail, duplicate and last-method removal are denied. |
+| AUTH-03 | OIDC owner registration, rotation, disabled state and re-enable work; unknown `issuer + sub`, fabricated email match, `requestSignUp: true`, non-owner SSO registration/mutation, unapproved/SSRF issuer and failed discovery all fail closed. Prior working provider and Passkey remain usable after error. |
+| AUTH-04 | Desktop Web/console browser settings, focus/keyboard, Passkey, session/consent revocation, expiry/reauth and draft-preserving OAuth redirects pass. Native SwiftUI PKCE/system authentication, Passkey, Keychain rotation and draft protection work on a physical iPhone or are explicitly **unverified**. Mobile React/Capacitor viewport E2E is not the release gate. |
+| AUTH-05 | Web/iOS public-client PKCE, exact redirect, issuer/resource, token class, scopes, signed keys, JWT profile, online introspection and logout/revocation behave as specified; wrong audience, replay, expiry, altered scopes, unauthorized owner and dependency outage fail closed. |
+| AUTH-06 | A remote MCP OAuth client without Access credentials receives discovery and the expected 401, completes consent/PKCE/token refresh and invokes only assigned `mcp:read/compute/propose` on permitted projects. Author approval/apply, owner-wide lists and cross-project objects remain denied. CI integration uses disposable resources and records actual results. |
+| AUTH-07 | Cloudflare rule tests prove UI entry behavior, public protocol metadata and unauthorized API rejection; frontend/Backend release compatibility, Tunnel, production preflight and documented rollback/recovery have verified evidence. No Cloudflare Access assertion changes owner authority. |
+| AUTH-08 | Repository/OCI/config/secret scan finds no active static-token admission, generation or fallback; optional OIDC can be absent; no behavior silently falls back to legacy mode. Run scoped tests, typecheck, build, core audit, browser/integration and relevant deployment-policy gates at the final exact source revision. |
+| AUTH-09 (new target) | On a clean approved VM, Ansible can issue and securely hand off one 256-bit setup key without creating an owner. Workers `/console/setup` and setup-only API complete WebAuthn owner enrollment in a real browser, consume the key exactly once, block anonymous/cross-origin/replayed/expired/racing enrollment, then allow protected activation with no temporary SSH registration listener. Subsequent Ansible runs and restored owner data do not reopen setup; tested recovery preserves the owner ID. |
+
+The implementation PR must report `PASS / FAIL / BLOCKED / NOT_CHECKED` for each acceptance item, the executed command and artifact, not claim production, physical-device or Cloudflare acceptance from source review alone. Updating this document itself proves no runtime acceptance.
+
+Official integration references: [Better Auth Passkey](https://www.better-auth.com/docs/plugins/passkey), [Better Auth SSO](https://www.better-auth.com/docs/plugins/sso), [SSO user resolution](https://www.better-auth.com/docs/plugins/sso/provisioning), [Better Auth OAuth Provider](https://www.better-auth.com/docs/plugins/oauth-provider), [Cloudflare Access application paths](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/).
+<<<
+
+[[/SECTION]]
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 78b4c484f7f5bf48d561204534ed24fb
+UID: DOC-ARCHITECTURE-API-AUTHN-AUTHZ-required-acceptance-evidence-for-implementation
+TITLE: Required acceptance evidence for implementation
+
+[TEXT]
+MID: 0dc346426b852b23e17a37ab90e1a92f
+STATEMENT: >>>
+- Better Auth authenticates the existing owner through Passkey without any upstream OIDC setting and issues API-audience OAuth access tokens through public-client Authorization Code + PKCE for Web and iOS; both call the same protected API with equivalent results. If OIDC is configured, a verified linked upstream account achieves the same results and unlinked identities fail closed.
+- A valid author can list, read, create, edit, review, approve and apply permitted resources; existing revision, recovery and proposal receipts remain correct.
+- Deny missing, expired, forged, unknown-key, wrong-issuer, wrong-audience, wrong-token-type, wrong-owner and insufficient-scope tokens, including rotating JWKS and unavailable metadata.
+- Exercise BOLA/BFLA negative cases across each object-bearing API family, nested object IDs, bulk reads, cross-project writes, proposals, approvals, jobs, modules and SSE. A valid token must **not** bypass object access checks.
+- Verify browser CSRF/CORS and iOS bearer paths separately, including concurrent cookie/bearer ambiguity, logout/reauthentication, stale-author-scope recovery and long-lived streams that outlast a grant.
+- Verify registered MCP clients over both stdio and Streamable HTTP, including clients limited to read scope. Record executed commands, results and environment blockers in PR or CI evidence.
+
+References: [OWASP API1:2023 BOLA](https://api-security.owasp.org/editions/2023/en/0xa1-broken-object-level-authorization/), [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068), [RFC 8252 (native OAuth apps)](https://www.rfc-editor.org/rfc/rfc8252), [RFC 7636 (PKCE)](https://www.rfc-editor.org/rfc/rfc7636), [Fastify JWT](https://github.com/fastify/fastify-jwt), [Fastify Auth](https://github.com/fastify/fastify-auth).
+<<<
+
+[[/SECTION]]

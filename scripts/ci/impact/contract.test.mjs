@@ -75,7 +75,7 @@ test('the CodexiaCTL binary is validated by Verify and independently released at
     assert.ok(plan.tasks.includes('codexiactl-linux'));
     assert.ok(plan.groups.includes('unit-architecture'));
   }
-  assert.ok(!createVerificationPlan({ files: ['docs/architecture/SYSTEM-DESIGN.md'], event: 'pull_request', sha, base }).tasks.includes('codexiactl-linux'));
+  assert.ok(!createVerificationPlan({ files: ['docs/architecture/SYSTEM-DESIGN.sdoc'], event: 'pull_request', sha, base }).tasks.includes('codexiactl-linux'));
   const verify = workflow.jobs.unit.steps.find(step => step.uses?.startsWith('actions/setup-go@'));
   assert.equal(verify.with['go-version-file'], 'cmd/codexiactl/go.mod');
   assert.match(verify.if, /codexiactl-linux/u);
@@ -134,6 +134,17 @@ test('Biome selects shipped JS/TS changes and config, but not unrelated CI or na
   assert.equal(biomeJob.steps.find(step => step.name === 'Run exact-source Biome CI and emit Lint-only SARIF').run, 'node scripts/ci/execution/group.mjs biome');
 });
 
+test('Types evidence retains the trace report and omits the rendered Pages package', () => {
+  const upload = workflow.jobs.types.steps.find(({ with: options }) => options?.name?.startsWith('ci-evidence-types-'));
+  assert.ok(upload);
+  const root = '${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}';
+  assert.deepEqual(upload.with.path.trim().split('\n'), [
+    root,
+    `!${root}/requirements-trace/strictdoc/html/**`,
+    `!${root}/requirements-trace/strictdoc/json/**`,
+  ]);
+});
+
 test('the certified graph covers every declared obligation and admits trace-owned tests within the twenty-two-job cap', () => {
   assert.ok(REQUIRED_VERIFICATION_JOBS.length + 1 <= 22, 'CI-CD.md caps certification at twenty-two jobs');
   assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'biome', 'unit', 'types', 'profile_core', 'profile_full', 'oci', 'certification']);
@@ -183,10 +194,13 @@ test('the certified graph covers every declared obligation and admits trace-owne
   const traceSelected = "matrix.group == 'trace'";
   assert.equal(strictdocSetup.if, traceSelected);
   for (const [files, expected] of [
-    [['docs/verification/CI-CD.md'], true],
-    [['docs/design/DEVELOPMENT-PAGES-UX.md'], false],
+    [['docs/verification/CI-CD.sdoc'], true],
+    [['docs/design/DEVELOPMENT-PAGES-UX.sdoc'], true],
+    [['docs/requirements/codexia.sgra'], true],
+    [['docs/architecture/diagrams/screen-1.mmd'], true],
+    [['docs/design/screen-catalog.json'], true],
     [['packages/persistence-postgres/tests/db-contract/runner.test.mjs'], true],
-    [['docs/requirements/STRICTDOC-TRACEABILITY.md'], true],
+    [['docs/requirements/STRICTDOC-TRACEABILITY.sdoc'], true],
     [['scripts/strictdoc/verify.mjs'], true],
   ]) {
     assert.equal(createVerificationPlan({ files, event: 'pull_request', sha: 'a'.repeat(40), base: 'b'.repeat(40) }).tasks.includes('requirements-trace'),

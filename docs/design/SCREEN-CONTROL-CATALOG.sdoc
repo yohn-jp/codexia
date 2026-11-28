@@ -1,0 +1,155 @@
+[DOCUMENT]
+MID: 5cf7d1a53e43fa92a1746bfbe4e06087
+TITLE: Codexia 画面・コントロール・ユーザージャーニー設計
+UID: DOC-DESIGN-SCREEN-CONTROL-CATALOG
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 787883ce63d23f1ea2184fe0b6e8e700
+STATEMENT: >>>
+**種別: 規範的UI/UX設計。** 本書はすべての論理画面・モーダル/シート・操作コントロールについて、ユーザー、入口、状態、ボタン、APIに要求する権限、成功後の遷移、失敗時の復帰を確定する。実際のURLとprincipalの正本は [LINK: DOC-ARCHITECTURE-ROUTE-AUTHORIZATION-CONTRACT, URL/API認可設計]、図の正本は [LINK: DOC-DESIGN-SCREEN-STATE-ATLAS, 画面状態遷移図]、保存は [LINK: DOC-DESIGN-INTERACTION-CONTRACT, Interaction contract]。**コードは実装状況の照合資料であり、デザイン決定のauthorityではない。**
+<<<
+
+[[SECTION]]
+MID: 1d3c875876d68e4b10ea5097c384f1b8
+UID: DOC-DESIGN-SCREEN-CONTROL-CATALOG-想定利用者と許可の最小化
+TITLE: 想定利用者と許可の最小化
+
+[TEXT]
+MID: 070f01e78ef62e1795f7b625ca373aa8
+STATEMENT: >>>
+| 利用者 | 目的 | 許可する作業面 | 絶対に到達させない操作 |
+| --- | --- | --- | --- |
+| 作者（owner） | 続きを書く、構成・知識・提案の管理、公開、認証器管理 | Desktop React Web、OAuth、本人管理 `/console`。iOS Native SwiftUI は採用目標 | 管理画面からVM・SSH・DB credentialへ直接アクセス |
+| 初回所有者（未登録） | 新規構築されたサービスで最初のPasskeyを登録 | `/console/setup` | 作品の閲覧/編集、owner sessionへの偽装、復旧DBで新規owner |
+| 公開読者 | 共有された内容を読む | `/r/:module/:project/:slug`のみ | 非公開原稿/設定/履歴、書込、作者登録 |
+| 外部AI/MCP | 許可された作品を参照・解析して提案 | `/mcp`と登録済みtool。**Web画面は不要** | 作者の変更承認/適用、直接persistence、資格情報 |
+| 運用者 | 初期VM構築、証明済み更新、特権バックアップ/本番復旧 | 保護済みGitHub Actions/Tailscale SSH/Ansible。**作者用Web UIからはS3保存先の指定・検証・保全要求/結果の参照のみ** | WebにVM/IAM権限や復号秘密鍵を渡すこと、導入キーでSSH認証 |
+
+今回「閲覧者」「初回owner候補」「MCP client」を同じ`user`として扱わない。想定利用者ごとに入口・失敗時の挙動・権限が違う。単一ownerの契約を、未合意の一般編集者・管理者グループへ勝手に拡張しない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 8366f6d5de02790407eedcbcf7c09e1d
+UID: DOC-DESIGN-SCREEN-CONTROL-CATALOG-全画面カタログとルーティング
+TITLE: 全画面カタログとルーティング
+
+[TEXT]
+MID: 466298eb5e9f8f97e6c5ae44b12cbbf2
+STATEMENT: >>>
+画面IDは [LINK: DOC-DESIGN-INFORMATION-ARCHITECTURE, 情報設計] の従来カタログと整合させる。特に **WRT-02＝Revision履歴、REV-01＝提案一覧、REV-02＝提案詳細**。CFG-01は表示設定（DISPLAY-01）と本人セキュリティ設定（PREF-01）を束ねる概念的なカテゴリであり、別のデータ正本やURLを作らない。KNO-03の局所グラフは情報設計で検討された**未採用提案**として明示し、実装済みの関係一覧/詳細に見せかけない。
+
+
+**画面IDは安定した論理識別子。** 【実装】は Desktop Web の画面実装を示す。採用目標の実装範囲は各行に記す。Console の Cloudflare と VM での受入、および Native iOS の実機受入には、それぞれの環境での証拠を要する。iOSの開発と自動Xcode検証は一時停止中で、実機受入は延期中。旧Mobile Web `/mobile/`/Ionic authoring shellは製品導線から撤去済みで、対応・互換性の約束はない。iOS Nativeの表示は[LINK: DOC-ARCHITECTURE-IOS-SWIFTUI-ARCHITECTURE, SwiftUI正本]に従い論理IDのみ共通化する。
+
+[画面カタログの正本](https://github.com/yohn-jp/codexia/blob/main/docs/design/screen-catalog.json)。公開ビューでは [UX Simulator](https://yohn-jp.github.io/codexia/ux/) で参照できる。
+
+**iOS採用目標は独立したSwiftUI画面とUIKit/TextKit 2編集面。** Core/API、作品、Revision、receipt/回復契約を共有するがReact/Ionic部品を共有しない。OAuthはsystem authentication、refresh tokenはKeychainに置き、第二原稿DBは作らない。SwiftUI sourceは存在するが、未完了の実装・受入は開発凍結中。Capacitor/Ionic Web authoringは旧実装であり、current iOS SwiftUI appの実装根拠ではない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: de37b048edae91e06622338de56ba1df
+UID: DOC-DESIGN-SCREEN-CONTROL-CATALOG-グローバルな状態離脱ガード
+TITLE: グローバルな状態・離脱ガード
+
+[TEXT]
+MID: 86d77bf6025d4f782a2e84b606064811
+STATEMENT: >>>
+すべての画面は`initializing`、`loading`、`ready`、`empty`、`recoverable-error`、`unauthorized`、`forbidden`、`not-found`を扱う。mutationを行う画面には`submitting`、`unknown-result`、`conflict`、`confirmed`を必要に応じて追加する。**空状態は通信失敗でも権限拒否でもない。**
+
+- 保存/文書/作品切替、読書↔編集、logout、コンソール遷移の前には各クライアント固有の下書き・IME composition guardを通す。守れない場合は遷移を取り消し、その場に本文と明示エラーを残す。
+- バック/キャンセルは原則として**元のURL・project・document・cursor・selection・scroll・参照元**を復元する。対象が既に削除・権限失効なら同じ作品の目次/ライブラリへ戻し、理由を明示する。
+- 検索、panelの開閉、参照シートの往復は同じRevisionで行い、局所的なUI状態を失わない。古いnetwork応答はnavigation generationで破棄する。
+- **保存済み**の表示条件はDBのidempotent receiptと対応する端末固有journal確定。保存要求送信後の入力は先のreceiptに含めない。競合を自動merge・上書きしない。
+- destructive操作は対象名/件数/差分/戻し方、fresh verification、明示的な確認、double submit防止を必要とする。単なるtoast成功ではなく実状態を再取得して表示する。
+- optional moduleが無効・読み込めない場合はTOOL-01だけを部分停止させ、原稿WRT-01を利用可能にする。Moduleはreader/compute/proposeの上限とserver approval境界を維持する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 6b4b5d0b5c188661ee1232c64ccbbe19
+UID: DOC-DESIGN-SCREEN-CONTROL-CATALOG-コントロール導線台帳ボタンフォーム単位
+TITLE: コントロール・導線台帳（ボタン・フォーム単位）
+
+[TEXT]
+MID: 5012ceebcf859e6e729bdd852e17444b
+STATEMENT: >>>
+以下の`CTRL` IDは受入時にテスト名やスクリーンショットへ結合する。`method`は**意味上の最小操作**であり、UI固有のサーバー実装がない表示操作は`LOCAL`。すべてのAPI操作は [LINK: DOC-ARCHITECTURE-ROUTE-AUTHORIZATION-CONTRACT, route authorization] をさらに満たす。
+
+[コントロール・導線台帳の正本](https://github.com/yohn-jp/codexia/blob/main/docs/design/screen-catalog.json)。公開ビューでは [UX Simulator](https://yohn-jp.github.io/codexia/ux/) で参照できる。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: d76c4baa9a8a1729d07210107c54cff8
+UID: DOC-DESIGN-SCREEN-CONTROL-CATALOG-画面ごとの操作優先順位視覚表示
+TITLE: 画面ごとの操作優先順位・視覚表示
+
+[TEXT]
+MID: b1a12d458f88d5b5c657026423d82ec3
+STATEMENT: >>>
+| 画面群 | 主要CTA | 補助操作 | 危険操作の取り扱い |
+| --- | --- | --- | --- |
+| Entry/OAuth | 明示選択、Passkeyサインイン、認可判断 | 戻る・IdPサインイン | client/scope/redirectを事前表示。拒否しやすく |
+| 作品/構成 | 続きを書く、作品を開く、文書を作成 | 検索・インポート・エクスポート | 削除は別セクション＋確認、即クリック削除を禁止 |
+| 執筆/読書 | 本文の入力・保存 | 参照・履歴・組版 | recovery/競合は原稿より優先しないが消せない警告 |
+| Knowledge/Review | 対象の根拠・差分確認 | フィルター、局所関係、履歴 | 「承認」と「適用」を分け、影響・revisionを示す |
+| Console setup | キー確認→Passkey作成→状態確認 | 説明・再試行・登録中断 | キーの平文再表示、成功未確認でowner作成を再実行しない |
+| Console security | 追加/確認/セッション終了 | 名称変更・一覧再取得 | 最後の認証器削除不可、fresh proofと結果照合 |
+| Console identity | provider検証・client同意確認 | 設定の説明 | 未検証のissuer/subjectをactiveにしない |
+| Console backups | S3保存先の設定→probe→再認証→有効化 | 暗号化保全点/独立DR証拠とrun履歴の参照 | secretの再表示、未確認202の成功化、公開API経由の本番復元、保全object削除を禁止 |
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 8e1b85f9886040bbc1a291642420a462
+UID: DOC-DESIGN-SCREEN-CONTROL-CATALOG-状態ごとのuiルール商用品質の受入基準
+TITLE: 状態ごとのUIルール（商用品質の受入基準）
+
+[TEXT]
+MID: a28c3a5b0d042662758d772edb3c4687
+STATEMENT: >>>
+| 状態 | 表示・操作 | 禁止 |
+| --- | --- | --- |
+| loading/initializing | 対象のheader・骨格を固定。キャンセル可能な操作は保持 | loading中に「データなし」「認証成功」と表示 |
+| empty | 「作品がない」「文書未選択」など原因別の開始CTA | DB/403/timeoutをempty扱い |
+| submitting | 一つのmutationを二重送信できない。進捗・Cancelの意味を明記 | operation IDを変えて自動retry |
+| unauthorized | 保存/未確定draftを保持し、安全な再認証 | local draft消去、無条件に別userへ切替 |
+| forbidden | 権限の不足を簡潔に提示し、元の画面へ | 一時的にローカルでroleを上げる |
+| not-found | 対象の存在を断定せず、safe fallback | 他projectのタイトルやmetadataを表示 |
+| conflict | 自分のtextと確定DB版と差分・対象IDを表示 | 自動上書き/黙ったmerge |
+| unknown-result | immutable operation/receiptを照合する導線 | duplicate save/grant consumption |
+| lost connectivity | recoverable local内容と「サーバー未保存」を区別 | Offlineを正本同期済みと偽装 |
+| unimplemented target | 画面やAPIが存在しない間は明示的に未提供 | 偽ボタン、静的モックで認可成功と表示 |
+
+Desktop Webのキーボード/スクリーンリーダー/zoom/IMEと、iOS NativeのVoiceOver/Dynamic Type/Touch/IMEを**別々に**検証する。Mobile React 320px専用E2Eは対象外。modalやsheetを閉じたら発火したボタンへフォーカスを戻す。save status、本人認証、進捗、失敗は色だけに依存せず`aria-live`の過剰通知を避ける。各画面のPC/Mobile視覚基準は [LINK: DOC-DESIGN-UX-CONTRACT, UX contract] に従う。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 788e5c8e1764dcc4e2981aa4192952ef
+UID: DOC-DESIGN-SCREEN-CONTROL-CATALOG-e2e受入トレーサビリティ
+TITLE: E2E受入トレーサビリティ
+
+[TEXT]
+MID: 9fcfb2068b63593a6f5bd5c07d43c528
+STATEMENT: >>>
+本書の各CTRL IDについて、最低限 **(A) 未認証/不適切principal、(B)正常、(C)入力不正、(D)stale・競合、(E)通信断/応答不明、(F)離脱/戻る、(G)キーボード/モバイル** を分類して記録する。すべての画面を単一E2Eへ詰めず、principal・session・project・revision・operation receiptの実値を証拠とする。
+
+受入時に控えるのは `screen ID / control ID / URL / principal / request(method,path) / outcome HTTP / DB結果 / screenshot / source SHA`。**CON-30〜34ではさらにbackup configuration revision、probe/run/receipt IDと遠隔保全・独立restoreの異なる合否を記録する。**目標画面は実装前なら`NOT_IMPLEMENTED`と記録し、モックの成功をPASSにしない。操作フローの正本は [LINK: DOC-DESIGN-SCREEN-STATE-ATLAS, Screen State Atlas] で更新する。
+<<<
+
+[[/SECTION]]

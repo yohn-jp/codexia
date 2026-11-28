@@ -1,0 +1,14 @@
+flowchart TD
+    ENTRY["KNO-02 node詳細から関係を確認"] --> STATE{"同じprojectの関係/根拠を取得できた?"}
+    STATE -->|DB/認可エラー| ERROR["元のnodeと原稿を維持し再試行"]
+    STATE -->|関係なし| EMPTY["関係は未登録 / 他projectは非表示"]
+    STATE -->|関係あり| GRAPH["局所グラフまたはアクセシブルな一覧"]
+    GRAPH -->|nodeを選択| VERIFY{"対象nodeも同じproject?"}
+    VERIFY -->|はい| DETAILS["KNO-02: 対象nodeの詳細"]
+    VERIFY -->|いいえ| ERROR
+    GRAPH -->|一覧表示| LIST["同じrelation集合をテキストで表示"]
+    LIST --> GRAPH
+    GRAPH -->|閉じる| RETURN["元のnode / 参照元原稿へ"]
+    DETAILS -->|戻る| GRAPH
+    EMPTY --> RETURN
+    ERROR --> RETURN

@@ -1,0 +1,13 @@
+flowchart TD
+    ENTRY["/console"] --> SESSION{"owner sessionとAPI scopeは有効?"}
+    SESSION -->|未ログイン| LOGIN["Passkey/OIDCログイン"]
+    SESSION -->|owner以外| DENY["403 管理UI/操作拒否"]
+    LOGIN --> SESSION
+    SESSION -->|owner| HOME["認証方法・client・session状態"]
+    HOME -->|セキュリティ| SECURITY["CON-10/11"]
+    HOME -->|連携先| IDENTITY["CON-20/21"]
+    HOME -->|バックアップ| BACKUPS["CON-30"]
+    BACKUPS --> HOME
+    HOME -->|元の作品| AUTHOR["元の執筆画面"]
+    SECURITY --> HOME
+    IDENTITY --> HOME

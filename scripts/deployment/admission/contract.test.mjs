@@ -718,11 +718,11 @@ test('Better Auth activation uses protected staged settings on a fresh or existi
 
   const apiSource = readFileSync(new URL('../../../packages/api/src/server.ts', import.meta.url), 'utf8');
   const authRuntime = readFileSync(new URL('../../../packages/api/src/better-auth.ts', import.meta.url), 'utf8');
-  const runbook = readFileSync(new URL('../../../docs/deployment/PUSH-DEPLOYMENT.md', import.meta.url), 'utf8');
+  const runbook = readFileSync(new URL('../../../docs/deployment/PUSH-DEPLOYMENT.sdoc', import.meta.url), 'utf8');
   assert.match(apiSource, /await betterAuth\.assertRegisteredClients\(\)/u, 'API startup must refuse incomplete persisted owner/client records');
   assert.match(authRuntime, /Configured Better Auth owner subject is not registered/u);
   assert.match(authRuntime, /has an unsupported scope/u, 'client registration checks must reject authority beyond the configured scope class');
-  assert.match(runbook, /\[browser enrollment\]\(\.\.\/\.\.\/deploy\/ansible\/AUTH-RUNTIME\.md#first-owner-through-the-browser\)/u);
+  assert.match(runbook, /\[LINK: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME-first-owner-through-the-browser, browser enrollment\]/u);
   assert.match(runbook, /`preflight_run_id`/u);
   assert.match(runbook, /`ACTIVATE_CODEXIA_BACKEND`/u);
   assert.match(runbook, /`CODEXIA_INITIAL_INSTALL_APPROVED=true` and `CODEXIA_DATABASE_INITIALIZATION_APPROVED=true`/u);

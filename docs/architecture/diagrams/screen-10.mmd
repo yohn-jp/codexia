@@ -1,0 +1,14 @@
+flowchart TD
+    ENTRY["知識一覧"] --> READ["作品scopeでnodeページを取得"]
+    READ --> STATE{"取得結果"}
+    STATE -->|空| EMPTY["知識候補を追加"]
+    STATE -->|一致| LIST["検索/種別/状態フィルタ"]
+    STATE -->|失敗| ERROR["同じ条件を保持して再試行"]
+    LIST -->|node選択| DETAIL["KNO-02"]
+    LIST -->|候補登録| CREATE["同じnode ID/versionで登録"]
+    EMPTY --> CREATE
+    CREATE --> RESULT{"保存・確認できた?"}
+    RESULT -->|はい| DETAIL
+    RESULT -->|不明| RECHECK["同じIDを再照合"]
+    RECHECK --> RESULT
+    DETAIL -->|戻る| LIST

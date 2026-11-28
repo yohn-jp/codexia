@@ -6,7 +6,7 @@ on:
       - scripts/deployment/handoff/prepare-revalidation.mjs
       - scripts/deployment/handoff/run-revalidation.mjs
       - scripts/deployment/handoff/revalidation.test.mjs
-      - docs/deployment/BACKEND-HANDOFF-REVALIDATION.md
+      - docs/deployment/BACKEND-HANDOFF-REVALIDATION.sdoc
       - scripts/deployment/handoff/verify-push.mjs
   workflow_dispatch:
     inputs:

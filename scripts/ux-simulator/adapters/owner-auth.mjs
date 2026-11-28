@@ -1,4 +1,4 @@
-import { control, gap, records, sourceAt, sourceRef, transition } from './owner-source.mjs';
+import { catalogLocation, control, gap, records, sourceAt, sourceRef, transition } from './owner-source.mjs';
 
 const redirects = 'edge/frontend/static/_redirects';
 const login = 'app/src/OAuthLoginPage.tsx';
@@ -53,10 +53,9 @@ export function projectAuth(source) {
       location: sourceAt(source, consent, 'window.location.assign(sameOriginOAuthContinuation(result.url, window.location.origin, context?.redirectUri));'),
     }),
   );
-  const catalog = 'docs/design/SCREEN-CONTROL-CATALOG.md';
   const gaps = records(
-    (!loginRoute || !loginComponent) && gap({ id: 'AUTH-01', platform: 'auth', status: 'unextracted', reason: 'The login route or rendered login component could not be located in canonical source.', location: sourceAt(source, catalog, '| AUTH-01 |') }),
-    (!consentRoute || !consentComponent) && gap({ id: 'AUTH-02', platform: 'auth', status: 'unextracted', reason: 'The consent route or rendered consent component could not be located in canonical source.', location: sourceAt(source, catalog, '| AUTH-02 |') }),
+    (!loginRoute || !loginComponent) && gap({ id: 'AUTH-01', platform: 'auth', status: 'unextracted', reason: 'The login route or rendered login component could not be located in canonical source.', location: catalogLocation(source, 'AUTH-01') }),
+    (!consentRoute || !consentComponent) && gap({ id: 'AUTH-02', platform: 'auth', status: 'unextracted', reason: 'The consent route or rendered consent component could not be located in canonical source.', location: catalogLocation(source, 'AUTH-02') }),
   );
   return { screens, controls, transitions, gaps };
 }

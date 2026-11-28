@@ -1,0 +1,12 @@
+flowchart TD
+    ENTRY["原稿Shellの設定"] --> TYPE{"選択項目"}
+    TYPE -->|Theme / 組版 / Workspace| LOCAL["browserの表示設定"]
+    LOCAL --> CHECK{"設定を保存できた?"}
+    CHECK -->|はい| RETURN["同じ原稿/scrollへ"]
+    CHECK -->|いいえ| NOTICE["保存失敗を表示 / 原稿は維持"]
+    TYPE -->|認証・セキュリティ| OWNER{"Better Auth owner session?"}
+    OWNER -->|いいえ| LOGIN["下書きを守って再認証"]
+    OWNER -->|はい| PANEL["Desktop Web dialog（旧Mobile設定routeは撤去済み）"]
+    PANEL -->|Passkey/session操作| VERIFY["server認可・fresh proof・結果再取得"]
+    VERIFY --> PANEL
+    PANEL -->|閉じる| RETURN

@@ -25,7 +25,11 @@ export async function generate({ output, sourceSha, repositoryRoot = root, obser
   const canonical = createSource(repositoryRoot);
   const generator = createSource(root);
   const expected = designProjection(authority);
-  for (const path of expected.screens.map(({ platformSource }) => platformSource?.path).filter(Boolean)) authority.read(path);
+  const designReferences = new Set([
+    ...expected.screens.map(({ platformSource }) => platformSource?.path).filter(Boolean),
+    ...expected.controls.flatMap(({ references = [] }) => references.map(({ path }) => path)),
+  ]);
+  for (const path of designReferences) authority.read(path);
   const observed = await observedProjection(canonical, sourceSha, (domain) => {
     const path = 'scripts/ux-simulator/adapters/' + domain + '.mjs';
     return generator.exists(path) ? import(pathToFileURL(join(root, path))) : null;

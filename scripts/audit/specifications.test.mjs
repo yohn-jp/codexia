@@ -10,20 +10,23 @@ test('[TEST-TRC-08-001] projects obligations, reverse surfaces, and evidence lin
   const root = mkdtempSync(join(tmpdir(), 'pages-spec-'));
   try {
     const output = join(root, 'export'); const site = join(root, 'site');
-    mkdirSync(join(output, 'html', 'requirements'), { recursive: true });
+    mkdirSync(join(output, 'html', 'docs', 'requirements'), { recursive: true });
     mkdirSync(join(output, 'json'), { recursive: true });
     writeFileSync(join(output, 'html/index.html'), '<html><body>Requirements</body></html>');
-    writeFileSync(join(output, 'html/requirements/REQUIREMENT-REGISTER.md-TRACE.html'), '<html><body>Trace</body></html>');
+    writeFileSync(join(output, 'html/docs/requirements/REQUIREMENT-REGISTER.sdoc-TRACE.html'),
+      '<html><body><p id="verified">Trace</p><a href="./REQUIREMENT-REGISTER.sdoc-TRACE.html#meaning">Meaning</a><a href="#meaning">In-page meaning</a><a href="./REQUIREMENT-REGISTER.sdoc-TRACE.html#verified">Verified</a></body></html>');
+    writeFileSync(join(output, 'html/docs/requirements/REQUIREMENT-REGISTER.sdoc.html'),
+      '<html><body><p id="meaning">Meaning</p><a href="https://github.com/yohn-jp/codexia/blob/main/docs/design/screen-catalog.json">Model</a></body></html>');
     writeFileSync(join(output, 'json/index.json'), '{}');
     const sha = 'a'.repeat(40);
     const exactRun = { testId: 'TEST-TRC-01-001', sourceSha: sha, repository: 'yohn-jp/codexia', runId: '42', attempt: 1, job: 'specification', task: 'pages-requirements-trace', result: 'PASS', url: 'https://github.com/yohn-jp/codexia/actions/runs/42' };
-    const rawFiles = ['html/index.html', 'html/requirements/REQUIREMENT-REGISTER.md-TRACE.html', 'json/index.json'].map(name => { const bytes=readFileSync(join(output,name)); return {name,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}; });
+    const rawFiles = ['html/index.html', 'html/docs/requirements/REQUIREMENT-REGISTER.sdoc-TRACE.html', 'html/docs/requirements/REQUIREMENT-REGISTER.sdoc.html', 'json/index.json'].sort().map(name => { const bytes=readFileSync(join(output,name)); return {name,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}; });
     const report = {
       exports: { rawFiles },
-      source: { sourceSha: sha, worktreeClean: true, registerPath: 'docs/requirements/REQUIREMENT-REGISTER.md' },
+      source: { sourceSha: sha, worktreeClean: true, documentScope: 'public', registerPath: 'docs/requirements/REQUIREMENT-REGISTER.sdoc' },
       toolchain: { strictdocVersion: '0.32.1', requirementsLockSha256: createHash('sha256').update(readFileSync('scripts/strictdoc/requirements.lock.txt')).digest('hex') },
       traceability: { TRC01: { status: 'LOCAL_PASS' }, TRC02: { status: 'LOCAL_PASS' }, TRC07: { status: 'PENDING_PAGES_PUBLISH', staticStaging: 'PASSED', browserAcceptance: 'PASSED' }, gates: Object.fromEntries(Array.from({length: 8}, (_, index) => [`G${index}`, {status: index === 0 ? 'LOCAL_PASS' : index === 7 ? 'PARTIAL' : 'NOT_RUN', evidence: `Gate ${index} evidence` }])) },
-      obligationTrace: { rows: [{ requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', obligationText: 'Native UI remains separately accepted', decisionStatus: 'ACCEPTED', conformanceStatus: 'PARTIAL', applicability: 'CURRENT', requirementImplementationIdentifiers: ['Native state machine 未導入'], requirementComment: 'XState actorは目標・未実装', status: 'PARTIAL', designRefs: ['[Traceability design](STRICTDOC-TRACEABILITY.md)'], sourceRefs: [{ path: 'scripts/strictdoc/case-results.mjs', range: '17, 28', LINE_RANGE: '17, 28' }], implementationIdentifiers: ['packages/api/src/job-history-store.ts: JobHistoryStore (target candidate)'], surfaceIdentifiers: [], testIds: ['TEST-TRC-01-001', 'TEST-TRC-02-001', 'TEST-TRC-03-001'], exactRuns: [exactRun] }], gaps: ['OBL-REQ-UI-001-O01: no semantic/device acceptance'] },
+      obligationTrace: { rows: [{ requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', obligationText: 'Native UI remains separately accepted', decisionStatus: 'ACCEPTED', conformanceStatus: 'PARTIAL', applicability: 'CURRENT', requirementImplementationIdentifiers: ['Native state machine 未導入'], requirementComment: 'XState actorは目標・未実装', status: 'PARTIAL', designRefs: ['[Traceability design](STRICTDOC-TRACEABILITY.sdoc)'], sourceRefs: [{ path: 'scripts/strictdoc/case-results.mjs', range: '17, 28', LINE_RANGE: '17, 28' }], implementationIdentifiers: ['packages/api/src/job-history-store.ts: JobHistoryStore (target candidate)'], surfaceIdentifiers: [], testIds: ['TEST-TRC-01-001', 'TEST-TRC-02-001', 'TEST-TRC-03-001'], exactRuns: [exactRun] }], gaps: ['OBL-REQ-UI-001-O01: no semantic/device acceptance'] },
       reverseTrace: { rows: [
         { surface: { kind: 'mcpTool', id: 'list_projects' }, requirementId: 'REQ-UI-001', obligationId: 'OBL-REQ-UI-001-O01', status: 'UNVERIFIED', provenance: 'Literal registration', source: { path: 'scripts/strictdoc/reverse-trace.mjs', line: 18 }, testIds: ['TEST-TRC-01-001'], exactRuns: [exactRun] },
         { surface: { kind: 'mcpTool', id: 'unlinked.export' }, status: 'UNMAPPED', provenance: 'Literal registration', source: { path: 'scripts/strictdoc/reverse-trace.mjs', line: 19 }, inventoryClassification: 'candidate REQ-MCP-002; effect remains unverified', candidateRequirementIds: ['REQ-MCP-002'], testIds: [], exactRuns: [] },
@@ -46,6 +49,11 @@ test('[TEST-TRC-08-001] projects obligations, reverse surfaces, and evidence lin
     writeFileSync(join(output, 'trace-report.json'), JSON.stringify(report));
     packSpecifications(site, output, sha, { status: 'CERTIFIED', sourceSha: sha, repository: 'yohn-jp/codexia', runId: '43', attempt: 2, job: 'types', task: 'requirements-trace', runUrl: 'https://github.com/yohn-jp/codexia/actions/runs/43', artifactId: 987, artifactDigest: 'sha256:' + 'd'.repeat(64), passedCaseIds: ['TEST-TRC-01-001'] });
     assert.equal(verifySpecifications(site, sha).sourceSha, sha);
+    const publishedTrace = readFileSync(join(site, 'requirements/html/docs/requirements/REQUIREMENT-REGISTER.sdoc-TRACE.html'), 'utf8');
+    assert.equal((publishedTrace.match(/REQUIREMENT-REGISTER\.sdoc\.html#meaning/gu) ?? []).length, 2);
+    assert.match(publishedTrace, /REQUIREMENT-REGISTER\.sdoc-TRACE\.html#verified/u);
+    const publishedDoc = readFileSync(join(site, 'requirements/html/docs/requirements/REQUIREMENT-REGISTER.sdoc.html'), 'utf8');
+    assert.ok(publishedDoc.includes(`github.com/yohn-jp/codexia/blob/${sha}/docs/design/screen-catalog.json`));
     assert.match(readFileSync(join(site, 'requirements/html/index.html'), 'utf8'), /href="\.\.\/\.\.\/"/u);
     const tracePage = readFileSync(join(site, 'requirements/traceability/index.html'), 'utf8');
     const traceJson = JSON.parse(readFileSync(join(site, 'requirements/traceability/traceability.json'), 'utf8'));
@@ -103,7 +111,7 @@ test('[TEST-TRC-08-001] projects obligations, reverse surfaces, and evidence lin
     assert.equal(traceJson.referenceAudit.broken.length, 0);
     assert.match(tracePage, /<search\b/u);
     assert.match(tracePage, /name="area"/u);
-    assert.match(tracePage, new RegExp(`https://github\\.com/yohn-jp/codexia/blob/${sha}/docs/requirements/STRICTDOC-TRACEABILITY\\.md`, 'u'));
+    assert.match(tracePage, new RegExp(`https://github\\.com/yohn-jp/codexia/blob/${sha}/docs/requirements/STRICTDOC-TRACEABILITY\\.sdoc`, 'u'));
     assert.match(tracePage, /href="#obligation-OBL-REQ-UI-001-O01"/u);
     assert.match(tracePage, /href="#test-TEST-TRC-01-001"/u);
     assert.match(tracePage, /NOT_RUN/u);

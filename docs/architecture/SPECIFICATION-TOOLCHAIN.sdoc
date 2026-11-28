@@ -1,0 +1,265 @@
+[DOCUMENT]
+MID: 609bf34f268996e545aec9d2851b604a
+TITLE: 仕様駆動開発ツールチェーン採用設計
+UID: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 3d4a87e305e78ddbf2deb02063a5e00e
+STATEMENT: >>>
+**種別: 採用済み技術方針・段階移行の規範的設計。** 要求・意味的な仕様の正本は [LINK: DOC-ARCHITECTURE-DOCUMENTATION-AUTHORITY, Documentation authority]、[LINK: DOC-REQUIREMENTS-REQUIREMENTS-GOVERNANCE, Requirements]、[LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, System design] などの領域正本が所有する。本書は**その仕様を型・コード・検証へ落とし込む方式と導入判定**を所有する。領域ごとの導入と適合は [LINK: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE, 受入契約] が規定する。
+<<<
+
+[[SECTION]]
+MID: 5f42d7270c24f842de0755e6472e8038
+UID: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-目的と権威
+TITLE: 目的と権威
+
+[TEXT]
+MID: 0d6330300d2f7ba029eca3e3d22bf1e7
+STATEMENT: >>>
+最終目標は、**承認済みの全要求・正常/異常・拒否・保護・回復・性能等の独立した検証義務を、設計の所有先、HTTP/MCP/DB/UI/IaCの実装、テストシナリオ、exact-source実行証拠へ双方向追跡できること**。単なる要求リンク率、OpenAPI生成成功、CI greenだけでは達成としない。
+
+1. **要求・意味的設計:** 承認済みStrictDocのネイティブSDoc文書を意味的設計の正本とする採用目標に移行する。移行前の領域は既存の承認済み文書を唯一の正本として維持する。コードの既存動作を無断で正本へ昇格させない。
+2. **実行可能な詳細契約:** HTTPはTypeSpec、DB物理定義は承認済みSQL migration、MCPは公式SDK tool input/output Schema、外部IaCは各管理ツールの宣言的設定。責務が異なる契約を一つの言語に強制しない。
+3. **派生コード:** OpenAPI、Fastify route schema/validator、ブラウザ/iOSクライアント、ERD、文書サイトは生成物。派生生成物を手修正して正本との差を隠さない。
+4. **検証:** ライブラリの型検査・lint・diff・schema検証は構文/静的整合の証拠。認可、競合、原子性、ユーザー操作、復旧などの意味的義務は実コンポーネントのテストで証明する。
+5. **追跡:** 要求が持つrelation、コードファイル/範囲、検証ID、実行したCI run/artifactを標準ツールで関連付ける。独自traceability engineの新設はしない。
+
+HTTP契約ではTypeSpec、変換スクリプト、設定、依存ロック、承認済みのルート一覧と互換性fixtureをGitで管理する。
+各ビルドはこれらからOpenAPIとFastify用JSONを生成し、WebとiOSは同じOpenAPIから各クライアントを生成する。
+生成したファイルはビルド作業領域と配布成果物に含め、Gitの追跡対象から外す。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: be6127a17589c03515e5ffbde1af2848
+UID: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-技術選定最終二択なぜ他方でないか
+TITLE: 技術選定（最終二択、なぜ他方でないか）
+
+[TEXT]
+MID: 9afe8350007fc1eeb1975e88f5034867
+STATEMENT: >>>
+| 領域 | 選択する目標 | 二択の相手 | 具体的な選択理由・不採用理由 |
+| --- | --- | --- | --- |
+| 要求・設計文書/追跡 | **StrictDoc（ネイティブSDoc）** | Sphinx-Needs | 要求と設計文書、source relation、trace matrix、coverage、標準静的HTML/JSONを既存基盤で扱う。Markdown文書形式はexperimentalであり新しい設計正本には選ばない。Sphinx-Needsとの二重管理はしない。TypeScript symbol解析とNode test ID discoveryはStrictDocの機能とみなさず、repository側のAST discoveryを独立gateで検証する |
+| HTTP wire仕様 | **TypeSpec + OpenAPI 3.1.0 emitter** | OpenAPI YAML直接編集 | model/operationの一意の宣言と再利用、OpenAPI生成が可能。YAML手編集は型・共通DTO更新に重複を生みやすい |
+| HTTP runtime | **Fastify（Node.js、継続採用）** | Hono | Schema/response serialization、plugin encapsulation、hook/close lifecycleとNodeのストリーム境界を維持。HonoのWeb標準APIとOrval Hono generatorは魅力だが、VM上のAPIで置換する合理性は不足。現行catch-allの廃止はFastify標準routeへ移行して実施 |
+| server/client生成 | **Orval（client/Zod生成に限定）** | Hey API | TypeSpec由来OpenAPIからclient/Schema生成を行う。Orval Hono server generatorは採用しない。Fastifyのroute schemaはOpenAPI/JSON Schemaから生成・照合し、二重の手書きDTOを作らない |
+| runtime Schema | **Zod v4（業務/MCP/client）＋ Fastify JSON Schema/Ajv（HTTP境界）** | TypeBoxをHTTPの別正本とする方式 | ZodとJSON Schemaは異なる責務。HTTPワイヤ契約はTypeSpec→OpenAPI/JSON Schemaに一方向生成し、Fastifyの標準validator/serializerで実行。Zodを独立編集可能なHTTP正本にしない |
+| UI状態機械 | **XState v5（複雑な保存/復旧・ChangeSet・認証・backup UIに限定）** | React boolean/reducerによる独立した状態フラグの増殖 | 状態・event・guard/async actorと異常遷移を機械的に記述。単純なローカルUI stateはReactのまま。API/DB/Better Authの正本を置換しない |
+| OpenAPI品質 | **Redocly CLI 2** | Spectral | lint、bundle、ルール/Markdownチェックを集約。実API適合は別ツールで証明 |
+| OpenAPI互換 | **oasdiff** | OpenAPI Diff | breaking/change severity、format別出力とCIゲート。互換epochの設計判断は既存 deployment契約が所有 |
+| API契約の実動作 | **Schemathesis** | Dredd | schemaに基づくpositive/negative・stateful探索。意味的なBOLA/作者承認/保存テストは別途維持 |
+| PostgreSQL schema | **SQL migration + pgTAP/pg_catalog** | Drizzle Schema + Drizzle Kit | 複合FK、trigger、CHECK、厳格なfingerprintを直接管理・検証。ORM Schemaを導入するとSQL固有の正本分割になり得る |
+| PostgreSQL query | **現行pgを維持** | Kysely | Query Builder追加だけでは本件の要求証明・物理schema適合の問題を解かない。型付きSQLの別要件が生じたら再評価 |
+| DB可視化 | **tbls（実DB由来）** | 手書きDBML | 実DBのオブジェクトから文書/ERDを派生でき、ドキュメントと実DBの差を発見できる |
+| MCP transport/sdk | **公式TypeScript SDK v2** | v1継続 | 2026-07-28 spec対応の現行安定ライン、Node/Web標準handler adapterとZod v4。v1でのsessionfulモデルとの違いを別gateにする |
+| MCP protocol検証 | **公式Inspector / conformance** | 独自プロトコル検証器 | SDK公式の仕様適合と相互運用を利用。Codexia固有scope/author-onlyは統合テストで検証 |
+| Auth仕様の抽出 | **Better Auth公式OpenAPI生成** | 手書きのライブラリAPI一覧 | ライブラリ管理endpointのinventory重複を避ける。公式pluginはearly stageであり、productionのreference endpointを新規公開しない |
+| Architecture | **LikeC4** | Structurizr DSL | 静的出力/Node CLI/Web統合を重視。システム構成の意味はSYSTEM-DESIGNが決定し、既存Atlas/Mermaidの状態図と二重正本を作らない |
+| 脅威モデリング | **Threagile** | OWASP Threat Dragon | Git管理のリスクモデル/CI用出力。ただしLikeC4との構成・通信重複を明示的に管理 |
+| 性能検証 | **k6** | Artillery | thresholdで合否を定義し、CI統合可能。実運用p75や全SLOの証明とは別 |
+| Docs表示 | **StrictDoc静的HTML + Scalar** | VitePress中心 | 設計文書全体と要求・tracingを閲覧できる標準HTMLを用いる。既存GitHub Pagesの単一publisherと開発PortalのURL方針を維持し、新規公開経路を増やさない |
+| CI証拠 | **既存GitHub Actionsのexact-source認証** | Allureを第二正本化 | 正しいartifact/run identityの既存ガバナンスがある。test reportの表示は派生物のみ |
+
+**不採用:** ts-restは保守終了の公式案内があり、今回の新しい中核依存にしない。Atlas無償機能だけではtrigger/functionまで完全に検証できないためDBの正本・完全性ゲートには採用しない。Honoへの全面置換は行わない。Fastifyの現行catch-allは契約に基づく明示的なrouteへ改修し、既存のHTTP admission・権限・streamingを保持する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: fe02e294d11ad59968e6cb4549c9f9bd
+UID: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-strictdocによる設計正本の全面移行採用済み方針
+TITLE: StrictDocによる設計正本の全面移行（採用済み方針）
+
+[TEXT]
+MID: 54233cdacfae2aaf90f35730dba9c031
+STATEMENT: >>>
+**決定:** StrictDocを要求管理から設計文書全体の管理・閲覧基盤へ拡張する。ネイティブ `.sdoc` を承認済みの意味的設計の標準形式とし、共通Grammarを必要最小限の `.sgra` に集約する。人間向け文書は正本から生成し、既存のGitHub Pagesで読む。設計の意味を変更する承認ではなく、正本の表現・接続・保守方式の変更である。現行のMarkdown正本をこの採用決定だけで無効にせず、領域ごとの移行受入が成立するまでは既存所有先を維持する。
+<<<
+
+[[SECTION]]
+MID: 83fa2fcac3dd5ea0a542408db42c5dec
+UID: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-所有権と記述方法
+TITLE: 所有権と記述方法
+
+[TEXT]
+MID: 05f82784ea712a03ced5588e1e36a0d0
+STATEMENT: >>>
+- 対象はCodexia自身の全設計文書（architecture、design/UX、deployment、verification/CI、requirements、performance、製品・インフラ・モジュールに分散する規範的設計を含む）。採用済み仕様、未採用提案、廃止・履歴、運用手順、単なる索引を区別し、意味的な設計・設計判断・関連する維持対象の説明文書をStrictDocプロジェクトに収録する。README/AGENTS/CONTRIBUTING/SECURITYなどホスティングやツールが要求する入口、第三者資料、証跡、プロンプト、過去の作業記録、ツール固有の入力は一律に変換しない。入口は必要な限り短くし、設計内容の別正本にしない。
+- 標準のDOCUMENT、SECTION、TEXTによる階層と説明、REQUIREMENTによる規範的要求・制約、必要な理由フィールド、UID・LINK・RELATIONSを優先する。既存のREQUIREMENT、OBLIGATION、TESTの意味・追跡を維持する。説明文をすべて要求へ変えず、独立した識別・関係・集計が必要なときのみカスタム型や属性を追加する。初期段階でDESIGN/CONSTRAINT/DECISIONの別型を必須化しない。ネイティブGrammarのimport・標準の文書構造・対応する本文マークアップを用い、文書ごとのGrammar複製、独自パーサー、独自DSL、StrictDoc本体のfork、汎用変換・traceability基盤を作らない。
+- 要求・設計意図・決定・制約の意味は承認済み設計が所有する。物理的な実行可能契約、設計値、観測事実はそれぞれ下表の正本が所有する。共通UID、Operation ID、model element ID、既存のsource relation、標準のJSON/OpenAPI/公式出力などで接続し、同じ事実を別々に編集しない。実装や実行結果から設計要求を無断生成・昇格しない。
+- 適合・実行時刻・run/attempt/artifact/digest・自動発見できるsource識別子は既存の認定・解析から投影できるものを優先し、設計正本に手入力する重複を整理する。ただし、承認された意味的対応関係、明示された未達・適用判断、独立の検証義務を自動推測で置き換えない。現行フィールドや追跡を削除するのは同等の情報・証明が維持できた後だけとする。
+- 運用に使う機械可読契約は承認済みの専門モデルまたは単一の宣言的定義から直接消費・導出する。説明用のTEXT、表、HTMLを解析して業務判定を再構築する方式を新設しない。実行時の認可・DB制約・排他・証跡・承認は既存の正規実行境界で強制し、StrictDocの構文・追跡の成功を実環境の適合とみなさない。
+
+| 情報 | 編集正本・役割 |
+| --- | --- |
+| 要求、意味的設計、設計理由、受入義務 | StrictDoc。標準機能と共通Grammar |
+| システム構造・関係、信頼境界 | LikeC4。StrictDocからモデルを参照し同じ構造を写経しない |
+| HTTPワイヤ契約、MCP Schema | TypeSpec、公式SDKのSchema。意味的な認可・動作は領域設計が所有 |
+| 振る舞い・状態 | 承認済みの状態機械（採用範囲内のXState）または正規の決定表・モデル。未移行の説明図を無条件に実行仕様とみなさない |
+| DB物理契約・制約、インフラ宣言 | SQL、Terraform、Ansible。生成したERD・構成一覧は派生物 |
+| 脅威・リスク | Threagile。リスク・対策参照を維持 |
+| 表現・図 | StrictDoc標準HTML、既存Mermaid/LikeC4等。図自体が唯一の設計情報を持つ場合は正本として保存し、派生図は手編集しない |
+| 構成値・CIタスク・依存・ポリシー | 既存JSON/Schema、CI Contract、正規判定関数など、単一の機械可読定義を優先 |
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 4da97756c2c24314ab6c47913d2587f9
+UID: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-public-design-search
+TITLE: 公開設計の日本語検索
+
+[TEXT]
+MID: 2571dacdf98848ea82a60e87e652b5071
+STATEMENT: >>>
+**採用決定:** 日本語本文、UID、英数字を既存の開発ポータルから検索できるようにする。StrictDoc 0.32.1 と 0.32.2 の標準静的検索は英数字の索引を作るため、日本語本文の検索には **Pagefind 1.6.0 Extended** と公式検索 UI を採用する。Sphinx は別の文書生成を必要とし、代表試行では StrictDoc の標準 RST 出力から表や図を同等に表示できなかった。Pagefind は標準 HTML を直接索引化し、検索結果から元の StrictDoc 文書へ移動する。
+
+既存の Repository Audit Pages が、公開対象として検証した StrictDoc の文書ページだけを同じ source SHA で索引化する。公開用 HTML は標準設定で全ノードを展開し、目次以外の本文も索引に含める。全文書のローカル検証と公開範囲は別に管理する。Pagefind は Pages 生成時の専用依存とし、`scripts/audit/pagefind/package-lock.json` にバージョンと配布物を固定する。検索インデックスは同一 source から生成して Pages artifact に収録する。編集正本はネイティブ SDoc または承認済みの専門モデルが所有する。
+
+版の変更時は、文字列検索、UID と元ページへの遷移、公開範囲、生成差分と所要時間を同じ代表文書で検証する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: ed7a7427dae5858e69515bbd1197ecc4
+UID: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-補完製品の選定条件
+TITLE: 補完製品の選定条件
+
+[TEXT]
+MID: 4aa133473142bd8b6bfa296b8073f87f
+STATEMENT: >>>
+StrictDocを汎用の制約言語・ポリシーエンジンへ拡張しない。不足はまず既存の専門ツール・標準形式で解く。次の選択肢は比較対象であり、採用決定・新規依存追加ではない。
+
+| 候補 | 利用を検討する条件 | 採用しない条件 |
+| --- | --- | --- |
+| CUE | JSON/Schemaや既存定義で簡潔に扱えない契約の合成・導出・静的制約。独立定義や独自解析を削減できる | 単純な値・一覧のため、またはStrictDoc/TypeSpecの内容を再記述するためだけ |
+| OPA/Rego | 複数の実行主体で同じ動的な許可・義務を強制し、正規判定の重複を廃止できる | 既存の単一判定関数で十分、追加の事後チェックのみ、別の管理プレーンが必要 |
+| Sphinx | StrictDoc標準HTMLでは不可欠な閲覧要件を満たせず、標準RST出力からの生成で解決できる | 独立編集する文書や別publisherが必要、既存標準HTMLで十分 |
+| Sphinx-Needs / SysML等 | StrictDocの標準機能・既存専門モデルでは必須要件を満たせないと実証され、置換の費用対効果が成立する場合に別設計判断 | 既存の要求・モデルとの二重正本、形式の全面再編自体が目的 |
+
+新規採用には、具体的な不足、既存手段との比較、削減できる定義・コード、依存・CI負荷、出力/実行の実証を要求する。新しいポータル、常駐サービス、永続DBは設けない。現時点の選定はStrictDoc強化のみであり、CUE、OPA、Sphinx/Sphinx-Needs等の追加は未採用。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: e69b774e67b89a5cba827fe163a18e01
+UID: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-移行順序と統合
+TITLE: 移行順序と統合
+
+[TEXT]
+MID: b8d95cf93ca47dc467b56d85a3a3a9a0
+STATEMENT: >>>
+1. **適格性検証:** 最新mainの全追跡文書を分類し、旧所有先・UID/anchor・実際の消費先・新所有先を特定する。現在固定のStrictDoc版と公式安定版を照合し、必要な版のnative SDoc/Grammar、複数文書relation、表・コード・図、HTML/JSON、外部参照、検索を代表文書で実行検証する。対象は少なくとも要求台帳、Deployment Lifecycle、CodexiaCTL、Route Authorization、Screen Control Catalog、Screen State Atlas、DB Detail、CI/CD、appのImpeccable入力。SDoc/HTML生成の成功だけでは意味的同等性を証明しない。必須要件に不足があれば代替を比較し、結果をPR証拠に残す。未成立のまま全量変換しない。
+2. **共通基盤:** 既存の要求台帳・Grammarをnative形式へ移す。既存UID/MID・関係・適用状態・検証証拠の境界を保存し、単一Markdownファイルや旧パスに依存する解析、基準照合、標準出力へのリンクを新しい正本体系に対応させる。プロジェクト全体を標準exportで扱えるようにし、既存requirements-trace、exact-source Certification、Repository Audit Pagesへ統合する。
+3. **領域移行:** Architecture/Security、API/Data、Deployment/CTL、Design/UX、CI/Verification、Requirements/Governance等を独立した所有範囲で並列化可能とする。既存仕様の正常・異常・例外・禁止・理由・表・図・参照の意味を保存し、未知の設計判断を変換時に行わない。共通基盤・専門モデルの共有変更は統合責務を明確にする。消費側と参照先を同じ変更単位で移行し、受入成立と同時に旧編集正本を除去する。全域を単一PRで移す場合も同じ段階・受入を満たすこと。
+4. **全体統合と撤去:** 全文書を新しい正本体系から閲覧でき、独立した旧Markdown設計正本・一時変換器・二重管理用の照合を残さない。Architecture Atlas、UX Simulator、Scalar、追跡ダッシュボードの契約と正規source SHAの表示を維持する。旧URL/anchorは利用中の参照を修復し、必要な場合だけ内容を持たない導線へ置換する。Impeccable等の固定形式は消費契約を確認し、必要なら正本から生成するか当該ツール形式をその情報の唯一の正本として参照する。壊れた入力を残したまま全移行を完了扱いしない。
+
+移行は [LINK: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE-strictdoc全面移行の受入, 仕様ツールチェーン受入のStrictDoc全面移行ゲート] に従う。採用決定はARCHITECTURE_SELECTEDであり、変換試験・移行・公開の実行証拠を意味しない。
+
+公式参照: [StrictDoc User Guide](https://strictdoc.readthedocs.io/en/latest/latest/docs/strictdoc_01_user_guide.html)、[Feature Map](https://strictdoc.readthedocs.io/en/latest/latest/docs/strictdoc_02_feature_map.sdoc.html)、[supported formats](https://strictdoc-project.github.io/formats/)。
+<<<
+
+[[/SECTION]]
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 70904053a6515a53ea6ed036fc71b852
+UID: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-openapiの採用バージョン
+TITLE: OpenAPIの採用バージョン
+
+[TEXT]
+MID: 8f447941b2456cfc370386de74a3a722
+STATEMENT: >>>
+TypeSpec 1.18.0 で直接生成する形式を **OpenAPI 3.1.0** とする。
+OpenAPIの安定版3.2.1と3.1系の3.1.2は、当該emitterの `openapi-versions` が受理する列挙値に含まれない。
+3.2.0は生成でき、Redocly 2.82.0、oasdiff 1.39.0、Orval 8.49.0でCodexiaの操作を処理できる。
+Swift OpenAPI Generator 1.14.4は3.2.1を拒否する。
+3.2.0の予備対応では、TypeSpecがストリームに出力する `itemSchema` がSwiftのoperation応答型に反映されず、未型付けの `HTTPBody` になる。
+採用中のFastify変換器も3.1.0を入力とする。
+
+OpenAPIのpatch番号は明確化や訂正に使用され、同じminor系列の機能集合を共有する。
+3.1系列の仕様本文は [OpenAPI 3.1.2](https://github.com/OAI/OpenAPI-Specification/releases/tag/3.1.2) を参照し、生成物のヘッダーにはemitterが出力した `3.1.0` を保持する。
+3.2系への移行では、TypeSpecでの直接生成、Scalar、Redocly、oasdiff、Fastifyのスキーマ変換、Orval、Swiftの再生成と実行を同じ契約で検証する。
+複数形式を併用する案には、変換で失われるスキーマ制約、HTTP操作、ストリーミング情報の検出と保守が必要になる。
+各利用側が3.2系を受理し、既存契約と同等の検証を実行できる段階で採用形式を更新する。
+
+比較時の正本は [OpenAPI 3.2.1](https://github.com/OAI/OpenAPI-Specification/releases/tag/3.2.1) と [TypeSpec emitter設定](https://typespec.io/docs/emitters/openapi3/reference/emitter/) を参照する。
+実行ツールの固定版は [LINK: DOC-ARCHITECTURE-DEPENDENCY-INVENTORY, 依存台帳] で管理する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: a3f29c4b8d853f6f7e31e5451cdb3236
+UID: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-実装と移行の境界
+TITLE: 実装と移行の境界
+
+[TEXT]
+MID: 769a6ba625a29daf847293e2645a4441
+STATEMENT: >>>
+| 現行コード/仕様の実情 | 変更後の目標 | 必須の変更と不変条件 |
+| --- | --- | --- |
+| TypeSpec から生成した OpenAPI と Fastify スキーマで通常 API と setup API を登録。SSE と外部プロトコルは明示的なアダプターを経由 | TypeSpec→OpenAPI→Fastifyの明示的route/JSON SchemaとOrval client | 全method/path、CSP/nonce、CORS/CSRF、body limit、HTTP 401/403/404/405/409、stream/drainを追跡して移管。動的module route等は明示的adapter |
+| packages/api/src/persistence-routes.tsがbody/headersを手動検証しCore/DBへ委譲 | TypeSpec/OpenAPI由来のFastify JSON Schema/Ajvを入口に使用 | 既存のsemantic precondition、transaction/owner判定をvalidatorへ誤移管しない。Zodは業務/MCP/clientで維持 |
+| `modules/mcp/src/http.ts` は Fastify の中央認可を経た Web Request を公式 SDK v2 の `createMcpHandler` へ渡す | 2026-07-28 の stateless HTTP。旧世代は [LINK: DOC-ARCHITECTURE-MCP-V2-MIGRATION, MCP 移行設計] の期限付き互換を適用 | 各リクエストの owner、project、scope の再検証と、CORS、切断、stream、retry を実証 |
+| `modules/mcp/src/stdio.ts` は公式 SDK v2 の `serveStdio` と HTTP 共通のツール登録を使用 | 入出力スキーマは Zod v4 | Core の action と effect が共通であること、および標準出力の JSON-RPC、切断とプロトコル交渉を検証 |
+| public schemaは3つのSQL migrationとchecksum ledger、認証schemaはBetter Auth専用 | SQLを物理詳細契約として維持しpgTAPで検証 | schema/checksum/trigger/roleと隔離restoreを維持。既存migrationを改変しない |
+| 既存のStrictDoc拡張Markdown要求台帳と領域別Markdown設計書 | ネイティブSDocの文書体系・要求relationとsource/TEST/evidence trace | 既存REQ/OBL/TESTのUID/MID・関係を保持し、設計正本を二重編集しない。移行前後の受入は下記に従う |
+| 既存Architecture AtlasはMermaidを抽出し単一のRepository Audit Pagesへ公開 | LikeC4の構成ビューとStrictDoc/Scalarを同一公開者に統合 | 状態遷移は承認済み領域契約・専門モデルが正本。移行後はMarkdownフェンスを正本とする抽出に依存せず、LikeC4の構成図とMermaidの状態図を別責務で維持 |
+
+認証/principal（ANON、OWNER-SESSION、OWNER-API、MCP-CLIENT、SHARE-READER、SETUP、OPERATOR）やPostgreSQL単一正本、作者による承認、Core/Full、Tailscale管理経路、既存のexact-source CI基準は**変更しない**。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 9521b11612f8790f61d34139d3fab141
+UID: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-導入判定ステータス
+TITLE: 導入判定ステータス
+
+[TEXT]
+MID: 7a6cb2e66f3acad136b12f4054e3fc9c
+STATEMENT: >>>
+- **ARCHITECTURE_SELECTED:** 上表は合意済み技術選定。各候補がCodexiaの全契約に合うことを証明した状態ではない。
+- **INTEGRATION_UNVERIFIED:** 領域ごとの実装やツールが存在する場合でも、対象となる受入義務の実行証拠が揃うまでは未検証とする。
+- **MIGRATION_ALLOWED:** 領域ごとの [LINK: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE, 採用ゲート] を満たしたときに限り移行変更のPRを合格判定できる。
+- **RETIRED:** 新旧二重ルーティングや旧MCP sessionを残すことを設計として採用しない。移行途中に必要な比較用実装は期間/削除条件を明示し、完了後に除去する。
+
+技術選定を変更する必要が生じた場合は、主観的な好みではなく、**公式にサポートされないこと、合否が再現するテストの失敗、セキュリティ不変条件の破壊、代替に比べた説明可能なコスト**を示し、本書に代替案と決定理由を記録して改訂する。ユーザーの合意済み選択を実装担当者が独断で再選定しない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 12cb853840692bcdc2a18b31a9dad5a0
+UID: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-詳細設計と資料
+TITLE: 詳細設計と資料
+
+[TEXT]
+MID: e68c2cc9eeecaa624dd9d050c607412a
+STATEMENT: >>>
+- [LINK: DOC-REQUIREMENTS-STRICTDOC-TRACEABILITY, 要求/StrictDoc移行]
+- [LINK: DOC-ARCHITECTURE-HTTP-PLATFORM-MIGRATION, TypeSpec/Fastify/Orval/API契約移行]
+- [LINK: DOC-ARCHITECTURE-POSTGRES-CONTRACT-VERIFICATION, DB契約検証]
+- [LINK: DOC-DESIGN-XSTATE-STATE-MACHINE-CONTRACT, XState v5状態機械]
+- [LINK: DOC-ARCHITECTURE-BACKUP-CONSOLE-CONTRACT, バックアップ管理UI・S3制御境界]
+- [LINK: DOC-ARCHITECTURE-SPECIFICATION-IMPLEMENTATION-CONTRACT, 全workstreamと依存・完了条件]
+- [LINK: DOC-ARCHITECTURE-MCP-V2-MIGRATION, MCP v2と認証境界]
+- [LINK: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE, CI・脅威・性能・Portalの受入]
+
+公式参照（2026-11-23照合）: [TypeSpec OpenAPI emitter](https://typespec.io/docs/emitters/openapi3/reference/emitter/)、[Orval config](https://orval.dev/docs/reference/configuration/output/)、[StrictDoc supported formats](https://strictdoc-project.github.io/formats/)、[MCP v2 SDK](https://ts.sdk.modelcontextprotocol.io/v2/)、[MCP v2 protocol era migration](https://ts.sdk.modelcontextprotocol.io/v2/migration/support-2026-07-28)、[Better Auth OpenAPI](https://better-auth.com/docs/plugins/open-api)、[Fastify validation and serialization](https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/)。最新releaseのpinは**導入時に個別検証**し、独立互換制約を説明できない古い固定を放置しない。
+<<<
+
+[[/SECTION]]

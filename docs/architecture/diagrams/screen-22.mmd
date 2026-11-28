@@ -1,0 +1,16 @@
+flowchart TD
+    ENTRY["/console/identity"] --> OWNER{"owner session＋fresh reauth"}
+    OWNER -->|拒否| LOGIN["安全に再認証"]
+    OWNER -->|OK| MENU["OIDC / OAuth clients / grants"]
+    MENU -->|OIDC追加・変更| VALIDATE["issuer/discovery/redirect/subを検証"]
+    VALIDATE -->|失敗| FIX["未有効のまま修正・再試行"]
+    FIX --> VALIDATE
+    VALIDATE -->|成功| LINK["同じownerへの検証済みlink"]
+    LINK --> ACTIVATE["明示的に有効化"]
+    MENU -->|同意一覧| GRANTS["client/scope/resource一覧"]
+    GRANTS -->|revoke| CONFIRM["対象grantと影響を確認"]
+    CONFIRM --> REVOKE["server側で失効を確定"]
+    REVOKE --> GRANTS
+    MENU -->|MCP client権限確認| MCP["server allowlistとproject assignmentを照合"]
+    ACTIVATE --> MENU
+    MCP --> MENU

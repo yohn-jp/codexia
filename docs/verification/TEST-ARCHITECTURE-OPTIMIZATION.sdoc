@@ -1,0 +1,246 @@
+[DOCUMENT]
+MID: a7334a7486f6e5903989459c823d2a55
+TITLE: Test architecture and proof placement
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: ae2473e7524cb40574c971de27bb6b6a
+STATEMENT: >>>
+Normative test design contract. [LINK: DOC-VERIFICATION-CI-CD, CI/CD architecture] owns execution, selection, artifact identity and release certification; [Verification](https://github.com/yohn-jp/codexia/blob/main/docs/verification/README.md) owns local commands. Existing implementation and acceptance evidence are separate from the target. This contract does not authorize deletion of tests or weakening of any gate.
+<<<
+
+[[SECTION]]
+MID: 96292db84c3da8274dd734a4fbeb3252
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-1-authority-と設計制約
+TITLE: 1. Authority と設計制約
+
+[TEXT]
+MID: d78927c250bc90d009ea0e1d85bb1101
+STATEMENT: >>>
+- [LINK: DOC-ARCHITECTURE-CORE, Core]、[LINK: DOC-ARCHITECTURE-INTERNAL-BOUNDARIES, Internal boundaries]、[LINK: DOC-ARCHITECTURE-MCP-FIRST, MCP-first]、[LINK: DOC-DESIGN-UX-CONTRACT, UX contract] を製品契約の正本とする。テストは現行実装の追認ではなく、それらの契約を証明する。
+- 実行グラフと認証の正本は [LINK: DOC-VERIFICATION-CI-CD, CI/CD architecture] とする。
+- PostgreSQL単一正本、明示的作者承認、外部エージェントの権限、固定Snapshot、Core/Fullの構成境界を維持する。内部LLM開発凍結、Git永続化の廃止、閉鎖済み移行証拠の保全を変更しない。
+- 既存の全検証義務を維持する。実行単位の再編と検証義務の削減を混同しない。必須テストの移管には旧・新の契約対応表と同等以上の検出能力の証拠が必要である。
+- 検証には隔離した合成データを使用し、実作者データ・秘密値の持ち出しを禁止する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 91903bffae67b6a7dfccf06560e5a2f8
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-2-テスト層と証明責務
+TITLE: 2. テスト層と証明責務
+
+[TEXT]
+MID: c0ecd2fc01487c8577f8c7815e88b1b1
+STATEMENT: >>>
+ここでE2Eとは、利用者が直接利用するインターフェースから永続化まで、管理下の実コンポーネントを結合して検証することを指す。ブラウザUIテストだけをE2Eとは呼ばない。API/MCPからPostgreSQLに至る検証もE2Eである。コンポーネント描画だけの検証はUIテストであってもE2Eではない。
+
+| 層 | 責務 | 主たる実装資産 |
+| --- | --- | --- |
+| 静的検証・契約 | production/test-source型検査、safety、schema、インベントリ、依存境界 | workspace typecheck、scriptsの契約テスト、Core audit |
+| 単体・モデル | 純粋計算、分岐、境界値、不変条件、決定的な状態遷移 | packages/modules/appの既存unit suite |
+| コンポーネント | 描画状態・表示条件、イベント、shared controller、エラー表示の結線 | appの既存テスト基盤。必要なら既存ブラウザ環境で局所テスト |
+| 実DB結合・API E2E | 永続化、Revision、トランザクション、認可、冪等、契約間の整合 | persistence-postgres、core、api、MCP integration |
+| ブラウザE2E | Desktop React Web/console/readerから正本までの結合、IndexedDB、再起動、IME。正式対応はWindows Chromium系。**Mobile React専用viewportは目標対象外** | tests/e2e、Core/Full、Chromium。旧Mobile/公開面の移行例外は [LINK: DOC-VERIFICATION-E2E-EXECUTION, E2E execution] |
+| 実行環境・パッケージング | OCI startup/drain、migration identity、Core/Fullの構成分離 | verify-oci、profile-package |
+| 特殊資源・運用受入 | 実モデル推論、native workerの解放、物理端末、バックアップ復元、実配備 | [LINK: DOC-VERIFICATION-INTEGRATION, Integration]、[LINK: DOC-VERIFICATION-OCI, OCI]、運用契約 |
+
+単体・コンポーネント層では依存を制御できるが、PostgreSQL、Core/APIやMCPの境界、実ブラウザの永続化を証明するテストで対象そのものをモックへ置換してはならない。外部provider、外部ID基盤などの組織制御外の依存をテストダブルで置き換える場合、代替範囲を明示する。実モデル検証の未実行を、provider non-executionや型検査の成功で代替しない。
+<<<
+
+[[SECTION]]
+MID: 091696643816f4b0dffc4b50506ed4e4
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-21-検証義務の配置
+TITLE: 2.1 検証義務の配置
+
+[TEXT]
+MID: db97de7e4f4ae7d0d7b6fc362afa9e77
+STATEMENT: >>>
+| 契約 | 分岐・境界の主証拠 | 保持すべき結合・E2E証拠 |
+| --- | --- | --- |
+| Native Knowledge/Evidence | Alias曖昧性、UUID解決、UTF-16、取得上限、旧投影、機密設定除外 | 実DB上の関連付け、削除済み根拠、archive round trip、Snapshot固定 |
+| Story/Scenario/Context | 時間・視点・置換・ID衝突・省略、独立した仮説 | 保存→採用提案→作者承認→正本状態、実データからContext、読者/人物非開示 |
+| ChangeSet/Proposal | 遷移可能性、入力契約、digest、stale/replayの分岐 | 実DBで同一操作の競合、原子的適用、承認境界、receipt永続化・再起動 |
+| MCP | named/generic schema、scope決定、結果型 | stdioとStreamable HTTPの実接続、PostgreSQL、認可・provider非実行 |
+| エディタ | Draft状態、revision acknowledgement、ナビゲーション世代、純粋なreducer | 実IMEイベント、保存中入力、遅延応答、reload/別タブ、実IndexedDB quotaと復旧 |
+| ワークスペース | 表示状態、アクション利用可否、画面内操作 | Desktop Webの執筆・参照・復帰、モジュール有無。SwiftUIはnative実機で別の受入 |
+| 配備 | 解析・構成選択・artifact identity | Core/Full実イメージ、起動・停止 |
+| モデル | capability leaseや設定の論理分岐 | 実モデルの推論、キャンセル、release、派生索引再構築と置換後の正本照合 |
+
+下位層へ移管するのは、その層で同じ故障を検出できると証明したケースだけとする。例えば遅延保存の世代判定は単体で網羅できても、実エディタのnavigationとIndexedDBの結合に固有の故障はブラウザに残す。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 55f85bf71ebce312ee72c22ce1b4c55c
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-22-高価値シナリオの固定
+TITLE: 2.2 高価値シナリオの固定
+
+[TEXT]
+MID: 2f53addb249304064f453a13ebed2922
+STATEMENT: >>>
+例ベースE2Eは、少なくとも次の契約を代表する既存シナリオを維持する。ケース数の目標を先に設定して削減しない。
+
+- 作者のログイン、原稿編集、保存、Revision再読込、Draft復旧。複数文書・別タブ・競合・応答順序逆転を含む。
+- Desktop Webの場面切替・参照・編集・原稿復帰を実ブラウザで確認する。iOS SwiftUIの同等操作、IME、選択、保護draft、ナビゲーションを物理iPhoneと実APIで独立確認する。Mobile React E2Eはネイティブの代替証拠ではなく、Mobile Web route/shell撤去後の残存テストも現行製品の受入証拠にはならない。
+- 外部MCPによる作品参照・提案、作者UIによるレビュー・承認、PostgreSQL適用とreceipt、拒否された操作が正本を変更しないこと。
+- Knowledgeの根拠、Story Contextの視点、Scenarioの仮説と承認後の確定状態。実装の横断的な結合を証明する。
+- Core/Fullとブラウザ固有の差、実OCIライフサイクルの証明。
+
+テスト移管時は、契約ID、旧テスト識別子、検出対象の反例、移管先、実装前の失敗または故障注入、保持するE2E、適用profileを対応付ける。移管先がまだ実行されていない段階で旧テストを削除しない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 58e4da5f7c1d48c97a458bea22588311
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-ブラウザープラットフォームの証明境界
+TITLE: ブラウザー・プラットフォームの証明境界
+
+[TEXT]
+MID: 58d65bb39776438f019e2016d39c235c
+STATEMENT: >>>
+[LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, System design] の採用対象に従う。作者用DesktopのWebKit/macOS/Firefox互換性は独立した品質要求ではない。WebKitの重複実行を廃止し、Chromiumに残す正常・異常・境界証明を維持する。旧Mobileの撤去は #794 のNative受入条件を変更しない。公開reader・外部認証の契約は別管理し、狭幅アクセシビリティ、セキュリティ、実DB/実APIの証明は維持する。Windows固有のIME・入力・フォントは実Windows受入、NativeはSimulatorと物理iPhoneで証明する。Browser実行最適化の詳細は [LINK: DOC-VERIFICATION-E2E-EXECUTION, E2E execution] が所有する。
+<<<
+
+[[/SECTION]]
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: be1b567c55d6f98740f1c7e9b80b0b6e
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-3-状態遷移ベースのテスト設計
+TITLE: 3. 状態遷移ベースのテスト設計
+
+[[SECTION]]
+MID: 17ac88578340b306d57affefd16c1cd5
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-31-独立した契約モデル
+TITLE: 3.1 独立した契約モデル
+
+[TEXT]
+MID: 40eab1caf09457b50c22dfbb87f79189
+STATEMENT: >>>
+資料でいうグラフベーステストは、仕様の状態遷移モデルを用いて、実行可能なイベント列と拒否されるイベントの整合性を検査する。単なるランダムUIクリックやコードの分岐網羅ではない。
+
+Codexiaでは次のモデルを既存契約から定義する。実装の関数を期待値生成器として再利用せず、モデルと実装を独立させる。
+
+| モデル | 観測する状態 | イベント例 | 不変条件 |
+| --- | --- | --- | --- |
+| Draft/Revision | 文書、base revision、generation、保護済みDraft、in-flight、競合、receipt | edit、protect、save、ack、navigate、reload、recover | 新しい入力を古い応答で破棄しない。別文書を上書きしない。未保護データを失う操作を拒否する |
+| Proposal/ChangeSet | actor、project、snapshot、operation、承認、適用receipt | propose、review、approve、apply、reject、replay、stale | 未承認・別scope・不正revisionの適用を拒否する。再送は重複変更しない |
+| Scenario/Context | 基準snapshot、代替案、置換、視点、開示、提案 | compare、save、adopt、approve、update snapshot | 仮説間・正本の分離。比較と採用の整合。非開示情報を返さない |
+| Module lifecycle | installed、enabled-idle、active、draining、disabled、lease | enable、invoke、cancel、disable、release | 利用権限のない処理を起動しない。最後のleaseの終了でworkerを解放する |
+
+モデルの抽象状態は仕様を表し、実装の内部フラグと一対一にする必要はない。上表は設計対象であり、現行実装の全状態列挙ではない。許容・拒否条件、安定状態、観測値、入力、既存契約との対応を各モデルのテスト仕様で確定する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 57da716a7fe56289df56e214a9537cbb
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-32-探索とoracle
+TITLE: 3.2 探索とoracle
+
+[TEXT]
+MID: e0bc159b0b99d0dd69e8034109dfe4d3
+STATEMENT: >>>
+- 許容トレース外への遷移（安全性違反）と、安定状態で受理すべきイベントが拒否されること（活性違反）を区別する。正当なエラー応答を無条件に失敗とみなさない。
+- 非同期処理中は安定状態とみなさない。Promise、deferred応答、制御可能なclock、正規の状態通知を用い、待機の上限は失敗を検出するために使用する。実時間sleepで順序を期待しない。
+- 有界の状態・遷移探索、境界値、決定的seedによるシーケンスを用いる。失敗時はseed、初期状態、イベント列、観測値を記録し、最小の再現列を保存する。
+- 高価値シナリオは固定例ベースで別途実行する。探索時間内に偶然通過することを必須契約の証拠としない。
+- 初期はDraft/RevisionとProposal/ChangeSetを対象とし、純粋な状態遷移テストまたは実DB/APIアダプタから導入する。ブラウザ探索はUI結合に固有の問題に限定する。形式手法による全状態空間の完全証明を主張しない。
+<<<
+
+[[/SECTION]]
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 28c23d2e023ab60715ee6772a69dcfc4
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-4-ブラウザテストの保守性
+TITLE: 4. ブラウザテストの保守性
+
+[[SECTION]]
+MID: b3b0f61710826d5b77a81f5611ab7b48
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-reusableoperator
+TITLE: ReusableOperator
+
+[TEXT]
+MID: a8a0fcaabac7a05e0f2f0c9092c26529
+STATEMENT: >>>
+資料でいうReusableOperatorは、イベント名と具象的な画面操作の対応を分離するパターンである。Codexiaでは既存のE2E helperを先に調査し、ログイン、作品選択、場面選択、入力、保存、レビュー、承認、復旧等の共通操作を責務単位で整理する。
+
+テストシナリオは操作意図と期待する契約に集中し、locatorや低レベルの操作はhelperに局所化する。既存のユーザー向けrole/nameと正規のtest identityを使い、アサーションを隠す巨大な共通関数や汎用テストDSLを作らない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: ea8d495807192566c11fcc9c7dfe5e68
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-contextstream
+TITLE: ContextStream
+
+[TEXT]
+MID: 3d8f0967c6042e97073963a66a067dec
+STATEMENT: >>>
+資料でいうContextStreamは、画面と文脈の組から次の画面と文脈の組を返す型付き非同期遷移を合成するパターンである。必要な場合、project ID、document ID、revision、セッション等を明示したfixture型を利用する。現行テストの単純な操作には追加抽象化を強制しない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 2274c616ac5b2d80b26e0e15b640b4a8
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-fixture同期分離
+TITLE: Fixture・同期・分離
+
+[TEXT]
+MID: 57573c3944ff582c264b139a7957cd20
+STATEMENT: >>>
+- ログインや作品作成が目的でない場合、正規のAPI経由の準備、正規のfixtureを利用できる。ただしUI導線そのものを検証したという主張はしない。ユーザー操作の結合を証明する代表シナリオでは実UIから操作する。
+- PostgreSQLへ直接seedする場合は、必要な不変条件を保った隔離データに限定し、seedで通過しなかった処理を別に検証する。旧Git fixtureを復活させない。
+- 原則としてテストを独立実行可能にする。資料のテストケース連鎖パターンは、成功した先行テストの終了状態を明示的依存で後続が継承する方式である。共通初期化を再利用するだけで暗黙の順序依存を導入しない。採用する場合は副作用局所化、依存失敗時の後続BLOCKED、単独再現性を証明する。
+- 失敗trace、最初の未成立条件、API応答、fixture identity、raceのevent順序を記録する。無根拠なretry、timeout延長、skip、assertion弱体化で緑化しない。
+<<<
+
+[[/SECTION]]
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 82d6c9df8abd8206a280d33e7f273e13
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-5-acceptance-and-evolution
+TITLE: 5. Acceptance and evolution
+
+[TEXT]
+MID: 5bfd82a07c4494af707b46362df943ee
+STATEMENT: >>>
+- Define required and forbidden transitions, inputs, pre/postconditions and cross-component refinement before implementation. Keep expected outcomes independent from the implementation. Test logical combinations at their cheapest faithful layer; keep representative end-to-end scenarios that expose real integration failures.
+- For a migrated test, map the original contract and counterexample to the new proof and retained E2E scenario. Demonstrate equivalent or stronger detection before removing the original. Never substitute a mocked DB or screenshot for persistence/authorization evidence.
+- Keep deterministic failure seeds, trace and fixture identity. A blocked or skipped case is not a success. For performance and usability, use measured workload and representative author goals, not merely functional assertions; browser emulation is not physical IME/device acceptance.
+- Preserve Core/Full, real PostgreSQL, MCP transport, browser and OCI obligations. Measure CI optimization and verify release eligibility according to [LINK: DOC-VERIFICATION-CI-CD, CI/CD architecture]. Do not introduce a new generic framework or formal verifier without a separately justified need.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 1ea77f67e3bb396a35dea26fcadd5513
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-6-設計参考
+TITLE: 6. 設計参考
+
+[TEXT]
+MID: 48ae70afc56b1806cd069a7f2b614492
+STATEMENT: >>>
+Kuniwak『E2Eテスト大全』をテスト設計の参考とした。特にE2Eの境界（p.6）、実行・保守コストと組み合わせ爆発（pp.11–14）、テストピラミッド（pp.15–16）、グラフベースと高価値例ベースの併用（pp.17–21）、ReusableOperator、ContextStream、テストケース連鎖（pp.22–25）を参照する。これらの独自用語は本書で適用上の意味を明示した。テスト選択・自動修正・並列化は同資料の詳細な論述対象外（p.28）であるため、実行DAGとartifactの設計はCodexia固有の提案であり、資料から直接導出した保証ではない。実行DAGとartifactの正本は [LINK: DOC-VERIFICATION-CI-CD, CI/CD architecture] に置く。
+
+本書は検証設計の正本であり、実装済みの証明ではない。現在の実行・認証を変更する際は、対象の検証契約と対応する実装・テストを同時に更新する。
+<<<
+
+[[/SECTION]]

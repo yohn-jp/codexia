@@ -1,0 +1,11 @@
+flowchart TD
+    OPEN["/oauth/login"] --> REQUEST{"署名済みOAuth要求が有効?"}
+    REQUEST -->|いいえ| INVALID["要求不正 / 最初から認証を開始"]
+    REQUEST -->|はい| METHODS["利用可能な認証方式を取得"]
+    METHODS --> PASS["Passkeyでサインイン"]
+    METHODS -->|設定済みの場合のみ| OIDC["外部IdPでサインイン"]
+    PASS --> CHECK{"owner本人と認証が成立?"}
+    OIDC --> CHECK
+    CHECK -->|成功| CONSENT["AUTH-02へ"]
+    CHECK -->|中断または失敗| METHODS
+    METHODS -->|戻る| ENTRY["ENTRY-01"]

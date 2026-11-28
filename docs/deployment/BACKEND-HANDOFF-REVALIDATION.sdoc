@@ -1,0 +1,22 @@
+[DOCUMENT]
+MID: 180deb7bc2123667afa6f499b3996ee3
+TITLE: Backend handoff revalidation
+UID: DOC-DEPLOYMENT-BACKEND-HANDOFF-REVALIDATION
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: cdd65a5f23b8f88d20adda37d9cc28b5
+STATEMENT: >>>
+The **Revalidate Backend Deployment Certificate** workflow is a read-only recheck of an already published backend release. It uses only the workflow's short-lived read-scoped `GITHUB_TOKEN`; it has no deployment credentials. Run it manually from `main` with a successful `Codexia Backend Image` run ID and that run's exact 40-character source SHA. The publisher run is looked up through GitHub's authenticated API and constrained to the canonical workflow, repository, main branch, successful conclusion, and current run attempt; its source SHA must equal the separate input before checkout. The workflow checks out that exact source commit without passing API response data through a workflow output file. A wrapper confirms the real runner event remains `workflow_dispatch`, checks both the trusted-main and publisher checkouts, retrieves the publisher again from the API, and only then passes its normalized response to the existing verifier in its expected internal workflow-run context. It does not accept a caller-supplied event payload.
+
+The verifier checks the publisher artifact, the Core and Full certificates, the source verification and producer receipt, release records, and the immutable OCI image identities. The job has only read permissions for repository contents, workflow artifacts and packages. It has no environment, deployment identity, SSH key, host connection or production write permission. It records `NOT_ESTABLISHED` for target-specific recovery; a successful certificate check is not a deployment approval.
+
+The existing candidate publisher run is `44878012473`, from main source `94d7cb890fa7c61fc03b6f5153893a8acc9f9609`. Its publication succeeded, while the original handoff run failed on GitHub's skipped matrix-job representation. The merged #462 verifier change accepts that exact promoted-run representation while retaining the complete main-build fallback. Revalidating this run after this workflow is integrated can establish the certified image handoff; it cannot establish access or recovery for the production target.
+
+This workflow does not implement the separate disposable push convergence and rollback fixture. The existing #443 host bootstrap and #444 isolated backup/restore results remain historical fixture evidence, and reboot recovery remains outside this check. None of these fixture results prove production-host readiness.
+<<<

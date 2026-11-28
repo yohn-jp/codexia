@@ -1,0 +1,15 @@
+flowchart TD
+    ENTRY["/console/backups/history"] --> LOAD["BKC-009 run一覧"]
+    LOAD --> PICK["run IDを選択"]
+    PICK --> STATE{"server receiptのstatus"}
+    STATE -->|QUEUED / RUNNING| POLL["同じrun IDで状態再取得"]
+    STATE -->|UNKNOWN / 接続断| POLL
+    POLL --> STATE
+    STATE -->|FAILED / BLOCKED| DIAG["理由区分・保全不能を表示"]
+    STATE -->|REMOTE_VERIFIED| REMOTE["暗号文/manifestと独立receipt一致<br/>off-VM保全点として表示"]
+    REMOTE --> RESTORE["/console/backups/recovery"]
+    RESTORE --> PROOF{"隔離hostでrestore drill済み?"}
+    PROOF -->|はい| DR["DRILL_PASSED 対象と日時の証拠"]
+    PROOF -->|いいえ| NODR["DR未認定。operator運用手順への導線"]
+    DR --> DENY["本番復元ボタンは設けない"]
+    NODR --> DENY

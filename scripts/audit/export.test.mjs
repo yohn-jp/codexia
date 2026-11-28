@@ -35,7 +35,7 @@ test('only regular source blobs, not credentials, data or branch-controlled pack
   for (const path of ['.env.production', 'nested/.npmrc', 'secret.pem', 'data/work.md', 'evidence/run/output.json', 'evidence/README.md', 'evidence/performance/run/seed/scene.md', '.repomixignore', 'repomix.config.ts', '../escape', '.git/config']) assert.ok(exclusion(path, '100644', 1), path);
   assert.ok(exclusion('link', '120000', 10));
   assert.ok(exclusion('submodule', '160000', 0));
-  for (const path of ['.env.example', 'app/src/index.ts', '.github/workflows/verify.yml', 'docs/architecture/CORE.md', 'packages/core/src/merge.test.ts', 'packages/persistence-postgres/migrations/0001.sql', 'pnpm-lock.yaml']) assert.equal(exclusion(path, '100644', 1), null, path);
+  for (const path of ['.env.example', 'app/src/index.ts', '.github/workflows/verify.yml', 'docs/architecture/CORE.sdoc', 'packages/core/src/merge.test.ts', 'packages/persistence-postgres/migrations/0001.sql', 'pnpm-lock.yaml']) assert.equal(exclusion(path, '100644', 1), null, path);
 });
 test('vendored project agent skills are excluded without hiding governance or source', () => {
   for (const path of ['.agents/skills/modern-web-guidance/SKILL.md', '.agents/skills/modern-web-guidance/guides/css/css.md', '.agents/skills/chrome-extensions/SKILL.md']) {

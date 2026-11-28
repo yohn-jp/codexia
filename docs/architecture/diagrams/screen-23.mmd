@@ -1,0 +1,16 @@
+flowchart TD
+    ENTRY["/console/backups"] --> GUARD{"owner session / API owner確認"}
+    GUARD -->|認証不足| AUTH["再認証して戻る・原稿下書き維持"]
+    GUARD -->|許可| FETCH["status + configを再取得"]
+    FETCH --> STATUS{"設定と遠隔保全の観測"}
+    STATUS -->|未設定 / 未検証| CFG["CON-31 保存先設定"]
+    STATUS -->|ACTIVE| READY["設定は適用済み<br/>保全実績とは独立"]
+    STATUS -->|DEGRADED / UNKNOWN| WARN["不明・劣化の理由表示<br/>実測まで保護済みとしない"]
+    READY -->|manual request + fresh| REQ["BKC-008 202 受付のみ"]
+    REQ --> RUN["CON-33 run ID照合"]
+    READY --> HIST["CON-33 保全履歴"]
+    READY --> REC["CON-34 復旧演習の証拠"]
+    CFG --> FETCH
+    RUN --> FETCH
+    HIST --> FETCH
+    REC --> FETCH

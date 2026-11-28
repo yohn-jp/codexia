@@ -1,6 +1,6 @@
 # Security Policy
 
-The [system design](docs/architecture/SYSTEM-DESIGN.md), [API authentication and authorization](docs/architecture/API-AUTHN-AUTHZ.md), and [owner security management transitions](docs/design/ADMIN-SCREEN-FLOW.md) define security responsibilities. The [deployment state machines](docs/deployment/INITIAL-DEPLOYMENT-FLOW.md) and [update state machines](docs/deployment/UPDATE-FLOW.md) define operational safeguards.
+The [system design](docs/architecture/SYSTEM-DESIGN.sdoc), [API authentication and authorization](docs/architecture/API-AUTHN-AUTHZ.sdoc), and [owner security management transitions](docs/design/ADMIN-SCREEN-FLOW.sdoc) define security responsibilities. The [deployment state machines](docs/deployment/INITIAL-DEPLOYMENT-FLOW.sdoc) and [update state machines](docs/deployment/UPDATE-FLOW.sdoc) define operational safeguards.
 
 Codexia is a single-owner writing application.
 
@@ -10,7 +10,7 @@ Report suspected vulnerabilities through private GitHub Security Advisories. Do 
 
 ## Deployment boundary
 
-Codexia uses the embedded Better Auth OAuth provider with an enrolled owner, registered clients, and private PostgreSQL connections for application and authentication data. Authoring clients sign in with a Passkey or a configured OIDC provider, then obtain short-lived API access tokens through Authorization Code with PKCE. The API verifies the token and its scope, performs online introspection, and checks the configured owner and resource authorization. Provision secrets and enroll the owner through the [protected Better Auth procedure](deploy/ansible/AUTH-RUNTIME.md).
+Codexia uses the embedded Better Auth OAuth provider with an enrolled owner, registered clients, and private PostgreSQL connections for application and authentication data. Authoring clients sign in with a Passkey or a configured OIDC provider, then obtain short-lived API access tokens through Authorization Code with PKCE. The API verifies the token and its scope, performs online introspection, and checks the configured owner and resource authorization. Provision secrets and enroll the owner through the [protected Better Auth procedure](docs/deployment/ANSIBLE-AUTH-RUNTIME.sdoc).
 
 Registered MCP clients can operate only within their assigned projects and OAuth scopes. Canonical changes require separate author approval and application. Cloudflare Access can protect static UI entry. The API applies its own authorization checks.
 

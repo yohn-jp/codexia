@@ -1,11 +1,10 @@
-import { records, sourceAt, sourceRef, transition } from './owner-source.mjs';
+import { catalogLocation, records, sourceAt, sourceRef, transition } from './owner-source.mjs';
 
 const launcher = 'app/src/launcher.tsx';
 const shell = 'app/src/contributions/PublicModuleView.tsx';
 const theme = 'app/src/components/ThemeControl.tsx';
 const publishing = 'modules/publishing/src/browser.tsx';
 const server = 'packages/api/src/server.ts';
-const catalog = 'docs/design/SCREEN-CONTROL-CATALOG.md';
 
 function publicControl(source) {
   if (!source.exists(theme)) return null;
@@ -61,8 +60,8 @@ export function projectReader(source) {
     }),
   );
   const gaps = records(
-    !apiRoute && { id: 'PUB-01', platform: 'reader', status: 'unextracted', reason: 'The public reader API route validator could not be located in the canonical server source.', source: sourceRef(sourceAt(source, catalog, '| PUB-01 |')) },
-    apiRoute && !shareMount && { id: 'PUB-01', platform: 'reader', status: 'unextracted', reason: 'The publishing module public mount could not be located; no reader behavior is inferred.', source: sourceRef(sourceAt(source, catalog, '| PUB-01 |')) },
+    !apiRoute && { id: 'PUB-01', platform: 'reader', status: 'unextracted', reason: 'The public reader API route validator could not be located in the canonical server source.', source: sourceRef(catalogLocation(source, 'PUB-01')) },
+    apiRoute && !shareMount && { id: 'PUB-01', platform: 'reader', status: 'unextracted', reason: 'The publishing module public mount could not be located; no reader behavior is inferred.', source: sourceRef(catalogLocation(source, 'PUB-01')) },
   );
   return { screens: records(publicReaderScreen), controls: records(control), transitions, gaps };
 }

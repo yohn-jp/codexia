@@ -387,7 +387,11 @@ jobs:
         if: always()
         with:
           name: ci-evidence-types-${{ matrix.group }}
-          path: ${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}
+          # The trace report already carries the output hashes. Pages publishes the rendered files.
+          path: |
+            ${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}
+            !${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}/requirements-trace/strictdoc/html/**
+            !${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}/requirements-trace/strictdoc/json/**
           if-no-files-found: error
           retention-days: 7
   profile_core:

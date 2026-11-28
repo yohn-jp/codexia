@@ -1,0 +1,11 @@
+flowchart TD
+    ENTRY["WRT-01から履歴"] --> LOAD["immutable Revision一覧取得"]
+    LOAD -->|失敗| RETRY["履歴取得を再試行"]
+    RETRY --> LOAD
+    LOAD -->|選択| DIFF["基準/現在の差分とIDを表示"]
+    DIFF -->|閉じる| EDIT["元の本文"]
+    DIFF -->|復元要求| CONFIRM["新しいRevisionとして復元を確認"]
+    CONFIRM --> APPLY["baseRevision/冪等キーを付けて保存"]
+    APPLY --> RESULT{"適用receiptを確認?"}
+    RESULT -->|成功| EDIT
+    RESULT -->|競合/不明| RECOVER["REC-01 / 元の内容維持"]

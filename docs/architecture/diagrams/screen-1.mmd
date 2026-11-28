@@ -1,0 +1,8 @@
+flowchart TD
+    WEB["Web /desktop/"] --> SESSION["APIと認証を照合"]
+    IOS["iOS Native SwiftUI App"] --> PKCE["System OAuth + PKCE"]
+    PKCE --> SESSION
+    SESSION -->|未認証| SIGNIN["AUTH-01"]
+    SESSION -->|ownerかつDB可| LIBRARY["LIB-01"]
+    SESSION -->|DB/認証不明| RETRY["接続と認可を再確認"]
+    RETRY --> SESSION

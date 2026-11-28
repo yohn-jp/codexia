@@ -1,0 +1,15 @@
+flowchart TD
+    ENTRY["ChangeSetまたはmodule proposal"] --> DIFF["対象・before/after・根拠・snapshotを表示"]
+    DIFF --> TYPE{"提案の権威"}
+    TYPE -->|Native ChangeSet| NATIVE["proposed / approved / applied / rejected"]
+    TYPE -->|Module proposal| MODULE["browser journalとserver proposalを照合"]
+    NATIVE -->|作者承認| APPROVE["versionを検査し承認"]
+    NATIVE -->|作者却下| REJECT["状態を再取得して却下"]
+    APPROVE --> APPLY["作者が別操作で適用"]
+    MODULE -->|作者承認| APPLY
+    MODULE -->|ブラウザーで隠す| HIDE["一覧から隠すだけ / server提案は保持"]
+    APPLY --> RESULT{"DB receiptとread/write setは整合?"}
+    RESULT -->|はい| WRITE["反映先原稿/知識へ"]
+    RESULT -->|競合/応答不明| RECHECK["最新状態と同一operationを照合"]
+    REJECT --> DIFF
+    RECHECK --> DIFF

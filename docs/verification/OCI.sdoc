@@ -1,0 +1,31 @@
+[DOCUMENT]
+MID: 13faf8beac3f511fd34408fdf63f27ae
+TITLE: OCI build and startup verification
+UID: DOC-VERIFICATION-OCI
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 0d1016c6c35c30d6c14202898b5f2ddb
+STATEMENT: >>>
+The root `Dockerfile` builds Core and Full profiles of one application container. Runtime packages include the compiled API and browser assets, CA certificates and required runtime dependencies. The image runs as UID 1000 and listens on port 3000. Core excludes optional analysis and model dependencies; Full includes its selected trusted module packages.
+
+Every API startup requires PostgreSQL. The OCI verification script creates an isolated network and PostgreSQL sidecar, applies checked migrations, registers a Better Auth owner and OAuth clients, and checks authorization alongside health, assets, profile metadata, nonroot execution, writable scratch data and graceful shutdown. It removes the fixture containers and network on exit.
+
+```sh
+CODEXIA_PROFILE=core bash scripts/verification/runtime/oci.sh
+CODEXIA_PROFILE=full bash scripts/verification/runtime/oci.sh
+```
+
+For a standalone installation, apply application migrations to private PostgreSQL and follow [LINK: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME, Better Auth runtime provisioning] and [LINK: DOC-DEPLOYMENT-PUSH-DEPLOYMENT-first-application-activation, protected activation]. `/data` holds derived module caches, and `/history` holds private usage and job history. Give each container its own writable volumes and use a trusted HTTPS reverse proxy beyond localhost.
+
+Podman is the default when available. Set `OCI_ENGINE`, `CODEXIA_OCI_IMAGE` and `CODEXIA_OCI_PORT` to override the engine, local image tag and host port; Docker remains supported. Provision engine trust through the host's normal administration; the verification procedure does not alter host trust configuration.
+
+The production dependency audit rejects build/test tools in runtime closure. Core auditing additionally rejects optional NLP, model-provider, tokenizer, embedding, reranker and speaker dependencies in packages or compiled imports. The local `pnpm audit:core` command allows development tools installed for source work, so it does not substitute for the image's production audit.
+
+For immutable image publication, use [LINK: DOC-VERIFICATION-OCI-RELEASE, OCI releases].
+<<<

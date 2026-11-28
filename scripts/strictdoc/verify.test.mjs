@@ -6,14 +6,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
+  collectTraceNodes,
   deterministicMid,
   discoverSourceInventory,
+  findTraceHtmlDocuments,
   normalizeHtml,
   normalizeSearchIndexJavascript,
   resolveRunIdentity,
   validateScenarioNodes,
   validateInventory,
   validateObligationDesignRefs,
+  validateBaselineTraceIds,
   validateRequirementNodes,
   validateRelations,
   projectTraceabilityGates,
@@ -22,7 +25,7 @@ import { discoverAnsibleSourceGraph } from './ansible-source-graph.mjs';
 
 test('projects unauthenticated or incomplete gates as partial and preserves missing case evidence', () => {
   const gates = projectTraceabilityGates({
-    requirementNodes: [{ UID: 'REQ-API-001', 'Test IDs': 'TEST-API-001 TEST-API-002' }],
+    requirementNodes: [{ UID: 'REQ-API-001', TEST_IDS: 'TEST-API-001 TEST-API-002' }],
     obligationTrace: { violations: [], gaps: ['OBL-REQ-API-001-O01: no exact-source run evidence'] },
     reverseTrace: { violations: [], gaps: ['surface link missing'] },
     caseExecutions: [{ testId: 'TEST-API-001', result: 'SKIPPED' }],
@@ -45,6 +48,44 @@ test('blocks the trace gate when relation validation finds injected defects', ()
     caseExecutions: [], run: { status: 'NOT_RUN' },
   });
   assert.equal(gates.G7.status, 'BLOCKED');
+});
+
+test('compares trace IDs and MIDs across standard JSON document boundaries', () => {
+  const requirement = { _NODE_TYPE: 'REQUIREMENT', UID: 'REQ-UI-001', MID: 'requirement-mid' };
+  const obligation = { _NODE_TYPE: 'OBLIGATION', UID: 'OBL-REQ-UI-001-O01', MID: 'obligation-mid' };
+  const scenario = { _NODE_TYPE: 'TEST', UID: 'TEST-UI-001-001', MID: 'scenario-mid' };
+  const baseline = collectTraceNodes({ DOCUMENTS: [{ NODES: [requirement, obligation, scenario] }] });
+  const current = collectTraceNodes({ DOCUMENTS: [
+    { NODES: [requirement] },
+    { NODES: [{ _NODE_TYPE: 'SECTION', NODES: [scenario, obligation] }] },
+  ] });
+  assert.deepEqual(validateBaselineTraceIds(baseline, current), []);
+  assert.deepEqual(validateBaselineTraceIds(baseline, [
+    { ...requirement, MID: 'changed' },
+    { ...obligation, _NODE_TYPE: 'REQUIREMENT' },
+  ]), [
+    'Baseline MID changed: REQ-UI-001',
+    'Baseline node type changed: OBL-REQ-UI-001-O01',
+    'Baseline TEST UID removed: TEST-UI-001-001',
+  ]);
+});
+
+test('requires each trace UID to have an actual anchor in one native document', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codexia-trace-html-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, 'html/requirements'), { recursive: true });
+  await writeFile(path.join(root, 'html/requirements/requirements.sdoc.html'),
+    '<sdoc-anchor id="REQ-UI-001"></sdoc-anchor> <a href="verification.sdoc.html#TEST-UI-001-001">TEST-UI-001-001</a>');
+  const ids = ['REQ-UI-001', 'TEST-UI-001-001'];
+  await assert.rejects(findTraceHtmlDocuments(root, ids), /missing UID anchors: TEST-UI-001-001/u);
+  const verification = path.join(root, 'html/requirements/verification.sdoc.html');
+  await writeFile(verification, '<sdoc-anchor id="TEST-UI-001-001"></sdoc-anchor>');
+  assert.deepEqual(await findTraceHtmlDocuments(root, ids), new Map([
+    ['html/requirements/requirements.sdoc.html', ['REQ-UI-001']],
+    ['html/requirements/verification.sdoc.html', ['TEST-UI-001-001']],
+  ]));
+  await writeFile(verification, '<sdoc-anchor id="REQ-UI-001"></sdoc-anchor>');
+  await assert.rejects(findTraceHtmlDocuments(root, ids), /repeats UID anchor REQ-UI-001/u);
 });
 
 test('[TEST-TRC-04-003] fault injection rejects stale route, tool, and database classifications removed from source inventory', () => {
@@ -91,7 +132,7 @@ test('rejects authored VERIFIED status without authenticated product evidence', 
   const uid = 'REQ-DATA-001';
   const violations = validateRequirementNodes([{
     UID: uid, MID: stableMid(uid), TITLE: 'Authoritative data', STATEMENT: 'Use PostgreSQL.',
-    'Decision status': 'ACCEPTED', 'Conformance status': 'VERIFIED', Applicability: 'CURRENT',
+    DECISION_STATUS: 'ACCEPTED', CONFORMANCE_STATUS: 'VERIFIED', APPLICABILITY: 'CURRENT',
   }]);
   assert.deepEqual(violations, [`${uid} cannot be VERIFIED without authenticated product obligation evidence`]);
 });
@@ -100,12 +141,12 @@ test('rejects missing normative design links in obligation nodes', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'strictdoc-design-links-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, 'docs/requirements'), { recursive: true });
-  await writeFile(path.join(root, 'docs/requirements/authority.md'), '# Authority\n');
+  await writeFile(path.join(root, 'docs/requirements/authority.sdoc'), '[DOCUMENT]\nTITLE: Authority\n');
   const violations = await validateObligationDesignRefs([{
     UID: 'OBL-REQ-DATA-001-O01',
-    'Design reference': '[Authority](authority.md)、[Missing](../architecture/missing.md); docs/requirements/authority.md',
-  }], 'docs/requirements/REQUIREMENT-REGISTER.md', root);
-  assert.deepEqual(violations, ['OBL-REQ-DATA-001-O01: File relation target is missing: docs/architecture/missing.md']);
+    DESIGN_REFERENCE: '[Authority](authority.sdoc)、[Missing](../architecture/missing.sdoc); docs/requirements/authority.sdoc',
+  }], 'docs/requirements/REQUIREMENT-REGISTER.sdoc', root);
+  assert.deepEqual(violations, ['OBL-REQ-DATA-001-O01: File relation target is missing: docs/architecture/missing.sdoc']);
 });
 
 test('[TEST-TRC-03-001] rejects missing files and authored source ranges', async (t) => {
@@ -294,26 +335,26 @@ test('[TEST-TRC-05-003] requires each TEST-ID to resolve to a declared requireme
   const id = 'TEST-TRC-06-001';
   const parent = {
     UID: 'REQ-TRACE-001',
-    'Test IDs': 'TEST-TRC-06-001, NOT_ASSIGNED (no standalone TEST-ID exists)',
+    TEST_IDS: 'TEST-TRC-06-001, NOT_ASSIGNED (no standalone TEST-ID exists)',
   };
   const scenario = {
     UID: id,
     MID: stableMid(id),
-    'Exact-run reference': 'NOT_RUN',
-    'Execution scope': 'TRACE_NODE',
+    EXACT_RUN_REFERENCE: 'NOT_RUN',
+    EXECUTION_SCOPE: 'TRACE_NODE',
     RELATIONS: [{ TYPE: 'Parent', VALUE: parent.UID }],
   };
   const sources = new Map([[id, { file: 'case.test.mjs', line: 3, name: `[${id}] case`, runner: 'node' }]]);
   assert.deepEqual(validateScenarioNodes([scenario], [parent], sources), []);
   assert.match(validateScenarioNodes([{
-    ...scenario, 'Exact-run reference': 'https://github.com/yohn-jp/codexia/actions/runs/7',
+    ...scenario, EXACT_RUN_REFERENCE: 'https://github.com/yohn-jp/codexia/actions/runs/7',
   }], [parent], sources).join('\n'), /authored Exact-run reference must be NOT_RUN/u);
   assert.match(validateScenarioNodes([{
-    ...scenario, 'Execution scope': 'unknown', RELATIONS: [{ TYPE: 'File', VALUE: 'case.test.mjs' }],
+    ...scenario, EXECUTION_SCOPE: 'unknown', RELATIONS: [{ TYPE: 'File', VALUE: 'case.test.mjs' }],
   }], [parent], new Map()).join('\n'), /invalid Execution scope[\s\S]*missing a parent[\s\S]*must be derived[\s\S]*no native test registration/iu);
   assert.match(validateScenarioNodes([], [parent], sources).join('\n'), /missing test scenario/u);
   assert.match(validateScenarioNodes([scenario, scenario], [parent], sources).join('\n'), /Duplicate test scenario UID/u);
-  assert.match(validateScenarioNodes([scenario], [{ ...parent, 'Test IDs': `${id} ${id} TEST-INVALID` }], sources).join('\n'),
+  assert.match(validateScenarioNodes([scenario], [{ ...parent, TEST_IDS: `${id} ${id} TEST-INVALID` }], sources).join('\n'),
     /duplicate TEST-ID references[\s\S]*invalid TEST-ID TEST-INVALID/u);
   assert.match(validateScenarioNodes([scenario], [parent, { ...parent, UID: 'REQ-TRACE-002' }], sources).join('\n'),
     /REQ-TRACE-002 declares TEST-TRC-06-001 parented by REQ-TRACE-001/u);
@@ -365,9 +406,10 @@ test('[TEST-TRC-02-001] normalizes only the observed StrictDoc HTML volatility',
     'https://example.test/1795413779.221949',
   ].join('\n');
 
-  const normalized = normalizeHtml(html, { stableMids: [stableMid('REQ-DATA-001')] });
+  const normalized = normalizeHtml(html);
   assert.match(normalized, /strictdoc-search-index-timestamp" content="<TIMESTAMP>"/);
-  assert.equal((normalized.match(/article-<SHELL-MID>/gu) ?? []).length, 2);
+  assert.match(normalized, /article-b9e6dedfa4674cb9af824ccffd19b566/);
+  assert.match(normalized, /article-9d4f2545b24a45dd9c81ae42f0d167d1/);
   assert.match(normalized, /data-nodeid="11111111111111111111111111111111"/);
   assert.match(normalized, /https:\/\/example\.test\/1795413779\.221949/);
 });

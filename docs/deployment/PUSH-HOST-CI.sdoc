@@ -1,0 +1,26 @@
+[DOCUMENT]
+MID: cdca2c0264117b8817a7059680a59d4c
+TITLE: Push host bootstrap acceptance
+UID: DOC-DEPLOYMENT-PUSH-HOST-CI
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: c7dcfed40b4e0f1362809bb25a8911be
+STATEMENT: >>>
+The dedicated [push-host workflow](https://github.com/yohn-jp/codexia/blob/main/.github/workflows/push-host.yml) is manually runnable and also validates relevant pull requests. It uses an isolated Ubuntu 26.04 runner and holds no production SSH, registry or application secrets.
+
+The fixture executes the canonical `host` stage twice under a dedicated bootstrap account, checks the `codexia` rootless account, systemd lingering, network generator and rootless Podman. It emits source-SHA/run-bound JSON evidence, a bounded redacted log and verifies cleanup of the fixture-owned account.
+
+The disposable host CI pins Ansible Core 2.21.6 and Mitogen 0.3.55, activates `mitogen_linear`, and records first and idempotent convergence durations. Temporary execute-only directory ACLs for the fixture UID are removed during cleanup. This does not change the production Ansible controller or SSH connection strategy.
+
+This is **not** acceptance of production deployment, backup restoration, application health, or reboot recovery. Reboot is explicitly `NOT_CHECKED`. The production deployment workflow and the backup/restore acceptance are separate proof boundaries.
+
+No polling, signed update channel or alternate deployment controller is present.
+
+The fixture runs the canonical host stage through `CODEXIA_HOST_CONVERGENCE`, with an isolated bootstrap identity.
+<<<

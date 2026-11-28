@@ -140,7 +140,7 @@ test('app lifecycle CI is isolated, path limited, manually runnable, and has no 
   assert.ok(selectsPath(workflow.on.pull_request.paths, 'packages/api/src/server.ts'));
   assert.ok(selectsPath(workflow.on.pull_request.paths, 'deploy/ansible/site.yml'));
   assert.equal(selectsPath(workflow.on.pull_request.paths, 'packages/core/src/formatter.ts'), false);
-  assert.equal(selectsPath(workflow.on.pull_request.paths, 'docs/deployment/PUSH-DEPLOYMENT.md'), false);
+  assert.equal(selectsPath(workflow.on.pull_request.paths, 'docs/deployment/PUSH-DEPLOYMENT.sdoc'), false);
   assert.ok(!workflow.on.pull_request.paths.includes('scripts/ci/impact/contract.mjs'),
     'generic CI planner edits must not launch the real-host lifecycle');
   assert.ok(backendWorkflow.on.pull_request.paths.includes('deploy/ansible/**'));
@@ -281,7 +281,7 @@ test('every selected lifecycle source also selects an exact-source backend artif
     'deploy/backup/new-transfer.sh',
     'scripts/deployment/lifecycle/app-new.mjs',
     'modules/story/package.json',
-    'deploy/backup/CONSOLE.md',
+    'docs/deployment/BACKUP-CONSOLE-OPERATIONS.sdoc',
     'packages/api/src/better-auth.test.ts',
   ]);
   let admitted = 0;

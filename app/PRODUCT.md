@@ -23,7 +23,7 @@ Codexia is a manuscript-centered writing environment whose documented mechanism 
 - **Current supported authoring product:** Windows Chromium (Chrome/Edge) Desktop Web (React/CodeMirror).
 - **Accepted iOS target:** a separate native iOS app (SwiftUI, with UIKit/TextKit where justified). Native development and automatic Xcode validation are paused; implementation and physical-device acceptance remain incomplete, so iOS is not currently a supported authoring deliverable.
 - Mobile Web/PWA and Capacitor/WebView authoring have been retired from the product, including the `/mobile/` route and Mobile authoring shell.
-- Desktop and iOS **do not share UI components or client-side state implementation**. They share only the server API/domain requirements and manuscript protection semantics. The web Impeccable design system applies to Desktop Web; native iOS design/acceptance is governed by [iOS SwiftUI architecture](../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md). Android support is not implied.
+- Desktop and iOS **do not share UI components or client-side state implementation**. They share only the server API/domain requirements and manuscript protection semantics. The web Impeccable design system applies to Desktop Web; native iOS design/acceptance is governed by [iOS SwiftUI architecture](../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.sdoc). Android support is not implied.
 - Writing, reading, reference, and review are ways to work with the same manuscript context, not separate manuscript authorities.
 
 ## Capabilities and Constraints
@@ -36,15 +36,15 @@ Codexia is a manuscript-centered writing environment whose documented mechanism 
 
 ## Brand Commitments
 
-The product name is Codexia. The accepted brand icon is an **open leather-bound manuscript with a rising quill**. Its design must remain recognizable at browser-favicon sizes, use deliberately simplified optical masters at small sizes, and remain available in light/dark and single-color variants. The [visual design system](DESIGN.md) owns the icon's intended appearance and accessibility constraints; the [icon generator](../scripts/branding/README.md) is an implementation, not a competing design authority. Unapproved brand voice, native icons and other identity assets are not implied by this decision.
+The product name is Codexia. The accepted brand icon is an **open leather-bound manuscript with a rising quill**. Its design must remain recognizable at browser-favicon sizes, use deliberately simplified optical masters at small sizes, and remain available in light/dark and single-color variants. The [visual design system](DESIGN.md) owns the icon's intended appearance and accessibility constraints; the [icon generator](../docs/design/BRAND-ICON.sdoc) is an implementation, not a competing design authority. Unapproved brand voice, native icons and other identity assets are not implied by this decision.
 
 ## Evidence on Hand
 
-- [Canonical system design](../docs/architecture/SYSTEM-DESIGN.md) and [documentation authority](../docs/architecture/DOCUMENTATION-AUTHORITY.md) define the system's design-first source of truth, distinct from implementation.
-- [User screen transitions](../docs/design/USER-SCREEN-FLOW.md) and [owner security transitions](../docs/design/ADMIN-SCREEN-FLOW.md) define screen flow contracts.
-- [Design and UX contract](../docs/design/UX-CONTRACT.md) defines the author experience and acceptance targets; it is not a report that every target is implemented or accepted in production.
+- [Canonical system design](../docs/architecture/SYSTEM-DESIGN.sdoc) and [documentation authority](../docs/architecture/DOCUMENTATION-AUTHORITY.sdoc) define the system's design-first source of truth, distinct from implementation.
+- [User screen transitions](../docs/design/USER-SCREEN-FLOW.sdoc) and [owner security transitions](../docs/design/ADMIN-SCREEN-FLOW.sdoc) define screen flow contracts.
+- [Design and UX contract](../docs/design/UX-CONTRACT.sdoc) defines the author experience and acceptance targets; it is not a report that every target is implemented or accepted in production.
 - [Codexia design system](DESIGN.md) records owner-confirmed visual direction and separates unresolved details from adopted decisions.
-- [Visual system history](../docs/design/VISUAL-SYSTEM.md) preserves existing proposals and comparisons; its earlier choices are not automatically current specifications.
+- [Visual system history](../docs/design/VISUAL-SYSTEM.sdoc) preserves existing proposals and comparisons; its earlier choices are not automatically current specifications.
 - [UI redesign acceptance record](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/acceptance.md) documents synthetic manuscript fixtures and the initial redesign capture. It notes that screenshots predate later review fixes, so they are not current rendered-state proof. No real user manuscript was used for those captures.
 
 ## Product Principles

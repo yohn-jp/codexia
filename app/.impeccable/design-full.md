@@ -7,8 +7,8 @@
 ## 文書の責務
 
 - [DESIGN.md](../DESIGN.md) is the visual design authority and token map; this file retains its expanded detail.
-- [UX contract](../../docs/design/UX-CONTRACT.md) は、UX・操作・体験とアクセシビリティ契約の正本である。適用可能な契約を視覚判断で弱めない。
-- [Visual system](../../docs/design/VISUAL-SYSTEM.md) は、既存案、比較、検討履歴を保管する。合意済みのデザイン仕様と異なる過去の提案は、現在の採用仕様として扱わない。
+- [UX contract](../../docs/design/UX-CONTRACT.sdoc) は、UX・操作・体験とアクセシビリティ契約の正本である。適用可能な契約を視覚判断で弱めない。
+- [Visual system](../../docs/design/VISUAL-SYSTEM.sdoc) は、既存案、比較、検討履歴を保管する。合意済みのデザイン仕様と異なる過去の提案は、現在の採用仕様として扱わない。
 - [Product](../PRODUCT.md) は、対象利用者、製品の目的、プラットフォームを定める。
 
 本書は、合意済みの視覚原則と未決定事項を区別する。CSSの現状やスクリーンショットは検討材料であり、それだけで採用判断とはみなさない。デザイン文書は実装状況や実機受入を証明しない。
@@ -21,7 +21,7 @@ Quiet Page を Writing の基本とする。Folio Atlas の考え方は、構成
 
 ## プラットフォームとシェル
 
-このImpeccable Webデザインシステムの対象はDesktop React Webのみ。iOSは独立SwiftUI Nativeアプリで、Mobile Web/PWAとCapacitor WebViewによる執筆機能は撤去済み。WebとiOSのReact部品・CSS・デザイントークンの共用は要求しない。Native詳細は[SwiftUI設計](../../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md)。
+このImpeccable Webデザインシステムの対象はDesktop React Webのみ。iOSは独立SwiftUI Nativeアプリで、Mobile Web/PWAとCapacitor WebViewによる執筆機能は撤去済み。WebとiOSのReact部品・CSS・デザイントークンの共用は要求しない。Native詳細は[SwiftUI設計](../../docs/architecture/IOS-SWIFTUI-ARCHITECTURE.sdoc)。
 
 Desktop WebとNative iOSは独立UIを持つ。原稿・Revision・保護・認可のCore/API契約は同じだが、画面・操作・クライアント状態のコード共有は不要。Desktop Webのズーム・リサイズには配慮し、React Mobile専用viewport受入は行わない。
 
@@ -86,7 +86,7 @@ Writing は Quiet Page を基調とし、本文と現在の執筆文脈へ視線
 
 ## アクセシビリティと体験契約
 
-アクセシビリティ契約は [UX contract](../../docs/design/UX-CONTRACT.md) をそのまま維持する。WCAG 2.2 A/AA、200%文字拡大、320 CSS px の reflow、keyboard と focus、状態通知、色に依存しない情報伝達など、適用される既存要件を変更しない。44×44 CSS px は主要タッチ操作の製品目標として保つ。
+アクセシビリティ契約は [UX contract](../../docs/design/UX-CONTRACT.sdoc) をそのまま維持する。WCAG 2.2 A/AA、200%文字拡大、320 CSS px の reflow、keyboard と focus、状態通知、色に依存しない情報伝達など、適用される既存要件を変更しない。44×44 CSS px は主要タッチ操作の製品目標として保つ。
 
 ### Focus 表示
 

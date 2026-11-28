@@ -1,0 +1,147 @@
+[GRAMMAR]
+ELEMENTS:
+- TAG: SECTION
+  PROPERTIES:
+    IS_COMPOSITE: True
+    VIEW_STYLE: Narrative
+  FIELDS:
+  - TITLE: MID
+    TYPE: String
+    REQUIRED: False
+  - TITLE: UID
+    TYPE: String
+    REQUIRED: False
+  - TITLE: TITLE
+    TYPE: String
+    REQUIRED: True
+- TAG: REQUIREMENT
+  PROPERTIES:
+    PREFIX: REQ
+  FIELDS:
+  - TITLE: MID
+    TYPE: String
+    REQUIRED: True
+  - TITLE: UID
+    TYPE: String
+    REQUIRED: True
+  - TITLE: TITLE
+    HUMAN_TITLE: Title
+    TYPE: String
+    REQUIRED: True
+  - TITLE: DECISION_STATUS
+    HUMAN_TITLE: Decision status
+    TYPE: SingleChoice(ACCEPTED, PROPOSED, RETIRED)
+    REQUIRED: True
+  - TITLE: CONFORMANCE_STATUS
+    HUMAN_TITLE: Conformance status
+    TYPE: SingleChoice(UNMAPPED, MAPPED_UNVERIFIED, PARTIAL, DEVIATION, BLOCKED, VERIFIED, NOT_APPLICABLE)
+    REQUIRED: True
+  - TITLE: APPLICABILITY
+    HUMAN_TITLE: Applicability
+    TYPE: SingleChoice(CURRENT, FUTURE_TARGET, RETIRED)
+    REQUIRED: True
+  - TITLE: DESIGN_OWNER
+    HUMAN_TITLE: Design owner
+    TYPE: String
+    REQUIRED: True
+  - TITLE: IMPLEMENTATION_IDENTIFIERS
+    HUMAN_TITLE: Implementation identifiers
+    TYPE: String
+    REQUIRED: True
+  - TITLE: VERIFICATION_IDENTIFIERS
+    HUMAN_TITLE: Verification identifiers
+    TYPE: String
+    REQUIRED: True
+  - TITLE: TEST_IDS
+    HUMAN_TITLE: Test IDs
+    TYPE: String
+    REQUIRED: True
+  - TITLE: EXACT_RUN_REFERENCE
+    HUMAN_TITLE: Exact-run reference
+    TYPE: String
+    REQUIRED: True
+  - TITLE: COMMENT
+    HUMAN_TITLE: Comment
+    TYPE: String
+    REQUIRED: False
+  - TITLE: STATEMENT
+    HUMAN_TITLE: Statement
+    TYPE: String
+    REQUIRED: True
+  RELATIONS:
+  - TYPE: Parent
+  - TYPE: Child
+  - TYPE: File
+- TAG: OBLIGATION
+  PROPERTIES:
+    PREFIX: OBL
+  FIELDS:
+  - TITLE: MID
+    TYPE: String
+    REQUIRED: True
+  - TITLE: UID
+    TYPE: String
+    REQUIRED: True
+  - TITLE: TITLE
+    HUMAN_TITLE: Title
+    TYPE: String
+    REQUIRED: True
+  - TITLE: DESIGN_REFERENCE
+    HUMAN_TITLE: Design reference
+    TYPE: String
+    REQUIRED: True
+  - TITLE: IMPLEMENTATION_IDENTIFIERS
+    HUMAN_TITLE: Implementation identifiers
+    TYPE: String
+    REQUIRED: True
+  - TITLE: SURFACE_IDENTIFIERS
+    HUMAN_TITLE: Surface identifiers
+    TYPE: String
+    REQUIRED: False
+  - TITLE: TEST_IDS
+    HUMAN_TITLE: Test IDs
+    TYPE: String
+    REQUIRED: True
+  - TITLE: EXACT_RUN_REFERENCE
+    HUMAN_TITLE: Exact-run reference
+    TYPE: String
+    REQUIRED: True
+  - TITLE: COMMENT
+    HUMAN_TITLE: Comment
+    TYPE: String
+    REQUIRED: False
+  - TITLE: STATEMENT
+    HUMAN_TITLE: Statement
+    TYPE: String
+    REQUIRED: True
+  RELATIONS:
+  - TYPE: Parent
+  - TYPE: File
+- TAG: TEST
+  PROPERTIES:
+    PREFIX: TEST
+  FIELDS:
+  - TITLE: MID
+    TYPE: String
+    REQUIRED: True
+  - TITLE: UID
+    TYPE: String
+    REQUIRED: True
+  - TITLE: TITLE
+    HUMAN_TITLE: Title
+    TYPE: String
+    REQUIRED: True
+  - TITLE: EXECUTION_SCOPE
+    HUMAN_TITLE: Execution scope
+    TYPE: SingleChoice(TRACE_NODE, TRACE_BROWSER, PRODUCT)
+    REQUIRED: True
+  - TITLE: EXACT_RUN_REFERENCE
+    HUMAN_TITLE: Exact-run reference
+    TYPE: String
+    REQUIRED: True
+  - TITLE: STATEMENT
+    HUMAN_TITLE: Statement
+    TYPE: String
+    REQUIRED: True
+  RELATIONS:
+  - TYPE: Parent

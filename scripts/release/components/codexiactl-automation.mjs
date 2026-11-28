@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const repository = 'yohn-jp/codexia';
 const tagPattern = /^v0\.1\.(\d+)$/u;
 const shaPattern = /^[a-f0-9]{40}$/u;
 const assetNames = ['codexiactl-linux-amd64', 'codexiactl-linux-amd64.sha256'];
 
+// Shared with the embedded contract used by the official CLI. A change to any
+// exact-match input must make a matching official release available.
+const exactContractPaths = JSON.parse(readFileSync(new URL('../../../cmd/codexiactl/release-contract.json', import.meta.url), 'utf8'));
+
 export function isCodexiactlReleaseInput(file) {
   return file.startsWith('cmd/codexiactl/') ||
-    file === 'scripts/ci/execution/verify-codexiactl.sh' ||
-    file.startsWith('scripts/release/components/codexiactl-') ||
+    exactContractPaths.some(path => file === path || (path.endsWith('/') && file.startsWith(path))) ||
     file === '.github/workflows/publish-codexiactl.yml' ||
     file === '.github/workflows/codexiactl-auto-release.yml';
 }

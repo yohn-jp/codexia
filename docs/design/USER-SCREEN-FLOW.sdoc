@@ -1,0 +1,140 @@
+[DOCUMENT]
+MID: 1444faba12dfd8e94d7858e4ede1cb2e
+TITLE: 利用画面の遷移設計
+UID: DOC-DESIGN-USER-SCREEN-FLOW
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 04ee9ae640ea9a5908c9161fe2790032
+STATEMENT: >>>
+**画面ごとの詳細正本:** [LINK: DOC-DESIGN-SCREEN-CONTROL-CATALOG, 全画面・ボタン台帳]、[LINK: DOC-DESIGN-SCREEN-STATE-ATLAS, 状態遷移図] と [LINK: DOC-ARCHITECTURE-ROUTE-AUTHORIZATION-CONTRACT, URL/API認可] に各画面の入口・主操作・異常系・principalを紐付ける。本書は作者体験の横断契約であり、個別画面の権限を曖昧にしない。
+
+**種別: 正本・規範的設計。** 本書は作者が Desktop Web（React）/ iOSアプリ（SwiftUI）から作品を利用する際の画面、遷移条件、失敗時の扱いを定義する。画面配置・内部 UI の実装をそのまま設計の正本にしない。[LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, システム基本設計]、[LINK: DOC-DESIGN-UX-CONTRACT, UX 契約]、[LINK: DOC-DESIGN-INFORMATION-ARCHITECTURE, 情報設計]に従う。
+
+**現行の提供範囲:** Windows Chromium上のDesktop Webが現在の対応済み作者用製品である。iOS SwiftUIは採用済みの設計目標だが、開発と自動Xcode検証が一時停止中で、実装・実機受入は未完了である。図とiOSの行は要求される将来の導線を示し、現在の提供や受入済み動作を主張しない。Mobile Webと `/mobile/` は製品導線から撤去済み。
+<<<
+
+[[SECTION]]
+MID: 688a9f3fa9a3537015e64f12e91a5ab1
+UID: DOC-DESIGN-USER-SCREEN-FLOW-起動から作品への遷移
+TITLE: 起動から作品への遷移
+
+[TEXT]
+MID: cca177a633d345767920eb3a1c915ee8
+STATEMENT: >>>
+[利用画面の遷移図をSVGで開く](https://yohn-jp.github.io/codexia/architecture/?diagram=user-1)
+
+[ANCHOR: ATLAS-DIAGRAM-user-1]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/user-1.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=user-1)
+
+`/console`以下の画面・遷移・初回登録の認可は[LINK: DOC-DESIGN-ADMIN-SCREEN-FLOW, 管理画面の遷移設計]が正本となる。Workersが静的ルートを配信し、VM上のBetter Authが認証・owner確認を担当する。通常の執筆用モード選択へ迂回させない。
+
+未認証と PostgreSQL 不可を同じ「作品なし」画面へ変換しない。サインイン時・サインアウト時・作者 scope 変更時には未保存の原稿と回復 journal を保護し、失敗しても別作者の作業領域を表示しない。ログインと認可は [LINK: DOC-ARCHITECTURE-API-AUTHN-AUTHZ, API 認証仕様] を正本とする。公開 reader は作者用エディターと独立し、書込操作へ進ませない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 6b36081ef501c6543c01d6d1d99f346d
+UID: DOC-DESIGN-USER-SCREEN-FLOW-執筆を中心とした利用画面
+TITLE: 執筆を中心とした利用画面
+
+[TEXT]
+MID: c3005e0b5cd38a96a41404fbcb5bd40a
+STATEMENT: >>>
+画面 ID は論理識別子であり、各状態への新しい独立 URL や新たなデータベースを意味しない。専用ルートを設ける場合も [LINK: DOC-DESIGN-INFORMATION-ARCHITECTURE, 情報設計] の既存 scope と guard を維持する。
+
+[ANCHOR: ATLAS-DIAGRAM-user-2]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/user-2.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=user-2)
+
+- **作品と構成:** 作成、インポート、選択、再開、巻・章・シーン・ノートの作成・移動を許された API 操作へ結び付ける。存在しない文書の直接リンクを空の編集画面で成功扱いしない。
+- **原稿:** DesktopはCodeMirror、iOSはUIKit UITextView/TextKit 2ベースのネイティブ編集面でIME・カーソル・選択・undoを保護する。読書表示や日本語組版の変更は Markdown 原稿への暗黙の編集としない。
+- **履歴:** 元 Revision の表示、比較、復元を分ける。復元は新しい Revision を作り、過去の確定内容を破壊しない。
+- **知識・根拠:** 人物・設定・根拠・Evidence の一覧と詳細へ移動しても、元の document、selection、scroll、作者 scope を維持する。履歴が現在の Revision に一致しない根拠は再確認を要求する。
+- **レビュー:** Native ChangeSet と Module proposal はそれぞれの作者承認・適用契約を保持する。提案の閲覧だけでは適用しない。外部 MCP は作者承認を迂回しない。
+- **設定:** 外観・組版・Workspace、認証・セッションへ到達する。管理者の資格情報変更は [LINK: DOC-DESIGN-ADMIN-SCREEN-FLOW, 管理画面遷移] に従う。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: f3faff090a624c061cc833077dac4e3e
+UID: DOC-DESIGN-USER-SCREEN-FLOW-desktop-web-とネイティブ-ios-の導線
+TITLE: Desktop Web とネイティブ iOS の導線
+
+[TEXT]
+MID: 0a04f958674c67995ef2601f2f7dc094
+STATEMENT: >>>
+| 観点 | Desktop Web (React) | iOS App (SwiftUI) |
+| --- | --- | --- |
+| 入口 | `/desktop/` | iOSアプリアイコン・許可されたアプリdeep link |
+| 作品・文書 | `/desktop/projects/:projectId` / `.../scenes/:documentId` | ネイティブのLibrary/Outline/Editor経路。/mobile/ URLを使用しない |
+| 作業面 | 可動Workspace、タブ、構成、原稿、知識、レビュー | 本文中心のネイティブ画面、必要時に構成・保存・知識を表示 |
+| 遷移の保護 | ブラウザーdraft journalとguard | 保護されたiOS draft journalとnative guard |
+| 共通契約 | Core/API・認証認可・Revision/receipt/競合復旧 | 同じCore/API・認証認可・Revision/receipt/競合復旧 |
+
+~~~mermaid
+flowchart TD
+    I["iOS SwiftUI 起動"] --> AUTH["System OAuth + PKCE"]
+    AUTH --> LIB["Library / 作品"]
+    LIB --> TREE["Outline / 構成"]
+    TREE --> WRITE["Writing / TextKit 2"]
+    WRITE -->|保護済み遷移| REF["Knowledge / Review / History"]
+    WRITE -->|一時参照| SHEET["Native Sheet: 構成・保存状況"]
+    SHEET -->|閉じる、入力状態保持| WRITE
+    REF -->|作業文脈を保持| WRITE
+    WRITE -->|ローカル保護 + API receipt| REC["Draft / Saving / Conflict / Unknown"]
+    REC --> WRITE
+~~~
+
+旧Mobile Webの`/mobile/`・`?view=`・Ionic参照sheetは現行mainの製品導線ではなく、互換性の約束もない。画面の幅に応じてWebがモバイル執筆shellを自動選択する設計は採用しない。iOS画面の詳細は [LINK: DOC-ARCHITECTURE-IOS-SWIFTUI-ARCHITECTURE, iOS SwiftUI設計]。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: bc1eecffc85a663937194944654f3583
+UID: DOC-DESIGN-USER-SCREEN-FLOW-保存復旧の状態遷移
+TITLE: 保存・復旧の状態遷移
+
+[TEXT]
+MID: e40a3fb282d48893c0d1da207b74e854
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-user-3]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/user-3.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=user-3)
+
+「保存中」「この端末に下書きあり」「PostgreSQL へ保存済み」「状態の確認が必要」は相互排他的な一個の変数ではない。保存要求後に加えた入力を、先に返った成功 receipt の内容に含めない。競合、local quota 不足、ネットワーク断、認証失効、unknown response は異なる回復指示を出す。原稿を黙って破棄・強制上書き・自動 conflict merge しない。具体的な UI 状態は [LINK: DOC-DESIGN-INTERACTION-CONTRACT, Interaction contract] を使用する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: bbef6f224513b88c0abe8bd34a0302a2
+UID: DOC-DESIGN-USER-SCREEN-FLOW-権限異常系と受入
+TITLE: 権限・異常系と受入
+
+[TEXT]
+MID: 1ae453db36b233a1b62555d001d71c13
+STATEMENT: >>>
+| 条件 | 設計上の画面動作 |
+| --- | --- |
+| 未ログイン、OAuth キャンセル | 明示的な認証入口へ。成功画面は表示しない |
+| 権限拒否、他作品の ID | 対象を表示せず、作者 scope を保ったエラーと戻り先を示す |
+| DB 不可、API の応答不良 | 認証未済と区別して再試行。Git/ファイルに切替えない |
+| 作品・文書の不存在 | 選択中作品の目次または作品ライブラリへ誘導する |
+| stale network response | navigation generation と Revision で破棄し、現在の編集を差し替えない |
+| optional module 不可 | 関連する panel のエラーに限定し、Core 原稿を利用可能に保つ |
+| 競合・回復保護に失敗 | 遷移を禁止し、原稿・journal・作業 context を残す |
+
+**受入証拠:** Desktop WebはWindows Chromiumを正式対象とし、Chromiumと実PostgreSQL、Windows固有の操作は実Windowsで、iOSはSimulatorに加えて物理iPhoneと実PostgreSQLで、OAuth/IME/保存追加入力/競合/応答喪失/アプリ復帰/作者切替/権限拒否を確認する。Mobile React向けviewport E2Eは受入対象としない。iOSの受入は現在停止中であり、延期は免除ではない。本書は画面操作の正本であり、上記がすべて実装・検証済みであるとの宣言ではない。
+<<<
+
+[[/SECTION]]

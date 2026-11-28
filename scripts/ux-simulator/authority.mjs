@@ -1,52 +1,52 @@
+import { isPath, jsonRecordLocator } from './source.mjs';
+
 export const platforms = ['desktop', 'ios', 'auth', 'console', 'reader'];
-export const catalogPath = 'docs/design/SCREEN-CONTROL-CATALOG.md';
-const nativePath = 'docs/architecture/IOS-SWIFTUI-ARCHITECTURE.md';
-const native = new Set('ENTRY-01 LIB-01 OUT-01 WRT-01 WRT-02 READ-01 REC-01 KNO-01 KNO-02 REV-01 REV-02 TOOL-01 JOB-01 DISPLAY-01 PREF-01'.split(' '));
-
-function adoptedPlatforms(id) {
-  if (id.startsWith('CON-')) return ['console'];
-  if (id.startsWith('AUTH-')) return ['auth'];
-  if (id.startsWith('PUB-')) return ['reader'];
-  return native.has(id) ? ['desktop', 'ios'] : ['desktop'];
-}
-
-const records = (text) => text.split('\n').flatMap((line, index) =>
-  !line.startsWith('| ') ? [] : [{ columns: line.slice(1, -1).split(/(?<!\\)\|/u).map((cell) => cell.trim()), line: index + 1 }]);
-const clean = (value) => value?.replace(/[*`]/g, '').trim();
+export const catalogPath = 'docs/design/screen-catalog.json';
+const nativePath = 'docs/architecture/IOS-SWIFTUI-ARCHITECTURE.sdoc';
+const designAdoptions = new Set(['adopted', 'proposal', 'conceptual', 'external']);
+const screenForms = new Set(['page', 'panel', 'sheet', 'dialog']);
 const screenId = /^[A-Z]+-\d{2}$/;
 const ctrlId = /^[A-Z]+-\d{2}\.[A-Z]$/;
+const hasText = value => typeof value === 'string' && value.trim() !== '';
 
 export function readAuthority(source) {
   const text = source.read(catalogPath);
-  const screens = [];
-  const controls = [];
-  const raw = records(text);
-  for (const { columns: [id, title, principal, purpose, kind], line } of raw) {
-    if (!screenId.test(id)) continue;
-    if (!kind || screens.some((entry) => entry.id === id)) throw new Error('Invalid screen record: ' + id);
-    const adoption = kind.includes('未採用') ? 'proposal' : id === 'OPS-01' ? 'external' : 'adopted';
-    const form = /sheet|シート/i.test(title) ? 'sheet' : /dialog|ダイアログ/i.test(title) ? 'dialog'
-      : /panel/i.test(title) ? 'panel' : 'page';
-    screens.push({
-      id, title: clean(title), principal: clean(principal), purpose: clean(purpose), kind: clean(kind), adoption, form,
-      platforms: adoption === 'adopted' ? adoptedPlatforms(id) : [], source: { path: catalogPath, line },
-      platformSource: native.has(id) ? { path: nativePath, line: 1 } : { path: catalogPath, line },
-    });
+  const data = JSON.parse(text);
+  if (!Array.isArray(data.screens) || !data.screens.length || !Array.isArray(data.controls)) {
+    throw new Error('Invalid screen catalog');
   }
-  const conceptual = text.split('\n').findIndex((line) => line.includes('CFG-01は表示設定'));
-  if (conceptual < 0) throw new Error('Missing CFG-01 classification in design');
-  screens.push({ id: 'CFG-01', title: '表示設定・本人セキュリティ設定', purpose: 'DISPLAY-01 と PREF-01 の分類',
-    adoption: 'conceptual', platforms: [], source: { path: catalogPath, line: conceptual + 1 } });
-  for (const { columns: [id, label, prerequisite, success, recovery], line } of raw) {
-    if (!ctrlId.test(id)) continue;
-    const screen = id.split('.')[0];
-    const owner = screens.find((entry) => entry.id === screen);
-    if (!owner || !recovery || controls.some((entry) => entry.id === id)) throw new Error('Invalid control record: ' + id);
-    controls.push({
-      id, screen, label: clean(label), prerequisite: clean(prerequisite), success: clean(success), recovery: clean(recovery),
-      adoption: owner.adoption, platforms: owner.platforms, source: { path: catalogPath, line },
-    });
-  }
+  const locate = jsonRecordLocator(catalogPath, text);
+  const byScreen = new Map();
+  const screens = data.screens.map(({ id, title, principal, purpose, kind, adoption, form, platforms: scope }) => {
+    if (!screenId.test(id) || byScreen.has(id) || !designAdoptions.has(adoption) ||
+        ![title, purpose].every(hasText) || (adoption !== 'conceptual' &&
+          (![principal, kind].every(hasText) || !screenForms.has(form))) ||
+        !Array.isArray(scope) || new Set(scope).size !== scope.length ||
+        scope.some(platform => !platforms.includes(platform)) || (adoption === 'adopted') !== Boolean(scope.length)) {
+      throw new Error('Invalid screen record: ' + id);
+    }
+    const location = locate(id);
+    const platformSource = scope.includes('ios') ? { path: nativePath, line: 1 } : location;
+    const result = { id, title, principal, purpose, kind, adoption, form, platforms: scope, source: location,
+      ...(adoption !== 'conceptual' ? { platformSource } : {}) };
+    byScreen.set(id, result);
+    return result;
+  });
+  if (byScreen.get('CFG-01')?.adoption !== 'conceptual') throw new Error('Missing CFG-01 classification in design');
+  const controlIds = new Set();
+  const controls = data.controls.map(({ id, screen, label, prerequisite, success, recovery, references }) => {
+    const owner = byScreen.get(screen);
+    if (!ctrlId.test(id) || id.split('.')[0] !== screen || !owner || controlIds.has(id) ||
+        ![label, prerequisite, success, recovery].every(hasText)) throw new Error('Invalid control record: ' + id);
+    if (references !== undefined && (!Array.isArray(references) || references.some(({ path, label }) =>
+      !isPath(path) || !path.startsWith('docs/') || !path.endsWith('.sdoc') || !hasText(label)))) {
+      throw new Error('Invalid control reference: ' + id);
+    }
+    controlIds.add(id);
+    return { id, screen, label, prerequisite, success, recovery,
+      adoption: owner.adoption, platforms: owner.platforms, source: locate(id),
+      ...(references ? { references } : {}) };
+  });
   for (const screen of screens.filter(({ adoption }) => adoption === 'adopted')) {
     if (!controls.some((control) => control.screen === screen.id || (screen.id === 'READ-01' && control.id === 'WRT-01.B'))) {
       throw new Error('Missing controls for adopted screen: ' + screen.id);

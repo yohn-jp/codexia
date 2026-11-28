@@ -1,0 +1,63 @@
+[DOCUMENT]
+MID: 96a2927811ae5d1c0bb5b47e696535ce
+TITLE: Graphify code map on Repository Audit Pages
+UID: DOC-VERIFICATION-GRAPHIFY-PAGES
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 484900a1aa76631bdc00a7c44e867122
+STATEMENT: >>>
+`repository-audit.yml` is the sole Pages publisher. **Code Map** (`/graph/`) and the native Graphify community viewer use the same Graphify AST graph. See the [LINK: DOC-DESIGN-DEVELOPMENT-PAGES-UX-4-graphifyの分析ux重点改善案, portal UX design].
+<<<
+
+[[SECTION]]
+MID: c0aca2885f92684210fc0ff2a904c83b
+UID: DOC-VERIFICATION-GRAPHIFY-PAGES-generation-and-scope
+TITLE: Generation and scope
+
+[TEXT]
+MID: 16181f323426c436edeeb66cdd7a09a7
+STATEMENT: >>>
+Pages-specific PR previews and main builds check out the exact source SHA; ordinary product and deployment PRs rely on their own verification, and the full portal is rebuilt on main. The pack step runs `graphifyy[sql,terraform]==0.9.120` on Python 3.12, `graphify extract . --code-only` with `GRAPHIFY_BACKEND=none`, and `graphify cluster-only` (Graphify's deterministic hub labels; no LLM backend). The workflow supplies the same exclusion flags to Graphify extraction and candidate detection. The packer builds the explorer from the source `graph.json` and limits the index to Git-tracked paths in that checkout.
+
+- **Explorer** at `/graph/`. Search paths and symbols, choose a file or symbol, and filter incoming and outgoing references by relation. Directory groups are calculated from the parent directories of the observed file endpoints. Selecting a group focuses the direct graph and reference lists on that directory and direction. Multi-hop exploration has a separate bounded list with an omission count. Expand a reference to open its SHA-pinned source evidence. File, symbol, and directory focus are preserved in the URL.
+- **Community overview** at `/graph/communities.html`. Graphify generates the native graph and hub-based community names. Above its visualization threshold each node represents a community. Clicking a graph node or using the keyboard-accessible Explore communities control opens the corresponding community inspector; `?community=ID` restores a selection within the same build. The native overview graph, search and legend show a source-qualified label: the upstream hub name with its dominant indexed file or source scope, and uniquely observed same-file containment ancestors for repeated hubs. Only remaining collisions get a snapshot-local ID suffix. The inspector preserves the original hub name and full source context, total and indexed member counts, a paged internal graph, searchable member links to the existing file/symbol explorer, and paged internal/incoming/outgoing edges with their reported Graphify confidence (non-extracted or unreported confidence uses dashed lines). The graph draws at most 60 members and 250 edges at a time; the lists retain every indexed member and observed edge, with omission counts. Unindexed endpoints are not published in the detail projection. IDs and hub labels are structural, not canonical subsystem names.
+- **Source metadata** at `/graph/source.json`. It records the source SHA, coverage and indexed file paths. Atlas uses the SHA and indexes to check whether a file link can open in Code Map.
+
+Exported coverage records tracked paths, measured Graphify code candidates and files represented by extracted nodes. A candidate without indexed nodes is reported as unavailable. Source JSON, snippets and intermediate Graphify reports are working inputs. Native HTML including the community inspector is limited to 20 MiB, source JSON to 80 MiB, and explorer HTML to 16 MiB.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: aef385d0320b817d6ad3ff48fcac6c6c
+UID: DOC-VERIFICATION-GRAPHIFY-PAGES-interpretation
+TITLE: Interpretation
+
+[TEXT]
+MID: 31ac70ea02986c2bfbdaceffaa5f7303
+STATEMENT: >>>
+Cross-file counts group observed directional edges by endpoint file and relation. In symbol mode the original source and target identities also support references within a file. Evidence links open SHA-pinned source and include a line only when Graphify provides one for the edge.
+
+**No incoming reference in Graphify does not mean unused or safe to delete.** The graph is static analysis and its extraction coverage is deliberately bounded; it does not prove actual runtime calls, route/MCP registrations, dynamic imports, SQL access, production reachability, or the presence of excluded tests. Likewise, a static reference does not prove a feature belongs in the agreed current architecture. Architecture and deletion decisions require comparison with the [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, canonical system design] and [LINK: DOC-ARCHITECTURE-DOCUMENTATION-AUTHORITY, documentation authority], plus independent reachability verification. A graph edge cannot overrule a design constraint.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 844ff498b69c8a95f9aa60e2cc25ebf9
+UID: DOC-VERIFICATION-GRAPHIFY-PAGES-verification
+TITLE: Verification
+
+[TEXT]
+MID: 5ef6300222a6e075659c2c9520a38622
+STATEMENT: >>>
+Run `node --test scripts/graphify-pages/*.test.mjs` for edge normalization, coverage, bounded traversal, graph packaging and browser interactions when Chromium is configured. Repository Audit Pages verifies the assembled preview in Chromium under the project path. Main is the publishing branch.
+<<<
+
+[[/SECTION]]

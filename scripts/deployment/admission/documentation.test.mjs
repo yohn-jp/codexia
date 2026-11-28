@@ -4,10 +4,10 @@ import { readFileSync } from 'node:fs';
 
 const files = new Map([
   ['agents', readFileSync(new URL('../../../AGENTS.md', import.meta.url), 'utf8')],
-  ['push', readFileSync(new URL('../../../docs/deployment/PUSH-DEPLOYMENT.md', import.meta.url), 'utf8')],
-  ['deployment', readFileSync(new URL('../../../docs/deployment/README.md', import.meta.url), 'utf8')],
-  ['ios', readFileSync(new URL('../../../docs/deployment/IOS-CLIENT.md', import.meta.url), 'utf8')],
-  ['iac', readFileSync(new URL('../../../docs/deployment/IAC.md', import.meta.url), 'utf8')],
+  ['push', readFileSync(new URL('../../../docs/deployment/PUSH-DEPLOYMENT.sdoc', import.meta.url), 'utf8')],
+  ['deployment', readFileSync(new URL('../../../docs/deployment/DEPLOYMENT-REFERENCE.sdoc', import.meta.url), 'utf8')],
+  ['ios', readFileSync(new URL('../../../docs/deployment/IOS-CLIENT.sdoc', import.meta.url), 'utf8')],
+  ['iac', readFileSync(new URL('../../../docs/deployment/IAC.sdoc', import.meta.url), 'utf8')],
 ]);
 
 test('deployment guidance names the push-only controller and removes retired updater authority', () => {

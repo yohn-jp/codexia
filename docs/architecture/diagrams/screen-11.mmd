@@ -1,0 +1,14 @@
+flowchart TD
+    ENTRY["選択node詳細"] --> AUTH{"projectとcurrentRevisionに合致?"}
+    AUTH -->|いいえ| RECHECK["古い根拠として再確認"]
+    AUTH -->|はい| DETAIL["属性・根拠・関係と状態"]
+    DETAIL -->|本文を開く| MANUSCRIPT["元の文書/selectionへ"]
+    MANUSCRIPT --> DETAIL
+    DETAIL -->|Anchor/Relation変更| PROPOSE["version/confirmed evidenceを検査"]
+    DETAIL -->|node統合| PREVIEW["統合先とpreviewDigestを提示"]
+    PREVIEW --> CONFIRM{"作者が影響を確認?"}
+    CONFIRM -->|はい| PROPOSE
+    CONFIRM -->|いいえ| DETAIL
+    PROPOSE --> RESULT{"DB version/receipt"}
+    RESULT -->|成功| DETAIL
+    RESULT -->|競合| RECHECK

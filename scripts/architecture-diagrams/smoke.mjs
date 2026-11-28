@@ -23,7 +23,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   };
   const atlasManifest = JSON.parse(await readFile(resolve(root, 'manifest.json'), 'utf8'));
   const relatedPaths = [...new Set(atlasManifest.diagrams.flatMap(diagram => diagram.implementationPaths ?? []))];
-  const sharedRoot = resolve(root, '../pages-ui');
+  const directories = [
+    ['/architecture/', root],
+    ['/pages-ui/', resolve(root, '../pages-ui')],
+    ['/requirements/html/', resolve(root, '../requirements/html')],
+  ];
   const server = createServer(async (req, res) => {
     try {
       const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
@@ -44,12 +48,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         }));
         return;
       }
-      const prefix = pathname.startsWith('/pages-ui/') ? '/pages-ui/' : '/architecture/';
-      if (!pathname.startsWith(prefix)) {
+      const matched = directories.find(([prefix]) => pathname.startsWith(prefix));
+      if (!matched) {
         res.writeHead(404).end();
         return;
       }
-      const directory = prefix === '/pages-ui/' ? sharedRoot : root;
+      const [prefix, directory] = matched;
       const path = resolve(directory, decodeURIComponent(pathname.slice(prefix.length)) || 'index.html');
       if (!path.startsWith(directory + sep)) {
         res.writeHead(404).end();
@@ -109,7 +113,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     assert.equal(await page.locator('#diagram-list .group:visible').count(), 1, 'Category selector filters to one group');
     await page.locator('#diagram-category').selectOption('all');
 
-    await page.goto(base + '/#screen-23', { waitUntil: 'networkidle' });
+    await page.goto(base + '/?diagram=screen-23', { waitUntil: 'networkidle' });
+    assert.equal(await page.locator('#svg-image').getAttribute('src'), 'svg/screen-23.svg',
+      'A generated specification link must open its Mermaid diagram');
     await page.locator('#svg-image:not([hidden])').waitFor();
     const longDiagram = await page.locator('#canvas').evaluate(el => ({
       scrollWidth: el.scrollWidth,
@@ -158,9 +164,16 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     assert.match(new URL(page.url()).hash, /^#screen-\d+$/u);
     assert.match(await page.locator('#diagram-title').textContent(), /AUTH-01/u);
     assert.equal(await page.locator('#diagram-list button[aria-current="true"]').count(), 1);
-    assert.match(await page.locator('#source-link').getAttribute('href'), new RegExp(atlasManifest.sourceSha, 'u'));
-    assert.ok(await page.locator('#screen-contract a[href*=\"SCREEN-CONTROL-CATALOG.md\"]').count() > 0,
-      'Screen IDs should link to their source contract row');
+    assert.match(await page.locator('#source-link').getAttribute('href'),
+      new RegExp(atlasManifest.sourceSha + '/docs/architecture/diagrams/screen-\\d+\\.mmd#L1$', 'u'));
+    const design = new URL(await page.locator('#design-link').getAttribute('href'), page.url());
+    assert.match(design.pathname, /\/requirements\/html\/docs\/design\/SCREEN-STATE-ATLAS\.sdoc\.html$/u);
+    assert.match(design.hash, /^#ATLAS-DIAGRAM-screen-\d+$/u);
+    const designResponse = await page.request.get(design.href);
+    assert.equal(designResponse.status(), 200, 'The StrictDoc detail link must resolve in assembled Pages');
+    assert.match(await designResponse.text(), new RegExp('id="' + design.hash.slice(1) + '"', 'u'));
+    assert.ok(await page.locator('#screen-contract a[href*="screen-catalog.json"]').count() > 0,
+      'Screen IDs should link to their source contract record');
     await page.locator('#evidence-details > summary').focus();
     await page.keyboard.press('Enter');
     assert.equal(await page.locator('#evidence-details').evaluate(el => el.open), true,

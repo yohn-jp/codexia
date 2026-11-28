@@ -1,0 +1,16 @@
+flowchart TD
+    OPEN["作品ライブラリ"] --> LIST["ownerの作品を照会"]
+    LIST --> STATE{"正常に取得できた?"}
+    STATE -->|いいえ| RETRY["DB/権限/通信を区別して再試行"]
+    STATE -->|はい・空| EMPTY["最初の作品を作成"]
+    STATE -->|はい・存在| ITEMS["一覧 / 最近の作業"]
+    EMPTY --> CREATE["作品名で作成"]
+    ITEMS -->|作品を選ぶ| OUTLINE["OUT-01構成"]
+    ITEMS -->|再開| WRITE["WRT-01本文"]
+    ITEMS -->|JSONを取り込む| IMPORT["検証して新しい作品を作る"]
+    ITEMS -->|書き出す| EXPORT["固定snapshotをJSONで返す"]
+    CREATE --> CHECK{"DB結果・対象IDを確認"}
+    IMPORT --> CHECK
+    CHECK -->|成功| OUTLINE
+    CHECK -->|不明・拒否| RETRY
+    EXPORT --> ITEMS

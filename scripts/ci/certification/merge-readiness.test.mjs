@@ -14,7 +14,7 @@ const plan = files => createVerificationPlan({ files, event: 'pull_request', sha
 test('merge readiness distinguishes full proof, affected proof, stale base and latest failed or pending runs', () => {
   assert.equal(assessMergeReadiness(input).status, 'inspect-plan');
   assert.equal(assessMergeReadiness({ ...input, plan: plan(['package.json']) }).status, 'compact-candidate');
-  assert.equal(assessMergeReadiness({ ...input, plan: plan(['docs/authoring.md']) }).status, 'full-main-required');
+  assert.equal(assessMergeReadiness({ ...input, plan: plan(['docs/authoring.sdoc']) }).status, 'full-main-required');
   assert.equal(assessMergeReadiness({ ...input, mergeBase: 'c'.repeat(40) }).status, 'not-ready');
   assert.equal(assessMergeReadiness({ ...input, runs: [run, { ...run, id: 3, run_number: 4, status: 'in_progress', conclusion: null }] }).status, 'not-ready');
   assert.equal(assessMergeReadiness({ ...input, runs: [run, { ...run, id: 3, run_number: 4, conclusion: 'failure' }] }).status, 'not-ready');

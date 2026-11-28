@@ -1,0 +1,207 @@
+[DOCUMENT]
+MID: 76ce001d22e5e456bc8b74c07c5a51fc
+TITLE: Push deployment
+UID: DOC-DEPLOYMENT-PUSH-DEPLOYMENT
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 9e2eece40f6bfbbad6e3c2395bdbb90d
+STATEMENT: >>>
+> A pristine approved VM supports browser enrollment through `/console/setup` and a restricted setup-only API. The legacy SSH-forward procedure remains available during the transition. Both enrollment procedures lead to the separately approved production activation. [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, Initial deployment] · [LINK: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME-first-owner-through-the-browser, Enrollment procedure]
+
+**Normative lifecycle diagrams:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, Deployment lifecycle] owns cross-component route selection, first Backend activation, incompatible-release refusal, shared exclusion and resumption. [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, Pristine VM / first owner activation] and [LINK: DOC-DEPLOYMENT-UPDATE-FLOW, Certified compatible update / rollback]. The owner enrollment, candidate admission and interruption semantics below must be read as implementations of those transitions, not as an alternative design.
+
+The backend release workflow publishes Core and Full images by immutable OCI digest under the deployment repository owner's GHCR namespace. Its certificates bind the repository and owner IDs, successful exact-main verification, the producer artifact and inspected image identities. A separate read-only handoff workflow rechecks the publication, artifact receipt and both images before exposing deployment inputs. In the deployment queue, the production job rechecks certification against the repository's current main and verifies the Cloudflare ingress for its `deploy/production.json` origin. It connects to the target Tailnet using the protected Environment's WIF Client ID and immutable GitHub OIDC subject, checks the VM's pinned SSH host key, verifies the live UI epoch and Access boundary, and runs Ansible as `codexia`. Cloudflare Tunnel provides application ingress. OpenSSH over the Tailnet provides VM management.
+
+The deployment job is gated by the `CODEXIA_PUSH_DEPLOYMENT_ENABLED` variable in the `codexia-production` GitHub Environment. Keep the value unset or set it to `false` until the service identity, data, secrets and the selected activation/update prerequisites are verified and explicitly approved; a fresh R6 does not require backup configuration, whereas R8 requires accepted ordinary backup and recovery. During coordinated maintenance, ordinary release mutation remains paused. Both the publication-triggered and manual Backend deployment handoffs use the same Ansible transaction.
+<<<
+
+[[SECTION]]
+MID: db40b2e44d1407e3ab401de89c76b89d
+UID: DOC-DEPLOYMENT-PUSH-DEPLOYMENT-protected-inputs
+TITLE: Protected inputs
+
+[TEXT]
+MID: 5b10178ed77f4f34b78ee7eaa7bcecad
+STATEMENT: >>>
+Configure these names in the `codexia-production` GitHub Environment. Never put a private key or credential in the repository.
+
+| Name | GitHub type | Purpose |
+| --- | --- | --- |
+| `TS_OAUTH_CLIENT_ID` | Secret | Existing Tailscale GitHub OIDC client. |
+| `CODEXIA_ACCESS_CLIENT_ID` | Secret | Existing Cloudflare Access service-token ID used by the read-only live compatibility preflight. |
+| `CODEXIA_ACCESS_CLIENT_SECRET` | Secret | Existing Cloudflare Access service-token secret used by the read-only live compatibility preflight. |
+| `CODEXIA_DEPLOY_SSH_PRIVATE_KEY` | Secret | Dedicated Ed25519 key used only by the production deployment job. R4 derives its public key in this Environment and registers it on the VM. |
+| `CODEXIA_DEPLOY_SSH_KNOWN_HOSTS` | Variable | Independently verified OpenSSH host key pin for the VM. A pin with a single literal address or hostname also declares the destination. |
+| `CODEXIA_DEPLOY_HOST` | Variable | Tailnet address or hostname to select when the pin file is hashed or covers multiple hosts. The selected host must match the pin. |
+| `CODEXIA_INITIAL_INSTALL_APPROVED` | Variable | Exact `true` is required for an explicitly approved first activation with no API container; it does not authorize activation on its own. Default is `false`. |
+| `CODEXIA_DATABASE_INITIALIZATION_APPROVED` | Variable | Exact `true` records explicit approval to use the initialized database for first activation; default is `false`. |
+| `CODEXIA_PUSH_DEPLOYMENT_ENABLED` | Variable | Set to the exact string `true` only when the ordinary push path's prerequisites and selected activation/update are explicitly approved; pause ordinary mutation during coordinated maintenance. |
+
+Backup staging and the public recipient are protected VM-local backup settings, not deployment Environment inputs. The private age identity and recovery read credentials remain in independent recovery custody; GitHub Actions must neither read nor transmit them. Ordinary S3 settings are managed through the Console, not through GitHub.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: e156c9006bd1e40510f49f294654cb8c
+UID: DOC-DEPLOYMENT-PUSH-DEPLOYMENT-deployment-contract
+TITLE: Deployment contract
+
+[TEXT]
+MID: 314d5cbced87d79abeeb4a492bb58bfe
+STATEMENT: >>>
+The production job runs only after the read-only handoff workflow verifies a successful main `Verify Codexia` run, the corresponding backend publication, and the certified Full digest and deployment certificate. It consumes the handoff job outputs; it does not resolve a tag or build a second image. Pull request validation and the handoff verifier have no production Environment and cannot mint a Tailscale OIDC identity.
+
+For an image-only update, the Ansible `deploy` stage requires a running, healthy Full API under the `codexia` rootless account. First activation is the explicit exception: it requires the reviewed R6 plan, both first-install and database-use approvals, and a clean API slot. It verifies the exact application migration ledger from the certified Full image. Automatic release handoffs cannot activate an empty API slot, even when the first-install switches are enabled. For either path, Ansible verifies that the certificate identity matches the exact image digest; updates must retain the running image's migration fingerprint, API epoch and persistence format, and the candidate must match the deployed UI epoch. Before stopping an installed API, the candidate compares the tables, columns, constraints and indexes of the live Better Auth schema with its expected PostgreSQL catalog. Schema drift blocks the update. The Quadlet disables startup schema migration. A database change requires a separately reviewed database maintenance and backup operation; replacing a container does not restore or roll back PostgreSQL.
+
+For a normal compatible Backend update with an installed writer, Ansible uses the VM-local backup configuration and verifies the backup directory before stopping the API. For a genuine fresh R6, skip the pre-update backup (there is no prior workload), but retain lock, certified image, DB/Auth checks and readiness. Local filesystems and remote mounts are supported for ordinary backups; remote mounts retain their host-identity validation. Under the host lock, the compatible-update transaction stops the application Tunnel and API, creates and validates an encrypted database/history backup, installs the digest-specific Quadlet, starts the candidate, and waits for readiness. First activation starts the certified candidate in a clean API slot without that backup step. Backup admission requires the API and Tunnel systemd units to be inactive and the API container to be stopped; it verifies ownership of the inherited host lock. If startup or readiness fails, Ansible restores the prior Quadlet and checks that the healthy running image matches the recorded prior digest before returning failure. A durable transaction record lets the next invocation recover the prior release if the runner or SSH connection disappears mid-deploy. Recovery leaves its record in place and keeps the Tunnel stopped if it cannot verify both prior health and image identity. A repeated application of the running digest verifies service health and performs no image switch.
+
+The API and Tunnel receive systemd user activation links so the Quadlet services return after a VM reboot. The API depends on the database unit; the Tunnel starts only after the API is healthy. The management connection remains available through Tailscale and SSH even if either application unit fails.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: c02a3bf3af1f8ca714b6274f16fcc90f
+UID: DOC-DEPLOYMENT-PUSH-DEPLOYMENT-disposable-app-lifecycle-ci
+TITLE: Disposable app lifecycle CI
+
+[TEXT]
+MID: b1186cdaf0fc460f69ecbbfc11ef9fee
+STATEMENT: >>>
+**Accepted CI design:** Produce the credential-free SSHFS server OCI image **once, before the lifecycle consumers start**, with the exact checked-out source SHA. The producer resolves its Debian base to a digest, builds on Docker, tests real public-key SSH login with a temporary key, and publishes a run/attempt-bound immutable Actions artifact containing an OCI archive and checksummed source/identity manifest. The artifact is retrieved by ID and its archive SHA-256, source files, producer SHA/run/attempt, image ID and platform are checked before it is loaded into rootless Podman. The disposable consumer independently generates its per-run SSH key and mounts only the public key read-only; **no identity key is baked into the OCI image**. This avoids recompiling the OpenSSH fixture and transferring it through rootful Docker in each lifecycle host. Unavailable or mismatched artifacts fail; there is no fallback build or mutable tag.
+
+**Two independently isolated acceptance lanes are mandatory:** `app` executes initial activation, same-digest reapplication, compatible update, failed-candidate rollback, durable interruption recovery and backup/volume/writer continuity. `auth` independently starts with an untouched database and checks Better Auth owner registration, schema, key/session continuity, reapplication, compatible update and rollback. They run concurrently on distinct Ubuntu 26.04 disposable hosts, never share PostgreSQL state, and both must report `PASS` including resource cleanup. The `auth` lane initializes its own pristine database and activates Better Auth directly; only the `app` lane runs generic application update, rollback and interrupted-transaction proof. Both lanes use the canonical production transaction. Any `NOT_CHECKED`, unavailable capability, skipped transition or failed cleanup fails the workflow. These run-bound reports are independent from production deployment certificates.
+
+**Declarative wait contract:** Fixed-duration `sleep` polling is prohibited in the production transaction and disposable lifecycle scripts. API Quadlet `Notify=healthy` makes `systemctl start` the actual readiness gate. `HealthStartupCmd` uses the identical `/health/ready` probe as `HealthCmd`, but runs at a 2-second startup interval before reverting to the 30-second steady-state interval; `HealthStartupInterval` alone must not be mistaken for an active startup healthcheck. `TimeoutStartSec` bounds failed activation and systemd restart limits stop permanently failing candidates. Other resources require a condition-aware wait (Podman health, live HTTP readiness, manager activation or registration output); a timeout is a failure guard, not evidence of readiness. Do not bypass the canonical systemd behavior in disposable failure injection. The API writer, PostgreSQL, encrypted backup, Better Auth session and rollback assertions remain required.
+
+**Performance evidence:** The lifecycle report records durations for disposable-host bootstrap, SSHFS capability, exact backend image selection, local registry mirror, scenario transitions, and individual Ansible deployment invocations (including expected fault-injection failures). GitHub Actions step timing separately measures the producer image build and runner package installation. Compare fully successful equivalent runs and required scenario coverage before claiming a runtime reduction. Publishing a persistent GHCR fixture may replace the run-local producer later only after an independently verified immutable digest is approved; no mutable registry tag is accepted.
+
+
+The [push-app-lifecycle workflow](https://github.com/yohn-jp/codexia/blob/main/.github/workflows/push-app-lifecycle.yml) runs manually and on pull requests that change the deployment transaction, host/Quadlet/backup implementation, Better Auth or bootstrap startup, database schema/connection, backend image packaging, dependency manifests or exact-image selection. Ordinary module/core feature changes, isolated tests and documentation-only edits retain their Verify and backend image/browser proof without starting disposable hosts. Both independent `app` and `auth` acceptance lanes remain mandatory whenever this workflow is triggered; a path-filter skip is not a production deployment certificate. It uses an Ubuntu 26.04 GitHub-hosted runner without a production Environment. It verifies the exact-source Full OCI artifact and looks up the newest earlier backend release with the same API epoch and persistence format. If that release's publication certificate also matches the migration fingerprint, the fixture installs the earlier Full image, reapplies it, then upgrades to the exact-source image. If the earlier release cannot be verified, the fixture installs the exact-source image and switches to a distinct test-only digest with the same application layers. The report records the transition, each image digest and the observed API writer at each checkpoint.
+
+The fixture runs `site.yml` through `host`, `secrets`, `base` and a separate `deploy-lifecycle-fixture` stage. That stage verifies run-bound image evidence, then includes the same `deploy-transaction.yml` used by production `deploy`; the production certificate and installed-image admission remain required by the production stage. The workflow observes first schema initialization, same-digest reapplication, compatible image update, failed-candidate rollback, interrupted-transaction recovery, PostgreSQL data and volume identity, API writer count, Quadlet and release record, and health readiness. It removes the newly installed Tunnel Quadlet only in the disposable fixture before deployment, so no Cloudflare connection or real Tunnel credential is used. It saves a run-bound outcome artifact and bounded redacted logs, then checks fixture cleanup.
+
+With a synthetic OIDC provider, the fixture registers the owner and clients, activates Better Auth, and verifies that the owner session, signing keys and auth schema survive same-digest reapplication, a compatible update and rollback of a failed candidate.
+
+The backup fixture mounts an SSHFS export served by a separate container on the same temporary runner. The real backup helper still checks for a remote filesystem, creates the encrypted archive under its normal lock, and validates the published checksum manifest. The runner and SSHFS server share a host. Production recovery requires a restore on an independent host. The disposable rootless container has a distinct network-namespace address: CI resolves its mount-source alias to that address solely so the unchanged backup destination guard can verify a non-local peer. SSH transport remains pinned to the same container through its localhost-mapped port, and the temporary host mapping is removed during cleanup. Neither container isolation nor this CI proof establishes physical backup independence.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 3e0698a1d2bbf27047263067c4bb5ea0
+UID: DOC-DEPLOYMENT-PUSH-DEPLOYMENT-first-application-activation
+TITLE: First application activation
+
+[TEXT]
+MID: c92c3654a3b31f90a9230d400287f6b0
+STATEMENT: >>>
+On the supported VM, run [LINK: DOC-DEPLOYMENT-PRODUCTION-BOOTSTRAP, Protected production Bootstrap] through R4 and R5. It executes `auth-runtime` before `deploy`, verifies the certified Full image and initializes the approved pristine database. Complete [LINK: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME-first-owner-through-the-browser, browser enrollment] through the normal frontend, then run activation preparation. The setup-only API and Tunnel stop; the verified owner and client bindings remain on the initialized DB. No fresh-install recovery job follows.
+
+With the runtime identity, run [Production Access Preflight](https://github.com/yohn-jp/codexia/blob/main/.github/workflows/production-preflight.yml) for the install intent and the approved activation window. Review the R6 plan. Dispatch [Codexia Backend Deployment](https://github.com/yohn-jp/codexia/blob/main/.github/workflows/backend-deployment-handoff.yml) from the same main with its `preflight_run_id` and `ACTIVATE_CODEXIA_BACKEND`. The protected job retrieves the immutable plan, checks the live compatible frontend and recertifies the candidate. Inside the production queue and under the host lock it rechecks the database, prepared owner, settings, candidate identity, and compatible Frontend. For a genuinely new installation no backup/restore point is required. For existing-data adoption, verify the applicable preservation evidence. The protected `CODEXIA_DEPLOYMENT_PRESERVATION` value binds its `codexia-deployment-preservation/v1` receipt to the exact target using `repository`, numeric `repositoryId` and numeric `ownerId`, in addition to the source host ID, database digest and independent backup evidence digest. Follow the restored Backend procedure below for recovery. If source or live state changed, review a new plan.
+<<<
+
+[[SECTION]]
+MID: 19373863ba5feceeea0382aafb4e7352
+UID: DOC-DEPLOYMENT-PUSH-DEPLOYMENT-restored-backend-publication
+TITLE: Restored Backend publication
+
+[TEXT]
+MID: 00e2d794b76ea98a47a2d728c2d929e8
+STATEMENT: >>>
+Complete R2 using the [LINK: DOC-DEPLOYMENT-PROTECTED-RECOVERY, protected recovery contract]. On the isolated target, keep the API, Tunnel and `codexia-backup-executor.service` stopped. Leave the executor disabled until its restored journal is reconciled. Keep the existing owner, Passkey and compatible Frontend. The target uses the normal DB and Auth settings and a clean API slot. Prepare it under the normal `codexia` host lock at `~/.local/state/codexia-deploy/host.lock`. Start with a mode-0700 state directory and create the lock with `umask 077` if the isolated target has no lock yet.
+
+Run the existing read-only Preflight with runtime management and `restore` intent to observe the prepared target before placing the record. With no handoff present, the plan cannot approve publication. Use the redacted host observation to fill in the actual target data. The backup and restore receipts come from the recovery operator's independent record.
+
+The deployment operator uses the existing protected VM management path and the shared host lock to place the approved record at `~/.local/state/codexia-deploy/recovery-handoff.json` for the `codexia` service identity. Place it by atomic rename into the mode-0700 state directory. The record is a regular, non-hardlinked mode-0600 JSON file of at most 16 KiB. Retain the authoritative record and restoration receipts in the independent protected operations record. The VM file carries only the following nonsecret values. Digests are lowercase SHA-256 in hexadecimal unless indicated.
+
+| Field | Value |
+| --- | --- |
+| `format`, `environment`, `operationId` | `codexia-recovery-handoff/v1`, `codexia-production`, and the protected restoration operation ID |
+| `repository`, `repositoryId`, `ownerId` | Exact deployment repository name and numeric GitHub repository and owner IDs from the protected target |
+| `backup` | v2 artifact `id` with its UTC timestamp, `sourceHostId`, `manifestSha256`, `transferReceiptSha256`, `restoreReceiptSha256`, and restored `databaseFingerprint` and `historyFingerprint` from the verified v2 manifest. Include `sourceClusterId` and `sourceDatabaseOid` as strings together if the source was observed. |
+| `target` | `hostId`, `clusterId` and `databaseOid` as observed by Preflight. Supply `ledgerSha256` for the reported `database.ledger` and `secretSetSha256` for `topology.secretHashes`, both as SHA-256 of canonical JSON with sorted object keys and no insignificant whitespace. Include observed `authSchemaSha256` and `ownerBindingSha256` with their `sha256:` prefix and the private runtime settings file's `settingsSha256`. |
+| `release` | Immutable certified Backend `image`, its 40-character producer `sourceSha`, and certified `frontendArtifactSha256` |
+| `window` | `id`, `notBefore`, and `notAfter` from the identical approved window. Use UTC ISO 8601 with milliseconds and a trailing `Z`. |
+| `writerFence` | `kind` is `decommissioned` or `write-access-revoked`. `recordSha256` identifies the independent proof that the source cannot resume writing. |
+| `executorFenceSha256`, `credentialsRecordSha256`, `postBackupWritesRecordSha256` | Independent evidence of the source executor fence, confirmation of required credentials on the target, and the approved disposition of writes after the selected backup point. |
+
+Run Production Access Preflight with runtime management and `restore` intent using the record's exact window (`window_id`, `window_start`, `window_end`). Review the R3 plan and dispatch the existing Backend Deployment workflow with its `preflight_run_id` and `PUBLISH_RESTORED_CODEXIA_BACKEND`. The job reobserves the same evidence in the production queue. Under the host lock, the transaction checks the evidence digest, restored host, ledger, owner, Auth settings, Podman credential identities, frozen database and history fingerprints, and the approval window. It masks the target Tunnel across a host restart until it has verified candidate readiness and rechecked the evidence. Failure keeps the protected proof for a new observation, and the existing R1 recovery clears a pending transaction and its Tunnel mask after removing the unpublished candidate. Retain the verified source fence for the whole operation and after publication. The transaction records the restoration operation ID and evidence digest with the deployed release.
+
+Ansible verifies the staged private settings and protected Podman secrets and verifies the owner, registered clients, API resources and introspection credentials before installing the candidate. The API repeats the client and credential checks on startup.
+
+The active Better Auth Quadlet references a private settings file named by its SHA-256. Image-only updates and interrupted updates require a matching release record, Quadlet and settings file. If an earlier token-based deployment has a pending transaction, use the release that recorded it to recover under the approved procedure. The current deployment refuses that pending state before touching services or recovery files. An incompatible older installation is not automatically migrated; follow the explicitly approved, concrete maintenance or recovery procedure if needed.
+
+Run the first API activation through the protected production workflow as the `codexia` service identity with the certified Full digest, the matching certificate and deployed UI epoch, and both GitHub Environment variables `CODEXIA_INITIAL_INSTALL_APPROVED=true` and `CODEXIA_DATABASE_INITIALIZATION_APPROVED=true`. The protected job passes these as `codexia_initial_install_approved=true` and `codexia_database_initialization_approved=true` to Ansible. Their default is `false`. Clear both after first activation succeeds. Keep them true for a retry only when the first activation did not complete, after inspecting the durable transaction and database. The second approval is required even when adopting an existing database: it records that the operator verified the database to be used. Under the host lock, before starting the API, `deploy` verifies the exact application migration ledger using the certified image on the internal database network. A missing, partial or mismatched ledger blocks activation. `deploy` refuses an existing API container without a canonical unit, and refuses a unit left behind without its container. Keep the API Tunnel stopped until the candidate passes health checks. Recheck the approved R6 window under the host lock before candidate startup and again immediately before starting the Tunnel; expiry leaves the database and enrolled owner intact and stops the candidate using the existing first-activation recovery path. Reapplying that same digest verifies health and makes no image switch.
+
+Inspect the target data and retain an independent backup before adopting an existing production VM. The [LINK: DOC-DEPLOYMENT-PUSH-HOST-CI, host bootstrap acceptance] covers the host stage. On the target, separately verify VM reboot, Cloudflare routing, sign-in through the configured identity provider, and recovery from the independent backup.
+<<<
+
+[[/SECTION]]
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: da6a98500c5ff8f6432b502636340827
+UID: DOC-DEPLOYMENT-PUSH-DEPLOYMENT-database-and-schema-maintenance-boundary
+TITLE: Database and schema maintenance boundary
+
+[TEXT]
+MID: bc85fbd6a55297aec75c8a01bc33749e
+STATEMENT: >>>
+After initial schema creation, image-only `deploy` supports only an unchanged migration fingerprint, API epoch, and persistence format. The owning migration change needs an independently reviewed and explicitly approved procedure that defines a pre-change encrypted backup, migration execution and verification, and a tested restore path. The [LINK: DOC-DEPLOYMENT-BACKUP-verify-a-candidate-ledger-on-a-restored-backup, isolated restore drill] can verify the candidate ledger against a restored backup copy. PostgreSQL roles and Podman secrets require separate recovery. Production activation remains subject to the compatibility gates and the existing protected first Backend activation or compatible update path.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 3b0900b7a2aee387c334b860825b0fdb
+UID: DOC-DEPLOYMENT-PUSH-DEPLOYMENT-incompatible-release-refusal
+TITLE: Incompatible release refusal
+
+[TEXT]
+MID: f813ae872843f383215352fef14504a9
+STATEMENT: >>>
+There is no coordinated pair or epoch-transition deployment path. Refuse an incompatible installed environment without modifying its writer, database or owner. A separately authorized clean install is available only after positively observing database absence; existing-data recovery remains a distinct operation.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: d4e80a45441874504362f8c9a747fdbf
+UID: DOC-DEPLOYMENT-PUSH-DEPLOYMENT-acceptance-order
+TITLE: Acceptance order
+
+[TEXT]
+MID: 834e5efe08e1b516b986b0b5c0f6d233
+STATEMENT: >>>
+Run `bootstrap` and complete enrollment before requesting protected first activation. Enable automatic updates only for the installed API after ordinary backup and recovery acceptance. At that point the target has the `codexia` account, rootless Podman and user systemd, canonical database and Tunnel resources, protected Podman secrets, the dedicated SSH key, and a pinned host key. The approved `auth-runtime` stage initializes an empty application schema during provisioning. The first `deploy` activation, with both explicit approvals, verifies its exact migration ledger. Later `deploy` runs apply compatible image updates. Keep the existing `sophia` storage outside this workflow.
+
+Acceptance must record separate evidence for CI certification and VM behavior. On the target, verify Tailscale SSH, first deployment from a clean `codexia` runtime with preserved or explicitly restored data, same-digest reapplication, a compatible update, a deliberately failing candidate and verified restoration, host-lock contention, service recovery after reboot, encrypted backup and isolated restore, and external application health through Cloudflare Tunnel.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 1649aafdc5a36ea4fc30e59fd659dd0f
+UID: DOC-DEPLOYMENT-PUSH-DEPLOYMENT-backup-destination-policy
+TITLE: Backup destination policy
+
+[TEXT]
+MID: a9488ee6b6d07acc8b20fc56efcbb818
+STATEMENT: >>>
+The operator provisions the [LINK: DOC-DEPLOYMENT-BACKUP-CONSOLE-OPERATIONS, VM backup runtime] with a private staging directory and the age recipient. The recipient's recovery identity stays in independent secret custody. An owner activates the destination in the ordinary Console. Complete the independent restore and operational acceptance before enabling automatic Backend updates.
+
+For a compatible change to an installed API, Ansible acquires the host lock and checks the VM-local staging configuration. The executor pins the active Console revision and records the source and candidate identities before Ansible stops the writer. The same protected runner used by ordinary backup invokes `backup.sh` with the inherited lock descriptor. The executor verifies the ciphertext against the pinned off-VM policy. A successful deployment record carries the verified run ID.
+
+Missing configuration or required preservation stops the update. A failed secondary destination permits activation only when the approved independent mount passes verification. When preservation fails after quiescing the writer, the transaction restores the prior API and Tunnel. Interrupted runs retain their recorded status for reconciliation.
+<<<
+
+[[/SECTION]]

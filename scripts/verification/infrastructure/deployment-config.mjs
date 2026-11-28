@@ -26,11 +26,11 @@ const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terr
   read('deploy/quadlet/codexia-postgres.volume'),
   read('deploy/quadlet/codexia-tunnel.container'),
   read('Dockerfile.backend'),
-  read('docs/deployment/README.md'),
-  read('docs/deployment/PUSH-DEPLOYMENT.md'),
-  read('docs/deployment/IAC.md'),
-  read('deploy/ansible/README.md'),
-  read('docs/deployment/BACKUP.md'),
+  read('docs/deployment/DEPLOYMENT-REFERENCE.sdoc'),
+  read('docs/deployment/PUSH-DEPLOYMENT.sdoc'),
+  read('docs/deployment/IAC.sdoc'),
+  read('docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc'),
+  read('docs/deployment/BACKUP.sdoc'),
 ]);
 const [terraformProviderLock, terraformWorkflow, terraformExample] = await Promise.all([
   read('deploy/cloudflare/terraform/.terraform.lock.hcl'),
@@ -115,9 +115,9 @@ assert.match(tunnelQuadlet, /^After=network-online\.target codexia-api\.service$
 assert.match(tunnelQuadlet, /PublishPort=127\.0\.0\.1:2000:2000\/tcp/u, 'Tunnel metrics must bind to host loopback only');
 assert.doesNotMatch(tunnelQuadlet, /^PublishPort=(?!127\.0\.0\.1:2000:2000\/tcp)/mu, 'the Tunnel must not publish a public host port');
 assert.match(backendDockerfile, /--server-only/u);
-assert.match(deploymentDocs, /\]\(BACKUP\.md#受入シナリオ\)/u,
+assert.match(deploymentDocs, /\[LINK: DOC-DEPLOYMENT-BACKUP-受入シナリオ,/u,
   'The deployment overview must link the canonical recovery acceptance');
-assert.match(deploymentDocs, /\]\(\.\.\/\.\.\/deploy\/backup\/CONSOLE\.md\)/u,
+assert.match(deploymentDocs, /\[LINK: DOC-DEPLOYMENT-BACKUP-CONSOLE-OPERATIONS,/u,
   'The deployment overview must link operator backup provisioning');
 assert.match(deploymentDocs, /codexia-db\.service/u);
 assert.match(deploymentDocs, /codexia-postgres/u);
@@ -125,14 +125,14 @@ assert.match(deploymentDocs, /VITE_API_URL/u);
 assert.match(deploymentDocs, /CORS/u);
 assert.match(deploymentDocs, /127\.0\.0\.1:2000\/ready/u);
 const operationsDocs = [deploymentDocs, pushDeploymentDocs, iacDocs, ansibleDocs, backupDocs].join('\n');
-assert.ok(pushDeploymentDocs.includes('](PRODUCTION-BOOTSTRAP.md)') && pushDeploymentDocs.includes('`preflight_run_id`'),
+assert.ok(pushDeploymentDocs.includes('[LINK: DOC-DEPLOYMENT-PRODUCTION-BOOTSTRAP,') && pushDeploymentDocs.includes('`preflight_run_id`'),
   'The first activation runbook must use protected Bootstrap and the reviewed Preflight run');
 assert.match(operationsDocs, /codexia_initial_install_approved=true/u);
 assert.match(operationsDocs, /codexia_database_initialization_approved=true/u);
 assert.match(operationsDocs, /CODEXIA_INITIAL_INSTALL_APPROVED=true/u);
 assert.match(operationsDocs, /CODEXIA_DATABASE_INITIALIZATION_APPROVED=true/u);
 assert.match(operationsDocs, /auth-runtime.*before.*deploy/u);
-assert.match(pushDeploymentDocs, /\]\(BACKUP\.md#verify-a-candidate-ledger-on-a-restored-backup\)/u,
+assert.match(pushDeploymentDocs, /\[LINK: DOC-DEPLOYMENT-BACKUP-verify-a-candidate-ledger-on-a-restored-backup,/u,
   'The push deployment runbook must link the isolated restore verification');
 assert.match(operationsDocs, /migration fingerprint, API epoch, and persistence format/u);
 assert.match(deploymentDocs, /CODEXIA_DATABASE_MIGRATE_ON_START=0/u);

@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BROWSER_SHARDS, CONFORMANCE_TASKS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES, isOpenApiGenerationInput, isFastifyGenerationInput } from './contract.mjs';
-import { ROOT_VERIFICATION_DOCUMENTS, UX_PROJECTION_DOCUMENTS, isNonExecutableDocumentation, isRequirementsTraceInput, taskGroup, taskWorkflowJob } from '../evidence/task-inputs.mjs';
+import { CODEXIACTL_SPECIFICATIONS, ROOT_VERIFICATION_DOCUMENTS, UX_PROJECTION_DOCUMENTS, isDesignProjectionModel, isNonExecutableDocumentation, isRequirementsTraceInput, taskGroup, taskWorkflowJob } from '../evidence/task-inputs.mjs';
 
 export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'scripts/shared/python-env.sh',
@@ -130,7 +130,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/cloudflare/public-protocol-paths.json',
   'deploy/cloudflare/terraform/.terraform.lock.hcl',
   'deploy/cloudflare/terraform/.gitignore',
-  'deploy/cloudflare/terraform/ACCESS-POLICY-MIGRATION.md',
+  'docs/deployment/ACCESS-POLICY-MIGRATION.sdoc',
   'deploy/cloudflare/terraform/initial-frontend-version/main.tf',
   'deploy/cloudflare/terraform/main.tf',
   'deploy/cloudflare/terraform/terraform.tfvars.example',
@@ -280,14 +280,15 @@ function isChangedPath(file) {
 }
 
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
-export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci/dashboard/', 'scripts/pages-ui/', 'scripts/ux-simulator/']);
+export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci/dashboard/', 'scripts/pages-ui/', 'scripts/ux-simulator/', 'scripts/audit/']);
 const uxProjectionDocuments = new Set(UX_PROJECTION_DOCUMENTS);
+const codexiactlSpecifications = new Set(CODEXIACTL_SPECIFICATIONS);
 const DB_CONTRACT_SOURCE_PATHS = new Set([
-  'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.md',
-  'docs/architecture/DATABASE-DETAIL-CONTRACT.md',
-  'docs/architecture/DATA-MODEL.md',
-  'docs/requirements/REQUIREMENT-REGISTER.md',
-  'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md',
+  'docs/architecture/POSTGRES-CONTRACT-VERIFICATION.sdoc',
+  'docs/architecture/DATABASE-DETAIL-CONTRACT.sdoc',
+  'docs/architecture/DATA-MODEL.sdoc',
+  'docs/requirements/REQUIREMENT-REGISTER.sdoc',
+  'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.sdoc',
   'deploy/ansible/verify-postgres-roles.sql',
   'packages/api/src/auth-schema.ts',
   'packages/api/src/migrate-auth.ts',
@@ -312,9 +313,10 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
     if (!isChangedPath(file)) { full = true; break; }
     if (file.startsWith('cmd/codexiactl/') || file === 'scripts/ci/execution/verify-codexiactl.sh') {
       add('codexiactl-linux');
+      if (file === 'cmd/codexiactl/release-contract.json') add('unit-root');
       continue;
     }
-    if (file === 'docs/deployment/CODEXIACTL.md' || file === 'deploy/production.json' ||
+    if (codexiactlSpecifications.has(file) || file === 'deploy/production.json' ||
         /^deploy\/cloudflare\/[^/]+\.json$/u.test(file) ||
         /^\.github\/workflows\/(?:production-bootstrap|production-preflight|frontend-release)\.yml$/u.test(file)) {
       add('codexiactl-linux');
@@ -325,29 +327,27 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       add(conformanceTask[0]);
       continue;
     }
-    if (file === 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.md') add(...Object.keys(CONFORMANCE_TASKS));
-    if (file === 'docs/architecture/HTTP-PLATFORM-MIGRATION.md' || HTTP_CONTRACT_ROUTE_SOURCE_PATHS.has(file) ||
+    if (file === 'docs/verification/SPECIFICATION-TOOLING-ACCEPTANCE.sdoc') add(...Object.keys(CONFORMANCE_TASKS));
+    if (file === 'docs/architecture/HTTP-PLATFORM-MIGRATION.sdoc' || HTTP_CONTRACT_ROUTE_SOURCE_PATHS.has(file) ||
         file.startsWith('packages/http-contract/')) add('http-conformance');
-    if (file === 'docs/architecture/MCP-V2-MIGRATION.md' || file.startsWith('modules/mcp/')) add('mcp-conformance');
+    if (file === 'docs/architecture/MCP-V2-MIGRATION.sdoc' || file.startsWith('modules/mcp/')) add('mcp-conformance');
     if (file.startsWith('scripts/ux-simulator/')) {
       add('unit-root');
       continue;
     }
-    if (uxProjectionDocuments.has(file)) add('unit-root');
+    if (uxProjectionDocuments.has(file) || isDesignProjectionModel(file)) add('unit-root');
     if (/^packages\/persistence-postgres\/tests\/db-contract\//u.test(file) || file.startsWith('scripts/postgres-contract/')) {
       add('db-contract', 'unit-persistence-postgres', 'typecheck-foundations');
       continue;
     }
     if (DB_CONTRACT_SOURCE_PATHS.has(file)) add('db-contract');
     if (file === 'deploy/backup/backup.sh') add('db-contract');
-    if ((file.startsWith('docs/requirements/') && file.endsWith('.md')) ||
-        file === 'scripts/strictdoc/strictdoc_config.py' ||
-        file.startsWith('scripts/strictdoc/')) {
+    if (file.startsWith('scripts/strictdoc/')) {
       add('requirements-trace');
       continue;
     }
     if (file.startsWith('docs/architecture/') || file.startsWith('docs/deployment/') || file.startsWith('docs/security/') ||
-        file === 'docs/verification/ARCHITECTURE-ATLAS.md' ||
+        file === 'docs/verification/ARCHITECTURE-ATLAS.sdoc' ||
         file.startsWith('scripts/architecture/') || file === 'scripts/architecture-diagrams/pack.mjs' ||
         file === 'scripts/architecture-diagrams/pack.test.mjs') add('architecture-g5');
     if (operationalRootPaths.has(file) || OPERATIONAL_ROOT_PREFIXES.some(prefix => file.startsWith(prefix) && file.length > prefix.length)) {

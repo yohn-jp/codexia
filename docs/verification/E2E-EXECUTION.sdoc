@@ -1,0 +1,143 @@
+[DOCUMENT]
+MID: 907a129542291242c9b54f22c04abdde
+TITLE: Browser E2E execution and optimization contract
+UID: DOC-VERIFICATION-E2E-EXECUTION
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 9ca0d72924cf97c982d63335916115ff
+STATEMENT: >>>
+**Status: accepted design target; implementation and measured acceptance pending.** Owner: CI/verification maintainers. Audience: implementers, reviewers and CI operators. [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, System design] owns supported clients; [LINK: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION, Test architecture] owns proof placement; [LINK: DOC-VERIFICATION-CI-CD, CI/CD] owns the sole execution plan, certification, artifact identity, release and runner security. This document refines browser execution only. No parallel task inventory, alternate release gate, new browser framework or production migration is authorized by this document.
+<<<
+
+[[SECTION]]
+MID: 63aeaaa98511774e858d00ce2a51199d
+UID: DOC-VERIFICATION-E2E-EXECUTION-1-required-proof-and-platform-boundary
+TITLE: 1. Required proof and platform boundary
+
+[TEXT]
+MID: 3c40faba1f01f7740a8f30359a307e90
+STATEMENT: >>>
+| Surface | Target evidence | Transition / exclusion |
+| --- | --- | --- |
+| Author Desktop Web | Windows Chrome/Edge (Chromium); real Chromium + exact profile + real API/PostgreSQL in routine CI; Windows device evidence for OS-specific IME, input, font and accessibility | macOS/Safari/Firefox/other OS compatibility is not an author product requirement; no UA-based blocking |
+| Owner console | Real supported Chromium and API/authz; focus, zoom, accessibility and failure/recovery | No removal of narrow viewport accessibility or protected owner admission tests |
+| Public reader and externally presented auth/consent | Real Chromium; independent route, authentication, authorization, reader behavior and accessibility contracts | Preserve all functional and security proofs; no separate WebKit compatibility obligation in routine CI |
+| Native iOS | Swift Testing/XCTest and XCUITest on the accepted simulator and actual iPhone for native/device obligations; same real API semantics | Playwright WebKit is neither Safari on an actual device nor native SwiftUI/TextKit/Keychain/system-auth evidence. macOS build hosts are not macOS product clients |
+| Legacy Mobile React/Capacitor | Retired from the supported product; no Mobile Web viewport acceptance target | The production route, authoring shell, package dependencies and implementation tests are removed. Preserve negative route assertions, shared Desktop and independent public/auth proof; native physical-device acceptance remains required for any future native release |
+| Core and Full | Both real profiles, profile-specific UI/module boundaries, API/authz, persistence, representative browser acceptance and OCI startup | Shared implementation does not prove equal runtime composition; move a redundant obligation only under the proof-placement contract |
+
+Routine browser CI is Chromium-only for both Core and Full, including public/auth and any remaining legacy behavior. Retire the duplicate WebKit project and image; every existing Chromium spec remains selected, including mixed and narrow-viewport behavior. The Mobile Web retirement and native device admission remain governed by their own contracts. No WebKit fallback for missing Chromium proof. Retain independent API, auth, persistence, accessibility and native obligations; do not delete functional tests merely to remove a browser. No browser-specific production changes are authorized by this CI retirement.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 495fd63666e1942e438808e8d054d092
+UID: DOC-VERIFICATION-E2E-EXECUTION-2-single-execution-authority-and-intended-graph
+TITLE: 2. Single execution authority and intended graph
+
+[TEXT]
+MID: 32d0a3a6f8f119e4caa885e225c57b2a
+STATEMENT: >>>
+Use six Chromium-only lanes (Core/Full × writing/reference/ui-v1), retaining the existing runner budget and at most two independent validations per runner, one worker per spec. All lanes use the same digest-pinned Git-capable Chromium runtime. The UI-v1 lane pairs the UI suite with modular workspace, native review, outline headings and the job inbox. The reference lane runs the visual performance measurement after its other selected tasks complete. Repartition by measured cost and dependency/fixture affinity before proposing a runner increase.
+
+```mermaid
+flowchart TD
+  P[Exact source and impact plan] --> B[Core and Full profile producers]
+  P --> R[Selected browser runner preparation]
+  B --> V[Verify immutable profile receipt]
+  R --> V
+  V --> S[Isolated fixture and runtime configuration]
+  S --> W[Balanced selected Chromium tasks]
+  W --> E[Per task evidence]
+  E --> C[Exact source certification]
+  P --> N[Independent API DB unit OCI and security proof]
+  N --> C
+```
+
+Use the existing BROWSER_SHARDS, VERIFICATION_GROUPS, impact/coverage, input fingerprints, producer receipt and certifier. Derive any finer test selection from canonical task definitions; prove the union equals the required inventory with no duplicates, gaps, unexpected skips, unreported failures or foreign evidence. Preserve negative admission controls and partial-rerun behavior. Changes to runtime images, test identity, invocation, profile, artifact and fixture recipe invalidate affected evidence; do not promote an old WebKit-inclusive proof as an unexplained substitute. Preserve the existing exact-source main release rules. Merge queue, runner infrastructure or release governance changes are separate decisions.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 6ac0f4ba4eab39c254d49bd759d39788
+UID: DOC-VERIFICATION-E2E-EXECUTION-3-minimize-work-at-its-owning-layer
+TITLE: 3. Minimize work at its owning layer
+
+[TEXT]
+MID: 669f88bd804d2ba4e2158f7d461ea7df
+STATEMENT: >>>
+| Obligation | Required strategy |
+| --- | --- |
+| Pure state/decision/expiry/pagination combinations | Independent unit/property or domain/API contract tests at the cheapest faithful layer; retain representative actual UI behavior |
+| DOM/focus/layout | Component or actual Chromium harness when no backend boundary is under test; no unnecessary DB/auth startup |
+| Persistence, authorization, token expiry and transactions | Real API and PostgreSQL contract checks; no mock DB/token as equivalent proof |
+| Author journeys, browser recovery and IndexedDB | Representative real browser, real authenticated API, independent contexts, fault injection and observable persisted outcomes |
+| Browser performance smoke | Retain isolated representative workload; never run concurrently with CPU-heavy siblings or claim functional assertions as performance evidence |
+| Native interaction | Native test tools and actual device acceptance, not a shared JS browser automation abstraction |
+
+For each migrated or deleted test record governing requirement, old identifier, independently observable failure/counterexample, new/retained test and layer, profile/browser applicability, negative-control evidence and cost. Apply existing [#615](https://github.com/yohn-jp/codexia/issues/615) proof-debt governance. Do not target test count, duplicate the implementation as an oracle, weaken assertions or remove a test before its retained/replacement proof executes. Independent public/auth and real DB contracts remain unchanged.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 2eabee6fb03f0e21458a8fda57ca9d7f
+UID: DOC-VERIFICATION-E2E-EXECUTION-4-fixture-authentication-and-build-lifecycle
+TITLE: 4. Fixture, authentication and build lifecycle
+
+[TEXT]
+MID: a813776a1f8424c5af75efa70fccb0f1
+STATEMENT: >>>
+- The `profile-core` and `profile-full` reusable calls each run their profile Build before that profile's Browser matrix. Browser runner setup may overlap the Build, while GitHub's direct job dependency gates artifact restoration and execution on the successful same-profile Build. Do not poll for producer artifacts or use an unverified artifact. Inspect actual fixture calls as well as top-level build steps: the prebuilt flag alone does not prove that no Vite build executes.
+- Target one build of each required profile/entry per distinct source/toolchain/configuration closure. The current author OAuth fixture injects issuer, origin, client ID and redirect configuration and rebuilds entries; measure it separately. Prefer reuse of the immutable producer with verified fixture-specific configuration, or reuse of a configuration-equivalent isolated build, only after proving behavior and provenance. Runtime configuration must preserve trusted origin/issuer/audience/redirect restrictions, CSP and fail-closed validation; never accept untrusted URL/query configuration, bypass real OAuth, alter a certified artifact in place or introduce production configuration solely to make tests fast. If equivalence is not demonstrated, retain required distinct builds.
+- Split fixtures by proof: component-only tasks need only the actual required browser/harness; author integration requires the existing disposable PostgreSQL, real API, real auth. Use worker-scoped server and immutable initialization where safe, distinct DB/state/ports for independent tasks, per-test isolated contexts and unique data. Benchmark template DB cloning versus migrations; bind template to exact schema/extension/toolchain and ensure no live connections, credentials or mutable author data are copied. Preserve dedicated migration, bootstrap, restart, failure and recovery tests that cannot use a preinitialized fixture.
+- Auth-specific tests exercise actual OAuth, bootstrap, PKCE, passkey, session revocation, expiry and recovery. For unrelated editing, prepare real authenticated state through the existing fixture and restore into an isolated context only when the actual token/session/storage semantics permit. Playwright storageState is a candidate, not evidence by itself (session storage/in-memory credentials may require another legitimate path). For explicitly classified non-authentication scenarios, the disposable browser fixture may obtain a real Better Auth code-flow token once per independent test from the worker-owned authenticated fixture, then initialize the canonical in-memory token setter before mount through a fixture-only Vite transform of the exact product entry, built from the same source and profile. The selected document claims its token once through a main-frame/exact-URL binding; without a pending claim ordinary browser OAuth remains unchanged. Do not intercept HTML or disable the HTTP cache for authentication preparation. Keep the canonical entry, version/session/persistence/author admission, real API authorization and PostgreSQL behavior; no fabricated response, persistent credential file, production entry, shared token across tests, or relaxation of dedicated OAuth/recovery proof. Explicitly requested continuation/re-authentication retains the ordinary browser path. Measure entry build and token preparation as well as avoided browser transactions. No shared mutable auth state across independent accounts, fabricated token, bypass, credential artifact or stale auth receipt. Separate fixture self-checks from duplicated negative assertions only after retaining their independent proof.
+- Use declarative readiness, deferred responses and observable state notifications. Fixed elapsed sleep is not synchronization. Browser clock controls browser time; server expiry must be driven by an appropriate server/domain clock or an equivalent independently tested boundary, not by changing the client clock. Preserve real expiry denial and UI error/recovery; do not reduce a production timeout just to speed CI.
+- Keep locked minimal pnpm dependency closures, avoid hidden install/build calls and compare fetch/restore with local computation. Use existing cache hierarchy and admission rules; no new remote cache service by default. Preserve failure traces, source/attempt binding and required visual evidence; do not compress already-compressed files twice or collect unnecessary artifacts.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 57717d243a99881f3e0ffcd072f0ede0
+UID: DOC-VERIFICATION-E2E-EXECUTION-5-scheduling-and-measurement
+TITLE: 5. Scheduling and measurement
+
+[TEXT]
+MID: 60a1b39abc62af5f79ff6472dd055a1d
+STATEMENT: >>>
+Measure actual full-run critical path, not the sum of parallel test durations. Use existing [LINK: DOC-VERIFICATION-CI-DASHBOARD, CI Observatory] and source-bound logs/artifacts; extend the existing reporter if needed rather than creating a second telemetry authority. Record per lane: queue, image pull/extract and PostgreSQL readiness, checkout/toolchain/install/cache, Build-to-Browser DAG release, artifact transfer/restoration/verification, fixture DB/migration/bootstrap/key generation, Vite build, browser/context/auth, spec and test including hooks, controlled/real waits, teardown and artifact transfer. Distinguish concurrent work, elapsed duration and runner consumption. Preserve performance smoke isolation and stable task identity.
+
+Keep long UI and auth tasks balanced across existing Chromium lanes. Partition large specs only if independently isolated; do not increase Playwright worker count inside a spec under the current CI contract. A change to concurrency or runner count needs a reviewed budget and evidence that isolation, failure propagation and proof remain valid. Schedule independent runner preparation alongside the Build; the direct dependency, not polling or an artificial delay, gates artifact use.
+
+Keep Playwright as the browser runner; use its native fixtures, clock, storage state and measured scheduling. Swift Testing/XCTest/XCUITest own native proof. Existing unit runner and real API/DB tests own their layers; evaluate Testing Library or fast-check only for a concrete migration, after checking existing dependencies, independent detection and total cost. Do not adopt Cypress, Selenium, WebdriverIO, Puppeteer, Appium or a generic testing DSL merely to replace Playwright or unify unrelated clients. New dependencies follow [LINK: DOC-ARCHITECTURE-DEPENDENCY-POLICY, dependency policy].
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: a8bc178a3e468891b7c988edba8e878c
+UID: DOC-VERIFICATION-E2E-EXECUTION-6-admission-and-completion
+TITLE: 6. Admission and completion
+
+[TEXT]
+MID: 371d286bfa1e51d31ed9ef681f215cbe
+STATEMENT: >>>
+For every execution change:
+1. Pin main/candidate source, plan, runner class, runtime digest, lock, fixture and cache condition. Compare at least three matched successful full runs where practical, record all results and any unmatched dimensions. Record per-task and per-phase measurements, wall-clock, critical path, total runner time, queue, flake/retry rate, evidence size and failure behavior in PR/run artifacts.
+2. Prove all required obligations via the canonical plan/coverage and independent certifier; prove invalid/missing/wrong-profile/foreign/stale evidence is rejected. Report NOT_SELECTED/NOT_RUN/BLOCKED distinctly from PASS. A benchmark alone never certifies a release.
+3. Demonstrate lower critical-path time or total runner consumption without weaker detection or unacceptable regression in the other metric. Prefer reducing actual work; do not transfer waste to an unrelated runner. Target browser completion at or below the longest independent non-browser lane on comparable full CI, not an absolute mandatory seconds threshold. Track certification tail separately.
+4. Retire obsolete image pins, dependency entries, cache paths, selectors, workflow branches, docs and references when the corresponding proof has been deliberately retired; retain historical evidence. No parallel canonical lists. Do not restore the retired Mobile Web route or its viewport acceptance gate. No unsupported-client blocking, new macOS client, production auth changes or changes to API/PostgreSQL authority.
+
+The implementation sequence is governed by the relevant Issues/PRs, not a second work backlog in this document. Design adoption is not implementation completion or measured acceleration.
+<<<
+
+[[/SECTION]]

@@ -1,0 +1,28 @@
+flowchart TD
+    ENTRY["Desktop Webの認証・セキュリティ / iOS Native設定（目標）"] --> GATE{"owner + 有効session + Passkey runtime?"}
+    GATE -->|認証不可・owner以外| DENY["非表示 / 権限エラー<br/>原稿へ戻る"]
+    GATE -->|client/session未整備| UNAVAILABLE["利用不可<br/>再認証や再読込を案内"]
+    GATE -->|はい| HOME["認証とセキュリティ"]
+    HOME --> PASS["Passkey 一覧"]
+    HOME --> SESS["セッション一覧"]
+    HOME --> STAGED["外部IDプロバイダーの設定有無と保存済みアプリ同意<br/>現行UIから参照"]
+    PASS --> ADD["新規 Passkey 登録<br/>WebAuthn とサーバー確認"]
+    PASS --> RENAME["名称変更<br/>server mutation"]
+    PASS --> DELETE{"Passkey 削除要求"}
+    DELETE -->|最後の1個| DENY_DELETE["削除禁止・代替を登録"]
+    DELETE -->|2個以上・本人確認OK| CONF_DELETE["削除確認 → 削除 → 再取得"]
+    ADD --> PASS
+    RENAME --> PASS
+    CONF_DELETE --> PASS
+    DENY_DELETE --> PASS
+    SESS --> REVOKE{"セッション終了要求"}
+    REVOKE -->|現在のセッション| DENY_SESS["個別終了ボタン無効"]
+    REVOKE -->|別端末| CONF_SESS["確認 → revoke → 再取得"]
+    SESS --> REVOKE_ALL["現在の端末以外をすべて終了"]
+    REVOKE_ALL --> SESS
+    DENY_SESS --> SESS
+    CONF_SESS --> SESS
+    PASS --> HOME
+    SESS --> HOME
+    STAGED --> HOME
+    HOME -->|閉じる / 戻る| RETURN["元の作品・執筆画面"]

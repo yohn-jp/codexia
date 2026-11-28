@@ -1,0 +1,11 @@
+flowchart LR
+    LIB["LIB-01<br/>作品一覧"] --> TREE["構成・目次"]
+    TREE --> WRITE["WRT-01<br/>原稿・読書"]
+    WRITE <-->|履歴を開く / 戻る| HIST["WRT-02<br/>Revision比較・復元"]
+    WRITE <-->|参照 / 元の原稿へ| KNOW["KNO-01/02/03<br/>知識・根拠・関係"]
+    WRITE <-->|レビュー / 戻る| REVIEW["REV-01/02<br/>変更提案と確認"]
+    WRITE <-->|状態を開く / 戻る| REC["REC-01<br/>保存・競合・回復"]
+    WRITE <-->|設定 / 戻る| CFG["CFG-01<br/>表示・組版・配置・認証"]
+    REVIEW -->|適用後に原稿・根拠を照合| WRITE
+    CFG -->|shell を変更、作業文脈を保持| WRITE
+    TREE -->|別作品を選択| LIB
