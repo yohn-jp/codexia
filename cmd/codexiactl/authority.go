@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha1"
+	_ "embed"
 	json "encoding/json/v2"
 	"fmt"
 	"maps"
@@ -34,43 +35,25 @@ type cloudflareContract struct {
 // and the local control-plane code they execute. A fork can change application
 // code and the documented public production values without changing the
 // contract understood by the official CLI.
-var releaseContractPaths = []string{
-	"docs/deployment/CODEXIACTL.sdoc",
-	"docs/deployment/ANSIBLE-AUTH-RUNTIME.sdoc",
-	"docs/deployment/ANSIBLE-BASE-RUNTIME.sdoc",
-	"docs/deployment/ANSIBLE-BASE-SECRETS.sdoc",
-	"docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc",
-	"docs/deployment/BACKUP-CONSOLE-OPERATIONS.sdoc",
-	"docs/deployment/ACCESS-POLICY-MIGRATION.sdoc",
-	".github/workflows/production-bootstrap.yml",
-	".github/workflows/production-preflight.yml",
-	".github/workflows/frontend-release.yml",
-	".github/workflows/backend-deployment-handoff.yml",
-	".github/workflows/backend-handoff-revalidate.yml",
-	".github/workflows/backend-release.yml",
-	".github/workflows/publish-oci.yml",
-	".github/workflows/verify.yml",
-	".github/workflows/verify-profile.yml",
-	".github/workflows/tailscale-connectivity.yml",
-	".github/actions/",
-	"scripts/github/",
-	"scripts/deployment/",
-	"scripts/ci/certification/",
-	"scripts/ci/evidence/",
-	"scripts/ci/execution/",
-	"scripts/ci/impact/",
-	"scripts/release/",
-	"scripts/verification/artifacts/",
-	"scripts/verification/infrastructure/",
-	"deploy/production.json",
-	"deploy/ansible/",
-	"deploy/backup/",
-	"deploy/cloudflare/terraform/",
-	"edge/frontend/wrangler.jsonc",
-	"deploy/quadlet/",
-	"deploy/cloudflare/ui-routes.json",
-	"deploy/cloudflare/identity-probes.json",
-	"deploy/cloudflare/public-protocol-paths.json",
+// The same exact-match paths also select automatic CLI releases. The
+// manifest itself is checked so a changed contract cannot be silently accepted
+// by an earlier CLI. Target-specific production settings are read and validated
+// from the selected source, but are deliberately not compared byte-for-byte.
+//
+//go:embed release-contract.json
+var releaseContractJSON []byte
+
+var releaseContractPaths = loadReleaseContractPaths()
+
+func loadReleaseContractPaths() []string {
+	var paths []string
+	if err := json.Unmarshal(releaseContractJSON, &paths); err != nil {
+		panic("invalid embedded CLI release contract: " + err.Error())
+	}
+	if len(paths) == 0 {
+		panic("empty embedded CLI release contract")
+	}
+	return append(paths, "deploy/production.json")
 }
 
 func (g *githubControl) productionSettings(ctx context.Context, sha string) (productionContract, error) {

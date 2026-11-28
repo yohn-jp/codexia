@@ -313,6 +313,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
     if (!isChangedPath(file)) { full = true; break; }
     if (file.startsWith('cmd/codexiactl/') || file === 'scripts/ci/execution/verify-codexiactl.sh') {
       add('codexiactl-linux');
+      if (file === 'cmd/codexiactl/release-contract.json') add('unit-root');
       continue;
     }
     if (codexiactlSpecifications.has(file) || file === 'deploy/production.json' ||

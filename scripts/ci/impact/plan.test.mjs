@@ -344,6 +344,12 @@ test('generated Fastify artifact, registration adapter, and module route manifes
   }
 });
 
+test('the shared CLI compatibility manifest selects both of its consumers', async () => {
+  const selection = await plan(['cmd/codexiactl/release-contract.json']);
+  assert.deepEqual(selection.tasks, ['unit-root', 'coverage', 'codexiactl-linux']);
+  assert.equal(selection.full_model_oci, false);
+});
+
 test('iOS deployment documentation selects the root tests that assert its contents', async () => {
   const selection = await plan(['docs/deployment/IOS-CLIENT.sdoc']);
   assert.deepEqual(selection.tasks, ['unit-root', 'coverage', 'architecture-g5', 'requirements-trace']);
