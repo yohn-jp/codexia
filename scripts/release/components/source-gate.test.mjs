@@ -83,6 +83,10 @@ test('only a newer change to the same component supersedes an affected source', 
     'A revert pushed separately is itself affected and may release');
   assert.equal(selectReleaseSource('backend', backend, reverted, git).affected, true);
 
+  const releaseRecord = commit('scripts/release/components/record-model.mjs', 'new publication model');
+  assert.equal(selectReleaseSource('backend', releaseRecord, releaseRecord, git).affected, true);
+  assert.equal(selectReleaseSource('backend', backend, releaseRecord, git).affected, false);
+
   git('checkout', '-b', 'fixture', frontend);
   const side = commit('app/src/side.ts', 'unmerged');
   git('checkout', 'main');

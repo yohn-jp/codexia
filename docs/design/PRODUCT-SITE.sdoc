@@ -41,7 +41,8 @@ MID: 1d7b39c0c34647d9bc9e4d6448796e15
 STATEMENT: >>>
 - 公式 URL は https://products.yohn.jp/codexia/ 。共有製品ホストの名前空間は複数製品を収容できる。公式 Codexia サイトの所有範囲は /codexia/ 配下と正規化用 /codexia に限定し、ホスト全体や他製品のルートを取得しない。共有ホストの DNS は別途一度だけ管理者が準備する。
 - 同一モノレポの edge/product-site がサイトの唯一のソースとビルド責務を所有する。Cloudflare Workers Static Assets の独立 Worker codexia-product-site に静的成果物のみを公開する。実行用 Worker スクリプト、API バインディング、DB、Tunnel、Access 変更は不要であり、個人稼働環境 codexia.yohn.jp、codexia-frontend、GitHub Pages に変更を加えない。外部 CDN の実行コードを直接読み込まない。
-- 公式配布リポジトリ yohn-jp/codexia の main で、製品サイト専用 CI が変更された静的ソースを検証・ビルドし、その正確な成果物を公開する。PR は検証のみで本番資格情報を持たない。既存の CLOUDFLARE_API_TOKEN と CLOUDFLARE_ACCOUNT_ID を必要な公開ステップにのみ渡す。製品サイトの公開承認・排他は本体のデプロイと別の環境・concurrency group に置く。既存 token が route/Worker に必要な権限を持たなければ失敗として扱う。権限を推測して広げない。
+- Cloudflare 側で共有ホストの DNS と製品専用 Worker route（`products.yohn.jp/codexia` および `products.yohn.jp/codexia/*` → `codexia-product-site`、zone `yohn.jp`）を一度だけ所有・設定する。route の所有権は製品サイトの静的成果物デプロイに含めない。routes は Wrangler 設定に記述しない。Cloudflare 公式の source-of-truth 分離方式に従い、CI は既存ルートを保持したまま Worker と Static Assets だけを更新する。経路の変更・削除は Cloudflare 管理主体の別作業とし、他製品の経路に触れない。
+- 公式配布リポジトリ yohn-jp/codexia の main で、製品サイト専用 CI が変更された静的ソースを検証・ビルドし、その正確な成果物を公開する。PR は検証のみで本番資格情報を持たない。CLOUDFLARE_API_TOKEN と CLOUDFLARE_ACCOUNT_ID は Worker 公開ステップにのみ渡す。製品サイトの公開承認・排他は本体のデプロイと別の環境・concurrency group に置く。Worker 更新に必要な最小権限を使用し、経路管理権限を CI に要求しない。権限を推測して広げない。
 - 公開前に固定された Wrangler で静的資産・構成を検証し、古い main の成果物による上書きを拒否する。公開後に公開 URL の HTTP 応答とビルド元 SHA の同一性を確認する。ビルド成功、デプロイ成功、公開 URL での観測、実ブラウザでの体験受入は独立した結果である。失敗は成功に置換せず、既知の正常 Worker version を Cloudflare の正規ロールバックで復旧する。
 <<<
 

@@ -9,10 +9,8 @@ assert.equal(config.name, 'codexia-product-site');
 assert.equal(config.workers_dev, false);
 assert.equal(config.preview_urls, false);
 assert.equal(config.main, undefined);
-assert.deepEqual(config.routes, [
-  { pattern: 'products.yohn.jp/codexia', zone_name: 'yohn.jp' },
-  { pattern: 'products.yohn.jp/codexia/*', zone_name: 'yohn.jp' },
-]);
+assert.equal(config.route, undefined);
+assert.equal(config.routes, undefined);
 assert.equal(config.assets.directory, './dist');
 assert.equal(config.assets.html_handling, 'force-trailing-slash');
 assert.equal(config.assets.not_found_handling, 'none');

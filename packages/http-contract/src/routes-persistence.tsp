@@ -33,7 +33,7 @@ op updatePersistenceProject(@path projectId: PersistenceId, @body body: Persiste
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/archive") @get @operationId("persistence_project_archive_get")
-op exportPersistenceArchive(@path projectId: PersistenceId): WorkArchiveExport | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | PersistenceUnauthorized;
+op exportPersistenceArchive(@path projectId: PersistenceId): WorkArchiveExport | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 413; @body body: ApiError; } | PersistenceUnauthorized;
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/open-export") @get @operationId("persistence_project_open_export_get")
@@ -118,7 +118,7 @@ op createAnchorMention(@path projectId: PersistenceId, @path documentId: Persist
 @extension("x-codexia-contract-status", "incomplete")
 @extension("x-codexia-runtime-response-deviation", "The public route preserves its legacy unfiltered list response with nodes only, while the browsed response includes nextCursor and projectVersion. Desktop only calls the browsed form and validates the strict generated page projection.")
 @extension("x-codexia-desktop-response-schema", "#/components/schemas/DesktopPersistenceNodeListBody")
-op listPersistenceNodes(@path projectId: PersistenceId, @query @maxLength(128) q?: string, @query @maxLength(64) type?: string, @query status?: "" | "proposed" | "confirmed" | "retired", @query @minValue(1) @maxValue(500) limit?: int32, @query cursor?: string, @query projectVersion?: PositiveVersion): PersistenceNodeListBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; } | PersistenceUnauthorized;
+op listPersistenceNodes(@path projectId: PersistenceId, @query @maxLength(128) q?: string, @query @maxLength(64) type?: string, @query status?: "" | "proposed" | "confirmed" | "retired", @doc("Unfiltered lists default to 100 nodes and allow up to 500. Supplying q, type, status, or cursor selects a browse page, which defaults to 50 nodes and allows up to 100.") @query @minValue(1) @maxValue(500) limit?: int32, @query cursor?: string, @query projectVersion?: PositiveVersion): PersistenceNodeListBody | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 409; @body body: ApiError; } | PersistenceUnauthorized;
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/nodes/{nodeId}") @get @operationId("persistence_node_get")

@@ -4,16 +4,6 @@
   "compatibility_date": "2026-11-08",
   "workers_dev": false,
   "preview_urls": false,
-  "routes": [
-    {
-      "pattern": "products.yohn.jp/codexia",
-      "zone_name": "yohn.jp"
-    },
-    {
-      "pattern": "products.yohn.jp/codexia/*",
-      "zone_name": "yohn.jp"
-    }
-  ],
   "assets": {
     "directory": "./dist",
     "html_handling": "force-trailing-slash",
