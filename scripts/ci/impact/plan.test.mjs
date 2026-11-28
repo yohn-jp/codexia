@@ -30,7 +30,7 @@ test('browser cache has a single trusted main-push writer without changing test 
   const steps = browser.steps;
   const restore = steps.find(step => step.id === 'dependencies');
   const saves = steps.filter(step => step.uses?.startsWith('actions/cache/save@'));
-  assert.equal(restore.uses, 'actions/cache/restore@v6.1.0');
+  assert.ok(restore.uses.startsWith('actions/cache/restore@'));
   assert.equal(saves.length, 1, 'Only one browser cache writer is permitted');
   const save = saves[0];
   assert.equal(save.if, "success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.group == 'full-reference' && steps.dependencies.outputs.cache-hit != 'true'");

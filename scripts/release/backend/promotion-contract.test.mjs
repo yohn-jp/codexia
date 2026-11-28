@@ -13,7 +13,7 @@ test('backend promotion resolver and publisher checkouts include full merge hist
     ['publish', 'scripts/deployment/handoff/verify-promotion.mjs'],
   ]) {
     const job = workflow.jobs[jobName];
-    const checkout = job.steps.find(step => step.uses === 'actions/checkout@v7.0.1');
+    const checkout = job.steps.find(step => step.uses?.startsWith('actions/checkout@'));
     assert.ok(checkout, `${jobName} checkout is required`);
     assert.equal(checkout.with['fetch-depth'], 0, `${jobName} must inspect both merge parents`);
     assert.equal(checkout.with['persist-credentials'], false);

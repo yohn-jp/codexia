@@ -28,6 +28,7 @@ STATEMENT: >>>
 - PostgreSQL単一正本、明示的作者承認、外部エージェントの権限、固定Snapshot、Core/Fullの構成境界を維持する。内部LLM開発凍結、Git永続化の廃止、閉鎖済み移行証拠の保全を変更しない。
 - 既存の全検証義務を維持する。実行単位の再編と検証義務の削減を混同しない。必須テストの移管には旧・新の契約対応表と同等以上の検出能力の証拠が必要である。
 - 検証には隔離した合成データを使用し、実作者データ・秘密値の持ち出しを禁止する。
+- Static CI assertions must establish independent admission/security/coverage invariants, not duplicate mutable Action versions, display names, command spelling, job layouts, runner counts or lane ordering. Derive coverage and scheduling inventory from the canonical executable definitions. Preserve exact source and artifact identities, protected boundaries, least privilege, failure semantics and behavioral counterexamples; replacing representation assertions is not permission to remove those checks.
 <<<
 
 [[/SECTION]]

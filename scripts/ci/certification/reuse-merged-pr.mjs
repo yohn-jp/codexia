@@ -4,7 +4,7 @@ import { actionsRepository, assertArtifactRunRepository, deploymentRepository, m
 import assert from 'node:assert/strict';
 import { CERTIFICATION_DEPENDENCIES } from '../impact/contract.mjs';
 import { execFileSync } from 'node:child_process';
-import { appendFile, readFile } from 'node:fs/promises';
+import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateVerificationPlan, planDigest } from '../impact/plan.mjs';
@@ -15,6 +15,8 @@ import { isSkippedProfileBrowserPlaceholder, normalizeVerificationJobs } from '.
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from '../evidence/download-artifacts.mjs';
 import { ALLOWED_SKIPPED_VERIFICATION_JOBS } from '../../release/components/policy.mjs';
 import { createGitHubProofClient } from '../evidence/proof-client.mjs';
+import { assertTaskProducerInventory } from '../evidence/input-proof.mjs';
+import { isReadOnlyMergedTask } from '../evidence/task-inputs.mjs';
 
 const WORKFLOW = '.github/workflows/verify.yml';
 const FULL_MODEL_JOB = 'full-model-oci / Run pinned Full model lifecycle on rootless Podman';
@@ -118,14 +120,14 @@ function assertMergedPull(pr, number, candidate, repoId) {
   return mergedAt;
 }
 
-export function assertCandidatePlan(plan, candidate) {
+export function assertCandidatePlan(plan, candidate, { allowAffected = false } = {}) {
   validateVerificationPlan(plan);
   assert.equal(plan.event, 'pull_request');
   assert.equal(plan.sha, candidate.head, 'PR plan source mismatch');
   assert.equal(plan.base, candidate.base, 'PR was not verified against the merged base');
   assert.deepEqual(plan.files, candidate.files, 'PR impact does not cover actual merge diff');
   // Affected PR checks certify only impacted tasks; compact main reuse requires the complete graph.
-  assert.equal(plan.mode, 'full', 'Affected PR proof cannot yet replace complete main verification');
+  if (!allowAffected) assert.equal(plan.mode, 'full', 'Affected PR proof cannot yet replace complete main verification');
 }
 
 export function assertCompactNeeds(needs) {
@@ -189,7 +191,7 @@ function assertSuccessfulStep(job, name) {
 }
 
 /** Recheck the actual merged tree and the existing canonical PR evidence, using read-only API data. */
-export async function readReusableMainEvidence({ sourceSha, before, repository, currentRun, git, request, readArtifact, checkoutSha = sourceSha }) {
+export async function readReusableMainEvidence({ sourceSha, before, repository, currentRun, git, request, readArtifact, checkoutSha = sourceSha, allowAffected = false }) {
   const context = mainContext(repository, currentRun, sourceSha, WORKFLOW);
   const candidate = mergeCandidate(sourceSha, before, git, checkoutSha);
   const { run, jobs, prNumber, mergedAt, headRef } = await mergedPrRun({ context, candidate, request });
@@ -202,7 +204,7 @@ export async function readReusableMainEvidence({ sourceSha, before, repository, 
   const [selectedPlan] = selectedArtifacts(inventory, [planArtifact.id], identity, 'plan');
   assertArtifactRunRepository(selectedPlan, run);
   const plan = await readArtifact(selectedPlan, 'ci-plan.json');
-  assertCandidatePlan(plan, candidate);
+  assertCandidatePlan(plan, candidate, { allowAffected });
   assertFullModelJob(plan, jobs);
   const evidence = selectLatestEvidenceArtifacts(plan, artifacts, jobs, identity);
   const selected = selectedArtifacts(inventory, evidence.map(item => item.id), identity, 'evidence');
@@ -214,7 +216,7 @@ export async function readReusableMainEvidence({ sourceSha, before, repository, 
     (runId, attempt) => request.paginate('actions/runs/' + runId + '/attempts/' + attempt + '/jobs', {}, 'jobs'),
     ['build-core', 'build-full']);
   assertProfileArtifactEvidence(plan, producerJobs, reports, artifacts, run.id);
-  for (const job of jobs.filter(job => job.conclusion === 'skipped')) {
+  if (plan.mode === 'full') for (const job of jobs.filter(job => job.conclusion === 'skipped')) {
     assert.ok(ALLOWED_SKIPPED_VERIFICATION_JOBS.includes(job.name) || isSkippedProfileBrowserPlaceholder(job.name),
       'Unexpected skipped PR job');
   }
@@ -224,7 +226,31 @@ export async function readReusableMainEvidence({ sourceSha, before, repository, 
     planArtifact: { id: selectedPlan.id, digest: selectedPlan.digest },
     evidence: selected.map(item => ({ id: item.id, digest: item.digest })),
   };
-  return { receipt, plan, reports };
+  return { receipt, plan, reports, jobs };
+}
+
+/** Build a candidate from independently certified PR results; never accept a
+ * reused result as an original producer or omit an unproven main task. */
+export function selectMergedTaskReuse(evidence, readOnly = task => isReadOnlyMergedTask(process.cwd(), evidence.receipt.sourceSha, task)) {
+  const { receipt, plan, reports, jobs } = evidence;
+  if (plan.mode !== 'affected') return undefined;
+  const proofs = [];
+  for (const report of reports) {
+    const job = jobs.find(item => item.name === report.group);
+    if (job?.conclusion !== 'success' || job.run_attempt !== receipt.attempt ||
+        report.workflowRunId !== receipt.runId || report.workflowAttempt !== receipt.attempt) continue;
+    try {
+      assertTaskProducerInventory({ plan, report, inventory: report.producerInventory });
+      for (const result of report.results) {
+        const proof = result.inputProof;
+        if (result.status === 'passed' && proof?.mode === 'task-execution' &&
+            proof.reusedFrom === undefined && readOnly(result.task)) proofs.push(proof);
+      }
+    } catch {
+      // Missing or malformed producer evidence never authorizes reuse.
+    }
+  }
+  return proofs.length ? { receipt, proofs: proofs.sort((a, b) => a.task.localeCompare(b.task)) } : undefined;
 }
 
 export async function verifyReusableMainProof(options) {
@@ -320,15 +346,28 @@ async function main() {
     const currentRun = await request('actions/runs/' + runId);
     assert.equal(String(currentRun.id), runId);
     assert.ok(matchesRunRepository(currentRun, context), 'Verify repository mismatch');
-    const verify = command === 'dedicated' ? verifyReusableDedicatedProof : verifyReusableMainProof;
-    return verify({ sourceSha, before: payload.before, repository, currentRun, request,
+    const verify = command === 'dedicated' ? verifyReusableDedicatedProof : command === 'plan' ? readReusableMainEvidence : verifyReusableMainProof;
+    return verify({ sourceSha, before: payload.before, repository, currentRun, request, allowAffected: command === 'plan',
       git: args => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 15000 }),
       readArtifact: async (artifact, filename) => JSON.parse(await extractJsonEntry(await downloadArtifact(artifact, repository, token), filename)),
     });
   };
   if (command === 'plan' || command === 'dedicated') {
     try {
-      await resolve();
+      const evidence = await resolve();
+      if (command === 'plan' && evidence.plan.mode === 'affected') {
+        const mergedTaskReuse = selectMergedTaskReuse(evidence);
+        if (mergedTaskReuse) {
+          const filename = process.env.CODEXIA_CI_PLAN_PATH;
+          assert.ok(filename, 'Missing main plan path');
+          const plan = validateVerificationPlan(JSON.parse(await readFile(filename, 'utf8')));
+          const amended = validateVerificationPlan({ ...plan, mergedTaskReuse });
+          await writeFile(filename, JSON.stringify(amended, null, 2) + '\n');
+          console.log('Eligible read-only PR task proof candidates: ' + mergedTaskReuse.proofs.map(proof => proof.task).join(', '));
+        }
+        await appendFile(process.env.GITHUB_OUTPUT, 'eligible=false\n');
+        return;
+      }
       await appendFile(process.env.GITHUB_OUTPUT, 'eligible=true\n');
       const message = 'Eligible merged PR proof revalidated for exact main source ' + sourceSha;
       console.log(message);

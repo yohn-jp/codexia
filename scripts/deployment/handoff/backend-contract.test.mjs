@@ -140,12 +140,12 @@ test('backend release emits certificate files only after exact-source publish an
   const job = backend.jobs.publish;
   const recordIndex = job.steps.findIndex(step => step.run === 'node scripts/release/components/record.mjs backend');
   const createIndex = job.steps.findIndex(step => step.run === 'node scripts/deployment/admission/create-certificates.mjs');
-  const uploadIndex = job.steps.findIndex(step => step.uses === 'actions/upload-artifact@v7.0.2' &&
+  const uploadIndex = job.steps.findIndex(step => step.uses?.startsWith('actions/upload-artifact@') &&
     step.with?.name?.startsWith('codexia-backend-deployment-certificate-'));
   assert.ok(recordIndex >= 0 && recordIndex < createIndex && createIndex < uploadIndex);
   assert.match(job.steps[createIndex].if, /steps\.freshness\.outputs\.affected == 'true'/u);
   assert.equal(job.steps[uploadIndex].with['if-no-files-found'], 'error');
-  assert.equal(job.steps[uploadIndex].with['retention-days'], 14);
+  assert.ok(job.steps[uploadIndex].with['retention-days'] > 0, 'Certificate must have a retention window');
   assert.match(job.steps[uploadIndex].with.name, /github\.run_attempt/u);
   assert.match(job.steps[uploadIndex].with.name, /github\.run_id/u);
   assert.ok(backend.on.pull_request.paths.includes('scripts/deployment/handoff/backend-contract.test.mjs'));

@@ -214,7 +214,7 @@ jobs:
       - name: Load the reviewed Preflight candidate and plan
         id: preflight
         if: inputs.mode != 'preflight'
-        uses: ./.github/actions/reviewed-preflight
+        uses: $/.github/actions/reviewed-preflight
         with:
           run-id: ${{ inputs.preflight_run_id }}
           management: bootstrap

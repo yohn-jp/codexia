@@ -30,6 +30,7 @@ async function makeWorkspaceFixture(rootTestScript) {
   await copyFile(path.join(root, 'scripts/ci/evidence/coverage-inputs.mjs'), path.join(projectRoot, 'scripts/ci/evidence/coverage-inputs.mjs'));
   await copyFile(runner, path.join(projectRoot, 'scripts/ci/execution/workspace.mjs'));
   await copyFile(path.join(root, 'scripts/ci/impact/contract.mjs'), path.join(projectRoot, 'scripts/ci/impact/contract.mjs'));
+  await copyFile(path.join(root, 'scripts/ci/impact/workspace-graph.mjs'), path.join(projectRoot, 'scripts/ci/impact/workspace-graph.mjs'));
   await copyFile(path.join(root, 'scripts/ci/execution/parallel.mjs'), path.join(projectRoot, 'scripts/ci/execution/parallel.mjs'));
 
   const rootManifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));

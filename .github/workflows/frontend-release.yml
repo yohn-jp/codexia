@@ -451,7 +451,7 @@ jobs:
           persist-credentials: false
       - name: Load the reviewed runtime Preflight candidate and plan
         id: preflight
-        uses: ./.github/actions/reviewed-preflight
+        uses: $/.github/actions/reviewed-preflight
         with:
           run-id: ${{ inputs.preflight_run_id }}
           management: runtime
