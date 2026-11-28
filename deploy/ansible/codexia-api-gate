@@ -16,19 +16,27 @@ unit_state() {
 
 close_gate() {
   local result=0 socket_unit_state
-  "$systemctl" stop "$socket_unit" || result=1
-  "$systemctl" stop "$service_unit" || result=1
-  socket_unit_state="$("$systemctl" show --property=UnitFileState --value "$socket_unit")" || result=1
+  socket_unit_state="$("$systemctl" show --property=UnitFileState --value "$socket_unit")" || return 1
   if [[ "$socket_unit_state" == enabled || "$socket_unit_state" == enabled-runtime ]]; then
-    "$systemctl" disable "$socket_unit" || result=1
+    # Disable while the socket's [Install] metadata is still visible. Disabling
+    # a masked unit no longer removes its activation links.
+    "$systemctl" disable "$socket_unit" || return 1
+    "$systemctl" disable --runtime "$socket_unit" || return 1
   fi
-  "$systemctl" mask "$socket_unit" || result=1
-  "$systemctl" mask "$service_unit" || result=1
-  if [[ "$(unit_state "$socket_unit")" != inactive || "$(unit_state "$service_unit")" != inactive ]]; then
-    result=1
-  fi
+
+  # Fence reboot before quiescing either live unit: a crash between runtime
+  # stops must not bring the product listener back with the writer down.
+  "$systemctl" mask "$socket_unit" || return 1
+  "$systemctl" mask "$service_unit" || return 1
+  sync -f /etc/systemd/system || return 1
   if [[ "$("$systemctl" show --property=UnitFileState --value "$socket_unit")" != masked ||
         "$("$systemctl" show --property=UnitFileState --value "$service_unit")" != masked ]]; then
+    return 1
+  fi
+
+  "$systemctl" stop "$socket_unit" || result=1
+  "$systemctl" stop "$service_unit" || result=1
+  if [[ "$(unit_state "$socket_unit")" != inactive || "$(unit_state "$service_unit")" != inactive ]]; then
     result=1
   fi
   return "$result"

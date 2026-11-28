@@ -765,10 +765,9 @@
         exit 1
       fi
       sync -f "$state_dir"
-      recovery_gate_closed=false
       restore_previous(){
         local restore_status=0
-        gate_control close || restore_status=1
+        gate_control close || return 1
         # Before first activation there may be no generated API service to stop.
         # Do not turn a failed pristine-schema check into an unrecoverable pending
         # transaction merely because systemctl cannot find that absent unit.
@@ -837,18 +836,10 @@
           exit 1
         fi
       fi
-      # Keep the publication gate closed across a VM reboot for both R3 and R6.
-      # A recorded first-activation window is checked again before reopening.
-      if [[ "$recovery_activation" != null || "$first_activation" != null || "$adoption_activation" != null ]]; then
-        if ! gate_control close; then
-          echo 'Could not hold the product publication gate closed for recovery; deployment remains pending' >&2
-          exit 1
-        fi
-        recovery_gate_closed=true
-      fi
-      # Record which links recovery owns before creating either one.
-      install_wants_links
-      if { [[ "$recovery_gate_closed" == false ]] && ! gate_control close; } ||
+      # Hold publication across reboot before creating activation links or
+      # stopping the writer. R3/R6 approval is rechecked before opening it.
+      if ! gate_control close ||
+         ! install_wants_links ||
          { [[ "$had_unit" == true ]] && ! systemctl --user stop codexia-api.service >/dev/null 2>&1; }; then
         echo 'Could not close product publication or stop the active API; deployment transaction remains pending for recovery' >&2
         exit 1

@@ -308,9 +308,9 @@
           '')
             socket_state="$(systemctl show --property=ActiveState,UnitFileState codexia-api.socket)"
             proxy_state="$(systemctl show --property=ActiveState,UnitFileState codexia-api-gate.service)"
-            if ! grep -Fxq 'ActiveState=inactive' <<< "$socket_state" ||
+            if ! grep -Eq '^ActiveState=(inactive|active)$' <<< "$socket_state" ||
                ! grep -Eq '^UnitFileState=(disabled|masked)$' <<< "$socket_state" ||
-               ! grep -Fxq 'ActiveState=inactive' <<< "$proxy_state" ||
+               ! grep -Eq '^ActiveState=(inactive|active)$' <<< "$proxy_state" ||
                ! grep -Eq '^UnitFileState=(static|masked)$' <<< "$proxy_state"; then
               echo 'Publication gate is ambiguous; resolve it under the protected host recovery procedure' >&2
               exit 1

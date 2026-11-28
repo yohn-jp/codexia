@@ -374,9 +374,9 @@ test('first activation checks the real transaction window at readiness and rolls
     'transaction_intent="$FIXTURE/deploy-transaction.json"',
     'release_state="$FIXTURE/deployed-release.json"',
     'trace="$FIXTURE/trace"',
-    'had_unit=false; gate_was_open=false; release_present=false; recovery_gate_closed=false',
+    'had_unit=false; gate_was_open=false; release_present=false',
     'api_link_created=true',
-    'gate_control() { printf "gate %s\n" "$1" >> "$trace"; printf "%s\n" "$1" > "$FIXTURE/gate-state"; }',
+    'gate_control() { printf "gate %s\n" "$1" >> "$trace"; if [[ "$SCENARIO" == restore-close-failure && "$1" == close && -f "$FIXTURE/gate-state" ]]; then return 1; fi; printf "%s\n" "$1" > "$FIXTURE/gate-state"; }',
     'curl() { [[ "$*" == *"http://127.0.0.1:18081/health/ready" ]] && grep -qx close "$FIXTURE/gate-state"; }',
     'candidate_image=fixture-image; first_activation="{}"; recovery_activation=null; adoption_activation=null; approved_not_before=1000; approved_not_after=2000',
     'clock=1500; backup_control=control_fixture; backup_run_id=; backup_pending_id=',
@@ -388,10 +388,10 @@ test('first activation checks the real transaction window at readiness and rolls
     'run_auth_cli() { echo auth >> "$trace"; }',
     'install_wants_links() { :; }',
     'podman() { case "$*" in *State.Health.Status*) echo healthy;; *ImageName*) echo "$candidate_image";; run*) echo ledger >> "$trace"; if [[ "$SCENARIO" == pre-start ]]; then echo 2001 > "$FIXTURE/clock"; fi;; *) return 99;; esac; }',
-    'systemctl() { printf "%s\\n" "$*" >> "$trace"; if [[ "$*" == "--user start codexia-api.service" && ( "$SCENARIO" == startup || "$SCENARIO" == stop-failure || "$SCENARIO" == recovery-stale ) ]]; then clock=2001; fi; if [[ "$*" == "--user stop codexia-api.service" && "$SCENARIO" == stop-failure ]]; then return 1; fi; }',
+    'systemctl() { printf "%s\\n" "$*" >> "$trace"; if [[ "$*" == "--user start codexia-api.service" && ( "$SCENARIO" == startup || "$SCENARIO" == stop-failure || "$SCENARIO" == recovery-stale || "$SCENARIO" == restore-close-failure ) ]]; then clock=2001; fi; if [[ "$*" == "--user stop codexia-api.service" && "$SCENARIO" == stop-failure ]]; then return 1; fi; }',
     'test -f "$candidate_unit"',
   ].join('\n') + '\n';
-  for (const scenario of ['pre-start', 'startup', 'stop-failure', 'within-window', 'recovery-current', 'recovery-stale']) {
+  for (const scenario of ['pre-start', 'startup', 'stop-failure', 'restore-close-failure', 'within-window', 'recovery-current', 'recovery-stale']) {
     const fixture = path.join(directory, scenario);
     mkdirSync(fixture);
     for (const name of ['candidate.container', 'api.service', 'deploy-transaction.json',
@@ -415,12 +415,13 @@ test('first activation checks the real transaction window at readiness and rolls
     const openGate = calls.indexOf('gate open');
     assert.ok(closeGate >= 0 && (startApi < 0 || closeGate < startApi));
     if (success) assert.ok(openGate > startApi);
-    if (!success && startApi >= 0) assert.ok(stopApi > startApi);
+    if (scenario === 'restore-close-failure') assert.equal(stopApi, -1, 'an unverified gate must prevent shutdown');
+    else if (!success && startApi >= 0) assert.ok(stopApi > startApi);
     assert.equal(readFileSync(path.join(fixture, 'gate-state'), 'utf8').trim(), success ? 'open' : 'close');
     if (!success) assert.match(result.stderr, scenario === 'recovery-stale'
       ? /restored target or approval changed before publication/u
       : /First activation approval window expired before publication/u);
-    const retained = success || scenario === 'stop-failure';
+    const retained = success || scenario === 'stop-failure' || scenario === 'restore-close-failure';
     assert.equal(existsSync(path.join(fixture, 'active.container')), retained);
     for (const name of ['deploy-transaction.json', 'api.service']) {
       assert.equal(existsSync(path.join(fixture, name)), retained, scenario + ': ' + name);
@@ -617,17 +618,19 @@ test('push activation keeps one canonical API writer and opens publication after
   assert.ok(transaction, 'the app activation must remain one serialized transaction');
   const shell = transaction['ansible.builtin.shell'].cmd;
 
-  const closeGate = shell.indexOf('! gate_control close;', shell.indexOf('# Record which links recovery owns'));
+  const closeGate = shell.indexOf('! gate_control close ||', shell.indexOf('# Hold publication across reboot'));
+  const createApiLink = shell.indexOf('! install_wants_links ||', closeGate);
   const stopApi = shell.indexOf('systemctl --user stop codexia-api.service', closeGate);
   const installCandidate = shell.indexOf('install -m 0600 "$candidate_unit" "$active_unit"');
   const startCandidate = shell.indexOf('systemctl --user start codexia-api.service', installCandidate);
   const readiness = shell.indexOf('if [[ "$candidate_health" != healthy ]]');
   const openGate = shell.indexOf('if ! gate_control open;', readiness);
   const commitRelease = shell.indexOf('mv -f -- "$release_state.tmp" "$release_state"');
-  for (const [name, position] of Object.entries({ closeGate, stopApi, installCandidate, startCandidate, readiness, openGate, commitRelease })) {
+  for (const [name, position] of Object.entries({ closeGate, createApiLink, stopApi, installCandidate, startCandidate, readiness, openGate, commitRelease })) {
     assert.notEqual(position, -1, `deployment transaction must include ${name}`);
   }
-  assert.ok(closeGate < stopApi, 'Product publication must close before the API writer changes');
+  assert.ok(closeGate < createApiLink && createApiLink < stopApi,
+    'Product publication must close before creating the API activation link or stopping the writer');
   assert.ok(stopApi < installCandidate, 'the old writer must stop before the candidate unit is installed');
   assert.ok(installCandidate < startCandidate && startCandidate < readiness,
     'candidate readiness must be observed after starting its canonical API service');

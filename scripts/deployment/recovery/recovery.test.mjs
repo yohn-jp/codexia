@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -9,6 +9,73 @@ import { test } from 'node:test';
 const repositoryBinding = { repository: 'yohn-jp/codexia', repositoryId: 401, ownerId: 502 };
 
 const recoveryScript = new URL('../../../deploy/ansible/push-deployment-recover.sh', import.meta.url);
+
+test('publication closure persists the reboot fence before either live unit stops', t => {
+  const root = mkdtempSync(path.join(tmpdir(), 'codexia-gate-fence-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const bin = path.join(root, 'bin');
+  const units = path.join(root, 'usr/local/lib/systemd/system');
+  const socket = 'codexia-api.socket';
+  const proxy = 'codexia-api-gate.service';
+  mkdirSync(bin);
+  mkdirSync(units, { recursive: true });
+  for (const unit of [socket, proxy]) {
+    copyFileSync(new URL('../../../deploy/systemd/' + unit, import.meta.url), path.join(units, unit));
+    writeFileSync(path.join(root, unit + '.active'), 'active\n');
+  }
+  const realSystemctl = (...args) => spawnSync('/usr/bin/systemctl', ['--root=' + root, ...args], { encoding: 'utf8' });
+  for (const args of [['enable', socket], ['--runtime', 'enable', socket]]) {
+    const enabled = realSystemctl(...args);
+    assert.equal(enabled.status, 0, enabled.stderr);
+  }
+  const command = (name, body) => writeFileSync(path.join(bin, name), '#!/bin/sh\nset -eu\n' + body, { mode: 0o700 });
+  command('id', 'echo 0\n');
+  command('systemctl', `printf '%s\\n' "$*" >> "$FIXTURE_ROOT/trace"
+case "$1" in
+  show)
+    case "$2" in
+      --property=ActiveState) cat "$FIXTURE_ROOT/$4.active";;
+      --property=UnitFileState) /usr/bin/systemctl --root="$FIXTURE_ROOT" is-enabled "$4" || true;;
+      *) exit 90;;
+    esac;;
+  mask)
+    if [ "$2" = $FIXTURE_FAILED_UNIT ]; then exit 91; fi
+    /usr/bin/systemctl --root="$FIXTURE_ROOT" "$@" >&2;;
+  disable) /usr/bin/systemctl --root="$FIXTURE_ROOT" "$@" >&2;;
+  stop)
+    test -f "$FIXTURE_ROOT/synced"
+    test "$(readlink "$FIXTURE_ROOT/etc/systemd/system/$FIXTURE_SOCKET")" = /dev/null
+    test "$(readlink "$FIXTURE_ROOT/etc/systemd/system/$FIXTURE_PROXY")" = /dev/null
+    echo inactive > "$FIXTURE_ROOT/$2.active";;
+  *) exit 92;;
+esac
+`);
+  command('sync', `printf '%s\\n' sync >> "$FIXTURE_ROOT/trace"
+test "$(readlink "$FIXTURE_ROOT/etc/systemd/system/$FIXTURE_SOCKET")" = /dev/null
+test "$(readlink "$FIXTURE_ROOT/etc/systemd/system/$FIXTURE_PROXY")" = /dev/null
+test ! -L "$FIXTURE_ROOT/etc/systemd/system/sockets.target.wants/$FIXTURE_SOCKET"
+test ! -L "$FIXTURE_ROOT/run/systemd/system/sockets.target.wants/$FIXTURE_SOCKET"
+/usr/bin/sync -f "$FIXTURE_ROOT/etc/systemd/system"
+touch "$FIXTURE_ROOT/synced"
+`);
+  const source = readFileSync(new URL('../../../deploy/ansible/codexia-api-gate', import.meta.url), 'utf8');
+  const gate = source.replace('readonly systemctl=/usr/bin/systemctl', 'readonly systemctl=systemctl');
+  const invoke = (failedUnit = '') => spawnSync('bash', ['-c', gate, 'codexia-api-gate', 'close'], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: bin + ':' + process.env.PATH, FIXTURE_ROOT: root,
+      FIXTURE_FAILED_UNIT: failedUnit, FIXTURE_SOCKET: socket, FIXTURE_PROXY: proxy },
+  });
+  const partial = invoke(proxy);
+  assert.notEqual(partial.status, 0);
+  assert.equal(realSystemctl('is-enabled', socket).stdout.trim(), 'masked');
+  assert.equal(realSystemctl('is-enabled', proxy).stdout.trim(), 'static');
+  assert.doesNotMatch(readFileSync(path.join(root, 'trace'), 'utf8'), /^stop /mu);
+  const resumed = invoke();
+  assert.equal(resumed.status, 0, resumed.stderr);
+  assert.equal(realSystemctl('is-enabled', socket).stdout.trim(), 'masked');
+  assert.equal(realSystemctl('is-enabled', proxy).stdout.trim(), 'masked');
+  assert.match(readFileSync(path.join(root, 'trace'), 'utf8'), /sync\n[\s\S]*stop codexia-api\.socket\nstop codexia-api-gate\.service/u);
+});
 
 function fixture({ phase = 'pending', health = 'healthy' } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'codexia-push-recovery-'));
