@@ -344,13 +344,19 @@ test("Web OAuth preserves consent, owner persistence, and drafts during reauthen
 });
 
 const ownerConsoleTest = test.extend<{ authorServer: BetterAuthFixture }>({
-  authorServer: async ({}, use) => {
+  authorServer: async ({ context }, use) => {
     assert.ok(fixtureDatabaseUrl, "Owner Console acceptance requires a disposable PostgreSQL database");
     const server = await startAuthorBrowserFixture({
       databaseUrl: fixtureDatabaseUrl, profile: process.env.CODEXIA_PROFILE ?? "core", apiHostname: "localhost",
     });
     try { await use(server); }
-    finally { await server.close(); }
+    finally {
+      // This test owns browser routes and background authentication requests.
+      // Playwright otherwise tears down authorServer before its page/context.
+      // Dispose the client first, even when a test assertion fails.
+      try { await context.close(); }
+      finally { await server.close(); }
+    }
   },
 });
 
