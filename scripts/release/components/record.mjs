@@ -97,28 +97,29 @@ export async function recordComponentRelease(release,{github,context}){
   const { owner, repo } = deploymentRepository(context.repository);
   const { data: current } = await github.rest.repos.get({ owner, repo });
   assert.ok(matchesRepository(current, context), 'Component release target repository changed');
-  const readOrMissing=async operation=>{
-    try{return (await operation()).data;}
-    catch(error){
-      if(error?.status===404)return null;
-      throw new Error('Component release API request failed'+(Number.isSafeInteger(error?.status)?': HTTP '+error.status:''),{cause:error});
+  const request = async (operation, call, allowMissing = false) => {
+    try {
+      return (await call()).data;
+    } catch (error) {
+      if (allowMissing && error?.status === 404) return null;
+      const status = Number.isSafeInteger(error?.status) ? ': HTTP ' + error.status : '';
+      throw new Error('Cannot ' + operation + ' ' + expectedTag + status, { cause: error });
     }
   };
-  let ref=await readOrMissing(()=>github.rest.git.getRef({owner,repo,ref:'tags/'+expectedTag}));
-  if(!ref){
-    try{await github.rest.git.createRef({owner,repo,ref:'refs/tags/'+expectedTag,sha:release.targetSha});}
-    catch(error){throw new Error('Component release API request failed'+(Number.isSafeInteger(error?.status)?': HTTP '+error.status:''),{cause:error});}
-    ref=await readOrMissing(()=>github.rest.git.getRef({owner,repo,ref:'tags/'+expectedTag}));
+  const readTag = () => request('read tag', () => github.rest.git.getRef({owner,repo,ref:'tags/'+expectedTag}), true);
+  let ref = await readTag();
+  if (!ref) {
+    await request('create tag', () => github.rest.git.createRef({owner,repo,ref:'refs/tags/'+expectedTag,sha:release.targetSha}));
+    ref = await readTag();
   }
   assert.equal(ref?.object?.type,'commit');assert.equal(ref.object.sha,release.targetSha,'Component version already belongs to a different source');
-  const existing=await readOrMissing(()=>github.rest.repos.getReleaseByTag({owner,repo,tag:expectedTag}));
+  const existing=await request('read release', () => github.rest.repos.getReleaseByTag({owner,repo,tag:expectedTag}), true);
   if(existing){
     assert.equal(existing.tag_name,release.tag);assert.equal(existing.body,release.body,'Existing component release binds different metadata');
     assert.equal(existing.draft,false);
   }else{
-    try{await github.rest.repos.createRelease({owner,repo,tag_name:release.tag,target_commitish:release.targetSha,name:release.title,body:release.body,
-      draft:false,prerelease:false,make_latest:'false'});}
-    catch(error){throw new Error('Component release API request failed'+(Number.isSafeInteger(error?.status)?': HTTP '+error.status:''),{cause:error});}
+    await request('create release', () => github.rest.repos.createRelease({owner,repo,tag_name:release.tag,target_commitish:release.targetSha,name:release.title,body:release.body,
+      draft:false,prerelease:false,make_latest:'false'}));
   }
   await assertComponentReleaseRecorded(release,{github,context});
   console.log('Recorded '+release.title+' from '+release.targetSha);

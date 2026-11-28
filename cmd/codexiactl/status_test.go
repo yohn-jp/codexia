@@ -151,12 +151,15 @@ func TestStatusForbiddenVariableListingLeavesGateAndInventoryUnknown(t *testing.
 
 func TestDoctorReportsActionableBlockersWithoutDumpingWorkflowHistory(t *testing.T) {
 	t.Parallel()
+	earlier := time.Unix(10, 0)
+	later := earlier.Add(time.Minute)
 	runs := []observedRun{
-		{ID: 15, Workflow: "production-preflight.yml", Conclusion: "failure"},
-		{ID: 14, Workflow: "production-preflight.yml", Conclusion: "success"},
-		{ID: 12, Workflow: "frontend-release.yml", Conclusion: "failure"},
-		{ID: 11, Workflow: "frontend-release.yml", Conclusion: "success"},
-		{ID: 10, Workflow: "backend-deployment-handoff.yml", Conclusion: "failure"},
+		{ID: 15, Workflow: preflightFile, Conclusion: "failure", createdAt: later},
+		{ID: 16, Workflow: preflightFile, Conclusion: "success", createdAt: earlier},
+		{ID: 11, Workflow: frontendFile, Conclusion: "success", createdAt: earlier},
+		{ID: 12, Workflow: frontendFile, Conclusion: "failure", createdAt: later},
+		{ID: 9, Workflow: githubBackendHandoffFile, Conclusion: "success", createdAt: later},
+		{ID: 10, Workflow: githubBackendHandoffFile, Conclusion: "failure", createdAt: later},
 	}
 	recent := latestWorkflowSummary(runs)
 	if len(recent) != 3 || recent[0].ID != 15 || recent[1].ID != 12 || recent[2].ID != 10 {

@@ -121,7 +121,7 @@ func runInit(ctx context.Context) (resultErr error) {
 		management := existingManagement(snapshot)
 		if management == "" {
 			return needsAction("Existing Codexia resources were detected and neither protected SSH configuration is complete. Verify the installation through " +
-				c.target.URL() + "/blob/main/docs/deployment/PROTECTED-RECOVERY.md")
+				c.runbookLink(recoveryRunbook))
 		}
 		tty.Notice("Existing Codexia resources detected. Observe the protected lifecycle before changing provider or repository settings.")
 		receipt, id, err := c.preflight(ctx, management)
@@ -573,12 +573,11 @@ func (c *workflowController) deliver(ctx context.Context, gh *githubControl, set
 	handoff.GrantBindingSHA = receipt.Evidence.Host.Database.OwnerSetupCheckpoint.GrantBindingSHA
 	if err := handoff.Deliver(ctx, c.operator, c.target, settings.PublicOrigin, settings.ServiceUID); err != nil {
 		if errors.Is(err, errHandoffUnavailable) {
-			c.operator.Notice("Owner recovery instructions: " + c.target.URL() + "/blob/main/deploy/ansible/AUTH-RUNTIME.md#first-owner-through-the-browser")
+			c.operator.Notice("For Owner recovery, see “First owner through the browser” in " + c.runbookLink(authRuntimeRunbook))
 		}
 		return err
 	}
 	c.operator.Notice("SETUP_PENDING. The Owner can enroll on " + settings.PublicOrigin + "/console/setup. ACTIVE: false. ACCEPTED: false.")
-	c.operator.Notice("After the Owner enrolls in their browser, use the protected preparation and activation steps at " +
-		c.target.URL() + "/blob/main/docs/deployment/PRODUCTION-BOOTSTRAP.md#run-r4-and-r5.")
+	c.operator.Notice("After the Owner enrolls in their browser, follow “Run R4 and R5” in " + c.runbookLink(bootstrapRunbook))
 	return nil
 }

@@ -123,3 +123,36 @@ test('a fork publishes only Backend digests in its own owner namespace', () => {
   assert.equal(release.metadata.images.full, producer.full);
   assert.throws(() => buildRecord('backend', source, null, producer), /deployment repository owner/);
 });
+
+test('a denied component tag or release operation identifies the failing step without logging provider data', async () => {
+  const { recordComponentRelease } = await import('./record.mjs');
+  const tag = 'backend-v0.1.3';
+  const targetSha = 'a'.repeat(40);
+  const release = { tag, targetSha, metadata: context, body: 'certified' };
+  for (const [operation, description] of [
+    ['getRef', 'read tag'], ['createRef', 'create tag'],
+    ['getReleaseByTag', 'read release'], ['createRelease', 'create release'],
+  ]) {
+    const calls = [];
+    const request = (method, data) => async () => {
+      calls.push(method);
+      if (method === operation) throw Object.assign(new Error('private provider detail'), { status: 403 });
+      if (data === undefined) throw Object.assign(new Error('missing'), { status: 404 });
+      return { data };
+    };
+    const github = { rest: {
+      repos: {
+        get: request('get', { full_name: context.repository, id: context.repositoryId, owner: { id: context.ownerId } }),
+        getReleaseByTag: request('getReleaseByTag'), createRelease: request('createRelease'),
+      },
+      git: {
+        getRef: request('getRef', operation === 'createRef' ? undefined : { object: { type: 'commit', sha: targetSha } }),
+        createRef: request('createRef'),
+      },
+    } };
+    await assert.rejects(recordComponentRelease(release, { github, context }), {
+      message: 'Cannot ' + description + ' ' + tag + ': HTTP 403',
+    });
+    assert.equal(calls.at(-1), operation);
+  }
+});

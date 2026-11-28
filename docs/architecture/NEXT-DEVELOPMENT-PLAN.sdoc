@@ -287,10 +287,10 @@ MID: cf16adecf2bcc10f4961d29d8d3f8655
 STATEMENT: >>>
 設計上の参照先。
 
-- [Core](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/CORE.md) / [Internal boundaries](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/INTERNAL-BOUNDARIES.md) / [Reboot RFC](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/CODEXIA-REBOOT-RFC.md)
+- [LINK: DOC-ARCHITECTURE-CORE, Core] / [LINK: DOC-ARCHITECTURE-INTERNAL-BOUNDARIES, Internal boundaries] / [LINK: DOC-ARCHITECTURE-CODEXIA-REBOOT-RFC, Reboot RFC]
 - [Persistence contracts](https://github.com/yohn-jp/codexia/blob/main/packages/persistence-contracts/src/index.ts) / [Core Knowledge](https://github.com/yohn-jp/codexia/blob/main/packages/core/src/knowledge/index.ts) / [Core Evidence](https://github.com/yohn-jp/codexia/blob/main/packages/core/src/evidence/index.ts)
 - [Story domain](https://github.com/yohn-jp/codexia/blob/main/modules/story/src/domain/index.ts) / [Story snapshot](https://github.com/yohn-jp/codexia/blob/main/modules/story/src/snapshot.ts) / [Story actions](https://github.com/yohn-jp/codexia/blob/main/modules/story/src/actions.ts) / [Assistant actions](https://github.com/yohn-jp/codexia/blob/main/modules/assistant/src/actions.ts)
-- [Deployment](https://github.com/yohn-jp/codexia/blob/main/docs/deployment/README.md) / [API Quadlet](https://github.com/yohn-jp/codexia/blob/main/deploy/quadlet/codexia-api.container) / [Portable works](https://github.com/yohn-jp/codexia/blob/main/docs/authoring-portable.md)
+- [Deployment](https://github.com/yohn-jp/codexia/blob/main/docs/deployment/README.md) / [API Quadlet](https://github.com/yohn-jp/codexia/blob/main/deploy/quadlet/codexia-api.container) / [LINK: DOC-AUTHORING-PORTABLE, Portable works]
 
 本書は設計契約と未採用の運用設計案を含み、実装完了・実機受入を宣言しない。5分間隔、監視時間、初期CLI、Standalone限定、短時間停止を許容する設計は、実機測定と設計承認を経て確定する。
 <<<

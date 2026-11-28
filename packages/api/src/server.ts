@@ -507,6 +507,10 @@ async function serveStatic(request: IncomingMessage, response: ServerResponse, s
     const content = file.contentType.startsWith('text/html')
       ? Buffer.from(original.toString('utf8').replaceAll('__CODEXIA_STYLE_NONCE__', styleNonce))
       : original;
+    if (uiEntry) {
+      const policy = response.getHeader('Content-Security-Policy');
+      response.setHeader('Content-Security-Policy', `${policy}; img-src 'self' data:`);
+    }
     if (publicReaderPath) {
       response.setHeader('Referrer-Policy', 'no-referrer');
       response.setHeader('X-Robots-Tag', 'noindex, nofollow');

@@ -215,7 +215,7 @@ function BackupRecovery({ onReauthenticate }: { onReauthenticate: () => void }) 
         />
       )}
       <p className={styles.hint}>本番の復元は、復旧担当者が承認を受けて実施します。</p>
-      <a className="codexia-console__link" href="https://github.com/yohn-jp/codexia/blob/main/docs/deployment/BACKUP.md">
+      <a className="codexia-console__link" href="https://github.com/yohn-jp/codexia/blob/main/docs/deployment/BACKUP.sdoc">
         復旧担当者向けの手順
       </a>
     </>

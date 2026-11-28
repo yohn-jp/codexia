@@ -100,7 +100,7 @@ async function holdSaves(page: Page, f: Fixture): Promise<{ seen: Promise<void>;
 async function scratch(page: Page): Promise<void> { await page.locator(".scratch-panel summary").click(); }
 const memo = (page: Page) => page.getByLabel("本文に含まれないメモ");
 const image = (page: Page) => page.getByLabel("スクラッチ画像を添付");
-const png = { name: "capture.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5RkAAAAASUVORK5CYII=", "base64") };
+const png = { name: "capture.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC", "base64") };
 async function scratchRecords(page: Page): Promise<Array<{ key: string; text: string }>> { return drafts(page, "pgScratch") as unknown as Promise<Array<{ key: string; text: string }>>; }
 async function scratchPayloads(page: Page): Promise<Array<{ key: string; scratchKey: string; kind: string; id: string; value: string }>> { return drafts(page, "pgScratchPayloads") as unknown as Promise<Array<{ key: string; scratchKey: string; kind: string; id: string; value: string }>>; }
 
@@ -896,6 +896,35 @@ preparedAuthorTest("a pending scratch image read is flushed to its captured docu
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.key.includes(f.one.document.id) && r.text.includes("Attachment belongs to Scene One."))).toBe(true);
   await expect.poll(async () => (await scratchPayloads(page)).some((r) => r.scratchKey.includes(f.one.document.id) && r.kind === "image" && r.value.startsWith("data:image/png;base64,"))).toBe(true);
   expect((await scratchRecords(page)).some((r) => r.key.includes(f.two.document.id) && r.text.includes("Attachment belongs to Scene One."))).toBe(false);
+});
+
+preparedAuthorTest("a scratch attachment awaiting FileReader blocks reload until the image is protected", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
+  await scratch(page);
+  await page.evaluate(() => {
+    const read = FileReader.prototype.readAsDataURL;
+    FileReader.prototype.readAsDataURL = function (file: Blob) {
+      window.addEventListener("release-scratch-image", () => read.call(this, file), { once: true });
+    };
+  });
+  await image(page).setInputFiles(png);
+  const prompt = page.waitForEvent("dialog", { timeout: 5_000 });
+  await page.evaluate(() => { setTimeout(() => location.reload(), 0); });
+  const dialog = await prompt;
+  expect(dialog.type()).toBe("beforeunload");
+  await dialog.dismiss();
+  await page.evaluate(() => window.dispatchEvent(new Event("release-scratch-image")));
+  await expect.poll(async () => (await scratchPayloads(page)).some(record =>
+    record.scratchKey.includes(f.one.document.id) && record.kind === "image")).toBe(true);
+  const preview = page.locator(".scratch-panel").getByRole("img", { name: png.name });
+  await expect(preview).toHaveJSProperty("naturalWidth", 1);
+  const unexpectedDialogs: string[] = [];
+  page.on("dialog", async next => { unexpectedDialogs.push(next.type()); await next.accept(); });
+  await page.reload();
+  expect(unexpectedDialogs).toEqual([]);
+  await reopen(page, f);
+  await scratch(page);
+  await expect(preview).toHaveJSProperty("naturalWidth", 1);
 });
 
 preparedAuthorTest("typing beside a scratch image writes compact metadata without serializing or rewriting its payload", async ({ page, authorizeAuthor }) => {

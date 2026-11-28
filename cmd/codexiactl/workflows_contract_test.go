@@ -9,6 +9,22 @@ import (
 	"testing"
 )
 
+func TestRunbookLinksUseCheckedOutDocumentsAtSelectedRevision(t *testing.T) {
+	target := githubTarget{Owner: "Fork-Org"}
+	controller := workflowController{target: target, sha: strings.Repeat("b", 40)}
+	for _, file := range []string{bootstrapRunbook, recoveryRunbook, authRuntimeRunbook} {
+		doc := "docs/deployment/" + file
+		want := target.URL() + "/blob/" + controller.sha + "/" + doc
+		if got := controller.runbookLink(file); got != want {
+			t.Errorf("runbook link = %q, want %q", got, want)
+		}
+		info, err := os.Stat(filepath.Join("..", "..", doc))
+		if err != nil || !info.Mode().IsRegular() {
+			t.Errorf("missing runbook %s", doc)
+		}
+	}
+}
+
 func TestRequiredJobsMatchCheckedOutProductionWorkflows(t *testing.T) {
 	for _, tc := range []struct {
 		operation string

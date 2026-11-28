@@ -1,15 +1,125 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
+import fs, { lstat, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { describe, it } from 'node:test';
+import { describe, it, type TestContext } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { RecentActivityStore } from './recent-activity-store.js';
 
 const repository = 'project-one';
 
+// Pause the actual replacement boundary. Other files continue through the normal fsync/rename path.
+function interceptReplacement(t: TestContext, path: string, before: () => Promise<void>): void {
+  const rename = fs.rename;
+  const hook = t.mock.method(fs, 'rename', async (source: string, destination: string) => {
+    if (destination === path) await before();
+    return rename(source, destination);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    hook.mock.restore();
+    syncBuiltinESMExports();
+  });
+}
+
 describe('RecentActivityStore', () => {
+  for (const phase of ['initial order', 'existing order', 'delayed page', 'before cursor'] as const) {
+    it(`recovers an interrupted ${phase} replacement before the next ordered report`, async t => {
+      const history = await mkdtemp(resolve(tmpdir(), 'codexia-activity-interruption-'));
+      t.after(() => rm(history, { recursive: true, force: true }));
+      const store = new RecentActivityStore(history);
+      const put = (target: RecentActivityStore, sequence: number, pageIndex?: number) =>
+        target.upsert(
+          'owner',
+          repository,
+          { sceneId: 'scene-one', sentenceOffset: sequence, deviceType: 'desktop', ...(pageIndex === undefined ? {} : { pageIndex }) },
+          { writer: '12345678-1234-4234-8234-123456789abc', sequence },
+        );
+      if (phase !== 'initial order') await put(store, phase === 'delayed page' ? 5 : 1);
+      const destination = phase === 'before cursor' ? 'recent-activity-state.json' : 'recent-activity-order.json';
+      let fail = true;
+      interceptReplacement(t, resolve(history, 'recent-activity', destination), async () => {
+        if (fail) throw new Error('injected replacement failure');
+      });
+      await assert.rejects(put(store, 3, phase === 'delayed page' ? 7 : undefined), /injected replacement failure/);
+      const restarted = new RecentActivityStore(history);
+      if (phase !== 'before cursor') {
+        await assert.rejects(restarted.list('owner', repository), /injected replacement failure/);
+      }
+      fail = false;
+      const [recovered] = await restarted.list('owner', repository);
+      if (phase === 'before cursor') {
+        assert.equal(recovered?.sentenceOffset, 1);
+        assert.equal((await put(restarted, 2))[0]?.sentenceOffset, 2);
+        assert.equal((await put(restarted, 3))[0]?.sentenceOffset, 3);
+      } else {
+        assert.equal(recovered?.sentenceOffset, phase === 'delayed page' ? 5 : 3);
+        assert.equal(recovered.pageIndex, phase === 'delayed page' ? 7 : null);
+        assert.deepEqual((await put(restarted, 2, phase === 'delayed page' ? 6 : undefined))[0], recovered);
+        assert.deepEqual((await put(restarted, 3, phase === 'delayed page' ? 7 : undefined))[0], recovered);
+      }
+      await assert.rejects(lstat(resolve(history, 'recent-activity', 'recent-activity-order.pending')), { code: 'ENOENT' });
+    });
+  }
+
+  it('leaves an independently changed cursor untouched when an interrupted order cannot be recovered', async t => {
+    const history = await mkdtemp(resolve(tmpdir(), 'codexia-activity-conflict-'));
+    t.after(() => rm(history, { recursive: true, force: true }));
+    const directory = resolve(history, 'recent-activity');
+    const statePath = resolve(directory, 'recent-activity-state.json');
+    interceptReplacement(t, resolve(directory, 'recent-activity-order.json'), async () => {
+      throw new Error('injected replacement failure');
+    });
+    const input = { sceneId: 'scene-one', sentenceOffset: 3, deviceType: 'desktop' as const };
+    const order = { writer: '12345678-1234-4234-8234-123456789abc', sequence: 3 };
+    await assert.rejects(new RecentActivityStore(history).upsert('owner', repository, input, order), /injected replacement failure/);
+    const state = JSON.parse(await readFile(statePath, 'utf8'));
+    state.entries[0].items[0].sentenceOffset = 123;
+    const external = JSON.stringify(state);
+    await writeFile(statePath, external);
+    const restarted = new RecentActivityStore(history);
+    await assert.rejects(restarted.list('owner', repository), { code: 'recent_activity_state_corrupt' });
+    await assert.rejects(restarted.upsert('owner', repository, input, order), { code: 'recent_activity_state_corrupt' });
+    assert.equal(await readFile(statePath, 'utf8'), external);
+    assert.equal((await lstat(resolve(directory, 'recent-activity-order.pending'))).mode & 0o777, 0o600);
+  });
+
+  it('keeps a second store reader behind an in-progress ordered replacement', async t => {
+    const history = await mkdtemp(resolve(tmpdir(), 'codexia-activity-reader-'));
+    t.after(() => rm(history, { recursive: true, force: true }));
+    const store = new RecentActivityStore(history);
+    let pause!: () => void;
+    let resume!: () => void;
+    const paused = new Promise<void>(resolve => {
+      pause = resolve;
+    });
+    const resumed = new Promise<void>(resolve => {
+      resume = resolve;
+    });
+    interceptReplacement(t, resolve(history, 'recent-activity', 'recent-activity-order.json'), async () => {
+      pause();
+      await resumed;
+    });
+    const updating = store.upsert(
+      'owner',
+      repository,
+      { sceneId: 'scene-one', sentenceOffset: 3, deviceType: 'desktop' },
+      { writer: '12345678-1234-4234-8234-123456789abc', sequence: 3 },
+    );
+    await paused;
+    const reading = new RecentActivityStore(history).list('owner', repository);
+    try {
+      assert.equal(await Promise.race([reading.then(() => 'read'), delay(75, 'blocked')]), 'blocked');
+    } finally {
+      resume();
+    }
+    const [written, visible] = await Promise.all([updating, reading]);
+    assert.deepEqual(visible, written);
+  });
+
   it('keeps per-device cursors private, owner/repository scoped, and durable across store instances', async t => {
     const root = await mkdtemp(resolve(tmpdir(), 'codexia-recent-activity-'));
     const usageDirectory = resolve(root, 'host-history');

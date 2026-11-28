@@ -39,6 +39,7 @@ type observedRun struct {
 	Workflow   string `json:"workflow"`
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion,omitempty"`
+	createdAt  time.Time
 }
 
 func readOnly(ctx context.Context, i invocation, stdout, stderr io.Writer) int {
@@ -158,7 +159,9 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 		report.Blockers = append(report.Blockers, "workflow-observation-unavailable")
 	}
 	for _, run := range runs {
-		report.Runs = append(report.Runs, observedRun{run.ID, run.File, stateValue(run.Status), stateValue(run.Conclusion)})
+		report.Runs = append(report.Runs, observedRun{
+			ID: run.ID, Workflow: run.File, Status: stateValue(run.Status), Conclusion: stateValue(run.Conclusion), createdAt: run.CreatedAt,
+		})
 	}
 	if historyErr == nil {
 		observeExistingReceipt(ctx, gh, vm.HostID, runs, time.Now().UTC(), report)
@@ -187,13 +190,17 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 // Status retains all fetched evidence for fail-closed lifecycle checks. A human
 // gets one recent run per workflow instead of dozens of irrelevant older runs.
 func latestWorkflowSummary(runs []observedRun) []observedRun {
-	seen := make(map[string]bool)
+	byWorkflow := make(map[string]int)
 	var result []observedRun
 	for _, run := range runs {
-		if seen[run.Workflow] {
+		if index, ok := byWorkflow[run.Workflow]; ok {
+			previous := result[index]
+			if run.createdAt.After(previous.createdAt) || (run.createdAt.Equal(previous.createdAt) && run.ID > previous.ID) {
+				result[index] = run
+			}
 			continue
 		}
-		seen[run.Workflow] = true
+		byWorkflow[run.Workflow] = len(result)
 		result = append(result, run)
 	}
 	return result
