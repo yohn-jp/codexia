@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
-import { lookup } from 'node:dns/promises';
+import { isIPv4 } from 'node:net';
 import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import { jwtVerify, SignJWT } from 'jose';
@@ -39,19 +39,15 @@ const credentialBody = z
 
 export function readOwnerSetupConfig() {
   const redirects = readCodexiaEnvironment('OWNER_SETUP_WEB_REDIRECT_URIS');
-  return { config: readBetterAuthMigrationConfig(false), redirects: redirects?.split(',').map(value => value.trim()) ?? [] };
+  const publicationPeers = readCodexiaEnvironment('OWNER_SETUP_PUBLICATION_PEERS')?.split(',') ?? [];
+  if (publicationPeers.some(address => !isIPv4(address)) || new Set(publicationPeers).size !== publicationPeers.length) {
+    throw new Error('Setup requires distinct IPv4 publication proxy peers');
+  }
+  return { config: readBetterAuthMigrationConfig(false), redirects: redirects?.split(',').map(value => value.trim()) ?? [], publicationPeers };
 }
 
 function scopedKey(secret: string, purpose: string): Buffer {
   return createHmac('sha256', secret).update(purpose).digest();
-}
-
-async function tunnelAddresses(): Promise<readonly string[]> {
-  try {
-    return (await lookup('codexia-tunnel', { all: true })).map(({ address }) => address);
-  } catch {
-    return [];
-  }
 }
 
 function createSetupRateLimiter() {
@@ -73,7 +69,7 @@ function createSetupRateLimiter() {
 export function createOwnerSetupApp(
   config: BetterAuthRuntimeConfig,
   webRedirectUris: readonly string[],
-  trustedTunnelAddresses: () => Promise<readonly string[]> = tunnelAddresses,
+  trustedPublicationPeers: readonly string[] = [],
 ) {
   const origin = new URL(config.publicOrigin);
   const [web, ios] = config.ownerClientIds;
@@ -310,7 +306,7 @@ export function createOwnerSetupApp(
         request.protocol === 'https' ||
         (request.headers['x-forwarded-proto'] === 'https' &&
           peerAddress !== undefined &&
-          (await trustedTunnelAddresses()).includes(peerAddress));
+          trustedPublicationPeers.includes(peerAddress));
       if (
         !transportSecure ||
         request.headers.host !== origin.host ||

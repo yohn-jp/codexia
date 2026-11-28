@@ -13,7 +13,7 @@ const settings = {
 };
 
 test("setup-only Fastify admits only the narrow setup routes without leaking authentication or business data", async (t) => {
-  const app = createOwnerSetupApp(settings, [origin + "/desktop/"], async () => ["127.0.0.1"]);
+  const app = createOwnerSetupApp(settings, [origin + "/desktop/"], ["127.0.0.1"]);
   t.after(() => app.close());
   for (const [method, url] of [
     ["GET", "/api/projects"], ["POST", "/mcp"], ["GET", "/api/auth/get-session"],
@@ -28,7 +28,7 @@ test("setup-only Fastify admits only the narrow setup routes without leaking aut
 });
 
 test("setup key admission rejects cross-origin, ambient API bearer, and non-JSON requests before connecting to PostgreSQL", async (t) => {
-  const app = createOwnerSetupApp(settings, [origin + "/desktop/"], async () => ["127.0.0.1"]);
+  const app = createOwnerSetupApp(settings, [origin + "/desktop/"], ["127.0.0.1"]);
   t.after(() => app.close());
   for (const headers of [
     { "content-type": "application/json" },
@@ -47,7 +47,7 @@ test("setup key admission rejects cross-origin, ambient API bearer, and non-JSON
 });
 
 test("setup endpoints require TLS through the configured origin and reject query input", async (t) => {
-  const app = createOwnerSetupApp(settings, [origin + "/desktop/"], async () => ["127.0.0.1"]);
+  const app = createOwnerSetupApp(settings, [origin + "/desktop/"], ["10.89.0.1", "10.89.1.1"]);
   t.after(() => app.close());
   const url = "/api/auth/codexia/setup/authorize";
   const headers = { host: new URL(origin).host, origin, "content-type": "application/json" };
@@ -59,17 +59,19 @@ test("setup endpoints require TLS through the configured origin and reject query
     headers: { ...headers, "x-forwarded-proto": "https" }, payload,
   });
   assert.equal(untrustedPeer.statusCode, 403);
-  const wrongHost = await app.inject({ method: "POST", url, headers: {
+  const wrongHost = await app.inject({ method: "POST", url, remoteAddress: "10.89.0.1", headers: {
     ...headers, host: "other.example.test", "x-forwarded-proto": "https",
   }, payload });
   assert.equal(wrongHost.statusCode, 403);
-  const invalid = await app.inject({
-    method: "POST", url, headers: { ...headers, "x-forwarded-proto": "https" }, payload,
-  });
-  assert.equal(invalid.statusCode, 400);
-  assert.deepEqual(invalid.json(), { code: "SETUP_KEY_INVALID" });
+  for (const remoteAddress of ["10.89.0.1", "::ffff:10.89.1.1"]) {
+    const invalid = await app.inject({
+      method: "POST", url, remoteAddress, headers: { ...headers, "x-forwarded-proto": "https" }, payload,
+    });
+    assert.equal(invalid.statusCode, 400);
+    assert.deepEqual(invalid.json(), { code: "SETUP_KEY_INVALID" });
+  }
   const query = await app.inject({
-    method: "POST", url: url + "?key=fixture", headers: { ...headers, "x-forwarded-proto": "https" }, payload,
+    method: "POST", url: url + "?key=fixture", remoteAddress: "10.89.0.1", headers: { ...headers, "x-forwarded-proto": "https" }, payload,
   });
   assert.equal(query.statusCode, 400);
   assert.deepEqual(query.json(), { code: "SETUP_REQUEST_INVALID" });
