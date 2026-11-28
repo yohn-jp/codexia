@@ -121,6 +121,7 @@ STATEMENT: >>>
 | JS/TS品質・フォーマット・import管理 | [`@biomejs/biome`](https://biomejs.dev/) `2.6.8` | リポジトリのLint・Formatter正本、Code ScanningへのSARIF送信 | CLIの安定版。CodeQLと型検査を代替しない。SARIFはLintに限定しFormatterはCIの合否で扱う |
 | CLI 対話フォーム | [`charm.land/huh/v2`](https://github.com/charmbracelet/huh) `v2.0.3` | `cmd/codexiactl` の非秘密候補選択・通常入力・非保護の確認 | Go 1.25.8 以上。公式 TTY の明示 I/O、Context、既定値による誤承認防止。組込み accessible mode と秘密入力は使わない |
 | CLI 表示・レイアウト | [`charm.land/lipgloss/v2`](https://github.com/charmbracelet/lipgloss) `v2.1.1` | `cmd/codexiactl` の共通 semantic style、工程・診断・結果の表示 | Go 1.26.0 以上。Huh と解決される依存の整合、NO_COLOR・端末幅・機械出力分離を検証 |
+| Go 実装・テスト・品質基盤 | [LINK: DOC-ARCHITECTURE-DEPENDENCY-POLICY-go-engineering, Go 選定] | 公式 SDK・標準 API、Testify/go-cmp、golangci-lint の採用境界・初期基準版は同節を正本とする | `cmd/codexiactl` の現行 toolchain、実 module 解決・テスト・CI と受入で検証 |
 <<<
 
 [[SECTION]]
@@ -256,6 +257,38 @@ Huh v2 + Lip Gloss v2 を採用する。[LINK: DOC-DEPLOYMENT-CODEXIACTL-22-タ�
 <<<
 
 [[/SECTION]]
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 6d1b6e3e81374fd6bd702a2f2bb4da91
+UID: DOC-ARCHITECTURE-DEPENDENCY-POLICY-go-engineering
+TITLE: Go 実装・開発基盤の選定
+
+[TEXT]
+MID: ad1317ae52a74c5b99e0f3dc79a81752
+STATEMENT: >>>
+**採用決定:** Go 標準ライブラリと公式・保守された SDK を通信・構文・汎用処理の第一選択とし、製品固有の認可、所望状態、遷移、排他、冪等性、認定を Codexia の責務として残す。対象は `cmd/codexiactl` の既存 Go module とその開発・検証経路。現行 Go 1.27.4 を基準とし、本節は toolchain を変更する指示ではない。採用は実装・検証完了を意味しない。
+
+| 用途 | 採用候補の初期基準版・ライセンス | 採用境界・判断 |
+| --- | --- | --- |
+| Cloudflare REST | [cloudflare-go](https://github.com/cloudflare/cloudflare-go) `github.com/cloudflare/cloudflare-go/v7` v7.15.0 (Apache-2.0、Go 1.26+) | 既存依存を再利用。承認済み認証が許す明示資格で型付き Service、Params、Response、SDK のページ処理を利用。対応 API を独自 HTTP/JSON transport で再実装しない |
+| GitHub REST | [go-github](https://github.com/google/go-github) `github.com/google/go-github/v93` v93.0.0 (BSD-3-Clause、Go 1.26+) | 既存依存を維持。公式 App の委任・repository identity、Environment、run/attempt/source/artifact の固有検証は維持 |
+| Assertion | [Testify](https://github.com/stretchr/testify) `github.com/stretchr/testify` v1.12.1 (MIT、Go 1.17+) | テスト専用。`assert` と `require` に限定。前提失敗・型付きエラー・副作用・期待値を簡潔に証明 |
+| 構造比較 | [go-cmp](https://github.com/google/go-cmp) `github.com/google/go-cmp` v0.7.0 (BSD-3-Clause、Go 1.21+) | テスト専用。複雑な観測・計画・状態差分に `cmp.Diff`。go-github の依存でもあり、直接 import を追加する時だけ直接依存へ |
+| Lint / Formatter | [golangci-lint](https://github.com/golangci/golangci-lint) v2.15.0 (GPL-3.0、Go 1.26+、Go 1.27 対応の公式ビルド) | 開発ツール専用。公式バイナリを版・digest 固定。内包された gofumpt v0.12.0 と goimports（x/tools v0.52.0）を利用し、別版を個別導入しない |
+| Go 脆弱性到達可能性 | [govulncheck](https://go.dev/security/vuln/) | 条件付き採用。安定版・Go toolchain 互換性、DB への到達性、終了コード・出力仕様、依存境界を実測して固定。版未確定のため未固定ツールの実行は禁止 |
+
+選定版は初期基準であり、実装 PR では最新安定版、ライセンス、go.mod の最低版、実際の Go 互換性、脆弱性、依存閉包、変更によるバイナリと CI 時間への影響を再照合する。Go の minimum-version 宣言だけを動作互換性の証明としない。`go.mod` の require と Go の Minimum Version Selection による解決版を区別し、`go.sum` はモジュール内容の checksum であって単独の lockfile ではない。`go list -m all`、`go mod tidy -diff`、`go mod verify`、readonly の build/test により実解決閉包を検査する。テスト専用 module を通常の製品ソースから import しない。Linter や脆弱性スキャナーの依存閉包は製品 module に混ぜない。通常ビルド・実行時に latest を解決しない。Go module の更新検知は既存 Dependabot の gomod ecosystem と対象 directory を利用し、開発ツールの固定版・checksum もレビュー対象にする。二重の固定値や更新経路を増やさない。
+
+Cloudflare 公式 `cf` は承認済み Device Flow・公開操作の責務を維持する。SDK は公式 cf の公開認証・資格発行により取得でき、対象と権限を確認した限定 API 資格でのみ使用する。cf の OAuth 内部 token の抽出、環境変数由来の別人の資格、手動 token 入力、非公開 API は採用しない。SDK が未対応の操作はまず公式 cf の公開コマンドを評価し、必要時のみ公式公開 API に限定した小さな例外を根拠・型・試験とともに承認する。全面的な汎用 REST dispatcher、汎用 IaC engine、SDK の型・ページ処理・認証 client の第二実装は採用しない。SDK の存在を実 grant の成立とみなさず、実環境での受入は [LINK: DOC-DEPLOYMENT-CODEXIACTL, CTL 正本] に従う。
+
+標準 API を優先する対象: `errors.Is/As/Join`（分類・結合）、`context`（期限・取消）、`os/exec`（子プロセス）、`os.Root` と `io/fs`（ファイル境界）、`net/url`・`net/netip`（URL/IP）、`encoding/json`・`encoding/json/v2`（構文・型境界）、`crypto/*`（暗号・乱数）、`slices`・`maps`・`iter`（collection）、構造化ログが必要な場合は `log/slog`。標準 API の採用は symlink/TOCTOU、ファイル権限、原子的更新、重複 JSON key の拒否、入力上限、origin/host pin、秘密の削除等の既存不変条件を代替しない。SDK や parser の既定動作が契約を満たさない場合は明示的な制約と検証を残す。既存の age、x/crypto、x/sys、x/term、Huh、Lip Gloss、Bubble Tea の正規責務を維持する。不要になった実装・依存を削除し、Tailscale 廃止の決定を変更しない。
+
+**不採用・保留:** [GoMock](https://github.com/uber-go/mock) v0.6.0 (Apache-2.0、Go 1.23+) は生成物管理と実 SDK の wire proof を代替しないことから当面保留。Testify の suite/mock、Ginkgo/Gomega、汎用 DI container、Viper、汎用 retry/logging/IaC framework は不要。Cobra v1.10.2 (Apache-2.0、Go 1.15+) と urfave/cli は既存 terminal UX の選定どおり現行の少数の command/flag に対する導入便益が小さく不採用。CLI の独立 command 階層が増加した場合に parser 選定を再評価する。明確な契約のない interface、汎用抽象化、パッケージ分割、wrapper を先行導入しない。
+
+テスト方法は [LINK: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-go-proof, Go test proof]、品質ルール・ツール実行と CI 認定は [LINK: DOC-VERIFICATION-CI-CD-go-quality-gate, Go quality gate]、実際の依存台帳は [LINK: DOC-ARCHITECTURE-DEPENDENCY-INVENTORY-go-quality-toolchain, Go 開発依存・ツール] に従う。
+<<<
 
 [[/SECTION]]
 

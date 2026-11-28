@@ -216,6 +216,40 @@ STATEMENT: >>>
 [[/SECTION]]
 
 [[SECTION]]
+MID: 9675618e2abd46318f1d75b4707a9935
+UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-go-proof
+TITLE: Go test proof — CodexiaCTL
+
+[TEXT]
+MID: c244689ea38d4ef3bc2a03ce53a6ea10e
+STATEMENT: >>>
+[LINK: DOC-ARCHITECTURE-DEPENDENCY-POLICY-go-engineering, Go 開発基盤の選定] に基づく `cmd/codexiactl` のテスト契約。既存の `testing`、`httptest`、PTY テストを保持し、採用ライブラリを理由とする全面書換えを行わない。移行は元の契約と反例の検出能力を維持・強化する単位で実施する。
+
+| 証明レイヤー | 正規の方法 | 証明する対象 |
+| --- | --- | --- |
+| Unit / table-driven subtests | `testing`、Testify、go-cmp | 入力検証、エラー分類、所望状態、認可・遷移、境界条件 |
+| 状態収束・協調 | 狭い interface の stateful fake、`testing/synctest` | 承認前の無変更、書込後の再観測、冪等性、部分失敗、競合、取消、期限 |
+| Provider API 境界 | `net/http/httptest` と実 Cloudflare/GitHub SDK | 実際の method/path/query/body/header、型と JSON、ページ処理、異常応答、認証隔離 |
+| CLI / host/process 統合 | 実バイナリ・子プロセス・既存 PTY fixture、`t.TempDir` / `testing/fstest` | 引数、出力、終了コード、ファイル・プロセス境界、TTY・signal・秘密保護 |
+| 実サービス受入 | 対象 owner が承認した実環境 | 実 grant、限定資格発行・登録・失効、実 SSH・Ansible・公開 gate・受入条件。fixture や CI の代替不可 |
+
+Testify は `require.NoError/ErrorIs/ErrorAs` 等を後続の検証に不可欠な前提に用い、`assert.Equal/Len/Empty` 等は独立した結果の診断に使う。`ErrorContains` は文言自体が外部契約の場合に限定し、通常は意味のある error class と副作用を検証する。`require` の Fatal/FailNow をテスト本体以外の goroutine（HTTP handler 等）から実行しない。handler は同期された観測結果又は error を本体へ渡す。`cmp.Diff(want, got)` は複雑な構造差分に用い、比較は秘密値を持たない意味モデル又は秘匿済み投影に限定する。秘密を assert/cmp の失敗出力へ混入させない。SDK の非公開 field を全面無視しない。順序を持つ Access policy、Tunnel ingress、状態遷移は順序込みで比較し、集合比較は意味上順序を持たない場合だけに用いる。Testify suite/mock と生成 Mock は標準としない。
+
+実 SDK を迂回する mock で HTTP 契約の証明を済ませない。Fake は consumer 側の最小 interface を実装し、実際に変化する状態を返す。計画や expected 値をテスト対象の同じ関数で生成しない。`t.Helper`、`t.Cleanup`、`t.Context`、`t.TempDir` を利用し、`t.Setenv`、cwd、端末や共有状態を変更するテストは安全に独立させる。無条件の `t.Parallel` 強制は禁止する。実行順序や retry を固定 sleep で仮定しない。`testing/synctest` の仮想時計と待機を Device Flow polling、期限、workflow polling、取消など in-process の閉じた並行処理に適用する。実ネットワーク・外部プロセスの完了は明示された通知・観測条件と context deadline を用い、synctest を実 I/O の証明に代用しない。fstest は fs.FS に対する純粋処理に用い、実ファイルの symlink・所有権・mode・排他・原子的置換は実一時ディレクトリで確認する。
+
+| 対象 | 必須の振る舞いと反例 |
+| --- | --- |
+| Provider 認証・通信 | 正しい要求と応答、不正 grant/target、401/403/404/429/5xx、不正・欠損・重複 JSON、過大応答、ページ境界・重複・打切り、redirect 先への資格転送拒否、ambient credential 非継承、context 取消 |
+| 資源の収束 | 新規と既存、ID/AUD 維持、完全一致時ゼロ書込、差分だけの変更、拒否/承認前ゼロ書込、共有資源・他用途の拒否、順序と閉鎖 gate、作成・応答喪失・部分失敗後の再観測と再開、二度目の実行のゼロ書込、無条件 retry 不在 |
+| GitHub・状態 | 別 repository/Environment/run/attempt/source の拒否、既存資格維持、sealed secret、承認拒否、二重 dispatch 回避、失効・中断復旧、機械出力の秘匿 |
+| CLI | 既存 command/flag と未知引数、0/1/2/3/130 の終了コード、read-only 操作、TTY/line mode、信号・EOF・端末復元、NO_COLOR・JSON・stdout/stderr 分離、制御文字と秘密の漏えい拒否 |
+
+Go 標準の fuzz test を入力境界へ導入する。外部 JSON・credential metadata、URL/hostname、SSH host key、checkpoint、CLI 引数を優先し、panic/無限処理を起こさず、契約外の入力を成功として扱わず、認可範囲を拡張しないことを oracle とする。既知の反例を deterministic seed/corpus として保持し、通常の `go test` で seed を実行する。追加探索は対象を明示し時間上限・CPU/メモリ制約を設け、実サービス・資格・配備操作を対象にしない。新しい常設 fuzz workflow は設けない。検出した failure corpus は秘匿情報を除き回帰テストに保持する。Race Detector は既存の実行対象で維持する。網羅率の数値目標や snapshot 一致のみを機能受入にしない。CI の配置・時間計測は [LINK: DOC-VERIFICATION-CI-CD-go-quality-gate, Go quality gate] を正本とする。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
 MID: 82d6c9df8abd8206a280d33e7f273e13
 UID: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-5-acceptance-and-evolution
 TITLE: 5. Acceptance and evolution
