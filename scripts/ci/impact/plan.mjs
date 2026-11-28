@@ -213,6 +213,8 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/deployment/preflight/preservation.mjs',
   'scripts/deployment/preflight/plan.mjs',
   'scripts/deployment/preflight/plan.test.mjs',
+  'scripts/deployment/ssh/cloudflared-proxy.sh',
+  'scripts/deployment/ssh/install-cloudflared.sh',
   'scripts/deployment/bootstrap/activate-backend.mjs',
   'scripts/deployment/bootstrap/activate-backend.test.mjs',
   'scripts/deployment/handoff/backend-contract.test.mjs',

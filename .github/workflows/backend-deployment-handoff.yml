@@ -208,17 +208,7 @@ jobs:
         run: node scripts/release/frontend/initial-publication.mjs observe-ingress
       - name: Install checksum-pinned cloudflared client
         if: steps.freshness.outputs.current == 'true'
-        shell: bash
-        env:
-          CLOUDFLARED_SHA256: 51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd
-        run: |
-          set -euo pipefail
-          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-            https://github.com/cloudflare/cloudflared/releases/download/2026.11.0/cloudflared-linux-amd64 \
-            --output "$RUNNER_TEMP/cloudflared"
-          printf '%s  %s\n' "$CLOUDFLARED_SHA256" "$RUNNER_TEMP/cloudflared" | sha256sum --check --status
-          chmod 0700 "$RUNNER_TEMP/cloudflared"
-          "$RUNNER_TEMP/cloudflared" version | grep -F '2026.11.0'
+        run: bash scripts/deployment/ssh/install-cloudflared.sh
       - name: Prepare pinned SSH identity
         id: target
         if: steps.freshness.outputs.current == 'true'
@@ -232,8 +222,8 @@ jobs:
       - name: Verify pinned public-key SSH as codexia
         if: steps.freshness.outputs.current == 'true'
         env:
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: ssh -F "$RUNNER_TEMP/codexia-ssh/config" codexia-target 'test "$(id -un)" = codexia'
       - name: Verify deployed frontend epoch and Access boundary for certified backend recovery
         if: steps.freshness.outputs.current == 'true'
@@ -306,8 +296,8 @@ jobs:
           CODEXIA_INITIAL_INSTALL_APPROVED: ${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED || 'false' }}
           CODEXIA_DATABASE_INITIALIZATION_APPROVED: ${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED || 'false' }}
           CODEXIA_DATABASE_ADOPTION_APPROVED: ${{ vars.CODEXIA_DATABASE_ADOPTION_APPROVED || 'false' }}
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'

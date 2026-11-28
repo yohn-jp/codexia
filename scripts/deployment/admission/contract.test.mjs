@@ -870,8 +870,8 @@ test('production lifecycle preflight establishes Cloudflare SSH only for main in
   assert.equal(ssh.run, 'bash deploy/ansible/prepare-deploy-ssh.sh');
   assert.ok(job.steps.some(step => step.name === 'Install checksum-pinned cloudflared client'));
   const access = job.steps.find(step => step.name === 'Verify independent bootstrap identity and noninteractive sudo');
-  assert.equal(access.env.CF_ACCESS_CLIENT_ID, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}');
-  assert.equal(access.env.CF_ACCESS_CLIENT_SECRET, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}');
+  assert.equal(access.env.TUNNEL_SERVICE_TOKEN_ID, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}');
+  assert.equal(access.env.TUNNEL_SERVICE_TOKEN_SECRET, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}');
 });
 
 test('the declared VM must resolve to a protected SSH pin in both diagnosis and deployment', t => {
@@ -912,9 +912,28 @@ test('the declared VM must resolve to a protected SSH pin in both diagnosis and 
   assert.equal(config.status, 0);
   for (const line of ['hostname ' + host, 'user codexia', 'stricthostkeychecking true', 'identitiesonly yes',
     'globalknownhostsfile /dev/null', 'userknownhostsfile ' + path.join(prepared.runner, 'codexia-ssh/known_hosts'),
-    'proxycommand test -n "$CF_ACCESS_CLIENT_ID" && test -n "$CF_ACCESS_CLIENT_SECRET" && BROWSER=/usr/bin/false "' + prepared.cloudflared + '" access ssh --hostname %h']) {
+    'proxycommand "' + new URL('../../../scripts/deployment/ssh/cloudflared-proxy.sh', import.meta.url).pathname + '" %h']) {
     assert.ok(config.stdout.split('\n').includes(line), line);
   }
+  const capture = path.join(prepared.runner, 'cloudflared-capture');
+  writeFileSync(prepared.cloudflared, [
+    '#!/bin/sh',
+    'printf "client_id=%s\\nclient_secret=%s\\nbrowser=%s\\nargs=%s\\n" "$TUNNEL_SERVICE_TOKEN_ID" "$TUNNEL_SERVICE_TOKEN_SECRET" "$BROWSER" "$*" > "$CLOUDFLARED_CAPTURE"',
+    'case "$*" in *"$TUNNEL_SERVICE_TOKEN_SECRET"*) printf "secret_in_argv=yes\\n" >> "$CLOUDFLARED_CAPTURE";; *) printf "secret_in_argv=no\\n" >> "$CLOUDFLARED_CAPTURE";; esac',
+    'exit 23',
+    '',
+  ].join('\n'), { mode: 0o700 });
+  const connection = spawnSync('ssh', ['-F', path.join(prepared.runner, 'codexia-ssh/config'), 'codexia-target', 'true'], {
+    encoding: 'utf8', env: {
+      ...process.env, RUNNER_TEMP: prepared.runner,
+      TUNNEL_SERVICE_TOKEN_ID: 'fixture-service-id',
+      TUNNEL_SERVICE_TOKEN_SECRET: 'fixture-service-secret', CLOUDFLARED_CAPTURE: capture,
+    },
+  });
+  assert.notEqual(connection.status, 0, 'the fake connector exits before any network connection');
+  assert.equal(readFileSync(capture, 'utf8'),
+    'client_id=fixture-service-id\nclient_secret=fixture-service-secret\nbrowser=/usr/bin/false\n' +
+    'args=access ssh --hostname ' + host + '\nsecret_in_argv=no\n');
   assert.notEqual(prepare(pins, '').result.status, 0, 'host must be explicitly declared');
   assert.notEqual(prepare(pins, '192.0.2.1').result.status, 0, 'management transport must use a DNS name');
   assert.notEqual(prepare(pins, 'different.example.test').result.status, 0);

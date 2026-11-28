@@ -129,17 +129,7 @@ jobs:
       - name: Load reviewed production OAuth settings
         run: node scripts/deployment/bootstrap/public-env.mjs
       - name: Install checksum-pinned cloudflared client
-        shell: bash
-        env:
-          CLOUDFLARED_SHA256: 51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd
-        run: |
-          set -euo pipefail
-          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-            https://github.com/cloudflare/cloudflared/releases/download/2026.11.0/cloudflared-linux-amd64 \
-            --output "$RUNNER_TEMP/cloudflared"
-          printf '%s  %s\n' "$CLOUDFLARED_SHA256" "$RUNNER_TEMP/cloudflared" | sha256sum --check --status
-          chmod 0700 "$RUNNER_TEMP/cloudflared"
-          "$RUNNER_TEMP/cloudflared" version | grep -F '2026.11.0'
+        run: bash scripts/deployment/ssh/install-cloudflared.sh
       - name: Prepare runtime pinned SSH
         if: inputs.management == 'runtime'
         id: runtime
@@ -165,8 +155,8 @@ jobs:
         if: inputs.management == 'bootstrap'
         env:
           EXPECTED_USER: ${{ steps.bootstrap.outputs.user }}
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           actual=$(ssh -F "$RUNNER_TEMP/codexia-ssh/config" codexia-target 'id -un')
@@ -192,8 +182,8 @@ jobs:
         env:
           CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.runtime.outputs.host || steps.bootstrap.outputs.host }}
           CODEXIA_PREFLIGHT_INTENT: ${{ inputs.intent }}
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: node scripts/deployment/preflight/run.mjs host
       - uses: actions/upload-artifact@v7.0.2
         with:

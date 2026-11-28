@@ -61,6 +61,9 @@ printf '%s\n' "${CODEXIA_DEPLOY_SSH_PRIVATE_KEY:?Missing deployment SSH identity
 ssh-keygen -y -P '' -f "$key" >/dev/null
 cloudflared="$RUNNER_TEMP/cloudflared"
 [[ -x "$cloudflared" ]] || { echo 'The pinned cloudflared client is missing.' >&2; exit 1; }
+repository_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+proxy="$repository_root/scripts/deployment/ssh/cloudflared-proxy.sh"
+[[ -x "$proxy" && ! -L "$proxy" ]] || { echo 'The reviewed Cloudflare SSH launcher is missing.' >&2; exit 1; }
 cat > "$directory/config" <<CONFIG
 Host codexia-target
     HostName $host
@@ -73,6 +76,6 @@ Host codexia-target
     UserKnownHostsFile "$pins"
     GlobalKnownHostsFile /dev/null
 CONFIG
-printf '    ProxyCommand test -n "$CF_ACCESS_CLIENT_ID" && test -n "$CF_ACCESS_CLIENT_SECRET" && BROWSER=/usr/bin/false "%s" access ssh --hostname %%h\n' "$cloudflared" >> "$directory/config"
+printf '    ProxyCommand "%s" %%h\n' "$proxy" >> "$directory/config"
 printf 'host=%s\n' "$host" >> "${GITHUB_OUTPUT:?}"
 if [[ "$user" != codexia ]]; then printf 'user=%s\n' "$user" >> "$GITHUB_OUTPUT"; fi

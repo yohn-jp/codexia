@@ -739,6 +739,8 @@ test('known operational inputs retain root proof and trace evidence for register
     'deploy/systemd/codexia-api.socket',
     'deploy/systemd/codexia-api-gate.service',
     'cmd/codexiactl/assets/codexia-cloudflared.service',
+    'scripts/deployment/ssh/cloudflared-proxy.sh',
+    'scripts/deployment/ssh/install-cloudflared.sh',
   ]) assert.ok(OPERATIONAL_ROOT_PATHS.includes(file), file);
   assert.ok(OPERATIONAL_ROOT_PATHS.includes('deploy/ansible/prepare-api-gate.yml'));
   for (const file of OPERATIONAL_ROOT_PATHS) {

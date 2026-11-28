@@ -138,32 +138,16 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: '24.22.3'
-      - name: Load reviewed production OAuth settings
-        run: node scripts/deployment/bootstrap/public-env.mjs
-      - name: Install checksum-pinned cloudflared client
-        shell: bash
+      - name: Load the existing protected runtime SSH private key
         env:
-          CLOUDFLARED_SHA256: 51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd
+          CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-            https://github.com/cloudflare/cloudflared/releases/download/2026.11.0/cloudflared-linux-amd64 \
-            --output "$RUNNER_TEMP/cloudflared"
-          printf '%s  %s\n' "$CLOUDFLARED_SHA256" "$RUNNER_TEMP/cloudflared" | sha256sum --check --status
-          chmod 0700 "$RUNNER_TEMP/cloudflared"
-          "$RUNNER_TEMP/cloudflared" version | grep -F '2026.11.0'
-      - name: Prepare existing protected runtime SSH identity
-        id: runtime
-        env:
-          CODEXIA_DEPLOY_HOST: ${{ vars.CODEXIA_DEPLOY_HOST }}
-          CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
-          CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}
-          CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET: ${{ vars.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET }}
-          CODEXIA_MANAGEMENT_HOSTNAME: ${{ env.CODEXIA_MANAGEMENT_HOSTNAME }}
-        run: bash deploy/ansible/prepare-deploy-ssh.sh
+          umask 077
+          directory="$RUNNER_TEMP/codexia-ssh"
+          mkdir -m 0700 "$directory"
+          printf '%s\n' "$CODEXIA_DEPLOY_SSH_PRIVATE_KEY" > "$directory/id_ed25519"
+          ssh-keygen -y -P '' -f "$directory/id_ed25519" >/dev/null
       - name: Export only the public half of the existing runtime credential
         id: public-key
         run: |
@@ -263,17 +247,7 @@ jobs:
           bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt
           echo "$RUNNER_TEMP/codexia-ansible/bin" >> "$GITHUB_PATH"
       - name: Install checksum-pinned cloudflared client
-        shell: bash
-        env:
-          CLOUDFLARED_SHA256: 51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd
-        run: |
-          set -euo pipefail
-          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-            https://github.com/cloudflare/cloudflared/releases/download/2026.11.0/cloudflared-linux-amd64 \
-            --output "$RUNNER_TEMP/cloudflared"
-          printf '%s  %s\n' "$CLOUDFLARED_SHA256" "$RUNNER_TEMP/cloudflared" | sha256sum --check --status
-          chmod 0700 "$RUNNER_TEMP/cloudflared"
-          "$RUNNER_TEMP/cloudflared" version | grep -F '2026.11.0'
+        run: bash scripts/deployment/ssh/install-cloudflared.sh
       - name: Prepare private inventory, exact secret inputs, pinned SSH identity, and run-scoped approvals
         id: control
         env:
@@ -293,8 +267,8 @@ jobs:
         env:
           CONTROL_SSH_CONFIG: ${{ steps.control.outputs.ssh_config }}
           EXPECTED_USER: ${{ steps.control.outputs.user }}
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           actual=$(ssh -F "$CONTROL_SSH_CONFIG" codexia-bootstrap-target 'id -un')
@@ -313,8 +287,8 @@ jobs:
         env:
           CODEXIA_PREFLIGHT_TARGET_HOST: ${{ steps.control.outputs.host }}
           ANSIBLE_HOST_KEY_CHECKING: 'True'
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: node scripts/deployment/preflight/run.mjs bootstrap-host
       - name: Bind runtime SSH acceptance to the observed VM
         if: inputs.mode != 'preflight'
@@ -346,8 +320,8 @@ jobs:
           CONTROL: ${{ steps.control.outputs.control }}
           OPERATION: ${{ inputs.mode }}
           ANSIBLE_HOST_KEY_CHECKING: 'True'
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
@@ -404,17 +378,7 @@ jobs:
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = "$GITHUB_SHA"
           bash scripts/shared/python-env.sh create python3 "$RUNNER_TEMP/codexia-ansible" -r deploy/ansible/requirements.txt
       - name: Install checksum-pinned cloudflared client
-        shell: bash
-        env:
-          CLOUDFLARED_SHA256: 51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd
-        run: |
-          set -euo pipefail
-          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-            https://github.com/cloudflare/cloudflared/releases/download/2026.11.0/cloudflared-linux-amd64 \
-            --output "$RUNNER_TEMP/cloudflared"
-          printf '%s  %s\n' "$CLOUDFLARED_SHA256" "$RUNNER_TEMP/cloudflared" | sha256sum --check --status
-          chmod 0700 "$RUNNER_TEMP/cloudflared"
-          "$RUNNER_TEMP/cloudflared" version | grep -F '2026.11.0'
+        run: bash scripts/deployment/ssh/install-cloudflared.sh
       - name: Prepare existing protected runtime SSH identity
         id: runtime
         env:
@@ -428,8 +392,8 @@ jobs:
         if: inputs.mode == 'bootstrap'
         env:
           EXPECTED_HOST_ID: ${{ needs.bootstrap.outputs.host-id }}
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           [[ "$EXPECTED_HOST_ID" =~ ^[a-f0-9]{64}$ ]]
@@ -445,8 +409,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ANSIBLE_HOST_KEY_CHECKING: 'True'
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           umask 077

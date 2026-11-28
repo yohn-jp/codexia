@@ -58,13 +58,16 @@ test('handoff consumer verifies successful same-repository main publication befo
   const ssh = deploy.steps.find(step => step.name === 'Prepare pinned SSH identity');
   assert.equal(ssh.env.CODEXIA_MANAGEMENT_HOSTNAME, '${{ env.CODEXIA_MANAGEMENT_HOSTNAME }}');
   const connection = deploy.steps.find(step => step.name === 'Verify pinned public-key SSH as codexia');
-  assert.equal(connection.env.CF_ACCESS_CLIENT_ID, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}');
-  assert.equal(connection.env.CF_ACCESS_CLIENT_SECRET, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}');
-  assert.equal(converge.env.CF_ACCESS_CLIENT_ID, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}');
-  assert.equal(converge.env.CF_ACCESS_CLIENT_SECRET, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}');
+  assert.equal(connection.env.TUNNEL_SERVICE_TOKEN_ID, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}');
+  assert.equal(connection.env.TUNNEL_SERVICE_TOKEN_SECRET, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}');
+  assert.equal(converge.env.TUNNEL_SERVICE_TOKEN_ID, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_ID }}');
+  assert.equal(converge.env.TUNNEL_SERVICE_TOKEN_SECRET, '${{ secrets.CODEXIA_SSH_ACCESS_CLIENT_SECRET }}');
   const cloudflared = deploy.steps.find(step => step.name === 'Install checksum-pinned cloudflared client');
-  assert.ok(cloudflared.run.includes('cloudflared/releases/download/2026.11.0/cloudflared-linux-amd64'));
-  assert.equal(cloudflared.env.CLOUDFLARED_SHA256, '51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd');
+  assert.equal(cloudflared.run, 'bash scripts/deployment/ssh/install-cloudflared.sh');
+  const installer = readFileSync(new URL('../../../scripts/deployment/ssh/install-cloudflared.sh', import.meta.url), 'utf8');
+  assert.match(installer, /readonly version=2026\.11\.0/u);
+  assert.match(installer, /readonly digest=51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd/u);
+  assert.match(installer, /cloudflare\/cloudflared\/releases\/download\/\$version\/cloudflared-linux-amd64/u);
   assert.equal(converge.env.CODEXIA_VERIFIED_MAIN_SHA, verifiedSource);
   assert.doesNotMatch(deploy.if, /CODEXIA_PUSH_DEPLOYMENT_ENABLED/u,
     'Environment-scoped variables must not be evaluated before Environment attachment');
