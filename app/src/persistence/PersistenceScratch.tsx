@@ -224,6 +224,7 @@ export function PersistenceScratch({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const pendingRead = useRef<Promise<void>>(Promise.resolve());
+  const pendingAttachments = useRef(0);
   const saveTail = useRef<Promise<void>>(Promise.resolve());
   const protectedScratch = useRef<ProtectedScratch | null>(null);
   const path = `scratch/${documentId}`;
@@ -234,7 +235,7 @@ export function PersistenceScratch({
   function hasUnprotectedInput(): boolean {
     const current = draftRef.current;
     const known = protectedScratch.current;
-    return Boolean(known && current.generation > known.generation);
+    return pendingAttachments.current > 0 || Boolean(known && current.generation > known.generation);
   }
   async function protect(): Promise<void> {
     let read = pendingRead.current;
@@ -315,6 +316,8 @@ export function PersistenceScratch({
     if (!loading && draft.generation > 0) void protectRef.current().catch(() => {});
   }, [draft.generation, loading]);
   async function attach(files: File[]) {
+    if (!files.length) return;
+    pendingAttachments.current += 1;
     setAttachmentError('');
     const task = pendingRead.current.then(async () => {
       let total = draftRef.current.images.reduce((sum, item) => sum + item.data.length * 0.75, 0);
@@ -348,6 +351,8 @@ export function PersistenceScratch({
     } catch (cause) {
       if (pendingRead.current === settled) setAttachmentError(cause instanceof Error ? cause.message : '画像を読み込めませんでした。');
       return;
+    } finally {
+      pendingAttachments.current -= 1;
     }
     await protectRef.current().catch(() => {});
   }
