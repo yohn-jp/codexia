@@ -123,6 +123,24 @@ test('rejects sitemap drift, invalid origins, missing internal links and hash ta
   } finally { cleanup(site); }
 });
 
+test('resolves quoted id and name fragments per file and per verification', () => {
+  const site = fixture();
+  try {
+    generate(site, sha, origin);
+    const links = join(site, 'links.html');
+    const target = join(site, 'targets.html');
+    put(links, '<a href="targets.html#%E7%AB%A0.%2B">id</a><a href="targets.html#legacy">name</a><a href="targets.html#nested">nested</a>');
+    put(target, `<h2 id = "章.+"></h2><a name='legacy'></a><div id="text name='nested'"></div>`);
+    verify(site, origin);
+
+    put(join(site, 'other.html'), '<h2 id="章.+"></h2>');
+    put(target, `<a name='legacy'></a><a name='nested'></a>`);
+    assert.throws(() => verify(site, origin), /fragment target is missing/u);
+  } finally {
+    cleanup(site);
+  }
+});
+
 test('rejects top-level snapshot registry mismatch and undeclared SHA files or directories',()=>{
   const site=fixture();
   try {
