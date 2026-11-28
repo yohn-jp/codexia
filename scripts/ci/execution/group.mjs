@@ -11,7 +11,7 @@ import { stageCertificationReceipt } from '../evidence/stage-receipt.mjs';
 import { withBrowserFixture } from '../browser/fixture.mjs';
 import { assertTaskProducerInventory, sanitizeProducerArguments, selectEquivalentTaskProofs } from '../evidence/input-proof.mjs';
 import { captureCoverageInputClosure, coverageInputProof, coverageInvocation, coverageRuntime } from '../evidence/coverage-inputs.mjs';
-import { captureTaskInputSource, taskInputProof, taskInvocation } from '../evidence/task-inputs.mjs';
+import { captureTaskInputSource, isReadOnlyMergedTask, taskInputProof, taskInvocation } from '../evidence/task-inputs.mjs';
 
 const group = process.argv[2];
 const plan = validateVerificationPlan(JSON.parse(readFileSync(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -94,7 +94,26 @@ async function executeTaskInContext(task, index, scope) {
   let blocked = Boolean(error || (task === 'audit-core' && completed.get('build-core')?.status !== 'passed' && tasks.includes('build-core')));
   if (blocked && !error) error = 'Core build prerequisite failed';
   let inputProof;
-  if (!blocked) {
+  const previous = plan.mergedTaskReuse?.proofs.find(proof => proof.task === task);
+  if (!blocked && previous && process.env.GITHUB_ACTIONS === 'true') {
+    try {
+      const tree = execFileSync('git', ['-c', `safe.directory=${process.cwd()}`, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
+      if (tree === plan.mergedTaskReuse.receipt.tree && isReadOnlyMergedTask(process.cwd(), sha, task)) {
+        const runtime = coverageRuntime();
+        taskProofClosureFor ??= captureTaskInputSource({ root: process.cwd(), sha, runtime });
+        const closure = taskProofClosureFor(task, taskInvocation(task, runtime.execPath));
+        if (Object.keys(closure).every(key => closure[key] === previous.inputClosure[key])) {
+          inputProof = taskInputProof({ task, closure, sourceSha: sha, planDigest: planDigest(plan),
+            workflowRunId: Number(process.env.GITHUB_RUN_ID), workflowAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+            workflowJob: process.env.GITHUB_JOB, runtime, reusedFrom: previous });
+          console.log('Reused independently certified PR task: ' + task);
+        }
+      }
+    } catch (caught) {
+      console.log('Merged task proof unavailable; executing ' + task + ': ' + String(caught).replace(/[\r\n]+/gu, ' | '));
+    }
+  }
+  if (!blocked && !inputProof) {
     try {
       if (task === 'biome-ci') await run(process.execPath, ['scripts/ci/biome/check.mjs'], { CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
       else if (task === 'swift-linux' || task === 'codexiactl-linux') {
@@ -186,7 +205,7 @@ async function executeTaskInContext(task, index, scope) {
       invocation: coverageInvocation(runtime.execPath), workflowJob });
     inputProof = coverageInputProof({ closure, sourceSha: sha, planDigest: planDigest(plan), workflowRunId, workflowAttempt, workflowJob, runtime });
   }
-  if (task !== 'coverage' && !blocked && !error && process.env.GITHUB_RUN_ID !== undefined) {
+  if (task !== 'coverage' && !blocked && !error && !inputProof && process.env.GITHUB_RUN_ID !== undefined) {
     const workflowRunId = Number(process.env.GITHUB_RUN_ID);
     const workflowAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
     const workflowJob = process.env.GITHUB_JOB;

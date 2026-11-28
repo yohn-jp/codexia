@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { mergeCandidate, assertCandidatePlan, assertCompactNeeds, readReusableMainEvidence, verifyReusableMainProof, verifyReusableDedicatedProof, DEDICATED_PROOFS } from './reuse-merged-pr.mjs';
+import { mergeCandidate, assertCandidatePlan, assertCompactNeeds, readReusableMainEvidence, selectMergedTaskReuse, verifyReusableMainProof, verifyReusableDedicatedProof, DEDICATED_PROOFS } from './reuse-merged-pr.mjs';
 import { createVerificationPlan, planDigest } from '../impact/plan.mjs';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from '../impact/contract.mjs';
 
@@ -312,4 +312,13 @@ test('push backup reuse requires exact pre-merge lock and recovery proof', async
   job.completed_at = end;
   state.prRun.conclusion = 'failure';
   await assert.rejects(verifyReusableDedicatedProof(args), /not successful/);
+});
+
+// Affected evidence may be inspected for task candidates but can never certify
+// the complete main graph or turn absent execution receipts into successful tasks.
+test('affected PR without original task receipts falls back to main execution', () => {
+  const evidence = { receipt: { sourceSha: 'a'.repeat(40) }, plan: { mode: 'affected' },
+    jobs: [{ name: 'types-sources', conclusion: 'success', run_attempt: 1 }],
+    reports: [{ group: 'types-sources', workflowRunId: 1, workflowAttempt: 1, results: [] }] };
+  assert.equal(selectMergedTaskReuse(evidence, () => true), undefined);
 });

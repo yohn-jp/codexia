@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { CONFORMANCE_TASKS, VERIFICATION_GROUPS, WORKSPACES, requiredBuildProfile, isFastifyGenerationInput, isOpenApiGenerationInput } from '../impact/contract.mjs';
+import { CONFORMANCE_TASKS, VERIFICATION_GROUPS, WORKSPACES, TYPECHECK_TARGETS, requiredBuildProfile, isFastifyGenerationInput, isOpenApiGenerationInput } from '../impact/contract.mjs';
 import { createWorkspaceGraph } from '../impact/workspace-graph.mjs';
 import { browserRuntimeRequirements } from '../browser/image-digests.mjs';
 import { THREAGILE_IMAGE } from '../../architecture/constants.mjs';
@@ -333,6 +333,24 @@ export function captureTaskInputSource({ root, sha, runtime }) {
       producers: sha256({ ...taskProducerRecipe(task, swiftToolchain, goVersion), ...(workspaceInputs ? { workspaceInputs } : {}) }),
     };
   };
+}
+
+/** Only read-only validation can omit execution. Generated/build outputs stay local to main. */
+export function isReadOnlyMergedTask(root, sha, task) {
+  if (task === 'test-types-modules') return true;
+  if (!task.startsWith('typecheck-')) return false;
+  const target = TYPECHECK_TARGETS.find(item => `typecheck-${item.id}` === task);
+  if (!target) return false;
+  return target.workspaces.every(id => {
+    const workspace = WORKSPACES.find(item => item.id === id);
+    if (!workspace) return false;
+    const manifest = JSON.parse(readGit(root, 'show', sha + ':' + workspace.path + '/package.json'));
+    const scripts = manifest.scripts ?? {};
+    // Admit the existing plain no-emit TypeScript commands, not arbitrary shell
+    // programs, lifecycle hooks, generators or build fallbacks.
+    return !scripts.pretypecheck && !scripts.posttypecheck &&
+      /^tsc(?: -p tsconfig\.json)? --noEmit$/u.test(scripts.typecheck ?? '');
+  });
 }
 
 export function taskInputProof({ task, closure, sourceSha, planDigest, workflowRunId, workflowAttempt, workflowJob, runtime, reusedFrom }) {
