@@ -56,6 +56,7 @@ type cloudflareTarget struct {
 }
 
 type cloudflareAPI struct {
+	resourceClient *cloudflare.Client
 	zones         *zones.ZoneService
 	dns           *dns.RecordService
 	workers       *workers.WorkerService
@@ -93,6 +94,7 @@ func newCloudflareAPI(secret []byte, baseURL string) cloudflareAPI {
 	opts := []option.RequestOption{option.WithBaseURL(baseURL), option.WithHTTPClient(client),
 		option.WithAPIToken(string(secret)), option.WithMiddleware(checkCloudflareResponse)}
 	return cloudflareAPI{
+		resourceClient: &cloudflare.Client{Options: opts},
 		zones: zones.NewZoneService(opts...), dns: dns.NewRecordService(opts...), workers: workers.NewWorkerService(opts...),
 		tunnels: zero_trust.NewTunnelCloudflaredService(opts...), access: zero_trust.NewAccessService(opts...),
 		accountTokens: accounts.NewTokenService(opts...), userTokens: user.NewTokenService(opts...), baseURL: baseURL,
@@ -352,7 +354,7 @@ func (api cloudflareAPI) checkWorker(ctx context.Context, host string, target cl
 }
 
 func cloudflareDrift(reason string) error {
-	return refused("Cloudflare " + reason + ". Reconcile using the existing Terraform workspace or account-owned Access policy, then observe again")
+	return refused("Cloudflare " + reason + ". Reconcile the Codexia-owned edge through the approved CTL operation or the account-owned Access policy, then observe again")
 }
 
 func validateProtectedCloudflareTarget(snapshot githubSnapshot, repo githubTarget, origin string) error {
