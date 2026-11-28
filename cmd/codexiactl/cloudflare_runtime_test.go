@@ -37,7 +37,9 @@ func TestPinnedCloudflareRuntimeAssetsAndScopes(t *testing.T) {
 		t.Fatal("Cloudflare scope validation accepted a duplicate or unsupported scope")
 	}
 	if !cfGrantedScopesContain([]byte("account:read\nzone:read\n"), []string{"account:read", "zone:read"}) ||
-		cfGrantedScopesContain([]byte("account:read\n"), []string{"account:read", "zone:read"}) {
+		cfGrantedScopesContain([]byte("account:read\n"), []string{"account:read", "zone:read"}) ||
+		cfGrantedScopesContain([]byte("xaccount:read\n"), []string{"account:read"}) ||
+		cfGrantedScopesContain([]byte("account:readonly\n"), []string{"account:read"}) {
 		t.Fatal("Cloudflare grant scope verification did not fail closed")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -23,6 +24,8 @@ var cfReadScopes = []string{
 	"access-app.read", "access-policy.read", "access-service-token.read", "account:read", "argotunnel.read",
 	"dns_records:read", "workers-routes.read", "workers-scripts.read", "zone:read",
 }
+
+var cfScopeToken = regexp.MustCompile(`(?m)(?:^|[^A-Za-z0-9_-])([A-Za-z0-9_-]+(?::|\.)[A-Za-z0-9_-]+)(?:$|[^A-Za-z0-9_-])`)
 
 type cfDeviceRequirements struct {
 	accountTokenCreate bool
@@ -132,9 +135,14 @@ func cfScopeSetAllowed(scopes []string) bool {
 }
 
 func cfGrantedScopesContain(output []byte, requested []string) bool {
-	text := string(output)
+	granted := make(map[string]bool)
+	for _, match := range cfScopeToken.FindAllSubmatch(output, -1) {
+		if len(match) == 2 {
+			granted[string(match[1])] = true
+		}
+	}
 	for _, scope := range requested {
-		if !strings.Contains(text, scope) {
+		if !granted[scope] {
 			return false
 		}
 	}
