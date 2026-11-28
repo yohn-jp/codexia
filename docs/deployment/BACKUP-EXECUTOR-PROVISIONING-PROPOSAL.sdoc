@@ -1,15 +1,43 @@
-# Backup Console executor provisioning and recovery
+[DOCUMENT]
+MID: 0c9f0b67753eb57e6b371b996c381f6f
+TITLE: Backup Console executor provisioning and recovery
+UID: DOC-DEPLOYMENT-BACKUP-EXECUTOR-PROVISIONING-PROPOSAL
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
 
-**Status. Accepted design decision.** The [Backup Console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md) owns executor provisioning and recovery. This document records the accepted topology trial, implementation rationale and evidence criteria for deployment and recovery operators.
-It covers the existing v2 executor under the approved lifecycle and Ansible delivery path. The [Backup contract](BACKUP.md) owns the backup format and operational targets.
-[Backup Console contract](../architecture/BACKUP-CONSOLE-CONTRACT.md) · [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) · [IaC](IAC.md)
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
 
-## Provisioning boundary
+[TEXT]
+MID: 8092839b3fb9bb37d767bd5b0c0873f0
+STATEMENT: >>>
+**Status. Accepted design decision.** The [LINK: DOC-ARCHITECTURE-BACKUP-CONSOLE-CONTRACT, Backup Console contract] owns executor provisioning and recovery. This document records the accepted topology trial, implementation rationale and evidence criteria for deployment and recovery operators.
+It covers the existing v2 executor under the approved lifecycle and Ansible delivery path. The [LINK: DOC-DEPLOYMENT-BACKUP, Backup contract] owns the backup format and operational targets.
+[LINK: DOC-ARCHITECTURE-BACKUP-CONSOLE-CONTRACT, Backup Console contract] · [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, Deployment lifecycle] · [LINK: DOC-DEPLOYMENT-IAC, IaC]
+<<<
 
-The protected Ansible `base` operation provisions the VM runtime after ACTIVE. It takes executor code from the admitted Full image, installs the SDK adapter and binds a restricted API login and public policy to the API. Both the worker and R8 use the installed launcher. [Operator procedure](../../deploy/backup/CONSOLE.md)
+[[SECTION]]
+MID: c4ef1e126ace628772f31b524d98ddd5
+UID: DOC-DEPLOYMENT-BACKUP-EXECUTOR-PROVISIONING-PROPOSAL-provisioning-boundary
+TITLE: Provisioning boundary
 
-## PostgreSQL access for the host executor
+[TEXT]
+MID: 3f9d5ecfb7ddc04cc4ec10e5ea828a94
+STATEMENT: >>>
+The protected Ansible `base` operation provisions the VM runtime after ACTIVE. It takes executor code from the admitted Full image, installs the SDK adapter and binds a restricted API login and public policy to the API. Both the worker and R8 use the installed launcher. [LINK: DOC-DEPLOYMENT-BACKUP-CONSOLE-OPERATIONS, Operator procedure]
+<<<
 
+[[/SECTION]]
+
+[[SECTION]]
+MID: 3d54d962a458e5dff21c2b0f0d782d51
+UID: DOC-DEPLOYMENT-BACKUP-EXECUTOR-PROVISIONING-PROPOSAL-postgresql-access-for-the-host-executor
+TITLE: PostgreSQL access for the host executor
+
+[TEXT]
+MID: 7139b1ccbeb7b7ba6120a06f1345046f
+STATEMENT: >>>
 | Option | Fit | Verification needed |
 | --- | --- | --- |
 | **Use a PostgreSQL Unix socket in a private shared directory** | Keeps the executor and lock on the VM and preserves the isolated data network. The API can keep its existing container-network connection. | Confirm rootless UID mapping and access after reboot. Shared socket authentication must enforce SCRAM for the dedicated executor login and prevent unauthenticated access to any other login. PostgreSQL local HBA rules cover all Unix sockets, so verify the existing database bootstrap, backup and recovery commands with the resulting rules. |
@@ -21,9 +49,18 @@ Compare a private authenticated Unix socket first on a disposable rootless host.
 Use the existing Node `pg` driver for the socket connection, the existing TCP route for the API container, and an Ansible-owned directory exposed only to PostgreSQL and the host runtime.
 Have PostgreSQL apply effective SCRAM authentication to reachable local sessions and reject logins outside the approved boundary. Because PostgreSQL uses the same local HBA rules for every socket, test existing in-container admin commands with their protected credentials and verify that sharing a socket exposes no local `trust` rule.
 The approved order is to validate the private socket first. Verify the effective UID mapping, socket access, login permissions and restart behavior before activating it. Compare loopback-only TCP under the same permission tests only if the socket fails those conditions. PostgreSQL stays inaccessible from outside the VM. [PostgreSQL socket settings](https://www.postgresql.org/docs/17/runtime-config-connection.html) · [PostgreSQL HBA rules](https://www.postgresql.org/docs/17/auth-pg-hba-conf.html) · [PostgreSQL password authentication](https://www.postgresql.org/docs/17/auth-password.html) · [Podman rootless network namespace](https://docs.podman.io/en/latest/markdown/podman-unshare.1.html)
+<<<
 
-## Provisioning with the existing deployment authority
+[[/SECTION]]
 
+[[SECTION]]
+MID: ab7492bf5d823f1939fe093407cd5005
+UID: DOC-DEPLOYMENT-BACKUP-EXECUTOR-PROVISIONING-PROPOSAL-provisioning-with-the-existing-deployment-authority
+TITLE: Provisioning with the existing deployment authority
+
+[TEXT]
+MID: a73b425d5ab00d9f0c6c15be02e80cec
+STATEMENT: >>>
 | Responsibility | Authority and access |
 | --- | --- |
 | Install or adopt the runtime | Existing protected Ansible uses the certified Full image digest as the source of the executor and Node dependencies. It installs a verified private host release and atomically selects the active version. The deployment operator enables the existing launcher as a systemd user service; R8 invokes its fixed deploy operation under the same host lock. |
@@ -32,18 +69,27 @@ The approved order is to validate the private socket first. Verify the effective
 | Execute accepted work | The existing VM-local runtime receives the executor DSN, sealing private key, approved provider credentials, protected paths and read-only policy. Both its long-lived service and the protected R8 command run as the existing rootless service identity with the same journal and lock. The API container gets no host socket, VM state directory, private-key mount, or host process control. |
 | Recover keys and records | The recovery operator keeps the necessary sealing keys and runtime secrets in independent protected custody. Backup age decryption keys and recovery-provider read access stay with the recovery operator, outside the writer runtime. |
 
-[Operator settings](../../deploy/backup/CONSOLE.md) · [Role grants](../../deploy/backup/operational-schema.sql) · [Role verification](../../deploy/backup/verify-console-roles.sql) · [Full image build](../../Dockerfile.backend)
+[LINK: DOC-DEPLOYMENT-BACKUP-CONSOLE-OPERATIONS, Operator settings] · [Role grants](https://github.com/yohn-jp/codexia/blob/main/deploy/backup/operational-schema.sql) · [Role verification](https://github.com/yohn-jp/codexia/blob/main/deploy/backup/verify-console-roles.sql) · [Full image build](https://github.com/yohn-jp/codexia/blob/main/Dockerfile.backend)
 
 For a new VM, existing Ansible may prepare the local role, schema and runtime with backup jobs disabled. R4–R6 admission must work with no provider setup, age recipient or independent restore receipt. The deployment operator enables the runtime through the existing protected VM controls once local configuration is verified. After ACTIVE the owner selects the destination in Console, and the recovery operator verifies restore before routine production acceptance and R8 writer changes.
 For an existing ACTIVE installation, use existing protected maintenance to add the runtime with the same image, ledger and owner. A needed API restart uses the existing host lock. Adopt the existing keys, roles, settings and queue records in place. Provisioning reruns preserve them or stop on an unexplained mismatch.
-[Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md) · [Update flow](UPDATE-FLOW.md)
+[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, Deployment lifecycle] · [LINK: DOC-DEPLOYMENT-UPDATE-FLOW, Update flow]
 
 systemd supervises the one service. The existing executor remains the owner of approved schedule windows and operation claims in PostgreSQL. For R8, the protected deployment command asks that same runtime to use the admitted Console revision and verifies the off-VM result.
 Once shared provisioning and R8 admission are accepted, retire the duplicate manual install and Actions-supplied backup settings for that path. Keep the existing producer, independent evidence and restore access for retained v2 backups.
+<<<
 
-## Restore before the executor resumes
+[[/SECTION]]
 
-The current v2 dump includes the operational schema when it exists. Because the producer takes the snapshot before publishing the remote receipt, the selected snapshot may contain its own RUNNING row without that receipt. The durable in-flight index prevents a new run while such a row is unresolved. The VM-local transaction records that would ordinarily guide reconciliation may have been lost with the VM. Remote preservation and successful restore are evidenced separately. [Backup producer](../../deploy/backup/backup.sh) · [Operational schema](../../deploy/backup/operational-schema.sql) · [Executor startup](../../packages/api/src/backup-console-executor.ts) · [Console control](../../packages/api/src/backup-console-control.ts)
+[[SECTION]]
+MID: 3c80bc0c190e58c3a41b0ef909537f53
+UID: DOC-DEPLOYMENT-BACKUP-EXECUTOR-PROVISIONING-PROPOSAL-restore-before-the-executor-resumes
+TITLE: Restore before the executor resumes
+
+[TEXT]
+MID: bac9a962762904029502c15c1c9fbe9d
+STATEMENT: >>>
+The current v2 dump includes the operational schema when it exists. Because the producer takes the snapshot before publishing the remote receipt, the selected snapshot may contain its own RUNNING row without that receipt. The durable in-flight index prevents a new run while such a row is unresolved. The VM-local transaction records that would ordinarily guide reconciliation may have been lost with the VM. Remote preservation and successful restore are evidenced separately. [Backup producer](https://github.com/yohn-jp/codexia/blob/main/deploy/backup/backup.sh) · [Operational schema](https://github.com/yohn-jp/codexia/blob/main/deploy/backup/operational-schema.sql) · [Executor startup](https://github.com/yohn-jp/codexia/blob/main/packages/api/src/backup-console-executor.ts) · [Console control](https://github.com/yohn-jp/codexia/blob/main/packages/api/src/backup-console-control.ts)
 
 Keep the target executor stopped throughout independent restore and database verification. Before production restart, the deployment operator confirms that the original executor is stopped or fenced from the destination, including in a source-VM return. The recovery operator provides the selected backup identity and independently held transfer receipt for reconciliation. Use the protected operation under the existing host lock and the current PostgreSQL run journal.
 
@@ -55,12 +101,24 @@ Keep the target executor stopped throughout independent restore and database ver
 | Queued or in-flight probe, activate or disable | Block replay. Require a fresh Console request against the verified settings; unresolved external impact must be investigated before restarting the executor. |
 
 The operator records each disposition with the existing run or operation ID and the digest of its evidence under the same protected mutation authority. For a required destination, revalidate the current policy, revision, key and provider access before enabling jobs. Missing or conflicting evidence keeps the target worker stopped. The same restored row cannot authorize a second producer or upload. Recovery handoff approval uses independently verified material under the lifecycle contract.
-[Backup and recovery](BACKUP.md) · [Deployment lifecycle](DEPLOYMENT-LIFECYCLE.md)
+[LINK: DOC-DEPLOYMENT-BACKUP, Backup and recovery] · [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, Deployment lifecycle]
+<<<
 
-## Acceptance for provisioning and recovery
+[[/SECTION]]
 
+[[SECTION]]
+MID: d99d79832e5e1f9d419856da88077e12
+UID: DOC-DEPLOYMENT-BACKUP-EXECUTOR-PROVISIONING-PROPOSAL-acceptance-for-provisioning-and-recovery
+TITLE: Acceptance for provisioning and recovery
+
+[TEXT]
+MID: 010203f43c50061e94dd8e2134b24475
+STATEMENT: >>>
 - A fresh install reaches ACTIVE and the owner can reach its normal Console before any provider credential, public age recipient or independent restore evidence is available. The operator provisions the backup runtime on a disposable new VM and an existing ACTIVE VM. Reapply provisioning and compare data, roles, keys and all pre-existing activity.
 - Verify the PostgreSQL endpoint from the selected worker boundary using the actual Node driver and dedicated DSN. Deny unauthenticated local connections, unauthorized local UIDs, API-container access to the host socket and executor credentials, and connections from other hosts. Verify least-privilege grants, every existing administrative socket client, private key isolation, runtime provenance, restart and reboot.
 - Configure and activate a destination in the Console. Exercise manual execution and compatible update on the same VM runtime and lock. Verify off-VM readback, absent configuration and required-provider failure, and interrupted backup and rollout recovery.
 - Restore the selected backup on a separate disposable host with an independently obtained receipt and necessary secrets. Include a captured RUNNING deployment backup, a mismatched transfer receipt, a queued configuration operation, an expired scheduled slot and an attempt to resume the target while the old worker can still write. Prove the journal disposition with a restored PostgreSQL database, verify API readiness and confirm that a newly approved run completes through the same Console.
 - Record synthetic exact-source CI evidence separately from actual provider, VM and independent recovery acceptance.
+<<<
+
+[[/SECTION]]

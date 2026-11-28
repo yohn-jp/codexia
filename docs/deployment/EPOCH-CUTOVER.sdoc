@@ -1,0 +1,16 @@
+[DOCUMENT]
+MID: 8584cdb2aff8966666b6654abc604038
+TITLE: Retired coordinated epoch deployment
+UID: DOC-DEPLOYMENT-EPOCH-CUTOVER
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: e6e3b65bb986554d59491519df655a8f
+STATEMENT: >>>
+The coordinated Cutover execution path is retired. The normative [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, deployment lifecycle] requires R4/R5/R6 for an approved clean install, ordinary compatible R8 releases, and no mutation of an incompatible installed environment. This page is a retirement notice for existing inbound links, not an operational runbook. Do not dispatch the former coordinated workflow or clear old production state without the read-only retirement checks in the lifecycle contract. Use the ordinary [LINK: DOC-DEPLOYMENT-PUSH-DEPLOYMENT, push deployment] and [LINK: DOC-DEPLOYMENT-BACKUP, backup/restore] procedures. Historical operating details are available in Git history only.
+<<<

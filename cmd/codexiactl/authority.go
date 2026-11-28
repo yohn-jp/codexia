@@ -30,11 +30,18 @@ type cloudflareContract struct {
 	routes, identityProbes, protocolPaths []byte
 }
 
-// Check the workflows and the local control-plane code they execute. A fork
-// can change application code and the documented public production values
-// without changing the contract understood by the official CLI.
+// Check the CLI specification, the operational contracts, the workflows,
+// and the local control-plane code they execute. A fork can change application
+// code and the documented public production values without changing the
+// contract understood by the official CLI.
 var releaseContractPaths = []string{
-	"docs/deployment/CODEXIACTL.md",
+	"docs/deployment/CODEXIACTL.sdoc",
+	"docs/deployment/ANSIBLE-AUTH-RUNTIME.sdoc",
+	"docs/deployment/ANSIBLE-BASE-RUNTIME.sdoc",
+	"docs/deployment/ANSIBLE-BASE-SECRETS.sdoc",
+	"docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc",
+	"docs/deployment/BACKUP-CONSOLE-OPERATIONS.sdoc",
+	"docs/deployment/ACCESS-POLICY-MIGRATION.sdoc",
 	".github/workflows/production-bootstrap.yml",
 	".github/workflows/production-preflight.yml",
 	".github/workflows/frontend-release.yml",

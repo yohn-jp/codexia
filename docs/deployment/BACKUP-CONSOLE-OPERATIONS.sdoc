@@ -1,10 +1,29 @@
-# Backup console control plane
+[DOCUMENT]
+MID: fb58c7b4013e0c8f43f176926698cbe3
+TITLE: Backup console control plane
+UID: DOC-DEPLOYMENT-BACKUP-CONSOLE-OPERATIONS
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
 
-BKC-001 through BKC-010 are enabled by an operator on a single-owner installation. The Fastify routes and executor share the `codexia_backup` operational schema on PostgreSQL. The executor has no HTTP listener. Ansible applies the [journal upgrade](operational-schema-667-upgrade.sql) to recognized earlier schemas and preserves existing settings.
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
 
-## Provisioning
+[TEXT]
+MID: b1fef2b6e9d2ce183b8b4532bb1c7014
+STATEMENT: >>>
+BKC-001 through BKC-010 are enabled by an operator on a single-owner installation. The Fastify routes and executor share the `codexia_backup` operational schema on PostgreSQL. The executor has no HTTP listener. Ansible applies the [journal upgrade](https://github.com/yohn-jp/codexia/blob/main/deploy/backup/operational-schema-667-upgrade.sql) to recognized earlier schemas and preserves existing settings.
+<<<
 
-After an installation reaches ACTIVE, select `provision-backups` in the existing [protected production workflow](../../.github/workflows/production-bootstrap.yml) on main. It uses the `codexia-production` rootless SSH identity and runs only the backup tasks of the Ansible `base` stage. The protected production controller reads the recovery operator’s **public** age recipient from `~/.config/codexia-backup/age-recipient.txt` and the approved destinations and maintenance windows from `policy.json` in the same private VM directory. The recipient can encrypt backups. Only the recovery operator holds its decryption identity. The owner supplies the actual destination and write-only credential in the Console.
+[[SECTION]]
+MID: 9f374378459e1180cde0245bba4800c6
+UID: DOC-DEPLOYMENT-BACKUP-CONSOLE-OPERATIONS-provisioning
+TITLE: Provisioning
+
+[TEXT]
+MID: a5afe269fb0ce42db122925f399d1451
+STATEMENT: >>>
+After an installation reaches ACTIVE, select `provision-backups` in the existing [protected production workflow](https://github.com/yohn-jp/codexia/blob/main/.github/workflows/production-bootstrap.yml) on main. It uses the `codexia-production` rootless SSH identity and runs only the backup tasks of the Ansible `base` stage. The protected production controller reads the recovery operator’s **public** age recipient from `~/.config/codexia-backup/age-recipient.txt` and the approved destinations and maintenance windows from `policy.json` in the same private VM directory. The recipient can encrypt backups. Only the recovery operator holds its decryption identity. The owner supplies the actual destination and write-only credential in the Console.
 
 The stage reads the deployed release record, checks the healthy Full image and extracts its Node runtime and executor. It sets up the private PostgreSQL socket and dedicated SCRAM logins, applies the operational schema or its journal upgrade, generates the local sealing key once and attaches only the API credential, public key and policy to the existing API. It starts the user service under the shared deployment lock and checks its database heartbeat. Reapplying the stage adopts matching settings. A mismatch in existing credentials, policy or release identity requires protected maintenance. Keep the original keys and journal when adopting an existing installation. After a compatible image update, the deployment transaction selects the committed executor version. The operator may prune inactive extracted runtime directories during maintenance.
 
@@ -43,11 +62,23 @@ For a restored database, keep the target executor stopped and disabled. Confirm 
 For each remaining `UNKNOWN` run, import its matching verified transfer receipt with the same fence or record the independently confirmed absence of a verified transfer. After checking the provider and independent records, use `codexia-backup-control reconcile-restored-absence <evidenceFile> <approvedEvidenceSha256>`. The protected JSON record contains `format: "codexia-backup-run-disposition/v1"`, the run UUID as `backupId`, `executorFenceSha256` and `conclusion: "no_verified_transfer"`. The existing journal retains the protected record digest. Leave a run `UNKNOWN` while its outcome is uncertain. Revalidate the policy, active revision, keys and provider access before enabling the worker. Record the isolated restore using the separate restore receipt.
 
 For a key rotation, load the new private key alongside the old one, switch the API to the new public key, and submit a fresh draft credential. Probe and activate the new revision before removing the old worker key. Removing a key makes revisions sealed to it unavailable to the executor. Revoke upstream credentials through the provider's existing operator process.
+<<<
 
-## API requests
+[[/SECTION]]
 
+[[SECTION]]
+MID: 8824c9ab03769522347f5c984b3c66b9
+UID: DOC-DEPLOYMENT-BACKUP-CONSOLE-OPERATIONS-api-requests
+TITLE: API requests
+
+[TEXT]
+MID: b1b168b92d9572987033076ecc4ed0b7
+STATEMENT: >>>
 All mutations require the exact browser Origin and `X-Codexia-CSRF: 1`. Draft writes, activate and disable also require a recent Better Auth owner session. GET config returns the current draft ETag. Draft writes use that value as `If-Match`.
 
 Send an `Idempotency-Key` for each POST and reuse it after an ambiguous response. Probe takes `revision`. Activate takes `revision`, `probeId` and `confirmed: true`. Disable takes the active `revision` and `confirmed: true`. Probe results are available at `GET /api/console/backups/config/probes/:id`. Configuration operation results are available at `GET /api/console/backups/status?requestId=<Idempotency-Key>`.
 
 For a day-based retention request, activation requires an observed bucket Object Lock default retention at least that long. A requested generation count stays in the draft pending independent evidence of retained backup generations. The executor revalidates the draft and S3 connection for activation and atomically records the applied revision and operation receipt. An existing required destination cannot be disabled or replaced with a secondary destination while alternate protection evidence is unavailable. Probe results and applied configuration do not establish that an off-VM backup or independent restore has succeeded.
+<<<
+
+[[/SECTION]]
