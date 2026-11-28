@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import Fastify from 'fastify';
 import { Pool } from 'pg';
 import { BackupConsoleControl } from '../src/backup-console-control.js';
 import {
@@ -13,9 +14,10 @@ import {
   protectedBackupRunner,
   pythonBackupProbe,
 } from '../src/backup-console-executor.js';
-import type { BackupPolicy } from '../src/backup-console-routes.js';
+import { type BackupPolicy, registerBackupConsole } from '../src/backup-console-routes.js';
 import { BackupConsoleStore } from '../src/backup-console-store.js';
 import { backupCredentialKeyId } from '../src/backup-credential-envelope.js';
+import { httpContract, httpContractSchemaController } from '../src/http-contract.js';
 import { createServer } from '../src/server.js';
 import { assertDisposableAuthFixtureDatabaseUrl, startBetterAuthFixture } from './fixtures/better-auth-server.js';
 
@@ -450,6 +452,7 @@ raise SystemExit(75)
   assert.equal(finalRun.status, 'REMOTE_VERIFIED');
   assert.deepEqual(finalRun, await finalRunDetail.json());
   assert.equal((await (await get('/status')).json()).run, undefined);
+
   const historyIds = [
     '00000000-0000-4000-8000-000000000003',
     '00000000-0000-4000-8000-000000000002',
@@ -574,4 +577,87 @@ raise SystemExit(75)
   await control.reconcileRestoredAbsence(dispositionPath, dispositionSha);
   assert.deepEqual(await readRun(unknownRun), { state: 'FAILED', reason_code: 'restored_no_verified_transfer', manifest_sha256: null });
   assert.equal(await worker.processNext(), true);
+});
+
+test('a manual backup that misses its window is blocked while an admitted interruption stays unknown', async t => {
+  const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
+  assert.ok(databaseUrl, 'Set CODEXIA_AUTH_TEST_DATABASE_URL to a disposable PostgreSQL auth database');
+  assertDisposableAuthFixtureDatabaseUrl(databaseUrl);
+  const admin = new Pool({ connectionString: databaseUrl });
+  const api = new Pool({ connectionString: databaseUrl, options: '-c role=codexia_backup_api' });
+  const worker = new Pool({ connectionString: databaseUrl, options: '-c role=codexia_backup_executor' });
+  const server = Fastify({ schemaController: httpContractSchemaController });
+  for (const schema of httpContract.schemas) server.addSchema(schema);
+  t.after(async () => {
+    await server.close();
+    await Promise.all([api.end(), worker.end()]);
+    await admin.query('DROP SCHEMA IF EXISTS codexia_backup CASCADE');
+    await admin.end();
+  });
+  await admin.query(await readFile(new URL('../../../deploy/backup/operational-schema.sql', import.meta.url), 'utf8'));
+  const scope = {
+    provider: 's3-compatible',
+    endpoint: 'https://backups.fixture.test',
+    region: 'us-east-1',
+    bucket: 'codexia-fixture',
+    prefix: 'manual/backup',
+  } as const;
+  const policy: BackupPolicy = {
+    destinations: [{ ...scope, credentialModes: ['operator-role'] }],
+    maintenanceWindows: [{ id: 'brief-window', timeZone: 'UTC', daysOfWeek: [1], start: '00:00', durationMinutes: 1 }],
+  };
+  await admin.query('INSERT INTO codexia_backup.revisions (revision, destination) VALUES (1, $1)', [
+    { ...scope, addressing: 'path-style', credentialMode: 'operator-role', offVmPolicy: 'required', schedule: 'disabled' },
+  ]);
+  await admin.query("UPDATE codexia_backup.state SET active_revision = 1, active_health = 'ready'");
+  const ownerAuth = {
+    checkOwnerSession: async () => ({ status: 200 as const }),
+    toHeaders: () => new Headers(),
+  } as Parameters<typeof registerBackupConsole>[1];
+  registerBackupConsole(server, ownerAuth, { store: new BackupConsoleStore(api), policy }, () => false);
+  const control = new BackupConsoleControl({
+    pool: worker,
+    policy,
+    config: { privateKeyFiles: [] },
+    python: '/unused',
+    transferScript: '/unused',
+    receiptDirectory: '/unused',
+    backupScript: '/unused',
+  });
+  const executor = new BackupConsoleExecutor({
+    pool: worker,
+    policy,
+    privateKeys: new Map(),
+    operatorCredential: { origin: scope.endpoint, credential: { accessKeyId: 'fixture', secretAccessKey: 'fixture' } },
+    async run(runId) {
+      await control.manualStart(runId, 'a'.repeat(40), 'sha256:' + 'b'.repeat(64));
+      throw new Error('Fixture lost the runner after admission');
+    },
+    probe: async () => {
+      throw new Error('Unexpected probe during manual backup');
+    },
+  });
+  assert.equal(await executor.processNext(), false);
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-30T00:00:59Z') });
+  const path = '/api/console/backups';
+  for (const windowClosed of [false, true]) {
+    const requestId = randomUUID();
+    const submitted = await server.inject({
+      method: 'POST',
+      url: path + '/runs',
+      headers: { 'content-type': 'application/json', 'x-codexia-csrf': '1', 'idempotency-key': requestId },
+      payload: { maintenanceWindowId: 'brief-window', confirmed: true },
+    });
+    assert.equal(submitted.statusCode, 202, submitted.body);
+    if (windowClosed) t.mock.timers.tick(1_000);
+    assert.equal(await executor.processNext(), true);
+    const status = await server.inject(path + '/status?' + new URLSearchParams({ requestId }));
+    assert.equal(status.statusCode, 200);
+    const { run } = status.json();
+    assert.equal(run.runId, submitted.json().runId);
+    assert.deepEqual(
+      [run.status, run.phase, run.reasonCode],
+      windowClosed ? ['BLOCKED', 'blocked', 'maintenance_window_closed'] : ['UNKNOWN', 'recovery_required', 'runner_interrupted'],
+    );
+  }
 });
