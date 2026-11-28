@@ -365,12 +365,17 @@
     mode: '0600'
 
 - name: Verify every staged Better Auth Podman secret exists before activation
+  # One metadata-only Podman lookup, retaining an exact-name and count check.
+  # Inspect does not expose secret values unless --showsecret is requested.
   ansible.builtin.command:
-    argv: [podman, secret, exists, "{{ item }}"]
-  loop: "{{ codexia_auth_secret_names }}"
+    argv: "{{ ['podman', 'secret', 'inspect'] + codexia_auth_secret_names }}"
   register: codexia_auth_runtime_secret_checks
   changed_when: false
-  failed_when: codexia_auth_runtime_secret_checks.rc != 0
+  failed_when: >-
+    codexia_auth_runtime_secret_checks.rc != 0 or
+    ((codexia_auth_runtime_secret_checks.stdout | from_json |
+      map(attribute='Spec.Name') | list | sort) !=
+     (codexia_auth_secret_names | sort))
   no_log: true
 
 - name: Name the candidate Quadlet by its image and nonsecret auth settings digests
