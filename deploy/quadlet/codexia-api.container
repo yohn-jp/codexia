@@ -41,7 +41,7 @@ HealthInterval=30s
 # Startup intervals require a startup command. Reuse the exact /health/ready
 # probe so Notify=healthy is based on readiness, never an elapsed-time delay.
 HealthStartupCmd=node -e 'fetch("http://127.0.0.1:3000/health/ready").then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
-HealthStartupInterval=1s
+HealthStartupInterval=500ms
 HealthStartupSuccess=1
 HealthTimeout=5s
 HealthStartPeriod=60s
