@@ -73,6 +73,31 @@ flowchart TD
 
 **受入:** (a) 初回または最後の CLI タグ以降の変更を含む main の認定成功でタグが一つだけ発行され Release に CLI バイナリと manifest が存在する、(b) 非対象変更・失敗・stale SHA では発行されない、(c) 連続変更で patch が単調増加し、同一SHAの再認定やAPI応答喪失で重複採番せず、必要なら既存タグの公開を再開する、(d) 同時実行・API 障害・資格不足で重複/未認定公開がない、(e) Release の SHA/provenance が元の main SHA と一致し VM 上で `version` が動作する。実際の公開が成功するまでは「自動リリース完了」と判定しない。
 
+## 2.2 ターミナル UX と対話の責務（正本）
+
+CodexiaCTL は SSH の通常端末上で完結する、案内付きの逐次 CLI とする。対話フォームに [Huh v2](https://github.com/charmbracelet/huh)、表示・レイアウトに [Lip Gloss v2](https://github.com/charmbracelet/lipgloss) を採用する。採用版と依存管理は [依存選定規約](../architecture/DEPENDENCY-POLICY.md#codexiactl-terminal-ux) に従う。Bubble Tea は Huh の内部の描画・入力基盤として利用し、別の常駐 TUI、全面画面の独自イベントループ、配備状態機械を作らない。現行の少数のコマンド・フラグには既存 parser を維持し、汎用 CLI framework を導入しない。
+
+対話・表示を一つの operator/presentation 境界に集約する。Huh は観測済みの非秘密候補の選択（§4.1 の複数 repo 等）、通常入力、非保護の確認フォームを所有し、Lip Gloss は工程見出し、選択対象、状態、差分、診断、完了表示を所有する。provider SDK、Workflow 制御、R0–R8 の判定、認可、排他、証跡・入力検証は既存制御面に留め、描画ライブラリの状態を成功・承認・配備結果の根拠にしない。入力の意味検証とエラー処理を表示に移さない。全フォームの正常・異常結果を既存の operator 契約に戻し、独自 UI を各 provider に散在させない。
+
+### 表示とガイド
+
+- §3 の既存 01–10 工程と観測結果を唯一の進捗源とし、工程番号・名称、現在の作業、完了・待機・不足・失敗・未実行を明記する。成功の観測がない段階を完了色にしない。待機中は対象 run と承認先・待機理由を表示し、計測していない進捗率や完了時刻を表示しない。
+- 最初の認証・対象確定後は repository、branch、確認済み VM・origin を表示する。複数候補は Huh の選択メニューで完全修飾 repo 名と識別情報を表示し、選択後も §4.1 の対象確認を省略しない。変更前には対象、意図、差分、影響、必要な権限、独立承認の有無を示す。
+- 診断・失敗は工程と観測した原因、影響、次に必要な具体的操作（設定箇所・公式 URL・不足権限・再実行コマンド・確認済み run link のうち該当するもの）を一緒に示す。既存値や事実が不明なら不明と表示する。一般的な失敗メッセージだけにしない。doctor/status の既存表示内容・JSON schema、最新 run の選択規則、ACTIVE/ACCEPTED の区別を保持する。
+- CLI 固有の共有 semantic style を定義する。Codexia の落ち着いた配色と明晰な階層を反映し、端末の明暗・色対応に応じて読みやすいアクセント、本文、補助、警告、エラーを使い分ける。Desktop Web の CSS・テーマ実装の共有は要求しない。状態と選択・フォーカスは色だけに依存させず、文字・記号・明示ラベルでも識別可能にする。狭幅・Unicode 幅・ASCII 端末でも情報を欠落させず折り返す。画面消去や別画面への常時切替を通常表示にせず、SSH の scrollback に非秘密の工程結果・修復案内を残す。
+
+### 端末とセキュリティ境界
+
+SSH 上で独立に開いた controlling TTY (`/dev/tty`) を対話の入出力とする。Huh の input/output はその TTY に明示的に接続し、stdin や stdout の既定値に依存しない。`--json` の stdout は ANSI 制御列・対話・進捗表示・秘密を含まない機械可読出力だけとし、診断は既存 stderr 契約に従う。パイプ・リダイレクトは承認の代わりにならない。TTY が無ければ対話を要求する command は安全停止し、help/version は外部認証なしで実行できる。
+
+秘密入力、Owner Setup Grant の一度限りの表示、provider の認証 code の TTY 限定表示、保護操作の明示承認は既存の安全な operator/TTY 経路を維持する。秘密を Huh の string 値・フォーム履歴・表示 model・clipboard・診断・JSON に渡さない。秘密入力は echo の完全無効化、入力長制限、byte slice の消去、端末設定復元を維持する。外部由来文字列は表示前に端末制御文字・escape sequence の注入を防止する。信頼済みの固定 style が生成する制御列と、外部入力を区別する。
+
+保護操作は確認対象と差分を表示し、既存の明示肯定（既定 No）を取得した時だけ実行する。未選択・空入力・曖昧な入力・EOF・中断・タイムアウト・入力障害を承認に変換しない。独立した Environment reviewer による GitHub 承認を端末フォームで代替しない。Huh の選択も正常に明示 submit された観測済み候補だけ受理し、終了時の既定値・未確定値では進めない。中断後に line mode へ切り替えて承認を再取得する等の暗黙の再試行を行わない。
+
+通常の Huh フォームは `RunWithContext` を利用して既存 command の cancellation と結合する。Huh の組込み accessible mode は `Field.RunAccessible` のエラーを破棄する実装で、通常の context-aware 実行経路とも異なるため、配備 CLI では採用しない。`TERM=dumb`、描画非対応端末等では開始前に既存の context-aware な line mode を選択する。これは同じ意味契約の表示・入力方式であり、第二の配備経路ではない。`NO_COLOR` が設定された環境では色を出さず、非対話出力に cursor 操作を出さない。全 mode で正常終了、拒否、Ctrl+C、SIGTERM、SIGHUP、SSH 切断、エラーの terminal mode・cursor 復元と §2 の終了コードを維持する。端末復元のために provider operation や workflow dispatch を再実行しない。
+
+進捗表示は既存 context と実際の待機・観測処理に従属させる。spinner 等を利用しても、表示側が副作用を実行する第二の worker や同一処理の並列 retry を作らず、待機終了・中断・エラー時は停止する。秘密入力・承認中に別描画処理が同じ TTY を読み書きしない。
+
 ## 3. init の順序と状態遷移
 
 操作の前に read-only で対象を確定し、外部変更の直前に意図・対象・差分を提示する。安全に並列できる読取り以外は次の順序を守る。step の成功をログの文字列や Workflow 全体の緑色から推定しない。CLI 内の step は配備 R 経路の第二定義ではなく、その入力準備と既存 operation の呼出しである。
@@ -231,10 +256,13 @@ Go の標準 crypto/net/http、維持されている GitHub/Tailscale/Cloudflare
 | CLI-08 | リポジトリと運用入口を照合し、CLI と重複する設定同期・手作業だけの通常経路を除去。Ansible/Terraform/Actions/認定/復旧の正本が二重化されていない |
 | CLI-09 | 同じ公式バイナリと公式 App で公式 repo および他の個人/Organization の `codexia` を検出し、対象を選択して初回導入を完走する。0/1/複数候補、全ページ取得、取消・停止中 installation・非対象名・権限不足・未設定 App・別 repo checkpoint・別 repo からの証跡を検証。PAT や任意 URL での迂回は不可 |
 | CLI-10 | 配備対象ごとに owner/repo ID、OIDC Subject/claims、Environment、公開 origin、証跡と product image を一貫して分離。異なる SHA でも対応契約の Fork を許可し、不適合契約・旧 OIDC 形式・古い証拠・改名/移転・別 repo への書込みは拒否する。公式 CLI の配布主体と対象 repo の product publication を分離し、Fork で公式 CLI の自動発行を行わない。実 GitHub App/隔離 Fork/VM での受入と既存公式 repo の回帰確認は模擬 API/CI と区別する |
+| CLI-11 | §2.2 の対話・表示契約を Huh/Lip Gloss の実ビルドと隔離した PTY/SSH で実証する。40/80 桁等の狭幅と resize、明暗・NO_COLOR・TERM=dumb/line mode、候補選択/取消/EOF/不正入力、既定 No、Ctrl+C/SIGTERM/SIGHUP/SSH 切断、terminal mode/cursor の復元、stdin/stdout redirect・JSON 分離、制御文字注入、秘密・grant・code の秘匿と明示承認前の無変更を確認する。既存 CLI の受入と同じ control/exit semantics を保ち、描画 snapshot や模擬 HTTP だけで実端末を合格としない |
 
 本書は規範的な設計・受入契約であり、CLI の実装、公式 App の設定、配備が完了したことを示すものではない。実装の受入は上記証拠をもって判定する。
 
 ## 公式仕様（設計根拠）
+
+- Terminal UX: [Huh v2 forms and terminal I/O](https://github.com/charmbracelet/huh), [Huh form implementation](https://github.com/charmbracelet/huh/blob/v2.0.3/form.go), [Lip Gloss v2](https://github.com/charmbracelet/lipgloss), [Bubble Tea v2](https://github.com/charmbracelet/bubbletea).
 
 - GitHub: [CLI with a GitHub App / device flow](https://docs.github.com/en/apps/creating-github-apps/writing-code-for-a-github-app/building-a-cli-with-a-github-app), [user access token](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app), [App installations and accessible repositories](https://docs.github.com/en/rest/apps/installations), [OIDC immutable subject claims](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims), [Environments](https://docs.github.com/en/rest/deployments/environments), [Variables](https://docs.github.com/en/rest/actions/variables), [Secrets](https://docs.github.com/en/rest/actions/secrets), [Workflow dispatch](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event).
 - Tailscale: [tailscale up](https://tailscale.com/docs/reference/tailscale-cli/up), [Workload identity federation](https://tailscale.com/docs/features/workload-identity-federation), [Trust credentials and scopes](https://tailscale.com/docs/reference/trust-credentials).
