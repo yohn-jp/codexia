@@ -25,7 +25,7 @@ The accepted Desktop Web toolchain is **TypeScript 7 (native compiler/type check
 
 ## 採用済みツール移行目標と現行実装の区別
 
-[Specification toolchain](SPECIFICATION-TOOLCHAIN.md) により、**HTTPの型付き契約をTypeSpecで定義し、Fastifyの明示的ルート/JSON SchemaとOrval生成クライアントへ接続すること、MCP SDK v2、SQL-firstの実DB検証、StrictDocの要求追跡**を採用目標とする。**Fastifyは継続採用**し、下記の図と本文に記されたFastifyは現行と目標の両方に該当する。現行のFastifyは、TypeSpec由来のルート・スキーマ一覧からcurrentに分類された契約を明示ルートとして登録する。API/OAuth/MCP権限とPostgreSQL単一正本は引き続きこの設計に従う。移行の完了は [HTTP基盤受入](HTTP-PLATFORM-MIGRATION.md)、[MCP移行受入](MCP-V2-MIGRATION.md)、[CI受入](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md) に必要な実行証拠が揃った時に限る。
+[Specification toolchain](SPECIFICATION-TOOLCHAIN.md) により、**HTTPの型付き契約をTypeSpecで定義し、Fastifyの明示的ルート/JSON SchemaとOrval生成クライアントへ接続すること、MCP SDK v2、SQL-firstの実DB検証、StrictDocの要求追跡・ネイティブSDocによる設計文書全体の正本化**を採用目標とする。設計正本の移行と既存領域の所有権は [Documentation authority](DOCUMENTATION-AUTHORITY.md) と仕様ツールチェーンの移行契約に従い、未移行の既存正本を無効にしない。**Fastifyは継続採用**し、下記の図と本文に記されたFastifyは現行と目標の両方に該当する。現行のFastifyは、TypeSpec由来のルート・スキーマ一覧からcurrentに分類された契約を明示ルートとして登録する。API/OAuth/MCP権限とPostgreSQL単一正本は引き続きこの設計に従う。移行の完了は [HTTP基盤受入](HTTP-PLATFORM-MIGRATION.md)、[MCP移行受入](MCP-V2-MIGRATION.md)、[CI受入](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.md) に必要な実行証拠が揃った時に限る。
 
 ## 製品・システム境界
 

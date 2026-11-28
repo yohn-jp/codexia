@@ -12,7 +12,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | External dependencies, current-version policy and selected libraries | [Library selection policy](architecture/DEPENDENCY-POLICY.md) — normative library-first choices, compatibility boundaries and adoption criteria |
 | Existing dependencies, declared versions and update constraints | [Dependency inventory](architecture/DEPENDENCY-INVENTORY.md) — direct dependencies, version constraints, update lag and coordinated upgrades |
 | Approved specification toolchain and alternative decisions | [Toolchain architecture](architecture/SPECIFICATION-TOOLCHAIN.md) — selected targets, implementation not yet certified |
-| Requirements tool migration | [StrictDoc traceability](requirements/STRICTDOC-TRACEABILITY.md) — Markdown-to-requirements conversion and code/test/evidence gates |
+| Design document and requirements migration | [Specification toolchain: StrictDoc adoption](architecture/SPECIFICATION-TOOLCHAIN.md#strictdocによる設計正本の全面移行採用済み方針) · [StrictDoc traceability](requirements/STRICTDOC-TRACEABILITY.md) · [migration acceptance](verification/SPECIFICATION-TOOLING-ACCEPTANCE.md#strictdoc全面移行の受入) — native SDoc target; current sources remain authoritative until accepted migration |
 | HTTP/API schema-first target | [TypeSpec → Fastify/Orval](architecture/HTTP-PLATFORM-MIGRATION.md) — schema-first Fastify routes, generated client and acceptance gates |
 | PostgreSQL schema verification target | [PostgreSQL verification](architecture/POSTGRES-CONTRACT-VERIFICATION.md) — SQL/pgTAP/catalog/tbls and isolated restore |
 | MCP protocol modernization | [MCP SDK v2 migration](architecture/MCP-V2-MIGRATION.md) — 2026-era stateless transport, OAuth and conformance |
