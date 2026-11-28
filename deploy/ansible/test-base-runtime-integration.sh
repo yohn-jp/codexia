@@ -403,12 +403,14 @@ db_verifier_bin=$(as_service mktemp -d "$service_home/.codexia-db-verifier.XXXXX
 as_service tee "$db_verifier_bin/podman" >/dev/null <<'MOCK_PODMAN'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" == secret && "${2:-}" == inspect && "${3:-}" == --format &&
-      "${5:-}" == "${CODEXIA_TEST_REPLACED_DB_SECRET:-}" ]]; then
-  current_id=$(/usr/bin/podman "$@")
-  replaced_id=0000000000000000000000000
-  [[ -n "$current_id" && "$current_id" != "$replaced_id" ]]
-  printf '%s\n' "$replaced_id"
+if [[ "${1:-}" == secret && "${2:-}" == inspect &&
+      "${3:-}" == codexia-postgres-admin-password &&
+      "${4:-}" == codexia-postgres-app-password &&
+      -z "${5:-}" && -n "${CODEXIA_TEST_REPLACED_DB_SECRET:-}" ]]; then
+  /usr/bin/podman "$@" | jq --arg name "$CODEXIA_TEST_REPLACED_DB_SECRET" '
+    if any(.[]; .Spec.Name == $name) then
+      map(if .Spec.Name == $name then .ID = "0000000000000000000000000" else . end)
+    else error("missing requested secret in batch inspection") end'
   exit 0
 fi
 exec /usr/bin/podman "$@"
