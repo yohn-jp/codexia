@@ -16,6 +16,9 @@ import { stripSourceComments } from './strip-source-comments.mjs';
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');
 const EXPECTED_STRICTDOC_VERSION = '0.32.1';
+const REGISTER_PATH = 'docs/requirements/REQUIREMENT-REGISTER.sdoc';
+const CONFIG_PATH = 'scripts/strictdoc/strictdoc_config.py';
+const TRACE_NODE_TYPES = new Set(['REQUIREMENT', 'OBLIGATION', 'TEST']);
 const DECISION_STATES = new Set(['ACCEPTED', 'PROPOSED', 'RETIRED']);
 const CONFORMANCE_STATES = new Set([
   'UNMAPPED', 'MAPPED_UNVERIFIED', 'PARTIAL', 'DEVIATION', 'BLOCKED', 'VERIFIED', 'NOT_APPLICABLE',
@@ -44,12 +47,12 @@ export function validateRequirementNodes(nodes) {
     }
     if (typeof mid === 'string') midCounts.set(mid, (midCounts.get(mid) ?? 0) + 1);
     if (typeof node.TITLE !== 'string' || node.TITLE.trim() === '') violations.push(`Missing title for ${uid}`);
-    if (!DECISION_STATES.has(node['Decision status'])) violations.push(`Invalid decision status for ${uid}`);
-    if (!CONFORMANCE_STATES.has(node['Conformance status'])) violations.push(`Invalid conformance status for ${uid}`);
-    if (node['Conformance status'] === 'VERIFIED') {
+    if (!DECISION_STATES.has(node.DECISION_STATUS)) violations.push(`Invalid decision status for ${uid}`);
+    if (!CONFORMANCE_STATES.has(node.CONFORMANCE_STATUS)) violations.push(`Invalid conformance status for ${uid}`);
+    if (node.CONFORMANCE_STATUS === 'VERIFIED') {
       violations.push(`${uid} cannot be VERIFIED without authenticated product obligation evidence`);
     }
-    if (!APPLICABILITY_STATES.has(node.Applicability)) violations.push(`Invalid applicability for ${uid}`);
+    if (!APPLICABILITY_STATES.has(node.APPLICABILITY)) violations.push(`Invalid applicability for ${uid}`);
     if (typeof node.STATEMENT !== 'string' || node.STATEMENT.trim() === '') violations.push(`Missing statement for ${uid}`);
   }
   for (const [uid, count] of uidCounts) {
@@ -126,7 +129,7 @@ export function validateObligationDesignRefs(nodes, registerPath, repositoryRoot
   const from = path.posix.dirname(registerPath);
   const withRelations = nodes.map(node => ({
     UID: node.UID,
-    RELATIONS: String(node['Design reference'] ?? '').split(/[;、]/u).map(reference => reference.trim()).filter(Boolean).map(reference => {
+    RELATIONS: String(node.DESIGN_REFERENCE ?? '').split(/[;、]/u).map(reference => reference.trim()).filter(Boolean).map(reference => {
       const link = /^\[[^\]]+\]\(([^)]+)\)$/u.exec(reference);
       const [, target] = link ?? ['', reference];
       const [file] = target.split('#');
@@ -149,8 +152,8 @@ export function validateScenarioNodes(scenarios, requirements, testSources) {
     }
     if (parentsByTest.has(uid)) violations.push(`Duplicate test scenario UID ${uid}`);
     if (scenario.MID !== deterministicMid(uid)) violations.push(`MID for ${uid} is not deterministic`);
-    if (!EXECUTION_SCOPES.has(scenario['Execution scope'])) violations.push(`${uid} has invalid Execution scope`);
-    if (scenario['Exact-run reference'] !== 'NOT_RUN') {
+    if (!EXECUTION_SCOPES.has(scenario.EXECUTION_SCOPE)) violations.push(`${uid} has invalid Execution scope`);
+    if (scenario.EXACT_RUN_REFERENCE !== 'NOT_RUN') {
       violations.push(`${uid} authored Exact-run reference must be NOT_RUN; observed runs are attached in Verify evidence`);
     }
     const parentRelations = (scenario.RELATIONS ?? []).filter((relation) => relation.TYPE === 'Parent');
@@ -170,8 +173,8 @@ export function validateScenarioNodes(scenarios, requirements, testSources) {
     }
     const source = testSources.get(uid);
     if (!source) violations.push(`${uid} has no native test registration`);
-    else if (['TRACE_NODE', 'TRACE_BROWSER'].includes(scenario['Execution scope']) && source.runner !== 'node') {
-      violations.push(`${uid} must register with node:test in ${scenario['Execution scope']}`);
+    else if (['TRACE_NODE', 'TRACE_BROWSER'].includes(scenario.EXECUTION_SCOPE) && source.runner !== 'node') {
+      violations.push(`${uid} must register with node:test in ${scenario.EXECUTION_SCOPE}`);
     }
   }
   for (const requirement of requirements) {
@@ -435,61 +438,42 @@ export function resolveRunIdentity(env) {
   };
 }
 
-export function normalizeHtml(html, { stableMids = [] } = {}) {
-  let normalized = html;
-  const timestamps = [...normalized.matchAll(/<meta name="strictdoc-search-index-timestamp" content="([^"]+)">/gu)];
+export function normalizeHtml(html) {
+  const timestamps = [...html.matchAll(/<meta name="strictdoc-search-index-timestamp" content="([^"]+)">/gu)];
   if (timestamps.length > 1) throw new Error(`Expected at most one StrictDoc search timestamp, found ${timestamps.length}`);
-  normalized = normalized.replace(
+  return html.replace(
     /(<meta name="strictdoc-search-index-timestamp" content=")[^"]+(">)/u,
     '$1<TIMESTAMP>$2',
   );
-
-  const shellIds = volatileDocumentMids(normalized, stableMids);
-  if (shellIds.length > 2) throw new Error(`Expected at most two volatile StrictDoc document shell MIDs, found ${shellIds.length}`);
-  for (const shellId of shellIds) normalized = normalized.replaceAll(shellId, '<SHELL-MID>');
-  return normalized;
 }
 
 export function normalizeSearchIndexJavascript(script) {
-  let found = false;
-  const normalized = script.replace(/(window\.StrictDoc\.search\.index = )(\{[^\n]*\})(;)/u, (_match, prefix, json, suffix) => {
-    const index = JSON.parse(json);
-    const sorted = Object.fromEntries(Object.entries(index)
-      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
-      .map(([term, documentNumbers]) => {
-        if (!Array.isArray(documentNumbers) || documentNumbers.some((value) => !Number.isSafeInteger(value) || value < 1)) {
-          throw new Error(`Invalid StrictDoc search index membership for ${term}`);
-        }
-        return [term, documentNumbers.toSorted((left, right) => left - right)];
-      }));
-    found = true;
-    return `${prefix}${JSON.stringify(sorted)}${suffix}`;
-  });
-  if (!found) throw new Error('StrictDoc search index assignment was not found');
-  return normalized;
-}
-
-function volatileDocumentMids(html, stableMids) {
-  const stable = new Set(stableMids);
-  const patterns = [
-    /<turbo-frame id="article-([0-9a-f]{32})">/giu,
-    /id="doc-field-([0-9a-f]{32})-[A-Z][A-Z0-9_-]*"/giu,
-    /data-node-mid="([0-9a-f]{32})"/giu,
-    /<sdoc-anchor\b[^>]*?\bid="([0-9a-f]{32})"/gsu,
-  ];
-  const ids = new Set();
-  for (const pattern of patterns) {
-    for (const match of html.matchAll(pattern)) {
-      if (!stable.has(match[1])) ids.add(match[1]);
-    }
+  const assignment = 'window.StrictDoc.search.index = ';
+  const marker = script.indexOf(assignment);
+  if (marker === -1) throw new Error('StrictDoc search index assignment was not found');
+  const start = marker + assignment.length;
+  const newLine = script.indexOf('\n', start);
+  const end = newLine === -1 ? script.length : newLine;
+  const value = script.slice(start, end);
+  if (!value.startsWith('{') || !value.endsWith('};')) {
+    throw new Error('StrictDoc search index assignment does not contain a JSON object');
   }
-  return [...ids];
+  const index = JSON.parse(value.slice(0, -1));
+  const sorted = Object.fromEntries(Object.entries(index)
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+    .map(([term, documentNumbers]) => {
+      if (!Array.isArray(documentNumbers) || documentNumbers.some(item => !Number.isSafeInteger(item) || item < 1)) {
+        throw new Error(`Invalid StrictDoc search index membership for ${term}`);
+      }
+      return [term, documentNumbers.toSorted((left, right) => left - right)];
+    }));
+  return `${script.slice(0, start)}${JSON.stringify(sorted)};${script.slice(end)}`;
 }
 
 function parseArgs(argv) {
   const args = {
     root: REPO_ROOT,
-    source: 'docs/requirements/REQUIREMENT-REGISTER.md',
+    source: REGISTER_PATH,
     baseRef: process.env.CODEXIA_TRACE_BASE_REF ?? 'origin/main',
     outputDir: undefined,
     report: undefined,
@@ -521,8 +505,8 @@ function printHelp() {
     '',
     'Options:',
     '  --root <path>         Repository root (default: this checkout)',
-    '  --source <path>       StrictDoc Markdown source path',
-    '  --base-ref <ref>      Git ref used to protect existing REQ-IDs',
+    '  --source <path>       Native requirement register link in the report',
+    '  --base-ref <ref>      Git ref used to protect existing trace UIDs and MIDs',
     '  --output-dir <path>   Static HTML/JSON staging directory',
     '  --report <path>       JSON report path',
     '  --strictdoc <path>    StrictDoc executable (default: strictdoc)',
@@ -536,21 +520,27 @@ function execute(command, args, { cwd, encoding = 'utf8', env = process.env } = 
   return result;
 }
 
-function requirementIdsFromSource(markdown) {
-  const metadataIds = [...markdown.matchAll(/^\*\*UID\*\*:\s*(REQ-[A-Z]+-\d{3})\s*$/gmu)].map((match) => match[1]);
-  if (metadataIds.length > 0) return metadataIds;
-  return [...markdown.matchAll(/^\|\s*(REQ-[A-Z]+-\d{3})\s*\|/gmu)].map((match) => match[1]);
-}
-
-function obligationIdsFromSource(markdown) {
-  return [...markdown.matchAll(/^\*\*UID\*\*:[ \t]*(OBL-REQ-[A-Z]+-\d{3}-O\d{2})[ \t]*$/gmu)].map(match => match[1]);
-}
-
-function collectNodes(value, type, found = []) {
+export function collectTraceNodes(value, found = []) {
   if (!value || typeof value !== 'object') return found;
-  if (value._NODE_TYPE === type) found.push(value);
-  for (const child of Object.values(value)) collectNodes(child, type, found);
+  if (TRACE_NODE_TYPES.has(value._NODE_TYPE)) found.push(value);
+  for (const child of Object.values(value)) collectTraceNodes(child, found);
   return found;
+}
+
+export function validateBaselineTraceIds(baselineNodes, currentNodes) {
+  if (!baselineNodes.some(node => node._NODE_TYPE === 'REQUIREMENT')) return ['Baseline StrictDoc export contains no requirement nodes'];
+  const currentByUid = new Map(currentNodes.map(node => [node.UID, node]));
+  const violations = [];
+  for (const previous of baselineNodes) {
+    const current = currentByUid.get(previous.UID);
+    if (!current) {
+      violations.push(`Baseline ${previous._NODE_TYPE} UID removed: ${previous.UID}`);
+      continue;
+    }
+    if (current._NODE_TYPE !== previous._NODE_TYPE) violations.push(`Baseline node type changed: ${previous.UID}`);
+    if (current.MID !== previous.MID) violations.push(`Baseline MID changed: ${previous.UID}`);
+  }
+  return violations;
 }
 
 async function executeTraceTests(root, tempRoot, reportName, testFiles, env = process.env) {
@@ -568,10 +558,27 @@ async function executeTraceTests(root, tempRoot, reportName, testFiles, env = pr
   return { stdout: String(result.stdout).trim(), outcomes: outcomes ? outcomes.split('\n').map(line => JSON.parse(line)) : [] };
 }
 
-async function readGitFile(root, ref, relativePath) {
-  const result = execute('git', ['show', `${ref}:${relativePath}`], { cwd: root });
-  if (result.status !== 0) throw new Error(`Could not read ${relativePath} at ${ref}: ${String(result.stderr).trim()}`);
+function executeChecked(command, args, root) {
+  const result = execute(command, args, { cwd: root });
+  if (result.status !== 0) throw new Error(`${command} ${args[0]} failed: ${String(result.stderr).trim()}`);
   return result.stdout;
+}
+
+async function exportBaselineTraceNodes(command, root, baseRef, tempRoot) {
+  const commit = executeChecked('git', ['rev-parse', '--verify', '--end-of-options', `${baseRef}^{commit}`], root).trim();
+  const source = path.join(tempRoot, 'baseline-source');
+  const archive = path.join(tempRoot, 'baseline.tar');
+  const output = path.join(tempRoot, 'baseline-export');
+  await mkdir(source);
+  executeChecked('git', ['archive', '--format=tar', '--output', archive, commit, 'docs', CONFIG_PATH], root);
+  executeChecked('tar', ['-xf', archive, '-C', source], root);
+  // Export the predecessor's exact authored files with its own config. The
+  // initial Markdown ledger and later native projects use the same stock exporter.
+  const native = await access(path.join(source, REGISTER_PATH)).then(() => true, () => false);
+  const env = { ...process.env };
+  delete env.CODEXIA_STRICTDOC_PUBLIC;
+  await runStrictDoc(command, source, native ? 'docs' : 'docs/requirements', output, { formats: 'json', env });
+  return collectTraceNodes(JSON.parse(await readFile(path.join(output, 'json/index.json'), 'utf8')));
 }
 
 async function sha256File(filePath) {
@@ -597,42 +604,24 @@ async function walkFiles(root, relative = '') {
   return files;
 }
 
-async function runStrictDoc(command, root, sourceAbs, outputDir) {
+async function runStrictDoc(command, root, inputPath, outputDir, { formats = 'html,json', env = process.env } = {}) {
   const result = execute(command, [
-    'export', path.dirname(sourceAbs),
-    '--config', path.join(root, 'scripts/strictdoc/strictdoc_config.py'),
-    '--project-title', 'Codexia Requirements',
-    '--formats', 'html,json',
+    'export', path.resolve(root, inputPath),
+    '--config', path.join(root, CONFIG_PATH),
+    '--formats', formats,
     '--output-dir', outputDir,
     '--no-parallelization',
-  ], { cwd: root, env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+  ], { cwd: root, env: { ...env, PYTHONDONTWRITEBYTECODE: '1' } });
   if (result.status !== 0) throw new Error(`StrictDoc export failed (${result.status ?? 'signal'}):\n${String(result.stdout)}\n${String(result.stderr)}`);
   return `${String(result.stdout)}\n${String(result.stderr)}`;
 }
 
-async function compareExports(firstDir, secondDir, stableMids) {
+async function compareExports(firstDir, secondDir) {
   const firstFiles = (await walkFiles(firstDir)).filter((file) => file.startsWith('html/') || file.startsWith('json/'));
   const secondFiles = (await walkFiles(secondDir)).filter((file) => file.startsWith('html/') || file.startsWith('json/'));
   const violations = [];
   if (JSON.stringify(firstFiles) !== JSON.stringify(secondFiles)) violations.push('StrictDoc output file sets differ between identical exports');
   const files = [...new Set([...firstFiles, ...secondFiles])].sort();
-  const volatileMids = new Set();
-  for (const relative of files.filter((file) => file.endsWith('.html'))) {
-    const firstPath = path.join(firstDir, relative);
-    const secondPath = path.join(secondDir, relative);
-    let firstHtml;
-    let secondHtml;
-    try {
-      firstHtml = await readFile(firstPath, 'utf8');
-      secondHtml = await readFile(secondPath, 'utf8');
-    } catch {
-      continue;
-    }
-    const firstShells = volatileDocumentMids(firstHtml, stableMids);
-    const secondShells = volatileDocumentMids(secondHtml, stableMids);
-    if (firstShells.length !== secondShells.length) violations.push(`StrictDoc volatile shell count changed between exports: ${relative}`);
-    for (const mid of [...firstShells, ...secondShells]) volatileMids.add(mid);
-  }
   const firstHashes = {};
   for (const relative of files) {
     const firstPath = path.join(firstDir, relative);
@@ -647,22 +636,14 @@ async function compareExports(firstDir, secondDir, stableMids) {
       continue;
     }
     if (relative.endsWith('.html')) {
-      const left = normalizeHtml(firstBytes.toString('utf8'), { stableMids });
-      const right = normalizeHtml(secondBytes.toString('utf8'), { stableMids });
+      const left = normalizeHtml(firstBytes.toString('utf8'));
+      const right = normalizeHtml(secondBytes.toString('utf8'));
       if (left !== right) violations.push(`Non-deterministic HTML after only documented normalizations: ${relative}`);
       firstHashes[relative] = createHash('sha256').update(left).digest('hex');
-    } else if (relative.endsWith('.js')) {
-      let left = firstBytes.toString('utf8');
-      let right = secondBytes.toString('utf8');
-      for (const mid of volatileMids) {
-        left = left.replaceAll(mid, '<SHELL-MID>');
-        right = right.replaceAll(mid, '<SHELL-MID>');
-      }
-      if (relative.endsWith('/static_html_search_index.js')) {
-        left = normalizeSearchIndexJavascript(left);
-        right = normalizeSearchIndexJavascript(right);
-      }
-      if (left !== right) violations.push(`Non-deterministic StrictDoc artifact after observed shell MID normalization: ${relative}`);
+    } else if (relative.endsWith('/static_html_search_index.js')) {
+      const left = normalizeSearchIndexJavascript(firstBytes.toString('utf8'));
+      const right = normalizeSearchIndexJavascript(secondBytes.toString('utf8'));
+      if (left !== right) violations.push(`Non-deterministic StrictDoc search index after ordering normalization: ${relative}`);
       firstHashes[relative] = createHash('sha256').update(left).digest('hex');
     } else {
       if (!firstBytes.equals(secondBytes)) violations.push(`Non-deterministic StrictDoc artifact: ${relative}`);
@@ -692,19 +673,36 @@ async function findHtmlDocument(root, sourceRel) {
   return path.join(root, candidates[0]);
 }
 
+export async function findTraceHtmlDocuments(outputDir, nodeIds) {
+  const expected = new Set(nodeIds);
+  const byFile = new Map();
+  for (const file of await walkFiles(outputDir)) {
+    if (!file.startsWith('html/') || !file.endsWith('.sdoc.html')) continue;
+    const html = await readFile(path.join(outputDir, file), 'utf8');
+    const ids = [...html.matchAll(/<sdoc-anchor\b[^>]*?\sid="([^"]+)"/gu)]
+      .map(match => match[1]).filter(id => expected.has(id));
+    if (ids.length > 0) byFile.set(file, ids);
+  }
+  const seen = new Set();
+  for (const ids of byFile.values()) {
+    for (const id of ids) {
+      if (seen.has(id)) throw new Error(`Generated StrictDoc HTML repeats UID anchor ${id}`);
+      seen.add(id);
+    }
+  }
+  const missingIds = [...expected].filter(id => !seen.has(id));
+  if (missingIds.length > 0) throw new Error(`Generated HTML is missing UID anchors: ${missingIds.join(', ')}`);
+  return byFile;
+}
+
 async function checkStaticOutput(outputDir, nodeIds, sourceRel, repositoryRoot) {
   const files = await walkFiles(outputDir);
   if (!files.includes('html/index.html') || !files.includes('json/index.json')) {
     throw new Error('StrictDoc did not generate both HTML and JSON indexes');
   }
   const htmlPath = await findHtmlDocument(path.join(outputDir, 'html'), sourceRel);
-  const html = await readFile(htmlPath, 'utf8');
   const jsonPath = path.join(outputDir, 'json/index.json');
-  const json = await readFile(jsonPath, 'utf8');
-  const missingHtmlIds = nodeIds.filter((id) => !html.includes(id));
-  const missingJsonIds = nodeIds.filter((id) => !json.includes(id));
-  if (missingHtmlIds.length > 0) throw new Error(`Generated HTML is missing requirement IDs: ${missingHtmlIds.join(', ')}`);
-  if (missingJsonIds.length > 0) throw new Error(`Generated JSON is missing requirement IDs: ${missingJsonIds.join(', ')}`);
+  await findTraceHtmlDocuments(outputDir, nodeIds);
   const sensitivePatterns = [
     /\bgh[pousr]_[A-Za-z0-9]{20,}\b/u,
     /\bgithub_pat_[A-Za-z0-9_]{20,}\b/u,
@@ -722,25 +720,7 @@ async function checkStaticOutput(outputDir, nodeIds, sourceRel, repositoryRoot) 
 async function runVerifier(args) {
   const root = path.resolve(args.root);
   const sourceRel = args.source.split(path.sep).join('/');
-  const sourcePath = path.resolve(root, args.source);
   const inventoryPath = path.resolve(root, args.inventory);
-  const baseText = await readGitFile(root, args.baseRef, sourceRel);
-  const baselineIds = requirementIdsFromSource(baseText);
-  if (baselineIds.length === 0) throw new Error(`No REQ-IDs found in baseline ${args.baseRef}:${sourceRel}`);
-  const sourceText = await readFile(sourcePath, 'utf8');
-  const currentSourceIds = requirementIdsFromSource(sourceText);
-  if (currentSourceIds.length === 0) throw new Error(`No StrictDoc REQ-IDs found in ${sourceRel}`);
-  const sourceDuplicates = currentSourceIds.filter((id, index) => currentSourceIds.indexOf(id) !== index);
-  if (sourceDuplicates.length > 0) throw new Error(`Duplicate UID ${[...new Set(sourceDuplicates)].join(', ')}`);
-  const missingBaselineIds = baselineIds.filter((id) => !currentSourceIds.includes(id));
-  if (missingBaselineIds.length > 0) throw new Error(`Requirement IDs removed from the baseline: ${missingBaselineIds.join(', ')}`);
-
-  const currentObligationIds = obligationIdsFromSource(sourceText);
-  const removedObligationIds = obligationIdsFromSource(baseText).filter(id => !currentObligationIds.includes(id));
-  if (removedObligationIds.length > 0) {
-    throw new Error(`Obligation IDs removed from the baseline: ${removedObligationIds.join(', ')}`);
-  }
-
   const versionResult = execute(args.strictdoc, ['--version'], { cwd: root });
   const version = String(versionResult.stdout).trim();
   if (versionResult.status !== 0 || version !== EXPECTED_STRICTDOC_VERSION) {
@@ -750,6 +730,7 @@ async function runVerifier(args) {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codexia-strictdoc-'));
   const run1 = path.join(tempRoot, 'run-1');
   const run2 = path.join(tempRoot, 'run-2');
+  const publicOnly = process.env.CODEXIA_STRICTDOC_PUBLIC === '1';
   const configuredReportDir = process.env.CODEXIA_CI_REPORT_DIR;
   const finalOutput = args.outputDir
     ? path.resolve(root, args.outputDir)
@@ -758,30 +739,47 @@ async function runVerifier(args) {
       : path.join(root, 'work/strictdoc');
   const reportPath = args.report ? path.resolve(root, args.report) : path.join(finalOutput, 'trace-report.json');
   try {
-    await runStrictDoc(args.strictdoc, root, sourcePath, run1);
-    await runStrictDoc(args.strictdoc, root, sourcePath, run2);
+    // Use an absolute CLI path only when supplied as a path. Installed commands
+    // on PATH remain usable when the baseline is exported from a temp checkout.
+    const command = args.strictdoc.includes(path.sep) ? path.resolve(root, args.strictdoc) : args.strictdoc;
+    const baselineNodes = await exportBaselineTraceNodes(command, root, args.baseRef, tempRoot);
+    await runStrictDoc(command, root, 'docs', run1);
+    await runStrictDoc(command, root, 'docs', run2);
     const firstJson = JSON.parse(await readFile(path.join(run1, 'json/index.json'), 'utf8'));
-    const requirementNodes = collectNodes(firstJson, 'REQUIREMENT');
-    const scenarioNodes = collectNodes(firstJson, 'TEST');
-    const obligationNodes = collectNodes(firstJson, 'OBLIGATION');
-    const exportedObligationIds = obligationNodes.map(node => node.UID);
-    const missingObligations = currentObligationIds.filter(id => !exportedObligationIds.includes(id));
-    const unexpectedObligations = exportedObligationIds.filter(id => !currentObligationIds.includes(id));
-    if (missingObligations.length > 0 || unexpectedObligations.length > 0) {
-      throw new Error(`StrictDoc export/source obligation mismatch; missing=${missingObligations.join(',')}; extra=${unexpectedObligations.join(',')}`);
+    const traceNodes = collectTraceNodes(firstJson);
+    let completeJson = firstJson;
+    if (publicOnly) {
+      // Verify authoring inputs outside the publication boundary without
+      // copying their output into the artifact or report directory.
+      const completeOutput = path.join(tempRoot, 'complete-export');
+      const env = { ...process.env };
+      delete env.CODEXIA_STRICTDOC_PUBLIC;
+      await runStrictDoc(command, root, 'docs', completeOutput, { formats: 'json', env });
+      completeJson = JSON.parse(await readFile(path.join(completeOutput, 'json/index.json'), 'utf8'));
+      const completeNodes = collectTraceNodes(completeJson);
+      const scopeViolations = validateBaselineTraceIds(completeNodes, traceNodes);
+      if (traceNodes.length !== completeNodes.length || scopeViolations.length > 0) {
+        throw new Error(`Published StrictDoc export must preserve all trace nodes from the complete project: ${scopeViolations.join('; ')}`);
+      }
     }
-    const nodeViolations = validateRequirementNodes(requirementNodes);
+    const authoredDocumentCount = (await walkFiles(path.join(root, 'docs'))).filter(file => file.endsWith('.sdoc')).length;
+    if (completeJson.DOCUMENTS.length !== authoredDocumentCount) {
+      throw new Error(`Complete StrictDoc export contains ${completeJson.DOCUMENTS.length} documents from ${authoredDocumentCount} native sources`);
+    }
+    const requirementNodes = traceNodes.filter(node => node._NODE_TYPE === 'REQUIREMENT');
+    const scenarioNodes = traceNodes.filter(node => node._NODE_TYPE === 'TEST');
+    const obligationNodes = traceNodes.filter(node => node._NODE_TYPE === 'OBLIGATION');
+    const exportedObligationIds = obligationNodes.map(node => node.UID);
+    const nodeViolations = [
+      ...validateBaselineTraceIds(baselineNodes, traceNodes),
+      ...validateRequirementNodes(requirementNodes),
+    ];
     if (nodeViolations.length > 0) throw new Error(nodeViolations.join('\n'));
     const { sources: testSources, violations: discoveryViolations } = await discoverTestSources(root);
     const scenarioViolations = [...discoveryViolations, ...validateScenarioNodes(scenarioNodes, requirementNodes, testSources)];
     if (scenarioViolations.length > 0) throw new Error(scenarioViolations.join('\n'));
     const exportedIds = requirementNodes.map((node) => node.UID);
-    const missingFromExport = currentSourceIds.filter((id) => !exportedIds.includes(id));
-    const extraInExport = exportedIds.filter((id) => !currentSourceIds.includes(id));
-    if (missingFromExport.length > 0 || extraInExport.length > 0) {
-      throw new Error(`StrictDoc export/source ID mismatch; missing=${missingFromExport.join(',')}; extra=${extraInExport.join(',')}`);
-    }
-    const relationViolations = await validateRelations([...requirementNodes, ...scenarioNodes, ...obligationNodes], root);
+    const relationViolations = await validateRelations(traceNodes, root);
     if (relationViolations.length > 0) throw new Error(relationViolations.join('\n'));
     const designViolations = await validateObligationDesignRefs(obligationNodes, sourceRel, root);
     if (designViolations.length > 0) throw new Error(designViolations.join('\n'));
@@ -789,8 +787,7 @@ async function runVerifier(args) {
     const inventory = JSON.parse(await readFile(inventoryPath, 'utf8'));
     const { discovered, ansibleProjection, violations: inventoryViolations } = await verifySourceInventory(root, inventory);
     if (inventoryViolations.length > 0) throw new Error(inventoryViolations.join('\n'));
-    const stableMids = [...requirementNodes, ...scenarioNodes, ...obligationNodes].map((node) => node.MID);
-    const determinism = await compareExports(run1, run2, stableMids);
+    const determinism = await compareExports(run1, run2);
     if (determinism.violations.length > 0) throw new Error(determinism.violations.join('\n'));
     await mkdir(path.dirname(finalOutput), { recursive: true });
     try {
@@ -824,7 +821,7 @@ async function runVerifier(args) {
     const browserTraceTests = ['scripts/strictdoc/verify.browser.mjs'];
     const testsForScope = (scope, supportingFiles) => [...new Set([
       ...supportingFiles,
-      ...scenarioNodes.filter(node => node['Execution scope'] === scope).map(node => testSources.get(node.UID).file),
+      ...scenarioNodes.filter(node => node.EXECUTION_SCOPE === scope).map(node => testSources.get(node.UID).file),
     ])];
     const nodeFiles = testsForScope('TRACE_NODE', nodeTraceTests);
     const browserFiles = testsForScope('TRACE_BROWSER', browserTraceTests);
@@ -833,7 +830,7 @@ async function runVerifier(args) {
     for (const node of scenarioNodes) {
       const { file } = testSources.get(node.UID);
       const actualScope = nodeFileSet.has(file) ? 'TRACE_NODE' : browserFileSet.has(file) ? 'TRACE_BROWSER' : 'PRODUCT';
-      if (actualScope !== node['Execution scope'] || (nodeFileSet.has(file) && browserFileSet.has(file))) {
+      if (actualScope !== node.EXECUTION_SCOPE || (nodeFileSet.has(file) && browserFileSet.has(file))) {
         throw new Error(`${node.UID} execution scope conflicts with the trace runner assignment for ${file}`);
       }
     }
@@ -842,7 +839,7 @@ async function runVerifier(args) {
       ...process.env, CODEXIA_STRICTDOC_OUTPUT_DIR: finalOutput,
     });
     const caseExecutions = associateTraceCases(testSources, [...nodeTest.outcomes, ...browserTest.outcomes]);
-    const requiredCases = scenarioNodes.filter(node => node['Execution scope'] !== 'PRODUCT');
+    const requiredCases = scenarioNodes.filter(node => node.EXECUTION_SCOPE !== 'PRODUCT');
     const caseById = new Map(caseExecutions.map(outcome => [outcome.testId, outcome]));
     const casesWithoutPass = requiredCases.filter(node => caseById.get(node.UID)?.result !== 'PASSED');
     if (casesWithoutPass.length > 0) {
@@ -876,7 +873,15 @@ async function runVerifier(args) {
     const report = {
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
-      source: { ...git, registerPath: sourceRel, requirementCount: exportedIds.length, requirementIds: [...exportedIds].sort() },
+      source: {
+        ...git,
+        documentScope: publicOnly ? 'public' : 'complete',
+        completeDocumentCount: completeJson.DOCUMENTS.length,
+        stagedDocumentCount: firstJson.DOCUMENTS.length,
+        registerPath: sourceRel,
+        requirementCount: exportedIds.length,
+        requirementIds: [...exportedIds].sort(),
+      },
       toolchain: { strictdocVersion: version, requirementsLockSha256: lockDigest },
       exports: {
         htmlPath: staticOutput.htmlPath,
@@ -890,7 +895,6 @@ async function runVerifier(args) {
         deterministic: true,
         normalizationRules: [
           'StrictDoc HTML search-index timestamp',
-          'Two observed volatile Markdown document MIDs outside requirement/test nodes',
           'StrictDoc search-index object keys and set-member arrays; StrictDoc serializes these values from Python sets',
         ],
         normalizedFileSha256: determinism.fileHashes,
@@ -905,8 +909,8 @@ async function runVerifier(args) {
         limitations: inventory.limitations ?? [],
       },
       traceability: {
-        TRC01: { status: 'LOCAL_PASS', detail: 'All baseline REQ-IDs are present exactly once as StrictDoc requirement nodes.' },
-        TRC02: { status: 'LOCAL_PASS', detail: 'Two exports match after only recorded StrictDoc timestamp, Markdown document MID, and search-index key and unordered membership normalization.' },
+        TRC01: { status: 'LOCAL_PASS', detail: 'All baseline REQ, OBL and TEST nodes preserve their UID, MID and type in the standard StrictDoc export.' },
+        TRC02: { status: 'LOCAL_PASS', detail: 'Two exports match after only recorded StrictDoc timestamp and search-index key and unordered membership normalization.' },
         TRC03: { status: 'PARTIAL', detail: 'See obligationTrace for resolved design and source references, and the remaining mapping gaps.' },
         TRC04: { status: inventory.coverageStatus ?? 'PARTIAL', detail: 'See reverseTrace for discovered surfaces, obligation links, deviations and discovery limitations.' },
         TRC05: { status: run.status === 'NOT_RUN' ? 'LOCAL_PASS_NO_RUN' : 'IN_PROGRESS', nodeTests: 'PASSED', browserTests: 'PASSED', detail: 'See caseExecutions for observed TEST IDs. The existing CI certifier binds the uploaded report to its job and artifact.' },

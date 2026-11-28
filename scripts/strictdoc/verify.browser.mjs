@@ -4,19 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { chromium } from '@playwright/test';
-
-function collectTraceIds(value, ids = []) {
-  if (!value || typeof value !== 'object') return ids;
-  if (Array.isArray(value)) {
-    for (const item of value) collectTraceIds(item, ids);
-    return ids;
-  }
-  if (['REQUIREMENT', 'OBLIGATION', 'TEST'].includes(value._NODE_TYPE) && typeof value.UID === 'string') ids.push(value.UID);
-  for (const [key, child] of Object.entries(value)) {
-    if (key !== '_NODE_TYPE') collectTraceIds(child, ids);
-  }
-  return ids;
-}
+import { collectTraceNodes, findTraceHtmlDocuments } from './verify.mjs';
 
 async function serveStaticOutput(root) {
   const contentTypes = {
@@ -67,14 +55,14 @@ async function serveStaticOutput(root) {
   return { server, baseUrl: `http://127.0.0.1:${address.port}` };
 }
 
-test('[TEST-TRC-07-001] renders every requirement UID from the staged StrictDoc HTML page', async () => {
+test('[TEST-TRC-07-001] renders every trace UID from the staged StrictDoc HTML documents', async () => {
   const outputDir = process.env.CODEXIA_STRICTDOC_OUTPUT_DIR;
   assert.ok(outputDir, 'CODEXIA_STRICTDOC_OUTPUT_DIR must point to generated StrictDoc artifacts');
-  const htmlPath = '/html/requirements/REQUIREMENT-REGISTER.md.html';
   const jsonPath = path.join(outputDir, 'json', 'index.json');
   const source = JSON.parse(await readFile(jsonPath, 'utf8'));
-  const ids = collectTraceIds(source).sort();
+  const ids = collectTraceNodes(source).map(node => node.UID);
   assert.ok(ids.some(id => id.startsWith('REQ-')), 'the staged JSON must contain requirement nodes');
+  const htmlDocuments = await findTraceHtmlDocuments(outputDir, ids);
 
   const browser = await chromium.launch({
     headless: true,
@@ -83,11 +71,13 @@ test('[TEST-TRC-07-001] renders every requirement UID from the staged StrictDoc 
   const staticServer = await serveStaticOutput(path.resolve(outputDir));
   try {
     const page = await browser.newPage();
-    const response = await page.goto(`${staticServer.baseUrl}${htmlPath}`, { waitUntil: 'domcontentloaded' });
-    assert.equal(response?.ok(), true, 'the staged HTML page must load from its static file URL');
-    assert.match(await page.title(), /Codexia accepted requirement register/u);
-    const pageText = await page.locator('body').innerText();
-    for (const id of ids) assert.ok(pageText.includes(id), `visible StrictDoc HTML is missing ${id}`);
+    for (const [file, fileIds] of htmlDocuments) {
+      const htmlPath = file.split('/').map(encodeURIComponent).join('/');
+      const response = await page.goto(`${staticServer.baseUrl}/${htmlPath}`, { waitUntil: 'domcontentloaded' });
+      assert.equal(response?.ok(), true, `the staged HTML page must load: ${file}`);
+      const pageText = await page.locator('body').innerText();
+      for (const id of fileIds) assert.ok(pageText.includes(id), `visible StrictDoc HTML is missing ${id} in ${file}`);
+    }
   } finally {
     await browser.close();
     await new Promise((resolve, reject) => staticServer.server.close((error) => error ? reject(error) : resolve()));

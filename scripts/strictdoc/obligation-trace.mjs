@@ -8,7 +8,7 @@ const SHA = /^[0-9a-f]{40}$/u;
 const RUN_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/\d+$/u;
 
 export function testIdReferences(node) {
-  return String(node['Test IDs'] ?? '').split(/[\s,;]+/u)
+  return String(node.TEST_IDS ?? '').split(/[\s,;]+/u)
     .filter(value => value.startsWith('TEST-') && value !== 'TEST-ID');
 }
 
@@ -69,19 +69,19 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
     const requirement = requirementById.get(requirementId);
     if (!requirement) violations.push(`${obligation.UID} refers to unknown requirement ${requirementId}`);
     if (obligation.MID !== deterministicMid(obligation.UID)) violations.push(`MID for ${obligation.UID} is not deterministic`);
-    if (obligation['Exact-run reference'] !== 'NOT_RUN') {
+    if (obligation.EXACT_RUN_REFERENCE !== 'NOT_RUN') {
       violations.push(`${obligation.UID} authored Exact-run reference must be NOT_RUN; observed runs are attached in Verify evidence`);
     }
     const parents = (obligation.RELATIONS ?? []).filter((item) => item.TYPE === 'Parent').map((item) => item.VALUE);
     if (parents.length !== 1 || parents[0] !== requirementId) violations.push(`${obligation.UID} must have exactly one Parent relation to ${requirementId}`);
-    const designRefs = String(obligation['Design reference'] ?? '').split(/\s*;\s*/u).filter(Boolean);
+    const designRefs = String(obligation.DESIGN_REFERENCE ?? '').split(/\s*;\s*/u).filter(Boolean);
     const sourceRefs = (obligation.RELATIONS ?? []).filter(item => item.TYPE === 'File').map(item => {
       const sourcePath = item.VALUE ?? item.PATH;
       return { path: sourcePath, identifier: sourcePath };
     });
-    const requirementImplementationIdentifiers = String(requirement?.['Implementation identifiers'] ?? '').split(/\s*;\s*/u).filter(Boolean);
-    const requirementComment = String(requirement?.Comment ?? '').trim();
-    const surfaceIdentifiers = String(obligation['Surface identifiers'] ?? '').split(/\s*;\s*/u).filter(Boolean).map((item) => {
+    const requirementImplementationIdentifiers = String(requirement?.IMPLEMENTATION_IDENTIFIERS ?? '').split(/\s*;\s*/u).filter(Boolean);
+    const requirementComment = String(requirement?.COMMENT ?? '').trim();
+    const surfaceIdentifiers = String(obligation.SURFACE_IDENTIFIERS ?? '').split(/\s*;\s*/u).filter(Boolean).map((item) => {
       const separator = item.indexOf('=');
       const kind = separator > 0 ? item.slice(0, separator) : '';
       const id = separator > 0 ? item.slice(separator + 1) : '';
@@ -123,12 +123,12 @@ export function buildObligationTrace({ requirements = [], obligations = [], scen
     }
     rows.push({
       requirementId, obligationId: obligation.UID, obligationText: obligation.STATEMENT ?? obligation.TITLE ?? '',
-      decisionStatus: requirement?.['Decision status'] ?? 'UNKNOWN',
-      conformanceStatus: requirement?.['Conformance status'] ?? 'UNMAPPED',
-      applicability: requirement?.Applicability ?? 'UNKNOWN',
+      decisionStatus: requirement?.DECISION_STATUS ?? 'UNKNOWN',
+      conformanceStatus: requirement?.CONFORMANCE_STATUS ?? 'UNMAPPED',
+      applicability: requirement?.APPLICABILITY ?? 'UNKNOWN',
       requirementImplementationIdentifiers, requirementComment,
       designRefs, sourceRefs,
-      implementationIdentifiers: String(obligation['Implementation identifiers'] ?? '').split(/\s*;\s*/u).filter(Boolean),
+      implementationIdentifiers: String(obligation.IMPLEMENTATION_IDENTIFIERS ?? '').split(/\s*;\s*/u).filter(Boolean),
       surfaceIdentifiers, testIds, exactRuns, status,
     });
   }

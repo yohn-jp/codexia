@@ -1,0 +1,2779 @@
+[DOCUMENT]
+MID: 6b6adaafffa810bdab6adf625a8ba029
+TITLE: Codexia accepted requirement register
+UID: DOC-REQUIREMENT-REGISTER
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 454cd7470ee4479f98b0d470957ad33a
+STATEMENT: >>>
+この文書が採用済み製品要求の唯一の編集正本である。HTML/JSONはStrictDocから生成する派生物。既存のREQ-IDと検証可能な要求文を継承する。実装候補とテスト候補のリンクは適合証拠ではない。
+<<<
+
+[REQUIREMENT]
+MID: 92e471d983d9375170f8efc2eb20eb43
+UID: REQ-CORE-001
+TITLE: REQ-CORE-001
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [System design](../architecture/SYSTEM-DESIGN.sdoc)、[Core](../architecture/CORE.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/core/src/; packages/module-runtime/
+VERIFICATION_IDENTIFIERS: tests/e2e/core.acceptance.spec.ts
+TEST_IDS: TEST-CORE-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: Optional module停止・未導入でも作品作成、執筆、保存、履歴、復元を継続する
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/SYSTEM-DESIGN.sdoc
+- TYPE: File
+  PATH: docs/architecture/CORE.sdoc
+- TYPE: File
+  PATH: tests/e2e/core.acceptance.spec.ts
+
+[OBLIGATION]
+MID: f48e7869132615dd5f981973829b8ec8
+UID: OBL-REQ-CORE-001-O01
+TITLE: OBL-REQ-CORE-001-O01
+DESIGN_REFERENCE: [System design](../architecture/SYSTEM-DESIGN.sdoc)、[Core](../architecture/CORE.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/persistence-routes.ts; app/src/persistence/PersistenceWorkspace.tsx
+TEST_IDS: TEST-CORE-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: Optional module停止・未導入でも作品作成、執筆、保存、履歴、復元を継続する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-CORE-001
+- TYPE: File
+  PATH: packages/api/src/persistence-routes.ts
+- TYPE: File
+  PATH: app/src/persistence/PersistenceWorkspace.tsx
+
+[REQUIREMENT]
+MID: fddfda8c0e816de124b2f7206e7f78cd
+UID: REQ-CORE-002
+TITLE: REQ-CORE-002
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Core](../architecture/CORE.sdoc)、[Modules](../architecture/MODULES.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/native-knowledge-actions.ts; packages/persistence-postgres/src/postgres-store.ts
+VERIFICATION_IDENTIFIERS: tests/e2e/native-review.acceptance.spec.ts
+TEST_IDS: TEST-CORE-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: module/MCPの変更は提案を経由し、作者承認・再検査前に原稿を直接変更しない
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/CORE.sdoc
+- TYPE: File
+  PATH: docs/architecture/MODULES.sdoc
+- TYPE: File
+  PATH: packages/api/src/native-knowledge-actions.ts
+- TYPE: File
+  PATH: packages/persistence-postgres/src/postgres-store.ts
+- TYPE: File
+  PATH: tests/e2e/native-review.acceptance.spec.ts
+
+[OBLIGATION]
+MID: f630a50db80fb29dc7887323f93b6a66
+UID: OBL-REQ-CORE-002-O01
+TITLE: OBL-REQ-CORE-002-O01
+DESIGN_REFERENCE: [Core](../architecture/CORE.sdoc)、[Modules](../architecture/MODULES.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/native-knowledge-actions.ts; packages/persistence-postgres/src/postgres-store.ts
+TEST_IDS: TEST-CORE-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: module/MCPの変更は提案を経由し、作者承認・再検査前に原稿を直接変更しない
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-CORE-002
+- TYPE: File
+  PATH: packages/api/src/native-knowledge-actions.ts
+- TYPE: File
+  PATH: packages/persistence-postgres/src/postgres-store.ts
+
+[REQUIREMENT]
+MID: c44c1b1260eb80b27eefb84ad6b51406
+UID: REQ-CORE-003
+TITLE: REQ-CORE-003
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Core](../architecture/CORE.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/server.ts; packages/persistence-postgres/src/postgres-store.ts
+VERIFICATION_IDENTIFIERS: tests/integration/mcp-acceptance.test.mjs
+TEST_IDS: TEST-CORE-003-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: Snapshotをproject/versionへ固定し、古い参照や別projectの結果を現行状態として使わない
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/CORE.sdoc
+- TYPE: File
+  PATH: packages/api/src/server.ts
+- TYPE: File
+  PATH: packages/persistence-postgres/src/postgres-store.ts
+- TYPE: File
+  PATH: tests/integration/mcp-acceptance.test.mjs
+
+[OBLIGATION]
+MID: e6dc945711cd5059ddd0fa0ae1967af8
+UID: OBL-REQ-CORE-003-O01
+TITLE: OBL-REQ-CORE-003-O01
+DESIGN_REFERENCE: [Core](../architecture/CORE.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/server.ts; packages/persistence-postgres/src/postgres-store.ts
+TEST_IDS: TEST-CORE-003-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: Snapshotをproject/versionへ固定し、古い参照や別projectの結果を現行状態として使わない
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-CORE-003
+- TYPE: File
+  PATH: packages/api/src/server.ts
+- TYPE: File
+  PATH: packages/persistence-postgres/src/postgres-store.ts
+
+[REQUIREMENT]
+MID: e5307f1475469b659a8d449fc5a0e200
+UID: REQ-DATA-001
+TITLE: REQ-DATA-001
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Data model](../architecture/DATA-MODEL.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/persistence-postgres/migrations/0001-initial.sql; 0003-project-workspace.sql
+VERIFICATION_IDENTIFIERS: packages/persistence-postgres/src/postgres-store.test.ts
+TEST_IDS: TEST-DATA-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: 原稿・構成・Revision・Knowledge・Evidence・ChangeSet・module recordの正本はPostgreSQLのみ
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/DATA-MODEL.sdoc
+- TYPE: File
+  PATH: packages/persistence-postgres/migrations/0001-initial.sql
+- TYPE: File
+  PATH: packages/persistence-postgres/src/postgres-store.test.ts
+
+[OBLIGATION]
+MID: 587009b33333c1d20a24054bb84fcc06
+UID: OBL-REQ-DATA-001-O01
+TITLE: OBL-REQ-DATA-001-O01
+DESIGN_REFERENCE: [Data model](../architecture/DATA-MODEL.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/persistence-postgres/migrations/0001-initial.sql
+TEST_IDS: TEST-DATA-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: 原稿・構成・Revision・Knowledge・Evidence・ChangeSet・module recordの正本はPostgreSQLのみ
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-001
+- TYPE: File
+  PATH: packages/persistence-postgres/migrations/0001-initial.sql
+
+[REQUIREMENT]
+MID: 007dd05315cc86292a93e108e688d796
+UID: REQ-DATA-002
+TITLE: REQ-DATA-002
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Data model](../architecture/DATA-MODEL.sdoc)、[Core](../architecture/CORE.sdoc)
+IMPLEMENTATION_IDENTIFIERS: document_revision; document_revision_immutable trigger; edit_operation; packages/api/src/persistence-routes.ts
+VERIFICATION_IDENTIFIERS: tests/e2e/persistence-database.acceptance.spec.ts
+TEST_IDS: TEST-DATA-002-001, TEST-DATA-002-002
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: 原稿revisionは不変で、保存・復元は整合性を守る新RevisionとDB receiptで表す
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/DATA-MODEL.sdoc
+- TYPE: File
+  PATH: docs/architecture/CORE.sdoc
+- TYPE: File
+  PATH: packages/api/src/persistence-routes.ts
+- TYPE: File
+  PATH: tests/e2e/persistence-database.acceptance.spec.ts
+
+[OBLIGATION]
+MID: 6fe5dbbfcfc87b5afcb11e6acfc21a9f
+UID: OBL-REQ-DATA-002-O01
+TITLE: OBL-REQ-DATA-002-O01
+DESIGN_REFERENCE: [Data model](../architecture/DATA-MODEL.sdoc)、[Core](../architecture/CORE.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/persistence-routes.ts
+TEST_IDS: TEST-DATA-002-001, TEST-DATA-002-002
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Broad whole-requirement candidate mapping; decomposition into the specific obligations below is incomplete and exact-source certification remains unverified.
+STATEMENT: 原稿revisionは不変で、保存・復元は整合性を守る新RevisionとDB receiptで表す
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-002
+- TYPE: File
+  PATH: packages/api/src/persistence-routes.ts
+
+[REQUIREMENT]
+MID: 7ed62661666f111b1326977dd407e519
+UID: REQ-DATA-003
+TITLE: REQ-DATA-003
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Data model](../architecture/DATA-MODEL.sdoc)
+IMPLEMENTATION_IDENTIFIERS: 0001-initial.sql の複合FK; postgres-store.ts
+VERIFICATION_IDENTIFIERS: packages/persistence-postgres/src/postgres-store.test.ts
+TEST_IDS: TEST-DATA-003-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: project境界をすべての関連オブジェクト・階層・根拠・提案の参照と書込で保持する
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/DATA-MODEL.sdoc
+- TYPE: File
+  PATH: packages/persistence-postgres/src/postgres-store.test.ts
+
+[OBLIGATION]
+MID: 7e42cc0ab0f57e7a7742882ac1150d85
+UID: OBL-REQ-DATA-003-O01
+TITLE: OBL-REQ-DATA-003-O01
+DESIGN_REFERENCE: [Data model](../architecture/DATA-MODEL.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/persistence-postgres/migrations/0001-initial.sql
+TEST_IDS: TEST-DATA-003-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: project境界をすべての関連オブジェクト・階層・根拠・提案の参照と書込で保持する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-003
+- TYPE: File
+  PATH: packages/persistence-postgres/migrations/0001-initial.sql
+
+[REQUIREMENT]
+MID: 2fd422dfc7f2115ff4a44f858905d5b8
+UID: REQ-DATA-004
+TITLE: REQ-DATA-004
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Data model](../architecture/DATA-MODEL.sdoc)、[Update flow](../deployment/UPDATE-FLOW.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/persistence-postgres/src/migrate.ts; migration-set.ts
+VERIFICATION_IDENTIFIERS: packages/persistence-postgres/src/migration-set.test.ts; packages/persistence-postgres/src/schema-maintenance.test.ts
+TEST_IDS: TEST-DATA-004-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: 既存migrationのchecksum/fingerprintを検証し、未承認のDB schema変更をアプリ更新で行わない
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/DATA-MODEL.sdoc
+- TYPE: File
+  PATH: docs/deployment/UPDATE-FLOW.sdoc
+- TYPE: File
+  PATH: packages/persistence-postgres/src/migrate.ts
+- TYPE: File
+  PATH: packages/persistence-postgres/src/migration-set.test.ts
+- TYPE: File
+  PATH: packages/persistence-postgres/src/schema-maintenance.test.ts
+
+[OBLIGATION]
+MID: 38e9159a4e5adf2a4eaa16e6974ae275
+UID: OBL-REQ-DATA-004-O01
+TITLE: OBL-REQ-DATA-004-O01
+DESIGN_REFERENCE: [Data model](../architecture/DATA-MODEL.sdoc)、[Update flow](../deployment/UPDATE-FLOW.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/persistence-postgres/src/migrate.ts
+TEST_IDS: TEST-DATA-004-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: 既存migrationのchecksum/fingerprintを検証し、未承認のDB schema変更をアプリ更新で行わない
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-004
+- TYPE: File
+  PATH: packages/persistence-postgres/src/migrate.ts
+
+[REQUIREMENT]
+MID: ed2b65f98d9d2d9b409105157c1629cf
+UID: REQ-AUTH-001
+TITLE: REQ-AUTH-001
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/oauth-owner.ts; oauth-token.ts; server.ts
+VERIFICATION_IDENTIFIERS: tests/e2e/oauth-web.acceptance.spec.ts
+TEST_IDS: TEST-AUTH-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: owner APIはCodexia発行OAuth bearerを署名・audience・scope・ownerとして検証する
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/API-AUTHN-AUTHZ.sdoc
+- TYPE: File
+  PATH: packages/api/src/oauth-owner.ts
+- TYPE: File
+  PATH: tests/e2e/oauth-web.acceptance.spec.ts
+
+[OBLIGATION]
+MID: d9ff68cdbd1e9aacb2f1dce8c3329274
+UID: OBL-REQ-AUTH-001-O01
+TITLE: OBL-REQ-AUTH-001-O01
+DESIGN_REFERENCE: [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/oauth-owner.ts
+TEST_IDS: TEST-AUTH-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: owner APIはCodexia発行OAuth bearerを署名・audience・scope・ownerとして検証する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-AUTH-001
+- TYPE: File
+  PATH: packages/api/src/oauth-owner.ts
+
+[REQUIREMENT]
+MID: dbadd0a9d5ffe4d1daca067a90a4b332
+UID: REQ-AUTH-002
+TITLE: REQ-AUTH-002
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/server.ts; persistence-routes.ts
+VERIFICATION_IDENTIFIERS: packages/api/src/server.test.ts; packages/api/src/oauth-mcp.test.ts
+TEST_IDS: TEST-AUTH-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: HTTP methodとpathだけでなくprincipal・project・object・revision・effectでfail-closed認可する
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc
+- TYPE: File
+  PATH: packages/api/src/server.ts
+- TYPE: File
+  PATH: packages/api/src/server.test.ts
+- TYPE: File
+  PATH: packages/api/src/oauth-mcp.test.ts
+
+[OBLIGATION]
+MID: 776050b1910f9ec630205e8d81b4583a
+UID: OBL-REQ-AUTH-002-O01
+TITLE: OBL-REQ-AUTH-002-O01
+DESIGN_REFERENCE: [Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/server.ts
+TEST_IDS: TEST-AUTH-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: HTTP methodとpathだけでなくprincipal・project・object・revision・effectでfail-closed認可する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-AUTH-002
+- TYPE: File
+  PATH: packages/api/src/server.ts
+
+[REQUIREMENT]
+MID: a2f6832213e2e0d2e71082b0c87a2e0e
+UID: REQ-AUTH-003
+TITLE: REQ-AUTH-003
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [MCP OAuth](../architecture/MCP-OAUTH.sdoc)、[Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/oauth-mcp.ts; modules/mcp/src/http.ts; tools.ts
+VERIFICATION_IDENTIFIERS: tests/integration/mcp-acceptance.test.mjs
+TEST_IDS: TEST-AUTH-003-001, TEST-AUTH-003-002
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: MCP clientは割当projectとread/compute/proposeまで。承認/applyやowner私有操作を行えない
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/MCP-OAUTH.sdoc
+- TYPE: File
+  PATH: docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc
+- TYPE: File
+  PATH: packages/api/src/oauth-mcp.ts
+- TYPE: File
+  PATH: modules/mcp/src/http.ts
+- TYPE: File
+  PATH: tests/integration/mcp-acceptance.test.mjs
+
+[OBLIGATION]
+MID: 80542f6c2058d64041c4ee2f99c6e995
+UID: OBL-REQ-AUTH-003-O01
+TITLE: OBL-REQ-AUTH-003-O01
+DESIGN_REFERENCE: [MCP OAuth](../architecture/MCP-OAUTH.sdoc)、[Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/oauth-mcp.ts; modules/mcp/src/http.ts
+TEST_IDS: TEST-AUTH-003-001, TEST-AUTH-003-002
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: MCP clientは割当projectとread/compute/proposeまで。承認/applyやowner私有操作を行えない
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-AUTH-003
+- TYPE: File
+  PATH: packages/api/src/oauth-mcp.ts
+- TYPE: File
+  PATH: modules/mcp/src/http.ts
+
+[REQUIREMENT]
+MID: 98f28a41293b47032faa301b09ce740e
+UID: REQ-AUTH-004
+TITLE: REQ-AUTH-004
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.sdoc)、[Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.sdoc)
+IMPLEMENTATION_IDENTIFIERS: /console/setup、setup-only Fastify、codexia_auth.owner_setup、Ansible の protected owner-setup operation。公開経路と初回配備の運用受入は別途確認する
+VERIFICATION_IDENTIFIERS: tests/e2e/passkey-bootstrap.acceptance.spec.ts, packages/api/test/passkey-bootstrap.acceptance.test.ts
+TEST_IDS: TEST-AUTH-004-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: 初回登録を実装。Cloudflare 経路、使い捨て VM の配備と運用受入の証跡待ち。
+STATEMENT: Passkey-firstの初回owner登録は一回限りsetup資格、owner不在、認証ceremonyを満たす
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/API-AUTHN-AUTHZ.sdoc
+- TYPE: File
+  PATH: docs/deployment/INITIAL-DEPLOYMENT-FLOW.sdoc
+- TYPE: File
+  PATH: tests/e2e/passkey-bootstrap.acceptance.spec.ts
+- TYPE: File
+  PATH: app/src/console/ConsoleSetup.tsx
+- TYPE: File
+  PATH: packages/api/src/owner-setup.ts
+- TYPE: File
+  PATH: packages/api/test/passkey-bootstrap.acceptance.test.ts
+- TYPE: File
+  PATH: deploy/ansible/owner-setup.yml
+
+[OBLIGATION]
+MID: 3b0c65af649c6eb349022e21fbe542a6
+UID: OBL-REQ-AUTH-004-O01
+TITLE: OBL-REQ-AUTH-004-O01
+DESIGN_REFERENCE: [API AuthN/AuthZ](../architecture/API-AUTHN-AUTHZ.sdoc)、[Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/console/ConsoleSetup.tsx; packages/api/src/owner-setup.ts; deploy/ansible/owner-setup.yml
+SURFACE_IDENTIFIERS: ansibleSource=deploy/ansible/prepare-owner-activation.yml
+TEST_IDS: TEST-AUTH-004-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: Passkey-firstの初回owner登録は一回限りsetup資格、owner不在、認証ceremonyを満たす
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-AUTH-004
+- TYPE: File
+  PATH: app/src/console/ConsoleSetup.tsx
+- TYPE: File
+  PATH: packages/api/src/owner-setup.ts
+- TYPE: File
+  PATH: deploy/ansible/owner-setup.yml
+- TYPE: File
+  PATH: deploy/ansible/prepare-owner-activation.yml
+
+[REQUIREMENT]
+MID: 962171018b777bef7028ea6af006f662
+UID: REQ-AUTH-005
+TITLE: REQ-AUTH-005
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: FUTURE_TARGET
+DESIGN_OWNER: [Admin screen flow](../design/ADMIN-SCREEN-FLOW.sdoc)、[Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/console/ConsoleEntry.tsx; packages/api/src/owner-security.ts; `/console/security`; `/console/identity`
+VERIFICATION_IDENTIFIERS: tests/e2e/auth-recovery.acceptance.spec.ts; packages/api/src/better-auth.test.ts; packages/api/src/owner-security.test.ts
+TEST_IDS: TEST-AUTH-005-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Desktop Web は Passkey とセッションの管理、連携情報の参照、Passkey 再認証を伴う保存済み OAuth 同意と対応する grant の取消しを実装。所有者による OIDC の登録、検証、有効化は採用目標。
+STATEMENT: `/console`管理、Passkey/session、OIDC設定はowner権限と再認証に拘束する
+RELATIONS:
+- TYPE: File
+  PATH: docs/design/ADMIN-SCREEN-FLOW.sdoc
+- TYPE: File
+  PATH: docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc
+- TYPE: File
+  PATH: app/src/console/ConsoleEntry.tsx
+- TYPE: File
+  PATH: packages/api/src/owner-security.ts
+- TYPE: File
+  PATH: tests/e2e/auth-recovery.acceptance.spec.ts
+
+[OBLIGATION]
+MID: 53a8b9037ebbb65c5e04b1b797ccf099
+UID: OBL-REQ-AUTH-005-O01
+TITLE: OBL-REQ-AUTH-005-O01
+DESIGN_REFERENCE: [Admin screen flow](../design/ADMIN-SCREEN-FLOW.sdoc)、[Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/console/ConsoleEntry.tsx; packages/api/src/owner-security.ts; packages/http-contract/src/routes-auth.tsp
+SURFACE_IDENTIFIERS: httpOperation=GET /api/auth/codexia/owner-security/identity; httpOperation=POST /api/auth/codexia/owner-security/revoke-consent
+TEST_IDS: TEST-AUTH-005-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: `/console`管理、Passkey/session、OIDC設定はowner権限と再認証に拘束する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-AUTH-005
+- TYPE: File
+  PATH: app/src/console/ConsoleEntry.tsx
+- TYPE: File
+  PATH: packages/api/src/owner-security.ts
+
+[REQUIREMENT]
+MID: 1da786a43f72f653d2cd7d1a3551d9f6
+UID: REQ-API-001
+TITLE: REQ-API-001
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [API contract](../architecture/API-CONTRACT.sdoc)、[Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/server.ts; persistence-routes.ts; 各moduleのHTTP contribution
+VERIFICATION_IDENTIFIERS: packages/api/src/persistence-routes.test.ts
+TEST_IDS: TEST-API-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／設計台帳の全面検証待ち; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: APIの入口、body/query、レスポンス、エラー、認可、競合、冪等性をmethod/path/Operationで特定する
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/API-CONTRACT.sdoc
+- TYPE: File
+  PATH: docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc
+- TYPE: File
+  PATH: packages/api/src/server.ts
+- TYPE: File
+  PATH: packages/api/src/persistence-routes.test.ts
+
+[OBLIGATION]
+MID: 4f4a92eac39e5a67333e045ec8782a64
+UID: OBL-REQ-API-001-O01
+TITLE: OBL-REQ-API-001-O01
+DESIGN_REFERENCE: [API contract](../architecture/API-CONTRACT.sdoc)、[Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/server.ts
+TEST_IDS: TEST-API-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: APIの入口、body/query、レスポンス、エラー、認可、競合、冪等性をmethod/path/Operationで特定する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-API-001
+- TYPE: File
+  PATH: packages/api/src/server.ts
+
+[REQUIREMENT]
+MID: 8ffbcb3626affc11f13e649ed5cf1a02
+UID: REQ-API-002
+TITLE: REQ-API-002
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Core](../architecture/CORE.sdoc)、[Interaction contract](../design/INTERACTION-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: persistence-routes.ts; postgres-store.ts; app/src/api-documents.ts
+VERIFICATION_IDENTIFIERS: tests/e2e/core.acceptance.spec.ts
+TEST_IDS: TEST-API-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: 作者向けMutationでrequest identity・precondition・receiptを確認し、競合/応答不明を偽成功にしない
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/CORE.sdoc
+- TYPE: File
+  PATH: docs/design/INTERACTION-CONTRACT.sdoc
+- TYPE: File
+  PATH: app/src/api-documents.ts
+- TYPE: File
+  PATH: tests/e2e/core.acceptance.spec.ts
+
+[OBLIGATION]
+MID: 2054c8ca1ebb89dfc9c67169bd819bf3
+UID: OBL-REQ-API-002-O01
+TITLE: OBL-REQ-API-002-O01
+DESIGN_REFERENCE: [Core](../architecture/CORE.sdoc)、[Interaction contract](../design/INTERACTION-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/api-documents.ts
+TEST_IDS: TEST-API-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Broad whole-requirement candidate mapping; decomposition into the specific obligations below is incomplete and exact-source certification remains unverified.
+STATEMENT: 作者向けMutationでrequest identity・precondition・receiptを確認し、競合/応答不明を偽成功にしない
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-API-002
+- TYPE: File
+  PATH: app/src/api-documents.ts
+
+[REQUIREMENT]
+MID: d88c4eafb567643571dfdac39b451bbf
+UID: REQ-MCP-001
+TITLE: REQ-MCP-001
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [MCP-first](../architecture/MCP-FIRST.sdoc)、[Modules](../architecture/MODULES.sdoc)、[MCP v2 migration](../architecture/MCP-V2-MIGRATION.sdoc)
+IMPLEMENTATION_IDENTIFIERS: modules/mcp/src/http.ts; modules/mcp/src/stdio.ts; modules/mcp/src/tools.ts; modules/mcp/src/tools/shared.ts; modules/mcp/src/tools/project.ts; modules/mcp/src/tools/knowledge.ts
+VERIFICATION_IDENTIFIERS: MCPV-001..008; tests/integration/mcp-acceptance.test.mjs; modules/mcp/src/tools.test.ts; packages/api/test/better-auth.integration.test.ts
+TEST_IDS: TEST-MCPV-001-001, TEST-MCPV-001-002, TEST-MCPV-004-001, TEST-MCPV-004-002, TEST-MCPV-006-001, TEST-MCPV-006-002, TEST-MCPV-006-003, TEST-MCPV-006-004, TEST-MCPV-006-005, TEST-MCPV-007-001, TEST-MCPV-007-002, TEST-MCPV-007-003, TEST-MCPV-007-004, TEST-MCPV-004-003
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writerを持たない
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/MCP-FIRST.sdoc
+- TYPE: File
+  PATH: docs/architecture/MODULES.sdoc
+- TYPE: File
+  PATH: modules/mcp/src/http.ts
+- TYPE: File
+  PATH: tests/integration/mcp-acceptance.test.mjs
+- TYPE: File
+  PATH: docs/architecture/MCP-V2-MIGRATION.sdoc
+
+[OBLIGATION]
+MID: e32620abf2dfe0ecf7a094cafd8f3e17
+UID: OBL-REQ-MCP-001-O01
+TITLE: OBL-REQ-MCP-001-O01
+DESIGN_REFERENCE: [MCP-first](../architecture/MCP-FIRST.sdoc)、[Modules](../architecture/MODULES.sdoc)
+IMPLEMENTATION_IDENTIFIERS: modules/mcp/src/http.ts; modules/mcp/src/stdio.ts; modules/mcp/src/tools.ts
+TEST_IDS: TEST-MCPV-004-001; TEST-MCPV-004-002; TEST-MCPV-004-003
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: stdioとHTTPのMCPは同じCore action/effect境界に到達し、独立writerを持たない
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+- TYPE: File
+  PATH: modules/mcp/src/http.ts
+- TYPE: File
+  PATH: modules/mcp/src/stdio.ts
+- TYPE: File
+  PATH: modules/mcp/src/tools.ts
+- TYPE: File
+  PATH: docs/architecture/MCP-V2-MIGRATION.sdoc
+
+[OBLIGATION]
+MID: 48ec31f4c3b8aa919dbb427ef88fb358
+UID: OBL-REQ-MCP-001-O02
+TITLE: OBL-REQ-MCP-001-O02
+DESIGN_REFERENCE: [MCP v2 migration](../architecture/MCP-V2-MIGRATION.sdoc#tool-schemaと追跡)
+IMPLEMENTATION_IDENTIFIERS: modules/mcp/src/tools.ts: registerMcpTools; modules/mcp/src/tools/knowledge.ts: registerKnowledgeTools
+TEST_IDS: TEST-MCPV-001-001; TEST-MCPV-001-002
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Selected registered scenarios cover parts of this obligation. Exact-source execution evidence and full product conformance remain pending.
+STATEMENT: 公式SDK v2のtool登録と公開catalogを一致させ、登録したSchemaで引数を検証する。公開名、入力Schema、native KnowledgeのUUID・操作範囲を含む。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+- TYPE: File
+  PATH: modules/mcp/src/tools.ts
+- TYPE: File
+  PATH: modules/mcp/src/tools/knowledge.ts
+
+[OBLIGATION]
+MID: a421ecc15ad1918d430f31479b15accc
+UID: OBL-REQ-MCP-001-O03
+TITLE: OBL-REQ-MCP-001-O03
+DESIGN_REFERENCE: [MCP v2 migration](../architecture/MCP-V2-MIGRATION.sdoc#プロトコルの互換期間)
+IMPLEMENTATION_IDENTIFIERS: modules/mcp/src/http.ts: createMcpHttpContribution; modules/mcp/src/protocol-version.ts: isMcpStrict; modules/mcp/src/stdio.ts: serveStdio
+TEST_IDS: TEST-MCPV-007-001; TEST-MCPV-007-002; TEST-MCPV-007-003; TEST-MCPV-007-004
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Selected registered scenarios cover parts of this obligation. Exact-source execution evidence and full product conformance remain pending.
+STATEMENT: 2026世代のHTTP交換をリクエスト単位で扱い、旧世代のstateless fallbackを承認済みの期限までに制限する。旧session操作を提供せず、期限以降は新規stdio接続と各HTTPリクエストで旧世代を拒否する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+- TYPE: File
+  PATH: modules/mcp/src/http.ts
+- TYPE: File
+  PATH: modules/mcp/src/protocol-version.ts
+- TYPE: File
+  PATH: modules/mcp/src/stdio.ts
+
+[OBLIGATION]
+MID: f34fab5cb281e94ef96f4e5b8304e2c0
+UID: OBL-REQ-MCP-001-O04
+TITLE: OBL-REQ-MCP-001-O04
+DESIGN_REFERENCE: [MCP v2 migration](../architecture/MCP-V2-MIGRATION.sdoc#検証計画)
+IMPLEMENTATION_IDENTIFIERS: modules/mcp/src/http.ts: createMcpHttpContribution; modules/mcp/src/stdio.ts: serveStdio; packages/api/src/server.ts: createServer
+TEST_IDS: TEST-MCPV-006-001; TEST-MCPV-006-002; TEST-MCPV-006-003; TEST-MCPV-006-004; TEST-MCPV-006-005
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Selected registered scenarios cover parts of this obligation. Exact-source execution evidence and full product conformance remain pending.
+STATEMENT: HTTPとstdioの要求境界でキャンセルを処理し、処理中のactionを解放する。HTTPでは不正header・過大入力をtool dispatch前に拒否し、停止時に進行中の処理を終結させる。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+- TYPE: File
+  PATH: modules/mcp/src/http.ts
+- TYPE: File
+  PATH: modules/mcp/src/stdio.ts
+- TYPE: File
+  PATH: packages/api/src/server.ts
+
+[REQUIREMENT]
+MID: cd52c2dfae742db14351fecaa42331c7
+UID: REQ-MCP-002
+TITLE: REQ-MCP-002
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [MCP-first](../architecture/MCP-FIRST.sdoc)、[MCP v2 migration](../architecture/MCP-V2-MIGRATION.sdoc)
+IMPLEMENTATION_IDENTIFIERS: modules/mcp/src/tools.ts; modules/mcp/src/tools/shared.ts; modules/mcp/src/tools/project.ts; modules/mcp/src/tools/knowledge.ts
+VERIFICATION_IDENTIFIERS: tests/integration/mcp-acceptance.test.mjs; MCPV-001..008
+TEST_IDS: TEST-MCP-CORE-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: 外部AIによる推論とCodexia内のCore編集を分離し、内部LLM API拡張を再開しない
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/MCP-FIRST.sdoc
+- TYPE: File
+  PATH: modules/mcp/src/tools.ts
+- TYPE: File
+  PATH: tests/integration/mcp-acceptance.test.mjs
+- TYPE: File
+  PATH: docs/architecture/MCP-V2-MIGRATION.sdoc
+
+[OBLIGATION]
+MID: d226d181f7a78354bf16607e64ed06e6
+UID: OBL-REQ-MCP-002-O01
+TITLE: OBL-REQ-MCP-002-O01
+DESIGN_REFERENCE: [MCP-first](../architecture/MCP-FIRST.sdoc)
+IMPLEMENTATION_IDENTIFIERS: modules/mcp/src/tools.ts; modules/mcp/src/tools/shared.ts
+TEST_IDS: TEST-MCP-CORE-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: 外部AIによる推論とCodexia内のCore編集を分離し、内部LLM API拡張を再開しない
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-002
+- TYPE: File
+  PATH: modules/mcp/src/tools.ts
+- TYPE: File
+  PATH: modules/mcp/src/tools/shared.ts
+- TYPE: File
+  PATH: tests/integration/mcp-acceptance.test.mjs
+- TYPE: File
+  PATH: docs/architecture/MCP-V2-MIGRATION.sdoc
+
+[REQUIREMENT]
+MID: b67567c59a7c147a08ef65e95b62bbd4
+UID: REQ-UI-001
+TITLE: REQ-UI-001
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [UX contract](../design/UX-CONTRACT.sdoc)、[iOS architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/launcher.tsx; app/src/shells/
+VERIFICATION_IDENTIFIERS: tests/e2e/modular-workspace.acceptance.spec.ts
+TEST_IDS: TEST-UI-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Desktop web mapping exists; iOS implementation and physical-device acceptance remain unverified, so this cross-platform requirement is only partial.
+STATEMENT: 作者用Desktop React Webの正式対応はWindows Chromium（Chrome/Edge）に限定する。DesktopとiOS SwiftUIはUIを共有せず、共通のCore/API・Revision・保存/復旧契約を満たす。Mobile Web/PWA作者UIは対象外。旧Mobile撤去の受入条件および独立した公開reader/外部認証契約は維持する
+RELATIONS:
+- TYPE: File
+  PATH: docs/design/UX-CONTRACT.sdoc
+- TYPE: File
+  PATH: docs/architecture/IOS-SWIFTUI-ARCHITECTURE.sdoc
+- TYPE: File
+  PATH: app/src/launcher.tsx
+- TYPE: File
+  PATH: tests/e2e/modular-workspace.acceptance.spec.ts
+
+[OBLIGATION]
+MID: f207ea617780f2a05b318ccc1874a257
+UID: OBL-REQ-UI-001-O01
+TITLE: OBL-REQ-UI-001-O01
+DESIGN_REFERENCE: [UX contract](../design/UX-CONTRACT.sdoc)、[iOS architecture](../architecture/IOS-SWIFTUI-ARCHITECTURE.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/launcher.tsx
+SURFACE_IDENTIFIERS: nativeIosView=LibraryView; nativeIosView=AccountScreen; nativeIosView=ProjectScreen; nativeIosView=ProductEditorScreen; nativeIosView=FixtureProjectView; nativeIosView=FixtureListView; nativeIosView=FixtureEditorDestination; nativeIosView=AuthoringView
+TEST_IDS: TEST-UI-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: 作者用Desktop React Webの正式対応はWindows Chromium（Chrome/Edge）に限定する。DesktopとiOS SwiftUIはUIを共有せず、共通のCore/API・Revision・保存/復旧契約を満たす。Mobile Web/PWA作者UIは対象外。旧Mobile撤去の受入条件および独立した公開reader/外部認証契約は維持する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-001
+- TYPE: File
+  PATH: app/src/launcher.tsx
+- TYPE: File
+  PATH: ios/CodexiaApp/Sources/CodexiaApp.swift
+- TYPE: File
+  PATH: ios/CodexiaEditor/Sources/CodexiaEditor/AuthoringView.swift
+
+[REQUIREMENT]
+MID: 340d6519232659932dbdaec6237e7b82
+UID: REQ-UI-002
+TITLE: REQ-UI-002
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Interaction contract](../design/INTERACTION-CONTRACT.sdoc)、[UX contract](../design/UX-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/storage/; app/src/application/persistence-save-protocol.ts; app/src/journal.test.ts
+VERIFICATION_IDENTIFIERS: tests/e2e/auth-recovery.acceptance.spec.ts; tests/e2e/core.acceptance.spec.ts
+TEST_IDS: TEST-UI-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: 未送信/保存中/DB確定/応答不明を区別し、下書きを黙って捨てない
+RELATIONS:
+- TYPE: File
+  PATH: docs/design/INTERACTION-CONTRACT.sdoc
+- TYPE: File
+  PATH: docs/design/UX-CONTRACT.sdoc
+- TYPE: File
+  PATH: app/src/application/persistence-save-protocol.ts
+- TYPE: File
+  PATH: app/src/journal.test.ts
+- TYPE: File
+  PATH: tests/e2e/auth-recovery.acceptance.spec.ts
+- TYPE: File
+  PATH: tests/e2e/core.acceptance.spec.ts
+
+[OBLIGATION]
+MID: 375573280f98b604ac8b6f18d376e847
+UID: OBL-REQ-UI-002-O01
+TITLE: OBL-REQ-UI-002-O01
+DESIGN_REFERENCE: [Interaction contract](../design/INTERACTION-CONTRACT.sdoc)、[UX contract](../design/UX-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/application/persistence-save-protocol.ts
+TEST_IDS: TEST-UI-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Broad whole-requirement candidate mapping; decomposition into the specific obligations below is incomplete and exact-source certification remains unverified.
+STATEMENT: 未送信/保存中/DB確定/応答不明を区別し、下書きを黙って捨てない
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-002
+- TYPE: File
+  PATH: app/src/application/persistence-save-protocol.ts
+
+[REQUIREMENT]
+MID: 36bebb605863f74dde54ec6552d3a350
+UID: REQ-UI-003
+TITLE: REQ-UI-003
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Screen catalog](../design/SCREEN-CONTROL-CATALOG.sdoc)、[State Atlas](../design/SCREEN-STATE-ATLAS.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/application/navigation.ts (parseApplicationLocation, applicationPath); app/src/persistence/PersistenceWorkspace.tsx (PersistenceWorkspace); app/src/shells/desktop/DesktopShell.tsx (DesktopShell)
+VERIFICATION_IDENTIFIERS: tests/e2e/ui-v1.acceptance.spec.ts
+TEST_IDS: TEST-UI-003-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／設計済み・適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: 画面、操作、遷移、戻り先、エラー、principalを画面ID/CTRL IDで特定する
+RELATIONS:
+- TYPE: File
+  PATH: docs/design/SCREEN-CONTROL-CATALOG.sdoc
+- TYPE: File
+  PATH: docs/design/SCREEN-STATE-ATLAS.sdoc
+- TYPE: File
+  PATH: app/src/application/navigation.ts
+- TYPE: File
+  PATH: app/src/persistence/PersistenceWorkspace.tsx
+- TYPE: File
+  PATH: app/src/shells/desktop/DesktopShell.tsx
+- TYPE: File
+  PATH: tests/e2e/ui-v1.acceptance.spec.ts
+
+[OBLIGATION]
+MID: 6129fe71966b7841314c39b71c52cddf
+UID: OBL-REQ-UI-003-O01
+TITLE: OBL-REQ-UI-003-O01
+DESIGN_REFERENCE: [Screen catalog](../design/SCREEN-CONTROL-CATALOG.sdoc)、[State Atlas](../design/SCREEN-STATE-ATLAS.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/application/navigation.ts (parseApplicationLocation, applicationPath); app/src/persistence/PersistenceWorkspace.tsx (PersistenceWorkspace); app/src/shells/desktop/DesktopShell.tsx (DesktopShell)
+TEST_IDS: TEST-UI-003-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: 画面、操作、遷移、戻り先、エラー、principalを画面ID/CTRL IDで特定する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-003
+- TYPE: File
+  PATH: app/src/application/navigation.ts
+- TYPE: File
+  PATH: app/src/persistence/PersistenceWorkspace.tsx
+- TYPE: File
+  PATH: app/src/shells/desktop/DesktopShell.tsx
+
+[REQUIREMENT]
+MID: 2f4e5f4c69d3f698da4db40133a73bb0
+UID: REQ-UI-004
+TITLE: REQ-UI-004
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [UX contract](../design/UX-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/editor/; app/src/shells/
+VERIFICATION_IDENTIFIERS: tests/e2e/core.acceptance.spec.ts
+TEST_IDS: TEST-UI-004-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可能性を保持する
+RELATIONS:
+- TYPE: File
+  PATH: docs/design/UX-CONTRACT.sdoc
+- TYPE: File
+  PATH: tests/e2e/core.acceptance.spec.ts
+
+[OBLIGATION]
+MID: cc5211ab48ff071e1224a01e69710c4a
+UID: OBL-REQ-UI-004-O01
+TITLE: OBL-REQ-UI-004-O01
+DESIGN_REFERENCE: [UX contract](../design/UX-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/editor/ManuscriptInput.tsx; app/src/editor/cm/compositionGuard.ts
+TEST_IDS: TEST-UI-004-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: IME、選択、focus、編集中の遅延・画面移動でも原稿と復旧可能性を保持する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-004
+- TYPE: File
+  PATH: app/src/editor/ManuscriptInput.tsx
+- TYPE: File
+  PATH: app/src/editor/cm/compositionGuard.ts
+
+[REQUIREMENT]
+MID: 0350c31a526959de6554b0a6c1ff960f
+UID: REQ-UI-005
+TITLE: REQ-UI-005
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [UX contract](../design/UX-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/components/; app/src/shells/
+VERIFICATION_IDENTIFIERS: tests/e2e/redesign-visual.acceptance.spec.ts
+TEST_IDS: TEST-UI-005-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: 適用可能なWCAG 2.2 A/AA、keyboard、reflow等の受入義務を満たす
+RELATIONS:
+- TYPE: File
+  PATH: docs/design/UX-CONTRACT.sdoc
+- TYPE: File
+  PATH: tests/e2e/redesign-visual.acceptance.spec.ts
+
+[OBLIGATION]
+MID: e888cfbfa2be257121c132812e3289e2
+UID: OBL-REQ-UI-005-O01
+TITLE: OBL-REQ-UI-005-O01
+DESIGN_REFERENCE: [UX contract](../design/UX-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/workspace/Workspace.tsx
+TEST_IDS: TEST-UI-005-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: 適用可能なWCAG 2.2 A/AA、keyboard、reflow等の受入義務を満たす
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-005
+- TYPE: File
+  PATH: app/src/workspace/Workspace.tsx
+
+[REQUIREMENT]
+MID: 75284b8b389d3d311edce1c19e4029c6
+UID: REQ-UI-006
+TITLE: REQ-UI-006
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.sdoc)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/application/persistence-save-machine.ts; app/src/persistence/PersistenceWorkspace.tsx; app/src/persistence/native-review-machine.ts; app/src/settings/owner-passkey-reauth-machine.ts; app/src/settings/owner-grant-revocation-machine.ts; app/src/console/backup-workflow.ts
+VERIFICATION_IDENTIFIERS: tests/e2e/core.acceptance.spec.ts; app/src/persistence/native-review-machine.test.ts; tests/e2e/native-review.acceptance.spec.ts; app/src/settings/owner-passkey-reauth-machine.test.ts; app/src/settings/owner-grant-revocation-machine.test.ts; app/src/console/backup-workflow.test.ts; tests/e2e/backup-console.acceptance.spec.ts
+TEST_IDS: TEST-UI-006-002; TEST-UI-006-003; TEST-UI-006-004; TEST-UI-006-005; TEST-UI-006-006; TEST-UI-006-007; TEST-UI-006-008; TEST-UI-006-009
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／XState v5 はWRT-01/REC-01、Native ChangeSetレビュー、Passkey再認証、OAuth同意撤回とバックアップの受付・再照合に導入済み; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: 原稿保存・復旧、ChangeSet、認証、バックアップの複雑な状態と失敗・競合・接続断を決定的な遷移と独立テストで検証し、未確認の副作用を成功表示にしない
+RELATIONS:
+- TYPE: File
+  PATH: docs/design/XSTATE-STATE-MACHINE-CONTRACT.sdoc
+- TYPE: File
+  PATH: docs/design/SCREEN-STATE-ATLAS.sdoc
+
+[OBLIGATION]
+MID: 0c54e429ce48db0abde06145b4640017
+UID: OBL-REQ-UI-006-O01
+TITLE: OBL-REQ-UI-006-O01
+DESIGN_REFERENCE: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.sdoc)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/application/persistence-save-machine.ts: createPersistenceSaveMachine; app/src/persistence/PersistenceWorkspace.tsx: PersistenceWorkspace
+TEST_IDS: TEST-UI-006-002
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Selected existing tests cover described scenarios. Remaining transitions and exact-source evidence are pending.
+STATEMENT: WRT-01/REC-01の保存・復旧で応答不明時に同じ保存操作を再照合し、確認済みreceiptを受け取るまでDB確定を表示しない。競合、接続断、再起動、別文書・別作者、ブラウザー保護失敗でも未確定原稿を保護する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-006
+- TYPE: File
+  PATH: app/src/application/persistence-save-machine.ts
+- TYPE: File
+  PATH: app/src/persistence/PersistenceWorkspace.tsx
+
+[OBLIGATION]
+MID: 005dd3deb0796799ee2165c4779cd238
+UID: OBL-REQ-UI-006-O02
+TITLE: OBL-REQ-UI-006-O02
+DESIGN_REFERENCE: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.sdoc)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/persistence/native-review-machine.ts: createNativeReviewMachine
+TEST_IDS: TEST-UI-006-003; TEST-UI-006-004
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Selected existing tests cover described scenarios. Remaining transitions and exact-source evidence are pending.
+STATEMENT: REV-01/REV-02のChangeSet reviewで承認と適用を別操作にし、競合時は現行状態を取り直す。適用結果が不明なら元の操作を再照合し、確定済みの適用を重複させない。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-006
+- TYPE: File
+  PATH: app/src/persistence/native-review-machine.ts
+
+[OBLIGATION]
+MID: 8d0f98b6e493ce99986244c669003b75
+UID: OBL-REQ-UI-006-O03
+TITLE: OBL-REQ-UI-006-O03
+DESIGN_REFERENCE: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.sdoc)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/settings/owner-passkey-reauth-machine.ts: createOwnerPasskeyReauthMachine; app/src/settings/owner-grant-revocation-machine.ts: createOwnerGrantRevocationMachine
+TEST_IDS: TEST-UI-006-005; TEST-UI-006-006
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Selected existing tests cover described scenarios. Remaining transitions and exact-source evidence are pending.
+STATEMENT: CON-10/CON-20の本人認証管理でWebAuthn中断を成功と扱わず、結果不明のOAuth同意撤回は対象grantをサーバーのidentityから再照合する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-006
+- TYPE: File
+  PATH: app/src/settings/owner-passkey-reauth-machine.ts
+- TYPE: File
+  PATH: app/src/settings/owner-grant-revocation-machine.ts
+
+[OBLIGATION]
+MID: 71c18268fd062de0776b8fbe66a766a8
+UID: OBL-REQ-UI-006-O04
+TITLE: OBL-REQ-UI-006-O04
+DESIGN_REFERENCE: [XState contract](../design/XSTATE-STATE-MACHINE-CONTRACT.sdoc)、[Screen Atlas](../design/SCREEN-STATE-ATLAS.sdoc)
+IMPLEMENTATION_IDENTIFIERS: app/src/console/backup-workflow.ts: backupWorkflowMachine; app/src/console/backup-actions.ts: useBackupWorkflow
+TEST_IDS: TEST-UI-006-007; TEST-UI-006-008; TEST-UI-006-009
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Scoped browser and machine observations cover acknowledgement, exact-ID recovery, session expiry and recovery. Real provider, VM and independent restore evidence belong to the operational acceptance.
+STATEMENT: CON-30〜34のバックアップ状態管理で、受付・検証・実行結果を区別し、接続断後は同じrun IDを再照合する。確認済みreceiptを受け取るまで成功を表示しない。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-006
+- TYPE: File
+  PATH: app/src/console/backup-workflow.ts
+- TYPE: File
+  PATH: app/src/console/backup-actions.ts
+
+[REQUIREMENT]
+MID: a3a584fb55f4b2aa688acf1243deb5f3
+UID: REQ-EXT-001
+TITLE: REQ-EXT-001
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Deployment](../deployment/DEPLOYMENT-REFERENCE.sdoc)、[System design](../architecture/SYSTEM-DESIGN.sdoc)
+IMPLEMENTATION_IDENTIFIERS: deploy/cloudflare/ui-routes.json; public-protocol-paths.json; terraform/
+VERIFICATION_IDENTIFIERS: scripts/verification/infrastructure/deployment-config.mjs
+TEST_IDS: TEST-EXT-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: Edgeの静的UI配信とAPI/Tunnelのルーティングを分け、AccessをCore認可の代わりにしない
+RELATIONS:
+- TYPE: File
+  PATH: docs/deployment/DEPLOYMENT-REFERENCE.sdoc
+- TYPE: File
+  PATH: docs/architecture/SYSTEM-DESIGN.sdoc
+- TYPE: File
+  PATH: deploy/cloudflare/ui-routes.json
+- TYPE: File
+  PATH: scripts/verification/infrastructure/deployment-config.mjs
+
+[OBLIGATION]
+MID: 38f8a579218352387edacbee564f0d62
+UID: OBL-REQ-EXT-001-O01
+TITLE: OBL-REQ-EXT-001-O01
+DESIGN_REFERENCE: [Deployment](../deployment/DEPLOYMENT-REFERENCE.sdoc)、[System design](../architecture/SYSTEM-DESIGN.sdoc)
+IMPLEMENTATION_IDENTIFIERS: deploy/cloudflare/ui-routes.json; scripts/verification/infrastructure/deployment-config.mjs
+SURFACE_IDENTIFIERS: iacResource=cloudflare_zero_trust_access_application.codexia; iacResource=cloudflare_zero_trust_access_application.identity_probe; iacResource=cloudflare_zero_trust_access_application.public_protocol; iacResource=terraform_data.public_oauth_edge_readiness; iacResource=cloudflare_zero_trust_tunnel_cloudflared.codexia; iacResource=cloudflare_dns_record.codexia; iacResource=cloudflare_zero_trust_tunnel_cloudflared_config.codexia; iacResource=cloudflare_worker.frontend; iacResource=cloudflare_workers_route.frontend; iacResource=cloudflare_workers_route.origin
+TEST_IDS: TEST-EXT-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: Edgeの静的UI配信とAPI/Tunnelのルーティングを分け、AccessをCore認可の代わりにしない
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-EXT-001
+- TYPE: File
+  PATH: deploy/cloudflare/ui-routes.json
+- TYPE: File
+  PATH: scripts/verification/infrastructure/deployment-config.mjs
+- TYPE: File
+  PATH: deploy/cloudflare/terraform/main.tf
+
+[REQUIREMENT]
+MID: e752ee48cf448d04c76e06aaad7394f5
+UID: REQ-EXT-002
+TITLE: REQ-EXT-002
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc)、[External interfaces](../architecture/EXTERNAL-INTERFACES.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/contracts/src/oauth-metadata.ts; packages/api/src/better-auth.ts; modules/mcp/src/http.ts
+VERIFICATION_IDENTIFIERS: packages/contracts/src/oauth-metadata.test.ts
+TEST_IDS: TEST-EXT-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を個別に検証する
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc
+- TYPE: File
+  PATH: docs/architecture/EXTERNAL-INTERFACES.sdoc
+- TYPE: File
+  PATH: packages/contracts/src/oauth-metadata.ts
+- TYPE: File
+  PATH: packages/api/src/better-auth.ts
+- TYPE: File
+  PATH: modules/mcp/src/http.ts
+- TYPE: File
+  PATH: packages/contracts/src/oauth-metadata.test.ts
+
+[OBLIGATION]
+MID: be2e78e6b8d67707146f62d4b4029872
+UID: OBL-REQ-EXT-002-O01
+TITLE: OBL-REQ-EXT-002-O01
+DESIGN_REFERENCE: [Route authorization](../architecture/ROUTE-AUTHORIZATION-CONTRACT.sdoc)、[External interfaces](../architecture/EXTERNAL-INTERFACES.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/contracts/src/oauth-metadata.ts; packages/api/src/better-auth.ts; modules/mcp/src/http.ts
+TEST_IDS: TEST-EXT-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: OAuth/OIDC、MCP、公開readerの外部境界はscope/audience/公開範囲を個別に検証する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-EXT-002
+- TYPE: File
+  PATH: packages/contracts/src/oauth-metadata.ts
+- TYPE: File
+  PATH: packages/api/src/better-auth.ts
+- TYPE: File
+  PATH: modules/mcp/src/http.ts
+
+[REQUIREMENT]
+MID: 5f8a8fd04ffea1957b4289dd57c5e2a2
+UID: REQ-OPS-001
+TITLE: REQ-OPS-001
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.sdoc)
+IMPLEMENTATION_IDENTIFIERS: deploy/ansible/site.yml; auth-runtime.yml
+VERIFICATION_IDENTIFIERS: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
+TEST_IDS: TEST-OPS-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／一部目標・適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: 新規VMのbootstrap、owner登録、公開、復旧を明示した別状態として扱う
+RELATIONS:
+- TYPE: File
+  PATH: docs/deployment/INITIAL-DEPLOYMENT-FLOW.sdoc
+- TYPE: File
+  PATH: deploy/ansible/site.yml
+
+[OBLIGATION]
+MID: b1a5dc144cb722c750aeea9c4cb2f85f
+UID: OBL-REQ-OPS-001-O01
+TITLE: OBL-REQ-OPS-001-O01
+DESIGN_REFERENCE: [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.sdoc)
+IMPLEMENTATION_IDENTIFIERS: deploy/ansible/site.yml
+SURFACE_IDENTIFIERS: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/deploy-ssh-key.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/managed-bootstrap-secrets.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/verify-base-tunnel-container.yml
+TEST_IDS: TEST-OPS-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: 新規VMのbootstrap、owner登録、公開、復旧を明示した別状態として扱う
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-OPS-001
+- TYPE: File
+  PATH: deploy/ansible/site.yml
+- TYPE: File
+  PATH: deploy/ansible/auth-runtime.yml
+- TYPE: File
+  PATH: deploy/ansible/base-runtime.yml
+- TYPE: File
+  PATH: deploy/ansible/base-secrets.yml
+- TYPE: File
+  PATH: deploy/ansible/deploy-ssh-key.yml
+- TYPE: File
+  PATH: deploy/ansible/host-validate.yml
+- TYPE: File
+  PATH: deploy/ansible/host.yml
+- TYPE: File
+  PATH: deploy/ansible/inspect.yml
+- TYPE: File
+  PATH: deploy/ansible/inventory.example.yml
+- TYPE: File
+  PATH: deploy/ansible/owner-setup.yml
+- TYPE: File
+  PATH: deploy/ansible/preflight-observe.yml
+- TYPE: File
+  PATH: deploy/ansible/recreate-missing-app-database.yml
+- TYPE: File
+  PATH: deploy/ansible/verify-base-db-container.yml
+- TYPE: File
+  PATH: deploy/ansible/verify-base-tunnel-container.yml
+- TYPE: File
+  PATH: deploy/ansible/managed-bootstrap-secrets.yml
+
+[REQUIREMENT]
+MID: ce4f2bf883e22452b4a76a7a5d58e84a
+UID: REQ-OPS-002
+TITLE: REQ-OPS-002
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Update flow](../deployment/UPDATE-FLOW.sdoc)、[CI/CD](../verification/CI-CD.sdoc)
+IMPLEMENTATION_IDENTIFIERS: deploy/update-compatibility.json; frontend-compatibility.json; .github/workflows/backend-release.yml
+VERIFICATION_IDENTIFIERS: deploy/ansible/test-push-app-lifecycle.sh
+TEST_IDS: TEST-OPS-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: 更新はexact-source検証、互換性、snapshot保全、失敗時停止/rollback規則を守る
+RELATIONS:
+- TYPE: File
+  PATH: docs/deployment/UPDATE-FLOW.sdoc
+- TYPE: File
+  PATH: docs/verification/CI-CD.sdoc
+- TYPE: File
+  PATH: deploy/update-compatibility.json
+- TYPE: File
+  PATH: .github/workflows/backend-release.yml
+- TYPE: File
+  PATH: deploy/ansible/test-push-app-lifecycle.sh
+
+[OBLIGATION]
+MID: 56539a1c84fb09cfed6287762023ff6c
+UID: OBL-REQ-OPS-002-O01
+TITLE: OBL-REQ-OPS-002-O01
+DESIGN_REFERENCE: [Update flow](../deployment/UPDATE-FLOW.sdoc)、[CI/CD](../verification/CI-CD.sdoc)
+IMPLEMENTATION_IDENTIFIERS: deploy/update-compatibility.json; .github/workflows/backend-release.yml; deploy/ansible/test-push-app-lifecycle.sh
+SURFACE_IDENTIFIERS: iacResource=cloudflare_worker_version.candidate; iacResource=cloudflare_worker.frontend; iacResource=terraform_data.public_oauth_edge_readiness; iacResource=cloudflare_workers_route.frontend; ansibleSource=deploy/ansible/deploy-lifecycle-fixture.yml; ansibleSource=deploy/ansible/deploy-prepare.yml; ansibleSource=deploy/ansible/deploy-transaction.yml; ansibleSource=deploy/ansible/deploy.yml; ansibleSource=deploy/ansible/verify-deploy-base-runtime.yml
+TEST_IDS: TEST-OPS-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: 更新はexact-source検証、互換性、snapshot保全、失敗時停止/rollback規則を守る
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-OPS-002
+- TYPE: File
+  PATH: deploy/update-compatibility.json
+- TYPE: File
+  PATH: .github/workflows/backend-release.yml
+- TYPE: File
+  PATH: deploy/ansible/test-push-app-lifecycle.sh
+- TYPE: File
+  PATH: deploy/cloudflare/terraform/initial-frontend-version/main.tf
+- TYPE: File
+  PATH: deploy/cloudflare/terraform/main.tf
+- TYPE: File
+  PATH: deploy/ansible/deploy-lifecycle-fixture.yml
+- TYPE: File
+  PATH: deploy/ansible/deploy-prepare.yml
+- TYPE: File
+  PATH: deploy/ansible/deploy-transaction.yml
+- TYPE: File
+  PATH: deploy/ansible/deploy.yml
+- TYPE: File
+  PATH: deploy/ansible/verify-deploy-base-runtime.yml
+
+[REQUIREMENT]
+MID: e4124266c15f499a077b6ff54563008b
+UID: REQ-OPS-003
+TITLE: REQ-OPS-003
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Backup](../deployment/BACKUP.sdoc)
+IMPLEMENTATION_IDENTIFIERS: deploy/backup/backup.sh`, `deploy/backup/s3_transfer.py`, `deploy/ansible/restore-drill.yml
+VERIFICATION_IDENTIFIERS: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
+TEST_IDS: TEST-OPS-003-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: S3互換の転送と隔離復元の実装を参照する。AWS S3での転送と読み戻し、および独立した復旧ホストでの復元は受入証拠が必要。
+STATEMENT: >>>
+バックアップと隔離復元でPostgreSQL正本と運用状態の復旧を検証する。
+S3互換ストレージへのage暗号化済みバックアップの転送、検証、取得、および隔離復元をサポートする。
+<<<
+RELATIONS:
+- TYPE: File
+  PATH: docs/deployment/BACKUP.sdoc
+- TYPE: File
+  PATH: deploy/backup/s3_transfer.py
+- TYPE: File
+  PATH: deploy/ansible/restore-drill.yml
+
+[OBLIGATION]
+MID: c2b97bf1e5ffaeba8abf5c29e5729378
+UID: OBL-REQ-OPS-003-O01
+TITLE: OBL-REQ-OPS-003-O01
+DESIGN_REFERENCE: [Backup](../deployment/BACKUP.sdoc)
+IMPLEMENTATION_IDENTIFIERS: deploy/ansible/restore-drill.yml
+SURFACE_IDENTIFIERS: ansibleSource=deploy/ansible/restore-drill.yml
+TEST_IDS: TEST-OPS-003-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: バックアップと隔離復元でPostgreSQL正本と運用状態の復旧を検証する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-OPS-003
+- TYPE: File
+  PATH: deploy/ansible/restore-drill.yml
+
+[OBLIGATION]
+MID: 3b0d4955a5e6732c8786dc25527f603a
+UID: OBL-REQ-OPS-003-O02
+TITLE: OBL-REQ-OPS-003-O02
+DESIGN_REFERENCE: [Backup](../deployment/BACKUP.sdoc)、[Backup console contract](../architecture/BACKUP-CONSOLE-CONTRACT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: S3BackupTransfer.upload_artifact`, `S3BackupTransfer.download_artifact`, `restore-drill.yml
+TEST_IDS: NOT_ASSIGNED
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: AWS S3での転送と読み戻し、および独立した復旧ホストでの復元について、対象ソースに紐づく証拠が必要。
+STATEMENT: S3互換ストレージへのage暗号化済みバックアップの転送、検証、取得、および隔離復元をサポートする。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-OPS-003
+- TYPE: File
+  PATH: deploy/backup/s3_transfer.py
+- TYPE: File
+  PATH: deploy/ansible/restore-drill.yml
+
+[REQUIREMENT]
+MID: 4c77b2e2f9b1aa8aef0dd51ae3d35222
+UID: REQ-OPS-004
+TITLE: REQ-OPS-004
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.sdoc)、[Admin flow](../design/ADMIN-SCREEN-FLOW.sdoc)
+IMPLEMENTATION_IDENTIFIERS: registerBackupConsole; BackupConsoleStore; BackupConsoleExecutor (BKC-001〜007)
+VERIFICATION_IDENTIFIERS: packages/api/test/backup-console.integration.test.ts
+TEST_IDS: TEST-OPS-004-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Fastifyの設定APIとexecutorを登録済み。Console画面と実運用の証拠は別に確認する。
+STATEMENT: ownerは管理コンソールからS3互換バックアップ先のdraft/検証/有効化/停止を操作できる。資格情報write-only、revisionとfresh再認証、operator保護のlocal staging/age鍵の非変更を保証する
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/BACKUP-CONSOLE-CONTRACT.sdoc
+- TYPE: File
+  PATH: docs/design/ADMIN-SCREEN-FLOW.sdoc
+- TYPE: File
+  PATH: packages/api/src/backup-console-routes.ts
+
+[OBLIGATION]
+MID: 7697c8d75f77faffd9e000e9b2db06b2
+UID: OBL-REQ-OPS-004-O01
+TITLE: OBL-REQ-OPS-004-O01
+DESIGN_REFERENCE: [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.sdoc)、[Admin flow](../design/ADMIN-SCREEN-FLOW.sdoc)
+IMPLEMENTATION_IDENTIFIERS: registerBackupConsole; BackupConsoleStore; BackupConsoleExecutor (BKC-001〜007)
+SURFACE_IDENTIFIERS: routeId=GET /api/console/backups/status; routeId=GET /api/console/backups/config; routeId=PUT /api/console/backups/config/draft; routeId=POST /api/console/backups/config/probes; routeId=GET /api/console/backups/config/probes/{probeId}; routeId=POST /api/console/backups/config/activate; routeId=POST /api/console/backups/config/disable
+TEST_IDS: TEST-OPS-004-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: APIと隔離運用schemaの検証を関連付ける。画面、実S3保管先、独立復旧は同じ検証では証明しない。
+STATEMENT: ownerは管理コンソールからS3互換バックアップ先のdraft/検証/有効化/停止を操作できる。資格情報write-only、revisionとfresh再認証、operator保護のlocal staging/age鍵の非変更を保証する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-OPS-004
+- TYPE: File
+  PATH: packages/api/src/backup-console-routes.ts
+- TYPE: File
+  PATH: packages/api/src/backup-console-store.ts
+- TYPE: File
+  PATH: packages/api/src/backup-console-executor.ts
+
+[TEST]
+MID: ce4e13acc7debed5ae86d232431558d1
+UID: TEST-OPS-004-001
+TITLE: TEST-OPS-004-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Verifies owner-session admission, credential isolation, revision handling, and executor-verified backup configuration in a disposable PostgreSQL database.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-OPS-004
+
+[REQUIREMENT]
+MID: 8aff323e8c18bb058160c82a27869785
+UID: REQ-OPS-005
+TITLE: REQ-OPS-005
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.sdoc)、[Backup](../deployment/BACKUP.sdoc)
+IMPLEMENTATION_IDENTIFIERS: registerBackupConsole; BackupConsoleStore; BackupConsoleExecutor; deploy/backup/backup.sh (BKC-008〜010)
+VERIFICATION_IDENTIFIERS: packages/api/test/backup-console.integration.test.ts
+TEST_IDS: TEST-OPS-005-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: 手動保全受付と復旧証拠の読取APIを登録済み。実際の保管先と独立復旧ホストでの適合認定は別証拠を要する。
+STATEMENT: ownerが手動保全を要求してrun/暗号文/独立復旧証拠を区別して確認でき、実副作用は既存host lock/backup.shと保護されたexecutorだけが実施。本番復元・遠隔削除をWebから禁止する
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/BACKUP-CONSOLE-CONTRACT.sdoc
+- TYPE: File
+  PATH: docs/deployment/BACKUP.sdoc
+- TYPE: File
+  PATH: packages/api/src/backup-console-routes.ts
+
+[OBLIGATION]
+MID: fe1292405731f817303d8340e74e674e
+UID: OBL-REQ-OPS-005-O01
+TITLE: OBL-REQ-OPS-005-O01
+DESIGN_REFERENCE: [Backup console](../architecture/BACKUP-CONSOLE-CONTRACT.sdoc)、[Backup](../deployment/BACKUP.sdoc)
+IMPLEMENTATION_IDENTIFIERS: registerBackupConsole; BackupConsoleStore; BackupConsoleExecutor; deploy/backup/backup.sh (BKC-008〜010)
+SURFACE_IDENTIFIERS: routeId=POST /api/console/backups/runs; routeId=GET /api/console/backups/runs; routeId=GET /api/console/backups/runs/{runId}; routeId=GET /api/console/backups/recovery
+TEST_IDS: TEST-OPS-005-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: APIと隔離運用schemaの検証を関連付ける。画面、実S3保管先、独立復旧は同じ検証では証明しない。
+STATEMENT: ownerが手動保全を要求してrun/暗号文/独立復旧証拠を区別して確認でき、実副作用は既存host lock/backup.shと保護されたexecutorだけが実施。本番復元・遠隔削除をWebから禁止する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-OPS-005
+- TYPE: File
+  PATH: packages/api/src/backup-console-routes.ts
+- TYPE: File
+  PATH: packages/api/src/backup-console-store.ts
+- TYPE: File
+  PATH: packages/api/src/backup-console-executor.ts
+- TYPE: File
+  PATH: deploy/backup/backup.sh
+
+[TEST]
+MID: d975a41570fbb2454417adb7f9672f11
+UID: TEST-OPS-005-001
+TITLE: TEST-OPS-005-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Verifies manual run admission, persisted run state and recovery evidence boundaries in a disposable PostgreSQL database.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-OPS-005
+
+[REQUIREMENT]
+MID: 9bfc3694283aff3d376a2a615a38f4bd
+UID: REQ-QUAL-001
+TITLE: REQ-QUAL-001
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.sdoc)
+IMPLEMENTATION_IDENTIFIERS: tests/e2e/; tests/integration/; packages/配下test
+VERIFICATION_IDENTIFIERS: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
+TEST_IDS: TEST-QUAL-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: テストは契約の正常/異常/境界と実DB/API/UI/hostを分け、モックでは境界統合を証明しない
+RELATIONS:
+- TYPE: File
+  PATH: docs/verification/TEST-ARCHITECTURE-OPTIMIZATION.sdoc
+
+[OBLIGATION]
+MID: 62309ca44d6dfc7d3809c3b7c170bd84
+UID: OBL-REQ-QUAL-001-O01
+TITLE: OBL-REQ-QUAL-001-O01
+DESIGN_REFERENCE: [Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.sdoc)
+IMPLEMENTATION_IDENTIFIERS: scripts/ci/impact/contract.mjs; .github/workflows/verify.yml
+TEST_IDS: TEST-QUAL-001-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: テストは契約の正常/異常/境界と実DB/API/UI/hostを分け、モックでは境界統合を証明しない
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-QUAL-001
+- TYPE: File
+  PATH: scripts/ci/impact/contract.mjs
+- TYPE: File
+  PATH: .github/workflows/verify.yml
+
+[REQUIREMENT]
+MID: 430a641c09fcc6c2f116d72d7d1db617
+UID: REQ-QUAL-002
+TITLE: REQ-QUAL-002
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: MAPPED_UNVERIFIED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [CI/CD](../verification/CI-CD.sdoc)
+IMPLEMENTATION_IDENTIFIERS: .github/workflows/verify.yml; scripts/ci/impact/plan.mjs
+VERIFICATION_IDENTIFIERS: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
+TEST_IDS: TEST-QUAL-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／適合未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: CIは選択タスク、exact-source、成果物IDと必須gateを証明し、未実行/欠落をPASSとしない
+RELATIONS:
+- TYPE: File
+  PATH: docs/verification/CI-CD.sdoc
+- TYPE: File
+  PATH: .github/workflows/verify.yml
+- TYPE: File
+  PATH: scripts/ci/impact/plan.mjs
+
+[OBLIGATION]
+MID: 0cfaf3b35ae9ac319c02611733dc2fc8
+UID: OBL-REQ-QUAL-002-O01
+TITLE: OBL-REQ-QUAL-002-O01
+DESIGN_REFERENCE: [CI/CD](../verification/CI-CD.sdoc)
+IMPLEMENTATION_IDENTIFIERS: .github/workflows/verify.yml; scripts/ci/impact/plan.mjs
+SURFACE_IDENTIFIERS: ciWorkflow=.github/workflows/verify.yml
+TEST_IDS: TEST-QUAL-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: CIは選択タスク、exact-source、成果物IDと必須gateを証明し、未実行/欠落をPASSとしない
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-QUAL-002
+- TYPE: File
+  PATH: .github/workflows/verify.yml
+- TYPE: File
+  PATH: scripts/ci/impact/plan.mjs
+
+[REQUIREMENT]
+MID: b33da6513a3ef2c6dc165912550fccab
+UID: REQ-QUAL-003
+TITLE: REQ-QUAL-003
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: UNMAPPED
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [UX contract](../design/UX-CONTRACT.sdoc)、[Performance](../performance/PERFORMANCE-MEASUREMENT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: scripts/performance/
+VERIFICATION_IDENTIFIERS: NOT_ASSIGNED (initial trace ledger has no resolvable test file)
+TEST_IDS: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／計測状態未認定; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: INP p75、CLS p75の品質目安に加え、原稿入力・保存・復旧の別々の実測で評価する
+RELATIONS:
+- TYPE: File
+  PATH: docs/design/UX-CONTRACT.sdoc
+- TYPE: File
+  PATH: docs/performance/PERFORMANCE-MEASUREMENT.sdoc
+
+[OBLIGATION]
+MID: e872dec9510925c3657296aea82ce557
+UID: OBL-REQ-QUAL-003-O01
+TITLE: OBL-REQ-QUAL-003-O01
+DESIGN_REFERENCE: [UX contract](../design/UX-CONTRACT.sdoc)、[Performance](../performance/PERFORMANCE-MEASUREMENT.sdoc)
+IMPLEMENTATION_IDENTIFIERS: UNMAPPED (candidate source file not identified)
+TEST_IDS: NOT_ASSIGNED (no standalone TEST-ID exists in the initial trace ledger)
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
+STATEMENT: INP p75、CLS p75の品質目安に加え、原稿入力・保存・復旧の別々の実測で評価する
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-QUAL-003
+
+[REQUIREMENT]
+MID: 5178ac05b8be2783fc02a6a8f24dc3cf
+UID: REQ-TRACE-001
+TITLE: REQ-TRACE-001
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Requirements governance](REQUIREMENTS-GOVERNANCE.sdoc)、[Traceability register](../verification/TRACEABILITY-REGISTER.sdoc)
+IMPLEMENTATION_IDENTIFIERS: この台帳とAPI・DB・外部IFの初期契約
+VERIFICATION_IDENTIFIERS: scripts/strictdoc/verify.test.mjs; scripts/audit/specifications.test.mjs; scripts/ci/evidence/trace-receipt.test.mjs
+TEST_IDS: TEST-TRC-01-001, TEST-TRC-02-001, TEST-TRC-02-002, TEST-TRC-03-001, TEST-TRC-04-001, TEST-TRC-04-002, TEST-TRC-05-001, TEST-TRC-05-002, TEST-TRC-05-003, TEST-TRC-07-001, TEST-TRC-07-002, TEST-TRC-08-001, TEST-TRC-04-003, TEST-TRC-05-004, TEST-TRC-06-001, TEST-TRC-06-002
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／**構築中**; candidate file references remain MAPPED_UNVERIFIED and do not establish pass or full obligation coverage.
+STATEMENT: すべての採用済み要求のobligationを正本→実装→検証→証拠まで双方向に追跡する
+RELATIONS:
+- TYPE: File
+  PATH: docs/requirements/REQUIREMENTS-GOVERNANCE.sdoc
+- TYPE: File
+  PATH: docs/verification/TRACEABILITY-REGISTER.sdoc
+
+[OBLIGATION]
+MID: 8f9ebbb8fb98f1bec1d72619b3835d64
+UID: OBL-REQ-TRACE-001-O01
+TITLE: OBL-REQ-TRACE-001-O01
+DESIGN_REFERENCE: [Requirements governance](REQUIREMENTS-GOVERNANCE.sdoc)、[Traceability register](../verification/TRACEABILITY-REGISTER.sdoc)
+IMPLEMENTATION_IDENTIFIERS: scripts/strictdoc/verify.mjs
+TEST_IDS: TEST-TRC-01-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: One explicit criterion only; remaining traceability criteria are separate obligations below. Exact-source certification remains unverified.
+STATEMENT: 各採用REQ-IDがStrictDoc requirement nodeとして一度だけ定義され、IDの欠落・重複を検査できる
+RELATIONS:
+- TYPE: File
+  PATH: docs/requirements/REQUIREMENT-REGISTER.sdoc
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+- TYPE: File
+  PATH: scripts/strictdoc/verify.mjs
+
+[OBLIGATION]
+MID: 0966fc7db2c488c5abd936cd7db8556f
+UID: OBL-REQ-TRACE-001-O02
+TITLE: OBL-REQ-TRACE-001-O02
+DESIGN_REFERENCE: docs/requirements/STRICTDOC-TRACEABILITY.sdoc
+IMPLEMENTATION_IDENTIFIERS: scripts/strictdoc/verify.mjs: compareExports
+TEST_IDS: TEST-TRC-02-001; TEST-TRC-02-002
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Explicit criterion; source and test references are candidates only; no independent certification is implied.
+STATEMENT: StrictDoc Markdown parsing and same-input HTML/JSON export are repeatable within the recorded version and observed normalization rules.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+- TYPE: File
+  PATH: scripts/strictdoc/verify.mjs
+
+[OBLIGATION]
+MID: 1e736c2a4c3d45d1ba659c1f0c85cfe6
+UID: OBL-REQ-TRACE-001-O03
+TITLE: OBL-REQ-TRACE-001-O03
+DESIGN_REFERENCE: docs/requirements/STRICTDOC-TRACEABILITY.sdoc
+IMPLEMENTATION_IDENTIFIERS: scripts/strictdoc/verify.mjs
+TEST_IDS: TEST-TRC-03-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Explicit criterion; source and test references are candidates only; no independent certification is implied.
+STATEMENT: A requirement-to-source relation must resolve to a repository file. The verifier rejects authored line ranges and derives test locations from native test registrations.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+- TYPE: File
+  PATH: scripts/strictdoc/verify.mjs
+
+[OBLIGATION]
+MID: 6a8582691c1bc79a39f22ad3e99ee2b0
+UID: OBL-REQ-TRACE-001-O04
+TITLE: OBL-REQ-TRACE-001-O04
+DESIGN_REFERENCE: docs/requirements/STRICTDOC-TRACEABILITY.sdoc
+IMPLEMENTATION_IDENTIFIERS: scripts/strictdoc/verify.mjs: verifySourceInventory; scripts/strictdoc/reverse-trace.mjs: discoverReverseSurfaces
+TEST_IDS: TEST-TRC-04-001; TEST-TRC-04-002, TEST-TRC-04-003
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Explicit criterion; source and test references are candidates only; no independent certification is implied.
+STATEMENT: Reverse inventory keeps discovered HTTP routes, MCP tools, database objects, Desktop UI controls, Native iOS views, and IaC resources or Ansible sources visible when classification or requirement mapping is missing.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+- TYPE: File
+  PATH: scripts/strictdoc/verify.mjs
+- TYPE: File
+  PATH: scripts/strictdoc/reverse-trace.mjs
+
+[OBLIGATION]
+MID: f108acf33cf12b70e9072e7828390202
+UID: OBL-REQ-TRACE-001-O05
+TITLE: OBL-REQ-TRACE-001-O05
+DESIGN_REFERENCE: docs/requirements/STRICTDOC-TRACEABILITY.sdoc
+IMPLEMENTATION_IDENTIFIERS: scripts/strictdoc/verify.mjs: resolveRunIdentity
+TEST_IDS: TEST-TRC-05-001; TEST-TRC-05-002; TEST-TRC-05-003, TEST-TRC-05-004
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Explicit criterion; source and test references are candidates only; no independent certification is implied.
+STATEMENT: Execution references retain exact repository, source SHA, run, attempt, job, task, and observed case result; local execution remains NOT_RUN.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+- TYPE: File
+  PATH: scripts/strictdoc/verify.mjs
+
+[OBLIGATION]
+MID: b08ae2a844fd70c84798b3e5c2606a83
+UID: OBL-REQ-TRACE-001-O06
+TITLE: OBL-REQ-TRACE-001-O06
+DESIGN_REFERENCE: docs/requirements/STRICTDOC-TRACEABILITY.sdoc
+IMPLEMENTATION_IDENTIFIERS: scripts/strictdoc/verify.test.mjs
+TEST_IDS: TEST-TRC-01-001; TEST-TRC-03-001; TEST-TRC-04-001; TEST-TRC-04-002, TEST-TRC-04-003, TEST-TRC-05-004, TEST-TRC-06-001, TEST-TRC-06-002
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Explicit criterion; source and test references are candidates only; no independent certification is implied.
+STATEMENT: Fault injection rejects duplicate requirement IDs, missing source files or authored line ranges, and unclassified reverse inventory entries.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+- TYPE: File
+  PATH: scripts/strictdoc/verify.test.mjs
+
+[OBLIGATION]
+MID: a0b534c63b2f6a4249115f574cb2bcac
+UID: OBL-REQ-TRACE-001-O07
+TITLE: OBL-REQ-TRACE-001-O07
+DESIGN_REFERENCE: docs/requirements/STRICTDOC-TRACEABILITY.sdoc
+IMPLEMENTATION_IDENTIFIERS: scripts/strictdoc/verify.browser.mjs
+TEST_IDS: TEST-TRC-07-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Explicit criterion; source and test references are candidates only; no independent certification is implied.
+STATEMENT: The staged static StrictDoc page renders every requirement UID in the browser check.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+- TYPE: File
+  PATH: scripts/strictdoc/verify.browser.mjs
+
+[OBLIGATION]
+MID: 5bfdcec3e2f8dbfabaf2f48f81f6b297
+UID: OBL-REQ-TRACE-001-O08
+TITLE: OBL-REQ-TRACE-001-O08
+DESIGN_REFERENCE: [StrictDoc traceability](STRICTDOC-TRACEABILITY.sdoc)
+IMPLEMENTATION_IDENTIFIERS: scripts/audit/specifications.mjs; scripts/audit/traceability-ui.js; scripts/audit/traceability.css; scripts/pages-ui/navigation.mjs
+SURFACE_IDENTIFIERS: ciWorkflow=.github/workflows/repository-audit.yml
+TEST_IDS: TEST-TRC-08-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Dashboard projection and browser operation are source-bound. Candidate requirement IDs remain navigation hints and never become accepted relations.
+STATEMENT: Requirementsから実装・テストへ、実装面から義務へ移動できる静的ページを生成する。適合状態、分類、候補、参照欠落、未実行状態を区別し、設計正本・実装・TEST-ID・同一source SHAの実行証拠へ直接リンクする。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+- TYPE: File
+  PATH: docs/requirements/STRICTDOC-TRACEABILITY.sdoc
+- TYPE: File
+  PATH: scripts/audit/specifications.mjs
+- TYPE: File
+  PATH: scripts/audit/traceability-ui.js
+- TYPE: File
+  PATH: scripts/audit/traceability.css
+- TYPE: File
+  PATH: scripts/audit/specifications.browser.mjs
+- TYPE: File
+  PATH: .github/workflows/repository-audit.yml
+
+[OBLIGATION]
+MID: cfcbe4617d5a8e5ba96f52635d2e21d6
+UID: OBL-REQ-TRACE-001-O09
+TITLE: OBL-REQ-TRACE-001-O09
+DESIGN_REFERENCE: [StrictDoc traceability](STRICTDOC-TRACEABILITY.sdoc)、[Tooling acceptance](../verification/SPECIFICATION-TOOLING-ACCEPTANCE.sdoc)
+IMPLEMENTATION_IDENTIFIERS: .github/workflows/repository-audit.yml; scripts/verification/artifacts/pages-live-ux.mjs; scripts/audit/traceability-ui.js
+SURFACE_IDENTIFIERS: ciWorkflow=.github/workflows/repository-audit.yml
+TEST_IDS: TEST-TRC-07-002
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: The registered fixture checks the publication verifier. Public acceptance relies on the producer's own post-deployment check.
+STATEMENT: Repository Audit Pagesの公開確認は正規URLで配信中のHTML・JSON・manifestと対象SHAを照合する。PR previewおよび公開後の照合が未完了のsiteはTRC-07の公開確認を保留する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+- TYPE: File
+  PATH: .github/workflows/repository-audit.yml
+- TYPE: File
+  PATH: scripts/verification/artifacts/pages-live-ux.mjs
+- TYPE: File
+  PATH: scripts/audit/traceability-ui.js
+
+[OBLIGATION]
+MID: ad50ca5561638f31c50b903a29477981
+UID: OBL-REQ-API-002-O02
+TITLE: OBL-REQ-API-002-O02
+DESIGN_REFERENCE: docs/architecture/API-CONTRACT.sdoc; docs/design/INTERACTION-CONTRACT.sdoc
+IMPLEMENTATION_IDENTIFIERS: API-PERSIST-007
+SURFACE_IDENTIFIERS: httpOperation=PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}
+TEST_IDS: TEST-API-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Explicit criterion; source and test references are candidates only; no independent certification is implied.
+STATEMENT: The document save operation binds author request identity, base revision precondition, idempotency identity and database receipt; conflict or uncertain response is not represented as success.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-API-002
+- TYPE: File
+  PATH: packages/api/src/persistence-routes.ts
+
+[OBLIGATION]
+MID: 0d4dc9d2f913e49708a6689e1490df6e
+UID: OBL-REQ-DATA-002-O02
+TITLE: OBL-REQ-DATA-002-O02
+DESIGN_REFERENCE: docs/architecture/DATA-MODEL.sdoc
+IMPLEMENTATION_IDENTIFIERS: document_revision_immutable
+SURFACE_IDENTIFIERS: objectId=document_revision_immutable
+TEST_IDS: TEST-DATA-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Explicit criterion; source and test references are candidates only; no independent certification is implied.
+STATEMENT: A persisted document revision rejects mutation and deletion.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-002
+- TYPE: File
+  PATH: packages/persistence-postgres/migrations/0001-initial.sql
+
+[OBLIGATION]
+MID: 4a8f75df53d052043d83da6905248eae
+UID: OBL-REQ-DATA-002-O03
+TITLE: OBL-REQ-DATA-002-O03
+DESIGN_REFERENCE: docs/architecture/DATA-MODEL.sdoc; docs/architecture/API-CONTRACT.sdoc
+IMPLEMENTATION_IDENTIFIERS: edit_operation; API-PERSIST-007
+SURFACE_IDENTIFIERS: objectId=edit_operation; httpOperation=PATCH /api/v1/persistence/projects/{projectId}/documents/{documentId}
+TEST_IDS: TEST-DATA-002-002
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Explicit criterion; source and test references are candidates only; no independent certification is implied.
+STATEMENT: A save or restore creates a new immutable revision and a database receipt for the author operation.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-002
+- TYPE: File
+  PATH: packages/api/src/persistence-routes.ts
+- TYPE: File
+  PATH: packages/persistence-postgres/migrations/0001-initial.sql
+
+[OBLIGATION]
+MID: 2e4c67561042509e3d3d139bd9421578
+UID: OBL-REQ-UI-002-O02
+TITLE: OBL-REQ-UI-002-O02
+DESIGN_REFERENCE: docs/design/INTERACTION-CONTRACT.sdoc; docs/design/SCREEN-CONTROL-CATALOG.sdoc
+IMPLEMENTATION_IDENTIFIERS: WRT-01.A; REC-01.A; REC-01.B
+SURFACE_IDENTIFIERS: controlId=WRT-01.A; controlId=REC-01.A; controlId=REC-01.B
+TEST_IDS: TEST-UI-002-001
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Explicit criterion; source and test references are candidates only; no independent certification is implied.
+STATEMENT: A recovery draft is durably journaled before remote write, and an unknown response can be reconciled with the same operation identity.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-002
+- TYPE: File
+  PATH: app/src/storage/journal.ts
+- TYPE: File
+  PATH: app/src/editor/postgresEvidenceAdapter.ts
+
+[TEST]
+MID: e3482a445ad89e23de0934b7060fb831
+UID: TEST-TRC-01-001
+TITLE: TEST-TRC-01-001
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Reject a duplicate REQ UID and a non-deterministic MID before any trace result can be accepted.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: 142f8d11bd7808018d86a61ae7ad234b
+UID: TEST-TRC-02-001
+TITLE: TEST-TRC-02-001
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Normalize the observed search index timestamp and volatile shell MID while preserving requirement MIDs and ordinary source text.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: 0b50405ac994547b312f8858a5c6373c
+UID: TEST-TRC-03-001
+TITLE: TEST-TRC-03-001
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Reject missing source files and authored line ranges.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: f0fa01e090c0dd89617942f1bf473c0d
+UID: TEST-TRC-04-001
+TITLE: TEST-TRC-04-001
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Keep discovered HTTP routes, MCP tools, database objects, Desktop UI controls, Native iOS views, Terraform resources, and Ansible sources visible as unclassified until each has a reasoned requirement or non-requirement classification.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: 08934503ff235c4aeddbf3cfbefc600f
+UID: TEST-TRC-04-002
+TITLE: TEST-TRC-04-002
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Derive bounded inventory entries from current source files so an unclassified SQL table or route fixture cannot be hidden by an unchanged cached discovered list.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: 140994365cbcd7dbb64e9fb7c5684b96
+UID: TEST-TRC-05-001
+TITLE: TEST-TRC-05-001
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Require the repository, SHA, run ID, attempt, job, and task before recording a GitHub Actions run reference.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: 8f0c942ae1d8c4ada43721d71cc2c230
+UID: TEST-TRC-05-002
+TITLE: TEST-TRC-05-002
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Record local verification as NOT_RUN with no synthesized workflow URL.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: 579c4dfa47305f4a4ba796d297302a2d
+UID: TEST-TRC-05-003
+TITLE: TEST-TRC-05-003
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Reject test IDs with an absent parent requirement, missing case name, or source-file text that does not contain the declared case name.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: 3771602c3129d2aeeb52306a21e8013b
+UID: TEST-TRC-07-001
+TITLE: TEST-TRC-07-001
+EXECUTION_SCOPE: TRACE_BROWSER
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Use Playwright to open the generated static page and verify that every UID in the generated JSON is visible in the browser.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: 7554b5f2d31df6dadb5d2307590bf5a5
+UID: TEST-TRC-08-001
+TITLE: TEST-TRC-08-001
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Verify the public Requirements projection preserves explicit obligation links, candidate-only classifications, declared test sources, source SHA links, and existing conformance states.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: e1f17904a09691d2dd5d777e2639577e
+UID: TEST-TRC-02-002
+TITLE: TEST-TRC-02-002
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Canonicalize StrictDoc search-index keys and unordered set membership while preserving all other generated JavaScript text.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: 553a90f344c0743e6be1b613946071da
+UID: TEST-MCPV-001-001
+TITLE: TEST-MCPV-001-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Verify the registered native Knowledge schemas reject invalid UUIDs and out-of-contract operations. This is a runtime-schema test candidate; it does not establish full SDK protocol conformance or a hosted exact-source result.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: b304ab460592f7f49cbda0cd9d4c39ac
+UID: TEST-MCP-CORE-001-001
+TITLE: TEST-MCP-CORE-001-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Verify the configured external Assistant admission boundary and that MCP dispatch does not call the configured model provider. This is an REQ-MCP-002 scenario, not the MCP SDK protocol conformance CLI run required by MCPV-002.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-002
+
+[TEST]
+MID: 9d036a15f7de684bfe7ee1f6093eb235
+UID: TEST-MCPV-004-001
+TITLE: TEST-MCPV-004-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Exercise selected-project scope, proposal-only MCP writes, replay handling, author review, receipt, and both stdio and Streamable HTTP transports against PostgreSQL. It is a candidate for MCPV-004 and MCPV-005; each protocol authorization dimension remains separately unverified until its specific case evidence exists.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: 4a482103850c55bc7b177207fc5182d8
+UID: TEST-MCPV-006-001
+TITLE: TEST-MCPV-006-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Exercise cancellation of real NLP jobs over both transports. HTTP shutdown and drain are exercised by the same test through `verifyHttpDrain`; protocol header limits and cross-request isolation still need separate evidence.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: 9a4e2608082648f649f3e4d15808ce37
+UID: TEST-MCPV-004-002
+TITLE: TEST-MCPV-004-002
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Exercise signed MCP bearer admission for exact client, scope, assigned-project, owner-rights, and effect boundaries. This server fixture uses manually constructed tokens; it does not establish OAuth PKCE issuance or external client interop.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: e8177bf3a4aebd82fd6d5542fc959d82
+UID: TEST-MCPV-001-002
+TITLE: TEST-MCPV-001-002
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Check the SDK tools/list catalog against the 53 public tool names and ensure every advertised input schema is an object with valid required fields and expected defaults. This is catalog coverage, not a protocol conformance result.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: 648436169a722ca028a296e5a785b465
+UID: TEST-MCPV-006-002
+TITLE: TEST-MCPV-006-002
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Check that aborting the host Web Request cancels the SDK exchange, propagates the abort signal, closes the exchange with 499, and releases the pending action. It complements the real worker cancellation and shutdown drain integration case.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: bc85b804bdf4f21c36706b3fd4b4b81f
+UID: TEST-MCPV-007-001
+TITLE: TEST-MCPV-007-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Exercise the official v2 client against the modern pinned protocol version and confirm per-request Streamable HTTP tool listing.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: 184f741818cfa72a7be4d7de0603bf08
+UID: TEST-MCPV-007-002
+TITLE: TEST-MCPV-007-002
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Exercise the temporary legacy stateless JSON-RPC tools/list fallback while that compatibility window remains open.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: 1169579fc2155d97d587f1edeb82d3ee
+UID: TEST-MCPV-007-003
+TITLE: TEST-MCPV-007-003
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Check strict mode rejects legacy stateless traffic and delegates unsupported GET/DELETE methods with 405.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: 01551c49fc512cac6bef9515c2d86fef
+UID: TEST-MCPV-007-004
+TITLE: TEST-MCPV-007-004
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Check the compatibility predicate immediately before, at, and after the six-month protocol cutoff.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: 7e194994663116ff2e6509e25a9b37b4
+UID: TEST-MCPV-006-003
+TITLE: TEST-MCPV-006-003
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Check mismatched modern MCP method/name headers are rejected before any tool dispatch.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: cb127df399b9b085e9ffc9c5f05af3dd
+UID: TEST-MCPV-006-004
+TITLE: TEST-MCPV-006-004
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Check an oversized request body receives 413 before the SDK action context is accessed.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: 79d00c3ff35b508520399c674c4976ab
+UID: TEST-MCPV-006-005
+TITLE: TEST-MCPV-006-005
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Close an MCP connection during OAuth admission and confirm that only the connected control request reaches module activation.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: 290cc979d9a509fd13d2b4d6ce86b894
+UID: TEST-MCPV-004-003
+TITLE: TEST-MCPV-004-003
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Exercise Better Auth public-client registration, authorization code with PKCE, registered resource, refresh, token revocation, project scope, and 2026 HTTP tool calls through the existing Fastify boundary and PostgreSQL.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-MCP-001
+
+[TEST]
+MID: 185414049c5eb1d2e04f77a167bb140c
+UID: TEST-CORE-001-001
+TITLE: TEST-CORE-001-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks the core-only author workspace without the optional search and terminology panels.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-CORE-001
+
+[TEST]
+MID: 0f608e16790fef30a5afe8e68441c1cf
+UID: TEST-CORE-002-001
+TITLE: TEST-CORE-002-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks that Desktop approval and application stay separate for a native proposal.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-CORE-002
+
+[TEST]
+MID: 015192e462e2cbc0c84cdd9c822aa529
+UID: TEST-CORE-003-001
+TITLE: TEST-CORE-003-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks the selected document and revision on current and pinned snapshots.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-CORE-003
+
+[TEST]
+MID: 485a1595569c9f6e4a98dbc89167fd58
+UID: TEST-DATA-001-001
+TITLE: TEST-DATA-001-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks that the retired Git selector cannot change the manuscript authority.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-001
+
+[TEST]
+MID: a89e6eb9e61f92d81a1c5fbb62ea4d41
+UID: TEST-DATA-002-001
+TITLE: TEST-DATA-002-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks update rejection for an existing PostgreSQL document revision. Delete rejection still requires a matching case.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-002
+
+[TEST]
+MID: 86d4bd4e81bcd5668ee52a26857715d5
+UID: TEST-DATA-002-002
+TITLE: TEST-DATA-002-002
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks revision creation, exact retry, restore and stale-head conflict in PostgreSQL.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-002
+
+[TEST]
+MID: e50ce01b5b362ae6d85710d64c90c4d1
+UID: TEST-DATA-003-001
+TITLE: TEST-DATA-003-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks the PostgreSQL project boundary for Knowledge relations.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-003
+
+[TEST]
+MID: 48f3286bb2251c83e9d8cda25588c56b
+UID: TEST-DATA-004-001
+TITLE: TEST-DATA-004-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks rejection of missing, changed and unknown applied migrations.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-004
+
+[TEST]
+MID: f1568451c92530e0fd44403408b56497
+UID: TEST-AUTH-001-001
+TITLE: TEST-AUTH-001-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks the API entry point rejects writes without a verified owner token for its audience.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-AUTH-001
+
+[TEST]
+MID: 4ca46d58f11ffa03396df371ecd52a05
+UID: TEST-AUTH-002-001
+TITLE: TEST-AUTH-002-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks admission ordering and refusal of unregistered methods and origins.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-AUTH-002
+
+[TEST]
+MID: f8859594d441465515ed94af70b93c74
+UID: TEST-AUTH-003-001
+TITLE: TEST-AUTH-003-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks exact MCP project assignment and rejection of malformed configuration.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-AUTH-003
+
+[TEST]
+MID: a208fcd03e8a4f2427dc2c62e2da8f6a
+UID: TEST-AUTH-003-002
+TITLE: TEST-AUTH-003-002
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks admitted MCP scope and denies owner operations through Fastify.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-AUTH-003
+
+[TEST]
+MID: 87c4eb8d847862e609ba67aa845da0ce
+UID: TEST-AUTH-004-001
+TITLE: TEST-AUTH-004-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks verified owner enrollment and closure of the isolated setup endpoint.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-AUTH-004
+
+[TEST]
+MID: 5e061d5d151d5d83d821f24f76deac62
+UID: TEST-AUTH-005-001
+TITLE: TEST-AUTH-005-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks fresh-owner authorization and preservation of the final passkey.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-AUTH-005
+
+[TEST]
+MID: 445b67648bfb9ff548d962c23e7d3a2e
+UID: TEST-API-001-001
+TITLE: TEST-API-001-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks one HTTP operation's cursor contract and rejection of stale snapshots.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-API-001
+
+[TEST]
+MID: 0a2034eae039ef847c3980b32816f7f6
+UID: TEST-API-002-001
+TITLE: TEST-API-002-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks recovery after a lost response to a committed save with the original operation identity.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-API-002
+
+[TEST]
+MID: 1d581794ed7e9c7e03333bec48c25c24
+UID: TEST-UI-001-001
+TITLE: TEST-UI-001-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks the Desktop launcher and retired Mobile routes. The scenario covers the Web branch.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-001
+
+[TEST]
+MID: e64f90cfa8b1f2db8d6556c95d239d10
+UID: TEST-UI-002-001
+TITLE: TEST-UI-002-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks preservation and reconciliation of the newer draft after an uncertain save.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-002
+
+[TEST]
+MID: 83cb8a7fd19a88e76412f8a9eeb9ac61
+UID: TEST-UI-003-001
+TITLE: TEST-UI-003-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks a guarded Desktop tab transition and rejects obsolete focus.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-003
+
+[TEST]
+MID: 5355b19a94521a4d5cc5d0cf3aa64557
+UID: TEST-UI-004-001
+TITLE: TEST-UI-004-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks composition during scene navigation preserves the correct document boundary.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-004
+
+[TEST]
+MID: 4d4f7499e20ad11e32e329fe726434b6
+UID: TEST-UI-005-001
+TITLE: TEST-UI-005-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks keyboard focus order and panel associations for the Desktop tab stack.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-005
+
+[TEST]
+MID: 7b626d7bf92e75476f19fb6c9ab25cbc
+UID: TEST-UI-006-002
+TITLE: TEST-UI-006-002
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks Chromium recovery retains newer edits after a lost response and rebases after acknowledgement.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-006
+
+[TEST]
+MID: 37274f1e217be18c48a9b7e642f42af7
+UID: TEST-UI-006-003
+TITLE: TEST-UI-006-003
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks the machine blocks another ChangeSet mutation until fresh details resolve a version conflict.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-006
+
+[TEST]
+MID: 88330daf9ec769ec9fa7e29b370a2650
+UID: TEST-UI-006-004
+TITLE: TEST-UI-006-004
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks Chromium reconciles a lost ChangeSet apply response after the database commits.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-006
+
+[TEST]
+MID: 1e347c42545fb1287dd77f5d6389e66c
+UID: TEST-UI-006-005
+TITLE: TEST-UI-006-005
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks cancellation cannot report successful owner reauthentication.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-006
+
+[TEST]
+MID: 24724101b874344eae1cced50374bd28
+UID: TEST-UI-006-006
+TITLE: TEST-UI-006-006
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks the machine reconciles an uncertain revocation against freshly fetched identity.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-006
+
+[TEST]
+MID: 3dad75dbf9890e7bc22319e42ac33574
+UID: TEST-UI-006-007
+TITLE: TEST-UI-006-007
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks that losing an accepted probe response in Chromium and reloading reuses the original request identity in the real owner API.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-006
+
+[TEST]
+MID: 843800c9068da8d9284eff01b69a5ead
+UID: TEST-UI-006-008
+TITLE: TEST-UI-006-008
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks direct Backup Console navigation, keyboard focus, narrow reflow, browser Back, and owner session recovery with real PostgreSQL and Better Auth.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-006
+
+[TEST]
+MID: 51871b45feaac23db1571e1d99a63b57
+UID: TEST-UI-006-009
+TITLE: TEST-UI-006-009
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks that an unknown manual backup outcome keeps its identity through disconnection and advances on the matching authoritative recheck.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-UI-006
+
+[TEST]
+MID: fbb0da7847cde11b3166cfbba9899e28
+UID: TEST-EXT-001-001
+TITLE: TEST-EXT-001-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks the probe's expected routing and denial observations with fixtures. Live Edge verification requires its own execution.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-EXT-001
+
+[TEST]
+MID: a267862223d54a509a5b93726ebb3505
+UID: TEST-EXT-002-001
+TITLE: TEST-EXT-002-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks the externally published MCP scope ceiling in OAuth metadata.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-EXT-002
+
+[TEST]
+MID: 71abc3d8ea0b266e760e25a8b5f0666e
+UID: TEST-OPS-001-001
+TITLE: TEST-OPS-001-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks separation of the bootstrap admission states and refusal to reissue an existing owner grant.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-OPS-001
+
+[TEST]
+MID: 81d87f39e0e51220bdedf453db454bec
+UID: TEST-OPS-002-001
+TITLE: TEST-OPS-002-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks source certification rejection in the update handoff with fixtures.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-OPS-002
+
+[TEST]
+MID: 39af32e2e1ba0c9596ca11da0ccb83a7
+UID: TEST-OPS-003-001
+TITLE: TEST-OPS-003-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks restore proof and candidate-ledger verification with fixtures. Live S3 transfer and independent restore execution still require evidence.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-OPS-003
+
+[TEST]
+MID: 95e1f928a883a2ff425e74ce6cb7034e
+UID: TEST-QUAL-001-001
+TITLE: TEST-QUAL-001-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks that workspace tests cannot substitute for the isolated lifecycle proof.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-QUAL-001
+
+[TEST]
+MID: caaf25963c3500c09149e168699bf6d0
+UID: TEST-QUAL-002-001
+TITLE: TEST-QUAL-002-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks rejection of insufficient selected-task evidence.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-QUAL-002
+
+[TEST]
+MID: 77afb3792554e354b69dc58fdb3008a5
+UID: TEST-TRC-04-003
+TITLE: TEST-TRC-04-003
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks rejection when documented route, tool and database identities are no longer discovered.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: 2e92518dec80e9ba9e72d53b18016a52
+UID: TEST-TRC-05-004
+TITLE: TEST-TRC-05-004
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks artifact provenance, producer attempts and refusal to promote a skipped case.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: c777c4e74536f31f6b3d79106743d409
+UID: TEST-TRC-06-001
+TITLE: TEST-TRC-06-001
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks that an observed passing case cannot promote an unimplemented UI obligation.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: 6961c6ddf4daccf12a2e8963c1e83c0a
+UID: TEST-TRC-06-002
+TITLE: TEST-TRC-06-002
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks that the trace retains a missing S3 receipt as a limitation.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[TEST]
+MID: 3694489c139146c11b7ff49148e69fc9
+UID: TEST-TRC-07-002
+TITLE: TEST-TRC-07-002
+EXECUTION_SCOPE: TRACE_NODE
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Checks public route identity and exact-source output bytes with controlled responses.
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-TRACE-001
+
+[REQUIREMENT]
+MID: ad3b54d5fb2fa830c9b9d69a177a3d92
+UID: REQ-DATA-005
+TITLE: REQ-DATA-005
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: UNMAPPED
+APPLICABILITY: FUTURE_TARGET
+DESIGN_OWNER: [Data model](../architecture/DATA-MODEL.sdoc)
+IMPLEMENTATION_IDENTIFIERS: JobHistoryStore; RecentActivityStore; PostgreSQL persistence and approved migrations; Quadlet volume lifecycle (target, 未実装)
+VERIFICATION_IDENTIFIERS: NOT_ASSIGNED (future acceptance scenarios in owning design)
+TEST_IDS: NOT_ASSIGNED (implementation and test mapping pending)
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ACCEPTED／将来目標・未実装。既存sourceは移行候補であり適合証拠ではない。
+STATEMENT: 復旧に必要な確定済みサーバーアプリケーション状態を単一PostgreSQLクラスタに集約し、DB外のアプリケーション領域は再生成可能なデータまたは一時領域に限定する。
+RELATIONS:
+- TYPE: File
+  PATH: docs/architecture/DATA-MODEL.sdoc
+
+[OBLIGATION]
+MID: c3c4e72ae44536489c0d5bdb6a09634f
+UID: OBL-REQ-DATA-005-O01
+TITLE: OBL-REQ-DATA-005-O01
+DESIGN_REFERENCE: [Data model](../architecture/DATA-MODEL.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/persistence-postgres/; packages/api/src/backup-console-store.ts (target candidate)
+TEST_IDS: NOT_ASSIGNED (implementation and test mapping pending)
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Future target; no implementation or exact-source evidence claimed.
+STATEMENT: 全runtime profileの永続状態を棚卸しし、作品、認証、ユーザー状態、運用記録を単一クラスタに保存する。スキーマ・role・owner/project境界を維持する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-005
+
+[OBLIGATION]
+MID: 510d6a0da145483ee20d5ba748b4072c
+UID: OBL-REQ-DATA-005-O02
+TITLE: OBL-REQ-DATA-005-O02
+DESIGN_REFERENCE: [Data model](../architecture/DATA-MODEL.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/job-history-store.ts: JobHistoryStore (target candidate)
+TEST_IDS: NOT_ASSIGNED (implementation and test mapping pending)
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Future target; no implementation or exact-source evidence claimed.
+STATEMENT: ジョブ、結果、通知、既読と状態遷移を原子的に確定し、既存の状態・保持・中断契約を維持する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-005
+
+[OBLIGATION]
+MID: bd6d8ac8e1cf067b17dd1daeb2b3d29a
+UID: OBL-REQ-DATA-005-O03
+TITLE: OBL-REQ-DATA-005-O03
+DESIGN_REFERENCE: [Data model](../architecture/DATA-MODEL.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/recent-activity-store.ts: RecentActivityStore (target candidate)
+TEST_IDS: NOT_ASSIGNED (implementation and test mapping pending)
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Future target; no implementation or exact-source evidence claimed.
+STATEMENT: Recent Activityのcursorとwriter/page順序を同一DBトランザクションで更新し、競合と遅延応答で新しい状態を失わない。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-005
+
+[OBLIGATION]
+MID: 3610bface7e2a1e65b22bdbe02506477
+UID: OBL-REQ-DATA-005-O04
+TITLE: OBL-REQ-DATA-005-O04
+DESIGN_REFERENCE: [Data model](../architecture/DATA-MODEL.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/maintain-job-history.ts; deploy/quadlet/codexia-api.container (target candidate)
+TEST_IDS: NOT_ASSIGNED (implementation and test mapping pending)
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Future target; no implementation or exact-source evidence claimed.
+STATEMENT: 旧historyの検証付き移行を冪等に行い、DB障害時の代替ファイル書込みを禁止する。受入後に旧ストア・volume・互換分岐を廃止する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-005
+
+[OBLIGATION]
+MID: 52bf39baaa7f67f9de79d9378e0d6565
+UID: OBL-REQ-DATA-005-O05
+TITLE: OBL-REQ-DATA-005-O05
+DESIGN_REFERENCE: [Data model](../architecture/DATA-MODEL.sdoc)
+IMPLEMENTATION_IDENTIFIERS: deploy/backup/backup.sh; deploy/ansible/restore-drill.yml (target candidate)
+TEST_IDS: NOT_ASSIGNED (implementation and test mapping pending)
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Future target; no implementation or exact-source evidence claimed.
+STATEMENT: 独立保全されたDB、再配備した構成/秘密情報、空の派生cacheだけで新規VMの確定済み状態を復旧できることを実証する。現行バックアップの廃止には別途承認を要する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-005
+
+[REQUIREMENT]
+MID: d9983b4b35d1e4e841037b838c59c303
+UID: REQ-DATA-006
+TITLE: REQ-DATA-006
+DECISION_STATUS: ACCEPTED
+CONFORMANCE_STATUS: PARTIAL
+APPLICABILITY: CURRENT
+DESIGN_OWNER: [Portable works](../authoring-portable.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/open-work-export.ts: generateOpenWorkZip; packages/api/src/server.ts: openWorkExport; app/src/persistence/PersistenceWorkspace.tsx
+VERIFICATION_IDENTIFIERS: packages/api/src/open-work-export.test.ts; packages/api/test/persistence-author-api.integration.test.ts; tests/e2e/ui-v1.acceptance.spec.ts
+TEST_IDS: TEST-DATA-006-001, TEST-DATA-006-002, TEST-DATA-006-003, TEST-DATA-006-004
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: ZIP と既存 JSON の実装を追跡する。Windows 標準展開と非本番 Cloudflare Tunnel での上限計測を受入までに行う。
+STATEMENT: 作者がCodexiaなしで作品の確定済み本文・構成・知識・根拠・保持された過去Revisionを利用できる、公開仕様のZIP/UTF-8 Markdown/JSONによる離脱用エクスポートを提供する。
+RELATIONS:
+- TYPE: File
+  PATH: docs/authoring-portable.sdoc
+
+[OBLIGATION]
+MID: f856ef5614d12e7c2de882e9e0667d07
+UID: OBL-REQ-DATA-006-O01
+TITLE: OBL-REQ-DATA-006-O01
+DESIGN_REFERENCE: [Portable works](../authoring-portable.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/open-work-export.ts; packages/api/src/open-work-export-v1.schema.json
+TEST_IDS: TEST-DATA-006-001, TEST-DATA-006-004
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: Windows 標準展開と独立した JSON Schema 検証を含む受入が残る。
+STATEMENT: 作品をZIPで取得し、一般的な展開ツールとエディタでMarkdownを利用できる。公開version付きmanifest、JSON Schema、説明書、パス・順序・ID・hashを同梱する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-006
+
+[OBLIGATION]
+MID: 48001e1bbab80bd75f8bdc781b211fb2
+UID: OBL-REQ-DATA-006-O02
+TITLE: OBL-REQ-DATA-006-O02
+DESIGN_REFERENCE: [Portable works](../authoring-portable.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/persistence-postgres/src/postgres-store.ts: scanOpenWorkExport; packages/api/src/open-work-export.ts
+TEST_IDS: TEST-DATA-006-001, TEST-DATA-006-002
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: 実 PostgreSQL の履歴・論理削除と並行更新を検証する。
+STATEMENT: 保持された過去Revisionと回復可能な論理削除文書を区別し、全本文の文字・改行・階層・順序と参照を保存する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-006
+
+[OBLIGATION]
+MID: cb217de1704bb6bfbc287a509ef2ee3c
+UID: OBL-REQ-DATA-006-O03
+TITLE: OBL-REQ-DATA-006-O03
+DESIGN_REFERENCE: [Portable works](../authoring-portable.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/open-work-export.ts; packages/api/src/open-work-export-v1.schema.json
+TEST_IDS: NOT_ASSIGNED (独立した全種別・参照照合が未割当)
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: 構造化出力を実装した。高密度の Knowledge、Evidence、Assertion、未解決参照の独立した全件照合が残る。
+STATEMENT: Knowledge、Evidence、Assertion、未解決参照、許可された作者所有module recordsを構造化出力し、参照の真正な対応を保持する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-006
+
+[OBLIGATION]
+MID: be77b9ff6017d4687d70ed902ce5ade2
+UID: OBL-REQ-DATA-006-O04
+TITLE: OBL-REQ-DATA-006-O04
+DESIGN_REFERENCE: [Portable works](../authoring-portable.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/server.ts: openWorkExport; packages/api/src/work-archive.ts: omitPortableModuleRecord
+SURFACE_IDENTIFIERS: httpOperation=GET /api/v1/persistence/projects/{projectId}/open-export; controlId=LIB-01.E
+TEST_IDS: TEST-DATA-006-001, TEST-DATA-006-003
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: 実 API の認可と機密除外を検証する。再認可失敗と外部経路での試験が残る。
+STATEMENT: 作者認可と作品境界を強制し、非認可principal、秘密情報、内部authority、運用状態、未確定draftを排除する。安全な除外記録を返す。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-006
+
+[OBLIGATION]
+MID: 24fc9e798a49c823411b221652b104af
+UID: OBL-REQ-DATA-006-O05
+TITLE: OBL-REQ-DATA-006-O05
+DESIGN_REFERENCE: [Portable works](../authoring-portable.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/persistence-postgres/src/postgres-store.ts: scanOpenWorkExport; packages/api/src/open-work-export.ts; app/src/api-documents.ts
+TEST_IDS: TEST-DATA-006-002, TEST-DATA-006-004
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: 同一スナップショット、上限超過と通常ダウンロードを検証する。期限と実経路の暫定上限の計測が残る。
+STATEMENT: 単一snapshotから大容量作品と全ページを欠落なく生成し、リソース上限、異常、キャンセルを完了と誤表示しない。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-006
+
+[OBLIGATION]
+MID: db33b8c0c008bb5ea1092fcb44e9dd9b
+UID: OBL-REQ-DATA-006-O06
+TITLE: OBL-REQ-DATA-006-O06
+DESIGN_REFERENCE: [Portable works](../authoring-portable.sdoc)
+IMPLEMENTATION_IDENTIFIERS: packages/api/src/work-archive.ts; packages/api/src/open-work-export.ts; packages/http-contract/src/routes-persistence.tsp
+TEST_IDS: TEST-DATA-006-003, TEST-DATA-006-004
+EXACT_RUN_REFERENCE: NOT_RUN
+COMMENT: 既存の版付き JSON 交換、import と生成 API クライアントを製品経路で検証する。
+STATEMENT: 既存のJSON交換・import、認可と正本を維持し、保守されたZIPライブラリと既存永続化読み取り経路を利用する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-006
+
+[TEST]
+MID: 11490505fda9967414d901afda1234aa
+UID: TEST-DATA-006-001
+TITLE: TEST-DATA-006-001
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: 実 PostgreSQL から Unicode と混合改行を含む論理削除文書の全 Revision を取得し、本文、ファイルの長さと SHA-256、機密の除外を照合する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-006
+
+[TEST]
+MID: 267f1feb540477bae639de971f98c7ae
+UID: TEST-DATA-006-002
+TITLE: TEST-DATA-006-002
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: 別の PostgreSQL トランザクションで編集を確定してから読み取りを続け、開始時点の本文だけを保持した ZIP を検証する。容量超過を型付きエラーとし、以降の要求が完了することを確認する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-006
+
+[TEST]
+MID: fffd1b8f7562416440027bf5c239bf42
+UID: TEST-DATA-006-003
+TITLE: TEST-DATA-006-003
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Fastify、Better Auth、PostgreSQL と生成 Orval クライアントを通し、作者のダウンロード、未認証と対象作品不在の拒否を確認する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-006
+
+[TEST]
+MID: c7b30f0992b70570a7c21d4c5fffcf4a
+UID: TEST-DATA-006-004
+TITLE: TEST-DATA-006-004
+EXECUTION_SCOPE: PRODUCT
+EXACT_RUN_REFERENCE: NOT_RUN
+STATEMENT: Chromium の作品画面から離脱用 ZIP と交換用 JSON を取得し、既存 import で元の作品を置き換えないことを確認する。Windows と非本番 Tunnel は別途実測する。
+RELATIONS:
+- TYPE: Parent
+  VALUE: REQ-DATA-006

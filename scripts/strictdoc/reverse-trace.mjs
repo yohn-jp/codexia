@@ -7,6 +7,7 @@ import { stripSourceComments } from './strip-source-comments.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, '../..');
+const SCREEN_CATALOG = 'docs/design/screen-catalog.json';
 
 async function walkFiles(root, relative, skipDirectory) {
   const absolute = path.join(root, relative);
@@ -61,14 +62,6 @@ function sqlObjects(source, file) {
   const pattern = /^\s*(?:CREATE\s+(?:(?:OR\s+REPLACE)\s+)?(?:UNIQUE\s+)?(?:TABLE|FUNCTION|TRIGGER|INDEX)\s+(?:IF\s+NOT\s+EXISTS\s+)?|ALTER\s+TABLE\s+\S+\s+ADD\s+CONSTRAINT\s+)([A-Za-z_][A-Za-z0-9_$]*)/gimu;
   for (const match of source.matchAll(pattern)) out.push({ kind: 'databaseObject', id: match[1], source: { path: file, line: source.slice(0, match.index).split('\n').length }, provenance: 'Named DDL declaration in a committed migration; not a live pg_catalog observation.' });
   return out;
-}
-
-function controlSurfaces(source, file) {
-  const surfaces = [];
-  for (const match of source.matchAll(/\b(?:CTRL-[A-Z0-9]+-[A-Z0-9-]+|[A-Z]{2,}-\d{2}\.[A-Z])\b/gu)) {
-    surfaces.push({ kind: 'uiControl', id: match[0], source: { path: file, line: source.slice(0, match.index).split('\n').length }, provenance: 'Control ID in the normative UI control catalog or state atlas; implementation binding remains separately evidenced.' });
-  }
-  return surfaces;
 }
 
 function implementationControlReferences(source, file) {
@@ -190,9 +183,17 @@ export async function discoverReverseSurfaces({ repositoryRoot = DEFAULT_ROOT, b
   }
   limitations.push({ area: 'database-live', reason: 'No live pg_catalog observation is available in this source-only trace; committed catalog contract is a comparison baseline, not runtime proof.' });
 
-  for (const file of ['docs/design/SCREEN-CONTROL-CATALOG.md', 'docs/design/SCREEN-STATE-ATLAS.md']) {
-    try { surfaces.push(...controlSurfaces(await readRegularFile(path.join(root, file)), file)); }
-    catch { limitations.push({ area: 'ui', reason: `${file} is missing.` }); }
+  try {
+    const { controls } = JSON.parse(await readRegularFile(path.join(root, SCREEN_CATALOG)));
+    for (const { id } of controls) {
+      surfaces.push({
+        kind: 'uiControl', id, source: { path: SCREEN_CATALOG },
+        provenance: 'Control ID declared in the shared screen catalog. Runtime implementation binding requires separate evidence.',
+      });
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    limitations.push({ area: 'ui', reason: `${SCREEN_CATALOG} is missing.` });
   }
   const appFiles = (await walkFiles(root, 'app/src', file =>
     file === 'app/src/generated/http' || file === 'app/src/generated/auth-methods')).filter((file) => /\.(tsx|jsx|ts|js)$/u.test(file) && !/\.test\./u.test(file));
