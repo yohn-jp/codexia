@@ -31,6 +31,7 @@ on:
       - scripts/shared/read-regular-file.mjs
       - scripts/build/packaging/profile-package.mjs
       - scripts/verification/dependencies/runtime-package-closure.mjs
+      - scripts/verification/dependencies/audit-runtime.mjs
       - scripts/verification/runtime/backend-image.sh
       - scripts/release/backend/update-identity*.mjs
       - scripts/release/components/version*.mjs
@@ -40,6 +41,8 @@ on:
       - scripts/release/components/verify-source.mjs
       - scripts/github/repository.mjs
       - scripts/github/octokit.mjs
+      - scripts/github/paginate-actions.mjs
+      - scripts/ci/evidence/github-rest-sdk.mjs
       - scripts/release/components/policy.mjs
       - scripts/ci/impact/contract.mjs
       - scripts/ci/evidence/artifact-selection.mjs
