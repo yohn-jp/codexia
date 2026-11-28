@@ -104,9 +104,9 @@
 - name: Observe the database container identity
   ansible.builtin.command:
     argv: [podman, container, exists, codexia-db]
-  register: base_runtime_db_container
+  register: base_runtime_db_container_presence
   changed_when: false
-  failed_when: base_runtime_db_container.rc not in [0, 1]
+  failed_when: base_runtime_db_container_presence.rc not in [0, 1]
 - name: Inspect the database systemd service state
   ansible.builtin.command:
     argv: [systemctl, --user, is-active, codexia-db.service]
@@ -118,12 +118,12 @@
   ansible.builtin.assert:
     that:
       - >-
-        (base_runtime_db_container.rc == 0 and base_runtime_db_service.rc == 0) or
-        (base_runtime_db_container.rc == 1 and base_runtime_db_service.rc != 0)
+        (base_runtime_db_container_presence.rc == 0 and base_runtime_db_service.rc == 0) or
+        (base_runtime_db_container_presence.rc == 1 and base_runtime_db_service.rc != 0)
     fail_msg: Existing database container and generated systemd unit disagree; operator recovery is required.
 - name: Verify the existing database container before any runtime mutation
   ansible.builtin.include_tasks: verify-base-db-container.yml
-  when: base_runtime_db_container.rc == 0
+  when: base_runtime_db_container_presence.rc == 0
 - name: Require the existing database volume to contain an adoptable cluster or be empty
   ansible.builtin.command:
     argv:
@@ -141,7 +141,7 @@
   ansible.builtin.assert:
     that:
       - (base_runtime_pgdata_before.stdout | from_json).state in ['empty', 'ready']
-      - base_runtime_db_container.rc != 0 or (base_runtime_pgdata_before.stdout | from_json).state == 'ready'
+      - base_runtime_db_container_presence.rc != 0 or (base_runtime_pgdata_before.stdout | from_json).state == 'ready'
     fail_msg: Existing PostgreSQL volume data is not a canonical PostgreSQL 17 cluster; no DB service will be started.
   when: base_runtime_pgdata_before is not skipped
 - name: Inspect every existing base Quadlet before changing host files or Podman resources
@@ -174,7 +174,7 @@
     fail_msg: An existing base container must already have its generated Quadlet file.
   loop:
     - {name: codexia-db, index: 5}
-  when: base_runtime_db_container.rc == 0
+  when: base_runtime_db_container_presence.rc == 0
 - name: Reject any existing base Quadlet drift before mutation
   ansible.builtin.assert:
     that:
@@ -187,7 +187,7 @@
     that: codexia_database_initialization_approved | default(false) | bool
     fail_msg: Explicit approval is required before initializing an empty PostgreSQL volume.
   when: >-
-    base_runtime_db_container.rc == 1 and
+    base_runtime_db_container_presence.rc == 1 and
     (base_runtime_pgdata_before is skipped or (base_runtime_pgdata_before.stdout | from_json).state == 'empty')
 - name: Converge the independent management connector and closed product publication gate
   ansible.builtin.include_tasks: prepare-api-gate.yml
@@ -331,7 +331,7 @@
     name: codexia-db.service
     scope: user
     state: started
-  when: base_runtime_db_container.rc == 1
+  when: base_runtime_db_container_presence.rc == 1
 - name: Wait for the permanent PostgreSQL server to accept TCP connections
   ansible.builtin.command:
     argv: [podman, exec, codexia-db, pg_isready, -h, 127.0.0.1, -U, codexia_admin, -d, codexia]
