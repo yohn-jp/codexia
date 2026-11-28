@@ -83,9 +83,13 @@ value.updatedAt=new Date().toISOString();
 fs.writeFileSync(path,JSON.stringify(value,null,2)+'\n',{mode:0o600});
 NODE
 }
+monotonic_ms() {
+  python3 -c 'import time; print(time.monotonic_ns() // 1_000_000)'
+}
 record_phase_timing() {
   local key=$1 started=$2 duration
-  duration=$(( $(date +%s%3N) - started ))
+  duration=$(( $(monotonic_ms) - started ))
+  (( duration >= 0 )) || { echo "Invalid phase duration: $key" >&2; return 1; }
   node - "$report" "$key" "$duration" <<'PHASE'
 const fs=require('node:fs');const [p,key,ms]=process.argv.slice(2);
 const r=JSON.parse(fs.readFileSync(p,'utf8'));
@@ -160,10 +164,10 @@ run_playbook() {
   local -a shared_vars=()
   if [[ -n ${3:-} ]]; then shared_vars=(--extra-vars "@$3"); fi
   local started_ms elapsed_ms
-  started_ms=$(date +%s%3N)
+  started_ms=$(monotonic_ms)
   ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "$ANSIBLE_PLAYBOOK" -i "$tmp/inventory.yml" \
     "$repo_root/deploy/ansible/site.yml" --extra-vars codexia_lifecycle_profile_backup=true "${shared_vars[@]}" --extra-vars "@$vars" >"$tmp/$name.log" 2>&1 || status=$?
-  elapsed_ms=$(( $(date +%s%3N) - started_ms ))
+  elapsed_ms=$(( $(monotonic_ms) - started_ms ))
   echo "LIFECYCLE_ANSIBLE_TIMING stage=$name duration_ms=$elapsed_ms status=$status"
   local timings="$fixture_home/.local/state/codexia-deploy/backup-release.timings"
   local phase seconds
@@ -206,9 +210,9 @@ codexia_database_initialization_approved: $approvals
 $(if [[ -n "$fault_path" ]]; then printf 'codexia_lifecycle_fault_path: "%s"\n' "$fault_path"; fi)
 YAML
   local begin_ms elapsed_ms status=0
-  begin_ms=$(date +%s%3N)
+  begin_ms=$(monotonic_ms)
   run_playbook "$tmp/deploy-vars.yml" "$log_name" || status=$?
-  elapsed_ms=$(( $(date +%s%3N) - begin_ms ))
+  elapsed_ms=$(( $(monotonic_ms) - begin_ms ))
   node - "$report" "$log_name" "$elapsed_ms" "$status" <<'TIMING'
 const fs=require('node:fs');const [p,label,ms,exit]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(p,'utf8'));
 r.timings ||= {}; (r.timings.ansible ||= []).push({label,durationMs:Number(ms),exitCode:Number(exit)});
@@ -395,7 +399,7 @@ const fs=require('node:fs');const [path,sha,run,attempt]=process.argv.slice(2);c
 NODE
 trap 'record_failure "$?" "${BASH_LINENO[0]:-0}" "$BASH_COMMAND"' ERR
 set_state first_activation NOT_CHECKED 'runtime fixture not started'
-bootstrap_started=$(date +%s%3N)
+bootstrap_started=$(monotonic_ms)
 if [[ "${GITHUB_ACTIONS:-}" != true ]]; then
   mark_fixture_unavailable 'execution is not on an isolated GitHub Actions runner'
   exit 78
@@ -531,7 +535,7 @@ const fs=require('node:fs');const [path,podman,rootless,systemd,postgres,health]
 CAPABILITIES
 
 record_phase_timing host_bootstrap "$bootstrap_started"
-sshfs_started=$(date +%s%3N)
+sshfs_started=$(monotonic_ms)
 # Use a dedicated rootless SSHFS server container. Its IP is distinct from host
 # interfaces; backup.sh retains its normal remote-filesystem and same-host checks.
 rootless_podman network create codexia-lifecycle-backup >/dev/null
@@ -622,10 +626,10 @@ test "$backup_recipient" != ''
 
 # Resolve and verify published images before installing the disposable registry map.
 # This keeps public GHCR pulls pointed at GHCR, never at the empty test registry.
-candidate_started=$(date +%s%3N)
+candidate_started=$(monotonic_ms)
 node "$repo_root/scripts/deployment/lifecycle/app.mjs" prepare
 record_phase_timing backend_candidate "$candidate_started"
-registry_started=$(date +%s%3N)
+registry_started=$(monotonic_ms)
 
 # The service user's OCI registry map points the production image name at a
 # disposable local registry. No image or package is published to GHCR.
@@ -749,13 +753,13 @@ verify_private_backup_socket
 observe_runtime private-backup-socket-restart "$initial_key"
 if [[ "${CODEXIA_BENCHMARK_BACKUP_RUNTIME:-false}" == true ]]; then
   local benchmark_started benchmark_helper
-  benchmark_started=$(date +%s%3N)
+  benchmark_started=$(monotonic_ms)
   benchmark_helper="$(rootless mktemp "$fixture_home/.local/state/backup-extractor.XXXXXXXX")"
   rootless tee "$benchmark_helper" < "$repo_root/deploy/ansible/backup-extract-runtime.sh" >/dev/null
   rootless python3 - "$benchmark_helper" < "$repo_root/deploy/ansible/benchmark-backup-extraction.py" |
     tee "$RUNNER_TEMP/codexia-push-app-lifecycle/backup-extraction-bounded.log"
   rootless rm -- "$benchmark_helper"
-  extraction_benchmark_ms=$(( $(date +%s%3N) - benchmark_started ))
+  extraction_benchmark_ms=$(( $(monotonic_ms) - benchmark_started ))
   record_phase_timing backup_extraction_comparison "$benchmark_started"
 fi
 if run_deploy "$update_key" false '' deploy-console-unconfigured; then
@@ -844,7 +848,7 @@ set_state database_volume_writer_quadlet_release_continuity PASS 'database senti
 }
 source "$repo_root/deploy/ansible/test-push-backup-host-lifecycle.sh"
 extraction_benchmark_ms=0
-scenario_started=$(date +%s%3N)
+scenario_started=$(monotonic_ms)
 case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in
   app)
     # The standalone API requires the same approved Better Auth bootstrap as the auth lane.
