@@ -32,6 +32,10 @@ const (
 var errCloudflareMintUnavailable = errors.New("Cloudflare Account API Tokens Write and exact deployment scopes were not verified")
 
 func (o *cloudflareObservation) Close() {
+	if o.closeAuth != nil {
+		o.closeAuth()
+		o.closeAuth = nil
+	}
 	o.api = cloudflareAPI{}
 	o.operator = nil
 	o.provisioning, o.readToken, o.workerToken = [32]byte{}, [32]byte{}, [32]byte{}

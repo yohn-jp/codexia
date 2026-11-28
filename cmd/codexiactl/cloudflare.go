@@ -79,6 +79,7 @@ type cloudflareObservation struct {
 	api            cloudflareAPI
 	serviceToken   zero_trust.ServiceToken
 	provisioning   [32]byte
+	closeAuth      func()
 	readToken      [32]byte
 	workerToken    [32]byte
 }
@@ -207,24 +208,23 @@ func (api cloudflareAPI) findZone(ctx context.Context, host string) (zones.Zone,
 	return candidates[0], nil
 }
 
-func observeCloudflare(ctx context.Context, o operator, repo githubTarget, settings productionContract) (*cloudflareObservation, error) {
+func observeCloudflare(ctx context.Context, o operator, repo githubTarget, settings productionContract, provision bool) (*cloudflareObservation, error) {
 	origin, err := url.Parse(settings.PublicOrigin)
 	if err != nil || origin.Scheme != "https" || origin.Hostname() != origin.Host || origin.User != nil ||
 		origin.Path != "" || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" ||
 		!strings.Contains(origin.Host, ".") || !cloudflareHost.MatchString(origin.Host) {
 		return nil, refused("Cloudflare requires the reviewed HTTPS production origin")
 	}
-	o.Notice("Cloudflare management authentication for " + origin.Host + " uses a temporary scoped API token. Wrangler Workers login does not establish the required DNS, Tunnel and Access management permissions.")
-	o.Notice("Create a short-lived token at " + cloudflareTokensPage + ". Select Zone Read, DNS Read and Workers Routes Read for the production zone. Select Cloudflare Tunnel Read, Access: Apps and Policies Read, Access: Service Tokens Read and Workers Scripts Read for its account. Cloudflare Tunnel Edit allows retrieval of the existing connector token.")
-	o.Notice("To enroll an existing Cloudflare deployment API token, the temporary management token needs Account API Tokens Read on the selected account for account-owned credentials, or API Tokens Read from the same user for user-owned credentials. An account-owned management token with Account API Tokens Write also permits issuance of the two scoped deployment credentials.")
-	if err := requireApproval(o, "Authenticate to the official Cloudflare API for "+origin.Host+"?"); err != nil {
-		return nil, err
-	}
-	secret, err := readCloudflareSecret(o, "Temporary Cloudflare management token")
+	secret, closeAuth, err := cloudflareManagementCredential(ctx, o, origin.Host, provision)
 	if err != nil {
 		return nil, err
 	}
 	defer clear(secret)
+	defer func() {
+		if closeAuth != nil {
+			closeAuth()
+		}
+	}()
 	api := newCloudflareAPI(secret, cloudflareAPIBase)
 	zone, err := api.findZone(ctx, origin.Host)
 	if err != nil {
@@ -236,7 +236,8 @@ func observeCloudflare(ctx context.Context, o operator, repo githubTarget, setti
 	}
 	observed.operator = o
 	observed.provisioning = cloudflareSecretDigest(secret)
-	o.Notice(fmt.Sprintf("Cloudflare target confirmed by API: account %s, zone %s, Tunnel %s. Routes and Access policies remain owned by the existing Terraform and Cloudflare account administrators.", observed.AccountID, zone.ID, observed.target.TunnelID))
+	observed.closeAuth, closeAuth = closeAuth, nil
+	reportResult(o, successText, fmt.Sprintf("Cloudflare target verified\nAccount: %s\nZone: %s\nTunnel: %s", observed.AccountID, zone.ID, observed.target.TunnelID))
 	return observed, nil
 }
 

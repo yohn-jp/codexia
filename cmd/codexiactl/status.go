@@ -297,7 +297,7 @@ func inspectProviders(ctx context.Context, o operator, vm vmObservation, gh *git
 	// Continue gathering read-only evidence instead of requiring another doctor
 	// invocation merely to discover the next missing prerequisite.
 	reportStage(o, cloudflareStage, "Inspect DNS, Tunnel, Access and Workers")
-	edge, edgeErr := observeCloudflare(ctx, o, gh.target, settings)
+	edge, edgeErr := observeCloudflare(ctx, o, gh.target, settings, false)
 	if edgeErr != nil {
 		report.Blockers = append(report.Blockers, "cloudflare-edge-unverified")
 		reportResult(o, warningText, "Cloudflare check: " + edgeErr.Error())
