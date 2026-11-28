@@ -105,7 +105,7 @@ STATEMENT: >>>
 | システム構造・関係、信頼境界 | LikeC4。StrictDocからモデルを参照し同じ構造を写経しない |
 | HTTPワイヤ契約、MCP Schema | TypeSpec、公式SDKのSchema。意味的な認可・動作は領域設計が所有 |
 | 振る舞い・状態 | 承認済みの状態機械（採用範囲内のXState）または正規の決定表・モデル。未移行の説明図を無条件に実行仕様とみなさない |
-| DB物理契約・制約、インフラ宣言 | SQL、Terraform、Ansible。生成したERD・構成一覧は派生物 |
+| DB物理契約・制約、インフラ宣言 | SQL、認定済みCloudflare edgeの設定とCodexiaCTL、Ansible。生成したERD・構成一覧は派生物 |
 | 脅威・リスク | Threagile。リスク・対策参照を維持 |
 | 表現・図 | StrictDoc標準HTML、既存Mermaid/LikeC4等。図自体が唯一の設計情報を持つ場合は正本として保存し、派生図は手編集しない |
 | 構成値・CIタスク・依存・ポリシー | 既存JSON/Schema、CI Contract、正規判定関数など、単一の機械可読定義を優先 |

@@ -82,23 +82,40 @@ function nativeIosViews(source, file) {
   return surfaces;
 }
 
-function terraformResources(source, file) {
+async function cloudflareContractSurfaces(root, directory) {
   const surfaces = [];
-  source = source.replace(/\/\*[\s\S]*?\*\//gu, comment => comment.replace(/[^\r\n]/gu, ' ')).replace(/^[\t ]*(?:#|\/\/).*$/gmu, '');
-  const pattern = /^[\t ]*resource\s+"([A-Za-z_][A-Za-z0-9_]*)"\s+"([A-Za-z_][A-Za-z0-9_-]*)"\s*\{/gmu;
-  for (const match of source.matchAll(pattern)) {
-    surfaces.push({
-      kind: 'iacResource', id: `${match[1]}.${match[2]}`, source: { path: file, line: source.slice(0, match.index).split('\n').length },
-      provenance: 'Terraform resource declaration in the canonical Cloudflare IaC tree; source declaration does not prove applied infrastructure state.',
-    });
+  const limitations = [];
+  for (const [filename, pathGroups] of [
+    ['ui-routes.json', input => [['cloudflareRoute.static', input.routes], ['cloudflareRoute.origin', input.originRoutes]]],
+    ['identity-probes.json', input => [['cloudflareAccess.probe', Object.values(input).map(entry => entry?.path)]]],
+    ['public-protocol-paths.json', input => [['cloudflareAccess.protocol', Object.values(input).map(entry => entry?.path)]]],
+  ]) {
+    const file = path.join(directory, filename);
+    let input;
+    try { input = JSON.parse(await readRegularFile(path.join(root, file))); }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      limitations.push({ area: 'iac', reason: `Canonical Cloudflare contract is missing: ${file}` });
+      continue;
+    }
+    for (const [group, paths] of pathGroups(input)) {
+      if (!Array.isArray(paths) || paths.length === 0 || new Set(paths).size !== paths.length ||
+          paths.some(value => typeof value !== 'string' || !value.startsWith('/'))) {
+        throw new Error(`Invalid Cloudflare contract for ${group}: ${file}`);
+      }
+      for (const value of paths) surfaces.push({
+        kind: 'iacResource', id: `${group}:${value}`, source: { path: file },
+        provenance: 'Source declaration in the certified Cloudflare edge contract consumed by CodexiaCTL.',
+      });
+    }
   }
-  return surfaces;
+  return { surfaces, limitations };
 }
 
 export async function discoverPlatformSurfaces({
   repositoryRoot = DEFAULT_ROOT,
   nativeIosRoot = 'ios',
-  iacRoot = 'deploy/cloudflare/terraform',
+  iacRoot = 'deploy/cloudflare',
   ansibleRoot = 'deploy/ansible',
   ansibleProjection,
 } = {}) {
@@ -111,10 +128,10 @@ export async function discoverPlatformSurfaces({
   if (iosFiles.length === 0) limitations.push({ area: 'native-ios', reason: `Canonical Native iOS source tree is empty: ${nativeIosRoot}` });
   limitations.push({ area: 'native-ios-runtime', reason: 'SwiftUI source declarations do not prove iOS build, physical-device behavior, IME, or acceptance execution.' });
 
-  const terraformFiles = (await walkFiles(root, iacRoot)).filter(file => file.endsWith('.tf'));
-  for (const file of terraformFiles) surfaces.push(...terraformResources(await readRegularFile(path.join(root, file)), file));
-  if (terraformFiles.length === 0) limitations.push({ area: 'iac', reason: `Canonical Terraform source tree is empty: ${iacRoot}` });
-  limitations.push({ area: 'iac-runtime', reason: 'Terraform declarations do not prove a plan, applied provider state, or live routing configuration.' });
+  const cloudflare = await cloudflareContractSurfaces(root, iacRoot);
+  surfaces.push(...cloudflare.surfaces);
+  limitations.push(...cloudflare.limitations);
+  limitations.push({ area: 'iac-runtime', reason: 'Cloudflare source contracts require independent evidence of convergence and live routing.' });
   const ansible = ansibleProjection ?? await discoverAnsibleSourceGraph({ repositoryRoot: root, ansibleRoot });
   surfaces.push(...ansible.surfaces);
   if (ansible.surfaces.length === 0) limitations.push({ area: 'ansible', reason: `Canonical Ansible source tree is empty: ${ansibleRoot}` });

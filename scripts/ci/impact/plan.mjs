@@ -86,7 +86,7 @@ export function matchesFullModelOciPath(file) {
 }
 
 // Reviewed independent inputs: root unit owns script/route/Worker proof;
-// dedicated Ansible, Terraform, audit and static-delivery workflows own
+// dedicated Ansible, audit and static-delivery workflows own
 // their corresponding executable integration proofs. New paths fail closed.
 export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   '.github/workflows/ansible-base-secrets.yml',
@@ -102,6 +102,9 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/ansible/prepare-api-gate.yml',
   'deploy/ansible/base-runtime.yml',
   'deploy/ansible/base-secrets.yml',
+  'deploy/ansible/backup-postgres-socket.sh',
+  'deploy/ansible/backup-release.yml',
+  'deploy/ansible/backup-runtime.yml',
   'deploy/ansible/check_postgres_volume.py',
   'deploy/ansible/ci-mitogen-playbook.sh',
   'deploy/ansible/deploy.yml',
@@ -119,6 +122,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/ansible/restore-drill.yml',
   'deploy/ansible/site.yml',
   'deploy/ansible/test-base-runtime-integration.sh',
+  'deploy/ansible/test-publication-gate-fixture.sh',
   'deploy/ansible/test-base-secrets-integration.sh',
   'deploy/ansible/test-base-secrets.sh',
   'deploy/ansible/test-host-integration.sh',
@@ -133,13 +137,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/backup/backup.sh',
   'deploy/cloudflare/identity-probes.json',
   'deploy/cloudflare/public-protocol-paths.json',
-  'deploy/cloudflare/terraform/.terraform.lock.hcl',
-  'deploy/cloudflare/terraform/.gitignore',
   'docs/deployment/ACCESS-POLICY-MIGRATION.sdoc',
-  'deploy/cloudflare/terraform/main.tf',
-  'deploy/cloudflare/terraform/terraform.tfvars.example',
-  'deploy/cloudflare/terraform/variables.tf',
-  'deploy/cloudflare/terraform/versions.tf',
   'deploy/cloudflare/ui-routes.json',
   'deploy/postgres/010-create-app-role.sh',
   'deploy/quadlet/codexia-api.container',
@@ -339,6 +337,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
     if (file === '.github/workflows/product-site.yml' || file.startsWith('edge/product-site/')) continue;
     if (file.startsWith('cmd/codexiactl/') || file === 'scripts/ci/execution/verify-codexiactl.sh') {
       add('codexiactl-linux');
+      if (isRequirementsTraceInput(file)) add('requirements-trace');
       if (file === 'cmd/codexiactl/release-contract.json' || operationalRootPaths.has(file)) add('unit-root');
       continue;
     }

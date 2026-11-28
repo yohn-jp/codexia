@@ -273,18 +273,14 @@ function dedicatedFixture(workflowPath, files, extraSteps = []) {
   return { state, args, job };
 }
 
-test('infrastructure reuse requires actual selected scopes rather than a green skipped step', async () => {
-  const ansible = dedicatedFixture('.github/workflows/deployment-config.yml', ['deploy/ansible/site.yml'], ['Check Ansible configuration']);
-  assert.equal((await verifyReusableDedicatedProof(ansible.args)).jobId, 500);
-  const terraform = dedicatedFixture('.github/workflows/deployment-config.yml', ['deploy/cloudflare/terraform/main.tf'], ['Check all Terraform files', 'Validate Cloudflare Terraform']);
-  assert.equal((await verifyReusableDedicatedProof(terraform.args)).jobId, 500);
-  const mixed = dedicatedFixture('.github/workflows/deployment-config.yml', ['deploy/ansible/site.yml', 'deploy/cloudflare/terraform/main.tf'], ['Check Ansible configuration']);
-  await assert.rejects(verifyReusableDedicatedProof(mixed.args), /Terraform/);
-  const shared = dedicatedFixture('.github/workflows/deployment-config.yml', ['scripts/shared/python-env.sh', 'deploy/cloudflare/terraform/main.tf'], ['Check all Terraform files', 'Validate Cloudflare Terraform']);
-  await assert.rejects(verifyReusableDedicatedProof(shared.args), /Ansible/);
-  for (const unit of ['deploy/systemd/codexia-api.socket', 'cmd/codexiactl/assets/codexia-cloudflared.service']) {
-    const proof = dedicatedFixture('.github/workflows/deployment-config.yml', [unit], ['Check Ansible configuration']);
-    assert.equal((await verifyReusableDedicatedProof(proof.args)).jobId, 500);
+test('Ansible configuration reuse requires successful validation for the exact input tree', async () => {
+  const workflow = '.github/workflows/deployment-config.yml';
+  for (const file of ['deploy/ansible/site.yml', 'scripts/shared/python-env.sh',
+    'deploy/systemd/codexia-api.socket', 'cmd/codexiactl/assets/codexia-cloudflared.service']) {
+    const { args, job } = dedicatedFixture(workflow, [file]);
+    assert.equal((await verifyReusableDedicatedProof(args)).jobId, 500);
+    job.steps.find(step => step.name === 'Check Ansible configuration').conclusion = 'skipped';
+    await assert.rejects(verifyReusableDedicatedProof(args), /Check Ansible configuration/u);
   }
 });
 

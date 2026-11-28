@@ -224,16 +224,16 @@ test('requires explicit inventory classifications for native iOS and IaC surface
   const discovered = {
     routes: [], tools: [], databaseObjects: [],
     nativeIosViews: ['AuthoringView'],
-    iacResources: ['cloudflare_workers_route.frontend'],
+    iacResources: ['cloudflareRoute.static:/*'],
     ansibleFiles: ['deploy/ansible/site.yml'],
   };
   const missing = validateInventory(discovered, []);
   assert.ok(missing.some(item => item === 'Unclassified nativeIosView AuthoringView'));
-  assert.ok(missing.some(item => item === 'Unclassified iacResource cloudflare_workers_route.frontend'));
+  assert.ok(missing.some(item => item === 'Unclassified iacResource cloudflareRoute.static:/*'));
   assert.ok(missing.some(item => item === 'Unclassified ansibleSource deploy/ansible/site.yml'));
   const complete = validateInventory(discovered, [
     { kind: 'nativeIosView', id: 'AuthoringView', classification: 'candidate REQ-UI-001; behavior unverified' },
-    { kind: 'iacResource', id: 'cloudflare_workers_route.frontend', classification: 'candidate REQ-EXT-001; applied state unverified' },
+    { kind: 'iacResource', id: 'cloudflareRoute.static:/*', classification: 'candidate REQ-EXT-001; applied state unverified' },
   ], { surfaces: [{ id: 'deploy/ansible/site.yml' }], violations: [] });
   assert.deepEqual(complete, []);
 });

@@ -71,6 +71,11 @@ export const REQUIREMENTS_TRACE_SURFACE_FILES = Object.freeze([
   'deploy/ansible/restore-drill.yml',
   'deploy/backup/backup.sh',
   'deploy/backup/s3_transfer.py',
+  'deploy/cloudflare/identity-probes.json',
+  'deploy/cloudflare/public-protocol-paths.json',
+  'deploy/cloudflare/ui-routes.json',
+  'cmd/codexiactl/cloudflare_managed_edge.go',
+  'cmd/codexiactl/cloudflare_deployment_contract_test.go',
   'packages/http-contract/openapi/codexia.openapi.yaml',
   'packages/http-contract/scripts/generate-fastify.mjs',
   'packages/api/src/generated/http-contract.json',
@@ -88,7 +93,6 @@ export function isRequirementsTraceInput(file) {
     isTraceTestSource(file) ||
     (file.startsWith('ios/') && /\.swift$/u.test(file)) ||
     (file.startsWith('deploy/ansible/') && /\.ya?ml$/u.test(file)) ||
-    (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf')) ||
     (/^app\/src\/.*\.[jt]sx?$/u.test(file) && !/\.test\./u.test(file));
 }
 

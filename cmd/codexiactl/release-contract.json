@@ -35,7 +35,6 @@
   "deploy/ansible/",
   "deploy/backup/",
   "deploy/systemd/",
-  "deploy/cloudflare/terraform/",
   "edge/frontend/wrangler.jsonc",
   "deploy/quadlet/",
   "deploy/cloudflare/ui-routes.json",

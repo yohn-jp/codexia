@@ -111,7 +111,7 @@ test('PR paths and completed-Verify release impact retain component build inputs
     ['Initial frontend Assets API uploader', ['scripts/release/frontend/initial-publication.mjs'], [true, false]],
     ['Frontend upload dependencies', ['edge/frontend/package-lock.json'], [true, false]],
     ['Certified edge route contract', ['deploy/cloudflare/ui-routes.json'], [true, false]],
-    ['Retired initial frontend provider lock dependency', ['deploy/cloudflare/terraform/.terraform.lock.hcl'], [false, false]],
+    ['Managed edge planner source', ['cmd/codexiactl/cloudflare_managed_edge.go'], [false, false]],
     ['Packaged Core dependency audit', ['scripts/verification/dependencies/audit-runtime.mjs'], [false, true]],
     ['Shared release evidence pagination', ['scripts/github/paginate-actions.mjs'], [true, true]],
     ['Shared release evidence SDK', ['scripts/ci/evidence/github-rest-sdk.mjs'], [true, true]],
@@ -426,7 +426,11 @@ test('changes to trace inputs select the existing trace task without dropping do
     ['app/src/entries/desktop.tsx', 'unit-app'],
     ['deploy/ansible/deploy.yml', 'unit-root'],
     ['deploy/ansible/site.yml', 'unit-root'],
-    ['deploy/cloudflare/terraform/main.tf', 'unit-root'],
+    ['deploy/cloudflare/ui-routes.json', 'unit-root'],
+    ['deploy/cloudflare/identity-probes.json', 'codexiactl-linux'],
+    ['deploy/cloudflare/public-protocol-paths.json', 'codexiactl-linux'],
+    ['cmd/codexiactl/cloudflare_managed_edge.go', 'codexiactl-linux'],
+    ['cmd/codexiactl/cloudflare_deployment_contract_test.go', 'codexiactl-linux'],
     ['ios/CodexiaApp/Sources/CodexiaApp.swift', 'unit-root'],
     ['deploy/backup/backup.sh', 'db-contract'],
   ]) {
@@ -764,7 +768,7 @@ test('known operational inputs retain root proof and trace evidence for register
       'docs/deployment/BACKUP.sdoc', 'docs/deployment/DEPLOYMENT-REFERENCE.sdoc',
     ].includes(file)) expected.push('requirements-trace');
     if (file.startsWith('deploy/ansible/') && /\.ya?ml$/u.test(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
-    if (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf') && !expected.includes('requirements-trace')) expected.push('requirements-trace');
+    if (file.startsWith('deploy/cloudflare/') && file.endsWith('.json') && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (isTraceTestSource(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (SWIFT_LINUX_RECIPES.includes(file)) expected.push('swift-linux');
     if (file === 'deploy/production.json' || file === '.github/workflows/production-preflight.yml' || ['docs/deployment/ACCESS-POLICY-MIGRATION.sdoc', 'docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc'].includes(file) ||
@@ -788,7 +792,7 @@ test('operational proof remains owned by one exact-head root task and matching i
   const infra = readWorkflow('deployment-config.yml');
   for (const event of ['pull_request','push']) {
     assert.deepEqual(infra.on[event].branches, ['main'], event);
-    for (const path of ['deploy/ansible/**','deploy/backup/**','deploy/quadlet/**','deploy/systemd/**','deploy/postgres/**','deploy/cloudflare/**',
+    for (const path of ['deploy/ansible/**','deploy/backup/**','deploy/quadlet/**','deploy/systemd/**','deploy/postgres/**',
       'cmd/codexiactl/assets/codexia-cloudflared.service']) {
       assert.ok(infra.on[event].paths.includes(path), path);
     }

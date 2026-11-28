@@ -413,7 +413,11 @@ test('specification authority and native iOS and IaC sources select the existing
   for (const file of [
     'ios/CodexiaApp/Sources/CodexiaApp.swift',
     'ios/CodexiaTransport/Sources/CodexiaTransport/APITransport.swift',
-    'deploy/cloudflare/terraform/main.tf',
+    'deploy/cloudflare/ui-routes.json',
+    'deploy/cloudflare/public-protocol-paths.json',
+    'deploy/cloudflare/identity-probes.json',
+    'cmd/codexiactl/cloudflare_managed_edge.go',
+    'cmd/codexiactl/cloudflare_deployment_contract_test.go',
     'deploy/ansible/site.yml',
     'packages/http-contract/src/routes-core.tsp',
     'packages/http-contract/src/fastify-schema.mjs',
