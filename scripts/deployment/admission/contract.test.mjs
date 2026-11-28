@@ -930,6 +930,10 @@ test('the declared VM must resolve to a protected SSH pin in both diagnosis and 
     '#!/bin/sh',
     'printf "client_id=%s\\nclient_secret=%s\\nbrowser=%s\\nargs=%s\\n" "$TUNNEL_SERVICE_TOKEN_ID" "$TUNNEL_SERVICE_TOKEN_SECRET" "$BROWSER" "$*" > "$CLOUDFLARED_CAPTURE"',
     'case "$*" in *"$TUNNEL_SERVICE_TOKEN_SECRET"*) printf "secret_in_argv=yes\\n" >> "$CLOUDFLARED_CAPTURE";; *) printf "secret_in_argv=no\\n" >> "$CLOUDFLARED_CAPTURE";; esac',
+    'test -z "$TUNNEL_SERVICE_DESTINATION$TUNNEL_SERVICE_URL$DISPLAY$WAYLAND_DISPLAY" || exit 24',
+    'test "$HOME" = "$PATH" && test "$HOME" = "$XDG_CONFIG_HOME" && test "$HOME" != "$INHERITED_HOME" || exit 25',
+    'test -d "$HOME" && test ! -e "$HOME/.cloudflared" || exit 26',
+    'printf "%s\\n" "$HOME" >> "$CLOUDFLARED_CAPTURE"',
     'exit 23',
     '',
   ].join('\n'), { mode: 0o700 });
@@ -938,12 +942,18 @@ test('the declared VM must resolve to a protected SSH pin in both diagnosis and 
       ...process.env, RUNNER_TEMP: prepared.runner,
       TUNNEL_SERVICE_TOKEN_ID: 'fixture-service-id',
       TUNNEL_SERVICE_TOKEN_SECRET: 'fixture-service-secret', CLOUDFLARED_CAPTURE: capture,
+      TUNNEL_SERVICE_DESTINATION: 'forbidden-destination', TUNNEL_SERVICE_URL: 'forbidden-listener',
+      DISPLAY: ':1', WAYLAND_DISPLAY: 'forbidden-wayland', INHERITED_HOME: process.env.HOME ?? '',
     },
   });
   assert.notEqual(connection.status, 0, 'the fake connector exits before any network connection');
-  assert.equal(readFileSync(capture, 'utf8'),
-    'client_id=fixture-service-id\nclient_secret=fixture-service-secret\nbrowser=/usr/bin/false\n' +
-    'args=access ssh --hostname ' + host + '\nsecret_in_argv=no\n');
+  const proxyCapture = readFileSync(capture, 'utf8').split('\n');
+  assert.deepEqual(proxyCapture.slice(0, 5), [
+    'client_id=fixture-service-id', 'client_secret=fixture-service-secret', 'browser=/usr/bin/false',
+    'args=access ssh --hostname ' + host, 'secret_in_argv=no',
+  ]);
+  assert.equal(path.dirname(proxyCapture[5]), prepared.runner);
+  assert.equal(existsSync(proxyCapture[5]), false, 'the isolated client profile is removed even on failure');
   assert.notEqual(prepare(pins, '').result.status, 0, 'host must be explicitly declared');
   assert.notEqual(prepare(pins, '192.0.2.1').result.status, 0, 'management transport must use a DNS name');
   assert.notEqual(prepare(pins, 'different.example.test').result.status, 0);
