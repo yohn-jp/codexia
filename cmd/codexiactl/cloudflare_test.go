@@ -292,9 +292,15 @@ func TestCloudflareMintRequiresScopedAuthorityAndDoesNotReplay(t *testing.T) {
 		name                         string
 		existing, approve, lose      bool
 		missingAuthority, wrongScope bool
+		oauth                        bool
 		wantPost                     int32
 	}{
 		{name: "exact scope", approve: true, wantPost: 1},
+		{name: "OAuth exact scope", approve: true, oauth: true, wantPost: 1},
+		{name: "OAuth wrong scope", approve: true, oauth: true, wrongScope: true},
+		{name: "OAuth already issued", approve: true, oauth: true, existing: true},
+		{name: "OAuth refused", oauth: true},
+		{name: "OAuth ambiguous outcome", approve: true, oauth: true, lose: true, wantPost: 1},
 		{name: "already issued", existing: true, approve: true},
 		{name: "refused", approve: false},
 		{name: "write unavailable", approve: true, missingAuthority: true},
@@ -341,6 +347,11 @@ func TestCloudflareMintRequiresScopedAuthorityAndDoesNotReplay(t *testing.T) {
 				var result any
 				switch r.URL.Path {
 				case route + "/verify":
+					if tc.oauth {
+						t.Error("OAuth bearer must not be treated as an account API token")
+						http.Error(w, "wrong credential class", http.StatusUnauthorized)
+						return
+					}
 					result = map[string]any{"id": currentID, "status": "active"}
 				case route + "/" + currentID:
 					group := "Account API Tokens Write"
@@ -372,11 +383,14 @@ func TestCloudflareMintRequiresScopedAuthorityAndDoesNotReplay(t *testing.T) {
 			defer server.Close()
 			edge := cloudflareObservation{target: cloudflareTarget{AccountID: account, ZoneID: zone},
 				operator: cloudflareTestOperator{tc.approve}, api: newCloudflareAPI([]byte("scoped-admin-token"), server.URL+"/")}
+			if tc.oauth {
+				edge.closeAuth = func() {}
+			}
 			value, err := edge.mintCloudflareToken(context.Background(), edge.permissionPlan(cloudflareWorkerRole))
 			if actual := writes.Load(); actual != tc.wantPost {
 				t.Fatalf("sent %d mutation requests, expected %d. Error %v", actual, tc.wantPost, err)
 			}
-			if tc.name == "exact scope" {
+			if tc.name == "exact scope" || tc.name == "OAuth exact scope" {
 				if err != nil || string(value) != mintedToken {
 					t.Fatalf("scoped token was not returned. Error %v", err)
 				}

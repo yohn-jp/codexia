@@ -237,6 +237,14 @@ func observeCloudflare(ctx context.Context, o operator, repo githubTarget, setti
 	observed.operator = o
 	observed.provisioning = cloudflareSecretDigest(secret)
 	observed.closeAuth, closeAuth = closeAuth, nil
+	if observed.closeAuth != nil && requirements.tokenPolicy {
+		// OAuth is not an account API token. Establish the selected account's
+		// token-management API access before any protected inputs are written.
+		if err := observed.checkOAuthTokenAuthority(ctx, requirements); err != nil {
+			observed.Close()
+			return nil, err
+		}
+	}
 	reportResult(o, successText, fmt.Sprintf("Cloudflare target verified\nAccount: %s\nZone: %s\nTunnel: %s", observed.AccountID, zone.ID, observed.target.TunnelID))
 	return observed, nil
 }

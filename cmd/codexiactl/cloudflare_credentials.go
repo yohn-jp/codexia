@@ -29,7 +29,7 @@ const (
 	cloudflareWorkerRole   = "CLOUDFLARE_API_TOKEN"
 )
 
-var errCloudflareMintUnavailable = errors.New("Cloudflare Account API Tokens Write and exact deployment scopes were not verified")
+var errCloudflareMintUnavailable = errors.New("Cloudflare account token issuance authority and exact deployment scopes were not verified")
 
 func (o *cloudflareObservation) Close() {
 	if o.closeAuth != nil {
@@ -168,6 +168,9 @@ func (o *cloudflareObservation) apiCredential(ctx context.Context, role string, 
 		if err != nil && !errors.Is(err, errCloudflareMintUnavailable) {
 			return nil, err
 		}
+		if errors.Is(err, errCloudflareMintUnavailable) && o.closeAuth != nil {
+			return nil, needsAction("Cloudflare OAuth could not establish automatic token issuance or a token with that stable name already exists. Review the account token inventory and the granted authority before retrying; no alternate token will be created automatically")
+		}
 	}
 	if len(value) == 0 {
 		if existing {
@@ -202,28 +205,62 @@ func (o *cloudflareObservation) apiCredential(ctx context.Context, role string, 
 	return value, nil
 }
 
+// checkOAuthTokenAuthority uses the actual account endpoints, not an assumed
+// relationship between OAuth scopes and API token permissions. Read-only
+// checks never call this function. No tokens are minted during this check.
+func (o *cloudflareObservation) checkOAuthTokenAuthority(ctx context.Context, requirements cloudflareAuthRequirements) error {
+	groups, err := o.api.permissionGroups(ctx, o.target.AccountID, true)
+	if err != nil {
+		return needsAction("Cloudflare OAuth could not read the selected account token permission catalog. Confirm that the publisher client and your Cloudflare role support account token management, or explicitly choose the temporary management token fallback")
+	}
+	if requirements.mint {
+		// Only the missing issuance roles need selectable permission groups.
+		if _, _, err := o.exactTokenPolicies(groups, o.permissionPlan(cloudflareReadRole), true); err != nil {
+			return needsAction("Cloudflare OAuth did not establish selectable deployment-read permissions")
+		}
+		if requirements.workerWrite {
+			if _, _, err := o.exactTokenPolicies(groups, o.permissionPlan(cloudflareWorkerRole), true); err != nil {
+				return needsAction("Cloudflare OAuth did not establish selectable Worker publication permissions")
+			}
+		}
+	}
+	_, err = cloudflareList("account token inventory", func(page int) (*pagination.V4PagePaginationArray[shared.Token], error) {
+		return o.api.accountTokens.List(ctx, accounts.TokenListParams{AccountID: cloudflare.F(o.target.AccountID),
+			IncludeExpired: cloudflare.F(true), Page: cloudflare.F(float64(page)), PerPage: cloudflare.F(float64(cloudflarePageSize))})
+	})
+	if err != nil {
+		return needsAction("Cloudflare OAuth could not read the selected account token inventory. No GitHub input registration was attempted")
+	}
+	return nil
+}
+
 func (o *cloudflareObservation) mintCloudflareToken(ctx context.Context, plan cloudflarePermissionPlan) ([]byte, error) {
 	account := cloudflare.F(o.target.AccountID)
 	api := o.api.accountTokens
-	current, err := api.Verify(ctx, accounts.TokenVerifyParams{AccountID: account})
-	if err != nil {
-		if cloudflareAuthorizationDenied(err) {
+	// Only manually supplied account API tokens have an account token ID.
+	// An OAuth bearer is authorized by the provider's account-scoped token
+	// APIs and selectable permission catalog; Verify cannot identify it.
+	if o.closeAuth == nil {
+		current, err := api.Verify(ctx, accounts.TokenVerifyParams{AccountID: account})
+		if err != nil {
+			if cloudflareAuthorizationDenied(err) {
+				return nil, errCloudflareMintUnavailable
+			}
+			return nil, cloudflareError("account token authority", err)
+		}
+		if current.Status != "active" || !cloudflareID.MatchString(current.ID) {
 			return nil, errCloudflareMintUnavailable
 		}
-		return nil, cloudflareError("account token authority", err)
-	}
-	if current.Status != "active" || !cloudflareID.MatchString(current.ID) {
-		return nil, errCloudflareMintUnavailable
-	}
-	currentMetadata, err := api.Get(ctx, current.ID, accounts.TokenGetParams{AccountID: account})
-	if err != nil {
-		if cloudflareAuthorizationDenied(err) {
+		currentMetadata, err := api.Get(ctx, current.ID, accounts.TokenGetParams{AccountID: account})
+		if err != nil {
+			if cloudflareAuthorizationDenied(err) {
+				return nil, errCloudflareMintUnavailable
+			}
+			return nil, cloudflareError("account token authority metadata", err)
+		}
+		if currentMetadata.ID != current.ID || !hasCloudflareTokenWrite(currentMetadata, o.target.AccountID) {
 			return nil, errCloudflareMintUnavailable
 		}
-		return nil, cloudflareError("account token authority metadata", err)
-	}
-	if currentMetadata.ID != current.ID || !hasCloudflareTokenWrite(currentMetadata, o.target.AccountID) {
-		return nil, errCloudflareMintUnavailable
 	}
 	groups, err := o.api.permissionGroups(ctx, o.target.AccountID, true)
 	if err != nil {

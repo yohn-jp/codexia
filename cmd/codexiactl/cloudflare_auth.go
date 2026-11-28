@@ -37,7 +37,7 @@ var cloudflareInspectionScopes = []string{
 // deployment credential is reused; a missing peer copy needs metadata read,
 // not new-token issuance. Unknown inventory is treated as missing.
 type cloudflareAuthRequirements struct {
-	tunnel, tokenPolicy, mint bool
+	tunnel, tokenPolicy, mint, workerWrite bool
 }
 
 func cloudflareRequirementsFor(snapshot githubSnapshot) cloudflareAuthRequirements {
@@ -50,6 +50,9 @@ func cloudflareRequirementsFor(snapshot githubSnapshot) cloudflareAuthRequiremen
 			requirements.tokenPolicy = true
 			if !snapshot.Bootstrap.Secrets[input.name] && !snapshot.Production.Secrets[input.name] {
 				requirements.mint = true
+				if input.name == cloudflareWorkerRole {
+					requirements.workerWrite = true
+				}
 			}
 		}
 	}
@@ -58,6 +61,24 @@ func cloudflareRequirementsFor(snapshot githubSnapshot) cloudflareAuthRequiremen
 
 func (r cloudflareAuthRequirements) readOnly() bool {
 	return !r.tunnel && !r.tokenPolicy && !r.mint
+}
+
+// Only scope IDs published by GET /oauth/scopes are used for a self-managed
+// client. The colon-delimited first-party CLI scopes cannot be registered.
+// Account API Tokens Write is the available OAuth scope for token management;
+// read-only doctor/plan never request it.
+func (r cloudflareAuthRequirements) oauthScopes() []string {
+	scopes := append([]string(nil), cloudflareInspectionScopes...)
+	if r.tunnel {
+		scopes = append(scopes, "argotunnel.write")
+	}
+	if r.tokenPolicy {
+		scopes = append(scopes, "account-api-tokens.write")
+	}
+	if r.workerWrite {
+		scopes = append(scopes, "workers-scripts.write")
+	}
+	return scopes
 }
 
 type cloudflareTemplatePermission struct {
@@ -91,15 +112,15 @@ func cloudflareManagementTemplate(requirements cloudflareAuthRequirements) strin
 }
 
 func cloudflareManagementCredential(ctx context.Context, o operator, host string, requirements cloudflareAuthRequirements) ([]byte, func(), error) {
-	if requirements.readOnly() && cloudflareOAuthClientPattern.MatchString(cloudflareOAuthClientID) {
+	if cloudflareOAuthClientPattern.MatchString(cloudflareOAuthClientID) {
 		choice, err := selectOption(o, "Cloudflare authentication for "+host, []string{
-			"Browser OAuth (read-only, requires SSH local forwarding)", "Temporary account API token",
+			"Browser OAuth (requires SSH local forwarding)", "Temporary account API token (fallback)",
 		})
 		if err != nil {
 			return nil, nil, err
 		}
 		if choice == 0 {
-			return cloudflareOAuthAccess(ctx, o, cloudflareOAuthClientID)
+			return cloudflareOAuthAccess(ctx, o, cloudflareOAuthClientID, requirements.oauthScopes())
 		}
 	} else if err := requireConfirmation(o, "Authenticate to Cloudflare for "+host+"?"); err != nil {
 		return nil, nil, err
@@ -121,7 +142,7 @@ func cloudflareManagementCredential(ctx context.Context, o operator, host string
 		o.Notice("Confirm Account API Tokens Read for deployment-token metadata verification.")
 	}
 	if requirements.tokenPolicy {
-		o.Notice("If reusing a user-owned deployment token, use "+cloudflareTokensPage+" instead with the same user, the listed edge permissions, and User API Tokens Read. Existing policy verification still applies.")
+		o.Notice("If reusing a user-owned deployment token, use " + cloudflareTokensPage + " instead with the same user, the listed edge permissions, and User API Tokens Read. Existing policy verification still applies.")
 	}
 	o.Notice("Do not select all accounts or all zones. Paste the temporary token here; revoke it after the session.")
 	secret, err := readCloudflareSecret(o, "Temporary Cloudflare management token")
@@ -179,7 +200,7 @@ func cloudflareOAuthHTTPClient() *http.Client {
 	}}
 }
 
-func cloudflareOAuthAccess(ctx context.Context, o operator, clientID string) ([]byte, func(), error) {
+func cloudflareOAuthAccess(ctx context.Context, o operator, clientID string, scopes []string) ([]byte, func(), error) {
 	if !cloudflareOAuthClientPattern.MatchString(clientID) {
 		return nil, nil, needsAction("The official Cloudflare OAuth client is not configured")
 	}
@@ -192,7 +213,7 @@ func cloudflareOAuthAccess(ctx context.Context, o operator, clientID string) ([]
 	cfg := oauth2.Config{
 		ClientID:    clientID,
 		RedirectURL: cloudflareOAuthRedirect,
-		Scopes:      cloudflareInspectionScopes,
+		Scopes:      scopes,
 		Endpoint: oauth2.Endpoint{
 			AuthURL:   "https://dash.cloudflare.com/oauth2/auth",
 			TokenURL:  "https://dash.cloudflare.com/oauth2/token",
@@ -210,6 +231,7 @@ func cloudflareOAuthAccess(ctx context.Context, o operator, clientID string) ([]
 	serveError := make(chan error, 1)
 	go func() { serveError <- server.Serve(listener) }()
 	defer server.Close()
+	o.Notice("Requested Cloudflare authorization: " + strings.Join(scopes, ", "))
 	o.Notice("On your local computer, open a second terminal using the same verified SSH host and administrator. Run ssh -N -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=yes -L 127.0.0.1:18765:127.0.0.1:18765 <same SSH target>. Close that session after sign-in.")
 	if err := privateNotice(o, cfg.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))); err != nil {
 		return nil, nil, err
