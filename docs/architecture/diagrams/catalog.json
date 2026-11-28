@@ -1,0 +1,325 @@
+{
+  "groups": {
+    "system": {
+      "label": "システム全体",
+      "designPath": "docs/architecture/SYSTEM-DESIGN.sdoc"
+    },
+    "data": {
+      "label": "データモデル",
+      "designPath": "docs/architecture/DATA-MODEL.sdoc"
+    },
+    "user": {
+      "label": "利用画面",
+      "designPath": "docs/design/USER-SCREEN-FLOW.sdoc"
+    },
+    "admin": {
+      "label": "管理・認証画面",
+      "designPath": "docs/design/ADMIN-SCREEN-FLOW.sdoc"
+    },
+    "screen": {
+      "label": "全画面の状態遷移",
+      "designPath": "docs/design/SCREEN-STATE-ATLAS.sdoc"
+    },
+    "first": {
+      "label": "初期デプロイ",
+      "designPath": "docs/deployment/INITIAL-DEPLOYMENT-FLOW.sdoc"
+    },
+    "update": {
+      "label": "アップデートと復旧",
+      "designPath": "docs/deployment/UPDATE-FLOW.sdoc"
+    },
+    "lifecycle": {
+      "label": "本番Deploymentライフサイクル",
+      "designPath": "docs/deployment/DEPLOYMENT-LIFECYCLE.sdoc"
+    }
+  },
+  "diagrams": [
+    {
+      "id": "system-2",
+      "title": "運用プレーンと更新"
+    },
+    {
+      "id": "data-1",
+      "title": "正規化された実体関係"
+    },
+    {
+      "id": "user-1",
+      "title": "起動から作品への遷移"
+    },
+    {
+      "id": "user-2",
+      "title": "執筆を中心とした利用画面"
+    },
+    {
+      "id": "user-3",
+      "title": "保存・復旧の状態遷移"
+    },
+    {
+      "id": "admin-1",
+      "title": "本人のセキュリティ管理画面（現在提供する範囲）"
+    },
+    {
+      "id": "admin-2",
+      "title": "外部 IdP と OAuth クライアントの管理"
+    },
+    {
+      "id": "admin-3",
+      "title": "インフラの管理プレーン（Web UI の外）"
+    },
+    {
+      "id": "admin-4",
+      "title": "管理コンソールのルート・認可と情報設計"
+    },
+    {
+      "id": "admin-5",
+      "title": "初回所有者登録ウィザード（`/console/setup`）"
+    },
+    {
+      "id": "admin-6",
+      "title": "バックアップ保管先と履歴の管理画面（`/console/backups`）"
+    },
+    {
+      "id": "screen-1",
+      "title": "ENTRY-01 — Desktop React Web / iOS SwiftUI起動【採用目標】",
+      "screenIds": [
+        "ENTRY-01"
+      ],
+      "designStatus": "採用目標"
+    },
+    {
+      "id": "screen-2",
+      "title": "AUTH-01 — Passkey / OIDC本人ログイン【実装】",
+      "screenIds": [
+        "AUTH-01"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-3",
+      "title": "AUTH-02 — OAuth client/scope同意【実装】",
+      "screenIds": [
+        "AUTH-02"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-4",
+      "title": "LIB-01 — 作品一覧・作成・インポート/エクスポート【実装】",
+      "screenIds": [
+        "LIB-01"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-5",
+      "title": "OUT-01 — 巻/章/シーンの構成・変更【実装】",
+      "screenIds": [
+        "OUT-01"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-6",
+      "title": "WRT-01 — 原稿執筆と保存【実装】",
+      "screenIds": [
+        "WRT-01"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-7",
+      "title": "READ-01 — 同じ原稿の読書モード【実装】",
+      "screenIds": [
+        "READ-01"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-8",
+      "title": "WRT-02 — Revisionの閲覧・復元【実装】",
+      "screenIds": [
+        "WRT-02"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-9",
+      "title": "REC-01 — Draft、競合、応答不明の復旧【実装】",
+      "screenIds": [
+        "REC-01"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-10",
+      "title": "KNO-01 — Knowledge検索・候補登録【実装】",
+      "screenIds": [
+        "KNO-01"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-11",
+      "title": "KNO-02 — Knowledge・Text Anchor・関係・統合【実装】",
+      "screenIds": [
+        "KNO-02"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-12",
+      "title": "REV-01 — 提案・ChangeSet一覧【実装】",
+      "screenIds": [
+        "REV-01"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-13",
+      "title": "REV-02 — 提案の比較・作者承認/適用【実装】",
+      "screenIds": [
+        "REV-02"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-14",
+      "title": "TOOL-01 — 任意モジュールと背景処理【実装】",
+      "screenIds": [
+        "TOOL-01"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-15",
+      "title": "JOB-01 — 受信箱・ジョブ履歴【実装】",
+      "screenIds": [
+        "JOB-01"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-16",
+      "title": "DISPLAY-01・PREF-01 — 表示設定・現行本人設定【実装】",
+      "screenIds": [
+        "DISPLAY-01",
+        "PREF-01"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-17",
+      "title": "PUB-01 — 公開読者の読書ビュー【実装】",
+      "screenIds": [
+        "PUB-01"
+      ],
+      "designStatus": "実装"
+    },
+    {
+      "id": "screen-18",
+      "title": "CON-00 — 管理コンソールHome【Desktop Web 実装】",
+      "screenIds": [
+        "CON-00"
+      ],
+      "designStatus": "Desktop Web 実装"
+    },
+    {
+      "id": "screen-19",
+      "title": "CON-01・CON-02・CON-03 — 初回登録ウィザード【Desktop Web 実装】",
+      "screenIds": [
+        "CON-01",
+        "CON-02",
+        "CON-03"
+      ],
+      "designStatus": "Desktop Web 実装"
+    },
+    {
+      "id": "screen-20",
+      "title": "CON-10 — Passkey管理【Desktop Web 実装】",
+      "screenIds": [
+        "CON-10"
+      ],
+      "designStatus": "Desktop Web 実装"
+    },
+    {
+      "id": "screen-21",
+      "title": "CON-11 — セッション管理【Desktop Web 実装】",
+      "screenIds": [
+        "CON-11"
+      ],
+      "designStatus": "Desktop Web 実装"
+    },
+    {
+      "id": "screen-22",
+      "title": "CON-20・CON-21 — OIDCとOAuth client/同意【部分導入】",
+      "screenIds": [
+        "CON-20",
+        "CON-21"
+      ],
+      "designStatus": "部分導入"
+    },
+    {
+      "id": "screen-23",
+      "title": "CON-30 — バックアップ管理トップ【Desktop Web 実装】",
+      "screenIds": [
+        "CON-30"
+      ],
+      "designStatus": "Desktop Web 実装"
+    },
+    {
+      "id": "screen-24",
+      "title": "CON-31・CON-32 — S3設定・接続検証・有効化【Desktop Web 実装】",
+      "screenIds": [
+        "CON-31",
+        "CON-32"
+      ],
+      "designStatus": "Desktop Web 実装"
+    },
+    {
+      "id": "screen-25",
+      "title": "CON-33・CON-34 — バックアップ履歴・隔離復旧証拠【Desktop Web 実装】",
+      "screenIds": [
+        "CON-33",
+        "CON-34"
+      ],
+      "designStatus": "Desktop Web 実装"
+    },
+    {
+      "id": "screen-26",
+      "title": "Cross-shell — 原稿を保持した端末と画面遷移【実装・目標の共通契約】",
+      "designStatus": "実装・目標の共通契約"
+    },
+    {
+      "id": "screen-27",
+      "title": "KNO-03 — 選択ノードの局所関係表示【未採用提案・未実装】",
+      "screenIds": [
+        "KNO-03"
+      ],
+      "designStatus": "未採用提案・未実装"
+    },
+    {
+      "id": "first-1",
+      "title": "初期構築・公開までの状態遷移"
+    },
+    {
+      "id": "first-2",
+      "title": "復旧状態と受入"
+    },
+    {
+      "id": "first-3",
+      "title": "VMの再構築と所有者資格の復旧"
+    },
+    {
+      "id": "update-1",
+      "title": "リリースからアクティベーションまでの状態遷移"
+    },
+    {
+      "id": "update-2",
+      "title": "中断とロールバック"
+    },
+    {
+      "id": "lifecycle-1",
+      "title": "統合Deployment経路"
+    }
+  ]
+}

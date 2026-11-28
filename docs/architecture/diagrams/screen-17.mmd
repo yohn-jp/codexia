@@ -1,0 +1,8 @@
+flowchart TD
+    ENTRY["/r/:module/:project/:slug"] --> PUBLIC{"共有capability・公開版を検証"}
+    PUBLIC -->|無効/失効/不在| NOTFOUND["共有できない旨を表示"]
+    PUBLIC -->|有効| VIEW["公開された版だけを表示"]
+    VIEW -->|ページ/Theme変更| VIEW
+    VIEW -->|権限外APIや編集| DENY["write・private reader拒否"]
+    DENY --> VIEW
+    VIEW -->|閉じる| END["公開画面を終了"]

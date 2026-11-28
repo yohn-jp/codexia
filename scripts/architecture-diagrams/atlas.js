@@ -20,6 +20,7 @@ const title = document.getElementById('diagram-title');
 const groupTitle = document.getElementById('diagram-group');
 const kind = document.getElementById('diagram-kind');
 const sourceLink = document.getElementById('source-link');
+const designLink = document.getElementById('design-link');
 const svgLink = document.getElementById('svg-link');
 const nativeInteract = document.getElementById('native-interact');
 const viewStatus = document.getElementById('view-status');
@@ -204,7 +205,7 @@ function renderContract(diagram) {
     const contract = contractById.get(id);
     if (contract) {
       const link = document.createElement('a');
-      link.href = sourceUrl('docs/design/SCREEN-CONTROL-CATALOG.md', contract.line);
+      link.href = sourceUrl(contract.path, contract.line);
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       const code = document.createElement('code');
@@ -237,7 +238,9 @@ function show(diagram, options = {}) {
   canvasDescription.textContent = '図全体は上下左右にスクロールして確認できます。';
   groupTitle.textContent = diagram.groupLabel;
   kind.textContent = diagram.kind;
-  sourceLink.href = sourceUrl(diagram.markdown, diagram.line);
+  sourceLink.href = sourceUrl(diagram.sourcePath, diagram.line);
+  designLink.href = '../requirements/html/' + diagram.designPath +
+    '.html#' + encodeURIComponent(diagram.designUid);
   const isNative = diagram.renderer === 'likec4';
   nativeInteract.hidden = !isNative;
   nativeInteract.disabled = isNative;
@@ -337,7 +340,7 @@ async function loadNativeView(diagram) {
 }
 
 function loadSvgView(diagram, options) {
-  image.alt = diagram.groupLabel + ' — ' + diagram.title + ' の設計図。全内容はリンク先の正本Markdownで確認できます。';
+  image.alt = diagram.groupLabel + ' — ' + diagram.title + ' の設計図。全内容はリンク先の設計正本で確認できます。';
   image.onload = () => {
     if (current?.id !== diagram.id) return;
     image.hidden = false;
@@ -350,7 +353,7 @@ function loadSvgView(diagram, options) {
     if (current?.id !== diagram.id) return;
     image.hidden = true;
     loading.hidden = false;
-    loadingMessage.textContent = 'SVGを読み込めませんでした。正本Markdownを開くか、図を再読み込みしてください。';
+    loadingMessage.textContent = 'SVGを読み込めませんでした。設計正本を開くか、図を再読み込みしてください。';
     loadingActions.hidden = false;
     retryDiagram.hidden = false;
     viewStatus.textContent = 'SVGの表示に失敗';
@@ -366,7 +369,7 @@ function matches(id) {
   const term = query.value.trim().toLocaleLowerCase();
   const groupOk = category.value === 'all' || category.value === diagram.group;
   const haystack = [
-    diagram.id, diagram.title, diagram.groupLabel, diagram.kind, diagram.markdown,
+    diagram.id, diagram.title, diagram.groupLabel, diagram.kind, diagram.designPath, diagram.sourcePath,
     ...(diagram.screenIds ?? []),
     ...(diagram.screenContracts ?? []).flatMap(contract => [contract.id, contract.status]),
     ...(diagram.implementationPaths ?? []),
@@ -503,6 +506,7 @@ function setLoadFailure(message) {
   groupTitle.textContent = '';
   kind.textContent = '';
   sourceLink.removeAttribute('href');
+  designLink.removeAttribute('href');
   svgLink.removeAttribute('href');
   viewStatus.textContent = '一覧を表示できません';
   resultCount.textContent = '図の一覧を読み込めませんでした。';
@@ -527,17 +531,20 @@ async function load() {
         !Array.isArray(manifest.diagrams) || manifest.diagrams.length === 0 ||
         !manifest.diagrams.every(item => /^[a-z]+-\d+$/.test(item.id) &&
           (item.renderer === 'mermaid'
-            ? /^svg\/[a-z]+-\d+\.svg$/.test(item.image)
+            ? item.image === 'svg/' + item.id + '.svg' &&
+              item.sourcePath === 'docs/architecture/diagrams/' + item.id + '.mmd'
             : item.renderer === 'likec4' && /^likec4\/[a-z0-9-]+\.mjs$/.test(item.artifact) &&
               /^[a-z][a-z0-9-]*$/.test(item.viewId) &&
-              /^docs\/architecture\/likec4\/model\.likec4$/.test(item.sourceModel) &&
+              item.sourceModel === 'docs/architecture/likec4/model.likec4' && item.sourcePath === item.sourceModel &&
               /^[a-f0-9]{64}$/.test(item.sourceModelSha256)) &&
-          /^docs\/(?:architecture|design|deployment)\/[A-Z0-9-]+\.md$/.test(item.markdown) &&
+          /^docs\/(?:architecture|design|deployment)\/[A-Z0-9-]+\.sdoc$/.test(item.designPath) &&
+          item.designUid === 'ATLAS-DIAGRAM-' + item.id &&
           Number.isSafeInteger(item.line) && item.line > 0 &&
           typeof item.title === 'string' && typeof item.groupLabel === 'string' &&
           (!item.screenIds || (Array.isArray(item.screenIds) && item.screenIds.every(id => typeof id === 'string'))) &&
           (!item.screenContracts || (Array.isArray(item.screenContracts) && item.screenContracts.every(contract =>
-            contract && typeof contract.id === 'string' && Number.isSafeInteger(contract.line) &&
+            contract && typeof contract.id === 'string' && contract.path === 'docs/design/screen-catalog.json' &&
+            Number.isSafeInteger(contract.line) &&
             contract.line > 0 && typeof contract.status === 'string'))) &&
           (!item.implementationPaths || (Array.isArray(item.implementationPaths) &&
             item.implementationPaths.every(path => typeof path === 'string'))))) {

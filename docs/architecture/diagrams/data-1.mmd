@@ -1,0 +1,93 @@
+erDiagram
+    PROJECT ||--o{ DOCUMENT : contains
+    DOCUMENT ||--o{ DOCUMENT_REVISION : revisions
+    DOCUMENT_REVISION ||--o{ EDIT_OPERATION : receipt
+    PROJECT ||--o{ KNOWLEDGE_NODE : owns
+    KNOWLEDGE_NODE ||--o{ KNOWLEDGE_ALIAS : has
+    KNOWLEDGE_NODE ||--o{ KNOWLEDGE_RELATION : source
+    KNOWLEDGE_NODE ||--o{ MENTION_LINK : target
+    PROJECT ||--o{ TEXT_ANCHOR : owns
+    DOCUMENT_REVISION ||--o{ TEXT_ANCHOR : anchors
+    TEXT_ANCHOR ||--o{ ANCHOR_HISTORY : positions
+    TEXT_ANCHOR ||--o{ MENTION_LINK : links
+    PROJECT ||--o{ ASSERTION : owns
+    ASSERTION ||--o{ ASSERTION_EVIDENCE : sourced
+    TEXT_ANCHOR ||--o{ ASSERTION_EVIDENCE : cited
+    PROJECT ||--o{ CHANGE_SET : proposals
+    PROJECT ||--o{ MODULE_RECORD : module_data
+    PROJECT {
+        uuid id PK
+        int version
+        text title
+    }
+    DOCUMENT {
+        uuid project_id PK
+        uuid id PK
+        uuid parent_id FK
+        uuid head_revision_id FK
+        text kind
+        text order_key
+    }
+    DOCUMENT_REVISION {
+        uuid project_id PK
+        uuid document_id PK
+        uuid id PK
+        text markdown
+        char sha256
+    }
+    EDIT_OPERATION {
+        uuid project_id PK
+        text idempotency_key PK
+        uuid new_revision_id FK
+    }
+    KNOWLEDGE_NODE {
+        uuid project_id PK
+        uuid id PK
+        text status
+    }
+    KNOWLEDGE_ALIAS {
+        uuid project_id PK
+        uuid id PK
+        uuid node_id FK
+    }
+    KNOWLEDGE_RELATION {
+        uuid project_id PK
+        uuid id PK
+        uuid source_id FK
+        uuid target_id FK
+    }
+    TEXT_ANCHOR {
+        uuid project_id PK
+        uuid id PK
+        uuid document_id FK
+        uuid current_revision_id FK
+    }
+    ANCHOR_HISTORY {
+        uuid project_id PK
+        uuid evidence_id PK
+        int version PK
+    }
+    MENTION_LINK {
+        uuid project_id PK
+        uuid evidence_id PK
+        uuid node_id PK
+    }
+    ASSERTION {
+        uuid project_id PK
+        uuid id PK
+    }
+    ASSERTION_EVIDENCE {
+        uuid project_id PK
+        uuid assertion_id PK
+        uuid evidence_id PK
+    }
+    CHANGE_SET {
+        uuid project_id PK
+        uuid id PK
+        text status
+    }
+    MODULE_RECORD {
+        uuid project_id PK
+        text module_id PK
+        text key PK
+    }

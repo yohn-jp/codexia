@@ -32,7 +32,7 @@ function browserTheme(t: TestContext) {
 
 test("stored appearance choices survive startup and override the system preference", t => {
   const browser = browserTheme(t);
-  // Existing saved key, preserved by docs/design/VISUAL-SYSTEM.md.
+  // Existing saved key, preserved by docs/design/VISUAL-SYSTEM.sdoc.
   for (const [stored, prefersLight] of [["paper", false], ["light", false], ["dark", true]] as const) {
     browser.storage.set("arcadia-theme-mode", stored);
     browser.preferLight(prefersLight);

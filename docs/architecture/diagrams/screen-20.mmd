@@ -1,0 +1,16 @@
+flowchart TD
+    ENTRY["/console/security / Passkeys"] --> OWNER{"owner sessionとfresh proof"}
+    OWNER -->|不十分| LOGIN["再認証して戻る"]
+    OWNER -->|OK| LIST["既存Passkey一覧"]
+    LIST -->|追加| ADD["WebAuthn登録/同一owner照合"]
+    LIST -->|改名| RENAME["対象IDと名称を更新"]
+    LIST -->|削除| LAST{"最後の本人認証手段?"}
+    LAST -->|はい| DENY["削除不可 / 別Passkey追加"]
+    LAST -->|いいえ| CONFIRM["明示確認/再認証"]
+    CONFIRM --> DELETE["server側で削除"]
+    ADD --> RESULT{"結果を再取得"}
+    RENAME --> RESULT
+    DELETE --> RESULT
+    RESULT -->|確定| LIST
+    RESULT -->|不明| RETRY["状態照合/再試行"]
+    RETRY --> LIST

@@ -1,0 +1,14 @@
+flowchart TD
+    ENTRY["/console/setup"] --> STATUS{"DBの導入状態"}
+    STATUS -->|既存owner/復旧中| BLOCK["新規登録を閉鎖"]
+    STATUS -->|NEW_APPROVED| KEY["256bit初回キーを本人が入力"]
+    KEY --> AUTHORIZE{"APIがgrant/Origin/期限/回数を確認"}
+    AUTHORIZE -->|拒否| KEY
+    AUTHORIZE -->|許可| CEREMONY["本人が明示的にWebAuthnを開始"]
+    CEREMONY -->|中断| RETRY["同じsetup transactionの状態を照合"]
+    CEREMONY -->|完了| COMMIT{"単一owner/Passkey/grant消費を原子的に確定"}
+    COMMIT -->|競合・応答不明| RETRY
+    COMMIT -->|確定| CLIENTS["server側のWeb/iOS/introspection clientを照合"]
+    CLIENTS -->|不足| WAIT["本番公開は停止 / 明示的な再照合"]
+    CLIENTS -->|準備完了| READY["本番deploy承認待ち"]
+    READY -->|配備・認証成功| LOGIN["通常のownerログインへ"]

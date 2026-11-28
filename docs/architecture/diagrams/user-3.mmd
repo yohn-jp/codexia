@@ -1,0 +1,15 @@
+stateDiagram-v2
+    [*] --> Confirmed : 確定 Revision を読取
+    Confirmed --> Editing : 入力
+    Editing --> Journaled : 下書きをローカル保護
+    Editing --> AtRisk : ローカルjournal書込失敗
+    Journaled --> Saving : base Revision と冪等キーで保存
+    Saving --> Reconciled : DB receipt と journal の確定を照合
+    Reconciled --> Confirmed : 追加入力なし
+    Reconciled --> Editing : 保存送信後に追加入力
+    Saving --> Conflict : stale Revision / 競合
+    Saving --> Uncertain : timeout / 応答喪失
+    Conflict --> Editing : 比較・作者による解決
+    Uncertain --> Reconciled : 同一操作IDで receipt 確認
+    Uncertain --> Journaled : 書込未成立を確認して再試行
+    AtRisk --> Editing : 安全な復旧操作・再保護

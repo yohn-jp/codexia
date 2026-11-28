@@ -1,0 +1,9 @@
+flowchart TD
+    ENTRY["レビューパネル"] --> FEED["owner scopeの提案/ChangeSetを取得"]
+    FEED -->|失敗| RETRY["保持した一覧を再取得"]
+    RETRY --> FEED
+    FEED -->|空| EMPTY["判断待ちなし"]
+    FEED -->|取得成功| LIST["提案者・対象・状態・件数"]
+    LIST -->|提案を選択| DETAIL["REV-02"]
+    DETAIL -->|一覧へ| LIST
+    LIST -->|本文へ| WRITE["WRT-01 / 元の原稿"]

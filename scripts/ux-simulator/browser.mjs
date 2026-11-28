@@ -34,7 +34,7 @@ let activeMode = 'expected';
 function ref(location, label = '根拠') {
   if (!location) return null;
   const path = location.path.split('/').map(encodeURIComponent).join('/');
-  const anchor = location.anchor ? '#' + encodeURIComponent(location.anchor) : '#L' + location.line;
+  const anchor = location.anchor ? '#' + encodeURIComponent(location.anchor) : location.line ? '#L' + location.line : '';
   return h('a', { href: 'https://github.com/yohn-jp/codexia/blob/' + snapshot.sourceSha + '/' + path + anchor }, label);
 }
 
@@ -238,7 +238,9 @@ function paintInspector() {
     selectedControl && h('section', { class: 'ux-selected-control' }, h('h3', {}, selectedControl.id),
       h('p', {}, selectedControl.label), h('p', {}, selectedControl.prerequisite ?? selectedControl.handler ?? '条件未抽出'),
       selectedControl.success && h('p', {}, '正常経路　' + selectedControl.success),
-      selectedControl.recovery && h('p', {}, '復帰　' + selectedControl.recovery), ref(selectedControl.source)),
+      selectedControl.recovery && h('p', {}, '復帰　' + selectedControl.recovery),
+      ...(selectedControl.references ?? []).map(reference => h('p', {}, ref(reference, reference.label))),
+      ref(selectedControl.source)),
     h('div', { class: 'actions' },
       button('リセット', () => apply(replay(snapshot, share(state)))),
       button('再現リンク', () => showExport('再現リンク', location.origin + location.pathname + share(state))),

@@ -1,0 +1,260 @@
+[DOCUMENT]
+MID: 8d67cbfdea840cf8b8f1b451b5c89027
+TITLE: Codexia — Desktop執筆環境の設計
+UID: DOC-DESIGN-DESKTOP-AUTHORING
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 0bf1771c36c509e223f013bfa929a445
+STATEMENT: >>>
+**画面遷移の正本:** [LINK: DOC-DESIGN-USER-SCREEN-FLOW, 利用画面の遷移設計]。本書は Desktop の配置と操作詳細を定め、画面遷移・下書き保護・原稿状態の規範を変更しない。
+<<<
+
+[[SECTION]]
+MID: cb81427eb46a9187e8b23b5a4126361e
+UID: DOC-DESIGN-DESKTOP-AUTHORING-位置付け
+TITLE: 位置付け
+
+[TEXT]
+MID: 5cb6a3cef899dd9a9c7373f06bec0cb6
+STATEMENT: >>>
+[LINK: DOC-DESIGN-INFORMATION-ARCHITECTURE, 情報設計] と [LINK: DOC-DESIGN-UX-CONTRACT, UX contract] を具体化する再設計提案。React、CodeMirror、既存Workspaceと共通authoring coordinatorを維持する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 2dcd80ce8a4d91e74f6360af20e4597c
+UID: DOC-DESIGN-DESKTOP-AUTHORING-作業面の構成
+TITLE: 作業面の構成
+
+[TEXT]
+MID: c64a26d756c3b67c74fdd6de4949c072
+STATEMENT: >>>
+通常のWritingは、幅を調整できる章の索引と大きな原稿領域からなる。Knowledge／Evidenceは初期画面から退け、Researchまたは「パネル」から開く。PostgreSQLの保護状態は上部の作業chromeと原稿見出しに短く示し、Journal・Revision・receiptの詳細は必要な時に確認する。Researchは原稿と参照stackを並べ、Reviewは原稿と提案レビューを並べる。これらは同じWorkspace上のプリセットであり固定画面ではない。任意の分割・tab・float・resize・非表示・レイアウト保存を維持する。既存のユーザー設定は読み込んだまま、利用者の明示操作だけで置き換える。
+
+| 領域 | 役割 |
+| --- | --- |
+| 上部の静かな作業バー | 製品名、作品と現在文書、簡潔なPostgreSQL保護状態。アカウント・theme・機能操作は補助 |
+| 構成ペイン | 巻・章・シーン・ノートの階層、現在位置、最近の作業。作成や移動は対象に応じて開く |
+| 原稿ペイン | 文書名、保存、読む／編集、本文。組版・印刷・履歴・Text Anchorは文脈から開く |
+| Research参照stack | 構成、Knowledge／Evidence、検索、任意moduleを必要に応じtabで見る |
+| 詳細状態 | 回復journal、Revision、競合、DB receiptとジョブ。短い表示から詳細を開く |
+
+装飾より本文の読みやすさを優先する。横書き・縦書き閲覧、ルビ、和欧混植、長いシーン名、テーマの既存設定を保持する。本文の行長は組版設定で制御し、パネルのリサイズで意図せず文字サイズを変更しない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 801463807cfc804e5359b2b8fd4f8eb1
+UID: DOC-DESIGN-DESKTOP-AUTHORING-操作の階層
+TITLE: 操作の階層
+
+[TEXT]
+MID: 1b8460d6002c2243178c69e009b6e872
+STATEMENT: >>>
+- 作品切替は現在の作品名に結び付ける。新規作成、インポート、エクスポート、削除など頻度の低い操作は明示的なメニューやフォームを開いて行う。
+- 構成は既存 parentId/orderKey/kind を用いた階層ツリー。親や数値の並び順を利用者が理解する必要はない。展開、追加、名称変更、移動、順序変更を対象行の操作として提示する。drag以外の手段を持ち、version precondition、循環防止、対象確認は既存APIを用いる。
+- 執筆では、読む、保存、主要な書式操作を目立たせる。印刷、組版、履歴、Text Anchor、詳細な書式は文脈に沿った操作へ配置し、すべてを同時に並べない。選択範囲から根拠を作る操作は既存の確定Revision条件を満たすときだけ実行できる。
+- パネルの移動・分割・サイズ変更は明示的な「レイアウト編集」から実行できる。通常の編集にパネル移動用のフォームが常に割り込まない。設定モードを閉じても本文とパネルは保持する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 56397abc5f48776bf4b73c628c02ec97
+UID: DOC-DESIGN-DESKTOP-AUTHORING-保存と復帰
+TITLE: 保存と復帰
+
+[TEXT]
+MID: 29f6895359eb602269a8ec7fa1c70ee4
+STATEMENT: >>>
+主表示は「作品に保存済み」「このブラウザーに下書きあり」「保存結果を確認できません」「この入力はまだ保護されていません」など、作者が閉じる前に必要な範囲・危険を判断できる短文を示す。詳細ではブラウザのjournal、対象Revision、現在の追加入力、DBの応答を区別する。「下書き」は同じブラウザに保護された場合のみ使用し、書込み失敗や照合中を成功扱いしない。保存中に追加入力があれば、その入力の状態を別に表示する。必要な競合・復旧判断には常時戻れる場所を用意する。
+
+既存の再開候補から現在の作品・シーンを復元し、回復照合が終わるまでは編集可能に見せない。構成・検索・知識・レビューから原稿に戻るときは、可能な範囲で caret/selection/scroll/undo を復帰し、正規のguardを必ず通す。別シーンの選択と参照ペインの開閉を同一操作とみなさない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 0d98ee498aafce1763c7d627e3dbe78d
+UID: DOC-DESIGN-DESKTOP-AUTHORING-検証
+TITLE: 検証
+
+[TEXT]
+MID: be41407f1ca771bc9e7c704b5e4e68a1
+STATEMENT: >>>
+- 日本語長文、ルビ、複数巻・章・シーン、同名シーン、空の作品、長い名前で、作業対象と次の操作が見える。
+- 構成変更の通常系、無効な移動、競合、キーボードによる順序変更が実際の永続化と一致する。
+- IME変換中の通知・参照・パネル操作で入力を消失しない。保存中の追加入力、失敗、応答不明、再読込のjournal状態を観測する。
+- Core/Full、標準とカスタム配置、狭いDesktop・200%拡大、ライト／ダーク、原寸／縮小で、本文が第一の視覚的重心である。
+- 既存の表示設定、保存・復旧、履歴・組版、module contributionsと自由配置の回帰を既存ブラウザ受入で検証する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: ec661223dd0f0ec427832a3738888b6e
+UID: DOC-DESIGN-DESKTOP-AUTHORING-代表レイアウトと寸法
+TITLE: 代表レイアウトと寸法
+
+[TEXT]
+MID: f657169d2cb8c4d75a7d40e5fd2ffa42
+STATEMENT: >>>
+基準は1440×900 CSS pxのDesktop。既存の可変splitを使い、初期状態の目安として以下を採用する。数値はレンダリングを見て調整でき、固定最小幅を全画面に強制しない。
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│ codexia.  潮目の図書館 / 第一巻 / 第一章 / 薄明の羅針盤   保存済  mobile │
+├─────────────────────────────────────────────────────────────────────────┤
+│ 作業面  執筆   調査   レビュー          パネル              配置を保存   │
+├──────────────────────┬──────────────────────────────────────────────────┤
+│ 構成                  │ 第一巻　潮が満ちる                                │
+│                      │ 一　薄明の羅針盤                    保存済  読む   │
+│ ▾ 第一巻             │                                                   │
+│   ▾ 第一章           │      日本語の長い本文が広い一続きの紙面を占める   │
+│      薄明の羅針盤     │                                                   │
+│      波間の記録       │      行間と組版幅は利用者の表示設定を保つ         │
+│      地下書庫の入口   │                                                   │
+│   ▸ 第二章           │                                                   │
+├──────────────────────┴──────────────────────────────────────────────────┤
+│                      必要な時だけ状態の詳細を開く                        │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+1440×900の標準Writingは上部barとWorkspace操作列を保ち、残りを可変幅の構成20%／原稿80%にする。原稿の組版幅は既存のユーザー設定で制御し、周囲余白を差し引いた領域幅を超えない。通常表示に専用railや右側の常時参照paneを置かない。参照はResearchまたはパネル一覧から開く。幅が狭い場合もDesktop shellは維持し、Workspaceをスクロールして機能へ到達できるようにする。既存の任意配置を保存済みの利用者には強制しない。狭幅での表示上の省略は永続layoutの破壊的変更ではない。
+<<<
+
+[[SECTION]]
+MID: 0236210f055684a679e3fa4d94dca86c
+UID: DOC-DESIGN-DESKTOP-AUTHORING-初期プリセットの具体案
+TITLE: 初期プリセットの具体案
+
+[TEXT]
+MID: bcfa56b26ba65b177b6cd250d9cb1700
+STATEMENT: >>>
+| プリセット | 初期構成（利用可能なpanelのみ） | 重心 |
+| --- | --- | --- |
+| 執筆 / Writing | outline / editor、幅比20:80。inspectorは初期配置で非表示 | 原稿 |
+| 調査 / Research | editor 68%とoutline / inspectorの補助stack 32%。有効moduleは検索可能なパネル一覧から必要なものを開く | 原稿と参照 |
+| レビュー / Review | editor 68%とreview / inspectorの補助stack 32% | 対象文書・提案・差分 |
+
+`createWorkspacePreset` はWritingを20:80のoutline/editor splitにし、Research／Reviewはeditorと補助stackの68:32 splitを生成する。これは初期配置だけを変更し、layout schema/version、panel ID、保存key、浮遊panel、非表示panel、ユーザー保存済み配置を置換しない。`history`が登録されていない構成で無効な履歴railを置かず、WRT-02の実在する履歴導線を使う。Knowledgeの一覧・詳細はinspectorから利用できる。多数のmoduleが有効でもResearchの初期タブへ全投入しない。選択したパネルは可視範囲に収め、追加パネルは既存の補助stackで表示する。既存のカスタム配置は自動的に書き換えない。新panelが必要な場合もhostのcatalogと登録手順に従い、同じeditorの複数instanceを作らない。
+
+実装した初期画面、Before / after、視覚・操作・accessibility・persistence・performanceの評価は[視覚受入記録](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/acceptance.md)を参照する。案の比較は[Folio Atlas](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/direction-folio.png)と[Quiet Page](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/ui-redesign-v2/direction-focus.png)に記録した。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 7da6870a5caf9f6081795b33993d8a48
+UID: DOC-DESIGN-DESKTOP-AUTHORING-画面部位ごとの操作仕様
+TITLE: 画面部位ごとの操作仕様
+
+[TEXT]
+MID: ee9de2db00b4560238a6ccef6e24da94
+STATEMENT: >>>
+| 部位 | 主操作 | 補助操作 | 表示しないもの |
+| --- | --- | --- | --- |
+| 作品名 | 作品切替・ライブラリ | 作成、取込、書出し | 常時展開された作成フォーム |
+| 構成の行 | 展開／折畳、選択 | 追加、名称変更、移動、順序変更、削除 | 常時表示される親ID・orderKey |
+| 原稿ヘッダー | タイトル、読む／書く、保存 | 組版、印刷、履歴、書式、scratch | 大きいDatabase workspaceタイトル |
+| 原稿内選択 | 通常選択、copy、IME | 参照、根拠にする（確定Revision条件） | 勝手な選択確定・本文書換え |
+| 参照 | 関連知識を開く、引用へ移動 | 関係・別名・命題詳細 | 常時展開された全登録フォーム |
+| 状態 | 現在の保護状態、クリックで詳細 | 競合比較、照合、回復 | 状態を隠すための装飾 |
+| パネル見出し | 対象名、閉じる／再表示 | 明示配置編集で移動・float等 | 通常時の常時表示移動フォーム |
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: bf2d235bf13ef3c73b2d569b581361fb
+UID: DOC-DESIGN-DESKTOP-AUTHORING-構成ツリーの具体動作
+TITLE: 構成ツリーの具体動作
+
+[TEXT]
+MID: 5cddb21d00c558ccfaf17956d31c8a75
+STATEMENT: >>>
+構造はparentIdとorderKeyを元に組み立て、同名の巻・章・シーンでもstable document IDで選択する。深い階層はインデントと展開状態で表現する。親が欠落したデータを別作品へ接続せず、未配置として理由を示す。通常は選択中の祖先を展開する。選択中の行を折り畳む場合でも編集対象は変えない。
+
+- 「追加」は親と文書kindを明示したフォームを開く。現在行の兄弟または子を明示選択し、既存createPersistenceDocumentのidempotency keyを保持する。
+- 「移動」は対象と移動先を名前・階層で確認する。循環や許されない親候補は除外し、サーバーの検証を最終判断とする。
+- 「上へ／下へ」は既存orderKeyとexpectedVersionによる一件の順序変更が表現できる時のみ可能。隣接キーの衝突、version不一致、複数更新が必要なケースでは成功を仮表示せず、最新構成の再取得と安全な操作を案内する。必要な原子的再順序化が現行APIにない場合は別途仕様化する。
+- 「削除」は対象名、配下の影響、保持されるRevisionを説明し、明示確認と既存削除契約を通す。削除後は正規の返却データから選択し直す。未保存原稿の保護なしに削除・移動を強行しない。
+
+ツリー項目の移動は、クリック可能な開閉と選択、行メニューを基本とする。ARIA treeを使うならarrow/Home/End、roving tabindex、expanded/selectedを一貫して実装する。dragは追加手段であり、既存データの安全な移動・順序変更が可能な範囲でのみ採用する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 20031d608e62a7914ae4eaf58ad2ce79
+UID: DOC-DESIGN-DESKTOP-AUTHORING-執筆集中と配置編集
+TITLE: 執筆集中と配置編集
+
+[TEXT]
+MID: 9bfb9d0c28125490cac7a3482251a999
+STATEMENT: >>>
+原稿の最大化は既存Workspaceのmaximize/restoreを利用する。集中表示からの復帰では元のsplit/active tabを再現し、永続設定を勝手に保存しない。レイアウト編集を開いたら移動元・先・配置方法とドラッグ可能領域を示し、閉じると通常の操作面に戻る。「配置を保存」は現行の明示保存と同じ意味とし、保存失敗・破損fallbackを明示する。原稿の「保存」と表示上も位置上も区別する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 3b7ee67b72d97c839b6ea518590b7955
+UID: DOC-DESIGN-DESKTOP-AUTHORING-責務の対応
+TITLE: 責務の対応
+
+[TEXT]
+MID: 3cdc86e74fa923a49656753189ff1343
+STATEMENT: >>>
+`PersistenceWorkspace` のselectProject、selectDocument、protectTransition、saveDocument、editStructure、createAnchor、loadRevisions、restoreRevisionを通る。原稿のprojectionと保存処理をShellへ移さない。DesktopShellは主要導線と作業chrome、Workspaceはlayoutとpanel lifetimeを所有する。ManuscriptInputは編集・IME・undoの所有者であり、視覚刷新を理由に別editorへ置換しない。
+<<<
+
+[[/SECTION]]
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: a0697d87c4a08f86acdb492c5efcb6e5
+UID: DOC-DESIGN-DESKTOP-AUTHORING-同名シーンを参照して執筆に戻る
+TITLE: 同名シーンを参照して執筆に戻る
+
+[TEXT]
+MID: 684b2beb85ff20cfb13f0119cc136be5
+STATEMENT: >>>
+執筆中のシーンの上に、近い所属から順に章、巻、作品を表示する。
+本文とシーン名を主に置き、所属は同名シーンを見分ける手掛かりにする。
+参照中の資料は、その資料の章とシーン、引用箇所で識別する。
+
+比較には、第一章と第三章に「帰港」がある架空の作品「潮待ち」を使う。
+第三章の「明日の便で帰る」の直後から始め、第一章で呼称「先生」を確認して、第三章の同じ台詞に追記する。
+
+| 操作 | 広いWebで並置する案 | 広いWebで一時表示する案 |
+| --- | --- | --- |
+| 通常の参照 | Workspaceの本文を左に残し、右に引用と出典を開く。照合を続けながら元の本文へフォーカスを戻せる | 本文を背景に残し、引用、出典、閉じる操作を示す。閉じた後は呼び出し元を経て元の選択から再開する |
+| 初回の参照 | 本文と参照の見出しで作業対象を区別し、Tabで参照に移る | 開いた参照の見出しから内容をたどり、閉じる操作へ到達できる |
+| 無効な引用 | 対象を確認できない理由を引用側に示す。元の本文と入力位置を保つ | 参照側で再確認するか閉じて戻る。無効な範囲へフォーカスを移さない |
+| 参照先を明示して開く | 現行の遷移ガードを通して編集対象を切り替え、確認できた範囲へ移る | 一時表示を終え、同じ遷移ガードと範囲確認を経て参照先を開く |
+
+狭いWebでMobile表示を使う場合は、参照シートをタップまたはTabとEnterで開く。
+シートの比較方法は[LINK: DOC-DESIGN-MOBILE-AUTHORING-操作と原稿保護, Mobileの参照シート]を参照する。
+
+着想の課題では、シーン内のスクラッチに「最終章で正体が判明する」と入力し、別シーンに移った後に探す。
+スクラッチの記録は元のシーンから開ける。
+「ノートとしてPostgreSQLへ保存」を選んだ場合は、元のシーン配下のノートを目次から開ける。
+どちらも本文と分かれている。
+再発見に元のシーンの記憶が必要だったかを記録し、専用の仮置き先の要否を判断する。
+
+資料を読み終えてから正しい位置への最初の追記までを計り、再検索、別シーンへの誤入力、介助の有無を記録する。
+設計者の操作確認と、予備説明を受けていない作者の結果は別欄に残す。
+比較が済むまでは、既存のWorkspace配置とMobileの参照シートを使う。
+<<<
+
+[[/SECTION]]

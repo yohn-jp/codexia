@@ -1,0 +1,13 @@
+stateDiagram-v2
+    [*] --> HealthyOld
+    HealthyOld --> Validated : 新版の証明と互換性
+    Validated --> HealthyOld : 同一digest / 更新不要
+    Validated --> Quiesced : host lockを取得しwriter停止
+    Quiesced --> BackedUp : backupとchecksum成功
+    Quiesced --> HealthyOld : backup不成立・旧版復帰
+    BackedUp --> Candidate : digest固定Unitを適用
+    Candidate --> HealthyNew : readiness成功・Tunnel復旧
+    Candidate --> Restoring : 不健康・接続喪失・途中中断
+    Restoring --> HealthyOld : 旧digestとreadiness確認
+    Restoring --> Isolated : 安全な復帰を確認できない
+    Isolated --> HealthyOld : 運用者の承認済み復旧

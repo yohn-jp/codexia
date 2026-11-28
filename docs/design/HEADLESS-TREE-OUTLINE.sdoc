@@ -1,0 +1,94 @@
+[DOCUMENT]
+MID: cdb733a92290662454fdc20a2599d254
+TITLE: Headless Tree adoption — Outline integration contract
+UID: DOC-DESIGN-HEADLESS-TREE-OUTLINE
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: dfc576ba45bb964888705c54a1814e65
+STATEMENT: >>>
+Status: accepted feature design / implementation to be verified. This document records the agreed scope, not evidence of working integration. The [LINK: DOC-DESIGN-USER-SCREEN-FLOW, user screen transitions] and [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, system design] govern outline navigation, manuscript protection and scope.
+<<<
+
+[[SECTION]]
+MID: 5421608e53189cded01cefba38c4f73e
+UID: DOC-DESIGN-HEADLESS-TREE-OUTLINE-decision
+TITLE: Decision
+
+[TEXT]
+MID: 07fac457ec7e04105c0eb3039afc8aa8
+STATEMENT: >>>
+Use Headless Tree as the sole tree interaction engine for the Desktop React Web Outline. Do not mount React Aria Tree in the same React hierarchy. Native SwiftUI uses a separate outline UI over the same API document hierarchy; see [LINK: DOC-ARCHITECTURE-IOS-SWIFTUI-ARCHITECTURE, iOS design].
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 3bf9fa1ec2a68285a5f151b59c37441e
+UID: DOC-DESIGN-HEADLESS-TREE-OUTLINE-authority-and-ownership
+TITLE: Authority and ownership
+
+[TEXT]
+MID: a3fd94e6689fa9c2725097a0a6aebe87
+STATEMENT: >>>
+- PostgreSQL `document` remains authoritative: `project_id`, `id`, `parent_id`, `kind`, `order_key`, `head_revision_id`, `version`.
+- `document_revision.markdown` remains the authoritative text; headings are derived presentation nodes, never new documents.
+- Headless Tree owns client-side expansion, focus, keyboard navigation and drag intent; it does not own persistence or authorization.
+- The existing `PersistenceWorkspace` transition protection, journal reconciliation and API calls remain the sole mutation path. Preserve CodeMirror instance, caret, IME composition, undo and pending drafts.
+- Do not replace Workspace layouts, panel identifiers, saved layout keys, or the editor.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 7a735c3b6a8a523331d94f3f21bf8d71
+UID: DOC-DESIGN-HEADLESS-TREE-OUTLINE-implementation-slices
+TITLE: Implementation slices
+
+[TEXT]
+MID: 71853b846ab1b53d861cefdb64803b67
+STATEMENT: >>>
+1. Introduce a pure `Document -> TreeItem` adapter keyed by stable document IDs; preserve same-title siblings, project scope, explicit sibling ordering and incomplete hierarchy diagnostics.
+2. Integrate Headless Tree's tree instance and feature configuration into the existing Outline panel. Preserve existing keyboard selection and accessible move controls; add inline rename/search only where consistent with current API contracts.
+3. Adapt move/reorder intent into existing Core/API mutation contracts. The current `editStructure` targets the active document: introduce an explicit target-document command, guarded by version checks, before enabling arbitrary-node DnD. Never treat optimistic UI as committed persistence.
+4. Add derived Markdown heading items under each document only after B-type document hierarchy passes acceptance. Heading activation scrolls within the selected document; it must not invoke document mutation.
+5. Verify Desktop keyboard/pointer and screen-reader behavior. SwiftUI outline touch/VoiceOver/keyboard is independently verified on real iOS devices; Mobile React WebView tests are not a release gate.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: aaaeb37fe0d2a8733e921cf18288b894
+UID: DOC-DESIGN-HEADLESS-TREE-OUTLINE-acceptance
+TITLE: Acceptance
+
+[TEXT]
+MID: f7d8920383b109541bf4df0c6506b43a
+STATEMENT: >>>
+- Create, rename, select, expand, collapse, move and reorder document nodes; project and parent boundaries remain enforced.
+- Reject cycles, invalid parents, stale versions and unsupported reorder operations without corrupting the UI or PostgreSQL.
+- Uncommitted drafts and IME composition survive switching nodes and failed mutations; successful operations re-fetch authoritative structure.
+- Keyboard-only and touch-only navigation work; dragging is supplemental and accessible alternatives remain.
+- No regressions in Core-only mode, existing Workspace presets, saved layout, CodeMirror, revisions or recovery journal.
+- Add focused tests for adapter, mutation failures, accessibility and real browser touch behavior. Run and report actual CI results before requesting merge.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 1b7f94261d3c95dbe7c8a74e5ebcf329
+UID: DOC-DESIGN-HEADLESS-TREE-OUTLINE-non-goals
+TITLE: Non-goals
+
+[TEXT]
+MID: 8b9780758f46b7b9ee7e83adec5e6109
+STATEMENT: >>>
+No new hierarchy table, no second React tree engine, no automatic Markdown section rearrangement or editor/persistence replacement. This Desktop Web workstream does not implement SwiftUI.
+<<<
+
+[[/SECTION]]

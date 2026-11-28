@@ -1,0 +1,27 @@
+flowchart TD
+    OPEN["/console/setup 初期化状況"] --> READY{"APIのsetup-only状態は利用可能?"}
+    READY -->|準備中| PREP["セットアップ待機<br/>API接続/更新を再試行"]
+    PREP --> READY
+    READY -->|復旧対象・既存owner| NOTNEW["新規登録を禁止<br/>通常ログインまたは復旧へ"]
+    READY -->|初回登録可能| INTRO["はじめに<br/>所要操作・必要なPasskey対応端末を表示"]
+    INTRO --> KEY["初期登録キーを入力<br/>貼り付け可・ブラウザー永続保存なし"]
+    KEY --> VALID{"APIでキーと状態を検証"}
+    VALID -->|無効・期限切れ| KEYERROR["理由を安全に案内<br/>再入力/運用者の再発行へ"]
+    KEYERROR --> KEY
+    VALID -->|正当| PROFILE["所有者プロフィール<br/>表示名と連絡先メールを入力"]
+    PROFILE --> VALIDPROFILE{"入力検証"}
+    VALIDPROFILE -->|不正| PROFILEERROR["項目ごとに修正を案内"]
+    PROFILEERROR --> PROFILE
+    VALIDPROFILE -->|妥当| PASS["Passkey作成を明示開始<br/>ブラウザーWebAuthn"]
+    PASS -->|キャンセル・端末非対応| PASSERR["入力を保持して再試行/別端末<br/>ownerは未作成"]
+    PASSERR --> PASS
+    PASS -->|応答| COMMIT{"APIが証明/単一owner/一回限り消費を原子的に確定"}
+    COMMIT -->|競合・失効| CLOSED["追加ownerを作らず停止<br/>状態再取得・運用者へ案内"]
+    COMMIT -->|応答不明| CHECK["完了状態を照合<br/>安全に再試行を判断"]
+    CHECK --> COMMIT
+    COMMIT -->|成功| SUCCESS["登録完了<br/>キー即時失効・本人用セッション確認"]
+    SUCCESS --> CLIENTS["Web/iOS/内省OAuth client登録結果をAPIが照合"]
+    CLIENTS -->|未完成| CLIENTERR["一部未完了を表示<br/>重複登録なく再検証"]
+    CLIENTERR --> CLIENTS
+    CLIENTS -->|準備完了| PENDING["本番公開の承認・配備待ち<br/>再試行・状態更新"]
+    PENDING -->|公開・認証確認済み| LOGIN["/console へ<br/>ownerでサインイン"]

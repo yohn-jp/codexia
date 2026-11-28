@@ -1,0 +1,12 @@
+flowchart TD
+    ENTRY["/console/security / Sessions"] --> LOAD["owner session一覧"]
+    LOAD --> LIST["現在の端末と他端末を区別"]
+    LIST -->|他セッション選択| CONFIRM["対象端末を確認"]
+    LIST -->|全他端末終了| CONFIRMALL["現在の端末を残す"]
+    LIST -->|自分の現在sessionを個別選択| BLOCK["個別revoke不可"]
+    CONFIRM --> REVOKE["対象tokenを失効"]
+    CONFIRMALL --> REVOKE
+    REVOKE --> RESULT{"serverの失効結果を照合"}
+    RESULT -->|成功| LOAD
+    RESULT -->|不明/再認証必要| RETRY["同じ対象を照合・再ログイン"]
+    RETRY --> LOAD

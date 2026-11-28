@@ -1,0 +1,19 @@
+stateDiagram-v2
+    [*] --> SSHReady
+    SSHReady --> HostReady : inspectとbootstrap承認
+    HostReady --> DataReady : secrets/baseを収束
+    DataReady --> SetupPending : 空DB・明示的に新規構築
+    DataReady --> RestorePending : 既存状態・復旧を要求
+    RestorePending --> OwnerReady : owner/認証/業務DBを同一性検証
+    RestorePending --> Blocked : バックアップ・secret不足
+    SetupPending --> SetupExposed : 256-bit grant・setup-only API・edge保護確認
+    SetupExposed --> OwnerReady : Passkey + ownerを原子的に確定
+    SetupExposed --> Blocked : キー失効・不正な状態
+    OwnerReady --> ActivationPending : client照合・setup停止・認証設定確定
+    ActivationPending --> Active : 保護された初回activation・既存互換Frontendを確認
+    Active --> Accepted : Console設定・保全 / 公開経路・再起動・独立restore実測
+    SSHReady --> Blocked : 接続・ホスト証明失敗
+    DataReady --> Blocked : 不明なDB・migration不一致
+    ActivationPending --> Blocked : 証明・承認不足 / 既存データ復旧不整合
+    Blocked --> RestorePending : 既存データなら復旧専用
+    Blocked --> SetupPending : 新規と空DBを再確認・承認

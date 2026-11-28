@@ -1,6 +1,14 @@
+import { catalogPath } from '../authority.mjs';
+import { jsonRecordLocator } from '../source.mjs';
+
 export function sourceAt(source, path, needle) {
   if (!source.exists(path)) return null;
   return source.location(path, needle);
+}
+
+export function catalogLocation(source, id) {
+  if (!source.exists(catalogPath)) return null;
+  return jsonRecordLocator(catalogPath, source.read(catalogPath))(id);
 }
 
 export function sourceRef(location) {

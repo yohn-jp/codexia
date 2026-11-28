@@ -1,0 +1,453 @@
+[DOCUMENT]
+MID: cfaa5088176d0357728d94ebe1a7eee7
+TITLE: 全画面の状態遷移図（Screen State Atlas）
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 32299aad2ef1377c4add627fadc37103
+STATEMENT: >>>
+**種別: 規範的な画面状態遷移設計。** [LINK: DOC-DESIGN-SCREEN-CONTROL-CATALOG, 全画面・ボタン台帳]にある論理画面IDとコントロールを状態遷移図へ対応させる。各図のURL/permissionは [LINK: DOC-ARCHITECTURE-ROUTE-AUTHORIZATION-CONTRACT, URL・API認可] を正本とする。各見出しは画面の実装範囲や採用状態を示す。稼働環境での受入には、図に示す操作を対象環境で確認した証拠を要する。
+
+読み方: 四角は画面/状態、ひし形は認証・入力・保存の分岐、矢印は実操作やサーバー結果による遷移。例外時は元の作業・下書き・認可の境界を保ち、隠れた別の書込経路へ転換しない。各画面のボタン名は `CTRL ID` を参照。共通の操作禁止/403/409/失敗の契約は台帳に委任し、各図ではその画面特有の戻り先を記載する。
+<<<
+
+[[SECTION]]
+MID: ef69c870b6fc65bade46dfc5847726ff
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-entry-01--desktop-react-web--ios-swiftui起動採用目標
+TITLE: ENTRY-01 — Desktop React Web / iOS SwiftUI起動【採用目標】
+
+[TEXT]
+MID: a510be25074f36b5f7a4ef62e9f85664
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-1]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-1.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-1)
+
+現行mainのWeb入口はDesktopのみで、Mobile Web shellと`/mobile/` routeは製品導線から撤去済みである。Native iOSは別NavigationStackとprotected draft journalを所有する設計目標で、実装・実機受入は未完了のまま開発と自動Xcode検証が一時停止中である。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: ff84206990bde939591df9381b9cbef0
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-auth-01--passkey--oidc本人ログイン実装
+TITLE: AUTH-01 — Passkey / OIDC本人ログイン【実装】
+
+[TEXT]
+MID: 293bce88d78a0f7c71c122cde788b7da
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-2]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-2.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-2)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: d273062631a12dfc6e918d3717cb7a57
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-auth-02--oauth-clientscope同意実装
+TITLE: AUTH-02 — OAuth client/scope同意【実装】
+
+[TEXT]
+MID: 616b77be3862331562a98a8045a1c815
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-3]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-3.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-3)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 7ed843049c62a0c2f5aa0bf09507ed48
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-lib-01--作品一覧作成インポートエクスポート実装
+TITLE: LIB-01 — 作品一覧・作成・インポート/エクスポート【実装】
+
+[TEXT]
+MID: df7030f1c7ca322b0777f8a16155d536
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-4]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-4.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-4)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: f6c41acd8bd97143668c6db20bb8cb3c
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-out-01--巻章シーンの構成変更実装
+TITLE: OUT-01 — 巻/章/シーンの構成・変更【実装】
+
+[TEXT]
+MID: aea1347665b56a2e238a24801bdf3f4f
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-5]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-5.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-5)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 1d1a17c37b86c1d6f3bb051a72912f72
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-wrt-01--原稿執筆と保存実装
+TITLE: WRT-01 — 原稿執筆と保存【実装】
+
+[TEXT]
+MID: c5be6bbd2ea0c59bcf44a6a5b4c764dc
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-6]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-6.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-6)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 1b06a79c99d85b451903a063287571f6
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-read-01--同じ原稿の読書モード実装
+TITLE: READ-01 — 同じ原稿の読書モード【実装】
+
+[TEXT]
+MID: d994976bc86d36252bf62644691ce4fd
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-7]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-7.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-7)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: b81b261d092785449199abc6319af873
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-wrt-02--revisionの閲覧復元実装
+TITLE: WRT-02 — Revisionの閲覧・復元【実装】
+
+[TEXT]
+MID: 579b1a7135555f83473bfbfce28a2e61
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-8]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-8.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-8)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 61a437f04a3dbd40f85b2410c960c6aa
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-rec-01--draft競合応答不明の復旧実装
+TITLE: REC-01 — Draft、競合、応答不明の復旧【実装】
+
+[TEXT]
+MID: d596df1a12d6a8e343965299086386f5
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-9]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-9.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-9)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: fa7b7d82fa34262faeaa15ecdf79ca3f
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-kno-01--knowledge検索候補登録実装
+TITLE: KNO-01 — Knowledge検索・候補登録【実装】
+
+[TEXT]
+MID: 183569f9a22f130f2a527ffc630e7d6b
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-10]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-10.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-10)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: d9f3ea73a7cb4d53f9b1089e6958c3bd
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-kno-02--knowledgetext-anchor関係統合実装
+TITLE: KNO-02 — Knowledge・Text Anchor・関係・統合【実装】
+
+[TEXT]
+MID: 9cb6fce47df3a0dcd6fda7884a4d9a36
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-11]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-11.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-11)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: a920a8a4e85b0b8f49d55e835fbf9aec
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-rev-01--提案changeset一覧実装
+TITLE: REV-01 — 提案・ChangeSet一覧【実装】
+
+[TEXT]
+MID: 6979e5e88c7c91a37f0e7db7163404d8
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-12]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-12.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-12)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 4b83c5c100518f0955c0e8ad47161e98
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-rev-02--提案の比較作者承認適用実装
+TITLE: REV-02 — 提案の比較・作者承認/適用【実装】
+
+[TEXT]
+MID: 6b68e64a4781fd2503346feb253356ea
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-13]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-13.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-13)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: b23d2f20877ff4cfb225da3e99854f2c
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-tool-01--任意モジュールと背景処理実装
+TITLE: TOOL-01 — 任意モジュールと背景処理【実装】
+
+[TEXT]
+MID: 33742f8c74a7e1475d34e75ca85e4e85
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-14]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-14.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-14)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 83e00eaee051cfeefe55afa00f6fbcfa
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-job-01--受信箱ジョブ履歴実装
+TITLE: JOB-01 — 受信箱・ジョブ履歴【実装】
+
+[TEXT]
+MID: 547b6d1744a579e340eee200fe51cf7d
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-15]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-15.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-15)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 4a58e15d5e7edae76f24238b12f917c7
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-display-01pref-01--表示設定現行本人設定実装
+TITLE: DISPLAY-01・PREF-01 — 表示設定・現行本人設定【実装】
+
+[TEXT]
+MID: cea6515c794cc55aa667007494dea5e2
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-16]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-16.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-16)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 454c004643afad89a20952cdc9b595b1
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-pub-01--公開読者の読書ビュー実装
+TITLE: PUB-01 — 公開読者の読書ビュー【実装】
+
+[TEXT]
+MID: b7024b0bec34fa764a064c661d57d885
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-17]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-17.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-17)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 953cd9d1ac85938eb8f147c4cef3b16b
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-con-00--管理コンソールhomedesktop-web-実装
+TITLE: CON-00 — 管理コンソールHome【Desktop Web 実装】
+
+[TEXT]
+MID: f098c949d987da87a50377fdc8490d75
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-18]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-18.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-18)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 76c4997903155847582c42200e4e04ee
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-con-01con-02con-03--初回登録ウィザードdesktop-web-実装
+TITLE: CON-01・CON-02・CON-03 — 初回登録ウィザード【Desktop Web 実装】
+
+[TEXT]
+MID: d10f584cc742d147dc8995847c130808
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-19]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-19.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-19)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 70812a1ecaada0f73546a902a35a5f7c
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-con-10--passkey管理desktop-web-実装
+TITLE: CON-10 — Passkey管理【Desktop Web 実装】
+
+[TEXT]
+MID: 666b868f80f1a649ee288b02029d55f5
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-20]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-20.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-20)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 2708eb6e9767cc37e951f1a0a7811fea
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-con-11--セッション管理desktop-web-実装
+TITLE: CON-11 — セッション管理【Desktop Web 実装】
+
+[TEXT]
+MID: fbb6727e1a445af3482ef04ef36fcca9
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-21]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-21.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-21)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 28267eacb2d1ef39b1a9357693122a95
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-con-20con-21--oidcとoauth-client同意部分導入
+TITLE: CON-20・CON-21 — OIDCとOAuth client/同意【部分導入】
+
+[TEXT]
+MID: c69417999b6dddb55f349c074e556443
+STATEMENT: >>>
+Desktop Web は、運用者による OIDC 設定の状態と保存済み OAuth 同意を表示し、Passkey での再認証後に対象の同意を取り消せる。
+所有者による OIDC の登録、検証、有効化は採用目標である。[LINK: DOC-ARCHITECTURE-OWNER-OIDC-MANAGEMENT-CONTRACT, Owner OIDC 契約]
+
+[ANCHOR: ATLAS-DIAGRAM-screen-22]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-22.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-22)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 813098a700aa62d05bd17cc5f9fc0cf1
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-con-30--バックアップ管理トップdesktop-web-実装
+TITLE: CON-30 — バックアップ管理トップ【Desktop Web 実装】
+
+[TEXT]
+MID: f0a8e2520f630d167f2269d9b0e6595b
+STATEMENT: >>>
+CON-30〜34 の操作はオペレーターが有効化した API と executor を使う。
+実 S3 保管と独立復旧の受入は、配備環境ごとの証拠で判定する。[LINK: DOC-ARCHITECTURE-BACKUP-CONSOLE-CONTRACT, Backup console contract]
+
+[ANCHOR: ATLAS-DIAGRAM-screen-23]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-23.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-23)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: fac79039a21f0309faaf15adcec3937d
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-con-31con-32--s3設定接続検証有効化desktop-web-実装
+TITLE: CON-31・CON-32 — S3設定・接続検証・有効化【Desktop Web 実装】
+
+[TEXT]
+MID: 112202d9c8288c6123a5bcd93ea5b286
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-24]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-24.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-24)
+
+draft保存・probe成功・202受理のどれも遠隔暗号文の保全済み証拠にはならない。資格情報はAPIへwrite-only送信され、再取得した応答に含まれない。起動時のlocal staging、age受取公開鍵、VM/IAM管理権限はUIから変更不可。検証用S3 probeと実backup objectは一意のprefix/IDで区別する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 6be4cde1a7e0383afb532d30a6e1b596
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-con-33con-34--バックアップ履歴隔離復旧証拠desktop-web-実装
+TITLE: CON-33・CON-34 — バックアップ履歴・隔離復旧証拠【Desktop Web 実装】
+
+[TEXT]
+MID: 7528ed10592b90c8a9c399cc2ed66bf0
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-25]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-25.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-25)
+
+本図は実ジョブのreceiptを表示するUI状態の正本。実executor・復号・データ復元は [LINK: DOC-ARCHITECTURE-BACKUP-CONSOLE-CONTRACT, Backup console contract] と [LINK: DOC-DEPLOYMENT-BACKUP, Backup] が所有し、画面状態を運用成功の証拠へ昇格しない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 8cec139138cc49c98d01fdd3b9e897ed
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-cross-shell--原稿を保持した端末と画面遷移実装目標の共通契約
+TITLE: Cross-shell — 原稿を保持した端末と画面遷移【実装・目標の共通契約】
+
+[TEXT]
+MID: b62f486c154eafacafb28cf365b76e6d
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-26]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-26.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-26)
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 36847f243238b9bd1d395af0fe6b64e7
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-kno-03--選択ノードの局所関係表示未採用提案未実装
+TITLE: KNO-03 — 選択ノードの局所関係表示【未採用提案・未実装】
+
+[TEXT]
+MID: c84e77be3fa82ef5f1e7c85cfa98fab8
+STATEMENT: >>>
+[ANCHOR: ATLAS-DIAGRAM-screen-27]
+
+[Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/screen-27.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=screen-27)
+
+採用前に関係情報を可視化した画面・動的API・Graphify等の別ソースを追加しない。本図は[LINK: DOC-DESIGN-INFORMATION-ARCHITECTURE, 情報設計]の検討を漏らさないための詳細仕様候補であり、既存のKnowledge/Evidenceのproject限定read・原稿保護を変更しない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 51ade251e770648900db38e1a8962a20
+UID: DOC-DESIGN-SCREEN-STATE-ATLAS-diagramcontrolapiの受入契約
+TITLE: Diagram/Control/APIの受入契約
+
+[TEXT]
+MID: 3b61a6db98d5d33c2fa64f435d281118
+STATEMENT: >>>
+- **必須の一致:** 画面ID、CTR ID、要求principal、method、遷移先、失敗時の保護先が [LINK: DOC-DESIGN-SCREEN-CONTROL-CATALOG, ボタン台帳] と [LINK: DOC-ARCHITECTURE-ROUTE-AUTHORIZATION-CONTRACT, URL/API認可] に矛盾しないこと。
+- **実装状況と受入:** 所有者による OIDC 設定は採用目標である。管理コンソールと初回登録の稼働は、Web、VM、Cloudflare の対象環境で確認する。初期登録キーの発行と配送の詳細は [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, 初期デプロイ遷移] を参照する。
+- **必須の可視化:** AtlasはこのMarkdownのMermaid定義からSVGを生成し、生成全件の構文・実ブラウザー読み込み・個別リンクを検証する。HTML側に同じ状態グラフを二重ハードコードしない。
+- **異常系:** 401/403、別project、404、競合409/412、通信断、local draft容量不足、応答不明、Passkeyキャンセル、setupの二重消費、無効な公開linkで、UIとDBの実状態を観測する。
+<<<
+
+[[/SECTION]]

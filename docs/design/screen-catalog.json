@@ -1,0 +1,874 @@
+{
+  "screens": [
+    {
+      "id": "ENTRY-01",
+      "title": "/ Desktop-only start → /desktop/",
+      "principal": "ANON",
+      "purpose": "Desktop React Webを起動。iOSはnative app entryという採用目標",
+      "kind": "実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "AUTH-01",
+      "title": "/oauth/login",
+      "principal": "正しいsigned request→OWNER-SESSION",
+      "purpose": "Passkey/連携IdPログイン → AUTH-02／中止→ENTRY",
+      "kind": "実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "auth"
+      ]
+    },
+    {
+      "id": "AUTH-02",
+      "title": "/oauth/consent",
+      "principal": "OWNER-SESSION＋登録済みclient",
+      "purpose": "scopeとclientを確認→許可/拒否→検証済みcallback",
+      "kind": "実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "auth"
+      ]
+    },
+    {
+      "id": "LIB-01",
+      "title": "Desktop Web /desktop/・iOS Native Library（旧/mobile/廃止）",
+      "principal": "OWNER-API",
+      "purpose": "作品を選択/作成/取込/書出→構成・本文",
+      "kind": "Desktop実装・iOS未受入",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "OUT-01",
+      "title": "Desktop構成panel・iOS native Outline",
+      "principal": "OWNER-API",
+      "purpose": "巻/章/シーン選択・移動・検索 → 本文",
+      "kind": "Desktop実装・iOS未受入",
+      "adoption": "adopted",
+      "form": "panel",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "WRT-01",
+      "title": "Desktop Web /desktop/projects/:projectId/scenes/:documentId・iOS native navigation target",
+      "principal": "OWNER-API",
+      "purpose": "編集、保存、閲覧、根拠、Revision。元の本文へ",
+      "kind": "Desktop実装・iOS未受入",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "READ-01",
+      "title": "Desktop reader・iOS native Reader",
+      "principal": "OWNER-API",
+      "purpose": "文字組み/縦横/参照→同じRevisionの編集位置へ",
+      "kind": "Desktop実装・iOS未受入",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "WRT-02",
+      "title": "WRT-01のRevision履歴・差分",
+      "principal": "OWNER-API",
+      "purpose": "差分表示・履歴復元→元の本文",
+      "kind": "実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "REC-01",
+      "title": "WRT-01の保存状態・競合/回復/失効",
+      "principal": "OWNER-API＋browser local journal",
+      "purpose": "確定状態を照合・復旧→同じ文書",
+      "kind": "実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "KNO-01",
+      "title": "Desktop Knowledge panel・iOS Native Knowledge",
+      "principal": "OWNER-API",
+      "purpose": "候補一覧、検索、確定→KNO-02／原稿へ",
+      "kind": "Desktop実装・iOS未受入",
+      "adoption": "adopted",
+      "form": "panel",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "KNO-02",
+      "title": "Knowledge node詳細・Evidence inspector",
+      "principal": "OWNER-API",
+      "purpose": "Relation/Assertion/Text Anchor/根拠への遷移→元の文書",
+      "kind": "実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "KNO-03",
+      "title": "選択nodeを中心にした局所関係グラフ/一覧",
+      "principal": "OWNER-API（当該projectのreadのみ）",
+      "purpose": "KNO-02から開き、同じnode/元原稿へ戻す",
+      "kind": "情報設計の未採用提案。専用UI/URLは未実装",
+      "adoption": "proposal",
+      "form": "page",
+      "platforms": []
+    },
+    {
+      "id": "REV-01",
+      "title": "Desktop ChangeSet/Module proposal・iOS Native Review",
+      "principal": "OWNER-API",
+      "purpose": "内容・作者の判断対象を選択 → REV-02",
+      "kind": "Desktop実装・iOS未受入",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "REV-02",
+      "title": "提案の前後差分・承認/却下/適用",
+      "principal": "OWNER-API",
+      "purpose": "receiptを照合し反映された原稿/知識へ",
+      "kind": "実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "TOOL-01",
+      "title": "Workspaceのmodule:*可変panel",
+      "principal": "OWNER-API、MCPは独立tool側",
+      "purpose": "Moduleのread/compute/proposeと非同期job→同じ作品",
+      "kind": "実装",
+      "adoption": "adopted",
+      "form": "panel",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "JOB-01",
+      "title": "ヘッダーの受信箱/ジョブdialog",
+      "principal": "OWNER-API",
+      "purpose": "通知とjob確認/既読 → 元の作業",
+      "kind": "実装",
+      "adoption": "adopted",
+      "form": "dialog",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "DISPLAY-01",
+      "title": "Theme、組版、Workspace配置",
+      "principal": "本人のbrowser UI state",
+      "purpose": "見た目・レイアウト変更→元の作業。原稿は無変更",
+      "kind": "実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "PREF-01",
+      "title": "Desktop 認証ダイアログと /console/security、iOS Native 設定",
+      "principal": "OWNER-SESSION（実APIはowner確認）",
+      "purpose": "Passkey/セッション→元の作業",
+      "kind": "Desktop実装・iOS未受入",
+      "adoption": "adopted",
+      "form": "dialog",
+      "platforms": [
+        "desktop",
+        "ios"
+      ]
+    },
+    {
+      "id": "PUB-01",
+      "title": "/r/:module/:project/:slug",
+      "principal": "SHARE-READER",
+      "purpose": "許された公開版の読書→公開画面内で終了",
+      "kind": "実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "reader"
+      ]
+    },
+    {
+      "id": "CON-00",
+      "title": "/console",
+      "principal": "OWNER-SESSION",
+      "purpose": "認証状況・各管理項目へのハブ",
+      "kind": "Desktop Web 実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "CON-01",
+      "title": "/console/setup開始・登録キー入力",
+      "principal": "SETUP",
+      "purpose": "状態確認、キー認可→CON-02",
+      "kind": "Desktop Web 実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "CON-02",
+      "title": "/console/setup Passkey ceremony/確認",
+      "principal": "SETUP",
+      "purpose": "WebAuthn、owner一意確定→CON-03",
+      "kind": "Desktop Web 実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "CON-03",
+      "title": "/console/setup client登録と公開待ち",
+      "principal": "SETUPのread-only状態（本人作成後は本人session）",
+      "purpose": "準備確認→通常owner login",
+      "kind": "Desktop Web 実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "CON-10",
+      "title": "/console/security Passkey管理",
+      "principal": "OWNER-SESSION＋fresh確認",
+      "purpose": "追加・改名・削除、現在の認証手段維持→CON-00",
+      "kind": "Desktop Web 実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "CON-11",
+      "title": "/console/security session管理",
+      "principal": "OWNER-SESSION＋fresh確認（操作による）",
+      "purpose": "他端末終了、全他セッション終了→CON-00",
+      "kind": "Desktop Web 実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "CON-20",
+      "title": "/console/identity OIDC管理",
+      "principal": "OWNER-SESSION＋fresh確認",
+      "purpose": "issuer/client登録・検証・リンク・有効化/無効化→CON-00",
+      "kind": "運用者設定状態の参照を実装。管理操作は目標",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "CON-21",
+      "title": "/console/identity OAuth client/grants",
+      "principal": "OWNER-SESSION＋object/scope認可",
+      "purpose": "クライアント・同意の参照/許可された失効→CON-00",
+      "kind": "Desktop Web で保存済み同意の参照と取消しを実装",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "CON-30",
+      "title": "/console/backups",
+      "principal": "OWNER-SESSION",
+      "purpose": "S3保存先/適用状態・off-VM保全・復旧検証の状態→各バックアップ画面",
+      "kind": "Desktop Web 実装、運用受入は別",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "CON-31",
+      "title": "/console/backups/destination",
+      "principal": "OWNER-SESSION＋fresh（secret/active変更時）",
+      "purpose": "S3 provider/endpoint/bucket/prefix/credential（write-only）を編集→CON-32",
+      "kind": "Desktop Web 実装、運用受入は別",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "CON-32",
+      "title": "/console/backups/verification",
+      "principal": "OWNER-SESSION＋fresh（activate時）",
+      "purpose": "probe→revision照合→activeの適用結果再取得→CON-30",
+      "kind": "Desktop Web 実装、運用受入は別",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "CON-33",
+      "title": "/console/backups/history",
+      "principal": "OWNER-SESSION",
+      "purpose": "backup run/暗号文receiptと失敗・未確認を表示→CON-30/34",
+      "kind": "Desktop Web 実装、運用受入は別",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "CON-34",
+      "title": "/console/backups/recovery",
+      "principal": "OWNER-SESSIONのread-only",
+      "purpose": "隔離restore drillの証拠、OPERATOR復旧手順への説明。実本番復元はしない",
+      "kind": "Desktop Web 実装、運用受入は別",
+      "adoption": "adopted",
+      "form": "page",
+      "platforms": [
+        "console"
+      ]
+    },
+    {
+      "id": "OPS-01",
+      "title": "Webではなくprotected workflow/SSH",
+      "principal": "OPERATOR",
+      "purpose": "VM構築・更新・本番復旧（設計はデプロイ文書に委任）。保管先設定はCON-30〜34のowner UI、実際のhost backup/restoreはprotected executor/operator",
+      "kind": "実装/目標分離",
+      "adoption": "external",
+      "form": "page",
+      "platforms": []
+    },
+    {
+      "id": "CFG-01",
+      "title": "表示設定・本人セキュリティ設定",
+      "purpose": "DISPLAY-01 と PREF-01 の分類",
+      "adoption": "conceptual",
+      "platforms": []
+    }
+  ],
+  "controls": [
+    {
+      "id": "ENTRY-01.A",
+      "screen": "ENTRY-01",
+      "label": "Desktop Webを起動",
+      "prerequisite": "ANON/LOCAL",
+      "success": "/desktop/へ移動。iOSはNative app entry",
+      "recovery": "選択状態保存へ依存しない"
+    },
+    {
+      "id": "AUTH-01.A",
+      "screen": "AUTH-01",
+      "label": "Passkeyでサインイン",
+      "prerequisite": "signed OAuth request、WebAuthn",
+      "success": "Better Auth session→AUTH-02",
+      "recovery": "cancel/UV失敗はログインのまま、鍵は残さない"
+    },
+    {
+      "id": "AUTH-01.B",
+      "screen": "AUTH-01",
+      "label": "外部IdPでサインイン",
+      "prerequisite": "ownerがリンクしたactive IdP",
+      "success": "issuer/sub確認→AUTH-02",
+      "recovery": "未リンク・認証失敗はowner作成なし"
+    },
+    {
+      "id": "AUTH-02.A",
+      "screen": "AUTH-02",
+      "label": "許可して続ける",
+      "prerequisite": "client/redirect/scope確認、OWNER-SESSION",
+      "success": "認可コード→登録済みcallback",
+      "recovery": "不明scopeならdisabled、grantなし"
+    },
+    {
+      "id": "AUTH-02.B",
+      "screen": "AUTH-02",
+      "label": "拒否して戻る",
+      "prerequisite": "valid OAuth request",
+      "success": "拒否結果を登録済みredirectへ",
+      "recovery": "tokenを発行しない"
+    },
+    {
+      "id": "LIB-01.A",
+      "screen": "LIB-01",
+      "label": "作品を開く・最近の作業に戻る",
+      "prerequisite": "OWNER-API、projectID一致",
+      "success": "OUT-01/WRT-01",
+      "recovery": "不在/別作品/ネットワーク失敗をempty扱いしない"
+    },
+    {
+      "id": "LIB-01.B",
+      "screen": "LIB-01",
+      "label": "作品を作成",
+      "prerequisite": "OWNER-API、POST /api/v1/persistence/projects",
+      "success": "新作品の構成に遷移",
+      "recovery": "結果不明は同じprojectIDで再照合"
+    },
+    {
+      "id": "LIB-01.C",
+      "screen": "LIB-01",
+      "label": "作品JSONをインポート",
+      "prerequisite": "OWNER-API、POST /api/v1/persistence/import、schema/hash検証",
+      "success": "新project選択。既存projectは不変",
+      "recovery": "無効JSON、重複、partialは元画面"
+    },
+    {
+      "id": "LIB-01.D",
+      "screen": "LIB-01",
+      "label": "作品JSONをエクスポート",
+      "prerequisite": "OWNER-API、GET …/archive、固定snapshot",
+      "success": "読取だけ、保存場所はブラウザー",
+      "recovery": "データ不完全なら成功ファイルを装わない"
+    },
+    {
+      "id": "LIB-01.E",
+      "screen": "LIB-01",
+      "label": "離脱用 ZIP をダウンロード",
+      "prerequisite": "OWNER-API、GET …/open-export、操作開始時の作品 ID と固定スナップショット",
+      "success": "全バイト受信後に保存用の ZIP をブラウザーに渡す",
+      "recovery": "中断、期限超過、容量超過、データ欠損は受信完了にしない。",
+      "references": [
+        {
+          "label": "離脱用 ZIP の実装契約",
+          "path": "docs/architecture/OPEN-WORK-EXPORT-CONTRACT.sdoc"
+        }
+      ]
+    },
+    {
+      "id": "OUT-01.A",
+      "screen": "OUT-01",
+      "label": "構成検索・展開・ズーム",
+      "prerequisite": "OWNER-APIで一覧取得後LOCAL",
+      "success": "同じprojectの構成を表示",
+      "recovery": "フィルター変更で本文を破棄しない"
+    },
+    {
+      "id": "OUT-01.B",
+      "screen": "OUT-01",
+      "label": "文書・シーンを選択",
+      "prerequisite": "OWNER-API、project/document scope、transition guard",
+      "success": "WRT-01、選択位置",
+      "recovery": "guard失敗/404は元編集を保持"
+    },
+    {
+      "id": "OUT-01.C",
+      "screen": "OUT-01",
+      "label": "巻・章・シーンを追加",
+      "prerequisite": "OWNER-API、POST …/documents、親とidempotency",
+      "success": "新文書を開く",
+      "recovery": "concurrent parent/invalid kindはエラー"
+    },
+    {
+      "id": "OUT-01.D",
+      "screen": "OUT-01",
+      "label": "名前・親・順序を変更",
+      "prerequisite": "OWNER-API、PATCH …/metadata、expectedVersion",
+      "success": "最新構成を再取得",
+      "recovery": "循環/別project/staleは拒否"
+    },
+    {
+      "id": "OUT-01.E",
+      "screen": "OUT-01",
+      "label": "文書を削除",
+      "prerequisite": "OWNER-API、DELETE …/documents/:id、明示確認",
+      "success": "歴史を保持し一覧へ",
+      "recovery": "guard/拒否/同時変更は現状態を維持"
+    },
+    {
+      "id": "WRT-01.A",
+      "screen": "WRT-01",
+      "label": "保存",
+      "prerequisite": "OWNER-API、PATCH …/documents/:id、baseRevision+idempotency",
+      "success": "receiptを確認して「保存済み」",
+      "recovery": "409/412/response不明はREC-01へ"
+    },
+    {
+      "id": "WRT-01.B",
+      "screen": "WRT-01",
+      "label": "読む/編集へ戻る",
+      "prerequisite": "LOCAL、IMEとdraft guard",
+      "success": "READ-01⇄WRT-01、同じ原稿",
+      "recovery": "guard失敗なら切替えない"
+    },
+    {
+      "id": "WRT-01.C",
+      "screen": "WRT-01",
+      "label": "選択範囲をText Anchor化",
+      "prerequisite": "OWNER-API、確定Revision、選択UTF-16とquote hash",
+      "success": "KNO-02の根拠へ",
+      "recovery": "dirty/stale/位置不明は無効化"
+    },
+    {
+      "id": "WRT-01.D",
+      "screen": "WRT-01",
+      "label": "書式記号・組版・文字サイズ",
+      "prerequisite": "LOCAL、CodeMirrorと表示state",
+      "success": "editor保持／表示のみ変更",
+      "recovery": "IME/カーソルを奪わない"
+    },
+    {
+      "id": "WRT-02.A",
+      "screen": "WRT-02",
+      "label": "Revision履歴と差分",
+      "prerequisite": "OWNER-API、GET …/revisions",
+      "success": "比較のみ、本文は無変更",
+      "recovery": "取得不可なら再試行。Draftは消さない"
+    },
+    {
+      "id": "WRT-02.B",
+      "screen": "WRT-02",
+      "label": "このRevisionを復元",
+      "prerequisite": "OWNER-API、POST …/restore、base/冪等、明示確認",
+      "success": "新immutable RevisionとしてWRT-01へ",
+      "recovery": "競合時に現在原稿を上書きしない"
+    },
+    {
+      "id": "REC-01.A",
+      "screen": "REC-01",
+      "label": "下書きを再保護",
+      "prerequisite": "LOCAL IndexedDB、原稿/author同一性",
+      "success": "journal再確認→WRT-01",
+      "recovery": "quota/write失敗を黙って消さない"
+    },
+    {
+      "id": "REC-01.B",
+      "screen": "REC-01",
+      "label": "応答不明を再確認",
+      "prerequisite": "OWNER-API、同じoperation/receipt",
+      "success": "確定なら「保存済み」",
+      "recovery": "timeout時に別IDで重複保存しない"
+    },
+    {
+      "id": "REC-01.C",
+      "screen": "REC-01",
+      "label": "競合を比較して解決",
+      "prerequisite": "OWNER-API、明示選択した版",
+      "success": "差分を示した上で新save",
+      "recovery": "「回復Draftを破棄」は追加確認が必要"
+    },
+    {
+      "id": "KNO-01.A",
+      "screen": "KNO-01",
+      "label": "検索・絞り込み・追加読込",
+      "prerequisite": "OWNER-API、GET …/nodes",
+      "success": "同じproject snapshotの一覧",
+      "recovery": "古いカーソルや応答を混ぜない"
+    },
+    {
+      "id": "KNO-01.B",
+      "screen": "KNO-01",
+      "label": "Knowledge候補を保存/確定",
+      "prerequisite": "OWNER-API、PUT …/nodes/:id、version",
+      "success": "KNO-02・同じノード",
+      "recovery": "失敗/応答不明は同一IDを照合"
+    },
+    {
+      "id": "KNO-02.A",
+      "screen": "KNO-02",
+      "label": "Evidence/Anchorを開く",
+      "prerequisite": "OWNER-API、Revision一致と対象project",
+      "success": "原稿の該当引用へ。戻り先保持",
+      "recovery": "orphan/staleなら位置再確認へ"
+    },
+    {
+      "id": "KNO-02.B",
+      "screen": "KNO-02",
+      "label": "Link・Relation・Assertionを変更",
+      "prerequisite": "OWNER-API、version/confirmed anchor",
+      "success": "KNO-02を再取得",
+      "recovery": "confirmedを推測せず競合として扱う"
+    },
+    {
+      "id": "KNO-02.C",
+      "screen": "KNO-02",
+      "label": "Knowledgeを統合",
+      "prerequisite": "OWNER-API、previewDigest+projectVersion+confirm",
+      "success": "影響/receipt表示",
+      "recovery": "preview古さ、競合、未確認は適用不可"
+    },
+    {
+      "id": "KNO-03.A",
+      "screen": "KNO-03",
+      "label": "（提案）関係グラフ/一覧へ切替・対象nodeを選択",
+      "prerequisite": "OWNER-APIの同一project readのみ。新規mutationなし",
+      "success": "KNO-02の選択node・原稿への復帰文脈を保持",
+      "recovery": "現時点では未実装。存在しないグラフを表示済みとしない"
+    },
+    {
+      "id": "REV-01.A",
+      "screen": "REV-01",
+      "label": "提案/ChangeSetを開く",
+      "prerequisite": "OWNER-API、read-set対象の認可",
+      "success": "REV-02、元のproject保持",
+      "recovery": "stale/欠損を成功として扱わない"
+    },
+    {
+      "id": "REV-02.A",
+      "screen": "REV-02",
+      "label": "承認・却下・適用",
+      "prerequisite": "OWNER-APIだけ。ChangeSet versionと状態",
+      "success": "receipt後に反映文書/知識へ",
+      "recovery": "MCPに渡さず、staleや未承認を拒否"
+    },
+    {
+      "id": "REV-02.B",
+      "screen": "REV-02",
+      "label": "Module提案を一覧から隠す",
+      "prerequisite": "LOCAL、ブラウザーjournal",
+      "success": "一覧表示だけ変更",
+      "recovery": "サーバー上の却下ではないと示す"
+    },
+    {
+      "id": "TOOL-01.A",
+      "screen": "TOOL-01",
+      "label": "分析/外部module actionを起動",
+      "prerequisite": "OWNER-API、宣言されたeffect+module availability",
+      "success": "局所結果またはJOB-01へ",
+      "recovery": "未導入/失敗はCore執筆へ波及させない"
+    },
+    {
+      "id": "JOB-01.A",
+      "screen": "JOB-01",
+      "label": "job/通知を読む・再取得・既読",
+      "prerequisite": "OWNER-API、/api/jobs*//api/inbox*",
+      "success": "dialog内状態更新、元の作業維持",
+      "recovery": "stream失敗はpoll/retry、既読成功を偽装しない"
+    },
+    {
+      "id": "DISPLAY-01.A",
+      "screen": "DISPLAY-01",
+      "label": "Theme・layout・組版",
+      "prerequisite": "LOCAL、author/device classの表示設定",
+      "success": "同じ原稿・位置",
+      "recovery": "保存設定の失敗を通知、原稿無変更"
+    },
+    {
+      "id": "PREF-01.A",
+      "screen": "PREF-01",
+      "label": "セキュリティ設定を開く",
+      "prerequisite": "OWNER-SESSION、API owner確認",
+      "success": "dialog/settingsまたはCON-10",
+      "recovery": "session変化で下書きを守る"
+    },
+    {
+      "id": "PUB-01.A",
+      "screen": "PUB-01",
+      "label": "公開版を読む・テーマ変更",
+      "prerequisite": "SHARE-READER、GETのみ",
+      "success": "公開版のまま表示",
+      "recovery": "失効/不明scopeでprivate APIへ遷移しない"
+    },
+    {
+      "id": "CON-00.A",
+      "screen": "CON-00",
+      "label": "セキュリティ・連携先を選択",
+      "prerequisite": "OWNER-SESSION",
+      "success": "CON-10/CON-20",
+      "recovery": "401なら再認証、403なら拒否"
+    },
+    {
+      "id": "CON-01.A",
+      "screen": "CON-01",
+      "label": "初期登録キーを検証",
+      "prerequisite": "SETUP、NEW_APPROVED＋短命transaction",
+      "success": "CON-02",
+      "recovery": "expired/rate-limit/復旧中なら登録不可"
+    },
+    {
+      "id": "CON-02.A",
+      "screen": "CON-02",
+      "label": "Passkeyを作る",
+      "prerequisite": "SETUP、WebAuthn challenge/UV、単一ownerDB制約",
+      "success": "原子的確定→CON-03",
+      "recovery": "cancel/競合/応答不明はowner再生成せず照合"
+    },
+    {
+      "id": "CON-03.A",
+      "screen": "CON-03",
+      "label": "状態更新/通常ログイン",
+      "prerequisite": "SETUP結果readまたはOWNER-SESSION",
+      "success": "owner確定後AUTH-01→CON-00",
+      "recovery": "本番公開失敗時も再初期化しない"
+    },
+    {
+      "id": "CON-10.A",
+      "screen": "CON-10",
+      "label": "Passkey追加・改名・削除",
+      "prerequisite": "OWNER-SESSION＋fresh、別の利用可能手段維持",
+      "success": "同じ一覧を再取得",
+      "recovery": "最後の手段削除・UV失敗は拒否"
+    },
+    {
+      "id": "CON-11.A",
+      "screen": "CON-11",
+      "label": "他セッション終了",
+      "prerequisite": "OWNER-SESSION＋対象確認",
+      "success": "最新session一覧を再取得",
+      "recovery": "自分の現在session個別終了は無効"
+    },
+    {
+      "id": "CON-20.A",
+      "screen": "CON-20",
+      "label": "OIDC登録/検証/有効化",
+      "prerequisite": "OWNER-SESSION＋fresh、issuer/sub不変",
+      "success": "verified owner linkを保持",
+      "recovery": "未検証providerをactiveにしない"
+    },
+    {
+      "id": "CON-21.A",
+      "screen": "CON-21",
+      "label": "OAuth client/grantを確認・revoke",
+      "prerequisite": "OWNER-SESSION、owner＋client/scope対象",
+      "success": "revoke receipt/状態再取得",
+      "recovery": "既存access JWTの有効性をlogoutだけで偽らない"
+    },
+    {
+      "id": "CON-00.B",
+      "screen": "CON-00",
+      "label": "バックアップ管理へ",
+      "prerequisite": "OWNER-SESSION。保管先変更の権限とは別",
+      "success": "CON-30へ",
+      "recovery": "401/403時は認証・拒否表示。元のdraftは保持"
+    },
+    {
+      "id": "CON-30.A",
+      "screen": "CON-30",
+      "label": "現在の保管先・保全状態を更新",
+      "prerequisite": "GET /api/console/backups/status、OWNER-SESSION",
+      "success": "設定/検証/DR証拠を区別してCON-30",
+      "recovery": "API未到達ならUNKNOWN、成功とみなさない"
+    },
+    {
+      "id": "CON-30.B",
+      "screen": "CON-30",
+      "label": "手動バックアップを要求",
+      "prerequisite": "POST /api/console/backups/runs、OWNER-SESSION＋fresh、停止の影響・確認",
+      "success": "202＋run IDを保存しCON-33へ",
+      "recovery": "既存runを二重生成しない。停止・拒否・不明を区別"
+    },
+    {
+      "id": "CON-31.A",
+      "screen": "CON-31",
+      "label": "S3設定案を保存",
+      "prerequisite": "PUT /api/console/backups/config/draft、If-Match、secretはwrite-only",
+      "success": "設定revision取得→CON-32",
+      "recovery": "412/422なら同じ入力を保持、秘密値を再表示しない"
+    },
+    {
+      "id": "CON-32.A",
+      "screen": "CON-32",
+      "label": "S3接続検証",
+      "prerequisite": "POST /api/console/backups/config/probes、draft revision",
+      "success": "probe IDで状態を再取得、結果がPASSEDならactivateへ",
+      "recovery": "probe失敗や応答不明を保全済みにしない"
+    },
+    {
+      "id": "CON-32.B",
+      "screen": "CON-32",
+      "label": "検証済み設定を有効化",
+      "prerequisite": "POST /api/console/backups/config/activate、OWNER-SESSION＋fresh＋同一revisionのPASSED probe",
+      "success": "202後はoperation結果再取得→ACTIVE後CON-30",
+      "recovery": "202をACTIVEと誤表示しない。stale/失効probeを拒否"
+    },
+    {
+      "id": "CON-30.C",
+      "screen": "CON-30",
+      "label": "S3設定を無効化",
+      "prerequisite": "POST /api/console/backups/config/disable、fresh＋影響確認",
+      "success": "サーバー確定後CON-30、保全済み遠隔objectは削除しない",
+      "recovery": "requiredに代替が無いなら拒否、DR保証を偽装しない"
+    },
+    {
+      "id": "CON-33.A",
+      "screen": "CON-33",
+      "label": "backup runとreceiptを開く",
+      "prerequisite": "GET /api/console/backups/runsとGET .../runs/:id、OWNER-SESSION",
+      "success": "同じrun IDの状態と暗号文receiptを表示",
+      "recovery": "UNKNOWN/FAILED/接続断を成功扱いしない"
+    },
+    {
+      "id": "CON-34.A",
+      "screen": "CON-34",
+      "label": "独立restore証拠を表示",
+      "prerequisite": "GET /api/console/backups/recovery、OWNER-SESSION",
+      "success": "証拠と保護された運用手順を表示",
+      "recovery": "実本番restore/SSH/Ansibleを実行しない"
+    },
+    {
+      "id": "OPS-01.A",
+      "screen": "OPS-01",
+      "label": "デプロイ/復旧を承認・実行",
+      "prerequisite": "OPERATOR、別管理planeと署名ではない証明書/backup",
+      "success": "保護されたworkflowの結果へ",
+      "recovery": "Webのボタンに実装しない"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+flowchart TD
+    OPEN["文書を開く"] --> FETCH["DB Revisionとlocal journalを照合"]
+    FETCH --> STATE{"対象の状態"}
+    STATE -->|確定| EDIT["CodeMirrorで執筆"]
+    STATE -->|Draft/競合あり| RECOVER["REC-01"]
+    STATE -->|404/権限拒否| OUTLINE["構成へ戻る"]
+    EDIT -->|本文入力| JOURNAL["ブラウザー下書きを保護"]
+    JOURNAL -->|保護成功| SAVE["baseRevision+idempotencyで保存"]
+    JOURNAL -->|保護失敗| RISK["保護不可を明示 / 同じ原稿保持"]
+    SAVE --> RESULT{"DB receiptは確認できた?"}
+    RESULT -->|はい| CONFIRMED["Revision確定と入力差分を表示"]
+    RESULT -->|応答不明/競合| RECOVER
+    CONFIRMED -->|追加入力| EDIT
+    CONFIRMED -->|読む| READING["READ-01"]
+    CONFIRMED -->|履歴| HIST["WRT-02"]
+    CONFIRMED -->|根拠作成| KNOW["KNO-02"]

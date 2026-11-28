@@ -1,0 +1,51 @@
+flowchart TD
+    INF["インフラ管理者: VM / Tailnet / Cloudflare準備"] --> REQ["配備運用者: Deployment要求 / 所望release"]
+    REQ --> OBS["Production Preflight<br/>VM・DB・Auth・API・Frontend・操作記録"]
+    OBS --> KNOWN{"必要な観測・承認が確定?"}
+    KNOWN -->|いいえ| STOP["R0: 停止 / 前提準備"]
+    KNOWN -->|はい| PENDING{"既知の未完了操作?"}
+    PENDING -->|あり| REC["R1: 再開または切戻し"]
+    REC --> OBS
+    PENDING -->|なし| LOST{"既存状態の復旧が必要?"}
+    LOST -->|はい| RESTORE["R2: 復旧担当 / 独立ホスト<br/>backup・必要なSecret復元"]
+    RESTORE --> HANDOFF["既存Preflight / 復元証拠・承認を照合"]
+    HANDOFF -->|一致| RECOVERED["R3: 共通Ansible配備処理で公開"]
+    HANDOFF -->|不成立| STOP
+    RECOVERED --> ACCEPT
+    LOST -->|いいえ| EMPTYDB{"DB不在を確認・新規承認済み・基盤正常?"}
+    EMPTYDB -->|はい| BOOT["R4: Actions → Tailscale → SSH → Ansible<br/>基盤・VM内部秘密・DB/Auth"]
+    EMPTYDB -->|いいえ| INCOMPAT{"既存DB/Auth/Backend非互換?"}
+    INCOMPAT -->|はい| STOP
+    INCOMPAT -->|いいえ| DRIFT{"drift・障害?"}
+    DRIFT -->|はい| MAINT["R3: 基盤修復・通常復旧"]
+    DRIFT -->|いいえ| BASE{"基盤・DB・Auth runtime収束済み?"}
+    BASE -->|いいえ| BOOT
+    BOOT --> OBS
+    BASE -->|はい| OWNER{"owner activation準備済み?"}
+    OWNER -->|いいえ / 新規承認済み| SETUP["R5: 配備運用者 / Actions<br/>通常Frontend・setup-only API<br/>所有者 / console/setup・Passkey<br/>activation preparation"]
+    SETUP --> OBS
+    OWNER -->|いいえ / 既存・不明| STOP
+    OWNER -->|はい| API{"cleanなAPI未配備?"}
+    API -->|はい| FRONT{"互換Frontend稼働済み?"}
+    FRONT -->|いいえ| STOP
+    FRONT -->|はい| ACT["R6: 配備運用者 / Actions<br/>互換Frontend確認後の初回Backend activation"]
+    API -->|いいえ| COMPAT{"通常release admission成立?"}
+    COMPAT -->|いいえ| STOP
+    COMPAT -->|はい| UPDATE["R8: Actions / 通常更新<br/>Backend変更前はVMの共通backup経路<br/>同一digest no-op"]
+    MAINT --> OBS
+    ACT --> ACCEPT["identity・health・Auth・データ・公開境界を検証"]
+    UPDATE --> ACCEPT
+    ACCEPT -->|不成立| REC
+    ACCEPT -->|成立| ACTIVE["ACTIVE: 通常Console利用可能"]
+    ACTIVE -->|純新規 / 保全未受入| CFG["所有者 / console/backups<br/>設定・検証・実行"]
+    CFG --> STORE["VMの共通backup実行主体 → 独立保管先"]
+    STORE -->|失敗| CFG
+    STORE -->|成功・初回または復元試験時| DRILL["復旧担当 / 独立ホスト<br/>復元試験・運用者受入"]
+    DRILL -->|失敗| CFG
+    DRILL -->|成功| USE["ACCEPTED: 通常運用"]
+    STORE -->|成功・受入済みの通常保全| USE
+    ACTIVE -->|既に運用受入済み| USE
+    USE -->|手動 / 承認済み定期保全| STORE
+    USE -->|独立復元試験| DRILL
+    USE -->|互換release / 障害・復旧要求| REQ
+    STOP -->|前提確定・再要求| OBS

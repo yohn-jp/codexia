@@ -1,0 +1,10 @@
+flowchart TD
+    ENTRY["ヘッダー受信箱ボタン"] --> DIALOG["Dialog/通知・ジョブ履歴"]
+    DIALOG --> GET["ownerのjobs/inboxを取得"]
+    GET -->|成功| LIST["待機/実行中/成功/失敗を表示"]
+    GET -->|失敗| RETRY["streamかRESTを再試行"]
+    RETRY --> GET
+    LIST -->|通知を既読| MARK["owner認可で既読にする"]
+    MARK --> GET
+    LIST -->|再取得| GET
+    LIST -->|閉じる| RETURN["元の原稿とfocusへ"]

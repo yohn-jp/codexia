@@ -1,0 +1,13 @@
+flowchart TD
+    ENTRY["Workspaceのmodule panel"] --> AVAILABLE{"選択profileで利用可能?"}
+    AVAILABLE -->|無効/未導入| CORE["Core執筆は継続"]
+    AVAILABLE -->|利用可能| ACTION["宣言されたread/compute/proposeを選択"]
+    ACTION --> GUARD{"権限・project/snapshot/effectは一致?"}
+    GUARD -->|拒否| ERROR["影響を局所表示して停止"]
+    GUARD -->|許可| EXEC["同じAPI action hostへ依頼"]
+    EXEC --> RESULT{"結果"}
+    RESULT -->|即時| VIEW["結果と出典/snapshotを表示"]
+    RESULT -->|非同期| JOB["JOB-01"]
+    RESULT -->|提案| REVIEW["REV-01"]
+    RESULT -->|失敗| ERROR
+    VIEW --> ENTRY

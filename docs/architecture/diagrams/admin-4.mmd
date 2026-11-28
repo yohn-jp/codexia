@@ -1,0 +1,24 @@
+flowchart TD
+    ENTRY["/console または /console/* に移動"] --> ROUTE{"要求URLは /console/setup ?"}
+    ROUTE -->|はい| STATUS["セットアップ状態をAPIで取得"]
+    STATUS -->|初回登録待ち| SETUP["/console/setup 初回登録"]
+    STATUS -->|owner登録済み| SETUPCLOSED["登録を閉鎖・新規owner禁止"]
+    STATUS -->|API未到達・復旧中| BLOCK["再試行/運用者へ連絡<br/>初回登録には戻さない"]
+    SETUPCLOSED --> AUTH{"owner sessionがある?"}
+    ROUTE -->|いいえ| AUTH
+    AUTH -->|未認証| SIGNIN["Better Auth Passkey/OIDCでサインイン"]
+    SIGNIN -->|成功| GUARD{"APIでowner scopeを検証"}
+    SIGNIN -->|中止・失敗| AUTHERROR["理由と再試行<br/>秘密・原稿を保持"]
+    AUTHERROR --> SIGNIN
+    AUTH -->|認証済み| GUARD
+    GUARD -->|owner以外| FORBID["403: 管理操作を拒否"]
+    GUARD -->|owner| HOME["/console 管理トップ"]
+    HOME --> SEC["/console/security<br/>Passkey/セッション"]
+    HOME --> IDENT["/console/identity<br/>IdP/OAuth設定"]
+    HOME --> BACKUP["/console/backups<br/>保管先/検証/履歴"]
+    SEC --> HOME
+    IDENT --> HOME
+    BACKUP --> HOME
+    HOME --> BACK["元の作品/執筆画面へ戻る"]
+    SETUP -->|登録と受入待ち| WAIT["公開有効化待ち<br/>DB/認証状態を再取得"]
+    WAIT -->|本番有効化成功| SIGNIN

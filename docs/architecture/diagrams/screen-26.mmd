@@ -1,0 +1,9 @@
+flowchart TD
+    ENTRY["現在の原稿/作者/作品"] --> ACTION{"画面・文書・Shellを切替える"}
+    ACTION --> GUARD{"IMEとlocal Draft保護が完了?"}
+    GUARD -->|いいえ| STAY["現在のEditorを保持 / 理由提示"]
+    GUARD -->|はい| AUTH{"遷移先のcredentialとproject/object認可"}
+    AUTH -->|OK| NEXT["遷移先を表示しcontextを復元"]
+    AUTH -->|401/403/404| BLOCK["旧Editor保護 / 安全な画面へ"]
+    NEXT -->|戻る| ACTION
+    STAY --> ACTION

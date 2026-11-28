@@ -1,0 +1,18 @@
+flowchart TD
+    OWNER["owner のセキュリティ設定"] --> IDP["外部 IdP 管理（目標）"]
+    IDP --> CONFIG["issuer / client ID / Secret を入力<br/>Secretは再表示しない"]
+    CONFIG --> VALIDATE{"issuer/discovery / redirect / owner再認証 / 信頼境界を検証"}
+    VALIDATE -->|失敗| INVALID["保存・有効化しない<br/>エラーと修正可能箇所を表示"]
+    INVALID --> CONFIG
+    VALIDATE -->|OK| TEST["owner が IdP で認証・本人へのリンクを検証"]
+    TEST -->|別人、未確認 sub、失敗| INVALID
+    TEST -->|同一 owner のリンクを検証| ACTIVATE["IdPを明示的に有効化"]
+    ACTIVATE --> IDP
+    IDP --> DISABLE{"無効化/削除要求"}
+    DISABLE -->|最後の復旧可能な本人認証が失われる| BLOCK["拒否・別手段を登録"]
+    DISABLE -->|owner復旧経路保持| CONFIRM["再認証 + 確認 → 無効化"]
+    BLOCK --> IDP
+    CONFIRM --> IDP
+    OWNER --> OAUTH["OAuth クライアント/同意管理"]
+    OAUTH --> REVOKE["対象 client・scope・grant を確認<br/>明示 revoke"]
+    REVOKE --> OAUTH

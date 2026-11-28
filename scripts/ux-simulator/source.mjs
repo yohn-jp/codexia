@@ -8,6 +8,21 @@ export const digest = (bytes) => createHash('sha256').update(bytes).digest('hex'
 export const isPath = (path) => typeof path === 'string' && /^[\w./@+-]+$/.test(path)
   && path.split('/').every((part) => part && part !== '.' && part !== '..');
 
+export function jsonRecordLocator(path, text) {
+  const lines = new Map();
+  let offset = 0;
+  let line = 1;
+  for (const match of text.matchAll(/"id"\s*:\s*"([\w.-]+)"/gu)) {
+    line += text.slice(offset, match.index).split('\n').length - 1;
+    offset = match.index;
+    lines.set(match[1], line);
+  }
+  return id => {
+    if (!lines.has(id)) throw new Error('Missing source location for design record: ' + id);
+    return { path, line: lines.get(id) };
+  };
+}
+
 export function createSource(rootLocation) {
   const root = rootLocation instanceof URL ? fileURLToPath(rootLocation) : resolve(rootLocation);
   const inputs = new Map();

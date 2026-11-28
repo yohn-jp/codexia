@@ -1,0 +1,18 @@
+stateDiagram-v2
+    [*] --> LoadDraft
+    LoadDraft --> Editing : existing draft / new
+    Editing --> Saving : BKC-003 + If-Match
+    Saving --> Editing : 412 stale / 422 invalid
+    Saving --> DraftSaved : revision確定
+    DraftSaved --> Probing : BKC-004 / probe ID
+    Probing --> ProbeFailed : FAILED / BLOCKED
+    ProbeFailed --> Editing : 修正
+    Probing --> ProbePassed : PASSED 同一revision
+    ProbePassed --> Reauth : owner明示確認
+    Reauth --> ActivationPending : BKC-006 / 202 operation ID
+    Reauth --> Editing : reauth失敗・取消
+    ActivationPending --> Active : actual executor ACTIVE receipt
+    ActivationPending --> Unknown : timeout / reconnect
+    Unknown --> ActivationPending : 同じoperation IDで照合
+    ActivationPending --> Editing : 409 / 412 / FAILED
+    Active --> [*]

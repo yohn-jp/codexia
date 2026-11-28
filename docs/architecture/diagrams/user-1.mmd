@@ -1,0 +1,23 @@
+flowchart TD
+    START["起動"] --> CONSOLE{"URLは /console または /console/* か"}
+    CONSOLE -->|はい| ADMIN["所有者管理コンソール<br/>/console/setup または認証・設定"]
+    CONSOLE -->|いいえ| PATH{"URLは公開 reader /r/* か"}
+    PATH -->|はい| READER["公開 reader<br/>読み取り専用"]
+    PATH -->|いいえ| OAUTH_PAGE{"OAuth login / consent の専用URLか"}
+    OAUTH_PAGE -->|はい| OA["Better Auth ログインまたは同意"]
+    OAUTH_PAGE -->|いいえ| ENTRY["Desktop Web 起動<br/>/desktop/（React）"]
+    NATIVE["iOSアプリ起動<br/>SwiftUI"] --> NATIVE_AUTH["OS認証 / PKCE"]
+    NATIVE_AUTH --> CHECK
+    ENTRY --> CHECK["API version・セッション・PostgreSQL 可用性を検証"]
+    CHECK -->|未認証| LOGIN["OAuth でサインイン"]
+    LOGIN --> OA
+    OA -->|認証コード + PKCE の検証成功| CHECK
+    OA -->|取消し・失敗| LOGIN
+    CHECK -->|DB または API エラー| FAIL["接続失敗<br/>再試行 / 再読込"]
+    FAIL --> CHECK
+    CHECK -->|作者 scope 確認済み| LIB["作品ライブラリ"]
+    LIB -->|作品作成・取込| PROJ["選択作品と構成"]
+    LIB -->|既存作品を開く| PROJ
+    LIB -->|再開位置を選ぶ| WRITING["文書の執筆・閲覧"]
+    PROJ -->|文書を選択・作成| WRITING
+    WRITING -->|作品を切替| LIB

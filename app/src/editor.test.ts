@@ -95,7 +95,7 @@ test('typography preferences retain source ranges and reject invalid values', ()
     maxWidth: 960,
     fontFamily: 'gothic',
   });
-  // Preset widths are a design contract in docs/design/VISUAL-SYSTEM.md.
+  // Preset widths are a design contract in docs/design/VISUAL-SYSTEM.sdoc.
   assert.equal(typographyPresetValues('bunko').maxWidth, 560);
   assert.equal(typographyPresetValues('web-novel').maxWidth, 720);
   assert.equal(typographyPresetValues('genko').maxWidth, 480);
