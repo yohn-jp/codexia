@@ -14,7 +14,7 @@ MID: c02ad2a8e9332151382a70c1dc1bff06
 STATEMENT: >>>
 **Normative lifecycle:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, Deployment lifecycle] defines cross-component admission, route selection, shared exclusion and recovery. [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, Initial VM deployment], [LINK: DOC-DEPLOYMENT-UPDATE-FLOW, Compatible backend updates], and [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, system design] specify the approved state transitions. The implemented `bootstrap` operation and individually supported stages must conform to them.
 
-The sole backend delivery path is **GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet**. Cloudflare Tunnel remains application ingress, not the administration channel. No pull updater, polling timer, signed release channel, reverse-proxy selector or alternate writer controller is maintained.
+The accepted replacement backend delivery path is **GitHub Actions → Cloudflare Access Service Auth → Cloudflare Tunnel → pinned OpenSSH → Ansible → rootless Podman Quadlet**. [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, Single Tunnel management and publication isolation] owns the migration, independent publication gate and acceptance. No pull updater, polling timer, signed release channel, custom reverse-proxy selector or alternate writer controller is maintained.
 
 The canonical production tasks are in [LINK: DOC-DEPLOYMENT-ANSIBLE-PUSH-DEPLOYMENT, Ansible] and the Quadlet definitions in [Quadlet](https://github.com/yohn-jp/codexia/blob/main/deploy/quadlet). The protected production workflow verifies a certified immutable Full GHCR digest and its provenance, serializes deployment under a rootless host lock, requires a verified encrypted backup for compatible image changes and probes readiness. Pull-request validation receives no production credentials.
 
@@ -35,7 +35,7 @@ STATEMENT: >>>
 - **配備の責務:** setup成功後もWorkersの管理コンソールからインフラを変更しない。正本DB、owner、OAuth clients、暗号化backup、証明済みdigest、公開経路を確認して保護されたactivationへ移行する。初回は R5 で通常 Frontend を配備してから、R6 で Backend を起動する。
 - **復旧の責務:** VM再構築時は独立バックアップ、PostgreSQL roles、Podman Secrets等を復元して同じBetter Auth owner IDを維持する。owner/認証DBの復旧が不明なら初回キーを発行しない。詳細は[LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, 初期導入・復旧の状態遷移]を正本とする。
 
-承認済みの新規 VM では、R4 が認証 DB を準備する。続く R5 の owner-setup が初回登録キーを発行し、暗号化した配送用ファイルを作成して、setup-only API と Tunnel を起動する。
+承認済みの新規 VM では、R4 が認証 DB を準備する。続く R5 の owner-setup が初回登録キーを発行し、暗号化した配送用ファイルを作成して、setup-only API を起動し、限定公開の受入後に製品公開ゲートを開く。基盤 Tunnel は管理接続として先に稼働する。
 配備先の VM と Cloudflare 経路を検証してから、登録キーを所有者に引き渡す。[LINK: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME-first-owner-through-the-browser, ブラウザーでの初回登録手順]
 <<<
 
@@ -55,7 +55,7 @@ STATEMENT: >>>
 | `bootstrap` | Converge the declared host, SSH deployment key, protected base secrets and base runtime. Include authentication provisioning when approved. |
 | `host` | Rootless service account and host prerequisites |
 | `secrets` | Initial protected Podman credential convergence |
-| `base` | Networks, persistent volumes, PostgreSQL and Tunnel Quadlets |
+| `base` | Networks, persistent volumes, PostgreSQL Quadlets and the closed product publication gate; verify the existing host Tunnel without stopping or restarting it |
 | `auth-runtime` | Approved application schema initialization for a pristine database, Better Auth role, schema and protected runtime secrets |
 | `deploy` | Approved pristine-schema first activation or certified image update, with verified encrypted backup for the update. Both verify application health and support rollback |
 | `deploy-lifecycle-fixture` | GitHub Actions disposable-host verification only; local `localhost` connection, run-bound source evidence and the shared deployment transaction, with production admission kept on `deploy` |
