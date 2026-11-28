@@ -35,6 +35,33 @@ resource "cloudflare_zero_trust_access_application" "codexia" {
   }]
 }
 
+resource "cloudflare_zero_trust_access_policy" "ssh" {
+  account_id = var.account_id
+  name       = "Codexia SSH (${var.repository_id})"
+  decision   = "non_identity"
+  include = [
+    for environment in ["codexia-bootstrap", "codexia-production"] : {
+      service_token_tag = {
+        key   = "codexia-scope"
+        value = "repo-${var.repository_id}-ssh-${environment}"
+      }
+    }
+  ]
+}
+
+resource "cloudflare_zero_trust_access_application" "ssh" {
+  account_id           = var.account_id
+  name                 = "Codexia management SSH"
+  domain               = var.ssh_hostname
+  type                 = "self_hosted"
+  app_launcher_visible = false
+  session_duration     = "1h"
+  policies = [{
+    id         = cloudflare_zero_trust_access_policy.ssh.id
+    precedence = 1
+  }]
+}
+
 # The reusable policies remain account-owned; manage only their application attachments.
 resource "cloudflare_zero_trust_access_application" "identity_probe" {
   for_each                  = local.identity_probes
@@ -94,6 +121,15 @@ resource "cloudflare_dns_record" "codexia" {
   ttl     = 1
 }
 
+resource "cloudflare_dns_record" "ssh" {
+  zone_id = var.zone_id
+  type    = "CNAME"
+  name    = trimsuffix(var.ssh_hostname, ".${var.zone_name}")
+  content = format("%s.cfargotunnel.com", cloudflare_zero_trust_tunnel_cloudflared.codexia.id)
+  proxied = true
+  ttl     = 1
+}
+
 resource "cloudflare_zero_trust_tunnel_cloudflared_config" "codexia" {
   account_id = var.account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.codexia.id
@@ -140,6 +176,17 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "codexia" {
               required  = true
               team_name = var.team_name
               aud_tag   = [cloudflare_zero_trust_access_application.codexia.aud]
+            }
+          }
+        },
+        {
+          hostname = var.ssh_hostname
+          service  = "ssh://127.0.0.1:22"
+          origin_request = {
+            access = {
+              required  = true
+              team_name = var.team_name
+              aud_tag   = [cloudflare_zero_trust_access_application.ssh.aud]
             }
           }
         },

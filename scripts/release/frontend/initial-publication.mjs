@@ -26,6 +26,9 @@ const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const hexId = /^[a-f0-9]{32}$/u;
 const workerIdPattern = /^[a-zA-Z0-9_-]{1,128}$/u;
 const api = 'https://api.cloudflare.com/client/v4';
+const publicationService = 'http://127.0.0.1:18080';
+const managementService = 'ssh://127.0.0.1:22';
+const serviceTokenTag = 'codexia-scope';
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
 function parseOrigin(origin) {
@@ -41,11 +44,12 @@ export function protectedCloudflareTarget(env = process.env) {
   const target = JSON.parse(env.CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET || 'null');
   const keys = ['repository', 'repositoryId', 'ownerId', 'origin',
     'accountId', 'zoneId', 'tunnelId', 'authorPolicyId', 'ciPolicyId',
-    'tunnelTeamName', 'publicProtocolEnabled'];
+    'sshHostname', 'sshPolicyId', 'tunnelTeamName', 'publicProtocolEnabled'];
   assert.ok(target && keys.every(key => Object.hasOwn(target, key)) &&
     Object.keys(target).length === keys.length, 'Invalid protected Cloudflare target');
   assertReleaseRepositoryBinding(target, actionsRepository(env));
   assert.equal(target.origin, env.CODEXIA_PUBLIC_ORIGIN, 'Protected Cloudflare origin differs from the certified source');
+  assert.equal(target.sshHostname, env.CODEXIA_MANAGEMENT_HOSTNAME, 'Protected SSH hostname differs from the certified source');
   return target;
 }
 
@@ -149,7 +153,7 @@ function allowsHostname(pattern, hostname) {
 
 function assertPolicyIds(policies, expected) {
   assert.ok(Array.isArray(policies) && policies.length === expected.length, 'Cloudflare Access application policies differ from the intended boundary');
-  for (const [index, [decision, id]] of expected.entries()) {
+  for (const [index, [decision, id, tags]] of expected.entries()) {
     const policy = policies.find(item => Number(item.precedence) === index + 1);
     assert.ok(policy?.decision === decision && (!id || policy.id === id), 'Cloudflare Access application policy decision or identity changed');
     if (decision === 'bypass') {
@@ -157,20 +161,26 @@ function assertPolicyIds(policies, expected) {
       assert.ok(!policy.require?.length && !policy.exclude?.length, 'Cloudflare protocol Bypass policy constraints changed');
     }
     if (decision === 'non_identity') {
-      assert.ok(policy.include?.length === 1 && uuid.test(policy.include[0]?.service_token?.token_id),
-        'Cloudflare CI policy must select a single identity probe service token');
+      assert.ok(!policy.require?.length && !policy.exclude?.length && Array.isArray(policy.include),
+        'Cloudflare Service Auth policy constraints changed');
+      assert.deepEqual(policy.include.map(canonical).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+        tags.toSorted().map(value => ({ service_token_tag: { key: serviceTokenTag, value } })),
+        'Cloudflare Service Auth policy must select only the repository and purpose tags');
     }
   }
 }
 
 export function createDeploymentEdge({
-  origin, accountId, zoneId, tunnelId,
-  authorPolicyId, ciPolicyId, tunnelTeamName, publicProtocolEnabled,
+  origin, accountId, zoneId, tunnelId, repositoryId,
+  authorPolicyId, ciPolicyId, sshHostname, sshPolicyId, tunnelTeamName, publicProtocolEnabled,
   readToken, workerToken, accessEnv = process.env, fetchImpl = fetch,
   uploadVersion = runWranglerUpload, uploadInitialVersion = runInitialWorkerUpload,
   readInitialWorkerControls = readCertifiedPublicationControls,
 }) {
   const target = parseOrigin(origin);
+  const managementHost = parseOrigin('https://' + sshHostname).hostname;
+  assert.ok(sshHostname === managementHost && managementHost !== target.hostname &&
+    Number.isSafeInteger(repositoryId) && repositoryId > 0, 'Invalid certified SSH hostname or repository identity');
   assert.ok(hexId.test(accountId) && hexId.test(zoneId) && uuid.test(tunnelId),
     'Cloudflare deployment resource IDs are invalid');
   const accountPath = `/accounts/${accountId}`;
@@ -349,7 +359,8 @@ export function createDeploymentEdge({
   }
 
   async function observeIngress({ lifecycle = false } = {}) {
-    assert.ok(uuid.test(authorPolicyId) && uuid.test(ciPolicyId) && authorPolicyId !== ciPolicyId &&
+    const policyIds = [authorPolicyId, ciPolicyId, sshPolicyId];
+    assert.ok(policyIds.every(id => uuid.test(id)) && new Set(policyIds).size === policyIds.length &&
       typeof publicProtocolEnabled === 'boolean' && /^[a-z0-9-]+$/u.test(tunnelTeamName ?? ''),
     'Access policy IDs, Tunnel team and protocol ingress setting must be pinned');
     const host = target.hostname;
@@ -365,12 +376,14 @@ export function createDeploymentEdge({
     if (normalWorker) {
       assertPrivateWorker(normalWorker.subdomain);
     }
-    const [dns, workerRoutes, domains, applications, tunnel, deployment] = await Promise.all([
+    const [dns, managementDns, workerRoutes, domains, applications, tunnel, deployment] = await Promise.all([
       list('proxied application DNS', `${zonePath}/dns_records?name=${host}`),
+      list('proxied SSH DNS', `${zonePath}/dns_records?name=${managementHost}`),
       result('Worker routes', `${zonePath}/workers/routes`),
       Promise.all([
         list('Worker custom domains', `${accountPath}/workers/domains?service=${worker}`),
         list('Worker custom domains for application', `${accountPath}/workers/domains?hostname=${host}`),
+        list('Worker custom domains for SSH', `${accountPath}/workers/domains?hostname=${managementHost}`),
       ]),
       list('Access applications', `${accountPath}/access/apps`),
       result('Tunnel configuration', `${accountPath}/cfd_tunnel/${tunnelId}/configurations`),
@@ -378,8 +391,12 @@ export function createDeploymentEdge({
     ]);
     assert.ok(dns.length === 1 && dns[0].name === host && dns[0].proxied === true && dns[0].type === 'CNAME' &&
       dns[0].content === `${tunnelId}.cfargotunnel.com`, 'Application DNS must be the pinned proxied Tunnel CNAME');
+    assert.ok(managementDns.length === 1 && managementDns[0].name === managementHost && managementDns[0].proxied === true &&
+      managementDns[0].type === 'CNAME' && managementDns[0].content === dns[0].content,
+    'SSH DNS must point to the same pinned proxied Tunnel');
     assert.ok(domains.every(items => items.length === 0), 'Worker custom domains permit alternate ingress');
     assert.ok(Array.isArray(workerRoutes), 'Cloudflare Worker route inventory is invalid');
+    assert.ok(workerRoutes.every(route => !allowsHostname(route.pattern, managementHost)), 'Worker routes overlap the SSH hostname');
     const relevantRoutes = workerRoutes.filter(route => route.script === worker || allowsHostname(route.pattern, host));
     const canonicalRoutes = [
       ...routes.routes.map(path => ({ pattern: host + path, script: worker })),
@@ -393,8 +410,8 @@ export function createDeploymentEdge({
 
     const relevantApps = applications.filter(app => [app.domain, ...(app.self_hosted_domains ?? []),
       ...(app.destinations ?? []).filter(destination => destination.type === 'public').map(destination => destination.uri),
-    ].some(domain => typeof domain === 'string' && allowsHostname(domain, host)));
-    assert.deepEqual(relevantApps.map(app => app.domain).sort(), expectedPaths.map(path => host + path).sort(),
+    ].some(domain => typeof domain === 'string' && (allowsHostname(domain, host) || allowsHostname(domain, managementHost))));
+    assert.deepEqual(relevantApps.map(app => app.domain).sort(), [...expectedPaths.map(path => host + path), managementHost].sort(),
       'Cloudflare Access application paths differ from the reviewed topology');
     const relevantPolicies = await Promise.all(relevantApps.map(async app => {
       const domains = [...(app.self_hosted_domains ?? []),
@@ -402,15 +419,18 @@ export function createDeploymentEdge({
       assert.ok(app.type === 'self_hosted' && uuid.test(app.id) && /^[a-f0-9]{64}$/u.test(app.aud) &&
         domains.every(domain => domain === app.domain) && !(app.destinations ?? []).some(destination => destination.overrides?.length),
       'Cloudflare Access application identity or destinations are invalid');
-      const path = app.domain.slice(host.length);
+      const management = app.domain === managementHost;
+      const path = management ? null : app.domain.slice(host.length);
       const policies = await list('Access policies', `${accountPath}/access/apps/${app.id}/policies`);
-      const expected = path === '' ? [['allow', authorPolicyId]]
-        : identityPaths.includes(path) ? [['non_identity', ciPolicyId], ['allow', authorPolicyId]]
-          : [['bypass']];
+      const expected = management
+        ? [['non_identity', sshPolicyId, ['bootstrap', 'production'].map(stage => `repo-${repositoryId}-ssh-codexia-${stage}`)]]
+        : path === '' ? [['allow', authorPolicyId]]
+          : identityPaths.includes(path) ? [['non_identity', ciPolicyId, [`repo-${repositoryId}-probe-codexia-production`]], ['allow', authorPolicyId]]
+            : [['bypass']];
       assertPolicyIds(policies, expected);
       return { path, app, policies: policies.sort((a, b) => a.precedence - b.precedence) };
     }));
-    const audits = Object.fromEntries(relevantPolicies.map(({ path, app }) => [path, app.aud]));
+    const audits = Object.fromEntries(relevantPolicies.map(({ path, app }) => [path ?? managementHost, app.aud]));
     const expectedIngress = [
       ...enabledProtocols.filter(entry => entry.tunnelPath).map(entry => [entry.tunnelPath, null]),
       ...Object.values(identities).map(({ path, tunnelPath }) => [tunnelPath, [audits[path], audits['']].sort()]),
@@ -418,11 +438,11 @@ export function createDeploymentEdge({
     ];
     const ingress = tunnel.config?.ingress;
     assert.ok(tunnel.tunnel_id === tunnelId && tunnel.account_id === accountId && tunnel.source === 'cloudflare' && Array.isArray(ingress) &&
-      ingress.length === expectedIngress.length + 1, 'Cloudflare Tunnel authority or ingress list differs from the reviewed topology');
+      ingress.length === expectedIngress.length + 2, 'Cloudflare Tunnel authority or ingress list differs from the reviewed topology');
     for (const [index, [path, aud]] of expectedIngress.entries()) {
       const item = ingress[index];
       const access = item.originRequest?.access;
-      assert.ok(item.hostname === host && (item.path || null) === path && item.service === 'http://codexia-api:3000' &&
+      assert.ok(item.hostname === host && (item.path || null) === path && item.service === publicationService &&
         item.originRequest?.httpHostHeader === host, 'Cloudflare Tunnel ingress endpoint differs from the reviewed topology');
       if (aud) {
         assert.ok(access?.required === true && access.teamName === tunnelTeamName && Array.isArray(access.audTag) &&
@@ -432,11 +452,17 @@ export function createDeploymentEdge({
         assert.ok(!access || access.required === false, 'Cloudflare public protocol Tunnel entry has unexpected Access settings');
       }
     }
+    const sshIngress = ingress.at(-2);
+    const sshAccess = sshIngress.originRequest?.access;
+    assert.ok(sshIngress.hostname === managementHost && !sshIngress.path && sshIngress.service === managementService &&
+      sshAccess?.required === true && sshAccess.teamName === tunnelTeamName && Array.isArray(sshAccess.audTag) &&
+      sshAccess.audTag.length === 1 && sshAccess.audTag[0] === audits[managementHost],
+    'Cloudflare SSH ingress target or Access audience differs from the reviewed topology');
     assert.ok(!ingress.at(-1).hostname && !ingress.at(-1).path && ingress.at(-1).service === 'http_status:404',
       'Cloudflare Tunnel must end with an unconditional 404');
     const workerId = normalWorker?.id ?? null;
-    const topology = { dns: dns[0].id, workerId, workerRoutes: routePlan,
-      access: relevantPolicies.sort((a, b) => a.path.localeCompare(b.path)), tunnel: tunnel.config,
+    const topology = { dns: dns[0].id, managementDns: managementDns[0].id, workerId, workerRoutes: routePlan,
+      access: relevantPolicies.sort((a, b) => a.app.domain.localeCompare(b.app.domain)), tunnel: tunnel.config,
     };
     const ingressDigest = `sha256:${createHash('sha256').update(JSON.stringify(canonical(topology))).digest('hex')}`;
     return { observedAt: new Date().toISOString(), origin: target.origin, deployment, ingressDigest, workerId,
