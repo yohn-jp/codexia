@@ -33,7 +33,7 @@ op updatePersistenceProject(@path projectId: PersistenceId, @body body: Persiste
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/archive") @get @operationId("persistence_project_archive_get")
-op exportPersistenceArchive(@path projectId: PersistenceId): WorkArchiveExport | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | PersistenceUnauthorized;
+op exportPersistenceArchive(@path projectId: PersistenceId): WorkArchiveExport | { @statusCode _: 400; @body body: ApiError; } | { @statusCode _: 404; @body body: ApiError; } | { @statusCode _: 413; @body body: ApiError; } | PersistenceUnauthorized;
 
 @tag("persistence") @extension("x-codexia-principal", "OWNER-API")
 @route("/api/v1/persistence/projects/{projectId}/open-export") @get @operationId("persistence_project_open_export_get")

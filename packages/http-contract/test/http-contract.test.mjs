@@ -197,6 +197,11 @@ test('the admitted inventory gate rejects omission of a live persistence revisio
   );
 });
 
+test('portable JSON export declares an API error for works exceeding export bounds', () => {
+  const archive = readMaterializedContract().paths['/api/v1/persistence/projects/{projectId}/archive'].get;
+  assert.equal(archive.responses['413']?.content['application/json'].schema.$ref, '#/components/schemas/ApiError');
+});
+
 test('document read and write responses use the PostgreSQL persistence DTOs', () => {
   const openapi = readMaterializedContract();
   const responseSchema = (method, route, status = '200') =>
