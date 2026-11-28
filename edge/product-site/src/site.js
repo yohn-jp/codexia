@@ -102,7 +102,7 @@ function setDecision(value) {
   decision = value;
   decisionStatus.textContent = decisions[value].message;
   for (const button of decisionButtons) {
-    button.setAttribute('aria-pressed', String(button.dataset.decision === value));
+    if (button.dataset.decision !== 'pending') button.setAttribute('aria-pressed', String(button.dataset.decision === value));
   }
   // The fictional author decision affects only the in-memory third chapter.
   if (scene === '3') {
