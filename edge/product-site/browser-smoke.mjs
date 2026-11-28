@@ -83,6 +83,9 @@ try {
       assert.equal(await page.locator('button[data-decision]').count(), 3);
       await noOverflow('hero');
       await page.screenshot({path:path.join(evidence,name+'-hero.png'),animations:'disabled'});
+      if (['desktop','mobile','small'].includes(name)) {
+        await page.screenshot({path:path.join(evidence,name+'-full-page.png'),fullPage:true,animations:'disabled'});
+      }
       await page.locator('.product-frame').screenshot({path:path.join(evidence,name+'-workspace.png'),animations:'disabled'});
 
       await page.locator('button[data-mode=knowledge]').click();
