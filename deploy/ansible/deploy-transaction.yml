@@ -738,8 +738,12 @@
       if [[ "$unchanged" == true ]]; then
         repaired=false
         install_wants_links
-        if [[ "$api_link_created" == true ]]; then repaired=true; fi
-        systemctl --user daemon-reload
+        if [[ "$api_link_created" == true ]]; then
+          repaired=true
+          # Regenerate only when the systemd activation link actually changed.
+          # A true no-op must still revalidate the live service and Podman health.
+          systemctl --user daemon-reload
+        fi
         systemctl --user is-active --quiet codexia-api.service
         podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api | grep -Fxq healthy
         profile_checkpoint reapply

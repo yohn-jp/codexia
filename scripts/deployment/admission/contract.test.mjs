@@ -551,6 +551,18 @@ test('production admission reuses canonical runtime validators and checks exact 
   assert.match(shell, /gate_state="\$\(gate_control status\)"/u);
 });
 
+test('unchanged API skips redundant systemd reload but repairs the missing activation link', () => {
+  const shell = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'].cmd;
+  const start = shell.indexOf('if [[ "$unchanged" == true ]]; then');
+  const end = shell.indexOf('if [[ "$had_unit" == true ]] && ! "$backup_control" deploy-check;', start);
+  assert.ok(start >= 0 && end > start, 'the canonical no-op branch must exist');
+  const noOp = shell.slice(start, end);
+  assert.match(noOp, /if \\[\\[ "\\$api_link_created" == true \\]\\]; then[\\s\\S]*systemctl --user daemon-reload[\\s\\S]*fi/u);
+  assert.match(noOp, /systemctl --user is-active --quiet codexia-api\\.service/u);
+  assert.match(noOp, /podman inspect --format[\\s\\S]*State\\.Health\\.Status[\\s\\S]*grep -Fxq healthy/u);
+  assert.match(noOp, /if \\[\\[ "\\$repaired" == true \\]\\]; then echo "REPAIRED/u);
+});
+
 test('first activation verifies the initialized database under both explicit approvals without Console backup', () => {
   const deployment = transactionTasks;
   const approval = deployment.find(task => task.name === 'Refuse implicit first activation without explicit verified schema approval');

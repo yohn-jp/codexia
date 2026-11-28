@@ -316,6 +316,34 @@ agree; (b) every selected task is proven or blocked/fails, never silently skippe
 profile identities are preserved; (e) test-only and unrelated changes no longer
 start expensive lanes; and (f) comparable actual CI demonstrates improved queue,
 runner and wall-clock behavior. A budget alone never authorizes dropping proof.
+
+Deployment-side optimization decisions (2026-11-28; disposable-host evidence, not production acceptance):
+- **Retain Mitogen**: same-digest Auth A/B observed Ansible linear at 12.081s and
+  12.106s versus mitogen_linear at 6.971s (PR #1053). No strategy switch or ACL
+  relaxation is authorized; real Tunnel/SSH production timings remain unverified.
+- **Reject no-intent recovery bypass**: the actual recovery helpers took 24-33ms
+  while separate guard-only observations took 33-44ms (PR #1054). The guard
+  does not prove the absence of a new pending intent under the host lock.
+  Keep the canonical deployment and backup recovery on every applicable run.
+- **Do not cache pre-lock identity/health across the host lock**: stale admission
+  is a correctness and TOCTOU boundary. PR #1052 measures individual costs;
+  measurement does not authorize reusing a stale snapshot.
+- **Do not replace registry pull with local image inspect**: a local digest
+  proves a cached object, not fresh registry/provenance admission. PR #1051
+  measures the possible saving only; no production pull skip is authorized.
+- **Do not split the canonical deployment transaction or bypass backup admission**:
+  PR #1055 measured same-digest App wall 6.012s with 1.126s checkpointed,
+  and Auth wall 9.102s with 1.746s checkpointed. The remaining time includes
+  Ansible controller, setup, admission, and unmeasured post-lock work; it is
+  not entirely removable overhead. Preserve durable intent, publication gate,
+  exact identity, health, and rollback checks.
+- **Conditional systemd regeneration on unchanged digest**: avoid a redundant
+  daemon-reload only when the exact active Quadlet is unchanged and its expected
+  activation symlink already exists. Retain reload on symlink repair and on
+  candidate replacement, and always recheck systemd active and Podman healthy.
+  Measure the no-op and repair paths independently; revert if any drift or
+  lifecycle acceptance regresses. This is a targeted implementation candidate,
+  not proof of an achieved production speedup.
 <<<
 
 [[/SECTION]]
