@@ -19,7 +19,11 @@ assert.deepEqual((await readdir(new URL('codexia/', dist))).sort(), ['favicon.sv
 const html = await readFile(new URL('codexia/index.html', dist), 'utf8');
 assert.ok(html.includes('<meta name="codexia-source" content="' + sha + '">'));
 assert.ok(html.includes('href="https://products.yohn.jp/codexia/"'));
-assert.equal((html.match(/<section id="act-[1-5]"/gu) ?? []).length, 5);
+for (const id of ['experience','workflow','principles','platform']) {
+  assert.ok(html.includes('id="' + id + '"'), 'Required product explanation: ' + id);
+}
+assert.equal((html.match(/data-mode="(?:write|knowledge|review)"/gu) ?? []).length, 3);
+assert.equal((html.match(/data-decision="(?:approved|rejected|pending)"/gu) ?? []).length, 3);
 assert.equal((html.match(/<script\b/gu) ?? []).length, 1);
 assert.ok(html.includes('<script type="module" src="./site.js"></script>'));
 assert.ok(html.includes('href="./site.css"'));
