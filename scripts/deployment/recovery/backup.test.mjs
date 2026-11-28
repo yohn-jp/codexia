@@ -183,6 +183,10 @@ async function createProtectedSocketFixture(t) {
     '#!/bin/sh', 'shift', 'case "$*" in',
     '  *codexia-api.service*) state="$FIXTURE_API";;', '  *codexia-tunnel.service*) state="$FIXTURE_TUNNEL";;', 'esac',
     'case "$1:$*" in', '  show:*UnitFileState*) echo disabled;;', '  show:*backup-executor*) echo inactive;;',
+    '  "cat:cat --no-pager codexia-db.service codexia-postgres-volume.service codexia-data-network.service")',
+    '    [ "$FIXTURE_UNIT_OBSERVATION" != unavailable ] || exit 1',
+    '    printf "database unit\nvolume unit\nnetwork unit\n"',
+    '    if [ "$FIXTURE_UNIT_OBSERVATION" = drift ]; then printf "changed database unit override\n"; fi;;',
     '  show:*codexia-db.service*FragmentPath*) echo "$XDG_RUNTIME_DIR/systemd/generator/codexia-db.service";;',
     '  show:*codexia-db.service*SourcePath*) echo "$HOME/.config/containers/systemd/codexia-db.container";;',
     '  show:*codexia-db.service*ActiveState*) echo failed;;',
@@ -258,6 +262,14 @@ test('protected socket recovery restores the prior writer after PostgreSQL stops
       assert.equal(await readFile(api, 'utf8'), 'inactive');
       assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
 
+      for (const observation of ['drift', 'unavailable']) {
+        assert.notEqual(run(['--recover-only'], { FIXTURE_UNIT_OBSERVATION: observation }).status, 0);
+        assert.equal(await readFile(database, 'utf8'), interruptedState);
+        assert.equal(await readFile(api, 'utf8'), 'inactive');
+        assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
+        assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v1/u);
+      }
+
       const recovered = run(['--recover-only']);
       assert.equal(recovered.status, 0, recovered.stderr);
       assert.equal(await readFile(database, 'utf8'), 'default');
@@ -267,6 +279,27 @@ test('protected socket recovery restores the prior writer after PostgreSQL stops
       await assert.rejects(readFile(transaction), { code: 'ENOENT' });
     });
   }
+});
+
+test('a legacy protected socket journal requires the existing database to be running', async t => {
+  const { run, transaction, database, api, tunnel } = await createProtectedSocketFixture(t);
+  assert.equal(run([], { FIXTURE_INTERRUPT: 'true', FIXTURE_INTERRUPTED_DATABASE: 'absent' }).signal, 'SIGKILL');
+  const journal = JSON.parse(await readFile(transaction, 'utf8'));
+  delete journal.previousDatabaseUnitsDigest;
+  await writeFile(transaction, JSON.stringify({ ...journal, phase: 'rollback' }));
+
+  assert.notEqual(run(['--recover-only']).status, 0);
+  assert.equal(await readFile(database, 'utf8'), 'absent');
+  assert.equal(await readFile(api, 'utf8'), 'inactive');
+  assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
+  assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v1/u);
+
+  await writeFile(database, 'default');
+  const recovered = run(['--recover-only']);
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.equal(await readFile(api, 'utf8'), 'active');
+  assert.equal(await readFile(tunnel, 'utf8'), 'active');
+  await assert.rejects(readFile(transaction), { code: 'ENOENT' });
 });
 
 test('protected socket recovery keeps its journal when PostgreSQL is running but unreachable', async t => {

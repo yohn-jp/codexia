@@ -23,6 +23,9 @@ exists(){ [[ -e "$1" || -L "$1" ]]; }
 private_directory(){ [[ -d "$1" && ! -L "$1" && -O "$1" && "$(stat -c %a -- "$1")" == 700 ]]; }
 private_file(){ [[ -f "$1" && ! -L "$1" && -O "$1" && "$(stat -c '%a:%h' -- "$1")" == 600:1 ]]; }
 sha256(){ local digest; digest="$(sha256sum)" && printf '%s\n' "${digest%% *}"; }
+database_units_digest(){
+  systemctl --user cat --no-pager "$db_service" codexia-postgres-volume.service codexia-data-network.service | sha256
+}
 admin_query(){
   podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"
     exec psql -X -qAtw -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "$1"' sh "$1"
@@ -57,6 +60,7 @@ if exists "$intent"; then
       (.database | type == "string" and test("^[0-9]+:[0-9]+$")) and
       (.authority | type == "string" and test("^[a-f0-9]{64}$")) and
       (.recipe | type == "string" and test("^[a-f0-9]{64}$")) and
+      (.previousDatabaseUnitsDigest == null or (.previousDatabaseUnitsDigest | type == "string" and test("^[a-f0-9]{64}$"))) and
       (.previousSocket | type == "string" and test("^[^[:cntrl:]]+$")) and
       (.previousHba | type == "string" and test("^/[^[:cntrl:]]+$")) and
       (.tunnelActive | type == "boolean")' "$intent" >/dev/null ||
@@ -172,7 +176,15 @@ resume_writer(){
   if [[ "$tunnel_active" == true ]]; then systemctl --user start "$tunnel_service" || return 1; fi
 }
 restart_database(){
-  systemctl --user daemon-reload && systemctl --user restart "$db_service" &&
+  local observed_units
+  systemctl --user daemon-reload || return 1
+  if [[ "$database_running" == false ]]; then
+    observed_units="$(database_units_digest)" && [[ "$observed_units" == "$previous_database_units_digest" ]] || {
+      printf '%s\n' 'Effective database units no longer match the recorded settings' >&2
+      return 1
+    }
+  fi
+  systemctl --user restart "$db_service" &&
     timeout 30s podman wait --condition=healthy codexia-db >/dev/null
 }
 write_intent() (
@@ -181,7 +193,9 @@ write_intent() (
   trap 'rm -f -- "$temporary"' EXIT
   jq -n --arg format "$format" --arg phase "$1" --arg authority "$authority" --arg recipe "$recipe" --arg database "$database_identity" \
     --arg previousSocket "$previous_socket" --arg previousHba "$previous_hba" --argjson tunnelActive "$tunnel_active" \
-    '{$format, $phase, $authority, $recipe, $database, $previousSocket, $previousHba, $tunnelActive}' > "$temporary" &&
+    --arg previousDatabaseUnitsDigest "$previous_database_units_digest" \
+    '{$format, $phase, $authority, $recipe, $database, $previousSocket, $previousHba, $tunnelActive} +
+     if $previousDatabaseUnitsDigest == "" then {} else {$previousDatabaseUnitsDigest} end' > "$temporary" &&
     sync -f "$temporary" && mv -T -- "$temporary" "$intent" && sync -f "$state"
 )
 clear_intent(){ rm -- "$intent" && sync -f "$state"; }
@@ -226,7 +240,9 @@ if [[ "$resuming" == true ]]; then
   previous_socket="$(jq -er .previousSocket "$intent")"
   previous_hba="$(jq -er .previousHba "$intent")"
   tunnel_active="$(jq -r .tunnelActive "$intent")"
+  previous_database_units_digest="$(jq -r '.previousDatabaseUnitsDigest // ""' "$intent")"
   if [[ "$database_running" == false ]]; then
+    [[ -n "$previous_database_units_digest" ]] || fail 'Legacy socket transaction requires the recorded PostgreSQL cluster to be running'
     verify_stopped_database || fail 'Stopped PostgreSQL does not match the recorded cluster and Quadlet'
     write_intent rollback
   fi
@@ -243,6 +259,7 @@ else
   previous_socket="$(admin_query 'SHOW unix_socket_directories')"
   previous_hba="$(admin_query 'SHOW hba_file')"
   [[ "$previous_socket" =~ ^[^[:cntrl:]]+$ && "$previous_hba" =~ ^/[^[:cntrl:]]+$ ]] || fail 'Cannot observe prior PostgreSQL socket settings'
+  previous_database_units_digest="$(database_units_digest)" || fail 'Cannot observe prior effective database units'
   write_intent pending
 fi
 rollback(){
