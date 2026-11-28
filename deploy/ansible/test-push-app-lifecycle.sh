@@ -224,6 +224,74 @@ fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 TIMING
   return "$status"
 }
+
+# Observe the real container/process/readiness timeline after a successful
+# candidate activation. This is CI evidence only: it does not alter production
+# health checks, service startup, or the deployment transaction.
+record_api_startup_timing() {
+  local stage=$1 started_at listen_at health_json exec_start_us active_enter_us summary
+  started_at=$(rootless_podman inspect --format '{{.State.StartedAt}}' codexia-api)
+  listen_at=$(rootless_podman logs --timestamps codexia-api 2>&1 |
+    awk '/Codexia is listening on http:\/\// { timestamp=$1 } END { print timestamp }')
+  [[ -n "$listen_at" ]] || { echo "Missing Codexia listen timestamp for $stage" >&2; return 1; }
+  health_json=$(rootless_podman inspect --format '{{json .State.Health.Log}}' codexia-api)
+  exec_start_us=$(rootless_systemctl show codexia-api.service --property=ExecMainStartTimestampMonotonic --value)
+  active_enter_us=$(rootless_systemctl show codexia-api.service --property=ActiveEnterTimestampMonotonic --value)
+  summary=$(node - "$stage" "$started_at" "$listen_at" "$health_json" "$exec_start_us" "$active_enter_us" <<'STARTUP_TIMING'
+const [stage, startedAt, listenAt, healthJson, execStartUsText, activeEnterUsText] = process.argv.slice(2);
+function timestampNs(value) {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/u.exec(value);
+  if (!match) throw new Error("Unexpected UTC timestamp: " + value);
+  const baseMs = Date.parse(match[1] + "Z");
+  if (!Number.isFinite(baseMs)) throw new Error("Invalid UTC timestamp: " + value);
+  return BigInt(baseMs) * 1_000_000n + BigInt((match[2] ?? "").padEnd(9, "0"));
+}
+function milliseconds(deltaNs) {
+  if (deltaNs < 0n) throw new Error("Startup timing moved backwards");
+  return Number(deltaNs) / 1_000_000;
+}
+if (!/^\d+$/u.test(execStartUsText) || !/^\d+$/u.test(activeEnterUsText)) {
+  throw new Error("systemd monotonic timestamps are unavailable");
+}
+const started = timestampNs(startedAt);
+const listened = timestampNs(listenAt);
+const health = JSON.parse(healthJson);
+if (!Array.isArray(health) || health.length === 0) throw new Error("Podman health history is unavailable");
+const attempts = health.map(entry => ({
+  start: timestampNs(entry.Start),
+  end: timestampNs(entry.End),
+  exitCode: Number(entry.ExitCode),
+})).filter(entry => entry.end >= started).sort((left, right) => left.end < right.end ? -1 : left.end > right.end ? 1 : 0);
+const successIndex = attempts.findIndex(entry => entry.exitCode === 0);
+if (successIndex < 0) throw new Error("No successful startup health probe was recorded");
+const success = attempts[successIndex];
+if (listened < started || success.end < listened || success.start < started) throw new Error("Startup event order is invalid");
+const execStartUs = BigInt(execStartUsText), activeEnterUs = BigInt(activeEnterUsText);
+if (activeEnterUs < execStartUs) throw new Error("systemd activation timestamp moved backwards");
+const row = {
+  stage,
+  containerToListenMs: milliseconds(listened - started),
+  containerToFirstProbeMs: milliseconds(attempts[0].start - started),
+  listenToHealthyMs: milliseconds(success.end - listened),
+  containerToHealthyMs: milliseconds(success.end - started),
+  successfulProbeMs: milliseconds(success.end - success.start),
+  healthAttemptsToReady: successIndex + 1,
+  systemdExecToActiveMs: Number(activeEnterUs - execStartUs) / 1000,
+};
+process.stdout.write(JSON.stringify(row));
+STARTUP_TIMING
+  )
+  node - "$report" "$summary" <<'STARTUP_REPORT'
+const fs=require('node:fs');const [path,json]=process.argv.slice(2);const row=JSON.parse(json);
+const report=JSON.parse(fs.readFileSync(path,'utf8'));
+report.timings ||= {};
+(report.timings.apiStartup ||= []).push(row);
+fs.writeFileSync(path,JSON.stringify(report,null,2)+'\n',{mode:0o600});
+STARTUP_REPORT
+  node -e 'const r=JSON.parse(process.argv[1]); console.log("LIFECYCLE_API_STARTUP " + Object.entries(r).map(([k,v]) => k + "=" + v).join(" "))' "$summary" |
+    tee -a "$RUNNER_TEMP/codexia-push-app-lifecycle/api-startup-timings-bounded.log"
+}
+
 observe_runtime() {
   local key=$1 role=$2
   local container_id image_id api_health api_unit quadlet_sha release_sha pg_volume pg_mount pg_created data_volume data_mount data_created history_volume history_mount history_created db_container db_image api_count sentinel
@@ -727,6 +795,7 @@ TRANSITION
 # verification evidence instead of the production admission certificate.
 set_state first_activation IN_PROGRESS
 run_deploy "$initial_key" true
+record_api_startup_timing first-activation
 observe_runtime first-activation "$initial_key"
 mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexia-backup-mount" -mindepth 1 -maxdepth 1 -type d -name 'codexia-*' -print)
 [[ "${#backup_artifacts[@]}" == 0 ]]
@@ -770,6 +839,7 @@ mapfile -t backup_artifacts < <(rootless find "$fixture_home/.local/state/codexi
 [[ "${#backup_artifacts[@]}" == 0 ]]
 activate_fixture_backup_destination
 run_deploy "$update_key" false
+record_api_startup_timing compatible-update
 observe_runtime compatible-update "$update_key"
 [[ "$(rootless readlink -e "$fixture_home/.local/share/codexia-backup/current")" == "$fixture_home/.local/share/codexia-backup/releases/${update_image##*:}" ]]
 rootless_systemctl is-active --quiet codexia-backup-executor.service

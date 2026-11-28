@@ -277,6 +277,7 @@ YAML
   # This lane uses its own pristine PostgreSQL cluster. Generic update,
   # rollback and interruption transitions are proven by the app lane.
   run_deploy auth-primary true '' auth-verified-activation
+  record_api_startup_timing better-auth-activation
   seed_database_sentinel
   auth_fixture authorize "$web" "$owner" >"$tmp/auth-session.json"
   token=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).accessToken' "$tmp/auth-session.json")
@@ -316,6 +317,7 @@ YAML
   token=$(auth_fixture refresh "$web" "$owner" <"$tmp/auth-session.json" | jq -er '.accessToken')
   [[ "$(observe_auth "$primary_image")" == "$proof" ]]
   run_deploy auth-update false '' auth-compatible-update
+  record_api_startup_timing better-auth-compatible-update
   [[ "$(observe_auth "$update_image")" == "$proof" ]]
   observe_runtime better-auth-compatible-update auth-update
   record_auth better-auth-compatible-update "$update_image" "$proof"
