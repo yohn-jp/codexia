@@ -10,6 +10,24 @@ import (
 	"time"
 )
 
+func TestStatusJSONVersionReportsCloudflareManagementHostname(t *testing.T) {
+	t.Parallel()
+	encoded, err := json.Marshal(statusReport{SchemaVersion: 2, ManagementHostname: "codexia-ssh.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document["schemaVersion"] != float64(2) || document["managementHostname"] != "codexia-ssh.example.test" {
+		t.Fatalf("status schema does not expose its Cloudflare management hostname: %s", encoded)
+	}
+	if _, old := document["tailnetAddress"]; old {
+		t.Fatalf("status schema still exposes a retired tailnet field: %s", encoded)
+	}
+}
+
 func TestStatusDoesNotUseSuccessBeforeNewerFailureOrDeployment(t *testing.T) {
 	t.Parallel()
 	const host = "fixture-host"
