@@ -10,8 +10,8 @@ assert.equal(config.workers_dev, false);
 assert.equal(config.preview_urls, false);
 assert.equal(config.main, undefined);
 assert.deepEqual(config.routes, [
-  { pattern: 'products.yohn.jp/codexia', zone_name: 'yohn.jp' },
-  { pattern: 'products.yohn.jp/codexia/*', zone_name: 'yohn.jp' },
+  { pattern: 'products.yohn.jp/codexia', zone_id: '012f11f9c2c929d034006f3ee682703b' },
+  { pattern: 'products.yohn.jp/codexia/*', zone_id: '012f11f9c2c929d034006f3ee682703b' },
 ]);
 assert.equal(config.assets.directory, './dist');
 assert.equal(config.assets.html_handling, 'force-trailing-slash');

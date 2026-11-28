@@ -7,11 +7,11 @@
   "routes": [
     {
       "pattern": "products.yohn.jp/codexia",
-      "zone_name": "yohn.jp"
+      "zone_id": "012f11f9c2c929d034006f3ee682703b"
     },
     {
       "pattern": "products.yohn.jp/codexia/*",
-      "zone_name": "yohn.jp"
+      "zone_id": "012f11f9c2c929d034006f3ee682703b"
     }
   ],
   "assets": {
