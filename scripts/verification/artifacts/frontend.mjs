@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareComponentVersions, readComponentVersion } from '../../release/components/version.mjs';
 import { selectLatestJobArtifact } from '../../ci/evidence/artifact-selection.mjs';
-import { downloadArtifact, extractArtifactFiles, extractJsonEntry, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from '../../ci/evidence/download-artifacts.mjs';
+import { downloadArtifact, extractArtifactFiles, extractJsonEntry, readArtifactFiles, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from '../../ci/evidence/download-artifacts.mjs';
 import { assertFrontendOAuthConfigIdentity, readFrontendOAuthConfig } from '../../build/frontend/oauth-config.mjs';
 import { assertVerificationRunJobs, verifiedSourceRun } from '../../release/components/policy.mjs';
 import { assertFrontendIdentity } from '../../release/frontend/verify-compatibility.mjs';
@@ -430,7 +430,7 @@ async function writePromotionOutputs(file,output){
 }
 
 /** Read the independently built main archive when ordinary deployment is paused. */
-export async function verifyLifecycleFrontendArtifact(input, { env = process.env, fetchImpl = fetch, expectedEpoch } = {}) {
+export async function verifyLifecycleFrontendArtifact(input, { env = process.env, fetchImpl = fetch, expectedEpoch, readPublicAssets = false } = {}) {
   assert.ok(Number.isSafeInteger(expectedEpoch) && expectedEpoch > 0, 'Expected frontend API epoch is invalid');
   const context=actionsRepository(env);
   assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Lifecycle frontend verification requires main');
@@ -478,15 +478,23 @@ export async function verifyLifecycleFrontendArtifact(input, { env = process.env
   assertArtifactRunRepository(artifact, run);
   const bytes = await downloadArtifact(artifact, context.repository, token, fetchImpl, { maxArchive: MAX_ASSET_ARCHIVE });
   const destination = fileURLToPath(new URL('../../../app/dist/', import.meta.url));
-  const extracted = await extractArtifactFiles(bytes, destination, { maxArchive: MAX_ASSET_ARCHIVE, maxUncompressed: MAX_ASSET_BYTES });
-  assert.ok(!extracted.some(file=>file.startsWith('mobile/')),'Retired Mobile Web output in lifecycle artifact');
-  const identity = assertFrontendIdentity(JSON.parse(readFileSync(path.join(destination, 'desktop/update-identity.json'), 'utf8')));
+  const assets = readPublicAssets ? await readArtifactFiles(bytes) : undefined;
+  const files = assets ? [...assets.keys()] : await extractArtifactFiles(bytes, destination, {
+    maxArchive: MAX_ASSET_ARCHIVE, maxUncompressed: MAX_ASSET_BYTES,
+  });
+  assert.ok(!files.some(file => file.startsWith('mobile/')), 'Retired Mobile Web output in lifecycle artifact');
+  const identityPath = 'desktop/update-identity.json';
+  assert.ok(files.includes(identityPath), 'Lifecycle frontend archive is missing its identity');
+  const identityBytes = assets ? assets.get(identityPath) : readFileSync(path.join(destination, identityPath));
+  const identity = assertFrontendIdentity(JSON.parse(identityBytes.toString('utf8')));
   assertFrontendOAuthConfigIdentity(identity, env);
   assert.equal(identity.version, readComponentVersion('frontend', String(run.run_number)), 'Frontend version differs from the producer');
   assert.equal(identity.sourceSha, sourceSha, 'Frontend archive source differs from the producer');
   assert.equal(identity.profile, 'full', 'Lifecycle requires a Full frontend');
   assert.equal(identity.apiEpoch, expectedEpoch, 'Lifecycle requires the selected frontend API epoch');
-  return { identity, artifactId: id, artifactDigest: input.artifactDigest, runId, verifyRunId, producerAttempt: attempt };
+  return { identity, artifactId: id, artifactDigest: input.artifactDigest, runId, verifyRunId, producerAttempt: attempt,
+    ...(assets && { assets }),
+  };
 }
 
 /** @param {{env?:NodeJS.ProcessEnv,fetchImpl?:typeof fetch}} options */

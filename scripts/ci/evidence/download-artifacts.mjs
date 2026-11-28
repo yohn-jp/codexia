@@ -246,6 +246,20 @@ export async function extractArtifactFiles(bytes, destination, {maxArchive = MAX
   });
 }
 
+/** Read the complete, digest-verified asset archive without materializing files on the runner. */
+export async function readArtifactFiles(bytes) {
+  return withArtifactZip(bytes, {maxArchive: MAX_ASSET_ARCHIVE, maxUncompressed: MAX_ASSET_BYTES, maxEntries: 9_999}, async (entries, readEntry) => {
+    const files = new Map();
+    for (const {entry, pathname, isDirectory} of entries) {
+      const chunks = [];
+      await readEntry(entry, isDirectory ? 0 : MAX_ASSET_BYTES, chunk => chunks.push(chunk));
+      if (!isDirectory) files.set(pathname, Buffer.concat(chunks));
+    }
+    assert.ok(files.size > 0, 'ZIP archive contains no files');
+    return files;
+  });
+}
+
 const TRACE_REPORT_ENTRY = 'requirements-trace/strictdoc/trace-report.json';
 
 async function extractJsonEntries(bytes, filenames) {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstat, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { isIP } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -10,7 +10,6 @@ import { fileURLToPath } from 'node:url';
 import { actionsRepository, assertReleaseRepositoryBinding } from '../../github/repository.mjs';
 import { promisify } from 'node:util';
 import { assertFrontendIdentity, readFrontendReleaseConfiguration } from '../frontend/verify-compatibility.mjs';
-import { readRegularFile } from '../../shared/read-regular-file.mjs';
 import { assertProbeDenied, IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, readLiveJson } from '../../verification/infrastructure/identity-probe-client.mjs';
 
 const readConfig = async name => JSON.parse(await readFile(new URL(`../../../deploy/cloudflare/${name}.json`, import.meta.url), 'utf8'));
@@ -21,7 +20,7 @@ const [identities, routes, protocols] = await Promise.all([
 ]);
 const worker = 'codexia-frontend';
 const publicationControls = ['_headers', '_redirects'];
-const frontendAssets = fileURLToPath(new URL('../../../app/dist/', import.meta.url));
+const root = fileURLToPath(new URL('../../../', import.meta.url));
 const identityPaths = Object.values(identities).map(({ path }) => path);
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const hexId = /^[a-f0-9]{32}$/u;
@@ -69,15 +68,15 @@ function candidateTag(artifactDigest) {
   return `frontend-${artifactDigest.slice(7)}`;
 }
 
-async function readCertifiedPublicationControls(directory = frontendAssets) {
-  return Object.fromEntries(await Promise.all(publicationControls.map(async name =>
-    [name, sha256(await readRegularFile(join(directory, name), { encoding: null }))])));
+function publicationControl(assets, name) {
+  const bytes = assets.get(name);
+  assert.ok(Buffer.isBuffer(bytes), 'Missing certified frontend publication control');
+  return bytes;
 }
 
 async function runWranglerUpload({ accountId, workerToken, tag }) {
   const output = await mkdtemp(join(tmpdir(), 'codexia-frontend-wrangler-'));
   const outputFile = join(output, 'versions.ndjson');
-  const root = fileURLToPath(new URL('../../../', import.meta.url));
   try {
     await promisify(execFile)(join(root, 'edge/frontend/node_modules/.bin/wrangler'), [
       'versions', 'upload', '--config', join(root, 'edge/frontend/wrangler.jsonc'), '--tag', tag,
@@ -103,14 +102,15 @@ async function runWranglerUpload({ accountId, workerToken, tag }) {
 // previous version exists. Do not use a script upload or wrangler deploy here.
 // https://developers.cloudflare.com/workers/static-assets/direct-upload/
 export async function runInitialWorkerUpload({
-  accountId, workerId, workerToken, tag, initialControls,
-  directory = frontendAssets, fetchImpl = fetch, mimeLookup,
+  accountId, workerId, workerToken, tag, assets, fetchImpl = fetch, mimeLookup,
 }) {
   assert.ok(hexId.test(accountId) && workerIdPattern.test(workerId), 'Invalid initial Worker target');
   assert.ok(typeof workerToken === 'string' && workerToken.length > 0 && workerToken.trim() === workerToken,
     'Missing Worker publication credential');
   assert.match(tag, /^frontend-[a-f0-9]{64}$/u);
-  const config = JSON.parse(await readFile(new URL('../../../edge/frontend/wrangler.jsonc', import.meta.url), 'utf8'));
+  assert.ok(assets instanceof Map, 'Initial Worker upload requires the certified frontend archive');
+  const { stdout } = await promisify(execFile)('git', ['show', 'HEAD:edge/frontend/wrangler.jsonc'], { cwd: root, timeout: 10_000 });
+  const config = JSON.parse(stdout);
   assert.equal(config.name, worker);
   assert.equal(config.workers_dev, false);
   assert.equal(config.preview_urls, false);
@@ -119,35 +119,20 @@ export async function runInitialWorkerUpload({
   assert.equal(config.assets.not_found_handling, 'none');
 
   const lookup = mimeLookup ?? createRequire(new URL('../../../edge/frontend/package.json', import.meta.url))('mime-types').lookup;
-  const modules = await Promise.all(publicationControls.map(async name => {
-    const bytes = await readRegularFile(join(directory, name), { encoding: null });
-    assert.equal(sha256(bytes), initialControls?.[name], 'Initial Worker publication controls changed before upload');
-    return { name, content_type: 'text/plain', content_base64: bytes.toString('base64') };
+  const modules = publicationControls.map(name => ({
+    name, content_type: 'text/plain', content_base64: publicationControl(assets, name).toString('base64'),
   }));
   const manifest = {};
   const byHash = new Map();
-  const hashFor = (bytes, name) => sha256(bytes.toString('base64') + extname(name).slice(1)).slice(0, 32);
-  assert.ok((await lstat(directory)).isDirectory(), 'Expected a regular asset directory');
-  async function walk(relative = '') {
-    for (const entry of await readdir(join(directory, relative), { withFileTypes: true })) {
-      const name = relative ? relative + '/' + entry.name : entry.name;
-      if (entry.isDirectory()) {
-        await walk(name);
-        continue;
-      }
-      assert.ok(entry.isFile(), 'Unexpected non-regular frontend asset');
-      if (publicationControls.includes(name)) continue;
-      const bytes = await readRegularFile(join(directory, name), { encoding: null });
-      const hash = hashFor(bytes, name);
-      const type = lookup(name) || 'application/null';
-      const previous = byHash.get(hash);
-      assert.ok(!previous || (previous.digest === sha256(bytes) && previous.type === type),
-        'Ambiguous frontend asset hash');
-      byHash.set(hash, { name, type, digest: sha256(bytes) });
-      manifest['/' + name] = { hash, size: bytes.length };
-    }
+  for (const [name, bytes] of assets) {
+    if (publicationControls.includes(name)) continue;
+    const hash = sha256(bytes.toString('base64') + extname(name).slice(1)).slice(0, 32);
+    const type = lookup(name) || 'application/null';
+    const previous = byHash.get(hash);
+    assert.ok(!previous || (previous.bytes.equals(bytes) && previous.type === type), 'Ambiguous frontend asset hash');
+    byHash.set(hash, { bytes, type });
+    manifest['/' + name] = { hash, size: bytes.length };
   }
-  await walk();
   assert.ok(byHash.size > 0, 'No frontend assets to upload');
 
   // Keep credentials and server response bodies out of diagnostics, including
@@ -189,10 +174,8 @@ export async function runInitialWorkerUpload({
   for (let index = 0; index < session.buckets.length; index++) {
     const form = new FormData();
     for (const hash of session.buckets[index]) {
-      const entry = byHash.get(hash);
-      const bytes = await readRegularFile(join(directory, entry.name), { encoding: null });
-      assert.equal(sha256(bytes), entry.digest, 'Frontend asset changed after manifest registration');
-      form.append(hash, new Blob([bytes.toString('base64')], { type: entry.type }), hash);
+      const { bytes, type } = byHash.get(hash);
+      form.append(hash, new Blob([bytes.toString('base64')], { type }), hash);
     }
     const last = index === session.buckets.length - 1;
     const { result, status } = await post('asset upload', account + '/assets/upload?base64=true', session.jwt, form,
@@ -256,7 +239,7 @@ export function createDeploymentEdge({
   authorPolicyId, ciPolicyId, sshHostname, sshPolicyId, tunnelTeamName, publicProtocolEnabled,
   readToken, workerToken, accessEnv = process.env, fetchImpl = fetch,
   uploadVersion = runWranglerUpload, uploadInitialVersion = runInitialWorkerUpload,
-  readInitialWorkerControls = readCertifiedPublicationControls,
+  readInitialWorkerAssets,
 }) {
   const target = parseOrigin(origin);
   const managementHost = parseOrigin('https://' + sshHostname).hostname;
@@ -387,8 +370,11 @@ export function createDeploymentEdge({
     assert.ok((before?.versionId ?? null) === previousVersionId, 'Active Worker version changed before candidate upload');
     assert.ok(typeof workerToken === 'string' && workerToken.length > 0 && workerToken.trim() === workerToken,
       'Missing Cloudflare credential for candidate upload');
-    const initialControls = initial ? await readInitialWorkerControls() : undefined;
-    const versionId = initial ? await uploadInitialVersion({ accountId, workerId: initial.workerId, workerToken, tag, initialControls })
+    const assets = initial ? await readInitialWorkerAssets?.(artifactDigest) : undefined;
+    if (initial) assert.ok(assets instanceof Map, 'Initial Worker upload requires the certified frontend archive');
+    const initialControls = initial ? Object.fromEntries(publicationControls.map(name =>
+      [name, sha256(publicationControl(assets, name))])) : undefined;
+    const versionId = initial ? await uploadInitialVersion({ accountId, workerId: initial.workerId, workerToken, tag, assets, fetchImpl })
       : await uploadVersion({ accountId, workerToken, tag });
     const [staged, after] = await Promise.all([
       assertStaged({ versionId, artifactDigest, initialWorkerId: initial?.workerId, initialControls }),
@@ -605,8 +591,7 @@ export function createDeploymentEdge({
     return { ...after, frontendState, frontend, backend };
   }
 
-  return { observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, assertWorkerArtifact, deployForOwnerEnrollment,
-    readInitialWorkerControls };
+  return { observeLifecycle, observeIngress, observeDeployment, stage, assertStaged, assertWorkerArtifact, deployForOwnerEnrollment };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

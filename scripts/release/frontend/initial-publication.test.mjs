@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { createDeploymentEdge, runInitialWorkerUpload } from './initial-publication.mjs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { publishInitialFrontend } from '../../deployment/bootstrap/publish-frontend.mjs';
 
 const origin = 'https://deploy.example.com';
@@ -36,6 +35,8 @@ const apps = [hostname, hostname + '/api/version', hostname + '/desktop/update-i
 const controls = { _headers: 'certified headers', _redirects: 'certified redirects' };
 const controlsSha256 = Object.fromEntries(Object.entries(controls).map(([name, content]) =>
   [name, createHash('sha256').update(content).digest('hex')]));
+const certifiedAssets = () => new Map(Object.entries({ ...controls, 'index.html': '<html>test</html>',
+  'assets/app.js': 'export {};' }).map(([name, content]) => [name, Buffer.from(content)]));
 
 function fixture() {
   const writes = [];
@@ -56,10 +57,13 @@ function fixture() {
       state.uploadTag = tag;
       return newVersion;
     },
-    readInitialWorkerControls: async () => controlsSha256,
-    uploadInitialVersion: async ({ workerId: targetWorker, tag, initialControls }) => {
+    readInitialWorkerAssets: async digest => {
+      assert.equal(digest, artifactDigest);
+      return certifiedAssets();
+    },
+    uploadInitialVersion: async ({ workerId: targetWorker, tag, assets }) => {
       state.uploadCount++;
-      state.initialUpload = { targetWorker, tag, initialControls };
+      state.initialUpload = { targetWorker, tag, assets };
       state.uploadTag = tag;
       return newVersion;
     },
@@ -227,8 +231,8 @@ test('first activation stages a version with no deployment and promotes under ca
   const staged = await client.stage({ previousVersionId: null, artifactDigest });
   assert.equal(staged.versionId, newVersion);
   assert.deepEqual(staged.initialControls, controlsSha256);
-  assert.deepEqual(state.initialUpload, { targetWorker: workerId, tag: 'frontend-' + artifactDigest.slice(7), initialControls: controlsSha256 });
-  const expected = { versionId: newVersion, artifactDigest, initialControls: await client.readInitialWorkerControls() };
+  assert.deepEqual(state.initialUpload, { targetWorker: workerId, tag: 'frontend-' + artifactDigest.slice(7), assets: certifiedAssets() });
+  const expected = { versionId: newVersion, artifactDigest, initialControls: controlsSha256 };
   assert.equal((await client.assertStaged(expected)).versionId, newVersion);
   state.controlsChanged = true;
   await assert.rejects(client.assertStaged(expected), /certified archive/u);
@@ -372,108 +376,129 @@ test('R5 refuses changed ingress before promotion and never records an unverifie
 });
 
 test('first Worker upload registers certified assets and creates a version without deploying', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codexia-upload-test-'));
-  try {
-    await mkdir(join(directory, 'assets'));
-    await Promise.all([
-      writeFile(join(directory, '_headers'), controls._headers),
-      writeFile(join(directory, '_redirects'), controls._redirects),
-      writeFile(join(directory, 'index.html'), '<html>test</html>'),
-      writeFile(join(directory, 'assets', 'app.js'), 'export {};'),
-    ]);
-    const requests = [];
-    let hashes;
-    const tag = 'frontend-' + artifactDigest.slice(7);
-    const version = await runInitialWorkerUpload({
-      accountId, workerId, workerToken: 'worker-secret', tag, initialControls: controlsSha256, directory,
-      mimeLookup: name => name.endsWith('.html') ? 'text/html' : 'text/javascript',
-      async fetchImpl(url, init) {
-        const target = new URL(url);
-        assert.equal(target.origin, 'https://api.cloudflare.com');
-        assert.equal(init.redirect, 'error');
-        assert.equal(init.method, 'POST');
-        requests.push(target.pathname);
-        const response = (result, status = 200) => Response.json({ success: true, result, errors: [] }, { status });
-        if (requests.length === 1) {
-          assert.equal(target.pathname, workerPath + '/assets-upload-session');
-          assert.equal(init.headers.Authorization, 'Bearer worker-secret');
-          const { manifest } = JSON.parse(init.body);
-          assert.deepEqual(Object.keys(manifest).sort(), ['/assets/app.js', '/index.html']);
-          assert.equal(manifest['/index.html'].size, 17);
-          assert.equal(manifest['/index.html'].hash,
-            createHash('sha256').update(Buffer.from('<html>test</html>').toString('base64') + 'html').digest('hex').slice(0, 32));
-          hashes = [manifest['/index.html'].hash, manifest['/assets/app.js'].hash];
-          return response({ jwt: 'upload-token', buckets: hashes.map(hash => [hash]) });
-        }
-        if (requests.length === 2 || requests.length === 3) {
-          assert.equal(target.pathname, accountPath + '/workers/assets/upload');
-          assert.equal(target.search, '?base64=true');
-          assert.equal(init.headers.Authorization, 'Bearer upload-token');
-          const i = requests.length - 2;
-          const [[hash, file]] = [...init.body.entries()];
-          assert.equal(hash, hashes[i]);
-          assert.equal(file.type, i ? 'text/javascript' : 'text/html');
-          assert.equal(Buffer.from(await file.text(), 'base64').toString(), i ? 'export {};' : '<html>test</html>');
-          return i ? response({ jwt: 'completion-token' }, 201) : response(undefined);
-        }
-        assert.equal(target.pathname, workerResourceById + '/versions');
-        assert.equal(target.search, '?deploy=false');
+  const requests = [];
+  let hashes;
+  const tag = 'frontend-' + artifactDigest.slice(7);
+  const version = await runInitialWorkerUpload({
+    accountId, workerId, workerToken: 'worker-secret', tag, assets: certifiedAssets(),
+    mimeLookup: name => name.endsWith('.html') ? 'text/html' : 'text/javascript',
+    async fetchImpl(url, init) {
+      const target = new URL(url);
+      assert.equal(target.origin, 'https://api.cloudflare.com');
+      assert.equal(init.redirect, 'error');
+      assert.equal(init.method, 'POST');
+      requests.push(target.pathname);
+      const response = (result, status = 200) => Response.json({ success: true, result, errors: [] }, { status });
+      if (requests.length === 1) {
+        assert.equal(target.pathname, workerPath + '/assets-upload-session');
         assert.equal(init.headers.Authorization, 'Bearer worker-secret');
-        const body = JSON.parse(init.body);
-        assert.equal(body.assets.jwt, 'completion-token');
-        assert.deepEqual(body.assets.config, { html_handling: 'none', not_found_handling: 'none' });
-        assert.equal(body.annotations['workers/tag'], tag);
-        assert.deepEqual(body.modules, Object.entries(controls).map(([name, content]) =>
-          ({ name, content_type: 'text/plain', content_base64: Buffer.from(content).toString('base64') })));
-        return response({ id: newVersion, urls: [] });
-      },
-    });
-    assert.equal(version, newVersion);
-    assert.equal(requests.length, 4);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+        const { manifest } = JSON.parse(init.body);
+        assert.deepEqual(Object.keys(manifest).sort(), ['/assets/app.js', '/index.html']);
+        assert.equal(manifest['/index.html'].size, 17);
+        assert.equal(manifest['/index.html'].hash,
+          createHash('sha256').update(Buffer.from('<html>test</html>').toString('base64') + 'html').digest('hex').slice(0, 32));
+        hashes = [manifest['/index.html'].hash, manifest['/assets/app.js'].hash];
+        return response({ jwt: 'upload-token', buckets: hashes.map(hash => [hash]) });
+      }
+      if (requests.length === 2 || requests.length === 3) {
+        assert.equal(target.pathname, accountPath + '/workers/assets/upload');
+        assert.equal(target.search, '?base64=true');
+        assert.equal(init.headers.Authorization, 'Bearer upload-token');
+        const i = requests.length - 2;
+        const [[hash, file]] = [...init.body.entries()];
+        assert.equal(hash, hashes[i]);
+        assert.equal(file.type, i ? 'text/javascript' : 'text/html');
+        assert.equal(Buffer.from(await file.text(), 'base64').toString(), i ? 'export {};' : '<html>test</html>');
+        return i ? response({ jwt: 'completion-token' }, 201) : response(undefined);
+      }
+      assert.equal(target.pathname, workerResourceById + '/versions');
+      assert.equal(target.search, '?deploy=false');
+      assert.equal(init.headers.Authorization, 'Bearer worker-secret');
+      const body = JSON.parse(init.body);
+      assert.equal(body.assets.jwt, 'completion-token');
+      assert.deepEqual(body.assets.config, { html_handling: 'none', not_found_handling: 'none' });
+      assert.equal(body.annotations['workers/tag'], tag);
+      assert.deepEqual(body.modules, Object.entries(controls).map(([name, content]) =>
+        ({ name, content_type: 'text/plain', content_base64: Buffer.from(content).toString('base64') })));
+      return response({ id: newVersion, urls: [] });
+    },
+  });
+  assert.equal(version, newVersion);
+  assert.equal(requests.length, 4);
 });
 
 test('first Worker upload rejects unknown buckets and incomplete uploads without creating a version', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codexia-upload-test-'));
-  try {
-    await Promise.all([
-      writeFile(join(directory, '_headers'), controls._headers),
-      writeFile(join(directory, '_redirects'), controls._redirects),
-      writeFile(join(directory, 'index.html'), 'test'),
-    ]);
-    for (const { unknown, result, status, error } of [
-      { unknown: true, result: {}, status: 200, error: /requested asset hash/u },
-      { unknown: false, result: {}, status: 200, error: /completed asset upload token/u },
-      { unknown: false, result: undefined, status: 201, error: /asset upload failed/u },
-      { unknown: false, result: null, status: 201, error: /asset upload failed/u },
-    ]) {
-      const paths = [];
-      await assert.rejects(runInitialWorkerUpload({
-        accountId, workerId, workerToken: 'worker-secret', tag: 'frontend-' + artifactDigest.slice(7),
-        initialControls: controlsSha256, directory, mimeLookup: () => 'text/html',
-        async fetchImpl(url, init) {
-          const path = new URL(url).pathname;
-          paths.push(path);
-          assert.ok(!path.endsWith('/versions'));
-          if (paths.length === 1) {
-            return Response.json({ success: true, errors: [], result: {
-              jwt: 'upload-token',
-              buckets: [[unknown ? 'unknown' : JSON.parse(init.body).manifest['/index.html'].hash]],
-            } });
-          }
-          return Response.json({ success: true, errors: [], result }, { status });
-        },
-      }), error);
-      assert.equal(paths.length, unknown ? 1 : 2);
-    }
+  for (const { unknown, result, status, error } of [
+    { unknown: true, result: {}, status: 200, error: /requested asset hash/u },
+    { unknown: false, result: {}, status: 200, error: /completed asset upload token/u },
+    { unknown: false, result: undefined, status: 201, error: /asset upload failed/u },
+    { unknown: false, result: null, status: 201, error: /asset upload failed/u },
+  ]) {
+    const paths = [];
     await assert.rejects(runInitialWorkerUpload({
       accountId, workerId, workerToken: 'worker-secret', tag: 'frontend-' + artifactDigest.slice(7),
-      initialControls: { ...controlsSha256, _headers: 'invalid' }, directory, mimeLookup: () => 'text/html',
-      fetchImpl: () => assert.fail('Changed publication controls must be rejected before any API request'),
-    }), /publication controls changed/u);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
+      assets: certifiedAssets(), mimeLookup: () => 'text/html',
+      async fetchImpl(url, init) {
+        const path = new URL(url).pathname;
+        paths.push(path);
+        assert.ok(!path.endsWith('/versions'));
+        if (paths.length === 1) {
+          return Response.json({ success: true, errors: [], result: {
+            jwt: 'upload-token',
+            buckets: [[unknown ? 'unknown' : JSON.parse(init.body).manifest['/index.html'].hash]],
+          } });
+        }
+        return Response.json({ success: true, errors: [], result }, { status });
+      },
+    }), error);
+    assert.equal(paths.length, unknown ? 1 : 2);
   }
+  const assets = certifiedAssets();
+  assets.delete('_headers');
+  await assert.rejects(runInitialWorkerUpload({
+    accountId, workerId, workerToken: 'worker-secret', tag: 'frontend-' + artifactDigest.slice(7),
+    assets, mimeLookup: () => 'text/html',
+    fetchImpl: () => assert.fail('Missing publication controls must be rejected before any API request'),
+  }), /Missing certified frontend publication control/u);
+});
+
+test('first Worker version uses a completed asset session without reuploading assets', async () => {
+  const calls = [];
+  const version = await runInitialWorkerUpload({
+    accountId, workerId, workerToken: 'worker-secret', tag: 'frontend-' + artifactDigest.slice(7),
+    assets: certifiedAssets(), mimeLookup: () => 'text/plain',
+    async fetchImpl(url, init) {
+      const { pathname, search } = new URL(url);
+      calls.push(pathname + search);
+      const result = pathname.endsWith('/assets-upload-session')
+        ? { jwt: 'completed-session-token', buckets: [] }
+        : { id: newVersion, urls: [] };
+      if (pathname.endsWith('/versions')) assert.equal(JSON.parse(init.body).assets.jwt, 'completed-session-token');
+      return Response.json({ success: true, result });
+    },
+  });
+  assert.equal(version, newVersion);
+  assert.deepEqual(calls, [workerPath + '/assets-upload-session', workerResourceById + '/versions?deploy=false']);
+});
+
+test('first Worker upload stops on an HTTP redirect before forwarding credentials or assets', async t => {
+  const requests = [];
+  const server = createServer((request, response) => {
+    requests.push({ url: request.url, method: request.method, authorization: request.headers.authorization });
+    request.resume();
+    response.writeHead(307, { location: '/unapproved' }).end();
+  });
+  server.listen(0, '127.0.0.1');
+  t.after(() => server.close());
+  await once(server, 'listening');
+  await assert.rejects(runInitialWorkerUpload({
+    accountId, workerId, workerToken: 'worker-secret', tag: 'frontend-' + artifactDigest.slice(7),
+    assets: certifiedAssets(), mimeLookup: () => 'text/plain',
+    fetchImpl(url, init) {
+      const { origin: destination, pathname, search } = new URL(url);
+      assert.equal(destination, 'https://api.cloudflare.com');
+      return fetch(`http://127.0.0.1:${server.address().port}${pathname}${search}`, init);
+    },
+  }), { message: 'Cloudflare asset upload session response could not be verified' });
+  assert.deepEqual(requests, [{ url: workerPath + '/assets-upload-session', method: 'POST', authorization: 'Bearer worker-secret' }]);
 });

@@ -194,7 +194,18 @@ async function planObservation({ bootstrapMode } = {}) {
     const config = protectedCloudflareTarget(env);
     const edgeReader = bootstrapMode === 'publish-frontend'
       ? createDeploymentEdge({ ...config, origin: env.CODEXIA_PUBLIC_ORIGIN, accessEnv: env,
-        readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN, workerToken: env.CLOUDFLARE_API_TOKEN })
+        readToken: env.CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN, workerToken: env.CLOUDFLARE_API_TOKEN,
+        // Called only when the approved R5 operation stages the first Worker version.
+        async readInitialWorkerAssets(artifactDigest) {
+          assert.equal(artifactDigest, 'sha256:' + candidateFrontend.artifactDigest);
+          const { verifyLifecycleFrontendArtifact } = await import('../../verification/artifacts/frontend.mjs');
+          const { assets, ...receipt } = await verifyLifecycleFrontendArtifact(request.frontend, {
+            expectedEpoch: candidateBackend.identity.apiEpoch, readPublicAssets: true,
+          });
+          assert.deepEqual(receipt, candidateFrontend, 'The certified frontend artifact receipt changed before upload');
+          return assets;
+        },
+      })
       : deploymentEdgeFromEnvironment(env);
     let edge = null;
     try {
