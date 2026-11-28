@@ -332,12 +332,15 @@ function assertConfidence(value: number | null): void {
   }
 }
 
-function assertUtf16Boundary(text: string, offset: number): void {
-  if (!Number.isInteger(offset) || offset < 0 || offset > text.length) throw validationError('Text offset is outside the revision');
-  if (offset === 0 || offset === text.length) return;
+function splitsUtf16SurrogatePair(text: string, offset: number): boolean {
   const previous = text.charCodeAt(offset - 1);
   const next = text.charCodeAt(offset);
-  if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+  return previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff;
+}
+
+function assertUtf16Boundary(text: string, offset: number): void {
+  if (!Number.isInteger(offset) || offset < 0 || offset > text.length) throw validationError('Text offset is outside the revision');
+  if (splitsUtf16SurrogatePair(text, offset)) {
     throw validationError('Text offset splits a UTF-16 surrogate pair');
   }
 }
@@ -357,6 +360,29 @@ function applyTextChanges(markdown: string, changes: readonly TextChange[]): str
   }
   result.push(markdown.slice(previousEnd));
   return result.join('');
+}
+
+function restoreTextChanges(before: string, after: string): TextChange[] {
+  if (before === after) return [];
+
+  const sharedLength = Math.min(before.length, after.length);
+  let prefix = 0;
+  while (prefix < sharedLength && before.charCodeAt(prefix) === after.charCodeAt(prefix)) prefix++;
+
+  let suffix = 0;
+  while (suffix < sharedLength && before.charCodeAt(before.length - suffix - 1) === after.charCodeAt(after.length - suffix - 1)) {
+    suffix++;
+  }
+
+  // When the matches overlap, repeated text could belong to either edge of the edit.
+  // Preserve only the portions that are unchanged under both alignments.
+  let fromUtf16 = Math.min(prefix, sharedLength - suffix);
+  let retainedSuffix = Math.min(suffix, sharedLength - prefix);
+  if (splitsUtf16SurrogatePair(before, fromUtf16) || splitsUtf16SurrogatePair(after, fromUtf16)) fromUtf16--;
+  if (splitsUtf16SurrogatePair(before, before.length - retainedSuffix) || splitsUtf16SurrogatePair(after, after.length - retainedSuffix)) {
+    retainedSuffix--;
+  }
+  return [{ fromUtf16, toUtf16: before.length - retainedSuffix, insert: after.slice(fromUtf16, after.length - retainedSuffix) }];
 }
 
 function mapTextOffset(offset: number, changes: readonly TextChange[], association: -1 | 1): number {
@@ -1867,16 +1893,7 @@ class PostgresTransaction implements PersistenceTransaction {
     const document = await this.updateDocumentHead(command.projectId, command.documentId, command.baseRevisionId, revision.id);
     const base = await this.getRevision(command.projectId, command.documentId, command.baseRevisionId);
     if (!base) throw notFound('base document revision', command.baseRevisionId);
-    const restoreChanges: TextChange[] =
-      base.markdown === source.markdown
-        ? []
-        : [
-            {
-              fromUtf16: 0,
-              toUtf16: base.markdown.length,
-              insert: source.markdown,
-            },
-          ];
+    const restoreChanges = restoreTextChanges(base.markdown, source.markdown);
     await this.advanceEvidenceAnchors(command.projectId, command.documentId, base.id, revision.id, source.markdown, restoreChanges);
     await this.recordDocumentOperation({
       projectId: command.projectId,
