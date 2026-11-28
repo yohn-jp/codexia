@@ -127,11 +127,21 @@ test('a deployment document checked by root tests is included in the task source
   const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'unit-root', runtime };
   const original = captureTaskInputClosure(input);
   await mkdir(path.join(root, 'docs/deployment'), { recursive: true });
-  await writeFile(path.join(root, 'docs/deployment/IOS-CLIENT.sdoc'), 'asserted deployment contract\n');
-  await git(root, 'add', '.');
-  await git(root, 'commit', '-qm', 'add executable documentation input');
-  const changed = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
-  assert.notEqual(changed.source, original.source);
+  let previous = original;
+  for (const file of ['docs/deployment/IOS-CLIENT.sdoc', 'docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc']) {
+    const target = path.join(root, file);
+    await writeFile(target, 'asserted deployment contract\n');
+    await git(root, 'add', '.');
+    await git(root, 'commit', '-qm', 'add executable documentation input');
+    const added = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+    assert.notEqual(added.source, previous.source, file);
+    await writeFile(target, 'changed deployment contract\n');
+    await git(root, 'add', '.');
+    await git(root, 'commit', '-qm', 'edit executable documentation input');
+    const changed = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+    assert.notEqual(changed.source, added.source, file);
+    previous = changed;
+  }
 });
 
 test('design authority changes invalidate the trace proof source without changing unrelated task input', async t => {

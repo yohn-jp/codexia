@@ -355,6 +355,14 @@ test('iOS deployment documentation selects the root tests that assert its conten
   assert.deepEqual(selection.tasks, ['unit-root', 'coverage', 'architecture-g5', 'requirements-trace']);
 });
 
+test('the relocated Ansible runbook selects its direct root verification consumer', async () => {
+  const file = 'docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc';
+  const selection = await plan([file]);
+  assert.deepEqual(selection.tasks, ['unit-root', 'coverage', 'architecture-g5', 'requirements-trace', 'codexiactl-linux']);
+  assert.equal(isTaskInputDocument(file, 'unit-root'), true);
+  assert.equal(selection.full_model_oci, false);
+});
+
 test('StrictDoc authority selects trace proof and the requirement register also selects its DB contract', async () => {
   for (const file of [
     'docs/requirements/REQUIREMENTS-GOVERNANCE.sdoc',
@@ -746,7 +754,7 @@ test('known operational inputs retain root proof and trace evidence for register
     if (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf') && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (isTraceTestSource(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (SWIFT_LINUX_RECIPES.includes(file)) expected.push('swift-linux');
-    if (file === 'deploy/production.json' || file === '.github/workflows/production-preflight.yml' || file === 'docs/deployment/ACCESS-POLICY-MIGRATION.sdoc' ||
+    if (file === 'deploy/production.json' || file === '.github/workflows/production-preflight.yml' || ['docs/deployment/ACCESS-POLICY-MIGRATION.sdoc', 'docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc'].includes(file) ||
         /^deploy\/cloudflare\/[^/]+\.json$/u.test(file)) expected.push('codexiactl-linux');
     assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);

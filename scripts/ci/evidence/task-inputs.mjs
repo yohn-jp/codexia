@@ -13,6 +13,7 @@ const testFilePattern = /\.(?:test|spec)\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx)$/u;
 const dependencyPath = file => /(?:^|\/)(?:package\.json|package-lock\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.node-version|\.nvmrc)$/u.test(file) ||
   file === 'tests/conformance/http/requirements.lock.txt' || file === 'scripts/strictdoc/requirements.lock.txt';
 export const ROOT_VERIFICATION_DOCUMENTS = Object.freeze([
+  'docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc',
   'docs/deployment/BACKUP.sdoc',
   'docs/deployment/IAC.sdoc',
   'docs/deployment/IOS-CLIENT.sdoc',
