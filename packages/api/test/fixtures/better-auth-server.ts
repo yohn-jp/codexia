@@ -196,6 +196,29 @@ function close(server: Server): Promise<void> {
   return new Promise((resolve, reject) => server.close(error => (error ? reject(error) : resolve())));
 }
 
+// The disposable public proxy is not a production server. Once the fixture
+// is being destroyed, stop admitting requests and disconnect its clients;
+// the outgoing close handler also cancels their upstream requests. Waiting
+// for an active browser response before closing its browser can deadlock.
+function closeFixtureProxy(server: Server): Promise<void> {
+  const drained = close(server);
+  server.closeAllConnections();
+  return drained;
+}
+
+async function observeFixtureClose(stage: string, action: () => Promise<unknown>): Promise<void> {
+  const started = performance.now();
+  if (process.env.CI === 'true') {
+    console.log(JSON.stringify({ phase: 'auth-fixture-close', stage, status: 'started' }));
+  }
+  await action();
+  if (process.env.CI === 'true') {
+    console.log(
+      JSON.stringify({ phase: 'auth-fixture-close', stage, status: 'completed', durationMs: Math.round(performance.now() - started) }),
+    );
+  }
+}
+
 function bodyChunks(request: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -827,15 +850,17 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       },
       async close() {
         try {
-          if (apiServer) await close(apiServer);
-          if (apiProxyServer) await close(apiProxyServer);
-          if (bootstrapServer) await close(bootstrapServer);
-          if (idpServer) await close(idpServer);
-          if (runtime) await runtime.pool.end();
-          if (domainPersistence) await domainPersistence.close();
-          if (bootstrapPool) await bootstrapPool.end();
-          if (usageDirectory) await rm(usageDirectory, { recursive: true, force: true });
-          if (tlsDirectory) await rm(tlsDirectory, { recursive: true, force: true });
+          // Shut off the external fixture ingress before draining the real
+          // API. Keep its normal shutdown path and database cleanup intact.
+          if (apiProxyServer) await observeFixtureClose('proxy', () => closeFixtureProxy(apiProxyServer!));
+          if (apiServer) await observeFixtureClose('api', () => close(apiServer!));
+          if (bootstrapServer) await observeFixtureClose('bootstrap', () => close(bootstrapServer!));
+          if (idpServer) await observeFixtureClose('idp', () => close(idpServer!));
+          if (runtime) await observeFixtureClose('auth-pool', () => runtime!.pool.end());
+          if (domainPersistence) await observeFixtureClose('domain-persistence', () => domainPersistence!.close());
+          if (bootstrapPool) await observeFixtureClose('bootstrap-pool', () => bootstrapPool!.end());
+          if (usageDirectory) await observeFixtureClose('usage-directory', () => rm(usageDirectory!, { recursive: true, force: true }));
+          if (tlsDirectory) await observeFixtureClose('tls-directory', () => rm(tlsDirectory!, { recursive: true, force: true }));
         } finally {
           restoreFixtureDns?.();
           restoreFixtureTls?.();
@@ -844,8 +869,8 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       },
     };
   } catch (error) {
+    if (apiProxyServer) await closeFixtureProxy(apiProxyServer).catch(() => undefined);
     if (apiServer) await close(apiServer).catch(() => undefined);
-    if (apiProxyServer) await close(apiProxyServer).catch(() => undefined);
     if (bootstrapServer) await close(bootstrapServer).catch(() => undefined);
     await bootstrap?.close().catch(() => undefined);
     if (idpServer) await close(idpServer).catch(() => undefined);
