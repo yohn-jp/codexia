@@ -51,7 +51,7 @@ STATEMENT: >>>
 | `bootstrap` | 既存の管理者SSH、承認済み計画、runnerが生成したinventory | host/secrets/base と許可した auth-runtime を順序どおり収束 | 途中で失敗した状態を観測し、同じ対象・既存の秘密を再照合 |
 | `inspect` | 該当するSSH利用者とホスト鍵pin | サポート対象 OS、所有 ID、既存資源の観測 | 読取専用で中断 |
 | `host` | 必要な sudo とアカウント作成承認 | rootless user、Podman/systemd 条件 | UID 衝突や既存 unit の予期せぬ自動起動を拒否 |
-| `secrets` | 外部Tunnel資格情報、新規生成または既存採用の承認 | Podman secret の内容・所有が一致 | 不足・異なる secret を自動修復・rotation しない |
+| `secrets` | VM 内の PostgreSQL/認証用 secret、新規生成または既存採用の承認。外部 Tunnel token は独立した host systemd credential | Podman secret の内容・所有が一致し、Tunnel credential を Podman に格納しない | 不足・異なる secret を自動修復・rotation しない |
 | `base` | network/volume/PG/Tunnel の所望状態 | 固定 volume、Podman、PostgreSQL 17 の同一性 | 既存 DB・container drift を拒否 |
 | `auth-runtime` | 審査済み Full digest、DB・認証初期化承認 | 原稿 migration ledger、別 auth role/schema、秘密設定 | API は非公開のまま停止 |
 | 初回キー発行 | Ansibleの承認済み新規構築、空の正本DB、CSPRNG | 256-bit一回限りキーのハッシュ保存、期限と配送先の明示、setup-only入口の検証 | 既存owner・復旧中なら発行禁止。ログ/CI artifactに平文キーを出さない |

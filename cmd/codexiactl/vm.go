@@ -28,7 +28,6 @@ import (
 )
 
 const (
-	serviceUID        = 1001
 	maxAuthorizedKeys = 1024 * 1024
 )
 
@@ -75,7 +74,7 @@ func parseSSHSession(connection string) (sshSession, error) {
 
 func observeVM(ctx context.Context) (vmObservation, error) {
 	vm := vmObservation{ObservedAt: time.Now().UTC(), Clock: "unknown", uid: os.Getuid(), verifiedPin: new(string)}
-	if vm.uid == 0 || vm.uid == serviceUID || vm.uid != os.Geteuid() {
+	if vm.uid == 0 || vm.uid != os.Geteuid() {
 		return vm, refused("use an independent non-root SSH administrator, distinct from the Codexia service account")
 	}
 	account, err := user.LookupId(strconv.Itoa(vm.uid))
@@ -150,12 +149,22 @@ func hasLocalCodexiaResources() bool {
 	if _, err := user.Lookup("codexia"); err == nil {
 		return true
 	}
-	for _, path := range []string{"/home/codexia", "/etc/containers/systemd/users/" + strconv.Itoa(serviceUID)} {
-		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-			return true
-		}
+	_, err := os.Lstat("/home/codexia")
+	return !errors.Is(err, os.ErrNotExist)
+}
+
+// Service UID comes from the approved repository contract, not a fixed UID
+// assumed before target selection. Unknown filesystem errors remain blocking.
+func hasServiceUIDResidue(uid int) bool {
+	if uid <= 0 {
+		return true
 	}
-	return false
+	_, err := os.Lstat("/etc/containers/systemd/users/" + strconv.Itoa(uid))
+	return !errors.Is(err, os.ErrNotExist)
+}
+
+func independentAdministratorUID(uid, serviceUID int) bool {
+	return uid > 0 && serviceUID > 0 && uid != serviceUID
 }
 
 func effectiveSSHConfig(ctx context.Context, vm vmObservation) (map[string][]string, error) {

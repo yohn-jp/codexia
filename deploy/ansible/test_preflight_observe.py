@@ -24,6 +24,28 @@ observer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(observer)
 
 
+class AbsentHostIdentityTests(unittest.TestCase):
+    def test_independent_sophia_administrator_does_not_count_as_existing_writer(self):
+        facts = json.dumps({"accountPresent": False})
+        with patch.dict(os.environ, {"CODEXIA_INSPECT_FACTS": facts, "CODEXIA_WRITER_OBSERVATION": "{}"}), \
+                patch.object(observer, "machine_identity", return_value="a" * 64), \
+                patch.object(observer, "user_exists", side_effect=lambda name: name == "sophia"), \
+                patch.object(observer, "metadata", return_value=None):
+            observed = observer.observe()
+        self.assertEqual(observed["H"], "absent")
+        self.assertEqual(observed["database"]["state"], "absent")
+
+    def test_legacy_sophia_codexia_state_blocks_fresh_install(self):
+        facts = json.dumps({"accountPresent": False})
+        with patch.dict(os.environ, {"CODEXIA_INSPECT_FACTS": facts, "CODEXIA_WRITER_OBSERVATION": "{}"}), \
+                patch.object(observer, "machine_identity", return_value="a" * 64), \
+                patch.object(observer, "user_exists", side_effect=lambda name: name == "sophia"), \
+                patch.object(observer, "metadata", side_effect=lambda path: object()
+                    if str(path) == "/home/sophia/.local/state/codexia-deploy" else None):
+            with self.assertRaises(ValueError):
+                observer.observe()
+
+
 class OwnerHandoffTests(unittest.TestCase):
     recipient = "age1recipient"
     binding = "a" * 64

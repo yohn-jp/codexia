@@ -66,6 +66,10 @@ func runInit(ctx context.Context) (resultErr error) {
 	if err != nil {
 		return err
 	}
+	if !independentAdministratorUID(vm.uid, settings.ServiceUID) {
+		return refused("the SSH administrator UID conflicts with the service UID in the selected repository contract")
+	}
+	vm.CodexiaPresent = vm.CodexiaPresent || hasServiceUIDResidue(settings.ServiceUID)
 	if err := gh.verifyOIDC(ctx); err != nil {
 		return err
 	}

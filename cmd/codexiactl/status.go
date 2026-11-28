@@ -314,17 +314,19 @@ func inspectProviders(ctx context.Context, o operator, vm vmObservation, gh *git
 		} else {
 			reportResult(o, successText, "Cloudflare edge verified")
 		}
-		needsInstall, connectorErr := CloudflareConnectorNeedsInstall(ctx)
-		if connectorErr != nil {
-			report.Blockers = append(report.Blockers, "cloudflare-connector-unverified")
-			reportResult(o, warningText, "Cloudflare connector check: "+connectorErr.Error())
-			failures = append(failures, connectorErr)
-		} else if needsInstall {
-			err := needsAction("the pinned Cloudflare connector is not installed and active on this VM")
-			report.Blockers = append(report.Blockers, "cloudflare-connector-install-required")
-			reportResult(o, warningText, "Cloudflare connector check: "+err.Error())
-			failures = append(failures, err)
-		}
+	}
+	// VM-local connector health is independent of Cloudflare account read access.
+	// Continue observing it even if the external inventory is unavailable.
+	needsInstall, connectorErr := CloudflareConnectorNeedsInstall(ctx)
+	if connectorErr != nil {
+		report.Blockers = append(report.Blockers, "cloudflare-connector-unverified")
+		reportResult(o, warningText, "Cloudflare connector check: "+connectorErr.Error())
+		failures = append(failures, connectorErr)
+	} else if needsInstall {
+		err := needsAction("the pinned Cloudflare connector is not installed and active on this VM")
+		report.Blockers = append(report.Blockers, "cloudflare-connector-install-required")
+		reportResult(o, warningText, "Cloudflare connector check: "+err.Error())
+		failures = append(failures, err)
 	}
 	reportStage(o, settingsStage, "Compare protected inputs with observed provider identity")
 	if len(failures) != 0 {
