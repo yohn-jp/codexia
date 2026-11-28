@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { createDeploymentEdge } from './initial-publication.mjs';
+import { createDeploymentEdge, runInitialWorkerUpload } from './initial-publication.mjs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { publishInitialFrontend } from '../../deployment/bootstrap/publish-frontend.mjs';
 
 const origin = 'https://deploy.example.com';
@@ -341,4 +344,104 @@ test('R5 refuses changed ingress before promotion and never records an unverifie
   f.state.candidateIdentity = { ...enrollmentCandidate.identity, apiEpoch: 2 };
   await assert.rejects(f.publish(), /API epoch|identity|immutable/u);
   assert.equal(f.records.length, 0);
+});
+
+test('first Worker upload registers certified assets and creates a version without deploying', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codexia-upload-test-'));
+  try {
+    await mkdir(join(directory, 'assets'));
+    await Promise.all([
+      writeFile(join(directory, '_headers'), controls._headers),
+      writeFile(join(directory, '_redirects'), controls._redirects),
+      writeFile(join(directory, 'index.html'), '<html>test</html>'),
+      writeFile(join(directory, 'assets', 'app.js'), 'export {};'),
+    ]);
+    const requests = [];
+    let hashes;
+    const tag = 'frontend-' + artifactDigest.slice(7);
+    const version = await runInitialWorkerUpload({
+      accountId, workerId, workerToken: 'worker-secret', tag, initialControls: controlsSha256, directory,
+      mimeLookup: name => name.endsWith('.html') ? 'text/html' : 'text/javascript',
+      async fetchImpl(url, init) {
+        const target = new URL(url);
+        assert.equal(target.origin, 'https://api.cloudflare.com');
+        assert.equal(init.redirect, 'error');
+        assert.equal(init.method, 'POST');
+        requests.push(target.pathname);
+        const response = (result, status = 200) => Response.json({ success: true, result, errors: [] }, { status });
+        if (requests.length === 1) {
+          assert.equal(target.pathname, workerPath + '/assets-upload-session');
+          assert.equal(init.headers.Authorization, 'Bearer worker-secret');
+          const { manifest } = JSON.parse(init.body);
+          assert.deepEqual(Object.keys(manifest).sort(), ['/assets/app.js', '/index.html']);
+          assert.equal(manifest['/index.html'].size, 17);
+          assert.equal(manifest['/index.html'].hash,
+            createHash('sha256').update(Buffer.from('<html>test</html>').toString('base64') + 'html').digest('hex').slice(0, 32));
+          hashes = [manifest['/index.html'].hash, manifest['/assets/app.js'].hash];
+          return response({ jwt: 'upload-token', buckets: hashes.map(hash => [hash]) });
+        }
+        if (requests.length === 2 || requests.length === 3) {
+          assert.equal(target.pathname, accountPath + '/workers/assets/upload');
+          assert.equal(target.search, '?base64=true');
+          assert.equal(init.headers.Authorization, 'Bearer upload-token');
+          const i = requests.length - 2;
+          const [[hash, file]] = [...init.body.entries()];
+          assert.equal(hash, hashes[i]);
+          assert.equal(file.type, i ? 'text/javascript' : 'text/html');
+          assert.equal(Buffer.from(await file.text(), 'base64').toString(), i ? 'export {};' : '<html>test</html>');
+          return i ? response({ jwt: 'completion-token' }, 201) : response({});
+        }
+        assert.equal(target.pathname, workerResourceById + '/versions');
+        assert.equal(target.search, '?deploy=false');
+        assert.equal(init.headers.Authorization, 'Bearer worker-secret');
+        const body = JSON.parse(init.body);
+        assert.equal(body.assets.jwt, 'completion-token');
+        assert.deepEqual(body.assets.config, { html_handling: 'none', not_found_handling: 'none' });
+        assert.equal(body.annotations['workers/tag'], tag);
+        assert.deepEqual(body.modules, Object.entries(controls).map(([name, content]) =>
+          ({ name, content_type: 'text/plain', content_base64: Buffer.from(content).toString('base64') })));
+        return response({ id: newVersion, urls: [] });
+      },
+    });
+    assert.equal(version, newVersion);
+    assert.equal(requests.length, 4);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('first Worker upload rejects unknown buckets and incomplete uploads without creating a version', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codexia-upload-test-'));
+  try {
+    await Promise.all([
+      writeFile(join(directory, '_headers'), controls._headers),
+      writeFile(join(directory, '_redirects'), controls._redirects),
+      writeFile(join(directory, 'index.html'), 'test'),
+    ]);
+    for (const unknown of [true, false]) {
+      const paths = [];
+      await assert.rejects(runInitialWorkerUpload({
+        accountId, workerId, workerToken: 'worker-secret', tag: 'frontend-' + artifactDigest.slice(7),
+        initialControls: controlsSha256, directory, mimeLookup: () => 'text/html',
+        async fetchImpl(url, init) {
+          const path = new URL(url).pathname;
+          paths.push(path);
+          assert.ok(!path.endsWith('/versions'));
+          const result = paths.length === 1 ? {
+            jwt: 'upload-token',
+            buckets: [[unknown ? 'unknown' : JSON.parse(init.body).manifest['/index.html'].hash]],
+          } : {};
+          return Response.json({ success: true, errors: [], result });
+        },
+      }), unknown ? /requested asset hash/u : /completed asset upload token/u);
+      assert.equal(paths.length, unknown ? 1 : 2);
+    }
+    await assert.rejects(runInitialWorkerUpload({
+      accountId, workerId, workerToken: 'worker-secret', tag: 'frontend-' + artifactDigest.slice(7),
+      initialControls: { ...controlsSha256, _headers: 'invalid' }, directory, mimeLookup: () => 'text/html',
+      fetchImpl: () => assert.fail('Changed publication controls must be rejected before any API request'),
+    }), /publication controls changed/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

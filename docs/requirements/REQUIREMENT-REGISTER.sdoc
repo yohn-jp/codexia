@@ -1255,8 +1255,6 @@ RELATIONS:
 - TYPE: File
   PATH: deploy/ansible/test-push-app-lifecycle.sh
 - TYPE: File
-  PATH: deploy/cloudflare/terraform/initial-frontend-version/main.tf
-- TYPE: File
   PATH: deploy/cloudflare/terraform/main.tf
 - TYPE: File
   PATH: deploy/ansible/deploy-lifecycle-fixture.yml
