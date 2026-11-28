@@ -95,7 +95,7 @@ func newCloudflareAPI(secret []byte, baseURL string) cloudflareAPI {
 		option.WithAPIToken(string(secret)), option.WithMiddleware(checkCloudflareResponse)}
 	return cloudflareAPI{
 		resourceClient: &cloudflare.Client{Options: opts},
-		zones: zones.NewZoneService(opts...), dns: dns.NewRecordService(opts...), workers: workers.NewWorkerService(opts...),
+		zones:          zones.NewZoneService(opts...), dns: dns.NewRecordService(opts...), workers: workers.NewWorkerService(opts...),
 		tunnels: zero_trust.NewTunnelCloudflaredService(opts...), access: zero_trust.NewAccessService(opts...),
 		accountTokens: accounts.NewTokenService(opts...), userTokens: user.NewTokenService(opts...), baseURL: baseURL,
 	}
