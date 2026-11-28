@@ -213,7 +213,9 @@ async function observeFixtureClose(stage: string, action: () => Promise<unknown>
   }
   await action();
   if (process.env.CI === 'true') {
-    console.log(JSON.stringify({ phase: 'auth-fixture-close', stage, status: 'completed', durationMs: Math.round(performance.now() - started) }));
+    console.log(
+      JSON.stringify({ phase: 'auth-fixture-close', stage, status: 'completed', durationMs: Math.round(performance.now() - started) }),
+    );
   }
 }
 
