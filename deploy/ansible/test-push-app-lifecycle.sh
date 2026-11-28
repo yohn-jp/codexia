@@ -281,13 +281,20 @@ const attempts = health.map(entry => ({
 const successIndex = attempts.findIndex(entry => entry.exitCode === 0);
 if (successIndex < 0) throw new Error("No successful startup health probe was recorded");
 const success = attempts[successIndex];
-if (listened < started || success.end < listened || success.start < started) throw new Error("Startup event order is invalid");
+const first = attempts[0];
+if (listened < started || success.end < listened || success.start < started || first.end < first.start) {
+  throw new Error("Startup event order is invalid");
+}
 const execStartUs = BigInt(execStartUsText), activeEnterUs = BigInt(activeEnterUsText);
 if (activeEnterUs < execStartUs) throw new Error("systemd activation timestamp moved backwards");
 const row = {
   stage,
   containerToListenMs: milliseconds(listened - started),
-  containerToFirstProbeMs: milliseconds(attempts[0].start - started),
+  containerToFirstProbeMs: milliseconds(first.start - started),
+  firstProbeMs: milliseconds(first.end - first.start),
+  firstProbeExitCode: first.exitCode,
+  firstProbeEndToListenMs: first.end <= listened ? -milliseconds(listened - first.end) : milliseconds(first.end - listened),
+  retryGapMs: successIndex > 0 ? milliseconds(success.start - attempts[successIndex - 1].end) : 0,
   listenToHealthyMs: milliseconds(success.end - listened),
   containerToHealthyMs: milliseconds(success.end - started),
   successfulProbeMs: milliseconds(success.end - success.start),
