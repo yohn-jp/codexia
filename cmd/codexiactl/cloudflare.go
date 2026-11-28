@@ -57,14 +57,14 @@ type cloudflareTarget struct {
 
 type cloudflareAPI struct {
 	resourceClient *cloudflare.Client
-	zones         *zones.ZoneService
-	dns           *dns.RecordService
-	workers       *workers.WorkerService
-	tunnels       *zero_trust.TunnelCloudflaredService
-	access        *zero_trust.AccessService
-	accountTokens *accounts.TokenService
-	userTokens    *user.TokenService
-	baseURL       string
+	zones          *zones.ZoneService
+	dns            *dns.RecordService
+	workers        *workers.WorkerService
+	tunnels        *zero_trust.TunnelCloudflaredService
+	access         *zero_trust.AccessService
+	accountTokens  *accounts.TokenService
+	userTokens     *user.TokenService
+	baseURL        string
 }
 
 type cloudflareObservation struct {

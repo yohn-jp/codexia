@@ -1240,7 +1240,7 @@ UID: OBL-REQ-OPS-002-O01
 TITLE: OBL-REQ-OPS-002-O01
 DESIGN_REFERENCE: [Update flow](../deployment/UPDATE-FLOW.sdoc)、[CI/CD](../verification/CI-CD.sdoc)
 IMPLEMENTATION_IDENTIFIERS: deploy/update-compatibility.json; .github/workflows/backend-release.yml; deploy/ansible/test-push-app-lifecycle.sh
-SURFACE_IDENTIFIERS: iacResource=cloudflare_worker_version.candidate; iacResource=cloudflare_worker.frontend; iacResource=terraform_data.public_oauth_edge_readiness; iacResource=cloudflare_workers_route.frontend; ansibleSource=deploy/ansible/deploy-lifecycle-fixture.yml; ansibleSource=deploy/ansible/deploy-prepare.yml; ansibleSource=deploy/ansible/deploy-transaction.yml; ansibleSource=deploy/ansible/deploy.yml; ansibleSource=deploy/ansible/verify-deploy-base-runtime.yml
+SURFACE_IDENTIFIERS: iacResource=cloudflare_worker.frontend; iacResource=terraform_data.public_oauth_edge_readiness; iacResource=cloudflare_workers_route.frontend; ansibleSource=deploy/ansible/deploy-lifecycle-fixture.yml; ansibleSource=deploy/ansible/deploy-prepare.yml; ansibleSource=deploy/ansible/deploy-transaction.yml; ansibleSource=deploy/ansible/deploy.yml; ansibleSource=deploy/ansible/verify-deploy-base-runtime.yml
 TEST_IDS: TEST-OPS-002-001
 EXACT_RUN_REFERENCE: NOT_RUN
 COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.

@@ -23,6 +23,7 @@ type managedEdgeSpec struct {
 	AllowedIDPs, SSHServiceTokenIDs []string
 	ProbeTokenID, ProductService, SSHService string
 	PublicProtocolEnabled, PublicProtocolAccepted bool
+	PublicProtocolTransitionApproved bool
 	Contract cloudflareContract
 }
 
@@ -278,8 +279,12 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		if a:=apps[domain];a.ID!="" {
 			attached:=state.AppPolicies[a.ID]
 			if len(attached)!=1||!exactManagedBypass(attached[0]){return nil,errors.New("Unexpected Cloudflare protocol Access policy")}
-			if !s.PublicProtocolEnabled {publicChanges=append(publicChanges,managedEdgeChange{"remove Bypass "+domain,"DELETE",account+"/access/apps/"+a.ID,nil})}
+			if !s.PublicProtocolEnabled {
+				if !s.PublicProtocolTransitionApproved {return nil,errors.New("Disabling public protocol requires explicit transition approval")}
+				publicChanges=append(publicChanges,managedEdgeChange{"remove Bypass "+domain,"DELETE",account+"/access/apps/"+a.ID,nil})
+			}
 		} else if s.PublicProtocolEnabled {
+			if !s.PublicProtocolTransitionApproved {return nil,errors.New("Enabling public protocol requires explicit transition approval")}
 			body:=map[string]any{"name":p.Name,"domain":domain,"type":"self_hosted","app_launcher_visible":false,
 				"policies":[]any{map[string]any{"name":p.Name,"decision":"bypass","precedence":1,"include":[]any{map[string]any{"everyone":map[string]any{}}}}}}
 			publicChanges=append(publicChanges,managedEdgeChange{"create Bypass "+domain,"POST",account+"/access/apps",body})
