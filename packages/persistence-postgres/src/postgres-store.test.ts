@@ -944,6 +944,41 @@ test('document saves advance persistent anchors atomically and revoke stale ment
   assert.equal(evidence.documentAnchors[0]?.status, 'orphaned');
 });
 
+test('compound edits keep adjacent replacements outside the evidence they delete or revise', async () => {
+  const project = await createProject('adjacent evidence edits');
+  for (const replacement of ['', '新']) {
+    const initial = await createDocument(project.id, 'abc');
+    const id = randomUUID() as EvidenceId;
+    await persistence.transaction(tx =>
+      tx.saveEvidenceAnchor({
+        projectId: project.id,
+        id,
+        documentId: initial.document.id,
+        revisionId: initial.revision.id,
+        fromUtf16: 1,
+        toUtf16: 2,
+        quoteSha256: sha256('b'),
+        status: 'confirmed',
+        expectedVersion: null,
+      }),
+    );
+    const markdown = '前😀' + replacement + '後';
+    const command = saveCommand(project.id, initial.document.id, initial.revision.id, markdown, [
+      { fromUtf16: 0, toUtf16: 1, insert: '前' },
+      { fromUtf16: 1, toUtf16: 1, insert: '😀' },
+      { fromUtf16: 1, toUtf16: 2, insert: replacement },
+      { fromUtf16: 2, toUtf16: 3, insert: '後' },
+    ]);
+    const saved = await persistence.transaction(tx => tx.saveDocument(command));
+    const anchor = await persistence.read(reader => reader.getEvidenceAnchor(project.id, id));
+    assert.ok(anchor);
+    assert.equal(anchor.revisionId, saved.revision.id);
+    assert.equal(anchor.status, replacement ? 'needs_review' : 'orphaned');
+    assert.deepEqual([anchor.fromUtf16, anchor.toUtf16], [3, 3 + replacement.length]);
+    assert.equal(anchor.quoteSha256, sha256(replacement || 'b'));
+  }
+});
+
 test('concurrent exact retries replay one document creation and one edit', async () => {
   const project = await createProject(`retry-${randomUUID()}`);
   const creation: CreateDocumentCommand = {
