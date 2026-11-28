@@ -115,7 +115,8 @@ assert.match(connectorUnit, /^ExecStart=\/usr\/bin\/cloudflared tunnel --no-auto
 assert.doesNotMatch(connectorUnit, /^\w*=.*codexia-(?:api|db)/mu, 'the host connector must remain independent of application services');
 assert.deepEqual(gateSocket.match(/^Listen\w+=.*$/gmu), ['ListenStream=127.0.0.1:18080']);
 assert.match(gateSocket, /^Service=codexia-api-gate\.service$/mu);
-assert.match(gateService, /^ExecStart=\S*systemd-socket-proxyd\b[^\n]*127\.0\.0\.1:18081$/mu);
+assert.match(gateSocket, /^WantedBy=sockets\.target$/mu);
+assert.match(gateService, /^ExecStart=\S*systemd-socket-proxyd --connections-max=256 127\.0\.0\.1:18081$/mu);
 assert.doesNotMatch(gateService, /^(?:Requires|Wants)=.*codexia-(?:api\.service|db|cloudflared)/mu);
 assert.match(backendDockerfile, /--server-only/u);
 assert.match(deploymentDocs, /\[LINK: DOC-DEPLOYMENT-BACKUP-受入シナリオ,/u,
