@@ -22,26 +22,21 @@ export function ellipsisNormalizeExtension(): Extension {
     // into the editor; normalization is only for local authoring input.
     if (!transaction.docChanged || isMidCompositionTransaction(transaction) || transaction.annotation(externalDocumentSync))
       return transaction;
-    let changed = false;
     const replacements: { from: number; to: number; insert: string }[] = [];
-    const doc = transaction.startState.doc;
-    transaction.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-      const text = inserted.toString();
-      const previousIsEllipsis = fromA > 0 && doc.sliceString(fromA - 1, fromA) === '…';
-      if (!text.includes('…') && !previousIsEllipsis) {
-        replacements.push({ from: fromA, to: toA, insert: text });
-        return;
-      }
-      let from = fromA;
-      let to = toA;
+    transaction.changes.iterChanges((fromA, _toA, fromB, toB, inserted) => {
+      const previousIsEllipsis = fromA > 0 && transaction.startState.doc.sliceString(fromA - 1, fromA) === '…';
+      if (!previousIsEllipsis && !inserted.toString().includes('…')) return;
+      const doc = transaction.newDoc;
+      let from = fromB;
+      let to = toB;
       while (from > 0 && doc.sliceString(from - 1, from) === '…') from -= 1;
       while (to < doc.length && doc.sliceString(to, to + 1) === '…') to += 1;
-      const combined = doc.sliceString(from, fromA) + text + doc.sliceString(toA, to);
-      const normalized = combined.replace(ELLIPSIS_LONE, '……');
-      if (normalized !== combined) changed = true;
-      replacements.push({ from, to, insert: normalized });
+      for (const match of doc.sliceString(from, to).matchAll(ELLIPSIS_LONE)) {
+        const at = from + match.index;
+        if (at !== replacements.at(-1)?.from) replacements.push({ from: at, to: at + 1, insert: '……' });
+      }
     });
-    if (!changed) return transaction;
-    return { changes: replacements, filter: false };
+    // Compose the expansion with the input so CodeMirror maps its caret and retains its event and history metadata.
+    return replacements.length ? [transaction, { changes: replacements, sequential: true }] : transaction;
   });
 }

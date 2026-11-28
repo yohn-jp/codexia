@@ -30,6 +30,17 @@ test('typing after a complete ellipsis pair does not duplicate either character'
   assert.equal(updated.doc.toString(), '前……y後');
 });
 
+test('normalizing an ellipsis preserves the input event and the caret for the next character', () => {
+  for (const userEvent of ['input.type', 'input.paste', 'input.type.compose.end']) {
+    const state = EditorState.create({ doc: '前後', selection: { anchor: 1 }, extensions: [ellipsisNormalizeExtension()] });
+    const input = state.update(state.replaceSelection('…'), { userEvent });
+    assert.equal(input.newDoc.toString(), '前……後');
+    assert.equal(input.newSelection.main.head, 3);
+    assert.equal(input.isUserEvent(userEvent), true);
+    assert.equal(input.state.update(input.state.replaceSelection('次')).newDoc.toString(), '前……次後');
+  }
+});
+
 test('external manuscript sync preserves the persisted ellipsis spelling', () => {
   const state = EditorState.create({ doc: '旧稿', extensions: [ellipsisNormalizeExtension()] });
   const updated = state.update({
