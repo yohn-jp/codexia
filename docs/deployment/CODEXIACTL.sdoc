@@ -429,6 +429,25 @@ MID: 096b117f38ddd66ec37f42d7b27020b5
 STATEMENT: >>>
 Go の標準 crypto/net/http、維持されている GitHub の公式または成熟 SDK と Cloudflare 公式 cf、Libsodium 互換 sealed box、age の既存実装を使う。CLI parser 等も [LINK: DOC-ARCHITECTURE-DEPENDENCY-POLICY, 依存選定方針] に従う。protocol、暗号、SSH、IaC、DB/Backup を再実装しない。依存の採用・固定バージョンは実装 PR で公式機能と検証を示し register を更新する。CLI に必要な既存公式 GitHub App と cf/cloudflared の認証・配布・認定を実装受入に含める。独自 Cloudflare App は廃止する。新規の helper script、常駐 service、別 Workflow を追加して既存の手動運用を温存することを完成としない。既存 Workflow の個別操作を独立復旧/診断のために維持し、正常初回導入で要求していた管理画面転記や別々の手動 dispatch を CLI 経由に置き換える。
 
+**Go 実装の責務境界:** [LINK: DOC-ARCHITECTURE-DEPENDENCY-POLICY-go-engineering, Go 開発基盤] を採用する。terminal/presentation は Huh、Lip Gloss、Bubble Tea と既存安全入力境界に従い、CLI command は既存 init/plan/status/doctor/version/help の構文・出力・終了コードを維持する。application/use case は既存の操作・承認・中断再開を編成し、配備 policy は target identity、認可、所望状態、操作順序、冪等性、公開 gate、証跡を所有する。Cloudflare/GitHub/host adapters は外部 I/O を所有する。論理的な責務分割であり、全層の機械的な package 化、第二の controller や DI framework の導入を要求しない。既存の正本とコードを再利用し、責務の混在する巨大関数は資源別・不変条件別の小さい処理へ必要な範囲で分割する。
+
+Cloudflare と GitHub の SDK は型付き Service、Params、Response を優先し、対応する API の URL/HTTP verb/JSON DTO/汎用 pagination/dispatch を重複実装しない。Cloudflare 公式 cf の Device Flow・公開コマンドは本書 `4.3 の正本とし、SDK の利用は公式の手段で発行され検証済みの用途・対象・権限・期限を持つ限定資格に限る。OAuth 内部 token の抽出、手動 token、ambient credentials、未承認権限への拡張は不可。SDK で不足する公開操作は選定規約の限定例外に従う。対応する既存 SDK の typed error と API schema を利用するが、独立した対象・identity・scope・認可判定は Codexia の責務である。既存の全ページ取得・ページ上限・context 伝播・応答量制限・厳格 JSON 検証・redirect の credential 隔離・秘密の非出力を維持し、SDK の default retry を副作用を持つ操作に無条件適用しない。応答喪失は再観測し、未成立と成立済みを識別して再開する。未確認 ID や所望状態を推測して変更しない。認証・配備・共有資源の所有範囲、既存受入と公開停止の条件を本節によって変更しない。
+
+**Go 実装品質の受入契約:** 以下は [LINK: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION-go-proof, Go テスト設計] と [LINK: DOC-VERIFICATION-CI-CD-go-quality-gate, Go 品質ゲート] の受入を CLI の実装に対応付ける。CLI-01〜CLI-11 や配備 lifecycle の既存実サービス受入を代替しない。設計 PR の文書受入と製品コードの導入・実サービス合格は区別する。
+
+| ID | 必須証明 |
+| --- | --- |
+| GO-01 | 対応する公式 typed SDK/標準 API を利用し、重複する汎用実装と不要依存を撤去。限定例外には根拠・境界テストがある |
+| GO-02 | target/認可/資格・入力検証・ページ上限・応答制限・取消・秘密保護を保持。未承認・未知・別用途を拒否 |
+| GO-03 | 実 SDK と HTTP fixture によって method/path/body/query/header/異常応答/redirect を検証 |
+| GO-04 | 正常・拒否・承認前ゼロ書込・部分失敗・応答喪失・再観測・再実行のゼロ書込・状態遷移を証明 |
+| GO-05 | 固定版 golangci-lint の設定検証、全対象 lint/format 合格。抑制・複雑性の評価は CI 正本に従う |
+| GO-06 | 既存 race test、決定的な seed corpus、適用可能な controlled-time tests、PTY/process proof が成功 |
+| GO-07 | Testify/go-cmp と独立開発ツールが通常の release build package closure に含まれない |
+| GO-08 | 既存 codexiactl-linux、影響選択・入力閉包・exact-source CI 認定・保護 release の契約と性能計測が成立 |
+| GO-09 | module 解決版/checksum と開発ツール版/digest、依存台帳・更新検知が整合。条件付き security tool の適格性を別に確認 |
+| GO-10 | CLI の操作、exit codes、TTY、read-only plan/status/doctor、機械出力・secret 非露出の既存意味を保持 |
+
 **先行適格性ゲート（実装着手条件）:** 既存正本を修正しただけでは旧 v0.1.6 を受入済みにしない。公式 cf の固定候補版・runtime、実 Device Flow（追加ターミナル・SSH 転送なし）、必要 scope の実 grant、Account API Token 発行と権限/metadata/実アクセス、Access Service Token の自動発行・限定許可、Tunnel token 取得、隔離 GitHub Environment への実 sealed secret 登録・利用・失効を、明示的に承認された隔離 account/repo/VM で実証してから製品認証実装へ進む。管理経路の先行適格性は Deployment lifecycle の独立ゲートと並行して実施できる。公開仕様の確認、SDK の存在、mock、fixture、ローカルプロキシ試行は実サービス合格を意味しない。実証できないときは未成立として停止し、要件を弱めない。
 
 **統合受入・リリース:** 以下を独立した隔離アカウント/VM と、別途承認された実環境で実証する。対象バージョン・source SHA・実行主体・scope・対象を結合した秘匿済み実行証拠を既存 PR/認定 artifact に残す。新しい常設 Workflow、受入台帳、管理サービスを作らない。既存の自動タグ/Publish CodexiaCTL は実装完了と現行候補の実受入を確認できるよう既存認定境界に統合し、未検証の候補をタグ発行・正式公開・配備可能として扱わない。設計変更だけで既存欠陥版を再発行しない。移行中は既存の自動タグ付けと Publish CodexiaCTL の入口を一時停止する。設計 PR 自体は文書・関連モデル・既存検証の合格をもって統合可能とし、製品の先行適格性・統合受入とは区別する。一時停止解除は正本に合致する実装・受入と同じ変更で行い、恒久的な別 release controller や手動採番経路を追加しない。
