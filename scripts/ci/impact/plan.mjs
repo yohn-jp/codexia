@@ -93,6 +93,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   '.github/workflows/ansible-host.yml',
   '.github/workflows/backend-deployment-handoff.yml',
   '.github/workflows/deployment-config.yml',
+  '.github/workflows/publish-codexiactl.yml',
   '.github/workflows/push-backup.yml',
   '.github/workflows/push-host.yml',
   '.github/workflows/repository-audit.yml',
@@ -121,6 +122,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/ansible/test-host-integration.sh',
   'deploy/ansible/test-host-validation.sh',
   'deploy/ansible/test-inspect.sh',
+  'deploy/ansible/test-push-app-lifecycle.sh',
   'deploy/ansible/test-push-host.sh',
   'deploy/ansible/test_host_contract.py',
   'deploy/ansible/test_postgres_volume_layout.py',
@@ -339,7 +341,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
     }
     if (codexiactlSpecifications.has(file) || file === 'deploy/production.json' ||
         /^deploy\/cloudflare\/[^/]+\.json$/u.test(file) ||
-        /^\.github\/workflows\/(?:production-bootstrap|production-preflight|frontend-release)\.yml$/u.test(file)) {
+        /^\.github\/workflows\/(?:production-bootstrap|production-preflight|frontend-release|publish-codexiactl)\.yml$/u.test(file)) {
       add('codexiactl-linux');
     }
     if (isRequirementsTraceInput(file) || HTTP_CONTRACT_ROUTE_SOURCE_PATHS.has(file)) add('requirements-trace');

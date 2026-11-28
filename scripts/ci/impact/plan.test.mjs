@@ -754,7 +754,7 @@ test('known operational inputs retain root proof and trace evidence for register
     if (file.startsWith('deploy/cloudflare/terraform/') && file.endsWith('.tf') && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (isTraceTestSource(file) && !expected.includes('requirements-trace')) expected.push('requirements-trace');
     if (SWIFT_LINUX_RECIPES.includes(file)) expected.push('swift-linux');
-    if (file === 'deploy/production.json' || file === '.github/workflows/production-preflight.yml' || ['docs/deployment/ACCESS-POLICY-MIGRATION.sdoc', 'docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc'].includes(file) ||
+    if (file === 'deploy/production.json' || ['.github/workflows/production-preflight.yml', '.github/workflows/publish-codexiactl.yml'].includes(file) || ['docs/deployment/ACCESS-POLICY-MIGRATION.sdoc', 'docs/deployment/ANSIBLE-PUSH-DEPLOYMENT.sdoc'].includes(file) ||
         /^deploy\/cloudflare\/[^/]+\.json$/u.test(file)) expected.push('codexiactl-linux');
     assert.deepEqual(selected.tasks, expected, file);
     assert.equal(selected.full_model_oci, false, file);
@@ -767,6 +767,19 @@ test('known operational inputs retain root proof and trace evidence for register
   assert.deepEqual((await plan(['deploy/ansible/host.yml','pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
   assert.deepEqual((await plan(['deploy/ansible/host.yml'], 'push')).tasks, NON_SWIFT_TASKS);
   assert.deepEqual((await plan(null)).tasks, VERIFICATION_TASKS);
+});
+
+test('deployment fixture and CLI publication changes narrow only their reviewed PR inputs', async () => {
+  const fixture = 'deploy/ansible/test-push-app-lifecycle.sh';
+  const publish = '.github/workflows/publish-codexiactl.yml';
+  const known = [fixture, publish, 'cmd/codexiactl/main.go'];
+  assert.deepEqual((await plan(known)).tasks, ['unit-root', 'coverage', 'codexiactl-linux']);
+  const unknown = 'deploy/ansible/test-push-new-lifecycle.sh';
+  assert.equal((await plan([...known, unknown])).full_model_oci, true);
+  assert.deepEqual((await plan([...known, unknown])).tasks, NON_SWIFT_TASKS);
+  for (const event of ['push', 'workflow_dispatch']) {
+    assert.equal((await plan(known, event)).mode, 'full');
+  }
 });
 
 test('operational proof remains owned by one exact-head root task and matching independent workflows', async () => {
