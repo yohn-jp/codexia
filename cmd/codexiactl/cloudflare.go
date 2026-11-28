@@ -134,7 +134,7 @@ func cloudflareStatus(err error) int {
 
 func observeCloudflare(ctx context.Context, o operator, repo githubTarget, settings productionContract,
 	snapshot githubSnapshot, requirements cfDeviceRequirements,
-) (*cloudflareObservation, error) {
+) (_ *cloudflareObservation, resultErr error) {
 	origin, err := url.Parse(settings.PublicOrigin)
 	if err != nil || origin.Scheme != "https" || origin.Hostname() != origin.Host || origin.User != nil ||
 		origin.Path != "" || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" ||
@@ -153,7 +153,7 @@ func observeCloudflare(ctx context.Context, o operator, repo githubTarget, setti
 	keepSession := false
 	defer func() {
 		if !keepSession {
-			_ = runtime.close()
+			resultErr = errors.Join(resultErr, runtime.close())
 		}
 	}()
 	zone, err := cfFindZone(ctx, runtime, origin.Host)
