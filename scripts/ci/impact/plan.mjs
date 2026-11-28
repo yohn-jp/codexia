@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BROWSER_SHARDS, CONFORMANCE_TASKS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES, isOpenApiGenerationInput, isFastifyGenerationInput } from './contract.mjs';
+import { createWorkspaceGraph } from './workspace-graph.mjs';
 import { CODEXIACTL_SPECIFICATIONS, ROOT_VERIFICATION_DOCUMENTS, UX_PROJECTION_DOCUMENTS, isDesignProjectionModel, isNonExecutableDocumentation, isRequirementsTraceInput, taskGroup, taskWorkflowJob } from '../evidence/task-inputs.mjs';
 
 export const FULL_MODEL_OCI_PATHS = Object.freeze([
@@ -296,6 +297,13 @@ const DB_CONTRACT_SOURCE_PATHS = new Set([
   'packages/persistence-postgres/src/migration-set.ts',
 ]);
 
+let workspaceGraph;
+function currentWorkspaceGraph() {
+  workspaceGraph ??= createWorkspaceGraph(new Map(WORKSPACES.map(workspace => [workspace.id,
+    JSON.parse(readFileSync(new URL('../../../' + workspace.path + '/package.json', import.meta.url), 'utf8'))])));
+  return workspaceGraph;
+}
+
 export function createVerificationPlan({ files, event, sha, base = null }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '') || (base !== null && !/^[a-f0-9]{40}$/.test(base))) throw new Error('Invalid verification source identity');
   const selected = new Set(['coverage']);
@@ -306,7 +314,18 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   const swiftLinux = !Array.isArray(files) || files.some(file => !isChangedPath(file) || isSwiftLinuxInput(file));
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
+  let graph;
+  if (event === 'pull_request' && Array.isArray(files)) {
+    try { graph = currentWorkspaceGraph(); }
+    catch { full = true; }
+  }
   for (const file of files ?? []) {
+    // Use declared transitive workspace consumers in addition to the existing
+    // cross-boundary obligations; an unresolvable graph never narrows checks.
+    if (graph && typeof file === 'string' && graph.owner(file) && !/\.(?:test|spec)\.tsx?$/u.test(file)) {
+      try { add(...graph.affectedTypechecks(file)); }
+      catch { full = true; }
+    }
     // Fail closed on changed JS/TS sources.
     if (file === 'biome.json' ||
         (/^(?:app|packages|modules|edge\/frontend)\//u.test(file) && /\.(?:[cm]?js|jsx|[cm]?ts|tsx)$/u.test(file))) add('biome-ci');
@@ -414,6 +433,15 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
     add(`unit-${owner.id}`, `typecheck-${TYPECHECK_TARGETS.find(item => item.workspaces.includes(owner.id)).id}`,
       owner.id === 'app' ? 'test-types-app-e2e' : 'test-types-modules');
     if (testOnly) continue;
+    // The same declared input closure drives workspace preparation and proof
+    // fingerprints. Only add actual transitive consumers here; cross-boundary
+    // runtime, generator and browser obligations remain explicitly selected.
+    if (graph) {
+      try {
+        add(...graph.affectedTasks(file, VERIFICATION_TASKS.filter(task =>
+          (task.startsWith('unit-') && task !== 'unit-root') || task.startsWith('test-types-'))));
+      } catch { full = true; }
+    }
     if (owner.id === 'app') {
       add('build-core', 'audit-core', 'build-full', 'safety');
       browser(PROFILES);
@@ -439,13 +467,43 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
 
 export function validateVerificationPlan(plan) {
   if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new Error('Verification plan is invalid');
-  const { coverageReuse, ...canonical } = plan;
+  const { coverageReuse, mergedTaskReuse, ...canonical } = plan;
   if (JSON.stringify(canonical) !== JSON.stringify(createVerificationPlan(canonical))) throw new Error('Verification plan does not match canonical impact rules');
   if (coverageReuse !== undefined) assertCoverageReuse(plan, coverageReuse);
+  if (mergedTaskReuse !== undefined) assertMergedTaskReusePlan(plan, mergedTaskReuse);
   return plan;
 }
 
 const INPUT_PROOF_DIMENSIONS = ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers'];
+// Reuse is an execution optimization, not a reduction of the main obligation set.
+function assertMergedTaskReusePlan(plan, reuse) {
+  if (plan.event !== 'push' || plan.mode !== 'full' || !reuse || !Array.isArray(reuse.proofs) ||
+      reuse.proofs.length === 0 || reuse.receipt?.sourceSha !== plan.sha || reuse.receipt.baseSha !== plan.base ||
+      reuse.receipt.mode !== 'affected') throw new Error('Invalid merged task reuse boundary');
+  const receipt = reuse.receipt;
+  if (![receipt.headSha, receipt.tree].every(value => /^[a-f0-9]{40}$/u.test(value ?? '')) ||
+      !/^[a-f0-9]{64}$/u.test(receipt.planDigest ?? '') ||
+      ![receipt.runId, receipt.attempt].every(value => Number.isSafeInteger(value) && value > 0)) {
+    throw new Error('Invalid merged task reuse identity');
+  }
+  const seen = new Set();
+  for (const proof of reuse.proofs) {
+    if (!proof || !plan.tasks.includes(proof.task) || seen.has(proof.task) ||
+        !(proof.task.startsWith('typecheck-') || proof.task === 'test-types-modules') ||
+        proof.format !== 'codexia-ci-task-input-proof/v2' || proof.mode !== 'task-execution' ||
+        proof.status !== 'passed' || proof.reusedFrom !== undefined ||
+        proof.sourceSha !== receipt.headSha || proof.planDigest !== receipt.planDigest ||
+        proof.workflowRunId !== receipt.runId || proof.workflowAttempt !== receipt.attempt ||
+        proof.workflowJob !== taskWorkflowJob(proof.task) ||
+        !proof.runtime || !proof.inputClosure ||
+        JSON.stringify(Object.keys(proof.inputClosure).sort()) !== JSON.stringify([...INPUT_PROOF_DIMENSIONS].sort()) ||
+        Object.values(proof.inputClosure).some(value => !/^[a-f0-9]{64}$/u.test(value))) {
+      throw new Error('Invalid merged task reuse proof');
+    }
+    seen.add(proof.task);
+  }
+}
+
 function assertCoverageReuse(plan, receipt) {
   const fields = ['task', 'sourceSha', 'proofSourceSha', 'planDigest', 'workflowRunId',
     'workflowAttempt', 'workflowId', 'repositoryId', 'jobId', 'workflowJob', 'artifactId',
@@ -515,7 +573,7 @@ export function assertExactPrImpact(plan, expectedBase, changedFiles) {
 }
 
 export function planDigest(plan) {
-  const { coverageReuse: _coverageReuse, ...canonical } = validateVerificationPlan(plan);
+  const { coverageReuse: _coverageReuse, mergedTaskReuse: _mergedTaskReuse, ...canonical } = validateVerificationPlan(plan);
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 

@@ -242,8 +242,16 @@ export function assertTaskProducerInventory({ plan, report, inventory }) {
       assert.equal(proof.workflowAttempt, report.workflowAttempt, 'Task input proof attempt mismatch');
       assert.equal(proof.workflowJob, report.workflowJob, 'Task input proof job mismatch');
       if (proof.reusedFrom !== undefined) {
-        assert.deepEqual(proof.reusedFrom, plan.coverageReuse, 'Task proof reuse receipt mismatch');
-        assert.equal(plan.base, proof.reusedFrom.sourceSha, 'Task proof base source mismatch');
+        if (proof.task === 'coverage') {
+          assert.deepEqual(proof.reusedFrom, plan.coverageReuse, 'Task proof reuse receipt mismatch');
+          assert.equal(plan.base, proof.reusedFrom.sourceSha, 'Task proof base source mismatch');
+        } else {
+          assert.equal(plan.event, 'push', 'Merged task proof must belong to a main push');
+          const prior = plan.mergedTaskReuse?.proofs.find(item => item.task === proof.task);
+          assert.ok(prior, 'Missing merged task reuse candidate');
+          assert.deepEqual(proof.reusedFrom, prior, 'Merged task reuse receipt mismatch');
+          assert.deepEqual(recorded.invocations, [], 'Reused task cannot claim fresh execution');
+        }
         assert.deepEqual(proof.inputClosure, proof.reusedFrom.inputClosure, 'Task proof reused input closure mismatch');
       }
       assert.ok(proof.runtime && typeof proof.runtime === 'object', 'Missing task input proof runtime');
@@ -260,7 +268,7 @@ export function assertTaskProducerInventory({ plan, report, inventory }) {
       assert.equal(proof.runtime.imageVersion, inventory.runner.imageVersion, 'Task input proof image version mismatch');
       assert.equal(proof.runtime.platform, inventory.runner.os.toLowerCase(), 'Task input proof platform mismatch');
       assert.equal(proof.runtime.arch, inventory.runner.arch.toLowerCase(), 'Task input proof architecture mismatch');
-      if (proof.mode === 'task-execution') {
+      if (proof.mode === 'task-execution' && proof.reusedFrom === undefined) {
         const expectedInvocations = taskInvocation(recorded.task, proof.runtime.execPath);
         assert.deepEqual(recorded.invocations, Array.isArray(expectedInvocations) ? expectedInvocations : [expectedInvocations],
           'Task input proof invocation does not match the canonical runner');

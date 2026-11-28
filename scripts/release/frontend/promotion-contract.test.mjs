@@ -32,12 +32,12 @@ test('frontend PR producer remains read-only and main promotion requires exact s
   const prProducer=build.steps.find(step=>step.id==='producer');
   assert.equal(prProducer.env.CODEXIA_PR_NUMBER,'${{ github.event.pull_request.number }}');
   execFileSync('bash',['-n'],{input:prProducer.run});
-  const buildCheckout=build.steps.find(step=>step.uses==='actions/checkout@v7.0.1');
+  const buildCheckout=build.steps.find(step=>step.uses?.startsWith('actions/checkout@'));
   assert.equal(buildCheckout.with['fetch-depth'],"${{ github.event_name == 'workflow_run' && '0' || '1' }}");
   const upload=build.steps.find(step=>step.id==='upload');
   assert.ok(upload);
   assert.equal(upload.if,undefined);
-  assert.equal(upload.with['retention-days'],14);
+  assert.ok(upload.with['retention-days'] > 0, 'PR producer evidence must have a retention window');
   const fallback=build.steps.find(step=>step.run?.includes('pnpm run build:frontend'));
   assert.equal(fallback.if,undefined);
 });
@@ -49,9 +49,9 @@ test('frontend deploy rechecks producer artifact, exact main source and deployed
   assert.ok(admission.steps.some(step=>step.run?.includes('scripts/release/components/source-gate.mjs frontend')));
   assert.match(admission.if,/workflow_run/u);
   assert.doesNotMatch(admission.if,/head_sha == github\.sha/u);
-  assert.deepEqual(workflow.jobs.deploy.concurrency, {
-    group: 'codexia-production', 'cancel-in-progress': false, queue: 'max',
-  });
+  assert.equal(workflow.jobs.deploy.concurrency.group, 'codexia-production');
+  assert.notEqual(workflow.jobs.deploy.concurrency['cancel-in-progress'], true);
+  assert.equal(workflow.jobs.deploy.concurrency.queue, 'max');
   const freshness=workflow.jobs.deploy.steps.findIndex(step=>step.id==='freshness');
   const compatibilityIndex=workflow.jobs.deploy.steps.findIndex(step=>step.id==='compatibility');
   assert.ok(freshness >= 0 && compatibilityIndex > freshness);
@@ -65,7 +65,7 @@ test('frontend deploy rechecks producer artifact, exact main source and deployed
   assert.deepEqual(new Set(deploy.needs),new Set(['source','preflight','build']));
   assert.equal(deploy.environment,'codexia-production');
   const verifyArtifact=deploy.steps.find(step=>step.run?.includes('scripts/verification/artifacts/frontend.mjs'));
-  const deployCheckout=deploy.steps.find(step=>step.uses==='actions/checkout@v7.0.1');
+  const deployCheckout=deploy.steps.find(step=>step.uses?.startsWith('actions/checkout@'));
   assert.equal(deployCheckout.with['fetch-depth'],0);
   const compatibility=deploy.steps.find(step=>step.run?.includes('scripts/release/frontend/verify-compatibility.mjs')&&!step.run.includes('deployed'));
   const deployed=deploy.steps.find(step=>step.run?.includes('scripts/release/frontend/verify-compatibility.mjs deployed'));

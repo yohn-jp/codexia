@@ -219,6 +219,7 @@ test('browser input proofs bind the Chromium image for every lane', async t => {
   t.after(() => rm(mutatedRoot, { recursive: true, force: true }));
   await cp(new URL('task-inputs.mjs', import.meta.url), path.join(mutatedScripts, 'task-inputs.mjs'));
   await cp(new URL('../impact/contract.mjs', import.meta.url), path.join(mutatedRoot, 'scripts/ci/impact/contract.mjs'));
+  await cp(new URL('../impact/workspace-graph.mjs', import.meta.url), path.join(mutatedRoot, 'scripts/ci/impact/workspace-graph.mjs'));
   await cp(new URL('../browser/image-digests.mjs', import.meta.url), path.join(mutatedRoot, 'scripts/ci/browser/image-digests.mjs'));
   const toolchainDirectory = path.join(mutatedRoot, 'packages/persistence-postgres/tests/db-contract');
   await mkdir(toolchainDirectory, { recursive: true });
