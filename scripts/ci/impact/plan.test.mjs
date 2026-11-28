@@ -1071,3 +1071,20 @@ test('native-owned input admission requires the Xcode workflow while its Swift s
       String(step.run ?? '').includes('xcodebuild')), owner.workflow + ' must execute a native build/test');
   }
 });
+
+test('official product-site inputs stay in independent static delivery and retain Verify coverage', async () => {
+  const workflow = parse(readFileSync(new URL('../../../.github/workflows/product-site.yml', import.meta.url), 'utf8'));
+  const files = ['edge/product-site/src/index.html', 'edge/product-site/src/site.css', 'edge/product-site/src/site.js', 'edge/product-site/build.mjs', 'edge/product-site/wrangler.jsonc', '.github/workflows/product-site.yml'];
+  for (const file of files) {
+    const selected = await plan([file]);
+    assert.equal(selected.mode, 'affected', file);
+    assert.deepEqual(selected.tasks, ['coverage'], file);
+    assert.equal(selected.full_model_oci, false, file);
+    assert.equal(matchesWorkflowPaths(workflow.on.pull_request.paths, [file]), true, file);
+    assert.equal(matchesWorkflowPaths(workflow.on.push.paths, [file]), true, file);
+  }
+  assert.equal(matchesWorkflowPaths(workflow.on.pull_request.paths, ['app/src/editor.ts']), false);
+  assert.ok(workflow.jobs.publish.if.includes("github.repository == 'yohn-jp/codexia'"));
+  assert.ok(workflow.jobs.publish.if.includes("github.ref == 'refs/heads/main'"));
+  assert.ok(workflow.jobs.publish.if.includes("github.event_name != 'pull_request'"));
+});

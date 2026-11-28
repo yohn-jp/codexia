@@ -311,6 +311,8 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
     if (file === 'biome.json' ||
         (/^(?:app|packages|modules|edge\/frontend)\//u.test(file) && /\.(?:[cm]?js|jsx|[cm]?ts|tsx)$/u.test(file))) add('biome-ci');
     if (!isChangedPath(file)) { full = true; break; }
+    // The official product site has its own static-only CI and no application inputs.
+    if (file === '.github/workflows/product-site.yml' || file.startsWith('edge/product-site/')) continue;
     if (file.startsWith('cmd/codexiactl/') || file === 'scripts/ci/execution/verify-codexiactl.sh') {
       add('codexiactl-linux');
       if (file === 'cmd/codexiactl/release-contract.json') add('unit-root');

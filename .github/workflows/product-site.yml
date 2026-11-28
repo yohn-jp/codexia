@@ -1,0 +1,112 @@
+name: Product Site
+on:
+  pull_request:
+    paths:
+      - 'edge/product-site/**'
+      - 'edge/frontend/package.json'
+      - 'edge/frontend/package-lock.json'
+      - '.github/workflows/product-site.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'edge/product-site/**'
+      - 'edge/frontend/package.json'
+      - 'edge/frontend/package-lock.json'
+      - '.github/workflows/product-site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-site-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'publish' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: Verify product site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Build and verify exact-source static assets
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          node --check edge/product-site/src/site.js
+          node edge/product-site/build.mjs "$SOURCE_SHA"
+          node edge/product-site/verify.mjs "$SOURCE_SHA"
+      - name: Install the existing locked Wrangler toolchain
+        run: npm ci --prefix edge/frontend
+      - name: Validate Worker configuration without publishing
+        run: edge/frontend/node_modules/.bin/wrangler deploy --config edge/product-site/wrangler.jsonc --dry-run --outdir "$RUNNER_TEMP/product-site-dry-run"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: product-site-${{ github.run_id }}-${{ github.run_attempt }}
+          path: edge/product-site/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish official product site
+    if: github.repository == 'yohn-jp/codexia' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: codexia-product-site
+      url: https://products.yohn.jp/codexia/
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: product-site-${{ github.run_id }}-${{ github.run_attempt }}
+          path: edge/product-site/dist/
+      - name: Verify the artifact and install locked deployment toolchain
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          node edge/product-site/verify.mjs "$GITHUB_SHA"
+          npm ci --prefix edge/frontend
+      - name: Require current product-site inputs and public DNS
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+          git diff --exit-code "$GITHUB_SHA" refs/remotes/origin/main -- edge/product-site edge/frontend/package.json edge/frontend/package-lock.json .github/workflows/product-site.yml
+          getent ahosts products.yohn.jp >/dev/null || { echo "::error::Provision the shared proxied products.yohn.jp DNS record before publishing."; exit 1; }
+      - name: Deploy only the independent product Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required}"
+          edge/frontend/node_modules/.bin/wrangler deploy --config edge/product-site/wrangler.jsonc --tag "product-site-$GITHUB_SHA"
+      - name: Observe the deployed source identity and static resources
+        run: |
+          set -euo pipefail
+          url='https://products.yohn.jp/codexia/'
+          curl --fail --silent --show-error --max-time 30 -H 'Cache-Control: no-cache' -D "$RUNNER_TEMP/product-site-headers" "${url}?source=$GITHUB_SHA" -o "$RUNNER_TEMP/product-site-index.html"
+          grep -F "<meta name=\"codexia-source\" content=\"$GITHUB_SHA\">" "$RUNNER_TEMP/product-site-index.html"
+          grep -i '^content-security-policy:' "$RUNNER_TEMP/product-site-headers"
+          for asset in site.css site.js; do
+            curl --fail --silent --show-error --max-time 30 "${url}${asset}?source=$GITHUB_SHA" -o "$RUNNER_TEMP/$asset"
+            cmp "edge/product-site/dist/codexia/$asset" "$RUNNER_TEMP/$asset"
+          done
