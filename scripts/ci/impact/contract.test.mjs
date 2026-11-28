@@ -19,11 +19,15 @@ test('CI evidence consumers resolve the frozen dependency before invoking it', (
   const directory = new URL('../../../.github/workflows/', import.meta.url);
   // Identify the evidence installation by capability, not a toolchain version or
   // a job/step display name. The actual pnpm version is owned by package.json.
-  const isEvidenceInstall = step => {
-    const command = step.run ?? '';
-    return /\bpnpm(?:@[^\s]+)?\b/u.test(command) && /\binstall\b/u.test(command) &&
-      /--filter\s+['"]?@codexia\/ci-evidence\b/u.test(command) &&
-      /--frozen-lockfile\b/u.test(command) && /--ignore-scripts\b/u.test(command);
+  const installsEvidence = (step, isolated) => {
+    const lines = (step.run ?? '').split('\n');
+    return lines.some(command => {
+      if (!/\bpnpm(?:@[^\s]+)?\b/u.test(command) || !/\binstall\b/u.test(command) ||
+          !/--frozen-lockfile\b/u.test(command)) return false;
+      const explicitlyFiltered = /--filter\s+['"]?@codexia\/ci-evidence\b/u.test(command);
+      if (isolated) return explicitlyFiltered && /--ignore-scripts\b/u.test(command);
+      return explicitlyFiltered || !/--filter\s+/u.test(command);
+    });
   };
   // These are the evidence-consuming entrypoints, not a list of their
   // containing YAML jobs. Discover consumers even if jobs are renamed or moved.
@@ -45,26 +49,24 @@ test('CI evidence consumers resolve the frozen dependency before invoking it', (
   for (const file of readdirSync(directory).filter(name => /\.ya?ml$/u.test(name))) {
     const definition = parse(readFileSync(new URL(file, directory), 'utf8'));
     for (const [job, { steps = [] }] of Object.entries(definition.jobs ?? {})) {
-      const installs = steps.map((step, index) => isEvidenceInstall(step) ? index : -1).filter(index => index >= 0);
       for (const [index, step] of steps.entries()) {
         const matches = consumers.filter(entry => (step.run ?? '').includes(entry));
         if (!matches.length) continue;
         for (const entry of matches) discovered.add(entry);
-        // A full frozen workspace install or a shared action may already
-        // provision the same workspace. Do not require a redundant install.
+        // Workspace validation may use a full frozen install; proof-only
+        // admission and release consumers must use the isolated frozen install.
+        const isolated = matches.some(entry => entry !== 'scripts/ci/execution/group.mjs');
         const prior = steps.slice(0, index);
         const checkout = prior.findIndex(candidate => candidate.uses?.startsWith('actions/checkout@'));
-        const setup = installs.find(position => position > checkout && position < index);
-        const fullInstall = prior.findIndex(candidate => /\bpnpm(?:@[^\s]+)?\s+[^\n]*\binstall\b/u.test(candidate.run ?? '') &&
-          /--frozen-lockfile\b/u.test(candidate.run ?? '') &&
-          !/--filter\s+[^\n]*$/mu.test(candidate.run ?? ''));
-        if (setup !== undefined) {
-          assert.notEqual(steps[setup]['continue-on-error'], true, file + ' ' + job);
-        } else if (fullInstall < 0 && !prior.some(candidate => /--frozen-lockfile\b/u.test(candidate.run ?? '') &&
-          /@codexia\/ci-evidence\b/u.test(candidate.run ?? ''))) {
-          // Not every invocation requires the evidence package (e.g. the
-          // freshness-only command). Runtime imports are checked by CI.
-          assert.ok(checkout >= 0, file + ' ' + job + ' invokes a repository entrypoint before checkout');
+        const setup = prior.findIndex((candidate, position) => position > checkout &&
+          installsEvidence(candidate, isolated) && candidate['continue-on-error'] !== true);
+        assert.ok(checkout >= 0 && setup > checkout, file + ' ' + job + ' requires the frozen evidence dependency before execution');
+        if (isolated) {
+          assert.equal(prior[setup].env, undefined, file + ' ' + job);
+          // A protected deployment may gate both setup and consumption on its
+          // enablement decision. Other proof consumers require unconditional setup.
+          const condition = prior[setup].if;
+          if (condition !== undefined) assert.equal(condition, "steps.deployment-gate.outputs.enabled == 'true'");
         }
       }
     }

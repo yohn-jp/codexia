@@ -327,7 +327,7 @@ test('affected PR without original task receipts falls back to main execution', 
 test('affected merged PR can contribute only original selected read-only task receipts', async () => {
   // Use the canonical selector to find an affected plan with a typecheck
   // obligation, rather than duplicating its workspace membership.
-  const selected = fixture(['modules/story/src/story.ts']);
+  const selected = fixture(['modules/story/src/story.test.ts']);
   if (selected.plan.mode !== 'affected') {
     assert.fail('Expected a module-only affected plan');
   }
