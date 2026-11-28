@@ -433,10 +433,26 @@
         (umask 077; printf '%s %s\n' "$1" "$elapsed" >> "$state_dir/deploy-transaction.timings") || return 0
         profile_previous_ms="$now"
       }
+      # Independent CI-only observations: no cache and no skipped locked recheck.
+      profile_slice_started_ms=0
+      profile_slice_start(){
+        [[ "$profile_enabled" == true ]] || return 0
+        profile_slice_started_ms="$(profile_now)" || return 0
+      }
+      profile_slice_end(){
+        [[ "$profile_enabled" == true ]] || return 0
+        local now elapsed
+        now="$(profile_now)" || return 0
+        [[ "$now" =~ ^[0-9]+$ && "$profile_slice_started_ms" =~ ^[0-9]+$ ]] || return 0
+        elapsed=$((now - profile_slice_started_ms))
+        (( elapsed >= 0 )) || return 0
+        (umask 077; printf '%s %s\n' "$1" "$elapsed" >> "$state_dir/deploy-lock-slices.timings") || return 0
+      }
       mkdir -p "$state_dir" "$unit_dir"
       exec 9>"$lock_file"
       flock --exclusive --nonblock 9 || { echo 'Another Codexia deployment or backup holds the host lock' >&2; exit 75; }
       profile_checkpoint lock_acquire
+      profile_slice_start
       stale_admission(){
         echo "Stale deployment admission: $1; rerun admission against the active release" >&2
         exit 1
@@ -646,6 +662,8 @@
         [[ "$actual_fingerprints" == "$expected_fingerprints" ]] ||
           stale_admission 'the restored database or history no longer matches the recovery point'
       fi
+      profile_slice_end live_identity_rechecks
+      profile_slice_start
       release_present=false
       if [[ -e "$release_state" || -L "$release_state" ]]; then
         [[ -f "$release_state" && ! -L "$release_state" ]] || { echo 'Previous deployment record is not a regular file' >&2; exit 1; }
@@ -680,6 +698,7 @@
         echo 'The installed Better Auth API requires a prior deployment record' >&2
         exit 1
       fi
+      profile_slice_end release_record_binding
       run_auth_cli(){
         local script="$1"; shift
         local oidc_secret=()
@@ -698,6 +717,7 @@
         [[ -f "$file" && ! -L "$file" && -O "$file" && "$(stat -c %a -- "$file")" == 600 ]] &&
           [[ "$(sha256sum < "$file")" == "$digest  -" ]]
       }
+      profile_slice_start
       if ! verify_auth_settings "$auth_settings_file" "$auth_settings_digest"; then
         echo 'Candidate Better Auth settings snapshot is invalid' >&2
         exit 1
@@ -716,10 +736,13 @@
       if [[ "$current_image" == "$candidate_image" && "$had_unit" == true ]] && cmp -s -- "$candidate_unit" "$active_unit"; then
         unchanged=true
       fi
+      profile_slice_end auth_snapshot_and_unit_compare
+      profile_slice_start
       if [[ "$had_unit" == true ]] && ! run_auth_cli /app/node_modules/@codexia/api/dist/verify-auth-clients.js; then
         echo 'Better Auth schema or registered clients failed verification before service changes' >&2
         exit 1
       fi
+      profile_slice_end auth_client_verification
       mkdir -p "$wants_dir"
       api_link_created=false
       plan_wants_link(){
@@ -736,12 +759,14 @@
       }
       profile_checkpoint locked_admission
       if [[ "$unchanged" == true ]]; then
+        profile_slice_start
         repaired=false
         install_wants_links
         if [[ "$api_link_created" == true ]]; then repaired=true; fi
         systemctl --user daemon-reload
         systemctl --user is-active --quiet codexia-api.service
         podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api | grep -Fxq healthy
+        profile_slice_end noop_systemd_and_health
         profile_checkpoint reapply
         if [[ "$repaired" == true ]]; then echo "REPAIRED $candidate_image"; else echo "UNCHANGED $candidate_image"; fi
         exit 0

@@ -194,6 +194,17 @@ run_playbook() {
         tee -a "$RUNNER_TEMP/codexia-push-app-lifecycle/deploy-transaction-timings-bounded.log"
     done < "$tmp/deploy-transaction.timings"
   fi
+  timings="$fixture_home/.local/state/codexia-deploy/deploy-lock-slices.timings"
+  if rootless test -f "$timings"; then
+    rootless cat "$timings" > "$tmp/deploy-lock-slices.timings" || return 1
+    rootless rm -- "$timings" || return 1
+    while read -r phase duration_ms; do
+      [[ "$phase" =~ ^(live_identity_rechecks|release_record_binding|auth_snapshot_and_unit_compare|auth_client_verification|noop_systemd_and_health)$ &&
+         "$duration_ms" =~ ^[0-9]+$ ]] || return 1
+      printf 'LIFECYCLE_LOCK_FRESHNESS stage=%s section=%s duration_ms=%s\n' "$name" "$phase" "$duration_ms" |
+        tee -a "$RUNNER_TEMP/codexia-push-app-lifecycle/lock-freshness-bounded.log"
+    done < "$tmp/deploy-lock-slices.timings"
+  fi
   redact_log "$tmp/$name.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/$name-bounded.log"
   if (( status != 0 )); then
     tail -80 "$RUNNER_TEMP/codexia-push-app-lifecycle/$name-bounded.log" >&2
