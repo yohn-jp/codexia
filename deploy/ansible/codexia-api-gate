@@ -63,11 +63,11 @@ gate_status() {
   service_file_state="$("$systemctl" show --property=UnitFileState --value "$service_unit")"
   if [[ "$socket_state" == active &&
         ( "$service_state" == inactive || "$service_state" == active ) &&
-        "$socket_file_state" == enabled && "$service_file_state" != masked ]]; then
+        "$socket_file_state" == enabled && "$service_file_state" == static ]]; then
     printf '%s\n' open
     return 0
   fi
-  if [[ "$socket_state" != active && "$service_state" != active &&
+  if [[ "$socket_state" == inactive && "$service_state" == inactive &&
         "$socket_file_state" == masked && "$service_file_state" == masked ]]; then
     printf '%s\n' closed
     return 0

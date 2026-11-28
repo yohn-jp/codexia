@@ -399,7 +399,7 @@
       candidate_identity={{ (codexia_candidate_identity_file.content | b64decode | from_json) | to_json | quote }}
       candidate_source_sha={{ codexia_source_sha | quote }}
       prior_source_sha={{ ((codexia_current_identity_result.stdout | from_json).sourceSha if codexia_current_container_exists.rc == 0 else codexia_source_sha) | quote }}
-      require_gate={{ 'false' if (codexia_lifecycle_fixture | default(false) | bool) else 'true' }}
+      require_production_admission={{ 'false' if (codexia_lifecycle_fixture | default(false) | bool) else 'true' }}
       auth_settings_file={{ (home + '/.config/codexia-auth/runtime-' + codexia_auth_settings_sha256 + '.env') | quote }}
       auth_settings_digest={{ codexia_auth_settings_sha256 | quote }}
       first_activation={{ (codexia_expected_first_activation | default(none)) | to_json | quote }}
@@ -412,13 +412,7 @@
       transaction_intent="$state_dir/deploy-transaction.json"
       lock_file="$state_dir/host.lock"
       gate_helper=/usr/local/sbin/codexia-api-gate
-      gate_control(){
-        if [[ "$require_gate" == true ]]; then
-          sudo -n "$gate_helper" "$@"
-        else
-          "${CODEXIA_API_GATE_HELPER:?Lifecycle fixture must provide a gate helper}" "$@"
-        fi
-      }
+      gate_control(){ sudo -n "$gate_helper" "$@"; }
       mkdir -p "$state_dir" "$unit_dir"
       exec 9>"$lock_file"
       flock --exclusive --nonblock 9 || { echo 'Another Codexia deployment or backup holds the host lock' >&2; exit 75; }
@@ -440,31 +434,19 @@
         echo 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet' >&2
         exit 1
       fi
-      if [[ "$require_gate" == true ]]; then
-        db_source="$(systemctl --user show --property=SourcePath --value codexia-db.service)" || db_source=''
-        if [[ "$db_source" != "$unit_dir/codexia-db.container" ]]; then
-          echo 'Deployment base runtime requires the canonical generated PostgreSQL unit' >&2
-          exit 1
-        fi
-        cloudflared_state="$(systemctl is-active codexia-cloudflared.service)" || cloudflared_state=''
-        [[ "$cloudflared_state" == active ]] || { echo 'Deployment requires the independent host Cloudflare connector' >&2; exit 1; }
+      db_source="$(systemctl --user show --property=SourcePath --value codexia-db.service)" || db_source=''
+      if [[ "$db_source" != "$unit_dir/codexia-db.container" ]]; then
+        echo 'Deployment base runtime requires the canonical generated PostgreSQL unit' >&2
+        exit 1
       fi
-      gate_was_open=false
-      if [[ "$require_gate" == true ]]; then
-        gate_state="$(gate_control status)" || { echo 'Publication gate state is not canonical' >&2; exit 1; }
-        case "$gate_state" in
-          open) gate_was_open=true ;;
-          closed) gate_was_open=false ;;
-          *) echo 'Publication gate helper returned an invalid state' >&2; exit 1 ;;
-        esac
-      else
-        gate_state="$(gate_control status)" || { echo 'Lifecycle fixture gate state is not canonical' >&2; exit 1; }
-        case "$gate_state" in
-          open) gate_was_open=true ;;
-          closed) gate_was_open=false ;;
-          *) echo 'Lifecycle fixture gate helper returned an invalid state' >&2; exit 1 ;;
-        esac
-      fi
+      cloudflared_state="$(systemctl is-active codexia-cloudflared.service)" || cloudflared_state=''
+      [[ "$cloudflared_state" == active ]] || { echo 'Deployment requires the independent host Cloudflare connector' >&2; exit 1; }
+      gate_state="$(gate_control status)" || { echo 'Publication gate state is not canonical' >&2; exit 1; }
+      case "$gate_state" in
+        open) gate_was_open=true ;;
+        closed) gate_was_open=false ;;
+        *) echo 'Publication gate helper returned an invalid state' >&2; exit 1 ;;
+      esac
       current_container=''
       current_image=''
       if podman container exists codexia-api; then
@@ -497,7 +479,7 @@
           stale_admission 'first activation requires a clean API target'
       fi
       # A clean production slot requires an explicitly admitted R6 or R3.
-      if [[ "$had_unit" == false && "$require_gate" == true && "$first_activation" == null && "$recovery_activation" == null && "$adoption_activation" == null ]]; then
+      if [[ "$had_unit" == false && "$require_production_admission" == true && "$first_activation" == null && "$recovery_activation" == null && "$adoption_activation" == null ]]; then
         stale_admission 'first activation requires an approved R6 plan or restored R3 plan'
       fi
       first_activation_window_current(){
@@ -929,7 +911,7 @@
         echo 'Candidate API image identity did not match the certified digest; deployment transaction remains pending if rollback is unverified' >&2
         exit 1
       fi
-      if ! curl --fail --silent --show-error --max-time 3 http://127.0.0.1:18081/health/ready >/dev/null; then
+      if ! curl --noproxy '*' --fail --silent --show-error --max-time 3 http://127.0.0.1:18081/health/ready >/dev/null; then
         restore_previous || echo 'Previous API recovery failed after host loopback readiness failure' >&2
         echo 'Candidate API is not ready at its host loopback endpoint; product gate remains closed' >&2
         exit 1

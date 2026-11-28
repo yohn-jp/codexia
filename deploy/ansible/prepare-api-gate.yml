@@ -89,12 +89,6 @@
     fail_msg: Existing Codexia gate unit differs from the reviewed source; no system unit was overwritten.
   loop: "{{ base_runtime_gate_units.results }}"
 
-- name: Require the fixed gate unit pair to be wholly absent or wholly installed
-  ansible.builtin.assert:
-    that:
-      - (base_runtime_gate_units.results | selectattr('stat.exists', 'equalto', true) | list | length) in [0, 2]
-    fail_msg: Only one publication-gate unit is present; resolve the interrupted host installation before convergence.
-
 - name: Inspect the existing root gate helper without following links
   become: true
   become_user: root
@@ -138,6 +132,36 @@
       - not base_runtime_gate_sudoers.stat.exists or base_runtime_gate_sudoers.stat.gr_name == 'root'
       - not base_runtime_gate_sudoers.stat.exists or base_runtime_gate_sudoers.stat.mode == '0440'
     fail_msg: Existing Codexia gate sudoers policy differs from the reviewed source; it was not overwritten.
+
+- name: Observe the API runtime before initializing the gate
+  ansible.builtin.command:
+    argv: [podman, container, exists, codexia-api]
+  register: base_runtime_api_container
+  changed_when: false
+  failed_when: base_runtime_api_container.rc not in [0, 1]
+
+- name: Observe the API user service before initializing the gate
+  ansible.builtin.command:
+    argv: [systemctl, --user, is-active, codexia-api.service]
+  register: base_runtime_api_service
+  changed_when: false
+  failed_when: base_runtime_api_service.rc not in [0, 3, 4]
+
+- name: Require API container and service identity to agree before gate convergence
+  ansible.builtin.assert:
+    that:
+      - (base_runtime_api_container.rc == 0 and base_runtime_api_service.rc == 0) or
+        (base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0)
+    fail_msg: Existing API container and generated systemd unit disagree; publication gate state is unchanged.
+
+- name: Require the full canonical gate installation for an existing API
+  ansible.builtin.assert:
+    that:
+      - base_runtime_gate_units.results | selectattr('stat.exists', 'equalto', true) | list | length == 2
+      - base_runtime_gate_helper.stat.exists
+      - base_runtime_gate_sudoers.stat.exists
+    fail_msg: An existing API requires its canonical publication gate; no gate unit or permission was changed.
+  when: base_runtime_api_container.rc == 0
 
 - name: Ensure the system gate unit directory exists
   become: true
@@ -198,28 +222,7 @@
     (base_runtime_gate_unit_install.results | selectattr('changed', 'equalto', true) | list | length > 0) or
     base_runtime_gate_helper_install.changed or base_runtime_gate_sudoers_install.changed
 
-- name: Observe the API runtime before initializing the gate
-  ansible.builtin.command:
-    argv: [podman, container, exists, codexia-api]
-  register: base_runtime_api_container
-  changed_when: false
-  failed_when: base_runtime_api_container.rc not in [0, 1]
-
-- name: Observe the API user service before initializing the gate
-  ansible.builtin.command:
-    argv: [systemctl, --user, is-active, codexia-api.service]
-  register: base_runtime_api_service
-  changed_when: false
-  failed_when: base_runtime_api_service.rc not in [0, 3, 4]
-
-- name: Require API container and service identity to agree before gate convergence
-  ansible.builtin.assert:
-    that:
-      - (base_runtime_api_container.rc == 0 and base_runtime_api_service.rc == 0) or
-        (base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0)
-    fail_msg: Existing API container and generated systemd unit disagree; publication gate state is unchanged.
-
-- name: Require the existing lifecycle host lock before initializing a fresh API-less gate
+- name: Inspect the lifecycle host lock before initializing an API-less gate
   ansible.builtin.stat:
     path: "{{ home }}/.local/state/codexia-deploy/host.lock"
     follow: false
@@ -228,10 +231,33 @@
     get_attributes: false
   register: base_runtime_fresh_gate_host_lock
   changed_when: false
-  when: base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0 and
-        (base_runtime_gate_units.results | selectattr('stat.exists', 'equalto', true) | list | length) == 0
+  when: base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0
 
-- name: Require the lifecycle host lock to be the existing private regular file
+- name: Create the canonical lifecycle lock only when the fresh target has none
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - |
+        import os
+        import stat
+        from pathlib import Path
+
+        state = Path.home() / ".local/state/codexia-deploy"
+        state.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = state.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+            raise SystemExit("Unsafe lifecycle state directory")
+        fd = os.open(state / "host.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+                raise SystemExit("Unsafe lifecycle lock")
+        finally:
+            os.close(fd)
+  when: base_runtime_fresh_gate_host_lock is not skipped and not base_runtime_fresh_gate_host_lock.stat.exists
+
+- name: Require the lifecycle host lock to be a private regular file
   ansible.builtin.assert:
     that:
       - base_runtime_fresh_gate_host_lock.stat.exists
@@ -240,9 +266,9 @@
       - base_runtime_fresh_gate_host_lock.stat.pw_name == codexia_service_user
       - base_runtime_fresh_gate_host_lock.stat.mode == '0600'
     fail_msg: Fresh publication-gate initialization requires the existing lifecycle host lock; no new lock authority is created.
-  when: base_runtime_fresh_gate_host_lock is not skipped
+  when: base_runtime_fresh_gate_host_lock is not skipped and base_runtime_fresh_gate_host_lock.stat.exists
 
-- name: Initialize only a fresh API-less gate closed under the lifecycle host lock
+- name: Close or recover an API-less publication gate under the lifecycle host lock
   ansible.builtin.command:
     argv:
       - /usr/bin/flock
@@ -254,136 +280,55 @@
       - -c
       - |
         container_rc=0
-        if podman container exists codexia-api; then
-          echo 'API container appeared while the fresh publication gate was being initialized' >&2
-          exit 1
-        else
-          container_rc=$?
-        fi
-        [[ "$container_rc" == 1 ]] || { echo 'Could not prove API container absence under the lifecycle lock' >&2; exit 1; }
-        api_load_state="$(systemctl --user show --property=LoadState --value codexia-api.service 2>/dev/null)" || {
-          echo 'Could not read API unit state under the lifecycle lock' >&2
+        podman container exists codexia-api || container_rc=$?
+        [[ "$container_rc" == 1 ]] || {
+          echo 'Could not prove API container absence under the lifecycle lock' >&2
           exit 1
         }
-        if [[ "$api_load_state" == not-found ]]; then
-          api_active_state=inactive
-        else
-          api_active_state="$(systemctl --user show --property=ActiveState --value codexia-api.service 2>/dev/null)" || {
-            echo 'Could not read API unit activity under the lifecycle lock' >&2
-            exit 1
-          }
+        unit_rc=0
+        api_state="$(systemctl --user show --property=LoadState,ActiveState codexia-api.service)" || unit_rc=$?
+        if [[ "$unit_rc" != 0 && "$unit_rc" != 4 ]] ||
+           ! grep -Fxq 'ActiveState=inactive' <<< "$api_state" ||
+           ! grep -Eq '^LoadState=(loaded|masked|not-found)$' <<< "$api_state"; then
+          echo 'API unit appeared or has an ambiguous state under the lifecycle lock' >&2
+          exit 1
         fi
-        case "$api_load_state:$api_active_state" in
-          not-found:inactive|loaded:inactive|masked:inactive) ;;
-          *) echo 'API unit appeared or has an ambiguous state under the lifecycle lock' >&2; exit 1 ;;
+        gate_status="$(sudo -n /usr/local/sbin/codexia-api-gate status 2>/dev/null)" || gate_status=
+        [[ "$gate_status" != closed ]] || exit 0
+        state="$HOME/.local/state/codexia-deploy"
+        for pending in deploy-transaction.json deploy-transaction.json.tmp deployed-release.json deployed-release.json.tmp \
+          rollback-api.container rollback-release.json cutover-transaction.json backup-transaction owner-setup.intent; do
+          if [[ -e "$state/$pending" || -L "$state/$pending" ]]; then
+            echo 'Recorded host state requires its existing recovery path before base convergence' >&2
+            exit 1
+          fi
+        done
+        case "$gate_status" in
+          open) ;;
+          '')
+            socket_state="$(systemctl show --property=ActiveState,UnitFileState codexia-api.socket)"
+            proxy_state="$(systemctl show --property=ActiveState,UnitFileState codexia-api-gate.service)"
+            if ! grep -Fxq 'ActiveState=inactive' <<< "$socket_state" ||
+               ! grep -Eq '^UnitFileState=(disabled|masked)$' <<< "$socket_state" ||
+               ! grep -Fxq 'ActiveState=inactive' <<< "$proxy_state" ||
+               ! grep -Eq '^UnitFileState=(static|masked)$' <<< "$proxy_state"; then
+              echo 'Publication gate is ambiguous; resolve it under the protected host recovery procedure' >&2
+              exit 1
+            fi
+            ;;
+          *) echo 'Invalid publication gate status' >&2; exit 1 ;;
         esac
         sudo -n /usr/local/sbin/codexia-api-gate close
         [[ "$(sudo -n /usr/local/sbin/codexia-api-gate status)" == closed ]]
-  register: base_runtime_fresh_gate_close
-  changed_when: true
-  when: base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0 and
-        (base_runtime_gate_units.results | selectattr('stat.exists', 'equalto', true) | list | length) == 0
-
-- name: Read the publication gate state through the fixed root helper
-  ansible.builtin.command:
-    argv: [sudo, -n, /usr/local/sbin/codexia-api-gate, status]
-  register: base_runtime_gate_state_before
-  changed_when: false
-  failed_when: false
-
-- name: Require a canonical API-less publication gate before initialization
-  ansible.builtin.assert:
-    that:
-      - base_runtime_gate_state_before.rc == 0
-      - base_runtime_gate_state_before.stdout in ['open', 'closed']
-    fail_msg: An API-less target has an ambiguous gate state; recover it through the locked deployment transaction.
-  when: base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0
-
-- name: Require the canonical host lock before closing an API-less open gate
-  ansible.builtin.stat:
-    path: "{{ home }}/.local/state/codexia-deploy/host.lock"
-    follow: false
-    get_checksum: false
-    get_mime: false
-    get_attributes: false
-  register: base_runtime_host_lock
-  changed_when: false
-  when: base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0 and
-        base_runtime_gate_state_before.stdout == 'open'
-
-- name: Require the canonical host lock to be a regular private file
-  ansible.builtin.assert:
-    that:
-      - base_runtime_host_lock.stat.exists
-      - base_runtime_host_lock.stat.isreg | default(false)
-      - not (base_runtime_host_lock.stat.islnk | default(false))
-      - base_runtime_host_lock.stat.pw_name == codexia_service_user
-      - base_runtime_host_lock.stat.mode == '0600'
-    fail_msg: Initial gate closure requires the existing lifecycle host lock; no new lock authority is created.
-  when: base_runtime_host_lock is not skipped
-
-- name: Close and persistently mask an API-less open publication gate under the lifecycle host lock
-  ansible.builtin.command:
-    argv:
-      - /usr/bin/flock
-      - --exclusive
-      - --nonblock
-      - "{{ home }}/.local/state/codexia-deploy/host.lock"
-      - /bin/bash
-      - -eu
-      - -c
-      - |
-        container_rc=0
-        if podman container exists codexia-api; then
-          echo 'API container appeared while the publication gate was being initialized' >&2
-          exit 1
-        else
-          container_rc=$?
-        fi
-        [[ "$container_rc" == 1 ]] || { echo 'Could not prove API container absence under the lifecycle lock' >&2; exit 1; }
-        api_load_state="$(systemctl --user show --property=LoadState --value codexia-api.service 2>/dev/null)" || {
-          echo 'Could not read API unit state under the lifecycle lock' >&2
-          exit 1
-        }
-        if [[ "$api_load_state" == not-found ]]; then
-          api_active_state=inactive
-        else
-          api_active_state="$(systemctl --user show --property=ActiveState --value codexia-api.service 2>/dev/null)" || {
-            echo 'Could not read API unit activity under the lifecycle lock' >&2
-            exit 1
-          }
-        fi
-        case "$api_load_state:$api_active_state" in
-          not-found:inactive|loaded:inactive|masked:inactive) ;;
-          *) echo 'API unit appeared or has an ambiguous state under the lifecycle lock' >&2; exit 1 ;;
-        esac
-        gate_state="$(sudo -n /usr/local/sbin/codexia-api-gate status)" || {
-          echo 'Publication gate became inconsistent under the lifecycle lock' >&2
-          exit 1
-        }
-        case "$gate_state" in
-          closed) exit 0 ;;
-          open) sudo -n /usr/local/sbin/codexia-api-gate close ;;
-          *) echo 'Publication gate returned an invalid state under the lifecycle lock' >&2; exit 1 ;;
-        esac
-        [[ "$(sudo -n /usr/local/sbin/codexia-api-gate status)" == closed ]]
-  register: base_runtime_initial_gate_close
-  changed_when: true
-  when: base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0 and
-        base_runtime_gate_state_before.stdout == 'open'
-
-- name: Require an API-less base target to remain closed
-  ansible.builtin.assert:
-    that: >-
-      (base_runtime_gate_state_before.rc == 0 and base_runtime_gate_state_before.stdout == 'closed') or
-      (base_runtime_initial_gate_close is not skipped and base_runtime_initial_gate_close.rc == 0)
-    fail_msg: Existing API target has an ambiguous gate state; recover it through the locked deployment transaction.
+        printf '%s\n' GATE_CLOSED
+  register: base_runtime_api_less_gate
+  changed_when: "'GATE_CLOSED' in base_runtime_api_less_gate.stdout_lines"
   when: base_runtime_api_container.rc == 1 and base_runtime_api_service.rc != 0
 
 - name: Require an existing API target to keep a coherent gate state
-  ansible.builtin.assert:
-    that:
-      - base_runtime_gate_state_before.rc == 0
-      - base_runtime_gate_state_before.stdout in ['open', 'closed']
-    fail_msg: Existing API target has an ambiguous gate state; recover it through the locked deployment transaction.
+  ansible.builtin.command:
+    argv: [sudo, -n, /usr/local/sbin/codexia-api-gate, status]
+  register: base_runtime_active_gate
+  changed_when: false
+  failed_when: base_runtime_active_gate.rc != 0 or base_runtime_active_gate.stdout not in ['open', 'closed']
   when: base_runtime_api_container.rc == 0 and base_runtime_api_service.rc == 0

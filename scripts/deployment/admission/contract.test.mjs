@@ -296,7 +296,7 @@ test('manual first Backend activation uses protected admission and the existing 
 
 test('locked production admission requires separate R6 or restored R3 evidence for a clean API slot', () => {
   const shell = transactionTasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'].cmd;
-  const gateStart = shell.indexOf('if [[ "$had_unit" == false && "$require_tunnel" == true && "$first_activation" == null && "$recovery_activation" == null && "$adoption_activation" == null ]]; then');
+  const gateStart = shell.indexOf('if [[ "$had_unit" == false && "$require_production_admission" == true && "$first_activation" == null && "$recovery_activation" == null && "$adoption_activation" == null ]]; then');
   const gateEnd = shell.indexOf('first_activation_window_current(){', gateStart);
   assert.ok(gateStart > shell.indexOf('flock --exclusive --nonblock 9') &&
     gateEnd > gateStart && gateEnd < shell.indexOf('deploy-backup'));
@@ -311,7 +311,7 @@ test('locked production admission requires separate R6 or restored R3 evidence f
     ['false', 'false', 'null', 'null', 'null', 0],
   ]) {
     const result = spawnSync('bash', ['-c', prefix + gate], {
-      encoding: 'utf8', env: { ...process.env, had_unit: hadUnit, require_tunnel: production,
+      encoding: 'utf8', env: { ...process.env, had_unit: hadUnit, require_production_admission: production,
         first_activation: evidence, recovery_activation: recovery, adoption_activation: adoption },
     });
     assert.ifError(result.error);
@@ -361,7 +361,7 @@ test('first activation checks the real transaction window at readiness and rolls
   const transaction = shell.slice(transactionStart, transactionEnd)
     .replaceAll("{{ '{{' }}", '{{').replaceAll("{{ '}}' }}", '}}');
   assert.match(transaction, /require_activation_window_or_restore\nif ! install -m 0600/u);
-  assert.match(transaction, /require_activation_window_or_restore\n\s*if \[\[ "\$recovery_tunnel_masked" == true \]\] && ! systemctl --user unmask codexia-tunnel\.service/u);
+  assert.match(transaction, /require_activation_window_or_restore\nif ! gate_control open/u);
 
   const directory = mkdtempSync(path.join(tmpdir(), 'codexia-first-activation-window-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -371,12 +371,13 @@ test('first activation checks the real transaction window at readiness and rolls
     'active_unit="$FIXTURE/active.container"',
     'candidate_unit="$FIXTURE/candidate.container"',
     'api_wants_link="$FIXTURE/api.service"',
-    'tunnel_wants_link="$FIXTURE/tunnel.service"',
     'transaction_intent="$FIXTURE/deploy-transaction.json"',
     'release_state="$FIXTURE/deployed-release.json"',
     'trace="$FIXTURE/trace"',
-    'had_unit=false; tunnel_present=true; tunnel_was_active=false; release_present=false; recovery_tunnel_masked=false',
-    'api_link_created=true; tunnel_link_created=true',
+    'had_unit=false; gate_was_open=false; release_present=false; recovery_gate_closed=false',
+    'api_link_created=true',
+    'gate_control() { printf "gate %s\n" "$1" >> "$trace"; printf "%s\n" "$1" > "$FIXTURE/gate-state"; }',
+    'curl() { [[ "$*" == *"http://127.0.0.1:18081/health/ready" ]] && grep -qx close "$FIXTURE/gate-state"; }',
     'candidate_image=fixture-image; first_activation="{}"; recovery_activation=null; adoption_activation=null; approved_not_before=1000; approved_not_after=2000',
     'clock=1500; backup_control=control_fixture; backup_run_id=; backup_pending_id=',
     'if [[ "$SCENARIO" == recovery-* ]]; then first_activation=null; recovery_activation="{}"; fi',
@@ -393,7 +394,7 @@ test('first activation checks the real transaction window at readiness and rolls
   for (const scenario of ['pre-start', 'startup', 'stop-failure', 'within-window', 'recovery-current', 'recovery-stale']) {
     const fixture = path.join(directory, scenario);
     mkdirSync(fixture);
-    for (const name of ['candidate.container', 'api.service', 'tunnel.service', 'deploy-transaction.json',
+    for (const name of ['candidate.container', 'api.service', 'deploy-transaction.json',
       'owner-setup.installation', 'owner-setup.promoted', 'database-sentinel', 'backup-sentinel']) {
       writeFileSync(path.join(fixture, name), name);
     }
@@ -407,22 +408,21 @@ test('first activation checks the real transaction window at readiness and rolls
     assert.match(calls, /^ledger$/mu);
     assert.doesNotMatch(result.stderr, /Unexpected Console command/u);
     assert.equal(calls.includes('--user start codexia-api.service'), scenario !== 'pre-start');
-    assert.equal(calls.includes('--user start codexia-tunnel.service'), success);
-    const mask = calls.indexOf('--user mask --now codexia-tunnel.service');
+    assert.equal(calls.includes('gate open'), success);
+    const closeGate = calls.indexOf('gate close');
     const startApi = calls.indexOf('--user start codexia-api.service');
     const stopApi = calls.indexOf('--user stop codexia-api.service');
-    const unmask = calls.indexOf('--user unmask codexia-tunnel.service');
-    const startTunnel = calls.indexOf('--user start codexia-tunnel.service');
-    if (scenario === 'recovery-current') assert.ok(mask >= 0 && mask < startApi && startApi < unmask && unmask < startTunnel);
-    else if (scenario === 'recovery-stale') assert.ok(mask >= 0 && mask < startApi && startApi < stopApi && stopApi < unmask);
-    else assert.ok(mask >= 0 && (startApi < 0 || mask < startApi),
-      'the Tunnel must remain masked across a reboot for every first activation');
+    const openGate = calls.indexOf('gate open');
+    assert.ok(closeGate >= 0 && (startApi < 0 || closeGate < startApi));
+    if (success) assert.ok(openGate > startApi);
+    if (!success && startApi >= 0) assert.ok(stopApi > startApi);
+    assert.equal(readFileSync(path.join(fixture, 'gate-state'), 'utf8').trim(), success ? 'open' : 'close');
     if (!success) assert.match(result.stderr, scenario === 'recovery-stale'
       ? /restored target or approval changed before publication/u
       : /First activation approval window expired before publication/u);
     const retained = success || scenario === 'stop-failure';
     assert.equal(existsSync(path.join(fixture, 'active.container')), retained);
-    for (const name of ['deploy-transaction.json', 'api.service', 'tunnel.service']) {
+    for (const name of ['deploy-transaction.json', 'api.service']) {
       assert.equal(existsSync(path.join(fixture, name)), retained, scenario + ': ' + name);
     }
     for (const name of ['owner-setup.installation', 'owner-setup.promoted', 'database-sentinel', 'backup-sentinel']) {
@@ -472,8 +472,6 @@ test('deployment requires the rootless base runtime under the lock before activa
   const end = shell.indexOf("current_container=''", start);
   assert.ok(start > shell.indexOf('flock --exclusive --nonblock') && end > start);
   assert.ok(end < shell.indexOf('mkdir -p "$wants_dir"'));
-  assert.match(shell, /require_tunnel=.*'false' if \(codexia_lifecycle_fixture \| default\(false\) \| bool\) else 'true'/u);
-
   const preflight = shell.slice(start, end).replaceAll('{% raw %}', '').replaceAll('{% endraw %}', '');
   const fixtureCommands = `
     set -eu -o pipefail
@@ -488,32 +486,33 @@ test('deployment requires the rootless base runtime under the lock before activa
     systemctl() {
       case "$*" in
         '--user is-active --quiet codexia-db.service') [[ "$missing" != db ]];;
-        '--user cat codexia-tunnel.service') [[ "$missing" != tunnel ]];;
         '--user show --property=SourcePath --value codexia-db.service') [[ "$missing" != db-source ]] && printf '%s\\n' "$unit_dir/codexia-db.container";;
-        '--user show --property=SourcePath --value codexia-tunnel.service') [[ "$missing" != tunnel-source ]] && printf '%s\\n' "$unit_dir/codexia-tunnel.container";;
+        'is-active codexia-cloudflared.service') [[ "$missing" != management ]] && printf '%s\\n' active;;
         *) return 99;;
       esac
     }
   `;
   const safeFailure = transactionTasks.find(task => task.name === 'Report only an allowlisted deployment transaction failure stage');
-  for (const [missing, dbHealth, requireTunnel, error] of [
-    ['history', 'healthy', 'true', 'Deployment base runtime requires the rootless history volume'],
-    ['db', 'healthy', 'true', 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet'],
-    ['', 'unhealthy', 'true', 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet'],
-    ['tunnel', 'healthy', 'true', 'Deployment base runtime requires the rootless Tunnel Quadlet'],
-    ['db-source', 'healthy', 'true', 'Deployment base runtime requires canonical generated PostgreSQL and Tunnel units'],
-    ['tunnel-source', 'healthy', 'true', 'Deployment base runtime requires canonical generated PostgreSQL and Tunnel units'],
-    ['tunnel', 'healthy', 'false', ''],
-    ['', 'healthy', 'true', ''],
+  for (const [missing, dbHealth, gateState, error] of [
+    ['history', 'healthy', 'closed', 'Deployment base runtime requires the rootless history volume'],
+    ['db', 'healthy', 'closed', 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet'],
+    ['', 'unhealthy', 'closed', 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet'],
+    ['db-source', 'healthy', 'closed', 'Deployment base runtime requires the canonical generated PostgreSQL unit'],
+    ['management', 'healthy', 'closed', 'Deployment requires the independent host Cloudflare connector'],
+    ['gate', 'healthy', 'closed', 'Publication gate state is not canonical'],
+    ['', 'healthy', 'invalid', 'Publication gate helper returned an invalid state'],
+    ['', 'healthy', 'closed', ''],
+    ['', 'healthy', 'open', ''],
   ]) {
-    const result = spawnSync('bash', ['-c', fixtureCommands + preflight], {
+    const result = spawnSync('bash', ['-c', fixtureCommands +
+      'gate_control() { [[ "$missing" != gate ]] && printf "%s\n" "$GATE_STATE"; }\n' + preflight], {
       encoding: 'utf8',
-      env: { ...process.env, missing, db_health: dbHealth, require_tunnel: requireTunnel },
+      env: { ...process.env, missing, db_health: dbHealth, GATE_STATE: gateState },
     });
     assert.ifError(result.error);
     assert.equal(result.status, error ? 1 : 0, result.stderr);
     assert.equal(result.stderr.trim(), error);
-    if (error) assert.ok(safeFailure['ansible.builtin.fail'].msg.includes(error));
+    if (error && !error.includes('helper returned')) assert.ok(safeFailure['ansible.builtin.fail'].msg.includes(error));
   }
   assert.match(safeFailure['ansible.builtin.fail'].msg,
     /'encrypted backup' if 'Encrypted backup failed; candidate was not applied'/u);
@@ -529,23 +528,25 @@ test('production admission reuses canonical runtime validators and checks exact 
   const quadlets = checks.find(task => task.name === 'Inspect every canonical base Quadlet without following links');
   assert.deepEqual(quadlets.loop, [
     'codexia.network', 'codexia-data.network', 'codexia-postgres.volume', 'codexia-data.volume',
-    'codexia-history.volume', 'codexia-db.container', 'codexia-tunnel.container',
+    'codexia-history.volume', 'codexia-db.container',
   ]);
   const fileAdmission = checks.find(task => task.name ===
     'Require every base Quadlet to match the reviewed repository source');
   assert.ok(fileAdmission['ansible.builtin.assert'].that.some(clause =>
     clause.includes("hash('sha256')")));
-  const generatedOrigins = checks.find(task => task.name === 'Require base services to originate from canonical rootless Quadlets');
+  const generatedOrigins = checks.find(task => task.name === 'Require PostgreSQL to originate from its canonical rootless Quadlet');
   assert.ok(generatedOrigins['ansible.builtin.assert'].that.some(clause =>
-    clause.includes("item.stdout == quadlet_dir + '/'")));
+    clause.includes("codexia_deploy_base_db_source.stdout == quadlet_dir + '/codexia-db.container'")));
   const includes = checks.filter(task => task['ansible.builtin.include_tasks'])
     .map(task => task['ansible.builtin.include_tasks']);
-  assert.deepEqual(includes, ['verify-base-db-container.yml', 'verify-base-tunnel-container.yml']);
+  assert.deepEqual(includes, ['verify-base-db-container.yml']);
+  assert.deepEqual(checks.find(task => task.name === 'Require the independent host Cloudflare connector')['ansible.builtin.command'].argv,
+    ['systemctl', 'is-active', 'codexia-cloudflared.service']);
   const networks = checks.find(task => task.name === 'Verify the canonical private network isolation before deployment');
   assert.deepEqual(networks.loop.map(value => value.expected), ['codexia|bridge|false', 'codexia-data|bridge|true']);
   const shell = transactionStages.find(task => task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'].cmd;
   assert.match(shell, /systemctl --user show --property=SourcePath --value codexia-db\.service/u);
-  assert.match(shell, /systemctl --user show --property=SourcePath --value codexia-tunnel\.service/u);
+  assert.match(shell, /gate_state="\$\(gate_control status\)"/u);
 });
 
 test('first activation verifies the initialized database under both explicit approvals without Console backup', () => {
@@ -598,50 +599,54 @@ test('fresh auth staging initializes the application ledger before provisioning 
   assert.match(helper, /flock --exclusive --nonblock[\s\S]*await initializeFreshPostgresSchema/u);
 });
 
-test('push rollout admits backups only after canonical API and Tunnel shutdown', () => {
+test('push rollout admits backups after API shutdown and verified product publication closure', () => {
   const deployment = readFileSync(new URL('../../../deploy/ansible/deploy-transaction.yml', import.meta.url), 'utf8');
   const backup = readFileSync(new URL('../../../deploy/backup/backup.sh', import.meta.url), 'utf8');
   const runner = readFileSync(new URL('../../../deploy/backup/backup-runner.sh', import.meta.url), 'utf8');
   assert.match(deployment, /systemctl --user stop codexia-api\.service[\s\S]*?deploy-backup/u);
   assert.match(runner, /backup-locked[\s\S]*--approved[\s\S]*--lock-file[\s\S]*--lock-fd 9/u);
-  assert.match(backup, /Push deployment requires inactive systemd unit/u);
+  assert.match(backup, /Push deployment requires the API service to be inactive/u);
+  assert.match(backup, /Push deployment requires the product publication gate to be closed/u);
+  assert.match(backup, /Management Tunnel connector must remain active/u);
   assert.doesNotMatch(backup, /codexia-updater|--push-deployment/u);
 });
 
-test('push activation keeps one canonical API writer and exposes Tunnel only after readiness', () => {
+test('push activation keeps one canonical API writer and opens publication after readiness', () => {
   const deploy = transactionTasks;
   const transaction = deploy.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   assert.ok(transaction, 'the app activation must remain one serialized transaction');
   const shell = transaction['ansible.builtin.shell'].cmd;
 
-  const stopTunnel = shell.indexOf('systemctl --user stop codexia-tunnel.service');
-  const stopApi = shell.indexOf('systemctl --user stop codexia-api.service');
+  const closeGate = shell.indexOf('! gate_control close;', shell.indexOf('# Record which links recovery owns'));
+  const stopApi = shell.indexOf('systemctl --user stop codexia-api.service', closeGate);
   const installCandidate = shell.indexOf('install -m 0600 "$candidate_unit" "$active_unit"');
   const startCandidate = shell.indexOf('systemctl --user start codexia-api.service', installCandidate);
   const readiness = shell.indexOf('if [[ "$candidate_health" != healthy ]]');
-  const startTunnel = shell.indexOf('systemctl --user start codexia-tunnel.service', readiness);
+  const openGate = shell.indexOf('if ! gate_control open;', readiness);
   const commitRelease = shell.indexOf('mv -f -- "$release_state.tmp" "$release_state"');
-  for (const [name, position] of Object.entries({ stopTunnel, stopApi, installCandidate, startCandidate, readiness, startTunnel, commitRelease })) {
+  for (const [name, position] of Object.entries({ closeGate, stopApi, installCandidate, startCandidate, readiness, openGate, commitRelease })) {
     assert.notEqual(position, -1, `deployment transaction must include ${name}`);
   }
-  assert.ok(stopTunnel < stopApi, 'Tunnel ingress must stop before the API writer is changed');
+  assert.ok(closeGate < stopApi, 'Product publication must close before the API writer changes');
   assert.ok(stopApi < installCandidate, 'the old writer must stop before the candidate unit is installed');
   assert.ok(installCandidate < startCandidate && startCandidate < readiness,
     'candidate readiness must be observed after starting its canonical API service');
-  assert.ok(readiness < startTunnel && startTunnel < commitRelease,
-    'Tunnel ingress and the release record must follow candidate readiness');
+  assert.ok(readiness < openGate && openGate < commitRelease,
+    'Product publication and the release record must follow candidate readiness');
 
   const apiUnit = readFileSync(new URL('../../../deploy/quadlet/codexia-api.container', import.meta.url), 'utf8');
-  const tunnelUnit = readFileSync(new URL('../../../deploy/quadlet/codexia-tunnel.container', import.meta.url), 'utf8');
+  const connectorUnit = readFileSync(new URL('../../../cmd/codexiactl/assets/codexia-cloudflared.service', import.meta.url), 'utf8');
+  const socketUnit = readFileSync(new URL('../../../deploy/systemd/codexia-api.socket', import.meta.url), 'utf8');
   const databaseUnit = readFileSync(new URL('../../../deploy/quadlet/codexia-db.container', import.meta.url), 'utf8');
   assert.match(apiUnit, /^ContainerName=codexia-api$/mu);
   assert.match(apiUnit, /^Network=codexia\.network$/mu);
   assert.match(apiUnit, /^Network=codexia-data\.network$/mu);
   assert.match(apiUnit, /^Volume=codexia-data\.volume:\/data$/mu);
   assert.match(apiUnit, /^Volume=codexia-history\.volume:\/history$/mu);
-  assert.match(tunnelUnit, /^Requires=codexia-api\.service$/mu);
-  assert.match(tunnelUnit, /^After=network-online\.target codexia-api\.service$/mu);
-  assert.match(tunnelUnit, /^Network=codexia\.network$/mu);
+  assert.match(apiUnit, /^PublishPort=127\.0\.0\.1:18081:3000\/tcp$/mu);
+  assert.match(socketUnit, /^ListenStream=127\.0\.0\.1:18080$/mu);
+  assert.doesNotMatch(connectorUnit, /codexia-(?:api|db)\.service/u);
+  assert.doesNotMatch(shell, /systemctl[^\n]*(?:stop|start|restart|mask)[^\n]*codexia-cloudflared\.service/u);
   assert.match(databaseUnit, /^ContainerName=codexia-db$/mu);
   assert.match(databaseUnit, /^Volume=codexia-postgres\.volume:\/var\/lib\/postgresql\/data$/mu);
   assert.match(databaseUnit, /^Environment=POSTGRES_DB=codexia$/mu);
@@ -652,9 +657,9 @@ test('push activation keeps one canonical API writer and exposes Tunnel only aft
   const restore = shell.indexOf('restore_previous(){');
   const restoreStartApi = shell.indexOf('systemctl --user start codexia-api.service', restore);
   const restoreHealth = shell.indexOf('podman inspect --format', restoreStartApi);
-  const restoreStartTunnel = shell.indexOf('systemctl --user start codexia-tunnel.service', restoreHealth);
-  assert.ok(restore !== -1 && restoreStartApi > restore && restoreHealth > restoreStartApi && restoreStartTunnel > restoreHealth,
-    'rollback must restore and health-check the previous API before restoring Tunnel ingress');
+  const restoreOpenGate = shell.indexOf('gate_control open', restoreHealth);
+  assert.ok(restore !== -1 && restoreStartApi > restore && restoreHealth > restoreStartApi && restoreOpenGate > restoreHealth,
+    'rollback must restore and health-check the previous API before restoring product publication');
 });
 
 test('Better Auth activation uses protected staged settings on a fresh or existing API', () => {
@@ -763,14 +768,16 @@ test('both first-owner launchers require a clean API target under the deployment
   mock('id', 'echo codexia');
   mock('podman', `case "$1 $2" in
     'info --format') echo true;;
-    'container exists') exit "$CONTAINER_STATUS";;
+    'container exists') if [ "$3" = codexia-tunnel ]; then exit 1; else exit "$CONTAINER_STATUS"; fi;;
     'inspect --format') echo healthy;;
     'run --rm')
       flock --nonblock "$HOME/.local/state/codexia-deploy/host.lock" true && exit 89
       echo "STARTED $*";;
     *) exit 90;;
   esac`);
+  mock('sudo', `[ "$*" = '-n /usr/local/sbin/codexia-api-gate status' ] && echo "$GATE_STATE"`);
   mock('systemctl', `case "$1 $2" in
+    'is-active codexia-cloudflared.service') echo "$MANAGEMENT_STATE";;
     '--user show') printf '%s\\n' "$UNIT_STATE"; exit "$UNIT_STATUS";;
     '--user is-active') exit 0;;
     *) exit 90;;
@@ -788,6 +795,7 @@ test('both first-owner launchers require a clean API target under the deployment
   const env = {
     ...process.env, HOME: home, PATH: bin + path.delimiter + process.env.PATH,
     CODEXIA_IMAGE_REPOSITORY: 'ghcr.io/yohn-jp/codexia-backend',
+    GATE_STATE: 'closed', MANAGEMENT_STATE: 'active',
     CONTAINER_STATUS: '1', UNIT_STATUS: '4', UNIT_STATE: 'LoadState=not-found\nActiveState=inactive',
   };
   const image = 'ghcr.io/yohn-jp/codexia-backend@sha256:' + 'a'.repeat(64);
@@ -812,6 +820,8 @@ test('both first-owner launchers require a clean API target under the deployment
     };
     refused({ CONTAINER_STATUS: '0' }); // Includes a stopped container with no remaining unit.
     refused({ CONTAINER_STATUS: '125' });
+    refused({ GATE_STATE: 'open' });
+    refused({ MANAGEMENT_STATE: 'inactive' });
     refused({ UNIT_STATE: '', UNIT_STATUS: '1' }); // Unreachable user manager.
     refused({ UNIT_STATE: 'LoadState=loaded\nActiveState=inactive', UNIT_STATUS: '0' });
     refused({ UNIT_STATE: 'LoadState=not-found\nActiveState=active', UNIT_STATUS: '0' });

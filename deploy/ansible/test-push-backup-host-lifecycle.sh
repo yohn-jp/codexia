@@ -27,20 +27,9 @@ codexia_backup_runtime_approved: true
 codexia_backup_staging_directory: "$fixture_home/.local/state/codexia-backup-mount"
 codexia_backup_secondary_independent_mount: "$fixture_home/.local/state/codexia-backup-mount"
 YAML
-  local tunnel="$fixture_home/.config/systemd/user/codexia-tunnel.service"
-  rootless tee "$tunnel" >/dev/null <<'UNIT'
-[Unit]
-Requires=codexia-api.service
-After=codexia-api.service
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/bin/true
-UNIT
-  rootless_systemctl daemon-reload
-  rootless_systemctl start codexia-tunnel.service
   run_playbook "$tmp/backup-provision.yml" backup-provision
-  rootless_systemctl is-active --quiet codexia-tunnel.service
+  [[ "$(rootless sudo -n /usr/local/sbin/codexia-api-gate status)" == open ]]
+  assert_fixture_management_continues
   before="$(rootless sha256sum "$settings/sealing-private.pem" "$settings/database.env")"
   before+=" $(rootless_podman inspect --format '{{.Id}}' codexia-api)"
   run_playbook "$tmp/backup-provision.yml" backup-provision-reapply
@@ -72,16 +61,15 @@ await assert.rejects(query(url.href, 'SELECT 1'));
 SOCKET_NODE
   }
   verify_socket_client
-  rootless_systemctl stop codexia-tunnel.service
-  rootless rm -- "$tunnel"
-  rootless_systemctl daemon-reload
+  rootless sudo -n /usr/local/sbin/codexia-api-gate close
   rootless_systemctl stop codexia-backup-executor.service codexia-api.service
   rootless_systemctl restart codexia-db.service
   rootless timeout 60s podman wait --condition=healthy codexia-db >/dev/null
   verify_socket_client
   rootless_systemctl start codexia-api.service codexia-backup-executor.service
-  # The synthetic lifecycle intentionally has no production Tunnel token.
-  disable_fixture_tunnel
+  curl --noproxy '*' --fail --silent --show-error --max-time 3 http://127.0.0.1:18081/health/ready >/dev/null
+  rootless sudo -n /usr/local/sbin/codexia-api-gate open
+  assert_fixture_management_continues
 
 )
 
@@ -107,31 +95,18 @@ SQL
 verify_backup_host_lifecycle(){
   local prior_key="$1" candidate_key="$2"
   local state="$fixture_home/.local/state/codexia-deploy"
-  local units="$fixture_home/.config/systemd/user"
   local runner="$fixture_home/.local/bin/codexia-backup-runner"
   local destination="$fixture_home/.local/state/codexia-backup-mount"
   local fault="$state/backup-fault-bin" before run_id code required_run
   before="$(rootless sha256sum "$state/deployed-release.json")"
   run_id="$(cat /proc/sys/kernel/random/uuid)"
-  rootless install -d -m 0700 "$units" "$fault"
+  rootless install -d -m 0700 "$fault"
   rootless_systemctl stop codexia-backup-executor.service
   backup_fixture_query -v run_id="$run_id" <<'SQL'
 INSERT INTO codexia_backup.runs (id, request_id, kind, revision, maintenance_window_id)
 VALUES (:'run_id', :'run_id', 'manual', 1, 'fixture');
 SQL
-  cat > "$tmp/backup-tunnel.service" <<'UNIT'
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/bin/true
-UNIT
-  sudo install -o codexia -g codexia -m 0600 "$tmp/backup-tunnel.service" "$units/codexia-tunnel.service"
-  rootless_systemctl daemon-reload
-  rootless_systemctl start codexia-tunnel.service
-
-  # A separate lock descriptor owned by the deployment fixture blocks a run
-  # before either systemd service or the executor is touched.
-
+  # A separate lock descriptor blocks the backup before quiescing the writer.
   code=0
   rootless flock -xn "$state/host.lock" "$runner" "$run_id" || code=$?
   [[ "$code" == 75 ]]
@@ -154,12 +129,14 @@ SYSTEMCTL
   [[ "$code" == 137 ]]
   rootless test -s "$state/backup-transaction"
   if rootless_systemctl is-active --quiet codexia-api.service ||
-     rootless_systemctl is-active --quiet codexia-tunnel.service; then
-    echo 'Backup interruption was injected before both services stopped' >&2
+     [[ "$(rootless sudo -n /usr/local/sbin/codexia-api-gate status)" != closed ]]; then
+    echo 'Backup interruption did not leave the writer stopped and publication closed' >&2
     return 1
   fi
+  assert_fixture_management_continues
   rootless "$runner" recover
-  rootless_systemctl is-active --quiet codexia-tunnel.service
+  [[ "$(rootless sudo -n /usr/local/sbin/codexia-api-gate status)" == open ]]
+  assert_fixture_management_continues
   [[ "$(backup_fixture_query -c "SELECT state || ':' || reason_code FROM codexia_backup.runs WHERE id = '$run_id'")" == UNKNOWN:manual_interrupted ]]
   rootless_systemctl start codexia-backup-executor.service
   rootless test ! -e "$state/backup-transaction"
@@ -179,14 +156,12 @@ SYSTEMCTL
      .candidates[$next].identity.sourceSha, (.candidates[$next].image | split("@")[1])] | join(" ")' "$evidence")" ]]
   backup_fixture_query -c "UPDATE codexia_backup.state SET active_revision = 1"
   rootless test ! -e "$state/deploy-transaction.json"
-  rootless_systemctl is-active --quiet codexia-tunnel.service
+  [[ "$(rootless sudo -n /usr/local/sbin/codexia-api-gate status)" == open ]]
+  assert_fixture_management_continues
   [[ "$(rootless sha256sum "$state/deployed-release.json")" == "$before" ]]
   observe_runtime required-off-vm-backup-failure "$prior_key"
-  append_observation backup_host_lifecycle '{"hostLockContention":true,"sigkillRecoveredApiAndFixtureTunnel":true,"failedOffVmVerificationBlockedCandidate":true,"sourceAndCandidateIdentityBound":true}'
+  append_observation backup_host_lifecycle '{"hostLockContention":true,"sigkillRecoveredApiAndPublicationGate":true,"continuousManagement":true,"failedOffVmVerificationBlockedCandidate":true,"sourceAndCandidateIdentityBound":true}'
 
-  rootless_systemctl stop codexia-tunnel.service
-  rootless rm -- "$units/codexia-tunnel.service"
-  rootless_systemctl daemon-reload
 }
 
 verify_s3_restore_lifecycle(){
