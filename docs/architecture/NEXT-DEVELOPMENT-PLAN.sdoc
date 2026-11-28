@@ -1,0 +1,298 @@
+[DOCUMENT]
+MID: 8c4e4881b99dc563ef7189cb95e3513e
+TITLE: Codexia 統合創作基盤・更新設計
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 5c9616e7cfa6e98f0462210ef45cc79c
+STATEMENT: >>>
+創作機能の統合設計提案。既存の正本・承認・リリース契約を維持する。バックエンドの読み取り・規模対応は [LINK: DOC-ARCHITECTURE-BACKEND-READ-MODEL, Backend read model]、CI/CDは [LINK: DOC-VERIFICATION-CI-CD, CI/CD architecture] を正本とする。AI統合の採用済み契約は [LINK: DOC-ARCHITECTURE-MCP-FIRST, MCP-first creative architecture] を正本とする。その他の未採用設計案と実装受入は区別する。
+<<<
+
+[[SECTION]]
+MID: 71fface94f05e50425d1abffdf407e8d
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-1-目的と完了条件
+TITLE: 1. 目的と完了条件
+
+[TEXT]
+MID: c8792a5bb345b5c2fb5d6b6f1990358a
+STATEMENT: >>>
+Codexiaを、原稿の執筆・作品世界の知識管理・物語の整合性検証・AIによる創作支援を一つの作品状態に基づいて行える長編創作基盤へ発展させる。PostgreSQLを唯一の正本とし、原稿から知識を蓄積し、その知識を次の執筆に還元する循環を完成させる。
+
+次期計画の完了は、機能数や画面数ではなく、以下の実操作によって判定する。
+
+- 原稿の一節から人物・設定・関係を参照し、未確定候補を確認・承認し、同じ原稿位置へ復帰できる。
+- 設定から原稿の根拠を逆引きできる。原稿変更・削除後も根拠の状態が正しく区別される。
+- 任意の場面について、世界内の状態・その人物の認識・読者への開示状態を分けて取得できる。
+- 設定矛盾や伏線の問題を根拠付きで指摘でき、AI/MCPが同じ作品状態を参照する。未承認の変更は正本へ適用されない。
+- 通常のアプリケーション更新が、DBマイグレーションなしで検証・切替・復旧できる。更新が失敗しても作品を失わない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 9a91fc9635c6fa842e8dea9f18f4547d
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-2-現状と設計上のauthority
+TITLE: 2. 現状と設計上のauthority
+
+[[SECTION]]
+MID: d1df7879491785f2de6c22cf33cbd05f
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-21-確認済みの資産
+TITLE: 2.1 確認済みの資産
+
+[TEXT]
+MID: f94971fad84e3e3ad7dd8d7db2860493
+STATEMENT: >>>
+下表は設計上の依存先。対応する実装の受入は既存CIおよび実環境の検証によって判断する。
+
+| 領域 | 現行の資産 | 次期開発での扱い |
+|---|---|---|
+| 永続化 | `packages/persistence-contracts` / `persistence-postgres`。Project、Document、Revision、Knowledge、Evidence、Assertion、ChangeSet、ModuleRecord | 唯一の正本。新しいDB・別ストアを作らない |
+| Knowledge | `packages/core/src/knowledge` のノード・関係・命題、`packages/persistence-postgres/src/knowledge-merge.ts` の統合 | 現行グラフ型と永続型の対応を明確にする |
+| Evidence | `packages/core/src/evidence` のAnchor追従、辞書、候補抽出、逆引き | 既存アルゴリズムを利用し、操作導線と永続化の整合を証明する |
+| Story | `modules/story/src/domain` のグラフ、年表、世界状態、伏線、読者知識 | 既存計算を再利用。PostgreSQLのID・Revision・Evidenceへの接続を強化 |
+| Story UI/API | `story.timeline.query`、`story.world-state.at-scene`、`story.threads.lifecycle`、`story.reader-model.build`、既存Workbench | 新規の並行Storyシステムを作らない |
+| Search | `modules/search` の辞書・索引・自動リンク | Knowledgeと用語辞書の責務整理。重複索引を作らない |
+| Assistant | `assistant.qa`、`continuation`、`reader.reaction`、`stateEvents.draft` 等と文脈・出典・プレビューの実装 | 既存Provider実行を凍結。文脈取得と提案の共通部分のみ再利用し、外部AI/MCPを主経路にする |
+| UI | Desktop Web、保存・復旧、可変パネル、Reading | Desktop Webで創作ワークフローを完成させる。iOSは[LINK: DOC-ARCHITECTURE-IOS-SWIFTUI-ARCHITECTURE, 独立したSwiftUI設計]に従う |
+| 交換・復旧 | `codexia-work/v1`、PostgreSQLバックアップ | 作品交換と運用バックアップを区別し、未解決Evidenceを保持 |
+| 配備 | Workers静的UI、Tunnel、Rootless Podman、Quadlet、SHA固定GHCR発行 | Tailscale/SSH/AnsibleのPush型に統一。Kubernetes等への移行は不要 |
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 9a3410ca0dd55b1e490bd87582c7f7c5
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-22-解決すべき設計上の差分
+TITLE: 2.2 解決すべき設計上の差分
+
+[TEXT]
+MID: 2d9a86858f2bf9c49f9a7a07bdd8d8e9
+STATEMENT: >>>
+- Storyの `readStorySnapshot` は、Coreの固定Snapshotから `bible/`・`plot/`・`manuscript/` 等のファイル形状を読み、独自Story Entityを組み立てる。これはGitへの復帰を意味しないが、KnowledgeのUUIDとStoryのID、文書の正規ID、Evidenceの関係を統一的に扱えるかを確認する必要がある。単にパスを全置換するのではなく、既存の投影・互換契約と実利用を追跡する。
+- CoreのKnowledge型とPersistence型には状態名・表現の相違がある。変換境界、損失の有無、正本の優先を確認し、必要な場合だけ修正する。
+- RFCの軽量Lexical Linkerと、現行のOptional Search/Terminologyの責務を整合させる。本計画ではCoreが手動のKnowledge/Evidenceと確認済み参照を提供し、継続的な自動抽出・検索は既存Optional機能の明示的な有効化に従う。Core-onlyでモデルや索引を必須化しない。
+- 配備・更新の正本は [Deployment](https://github.com/yohn-jp/codexia/blob/main/docs/deployment/README.md)、[LINK: DOC-DEPLOYMENT-PUSH-DEPLOYMENT, Push deployment]、[LINK: DOC-DEPLOYMENT-BACKUP, Backup]。本書はこれらの実装・運用受入の進捗を定義しない。
+
+本計画は `CORE.md`、`INTERNAL-BOUNDARIES.md`、`MODULES.md`、`MODULAR-WORKSPACE.md`、`UX-CONTRACT.md` の既存契約を維持する。矛盾するRFC記述を採用する場合は、実装前に正本の文書を明示的に改訂する。設計案を暗黙に受入条件へ昇格させない。
+<<<
+
+[[/SECTION]]
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 7fe4f3e211549b30ce0fc4001786fb20
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-3-基本設計原則
+TITLE: 3. 基本設計原則
+
+[TEXT]
+MID: 43ea3066232454a8a3317a620ffd1d92
+STATEMENT: >>>
+1. PostgreSQL以外に原稿・Knowledge・確定作品状態の正本を作らない。IndexedDBは未保存Draftの復旧専用とする。
+2. 作品内の世界事実、人物の信念・知識、読者への開示、作者の未採用構想を区別する。本文に書かれたことをそのまま客観的事実と認定しない。
+3. 文書ID、Revision ID、Knowledge ID、Evidence IDは安定IDを使用する。ファイル形状のパスは既存モジュール向けの投影に限定する。
+4. 解析は固定Snapshotに基づく。正本への変更は既存ChangeSet・作者承認・トランザクションの契約を経由する。著者による通常編集は既存保存経路を維持する。
+5. 派生データは再生成できる。背景処理の停止・失敗・モジュール無効化は執筆を阻害しない。
+6. 日本語IME、ルビ、縦書き閲覧、入力復旧、別シェル、可変レイアウトを維持する。新しいエディタや状態管理基盤への置換は行わない。
+7. DBスキーマ変更はメジャー更新でのみ行う。通常の自動更新では一切のDBマイグレーションを実行しない。次期機能に必要なスキーマ変更は計画的なメジャー境界へ集約し、不要な変更は避ける。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 25409d29e52db6417f515680753d424d
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-4-機能間の依存関係
+TITLE: 4. 機能間の依存関係
+
+[TEXT]
+MID: 9cff4d64ce88976e6d37358fdb624932
+STATEMENT: >>>
+Knowledge/Evidenceの統合契約を基礎として、Temporal Story、Narrative Intelligence、Context Engine、Scenario Planningを接続する。更新制御はリリース契約、Blue/Green切替、運用保全の順に依存する。共有API・永続契約・CI定義の整合を維持する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: cbbabcb4f486cf12a1a26cef1b73f97c
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-5-創作系列--設計仕様と受入条件
+TITLE: 5. 創作系列 — 設計仕様と受入条件
+
+[[SECTION]]
+MID: 9de04c4ae0a755cb3dc90a3e58ffd8f9
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-棚卸し統合契約
+TITLE: 棚卸し・統合契約
+
+[TEXT]
+MID: 07c1a6927882ce1cf72e32db8c294ea5
+STATEMENT: >>>
+**統合契約:** コード・API・UI・テストの対応、ID/状態の対応、スキーマ互換性および統合fixtureを明確にする。
+
+- Core→Persistence、Story→SnapshotReader、Search→用語辞書、Assistant→Story/MCPの実際の実行経路を追跡する。KnowledgeとStoryの二重登録・未接続・型の変換損失を調査する。
+- 既存CI/実環境の結果を確認し、失敗を機能追加で覆い隠さない。実装の存在と動作済みを分ける。
+- fixtureには同名人物、別名、回想、意図的な嘘、人物の誤認、伏線、複数視点、本文の修正・削除、UTF-16境界、複数作品を含める。
+
+**受入:** 各計画項目が既存機能の再利用・接続改善・新規実装・延期のどれかに分類され、担当コンポーネントと受入証拠が確定する。未確認の既存機能を「未実装」と決め付けない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 2519c042e618bd622a81ddc587eb00c3
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-knowledge--evidence統合
+TITLE: Knowledge / Evidence統合
+
+[TEXT]
+MID: f947f505afbd09722bddff97951ca401
+STATEMENT: >>>
+**作者体験:** 本文選択または装飾クリックからContext Dockを開く。対象のKnowledge、関連人物・設定、確定根拠、候補、曖昧さを確認する。原稿を離れず新規設定・関連・言及を提案でき、承認後は設定から根拠箇所へ逆引きできる。既存Knowledge/Evidenceパネルを利用し、本文を閉じずに必要情報へ到達する。
+
+**実装:** 既存の `KnowledgeNode` / `KnowledgeRelation` / `Assertion` / `EvidenceAnchor` / `MentionLink` とCoreの辞書・Anchor・逆引きを優先利用する。関係の追加、ノード統合、別名の曖昧性解消、根拠付き命題の承認を既存トランザクションへ接続する。Story EntityとKnowledgeの対応が明確でないものは候補・未接続として扱い、推測で同一視しない。検索のTerm RegistryとKnowledge Aliasは別正本にせず、意味が同一なら明示的な参照または一方向投影で整合させる。用語の表示設定など固有の情報はSearchの責務に留める。
+
+**受入:**
+- ノード・関係・命題を作成し、複数文書の根拠を追加して再起動後に取得できる。本文にない作者設定も登録できる。
+- 別名が同一文字列の複数ノードを指す場合、自動確定せず選択を求める。ノード統合は関係・根拠・履歴を失わない。
+- Anchor前方の編集は位置追従、内部変更は要確認、削除は孤立として表示する。古いRevisionを現在の根拠と偽らない。
+- 日本語IME・ルビ・絵文字を含む実原稿で入力と選択が失われず、Desktop Webで原稿とKnowledgeを往復できる。iOS SwiftUIでも実機で同じ作業を確認する。
+- Core-onlyでも手動Knowledge/Evidenceが利用でき、Optionalモジュールの停止によって確定データが失われない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 31dd98f02cba7ed21e7d6f928305a779
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-temporal-story--世界状態
+TITLE: Temporal Story / 世界状態
+
+[TEXT]
+MID: 4b6f593440fbfd55564db793c8b89869
+STATEMENT: >>>
+**作者体験:** シーンを選択すると、世界内の時点、作品内の描写位置、人物の状態、直前からの変化とその根拠を確認できる。回想や時点不明の場面を無理に現在順へ並べず、年表と構成を独立して参照する。
+
+**実装:** `modules/story/src/domain/timeline.ts` と `worldState.ts` の既存推定・イベント・fold・履歴計算を評価し再利用する。状態イベントとKnowledge/Assertion/Evidenceの対応を明確にする。世界内時刻は年月日固定ではなく、相対順・範囲・不明・同時期を表現できる契約とする。シーンの描写順と世界内の因果順を分離する。作者が確定した状態・候補・競合・未知は区別する。新しい時系列DBや汎用イベントソーシング基盤を導入しない。必要な型は既存ModuleRecordまたは既存永続契約を利用できるかを先に検証する。
+
+**受入:**
+- 入隊→戦役→昇進の出来事を登録し、回想を含む描写順でも各時点の所属・地位が正しい。時間順不明の場合は不明として返す。
+- 人物の所在地、所有物、所属、生死等の状態を根拠付きで取得できる。旧状態を上書き消去しない。
+- 過去の状態イベントを変更すると影響する後続の派生状態が更新またはstaleとなる。関連しない本文を再解析しない。
+- 同一時点の相反する確定状態は明示され、片方を無言で選択しない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: caf8e2d2de8c9f3268d1d95b780a6a4b
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-narrative-intelligence--伏線認識整合性
+TITLE: Narrative Intelligence / 伏線・認識・整合性
+
+[TEXT]
+MID: f19b2be656cd19c4b9555b205dbef581
+STATEMENT: >>>
+**作者体験:** 章・シーン・人物ごとに、伏線の提示/進展/回収、人物の認識、読者への情報開示を確認できる。問題候補をクリックすると関連する原稿と設定へ移動する。意図的な矛盾や叙述トリックを作者が説明・除外できる。
+
+**実装:** `threadLifecycle.ts`、`readerKnowledge.ts`、`worldState.ts` とDiagnosticsの既存整合性検査を統合する。命題の真偽、発言者・視点・モダリティ・時点・情報開示を別々に扱い、単なる言及を知識獲得と認定しない。ルールで証明できる矛盾とモデルの推測を区別する。指摘は元Snapshot・対象ID・根拠・ルール/モデル版・重要度・状態を持ち、作者が確認・却下・保留・例外指定できる。例外は適用範囲を限定し、無関係な新規問題まで抑制しない。
+
+**受入:**
+- 伏線の未回収、死亡後の登場、未取得情報の発言等のfixtureで、根拠付き指摘を得られる。
+- 嘘・誤認・回想・信頼できない語り手のfixtureを、確定した客観的矛盾として誤登録しない。
+- 登場人物Aには既知、Bには未知、読者には未開示という状態を別々に参照できる。
+- 原稿編集後に旧指摘を現行指摘として表示しない。作者が承認した例外をRevision変更時に必要に応じて再評価する。
+- 検査結果から原稿・設定へ移動し、ChangeSet経由で必要な修正のみ反映する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 836a0dc9f5b6eb103873648c936e149c
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-context-engine--aimcp統合
+TITLE: Context Engine / AI・MCP統合
+
+[TEXT]
+MID: 8222002245ffaba764a17b918a51da54
+STATEMENT: >>>
+**作者体験:** 「このシーンの続きを考える」「この人物の発言を見直す」「読者視点で第3章を評価する」等に応じ、外部AIがMCP経由で対象文脈を取得し、推論・生成をクライアント側で実施する。文脈の範囲と根拠を確認でき、提出された変更案から原稿へ戻れる。
+
+**実装:** 既存Storyの文脈構築、Knowledge投影、MCPのContext ManifestとAction境界、Assistantのローカル文脈構築・出典を再利用する。Provider・実行キュー・新規モデル呼出は拡張しない。用途別に共通のContext Packageを生成できるよう、必要な共通部分だけを抽出する。入力は固定Snapshotと対象シーン・人物・用途・知識範囲・トークン予算。出力は原稿引用、Knowledge ID、確定/候補、世界状態、視点別認識、関連伏線、任意の文体サンプル、除外理由、出典Revisionを含む。固定予算で根拠・近接性・関連性を優先し、切り捨てた情報を明示する。既存検索を活用し、埋め込みやモデルをCoreの依存にしない。
+
+**受入:**
+- 同じSnapshot・用途・制約でWeb UIとMCPが同一の正本情報を参照する。Assistantなしでも主要操作が利用できる。
+- 読者視点では未開示の真相、人物視点では未取得の知識を既定で混入させない。作者向け全知モードとは明確に区別する。
+- MCPは認証済みの作品権限と明示された視点・対象範囲内で文脈を返す。内部LLMの呼出はMCPの直接・間接経路を含め新規開発対象外とし、既存Providerの同意制御は維持する。
+- AIは設定の確定や本文の書換えを直接行えない。作者承認とRevision検証を経て反映する。
+- 古い文脈・根拠を使った提案はstaleとして扱い、再取得を促す。出典が欠ける場合は推測と明示する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 327b763200896cec0cccfc926397e25c
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-scenario-planning--構想分岐将来設計
+TITLE: Scenario Planning / 構想分岐（将来設計）
+
+[TEXT]
+MID: d87f63e934bf7cf0a1ba5da442fb1050
+STATEMENT: >>>
+本編の正本を変更せず、複数の展開案・仮定・予定イベント・想定される世界状態を比較する。分岐はGitのブランチではなく、固定した本編Snapshotに対する仮説・変更候補の集合とする。まず設計と小さな実証を行い、既存ChangeSetとの意味・寿命・承認単位を整理する。長期保存が必要な構想はStoryの作者所有ModuleRecord等を評価する。完全な並行世界の版管理や自動マージは対象外。
+
+**受入:** 同一の本編から2つの仮説を比較しても確定状態・検索結果・読者知識は汚染されない。採用時のみ作者承認で必要な変更を適用し、元のSnapshotが古ければ差分を再確認する。不採用案は本編に影響せず再利用できる。
+<<<
+
+[[/SECTION]]
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: baa48f939eebe5e4d5aa160766120729
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-6-運用系列
+TITLE: 6. 運用系列
+
+[TEXT]
+MID: f964af08daa2592851e95c6fe68012e8
+STATEMENT: >>>
+独立したコンポーネント配布、デプロイ時のAPIとDBの互換判定、バックアップ・復元は [Deployment](https://github.com/yohn-jp/codexia/blob/main/docs/deployment/README.md)、[LINK: DOC-DEPLOYMENT-PUSH-DEPLOYMENT, Push deployment]、[LINK: DOC-DEPLOYMENT-BACKUP, Backup] を正本とする。CIの実行と認証は [LINK: DOC-VERIFICATION-CI-CD, CI/CD architecture] に従う。実VMの受入は運用手順で証明し、設計提案を本番稼働の証拠としない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 80269cccbcac56f8468b4af6068e9e74
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-7-共通検証リリースガバナンス
+TITLE: 7. 共通検証・リリースガバナンス
+
+[TEXT]
+MID: baa9455b8f0752b26d8591d81dcef7d8
+STATEMENT: >>>
+- 検証義務の配置は [LINK: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION, Test architecture]、実行・認証は [LINK: DOC-VERIFICATION-CI-CD, CI/CD architecture] に従う。
+- 各機能の必須証拠は、純粋計算のunit、実PostgreSQLでのトランザクション・scope・Revision・障害検証、Desktop Webの実操作、iOS SwiftUIの独立した実機検証、外部AIを使用しないfixture、必要な場合の実サービス検証で構成する。
+- パフォーマンスは統合契約の基準値と同じfixture・profile・環境で比較する。入力、場面切替、保存、参照、解析を分離し、解析をForegroundへ直列化しない。目標数値は基準計測後に設定する。
+- スキーマ変更を発見した場合は変更の理由と互換性を記録する。通常更新へ紛れ込ませず、計画されたメジャーアップデートの運用手順・バックアップ・復旧試験を別途定める。
+- スコープ外: Git永続化/同期、WASMによる再設計、外部Plugin Marketplace、全作品横断の知識統合、汎用イベントバス、Kubernetes、完全オフライン同期、共同編集CRDT、無条件の自動原稿修正。外部Plugin設計は既存別計画に留める。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 2e6d754346e901d2c3374837fca980d4
+UID: DOC-ARCHITECTURE-NEXT-DEVELOPMENT-PLAN-8-参照資料
+TITLE: 8. 参照資料
+
+[TEXT]
+MID: cf16adecf2bcc10f4961d29d8d3f8655
+STATEMENT: >>>
+設計上の参照先。
+
+- [Core](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/CORE.md) / [Internal boundaries](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/INTERNAL-BOUNDARIES.md) / [Reboot RFC](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/CODEXIA-REBOOT-RFC.md)
+- [Persistence contracts](https://github.com/yohn-jp/codexia/blob/main/packages/persistence-contracts/src/index.ts) / [Core Knowledge](https://github.com/yohn-jp/codexia/blob/main/packages/core/src/knowledge/index.ts) / [Core Evidence](https://github.com/yohn-jp/codexia/blob/main/packages/core/src/evidence/index.ts)
+- [Story domain](https://github.com/yohn-jp/codexia/blob/main/modules/story/src/domain/index.ts) / [Story snapshot](https://github.com/yohn-jp/codexia/blob/main/modules/story/src/snapshot.ts) / [Story actions](https://github.com/yohn-jp/codexia/blob/main/modules/story/src/actions.ts) / [Assistant actions](https://github.com/yohn-jp/codexia/blob/main/modules/assistant/src/actions.ts)
+- [Deployment](https://github.com/yohn-jp/codexia/blob/main/docs/deployment/README.md) / [API Quadlet](https://github.com/yohn-jp/codexia/blob/main/deploy/quadlet/codexia-api.container) / [Portable works](https://github.com/yohn-jp/codexia/blob/main/docs/authoring-portable.md)
+
+本書は設計契約と未採用の運用設計案を含み、実装完了・実機受入を宣言しない。5分間隔、監視時間、初期CLI、Standalone限定、短時間停止を許容する設計は、実機測定と設計承認を経て確定する。
+<<<
+
+[[/SECTION]]

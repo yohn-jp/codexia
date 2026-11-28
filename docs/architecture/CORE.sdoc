@@ -1,0 +1,101 @@
+[DOCUMENT]
+MID: dadb18dbbfb93f54cde4d8af483d41a8
+TITLE: Core architecture
+UID: DOC-ARCHITECTURE-CORE
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 1f1d2a17b566b2e8c93c9c4d2c4fe785
+STATEMENT: >>>
+**Normative Core contract.** [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, System design] is the overall architecture authority, [LINK: DOC-ARCHITECTURE-DATA-MODEL, Data model] owns canonical entity relationships, and [LINK: DOC-ARCHITECTURE-DOCUMENTATION-AUTHORITY, Documentation authority] governs design changes. Current code is implementation evidence, not a replacement for these decisions.
+
+PostgreSQL is the sole authority for projects, document hierarchy, Markdown bodies, immutable revisions, Knowledge, Evidence, Text Anchors and module-owned records. Core authoring works without optional modules or model credentials. A missing or unavailable database fails closed; no Git workspace or filesystem manuscript fallback is available.
+<<<
+
+[[SECTION]]
+MID: e46c55d64c436efdc4b3172ca8f31f8f
+UID: DOC-ARCHITECTURE-CORE-ownership-and-dependency-direction
+TITLE: Ownership and dependency direction
+
+[TEXT]
+MID: 83c0696a6974b2705cd9bb2bc7320235
+STATEMENT: >>>
+The [LINK: DOC-ARCHITECTURE-API-AUTHN-AUTHZ, API authentication and authorization contract] defines standalone Better Auth OAuth admission and object-level authorization. [LINK: DOC-DEPLOYMENT-PUSH-DEPLOYMENT, Push deployment] describes owner enrollment and approved activation.
+
+Desktop React Web and native SwiftUI iOS are separate UI implementations using the same authenticated API. API admission owns authentication, project authorization, origin checks, cancellation and lifecycle draining. Cloudflare Access can restrict entry to the static UI. Better Auth provides author identity and issues OAuth access tokens to registered MCP clients. The API enforces each MCP client's project assignments and operation scopes. Core coordinates module snapshots and approved mutations through Persistence, and the PostgreSQL adapter owns transactions and record validation. Core never imports optional module implementations or model providers.
+
+| Area | Owner |
+| --- | --- |
+| Snapshot, operation and trusted module contracts | `packages/contracts` |
+| Canonical records, revision and ChangeSet interfaces | `packages/persistence-contracts` |
+| PostgreSQL transactions, schema and checked migrations | `packages/persistence-postgres` |
+| Project read models and module proposal coordination | `packages/core` |
+| Authentication, API admission and host integration | `packages/api` |
+| Lazy module activation and supervised workers | `packages/module-runtime` |
+| Authoring, browser recovery and separate shells | `app` |
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 38c3231bb28751f34e742936ec401aeb
+UID: DOC-ARCHITECTURE-CORE-canonical-state-and-snapshots
+TITLE: Canonical state and snapshots
+
+[TEXT]
+MID: 23458a851b74f0937b9f1f56aa4cf8c8
+STATEMENT: >>>
+Documents retain stable IDs, hierarchy, order and immutable body revisions. Metadata changes use version preconditions. Deletion preserves historical revisions and evidence rather than erasing author data. Knowledge and Evidence are project-scoped; Text Anchors bind UTF-16 ranges and quote hashes to exact document revisions. Saving a body maps unaffected anchors and marks overlapping or removed ranges for review.
+
+A module `SnapshotId` contains `projectId` and `projectVersion`. The Core materializes one consistent PostgreSQL read and retains pinned views for asynchronous work. Content mutations advance the project version atomically. Read models cannot combine content from different snapshots or substitute current content for an unavailable historical revision.
+
+[LINK: DOC-ARCHITECTURE-BACKEND-READ-MODEL, Backend read model] specifies snapshot reuse, bounded set-oriented persistence reads, internal indexes, resource envelopes and performance acceptance without changing this authority.
+
+The module file-shaped reader is a projection over PostgreSQL records. Stable manuscript, hierarchy and `meta/scriptorium/modules/<module-id>/` paths are domain identifiers, not checkout locations. They preserve existing module formats and unknown data without introducing another authority. Search indexes, model artifacts and caches remain reconstructible derivatives keyed by source revision and model/schema identity.
+Story reads hierarchy identity and order from the typed projection of the same pinned snapshot.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 4d9340c777f1540b5b069519a7ab26e8
+UID: DOC-ARCHITECTURE-CORE-mutation-and-recovery
+TITLE: Mutation and recovery
+
+[TEXT]
+MID: da475516d4a14ad0170adc3b164da445
+STATEMENT: >>>
+Document saves require the observed base revision, exact text changes, resulting hash and an idempotency key. A stale base conflicts without overwriting the author's draft. Revision restore creates a new immutable revision. Retry returns the original successful result rather than duplicating the write.
+
+Modules and MCP receive read and proposal ports. Only the authenticated author boundary may approve. Approved operations declare their read/write sets and scope guards; PostgreSQL transactions recheck preconditions and apply writes atomically. Durable proposal state and application receipts survive process or local-state replacement. Cancellation or a lost response does not imply that an accepted write was rolled back.
+
+Author-confirmed Knowledge merges and approved Knowledge merge ChangeSets share the Persistence planner and transaction implementation. Both check the project version and preview digest before transferring references and recording the merge audit.
+
+Browser IndexedDB stores recoverable drafts and pending proposals separately from canonical records. Input and IME state remain immediately authoritative while editing. A save indicator requires the database result and the corresponding durable local journal transition. Conflicts, storage errors and uncertain responses preserve recovery data. Author/project scope and navigation generations fence late responses.
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 2489645f07dcfde7750fd03449c96441
+UID: DOC-ARCHITECTURE-CORE-portable-work-import-export-and-backup
+TITLE: Portable work import, export and backup
+
+[TEXT]
+MID: 6eb8ba9827b2ce943ff68b8c8d2b98b6
+STATEMENT: >>>
+The standard product exchange is a versioned `codexia-work/v1` JSON current-state archive. Export reads one consistent PostgreSQL snapshot of work metadata, Markdown, Knowledge, supported Evidence and author-owned module records. Import validates references and hashes, creates a fresh project atomically, and never overwrites an existing project. Stale Evidence is retained explicitly without forging a current anchor. Historical revisions, credentials, approval state and browser drafts are not silently presented as portable content; see [LINK: DOC-AUTHORING-PORTABLE, Portable works].
+
+The implemented [LINK: DOC-AUTHORING-PORTABLE-離脱用オープンエクスポート契約req-data-006, open exit export] is a separate author-facing, versioned ZIP of directly usable UTF-8 Markdown and documented JSON. It preserves retained author-owned revisions and recoverable deleted documents, without exposing internal authority or authentication data. It is not a replacement for the existing JSON import contract or a disaster-recovery backup. Acceptance on Windows and a non-production Cloudflare Tunnel remains pending.
+
+For one-time conversion of older Git, SQLite or workspace data, use the [archived converter and its operator instructions](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/packages/migration/README.md) from an isolated checkout of that revision. Keep source backups and use a disposable PostgreSQL database for conversion and author review. Export the converted work as `codexia-work/v1` for import into the current release.
+
+Publishing exports read pinned PostgreSQL projections. Until the [LINK: DOC-ARCHITECTURE-DATA-MODEL, server durability consolidation] is accepted in operation, operational recovery uses protected PostgreSQL backups plus private host-history backups. The accepted target is a single PostgreSQL application-state recovery source; the existing backup path remains authoritative until its replacement is separately accepted. See [LINK: DOC-DEPLOYMENT-BACKUP, Backup]. Rehearse restoration into an isolated replacement database before changing service routing. Do not restore over the only copy or operate on production data during verification.
+<<<
+
+[[/SECTION]]

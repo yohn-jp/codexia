@@ -1,0 +1,18 @@
+[DOCUMENT]
+MID: 748d363c825f26c03909d06f6a0b347f
+TITLE: Codexia reboot rationale
+UID: DOC-ARCHITECTURE-CODEXIA-REBOOT-RFC
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 59e123a8cef3f058e435a6a036b27227
+STATEMENT: >>>
+The [original reboot RFC](https://github.com/yohn-jp/codexia/blob/91b6cb64a85da6c8f4b864a5843ac7fb776e08fa/evidence/history/CODEXIA-REBOOT-RFC.md) is retained as historical design evidence, not a current specification or an implementation plan. Its source observations and provenance describe the predecessor repositories. Do not reopen the closed migration ledger or restore Git runtime behavior.
+
+For maintained contracts use the [documentation index](https://github.com/yohn-jp/codexia/blob/main/docs/README.md), [LINK: DOC-ARCHITECTURE-CORE, Core], [LINK: DOC-ARCHITECTURE-BACKEND-READ-MODEL, Backend read model], [LINK: DOC-ARCHITECTURE-MCP-FIRST, MCP-first], [Deployment](https://github.com/yohn-jp/codexia/blob/main/docs/deployment/README.md) and [LINK: DOC-VERIFICATION-CI-CD, CI/CD architecture].
+<<<

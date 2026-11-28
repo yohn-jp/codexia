@@ -1,0 +1,124 @@
+[DOCUMENT]
+MID: 050db9e98c743ca72ac8adb3014d0747
+TITLE: 設計書の正本と保守規則
+UID: DOC-ARCHITECTURE-DOCUMENTATION-AUTHORITY
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[TEXT]
+MID: 76dcfc289bca4d2a0e602de5e32cc939
+STATEMENT: >>>
+**種別: 正本・規範的設計。** Codexia は **Design-first / Design-as-authority** を採用する。リポジトリのコードを「現行動作の観測」には利用するが、コードの存在を理由に製品設計を追認しない。本書は [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, SYSTEM-DESIGN] と併せて、文書間の優先順位と設計変更の手続きを定める。
+<<<
+
+[[SECTION]]
+MID: 7f92835357dc92d316fe82d477112a6e
+UID: DOC-ARCHITECTURE-DOCUMENTATION-AUTHORITY-文書の種別
+TITLE: 文書の種別
+
+[TEXT]
+MID: 7d46822a040b1771fdbd767538a694b4
+STATEMENT: >>>
+| 種別 | 役割 | 例 |
+| --- | --- | --- |
+| 規範的設計（normative） | 製品が従うべき構成・仕様・受入条件を確定する | `SYSTEM-DESIGN.sdoc`、`CORE.sdoc`、`API-AUTHN-AUTHZ.sdoc`、`UX-CONTRACT.sdoc`、`CI-CD.sdoc` |
+| 運用手順（runbook） | 既存の承認済み仕組みで行う操作と前提条件を定義する | `deployment/PUSH-DEPLOYMENT.md`、`deploy/ansible/README.md`、`verification/README.md` |
+| 設計詳細・提案（proposal） | 正本を細分化した候補・未決事項を扱う。明示採用されるまで正本を上書きしない | `INFORMATION-ARCHITECTURE.md`、`PLUGIN-PLATFORM.md`、`NEXT-DEVELOPMENT-PLAN.md` |
+| 受入証拠（evidence） | 実行したテスト・CI・実機・VM の結果。仕様の正本ではない | CI artifact、PR、保護された運用記録 |
+| 履歴・外部資料 | 移行の記録、設計比較、ベンダーの同梱資料 | `evidence/migration`、`.agents/skills`、`CODEXIA-REBOOT-RFC.md` |
+
+**設計正本:** [LINK: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN-strictdocによる設計正本の全面移行採用済み方針, StrictDocによる設計正本の全面移行] に従い、意味的な設計文書をネイティブ SDoc で管理する。専門モデル・実行可能契約の所有権は領域に残る。StrictDoc 標準出力と GitHub Pages、Pagefind の検索インデックスは閲覧用の派生物である。ページの公開範囲と、設計正本として管理する範囲は別に定める。
+
+文書の名称、分量、作成順序によって優先順位を決めない。所有対象ごとの正本を決め、別の文書から参照する。ドメインを横断する新しい決定は `SYSTEM-DESIGN.sdoc` を更新する。サブシステム内の決定は所有文書を更新し、必要に応じて相互リンクを追加する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: b15422273aa2fcca9528f14eeb4cbaf7
+UID: DOC-ARCHITECTURE-DOCUMENTATION-AUTHORITY-仕様の所有先
+TITLE: 仕様の所有先
+
+[TEXT]
+MID: 61782107f2dc9ef5a3e694bac5cc256b
+STATEMENT: >>>
+| 対象 | 設計上の所有先 |
+| --- | --- |
+| 採用済み仕様ツールチェーンと移行の比較・合格条件 | [LINK: DOC-ARCHITECTURE-SPECIFICATION-TOOLCHAIN, Specification toolchain]（設計正本は本書と各領域に従う） |
+| XState採用対象・machineとAPI/DB副作用の境界 | [LINK: DOC-DESIGN-XSTATE-STATE-MACHINE-CONTRACT, XState状態機械設計]（Webクライアントの対象。ネイティブSwiftUIにはReact/XState runtimeを要求しない） |
+| Windows Chromiumの作者用Web対応境界・Desktop ReactとネイティブiOS SwiftUI・モバイルWeb廃止 | [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, System design]（製品境界）・[LINK: DOC-ARCHITECTURE-IOS-SWIFTUI-ARCHITECTURE, iOS SwiftUI architecture]（ネイティブ実装正本） |
+| 仕様駆動移行の実装分割/依存関係/検証引渡し | [LINK: DOC-ARCHITECTURE-SPECIFICATION-IMPLEMENTATION-CONTRACT, 実装契約と統合計画]（製品要求の第二正本ではない） |
+| ファイル命名・ソース配置の規範 | [LINK: DOC-ARCHITECTURE-SOURCE-LAYOUT-CONVENTIONS, Source layout and naming]（全リポジトリの新規・移動ファイルの配置と例外） |
+| scripts移行の作業分割・完全対応表 | [Issue #690](https://github.com/yohn-jp/codexia/issues/690)（移行作業の計画と対応表。設計正本ではない） |
+| 外部ライブラリの選定・最新版方針・依存境界 | [LINK: DOC-ARCHITECTURE-DEPENDENCY-POLICY, 外部ライブラリ選定規約]・[LINK: DOC-ARCHITECTURE-DEPENDENCY-INVENTORY, 既存依存と固定根拠の台帳] |
+| 要求管理/StrictDoc移行 | [LINK: DOC-REQUIREMENTS-STRICTDOC-TRACEABILITY, StrictDoc traceability]（REQ-ID内容の正本は要求登録簿） |
+| HTTP実行基盤/生成器の移行目標 | [LINK: DOC-ARCHITECTURE-HTTP-PLATFORM-MIGRATION, HTTP platform migration]（認可の意味は Route authorization） |
+| DB契約検証ツールと対象 | [LINK: DOC-ARCHITECTURE-POSTGRES-CONTRACT-VERIFICATION, PostgreSQL contract verification]（Data modelとDB detailが正本） |
+| MCP v2 SDK・プロトコル移行 | [LINK: DOC-ARCHITECTURE-MCP-V2-MIGRATION, MCP v2 migration]（MCP OAuth/Coreの権限が正本） |
+| 新規CI検証と成果公開の受入 | [LINK: DOC-VERIFICATION-SPECIFICATION-TOOLING-ACCEPTANCE, Tooling acceptance]（CI/CDが実行の正本） |
+| 要求ID・採用済み要件登録 | [LINK: DOC-REQUIREMENTS-REQUIREMENTS-GOVERNANCE, Requirements governance]・[LINK: DOC-REQUIREMENT-REGISTER, Requirement register] |
+| 要件から実装・テスト・証拠への双方向追跡 | [LINK: DOC-VERIFICATION-TRACEABILITY-REGISTER, Traceability] |
+| HTTP APIのrequest/response/error・operation | [LINK: DOC-ARCHITECTURE-API-CONTRACT, API contract]（認可は Route authorization が正本） |
+| DBの表・列・制約・索引・schema lifecycle | [LINK: DOC-ARCHITECTURE-DATABASE-DETAIL-CONTRACT, DB detail contract]（概念データは Data model が正本） |
+| 外部IF・trust/障害/復旧 | [LINK: DOC-ARCHITECTURE-EXTERNAL-INTERFACES, External interfaces]（OAuth/MCP/配備の詳細は既存所有文書が正本） |
+| システム構成と責務 | [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, システム基本設計]・[LINK: DOC-ARCHITECTURE-INTERNAL-BOUNDARIES, Internal boundaries] |
+| PostgreSQL とドメイン ID | [LINK: DOC-ARCHITECTURE-DATA-MODEL, データモデル]・[LINK: DOC-ARCHITECTURE-CORE, Core] |
+| URL/HTTP method・principal別のアクセス境界 | [LINK: DOC-ARCHITECTURE-ROUTE-AUTHORIZATION-CONTRACT, Route authorization contract]・[LINK: DOC-ARCHITECTURE-API-AUTHN-AUTHZ, API authentication] |
+| 画面ID・操作ボタン・状態遷移の全体台帳 | [LINK: DOC-DESIGN-SCREEN-CONTROL-CATALOG, Screen control catalog]・[LINK: DOC-DESIGN-SCREEN-STATE-ATLAS, Screen State Atlas] |
+| API admission / Better Auth / OAuth / project 認可 | [LINK: DOC-ARCHITECTURE-API-AUTHN-AUTHZ, API authentication]・[LINK: DOC-ARCHITECTURE-MCP-OAUTH, MCP OAuth] |
+| Module と外部 AI | [LINK: DOC-ARCHITECTURE-MODULES, Modules]・[LINK: DOC-ARCHITECTURE-MCP-FIRST, MCP-first]・[LINK: DOC-ARCHITECTURE-MODULAR-WORKSPACE, Modular workspace] |
+| UI/UX と利用者操作 | [LINK: DOC-DESIGN-UX-CONTRACT, UX contract]・[LINK: DOC-DESIGN-USER-SCREEN-FLOW, 利用画面遷移] |
+| 所有者の管理 UI | [LINK: DOC-DESIGN-ADMIN-SCREEN-FLOW, 管理画面遷移]・[LINK: DOC-ARCHITECTURE-API-AUTHN-AUTHZ, API authentication]・[LINK: DOC-ARCHITECTURE-BACKUP-CONSOLE-CONTRACT, バックアップ管理・S3制御]（運用設定/ワイヤ/責務。具体画面遷移はScreen State Atlas） |
+| 本番運用サイクル・実行者/実行面・入力/秘密の正本・経路選択・初回配備・更新・復旧・排他/再開 | [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE, Deployment lifecycle]（横断契約。個別stage・認証・CI・backupの正本を置換しない） |
+| 初回配備 CLI・外部認証・入力準備・Workflow 起動と再開 | [LINK: DOC-DEPLOYMENT-CODEXIACTL, codexiactl]（規範的設計。既存 R 経路・IaC・認定・本人認証の正本を置換しない） |
+| 初期導入・VM の収束 | [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, 初期導入遷移]・[LINK: DOC-DEPLOYMENT-IAC, IaC] |
+| 自動更新・復旧 | [LINK: DOC-DEPLOYMENT-UPDATE-FLOW, 更新遷移]・[LINK: DOC-DEPLOYMENT-PUSH-DEPLOYMENT, Push deployment] |
+| 設計と正規コードから派生する画面・操作・遷移の抽象表示・探索・差分 | [LINK: DOC-DESIGN-UX-SIMULATOR-CONTRACT, UX Simulator契約]（二重実装禁止。製品の設計正本と実装観測を区別し、実製品受入を置換しない） |
+| GitHub Pages の画面設計、機能、公開 | [LINK: DOC-DESIGN-DEVELOPMENT-PAGES-UX, Pages サイトマップと UX]（設計詳細）／ [LINK: DOC-VERIFICATION-PAGES-FUNCTION-INVENTORY, Pages 機能台帳]（観測）／ [LINK: DOC-VERIFICATION-CI-CD, CI/CD]（公開と証拠の契約） |
+| CI・証明・実測 | [LINK: DOC-VERIFICATION-CI-CD, CI/CD]（実行・認定）・[LINK: DOC-VERIFICATION-TEST-ARCHITECTURE-OPTIMIZATION, Test architecture]（証明配置）・[LINK: DOC-VERIFICATION-E2E-EXECUTION, E2E execution]（Browser実行最適化の詳細。上位契約を置換しない） |
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 9f0dd73be1bb88c9d494274979806c09
+UID: DOC-ARCHITECTURE-DOCUMENTATION-AUTHORITY-設計変更の順序
+TITLE: 設計変更の順序
+
+[TEXT]
+MID: 21719bf50844f454fa79c67c33b68cba
+STATEMENT: >>>
+1. **仕様を確定:** 受入済みの決定を確認し、対象の正本文書にユーザー体験、依存関係、状態遷移、正常・異常系、セキュリティ不変条件を記載する。
+2. **差分を評価:** 現行実装、データ schema、API、CI、運用と仕様を照合し、適合/逸脱/未実装/未確認を区別する。既存コードを仕様の根拠として正当化しない。
+3. **実装:** 正本に従う最小の変更を行う。新しい互換層、独立 writer、環境変数、代替認証経路は受入済み要件なしに追加しない。
+4. **受入:** unit/integration/E2E、API schema、DB 一貫性、アクセシビリティ、実機/実 VM、CI を変更の影響範囲で実測する。実行していないものを PASS にしない。
+5. **更新:** 実装に伴い正本の曖昧さが判明した場合は先に設計上の意思決定を記録する。PR に観測証拠を残し、仕様書に CI 結果や作業日誌を埋め込まない。
+
+設計書だけに存在する機能は**設計目標**であり、稼働・公開・セキュリティ受入を主張しない。逆にコードだけに存在する古い互換機能も、新規実装の仕様上の制約にはならない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: e9dd674ba695eae0bcf1a8052c8bdabe
+UID: DOC-ARCHITECTURE-DOCUMENTATION-AUTHORITY-文書を追加改訂する際の必須項目
+TITLE: 文書を追加・改訂する際の必須項目
+
+[TEXT]
+MID: e02ca7b369d6f4d3da03bf864b503eb0
+STATEMENT: >>>
+- 文書種別、owner、対象読者と非目標を明記する。承認済み仕様か未採用提案かを分ける。
+- UI/操作には入口、状態と遷移条件、戻り先、保護対象、エラーと回復、権限、Desktop Web と iOS SwiftUI の差異を書く。
+- API/データには principal、scope、ID、整合性、冪等性、失敗時の扱いを定める。
+- 運用には入力の出典、承認ゲート、成功の観測点、失敗時の停止・復旧、バックアップ責務を書く。
+- 新しい画面/API/DB テーブル/ジョブ/route は既存の唯一の責務を確認し、設計対象が存在することと実装済みであることを区別する。
+- 相対リンク・図の構文・実際の操作コマンドをレビューし、既存文書の重複定義を増やさない。
+
+**文書分類の範囲:** このガバナンスが管理するのは Codexia 自身の README、`docs`、`deploy`、`app`、`packages`、`modules`、`scripts` 配下の製品・運用文書である。同梱スキルのライセンスや配布された技術資料、閉じた移行証跡を製品設計の更新対象に含めない。外部資料は upstream の著作物として扱い、必要な場合にリンクする。
+<<<
+
+[[/SECTION]]
