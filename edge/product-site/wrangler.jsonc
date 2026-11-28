@@ -4,16 +4,6 @@
   "compatibility_date": "2026-11-08",
   "workers_dev": false,
   "preview_urls": false,
-  "routes": [
-    {
-      "pattern": "products.yohn.jp/codexia",
-      "zone_id": "012f11f9c2c929d034006f3ee682703b"
-    },
-    {
-      "pattern": "products.yohn.jp/codexia/*",
-      "zone_id": "012f11f9c2c929d034006f3ee682703b"
-    }
-  ],
   "assets": {
     "directory": "./dist",
     "html_handling": "force-trailing-slash",
