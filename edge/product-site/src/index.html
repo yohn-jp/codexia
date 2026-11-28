@@ -130,14 +130,14 @@
           <p class="review-eyebrow">原稿の整合性　/　古傷の左右</p><h3>どちらの記述を残しますか。</h3>
           <p class="review-desc">第一章では「左手」、第三章では「右手」とあります。変更案を確認してください。</p>
           <div class="diff"><div><small>ORIGINAL</small><p>佐伯は <del>右手</del> の古傷を袖口で隠した。</p></div><div><small>PROPOSED</small><p>佐伯は <ins>左手</ins> の古傷を袖口で隠した。</p></div></div>
-          <div class="decision-buttons" role="group" aria-label="見本の変更提案の採否"><button type="button" class="accept" data-decision="approved" aria-pressed="false" disabled>提案を採用 <span aria-hidden="true">↗</span></button><button type="button" data-decision="rejected" aria-pressed="false" disabled>原文を保持</button><button type="button" class="reset" data-decision="pending" aria-pressed="true" disabled>リセット</button></div>
+          <div class="decision-buttons" role="group" aria-label="見本の変更提案の採否"><button type="button" class="accept" data-decision="approved" aria-pressed="false" disabled>提案を採用 <span aria-hidden="true">↗</span></button><button type="button" data-decision="rejected" aria-pressed="false" disabled>原文を保持</button><button type="button" class="reset" data-decision="pending" disabled>リセット</button></div>
           <p class="result" role="status" aria-live="polite"><span class="result-dot" aria-hidden="true"></span><span id="decision-status">未決定 — 原稿は変更されていません。</span></p>
         </div>
       </div>
     </section>
 
     <section id="principles" class="principles container" aria-labelledby="principles-heading">
-      <div class="principles-intro"><p class="section-label">05 / ENGINEERED FOR OWNERSHIP</p><h2 id="principles-heading">創作の自由を支えるのは、<br><em>明確な設計です。</em></h2><p>信頼は曖昧な主張からではなく、確認できるアーキテクチャから生まれる。設計と実装の境界を公開しています。</p></div>
+      <div class="principles-intro"><p class="section-label">05 / ENGINEERED FOR OWNERSHIP</p><h2 id="principles-heading">創作の自由は、<br><em>明確な設計から。</em></h2><p>信頼は曖昧な主張からではなく、確認できるアーキテクチャから生まれる。設計と実装の境界を公開しています。</p></div>
       <div class="principle-grid"><article><span>01 / DATA AUTHORITY</span><h3>原稿の正本は<br>PostgreSQL。</h3><p>作品、文書、Revision、Knowledgeを一つの永続化境界に置く。</p><a href="https://github.com/yohn-jp/codexia/blob/main/docs/architecture/DATA-MODEL.sdoc">データモデル ↗</a></article><article><span>02 / INTEROPERABILITY</span><h3>AIとの接続は<br>MCPを通じて。</h3><p>外部クライアントの権限と、作者自身の承認を明確に分離する。</p><a href="https://github.com/yohn-jp/codexia/blob/main/docs/architecture/MCP-FIRST.sdoc">MCP-first設計 ↗</a></article><article><span>03 / PORTABILITY</span><h3>作品は、<br>持ち出せる。</h3><p>作品のポータブルJSONエクスポート。復旧と移行の条件も公開する。</p><a href="https://github.com/yohn-jp/codexia/blob/main/docs/architecture/OPEN-WORK-EXPORT-CONTRACT.sdoc">エクスポート仕様 ↗</a></article></div>
       <p class="principles-disclaimer">掲載リンクは設計・仕様を示します。稼働や提供状況はリポジトリの実装・検証結果と分けて確認してください。</p>
     </section>
