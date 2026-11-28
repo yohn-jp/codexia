@@ -1635,11 +1635,12 @@ export class CoreStore implements MutationCoordinator {
       const authorId = state.approvedByOperationId?.[operation.id] ?? (state as ProposalStatus & { approvedBy?: string }).approvedBy;
       if (!authorId) fail(409, 'approval_actor_missing', 'Approved operation has no durable author identity');
       await this.applyWrites(transaction, manifest, operation, authorId);
+      await transaction.finalizeProjectVersions(pid(projectId));
       const after = await this.currentManifest(transaction, projectId);
       const receipt: ApplyReceipt = {
         operationId: operation.id,
         generation: operation.generation,
-        projectVersion: Math.max(after.project.version, manifest.project.version + 1),
+        projectVersion: after.project.version,
         revisions: operation.writes.map(write => ({
           path: write.path,
           revision: after.files[write.path]?.revision ?? null,

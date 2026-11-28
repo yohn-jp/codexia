@@ -709,6 +709,132 @@ test('native restore of identical text keeps confirmed evidence and mentions', a
   assert.equal(changedState.links[0]?.status, 'proposed');
 });
 
+test('native restore retains confirmed evidence across an unambiguous edit outside its range', async () => {
+  const project = await createProject(`native-restore-unaffected-${randomUUID()}`);
+  const initial = await createDocument(project.id, '😀文🧭証拠');
+  const edited = await persistence.transaction(transaction =>
+    transaction.saveDocument(
+      saveCommand(project.id, initial.document.id, initial.revision.id, '😁🪶文🧭証拠', [{ fromUtf16: 0, toUtf16: 2, insert: '😁🪶' }]),
+    ),
+  );
+  const evidenceId = randomUUID() as EvidenceId;
+  const editedEvidenceId = randomUUID() as EvidenceId;
+  const nodeId = randomUUID() as KnowledgeNodeId;
+  await persistence.transaction(async transaction => {
+    await transaction.saveKnowledgeNode({
+      projectId: project.id,
+      id: nodeId,
+      type: 'character',
+      name: 'Entity',
+      attributes: {},
+      status: 'confirmed',
+      expectedVersion: null,
+    });
+    await transaction.saveEvidenceAnchor({
+      projectId: project.id,
+      id: evidenceId,
+      documentId: initial.document.id,
+      revisionId: edited.revision.id,
+      fromUtf16: 5,
+      toUtf16: 9,
+      quoteSha256: sha256('🧭証拠'),
+      status: 'confirmed',
+      expectedVersion: null,
+    });
+    await transaction.saveEvidenceAnchor({
+      projectId: project.id,
+      id: editedEvidenceId,
+      documentId: initial.document.id,
+      revisionId: edited.revision.id,
+      fromUtf16: 2,
+      toUtf16: 4,
+      quoteSha256: sha256('🪶'),
+      status: 'confirmed',
+      expectedVersion: null,
+    });
+    await transaction.saveMentionLink({
+      projectId: project.id,
+      evidenceId,
+      nodeId,
+      status: 'confirmed',
+      source: 'author',
+      confidence: 1,
+      extractorVersion: null,
+    });
+  });
+
+  const restored = await persistence.transaction(transaction =>
+    transaction.restoreDocumentRevision({
+      projectId: project.id,
+      documentId: initial.document.id,
+      baseRevisionId: edited.revision.id,
+      sourceRevisionId: initial.revision.id,
+      authorId: 'author',
+      idempotencyKey: randomUUID(),
+    }),
+  );
+  const state = await persistence.read(async reader => ({
+    anchor: await reader.getEvidenceAnchor(project.id, evidenceId),
+    editedAnchor: await reader.getEvidenceAnchor(project.id, editedEvidenceId),
+    link: await reader.getMentionLink(project.id, evidenceId, nodeId),
+    history: await reader.listEvidenceHistory(project.id, evidenceId),
+  }));
+  assert.equal(restored.revision.markdown, '😀文🧭証拠');
+  assert.equal(state.anchor?.revisionId, restored.revision.id);
+  assert.equal(state.anchor?.fromUtf16, 3);
+  assert.equal(state.anchor?.toUtf16, 7);
+  assert.equal(state.anchor?.quoteSha256, sha256('🧭証拠'));
+  assert.equal(state.anchor?.status, 'confirmed');
+  assert.equal(state.link?.status, 'confirmed');
+  assert.equal(state.history.length, 2);
+  assert.equal(state.history[1]?.revisionId, restored.revision.id);
+  assert.equal(state.history[1]?.status, 'confirmed');
+  assert.equal(state.editedAnchor?.status, 'needs_review');
+  assert.equal(state.editedAnchor?.fromUtf16, 0);
+  assert.equal(state.editedAnchor?.toUtf16, 2);
+  assert.equal(state.editedAnchor?.quoteSha256, sha256('😀'));
+});
+
+test('native restore requires review when repeating text makes the retained anchor ambiguous', async () => {
+  const project = await createProject(`native-restore-ambiguous-${randomUUID()}`);
+  const initial = await createDocument(project.id, '前🧭後');
+  const edited = await persistence.transaction(transaction =>
+    transaction.saveDocument(
+      saveCommand(project.id, initial.document.id, initial.revision.id, '前🧭🧭後', [{ fromUtf16: 3, toUtf16: 3, insert: '🧭' }]),
+    ),
+  );
+  const evidenceId = randomUUID() as EvidenceId;
+  await persistence.transaction(transaction =>
+    transaction.saveEvidenceAnchor({
+      projectId: project.id,
+      id: evidenceId,
+      documentId: initial.document.id,
+      revisionId: edited.revision.id,
+      fromUtf16: 1,
+      toUtf16: 3,
+      quoteSha256: sha256('🧭'),
+      status: 'confirmed',
+      expectedVersion: null,
+    }),
+  );
+
+  const restored = await persistence.transaction(transaction =>
+    transaction.restoreDocumentRevision({
+      projectId: project.id,
+      documentId: initial.document.id,
+      baseRevisionId: edited.revision.id,
+      sourceRevisionId: initial.revision.id,
+      authorId: 'author',
+      idempotencyKey: randomUUID(),
+    }),
+  );
+  const anchor = await persistence.read(reader => reader.getEvidenceAnchor(project.id, evidenceId));
+  assert.equal(anchor?.revisionId, restored.revision.id);
+  assert.equal(anchor?.status, 'needs_review');
+  assert.equal(anchor?.fromUtf16, 1);
+  assert.equal(anchor?.toUtf16, 3);
+});
+
 test('document saves advance persistent anchors atomically and revoke stale mention confirmation', async () => {
   const project = await createProject(`anchor-follow-${randomUUID()}`);
   const initial = await createDocument(project.id, '前文 東京 の後文');

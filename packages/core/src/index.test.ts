@@ -1907,6 +1907,21 @@ test('duplicate approved proposals share one manuscript application and settle o
   assert.equal((await core.readScene(p.id, 's1')).text, 'One new manuscript revision');
 });
 
+test('applying an already absent hierarchy deletion records a durable project version', async () => {
+  const p = await project();
+  const { snapshot } = await core.observe(p.id);
+  const path = 'plot/volumes/absent/volume.yaml';
+  const op: ChangeOperation = { ...operation(snapshot, path, null), effect: 'structure' };
+  const proposal = await approve(p.id, { operation: op, snapshot });
+
+  const receipt = await core.apply(p.id, op);
+  assert.equal(receipt.projectVersion, snapshot.projectVersion);
+  assert.deepEqual(receipt.revisions, [{ path, revision: null }]);
+  assert.deepEqual((await core.reader(p.id, { projectId: p.id, projectVersion: receipt.projectVersion })).snapshot, snapshot);
+  assert.deepEqual((await core.getProposal(p.id, proposal.id))?.applications, [receipt]);
+  assert.deepEqual(await core.apply(p.id, op), receipt);
+});
+
 test('pinned manuscript history excludes future revisions and rejects their body reads', async () => {
   const p = await hierarchy();
   const old = await core.reader(p.id);

@@ -665,6 +665,8 @@ export interface PersistenceReader {
 export interface PersistenceTransaction extends PersistenceReader {
   /** Lock and fence a project revision before applying a snapshot-bound mutation. */
   assertProjectVersion(projectId: ProjectId, expectedVersion?: number): Promise<void>;
+  /** Write pending content versions inside the transaction before creating a durable receipt. */
+  finalizeProjectVersions(projectId?: ProjectId): Promise<void>;
   updateProject(command: UpdateProjectCommand): Promise<Project>;
   updateDocument(command: UpdateDocumentCommand): Promise<Document>;
   deleteDocument(command: DeleteDocumentCommand): Promise<Document>;

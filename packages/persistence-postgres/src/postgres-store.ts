@@ -332,12 +332,15 @@ function assertConfidence(value: number | null): void {
   }
 }
 
-function assertUtf16Boundary(text: string, offset: number): void {
-  if (!Number.isInteger(offset) || offset < 0 || offset > text.length) throw validationError('Text offset is outside the revision');
-  if (offset === 0 || offset === text.length) return;
+function splitsUtf16SurrogatePair(text: string, offset: number): boolean {
   const previous = text.charCodeAt(offset - 1);
   const next = text.charCodeAt(offset);
-  if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+  return previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff;
+}
+
+function assertUtf16Boundary(text: string, offset: number): void {
+  if (!Number.isInteger(offset) || offset < 0 || offset > text.length) throw validationError('Text offset is outside the revision');
+  if (splitsUtf16SurrogatePair(text, offset)) {
     throw validationError('Text offset splits a UTF-16 surrogate pair');
   }
 }
@@ -357,6 +360,29 @@ function applyTextChanges(markdown: string, changes: readonly TextChange[]): str
   }
   result.push(markdown.slice(previousEnd));
   return result.join('');
+}
+
+function restoreTextChanges(before: string, after: string): TextChange[] {
+  if (before === after) return [];
+
+  const sharedLength = Math.min(before.length, after.length);
+  let prefix = 0;
+  while (prefix < sharedLength && before.charCodeAt(prefix) === after.charCodeAt(prefix)) prefix++;
+
+  let suffix = 0;
+  while (suffix < sharedLength && before.charCodeAt(before.length - suffix - 1) === after.charCodeAt(after.length - suffix - 1)) {
+    suffix++;
+  }
+
+  // When the matches overlap, repeated text could belong to either edge of the edit.
+  // Preserve only the portions that are unchanged under both alignments.
+  let fromUtf16 = Math.min(prefix, sharedLength - suffix);
+  let retainedSuffix = Math.min(suffix, sharedLength - prefix);
+  if (splitsUtf16SurrogatePair(before, fromUtf16) || splitsUtf16SurrogatePair(after, fromUtf16)) fromUtf16--;
+  if (splitsUtf16SurrogatePair(before, before.length - retainedSuffix) || splitsUtf16SurrogatePair(after, after.length - retainedSuffix)) {
+    retainedSuffix--;
+  }
+  return [{ fromUtf16, toUtf16: before.length - retainedSuffix, insert: after.slice(fromUtf16, after.length - retainedSuffix) }];
 }
 
 function mapTextOffset(offset: number, changes: readonly TextChange[], association: -1 | 1): number {
@@ -679,7 +705,8 @@ function validateChangeSetOperations(
 }
 
 class PostgresTransaction implements PersistenceTransaction {
-  readonly changedProjects = new Set<ProjectId>();
+  private readonly pendingProjectVersions = new Set<ProjectId>();
+  private readonly finalizedProjectVersions = new Set<ProjectId>();
 
   constructor(
     private readonly client: PoolClient,
@@ -695,7 +722,18 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   private markChanged(projectId: ProjectId): void {
-    this.changedProjects.add(projectId);
+    if (!this.finalizedProjectVersions.has(projectId)) this.pendingProjectVersions.add(projectId);
+  }
+
+  async finalizeProjectVersions(projectId?: ProjectId): Promise<void> {
+    this.ensureWritable();
+    const projects = [...this.pendingProjectVersions].filter(id => projectId === undefined || id === projectId).sort();
+    if (projects.length === 0) return;
+    for (const id of projects) {
+      this.pendingProjectVersions.delete(id);
+      this.finalizedProjectVersions.add(id);
+    }
+    await this.query('UPDATE project SET version = version + 1, updated_at = clock_timestamp() WHERE id = ANY($1::uuid[])', [projects]);
   }
 
   async *scanOpenWorkExport<K extends keyof OpenWorkExportRows>(
@@ -1337,7 +1375,8 @@ class PostgresTransaction implements PersistenceTransaction {
     if (!result.rows[0])
       throw conflict('project', command.projectId, command.expectedVersion, (await this.getProject(command.projectId))?.version ?? null);
     this.markChanged(command.projectId);
-    return { ...mapProject(result.rows[0]), version: asNumber(result.rows[0].version) + 1 };
+    const project = mapProject(result.rows[0]);
+    return this.finalizedProjectVersions.has(command.projectId) ? project : { ...project, version: project.version + 1 };
   }
 
   async assertProjectVersion(projectId: ProjectId, expectedVersion?: number): Promise<void> {
@@ -1867,16 +1906,7 @@ class PostgresTransaction implements PersistenceTransaction {
     const document = await this.updateDocumentHead(command.projectId, command.documentId, command.baseRevisionId, revision.id);
     const base = await this.getRevision(command.projectId, command.documentId, command.baseRevisionId);
     if (!base) throw notFound('base document revision', command.baseRevisionId);
-    const restoreChanges: TextChange[] =
-      base.markdown === source.markdown
-        ? []
-        : [
-            {
-              fromUtf16: 0,
-              toUtf16: base.markdown.length,
-              insert: source.markdown,
-            },
-          ];
+    const restoreChanges = restoreTextChanges(base.markdown, source.markdown);
     await this.advanceEvidenceAnchors(command.projectId, command.documentId, base.id, revision.id, source.markdown, restoreChanges);
     await this.recordDocumentOperation({
       projectId: command.projectId,
@@ -3075,12 +3105,7 @@ export class PostgresPersistence implements Persistence {
       await client.query('BEGIN');
       const transaction = new PostgresTransaction(client, false);
       const result = await work(transaction);
-      const changedProjects = [...transaction.changedProjects].sort();
-      if (changedProjects.length > 0) {
-        await client.query('UPDATE project SET version = version + 1, updated_at = clock_timestamp() WHERE id = ANY($1::uuid[])', [
-          changedProjects,
-        ]);
-      }
+      await transaction.finalizeProjectVersions();
       await client.query('COMMIT');
       return result;
     } catch (error) {

@@ -23,6 +23,16 @@ exists(){ [[ -e "$1" || -L "$1" ]]; }
 private_directory(){ [[ -d "$1" && ! -L "$1" && -O "$1" && "$(stat -c %a -- "$1")" == 700 ]]; }
 private_file(){ [[ -f "$1" && ! -L "$1" && -O "$1" && "$(stat -c '%a:%h' -- "$1")" == 600:1 ]]; }
 sha256(){ local digest; digest="$(sha256sum)" && printf '%s\n' "${digest%% *}"; }
+database_units_digest(){
+  local unit properties
+  local -a database_units=("$db_service" codexia-postgres-volume.service codexia-data-network.service)
+  # systemctl cat reads the on-disk files. Require the manager to have loaded them.
+  for unit in "${database_units[@]}"; do
+    properties="$(systemctl --user show "$unit" --property=LoadState --property=NeedDaemonReload)" || return 1
+    [[ $'\n'"$properties"$'\n' == *$'\nLoadState=loaded\n'* && $'\n'"$properties"$'\n' == *$'\nNeedDaemonReload=no\n'* ]] || return 1
+  done
+  systemctl --user cat --no-pager "${database_units[@]}" | sha256
+}
 admin_query(){
   podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"
     exec psql -X -qAtw -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "$1"' sh "$1"
@@ -57,6 +67,7 @@ if exists "$intent"; then
       (.database | type == "string" and test("^[0-9]+:[0-9]+$")) and
       (.authority | type == "string" and test("^[a-f0-9]{64}$")) and
       (.recipe | type == "string" and test("^[a-f0-9]{64}$")) and
+      (.previousDatabaseUnitsDigest == null or (.previousDatabaseUnitsDigest | type == "string" and test("^[a-f0-9]{64}$"))) and
       (.previousSocket | type == "string" and test("^[^[:cntrl:]]+$")) and
       (.previousHba | type == "string" and test("^/[^[:cntrl:]]+$")) and
       (.tunnelActive | type == "boolean")' "$intent" >/dev/null ||
@@ -65,10 +76,38 @@ if exists "$intent"; then
 elif [[ "$recovery_only" == --recover-only ]]; then
   exit 0
 fi
-database_ports="$(podman port codexia-db)"
-[[ -z "$database_ports" ]] || fail 'Database port is published'
-database_identity="$(admin_query "$identity_sql")"
-[[ "$database_identity" =~ ^[0-9]+:[0-9]+$ ]] || fail 'Unable to identify the initialized PostgreSQL cluster'
+volume="$(podman volume inspect --format '{{.Name}}|{{.Mountpoint}}' codexia-postgres)"
+[[ "$volume" == codexia-postgres\|/* ]] || fail 'Database volume is not canonical'
+verify_database_container(){
+  local mount ports
+  mount="$(podman inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}|{{.Source}}{{end}}{{end}}' codexia-db)" &&
+    ports="$(podman inspect --format '{{json .HostConfig.PortBindings}}' codexia-db)" &&
+    [[ "$mount" == "$volume" ]] && jq -e '. == null or . == {}' <<<"$ports" >/dev/null
+}
+database_running=true
+if [[ "$resuming" == true ]]; then
+  exists_status=0
+  podman container exists codexia-db || exists_status=$?
+  case "$exists_status" in
+    0)
+      database_running="$(podman inspect --format '{{.State.Running}}' codexia-db)"
+      [[ "$database_running" == true || "$database_running" == false ]] || fail 'Unable to observe PostgreSQL container state'
+      verify_database_container || fail 'Database container does not use the committed host volume or exposes a port'
+      ;;
+    1) database_running=false ;;
+    *) fail 'Unable to observe the PostgreSQL container' ;;
+  esac
+else
+  verify_database_container || fail 'Database container does not use the committed host volume or exposes a port'
+fi
+if [[ "$database_running" == true ]]; then
+  database_ports="$(podman port codexia-db)"
+  [[ -z "$database_ports" ]] || fail 'Database port is published'
+  database_identity="$(admin_query "$identity_sql")" || fail 'Unable to identify the running PostgreSQL cluster'
+  [[ "$database_identity" =~ ^[0-9]+:[0-9]+$ ]] || fail 'Unable to identify the initialized PostgreSQL cluster'
+else
+  database_identity="$(jq -er .database "$intent")"
+fi
 
 if [[ ! -e "$directory" && ! -L "$directory" ]]; then install -d -m 0700 -- "$directory"; fi
 private_directory "$directory" || fail 'Invalid private backup socket parent'
@@ -121,9 +160,6 @@ image="$(jq -er 'select(.format == "codexia-push-deployment/v1" and .identity.fo
   fail 'Committed image differs from the reviewed image repository'
 image_id="$(podman image inspect --format '{{.Id}}' "$image")"
 [[ "${image_id#sha256:}" =~ ^[a-f0-9]{64}$ ]] || fail 'Committed Full image is unavailable'
-volume="$(podman volume inspect --format '{{.Name}}|{{.Mountpoint}}' codexia-postgres)"
-mount="$(podman inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}|{{.Source}}{{end}}{{end}}' codexia-db)"
-[[ "$volume" == codexia-postgres\|/* && "$mount" == "$volume" ]] || fail 'Database container does not use the committed host volume'
 authority="$({ sha256sum -- /etc/machine-id "$release" "$units/codexia-api.container" "$units/codexia-db.container" "$units/codexia-postgres.volume" &&
   printf '%s\n' "$volume"; } | sha256)"
 recipe="$(printf '%s\n%s\n' "$dropin_contents" "$expected_hba" | sha256)"
@@ -147,7 +183,15 @@ resume_writer(){
   if [[ "$tunnel_active" == true ]]; then systemctl --user start "$tunnel_service" || return 1; fi
 }
 restart_database(){
-  systemctl --user daemon-reload && systemctl --user restart "$db_service" &&
+  local observed_units
+  systemctl --user daemon-reload || return 1
+  if [[ "$database_running" == false ]]; then
+    observed_units="$(database_units_digest)" && [[ "$observed_units" == "$previous_database_units_digest" ]] || {
+      printf '%s\n' 'Effective database units no longer match the recorded settings' >&2
+      return 1
+    }
+  fi
+  systemctl --user restart "$db_service" &&
     timeout 30s podman wait --condition=healthy codexia-db >/dev/null
 }
 write_intent() (
@@ -156,21 +200,44 @@ write_intent() (
   trap 'rm -f -- "$temporary"' EXIT
   jq -n --arg format "$format" --arg phase "$1" --arg authority "$authority" --arg recipe "$recipe" --arg database "$database_identity" \
     --arg previousSocket "$previous_socket" --arg previousHba "$previous_hba" --argjson tunnelActive "$tunnel_active" \
-    '{$format, $phase, $authority, $recipe, $database, $previousSocket, $previousHba, $tunnelActive}' > "$temporary" &&
+    --arg previousDatabaseUnitsDigest "$previous_database_units_digest" \
+    '{$format, $phase, $authority, $recipe, $database, $previousSocket, $previousHba, $tunnelActive} +
+     if $previousDatabaseUnitsDigest == "" then {} else {$previousDatabaseUnitsDigest} end' > "$temporary" &&
     sync -f "$temporary" && mv -T -- "$temporary" "$intent" && sync -f "$state"
 )
 clear_intent(){ rm -- "$intent" && sync -f "$state"; }
 verify_previous_database(){
-  [[ "$(admin_query "$identity_sql")" == "$database_identity" &&
-     "$(admin_query 'SHOW unix_socket_directories')" == "$previous_socket" && "$(admin_query 'SHOW hba_file')" == "$previous_hba" ]]
+  verify_database_container &&
+    [[ "$(admin_query "$identity_sql")" == "$database_identity" &&
+       "$(admin_query 'SHOW unix_socket_directories')" == "$previous_socket" && "$(admin_query 'SHOW hba_file')" == "$previous_hba" ]]
 }
 restore_previous(){
   stop_writer || return 1
   if exists "$dropin"; then
     verify_dropin && rm -- "$dropin" && sync -f "${dropin%/*}" && systemctl --user daemon-reload || return 1
   fi
-  if ! verify_previous_database; then restart_database && verify_previous_database || return 1; fi
+  if [[ "$database_running" == false ]] || ! verify_previous_database; then
+    restart_database && verify_previous_database || return 1
+  fi
   resume_writer && clear_intent
+}
+
+verify_stopped_database(){
+  local unit_state fragment image control
+  unit_state="$(systemctl --user show "$db_service" --property=ActiveState --value)" &&
+    [[ "$unit_state" == inactive || "$unit_state" == failed ]] || return 1
+  [[ "$(systemctl --user show "$db_service" --property=SourcePath --value)" == "$units/codexia-db.container" ]] || return 1
+  fragment="$(systemctl --user show "$db_service" --property=FragmentPath --value)" || return 1
+  [[ "$fragment" == "${XDG_RUNTIME_DIR:?}/systemd/generator/$db_service" ]] || return 1
+  image="$(sed -n 's/^Image=//p' "$units/codexia-db.container")" &&
+    [[ "$image" =~ ^docker\.io/library/postgres:17-bookworm@sha256:[a-f0-9]{64}$ ]] || return 1
+  # Check the recorded cluster before restarting, including when Quadlet has
+  # removed the previous container. Do not let PostgreSQL initialize a volume.
+  control="$(LC_ALL=C podman run --rm --pull=never --network=none --read-only --cap-drop=all \
+    --security-opt=no-new-privileges --user 999:999 --image-volume=ignore --env LC_ALL=C \
+    --volume "${volume#*|}/pgdata:/var/lib/postgresql/data:ro" --entrypoint=pg_controldata "$image" \
+    /var/lib/postgresql/data)" || return 1
+  [[ "$(awk '/^Database system identifier:/ { print $NF }' <<<"$control")" == "${database_identity%%:*}" ]]
 }
 
 if [[ "$resuming" == true ]]; then
@@ -180,6 +247,12 @@ if [[ "$resuming" == true ]]; then
   previous_socket="$(jq -er .previousSocket "$intent")"
   previous_hba="$(jq -er .previousHba "$intent")"
   tunnel_active="$(jq -r .tunnelActive "$intent")"
+  previous_database_units_digest="$(jq -r '.previousDatabaseUnitsDigest // ""' "$intent")"
+  if [[ "$database_running" == false ]]; then
+    [[ -n "$previous_database_units_digest" ]] || fail 'Legacy socket transaction requires the recorded PostgreSQL cluster to be running'
+    verify_stopped_database || fail 'Stopped PostgreSQL does not match the recorded cluster and Quadlet'
+    write_intent rollback
+  fi
   if [[ "$(jq -er .phase "$intent")" == rollback ]]; then
     restore_previous || fail 'Prior socket and writer recovery requires operator attention'
     printf '%s\n' PRIVATE_BACKUP_SOCKET_RECOVERED
@@ -193,6 +266,7 @@ else
   previous_socket="$(admin_query 'SHOW unix_socket_directories')"
   previous_hba="$(admin_query 'SHOW hba_file')"
   [[ "$previous_socket" =~ ^[^[:cntrl:]]+$ && "$previous_hba" =~ ^/[^[:cntrl:]]+$ ]] || fail 'Cannot observe prior PostgreSQL socket settings'
+  previous_database_units_digest="$(database_units_digest)" || fail 'Cannot observe prior effective database units'
   write_intent pending
 fi
 rollback(){

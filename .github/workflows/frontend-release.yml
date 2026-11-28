@@ -55,6 +55,7 @@ on:
       # Build-emitted source and test files remain runtime package inputs.
       - 'packages/persistence-contracts/src/**'
       - deploy/cloudflare/**
+      - deploy/cloudflare/terraform/.terraform.lock.hcl
       - deploy/frontend-compatibility.json
       - deploy/production.json
       - scripts/deployment/bootstrap/public-env.mjs
@@ -68,6 +69,8 @@ on:
       - scripts/release/components/verify-source.mjs
       - scripts/github/repository.mjs
       - scripts/github/octokit.mjs
+      - scripts/github/paginate-actions.mjs
+      - scripts/ci/evidence/github-rest-sdk.mjs
       - scripts/release/frontend/deployment-rollback.mjs
       - scripts/release/frontend/initial-publication.mjs
       - scripts/verification/infrastructure/deployment-config.mjs
