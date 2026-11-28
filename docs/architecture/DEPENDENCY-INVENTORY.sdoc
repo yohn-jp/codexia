@@ -57,6 +57,7 @@ STATEMENT: >>>
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
 | `@playwright/test` | `1.65.1` | root・ブラウザーE2E | **連動**: CIのブラウザーイメージとPlaywrightバージョン、ブラウザー実体を一致させる |
+| `playwright-core` | `1.65.1` | edge/product-site・公開静的サイトのブラウザー検証専用 | **連動**: rootのPlaywrightと一致させる。独立npm lockfileで固定し、公開資産に含めない |
 | `@types/node` | `^24.19.2` | root・Node型 | **連動**: 現行実行Node 24系。26系への変更で型検査に失敗したため独立更新しない |
 | `@types/react` | `^19.3.0` | root/app・React型 | **連動**: React 19の型とランタイムを一緒に検証 |
 | `@types/react-dom` | `^19.3.0` | root/app・React DOM型 | **連動**: React DOM 19と合わせる |

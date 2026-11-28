@@ -26,6 +26,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Complete screen, control and user journey catalog | [Screen control catalog](design/SCREEN-CONTROL-CATALOG.sdoc) — route/CTA/error/authorization traceability |
 | Individual screen state diagrams | [Screen State Atlas](design/SCREEN-STATE-ATLAS.sdoc) — all logical screen transitions and recovery paths |
 | Abstract UX journey exploration and design/implementation comparison | [UX Simulator contract](design/UX-SIMULATOR-CONTRACT.sdoc) — derived from design authorities and canonical product sources, generic renderer, no duplicate screens or behavior, independent product acceptance |
+| Official product website | [Product site](design/PRODUCT-SITE.sdoc) — immersive public static site, separate Cloudflare Worker and delivery boundary |
 | GitHub Pages feature inventory and publication boundaries | [Pages inventory](verification/PAGES-FUNCTION-INVENTORY.sdoc) — generated routes, data sources and publication requirements |
 | Development Pages unified portal and screen navigation | [Pages sitemap and UX design](design/DEVELOPMENT-PAGES-UX.sdoc) — portal and shared navigation design; see the Pages inventory for generated features |
 | Graphical, source-bound diagrams | [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/) · [viewer and verification](verification/ARCHITECTURE-ATLAS.sdoc) — SVG diagram viewer, built and validated by Repository Audit Pages |

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -114,7 +115,24 @@ func (t *terminal) runForm(field huh.Field) error {
 	keys.Quit.SetKeys("ctrl+c", "ctrl+d", "esc")
 	// Huh owns form input. Capture the abort reason without adding a second
 	// input reader or letting Bubble Tea install a competing signal handler.
+	// Bubble Tea v2.0.2 handles an explicit RequestWindowSize by starting
+	// checkResize in a goroutine, concurrently with its SIGWINCH listener.
+	// Both write Program.width/height without synchronization. Huh sends
+	// that request during Init. Resolve it on the event loop using the
+	// controlling TTY instead; automatic SIGWINCH WindowSizeMsg delivery
+	// remains intact. Identify the private request type via the public
+	// command, not a hard-coded type name or a dependency fork.
+	windowSizeRequest := reflect.TypeOf(tea.RequestWindowSize())
 	filter := tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+		if reflect.TypeOf(msg) == windowSizeRequest {
+			width, height, err := term.GetSize(int(file.Fd()))
+			if err != nil {
+				// Bubble Tea already supplies the initial and subsequent
+				// automatic size events. Do not invent dimensions.
+				return nil
+			}
+			return tea.WindowSizeMsg{Width: width, Height: height}
+		}
 		if key, ok := msg.(tea.KeyPressMsg); ok {
 			switch key.String() {
 			case "ctrl+c", "ctrl+d", "esc":

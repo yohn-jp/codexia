@@ -216,6 +216,7 @@ component build, package, promotion and publication; `push-app-lifecycle.yml`,
 deployment-config/host/backup flows own real operational proof; `repository-audit.yml`
 owns development Pages; `ios-*.yml` own native acceptance;
 `codeql.yml` and `security-scans.yml` own static security scanning.
+The official-only `product-site.yml` owns independent public product-site static verification, build, publication and URL identity observation under [LINK: DOC-DESIGN-PRODUCT-SITE, Product site]. It does not admit application releases, alter the runtime deployment or replace canonical Verify. Its Cloudflare credentials are confined to the main-only protected publication job.
 Do not run a backend image or disposable VM lifecycle merely because a
 `packages/**` test file or unrelated deployment documentation changed. Conversely,
 include packaging scripts, profile manifests, dependency locks, workflows and actual
