@@ -21,12 +21,20 @@ class ControllerTests(unittest.TestCase):
         for name in ("admin", "runtime", "host"):
             subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(self.tmp / name)], check=True)
         self.host = "vm.example.invalid"
+        cloudflared = self.tmp / "cloudflared"
+        cloudflared.write_text("#!/bin/sh\nexit 0\n")
+        cloudflared.chmod(0o700)
         self.env = {
             "GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": "yohn-jp/codexia", "GITHUB_REF": "refs/heads/main",
             "GITHUB_REPOSITORY_ID": "401", "GITHUB_REPOSITORY_OWNER_ID": "502",
             "GITHUB_EVENT_NAME": "workflow_dispatch", "RUNNER_TEMP": directory.name, "GITHUB_SHA": "a" * 40,
             "GITHUB_RUN_ID": "10", "GITHUB_RUN_ATTEMPT": "2", "CODEXIA_BOOTSTRAP_HOST": self.host,
             "CODEXIA_BOOTSTRAP_SSH_USER": "admin", "CODEXIA_BOOTSTRAP_MODE": "preflight",
+            "CODEXIA_MANAGEMENT_HOSTNAME": self.host,
+            "CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET": json.dumps({
+                "repository": "yohn-jp/codexia", "repositoryId": 401, "ownerId": 502,
+                "sshHostname": self.host, "sshPolicyId": "10000000-0000-4000-8000-000000000001",
+            }),
             "CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY": (self.tmp / "admin").read_text(),
             "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS": self.host + " " + (self.tmp / "host.pub").read_text(),
             "CODEXIA_BOOTSTRAP_DATABASE_INITIALIZATION_APPROVED": "false",
@@ -56,6 +64,35 @@ class ControllerTests(unittest.TestCase):
         runtime = json.loads((target / "runtime-vars.json").read_text())
         self.assertNotIn("ansible_host", runtime)
         return target, group["vars"], runtime
+
+    def test_bootstrap_config_routes_pinned_ssh_via_protected_cloudflare(self):
+        target, _, _ = self.prepare()
+        config = target.parent / "ssh/config"
+        effective = subprocess.run(["ssh", "-G", "-F", str(config), "codexia-bootstrap-target"],
+                                   check=True, capture_output=True, text=True).stdout.lower()
+        self.assertIn(f"hostname {self.host}", effective)
+        self.assertIn("stricthostkeychecking true", effective)
+        self.assertIn("proxycommand ", effective)
+        self.assertIn("cloudflared-proxy.sh", effective)
+        self.assertNotIn("proxycommand none", effective)
+        self.assertIn("userknownhostsfile ", effective)
+
+    def test_bootstrap_refuses_unbound_cloudflare_management(self):
+        self.env["CODEXIA_MANAGEMENT_HOSTNAME"] = "other.example.invalid"
+        with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "management hostname"):
+            self.prepare()
+
+    def test_bootstrap_refuses_foreign_cloudflare_target(self):
+        target = json.loads(self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"])
+        target["repositoryId"] = 999
+        self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"] = json.dumps(target)
+        with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "protected repository"):
+            self.prepare()
+
+    def test_bootstrap_refuses_missing_cloudflared(self):
+        (self.tmp / "cloudflared").unlink()
+        with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "transport is unavailable"):
+            self.prepare()
 
     def test_access_only_needs_connection(self):
         target, values, runtime = self.prepare()
@@ -105,6 +142,11 @@ class ControllerTests(unittest.TestCase):
 
     def test_refuses_unpinned_host(self):
         self.env["CODEXIA_BOOTSTRAP_HOST"] = "other.example.invalid"
+        self.env["CODEXIA_MANAGEMENT_HOSTNAME"] = "other.example.invalid"
+        target = json.loads(self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"])
+        target["sshHostname"] = "other.example.invalid"
+        self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"] = json.dumps(target)
+        # Bind the management target first so the independent pin is exercised.
         with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "pinned"):
             self.prepare()
 
@@ -116,5 +158,9 @@ class ControllerTests(unittest.TestCase):
     def test_refuses_same_name_certificate_for_another_repository_id(self):
         self.mutation()
         self.env["GITHUB_REPOSITORY_ID"] = "818"
+        target = json.loads(self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"])
+        target["repositoryId"] = 818
+        self.env["CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"] = json.dumps(target)
+        # The reviewed target is the alternate repository; the image receipt is not.
         with self.assertRaisesRegex(bootstrap.InvalidBootstrapInput, "different repository"):
             self.prepare()

@@ -622,8 +622,15 @@ def observe():
     base = {"format": "codexia-lifecycle-host/v1", "hostId": host_id, "M": "ready"}
     if not facts["accountPresent"]:
         # Account absence alone cannot establish an empty installation.
-        require(not user_exists("codexia") and not user_exists("sophia"))
-        require(all(metadata(Path(path)) is None for path in ("/home/codexia", "/home/sophia")))
+        require(not user_exists("codexia"))
+        require(metadata(Path("/home/codexia")) is None)
+        # A normal SSH administrator named sophia is not an installed writer.
+        # Retain the legacy refusal only for Codexia-specific state under that home.
+        old_home = Path("/home/sophia")
+        require(all(metadata(old_home / name) is None for name in (
+            ".local/state/codexia-deploy", ".config/codexia-auth",
+            ".config/containers/systemd/codexia-db.container",
+            ".config/containers/systemd/codexia-api.container")))
         return {**base, "H": "absent", "database": {"state": "absent", "authState": "absent"},
                 "backend": {"state": "absent"}, "transaction": None, "topology": {"accountPresent": False}}
     account = pwd.getpwnam("codexia")

@@ -49,6 +49,23 @@ def validate_host(host: str) -> None:
         raise InvalidBootstrapInput("Bootstrap host must be a single literal address or DNS name")
 
 
+def validate_management_binding(env: dict[str, str], repository: str, repository_id: str,
+                                owner_id: str, host: str) -> None:
+    if host != required(env, "CODEXIA_MANAGEMENT_HOSTNAME"):
+        raise InvalidBootstrapInput("Bootstrap target must equal the reviewed management hostname")
+    try:
+        target = json.loads(required(env, "CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"))
+        valid = (isinstance(target, dict) and target.get("repository") == repository
+                 and str(target.get("repositoryId")) == repository_id
+                 and str(target.get("ownerId")) == owner_id
+                 and target.get("sshHostname") == host
+                 and isinstance(target.get("sshPolicyId"), str) and bool(target["sshPolicyId"]))
+    except (ValueError, TypeError) as exc:
+        raise InvalidBootstrapInput("Invalid protected Cloudflare management target") from exc
+    if not valid:
+        raise InvalidBootstrapInput("Bootstrap target differs from the protected repository and Cloudflare SSH ingress")
+
+
 def certified_image(env: dict[str, str], runner_temp: Path, repository: str,
                     repository_id: int, owner_id: int, image_repository: str) -> str:
     source = required(env, "GITHUB_SHA")
@@ -101,6 +118,7 @@ def prepare(env: dict[str, str]) -> dict[str, str]:
         raise InvalidBootstrapInput("Unsupported bootstrap operation")
     host = required(env, "CODEXIA_BOOTSTRAP_HOST")
     validate_host(host)
+    validate_management_binding(env, repository, repository_id, owner_id, host)
     user = required(env, "CODEXIA_BOOTSTRAP_SSH_USER")
     if not USERNAME.fullmatch(user) or user in ("root", "codexia"):
         raise InvalidBootstrapInput("Bootstrap must use an independent non-root administrator SSH identity")
@@ -109,6 +127,11 @@ def prepare(env: dict[str, str]) -> dict[str, str]:
         raise InvalidBootstrapInput("Read-only preflight and owner operations must not include mutation approvals for database initialization")
 
     runner_temp = Path(required(env, "RUNNER_TEMP")).resolve(strict=True)
+    cloudflared = runner_temp / "cloudflared"
+    proxy = Path(__file__).resolve().parents[2] / "scripts/deployment/ssh/cloudflared-proxy.sh"
+    if (cloudflared.is_symlink() or not cloudflared.is_file() or not os.access(cloudflared, os.X_OK)
+            or proxy.is_symlink() or not proxy.is_file() or not os.access(proxy, os.X_OK)):
+        raise InvalidBootstrapInput("The pinned Cloudflare SSH transport is unavailable")
     image = (certified_image(env, runner_temp, repository, int(repository_id), int(owner_id), image_repository)
              if operation in MUTATING_MODES else None)
     root = runner_temp / "codexia-bootstrap"
@@ -176,6 +199,7 @@ def prepare(env: dict[str, str]) -> dict[str, str]:
     GlobalKnownHostsFile /dev/null
     PasswordAuthentication no
     KbdInteractiveAuthentication no
+    ProxyCommand "{proxy}" %h
 """, encoding="utf-8")
     config.chmod(0o600)
 

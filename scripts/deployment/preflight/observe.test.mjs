@@ -6,11 +6,17 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { migrationSetFingerprint } from '../../../packages/persistence-postgres/src/migration-set.ts';
 import { planFromObservations as observeWithContext } from './observe.mjs';
-import { parsePreflightRequest } from './run.mjs';
+import { baseQuadletNames, parsePreflightRequest } from './run.mjs';
 import { frontendOAuthConfigIdentity } from '../../build/frontend/oauth-config.mjs';
 
 const context = { repository: 'yohn-jp/codexia', owner: 'yohn-jp', repo: 'codexia', repositoryId: 1450072993, ownerId: 405 };
 const planFromObservations = evidence => observeWithContext({ ...evidence, context });
+
+test('R4 base observation excludes the separately managed setup and production API slot', () => {
+  assert.deepEqual([...baseQuadletNames], ['codexia.network', 'codexia-data.network',
+    'codexia-postgres.volume', 'codexia-data.volume', 'codexia-history.volume', 'codexia-db.container']);
+  assert.equal(baseQuadletNames.includes('codexia-api.container'), false);
+});
 
 test('the host observation entrypoint loads from a clean checkout without evidence-reader dependencies', () => {
   const root = mkdtempSync(join(tmpdir(), 'codexia-preflight-import-'));

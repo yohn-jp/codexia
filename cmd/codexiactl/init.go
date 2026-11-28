@@ -66,6 +66,10 @@ func runInit(ctx context.Context) (resultErr error) {
 	if err != nil {
 		return err
 	}
+	if !independentAdministratorUID(vm.uid, settings.ServiceUID) {
+		return refused("the SSH administrator UID conflicts with the service UID in the selected repository contract")
+	}
+	vm.CodexiaPresent = vm.CodexiaPresent || hasServiceUIDResidue(settings.ServiceUID)
 	if err := gh.verifyOIDC(ctx); err != nil {
 		return err
 	}
@@ -135,12 +139,23 @@ func runInit(ctx context.Context) (resultErr error) {
 			if _, err := receipt.initialOperation(); err != nil {
 				return c.lifecycleBlocker(id, err)
 			}
+			// R5 may already have published a verified setup-only API and its
+			// encrypted grant. Resume delivery before a Cloudflare mutation guard
+			// demands a closed publication gate; the on-host reader rechecks it.
+			if resumeVerifiedOwnerDelivery(receipt, c.state) {
+				tty.Notice("The prior R5 grant and certified Frontend are live. Resume its bound Owner handoff without changing Cloudflare resources.")
+				return c.deliver(ctx, gh, settings, receipt, nil)
+			}
 		}
 	}
 	if err := c.prepareInputs(ctx, gh, tty, vm, settings, snapshot); err != nil {
 		return err
 	}
 	return c.install(ctx, gh, settings)
+}
+
+func resumeVerifiedOwnerDelivery(receipt lifecycleReceipt, state checkpoint) bool {
+	return state.OwnerSetupRunID > 0 && receipt.setupForDelivery()
 }
 
 func closeGitHub(ctx context.Context, gh *githubControl) {
@@ -433,7 +448,7 @@ func (c *workflowController) install(ctx context.Context, gh *githubControl, set
 	}
 	// With setup already running, a fresh bootstrap receipt can authorize
 	// delivery. The canonical on-host reader rechecks the live API and grant.
-	if next == publishFrontend && receipt.setupForDelivery() && c.state.OwnerSetupRunID > 0 {
+	if next == publishFrontend && resumeVerifiedOwnerDelivery(receipt, c.state) {
 		reportStage(c.operator, frontendStage, "The certified Frontend is already live")
 		reportStage(c.operator, ownerSetupStage, "The recorded Owner setup has a verified live grant")
 		return c.deliver(ctx, gh, settings, receipt, nil)
@@ -452,7 +467,7 @@ func (c *workflowController) install(ctx context.Context, gh *githubControl, set
 	if !receipt.frontendReady() {
 		return needsAction("The certified Frontend was not observed on the normal Worker. Review the edge evidence and candidate in " + c.target.runLink(id))
 	}
-	if receipt.setupForDelivery() && c.state.OwnerSetupRunID > 0 {
+	if resumeVerifiedOwnerDelivery(receipt, c.state) {
 		c.operator.Notice("The recorded Owner setup has a verified live grant.")
 		return c.deliver(ctx, gh, settings, receipt, nil)
 	}

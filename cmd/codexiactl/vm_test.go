@@ -106,6 +106,24 @@ func TestNewSSHIdentityIsOpenSSHCompatible(t *testing.T) {
 	}
 }
 
+func TestAdministratorIdentityUsesSelectedRepositoryServiceUID(t *testing.T) {
+	for _, test := range []struct {
+		admin, service int
+		allowed        bool
+	}{
+		{1001, 2001, true},
+		{1001, 1001, false},
+		{2001, 2001, false},
+		{2001, 1001, true},
+		{0, 1001, false},
+		{1000, 0, false},
+	} {
+		if got := independentAdministratorUID(test.admin, test.service); got != test.allowed {
+			t.Errorf("admin UID %d, service UID %d: got %v, want %v", test.admin, test.service, got, test.allowed)
+		}
+	}
+}
+
 func TestSSHConnectionRejectsForgedFlagsAndAcceptsIPv6(t *testing.T) {
 	for _, input := range []string{
 		"192.0.2.1 65536 192.0.2.2 22",

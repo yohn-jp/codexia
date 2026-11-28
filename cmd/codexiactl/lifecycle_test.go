@@ -110,13 +110,16 @@ func TestSetupDeliveryRequiresPositiveProof(t *testing.T) {
 	if !receipt.setupForDelivery() {
 		t.Fatal("valid live and grant receipt was rejected")
 	}
+	if resumeVerifiedOwnerDelivery(receipt, checkpoint{}) || !resumeVerifiedOwnerDelivery(receipt, checkpoint{OwnerSetupRunID: 82}) {
+		t.Fatal("only a completed recorded R5 operation may resume the live grant without provider convergence")
+	}
 	receipt.Evidence.Host.Database.OwnerSetupCheckpoint.PendingHandoff = true
-	if receipt.setupForDelivery() {
+	if receipt.setupForDelivery() || resumeVerifiedOwnerDelivery(receipt, checkpoint{OwnerSetupRunID: 82}) {
 		t.Fatal("interrupted grant was accepted")
 	}
 	receipt.Evidence.Host.Database.OwnerSetupCheckpoint.PendingHandoff = false
 	receipt.Evidence.Edge.PublicProtocolEnabled = true
-	if receipt.setupForDelivery() {
+	if receipt.setupForDelivery() || resumeVerifiedOwnerDelivery(receipt, checkpoint{OwnerSetupRunID: 82}) {
 		t.Fatal("public protocol bypass was accepted")
 	}
 }

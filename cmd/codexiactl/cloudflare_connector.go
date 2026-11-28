@@ -134,7 +134,7 @@ func installCloudflareConnector(ctx context.Context, o operator, token []byte) e
 	return nil
 }
 
-const cloudflareConnectorUnitSHA256 = "eaa5f33dabcffc3da71ba521597141ef0e2cb37851296b9e44fbc87398c15423"
+const cloudflareConnectorUnitSHA256 = "060f006c80ecb874eeaf6dc310df206dddd57bb8703d1685b78796652e4577ce"
 
 type cloudflareConnectorProvisionResult struct {
 	NeedsInstall bool     `json:"needsInstall"`
