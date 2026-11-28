@@ -389,7 +389,7 @@ test('first Worker upload registers certified assets and creates a version witho
           assert.equal(hash, hashes[i]);
           assert.equal(file.type, i ? 'text/javascript' : 'text/html');
           assert.equal(Buffer.from(await file.text(), 'base64').toString(), i ? 'export {};' : '<html>test</html>');
-          return i ? response({ jwt: 'completion-token' }, 201) : response({});
+          return i ? response({ jwt: 'completion-token' }, 201) : response(undefined);
         }
         assert.equal(target.pathname, workerResourceById + '/versions');
         assert.equal(target.search, '?deploy=false');
@@ -418,7 +418,12 @@ test('first Worker upload rejects unknown buckets and incomplete uploads without
       writeFile(join(directory, '_redirects'), controls._redirects),
       writeFile(join(directory, 'index.html'), 'test'),
     ]);
-    for (const unknown of [true, false]) {
+    for (const { unknown, result, status, error } of [
+      { unknown: true, result: {}, status: 200, error: /requested asset hash/u },
+      { unknown: false, result: {}, status: 200, error: /completed asset upload token/u },
+      { unknown: false, result: undefined, status: 201, error: /asset upload failed/u },
+      { unknown: false, result: null, status: 201, error: /asset upload failed/u },
+    ]) {
       const paths = [];
       await assert.rejects(runInitialWorkerUpload({
         accountId, workerId, workerToken: 'worker-secret', tag: 'frontend-' + artifactDigest.slice(7),
@@ -427,13 +432,15 @@ test('first Worker upload rejects unknown buckets and incomplete uploads without
           const path = new URL(url).pathname;
           paths.push(path);
           assert.ok(!path.endsWith('/versions'));
-          const result = paths.length === 1 ? {
-            jwt: 'upload-token',
-            buckets: [[unknown ? 'unknown' : JSON.parse(init.body).manifest['/index.html'].hash]],
-          } : {};
-          return Response.json({ success: true, errors: [], result });
+          if (paths.length === 1) {
+            return Response.json({ success: true, errors: [], result: {
+              jwt: 'upload-token',
+              buckets: [[unknown ? 'unknown' : JSON.parse(init.body).manifest['/index.html'].hash]],
+            } });
+          }
+          return Response.json({ success: true, errors: [], result }, { status });
         },
-      }), unknown ? /requested asset hash/u : /completed asset upload token/u);
+      }), error);
       assert.equal(paths.length, unknown ? 1 : 2);
     }
     await assert.rejects(runInitialWorkerUpload({

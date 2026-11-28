@@ -148,7 +148,7 @@ export async function runInitialWorkerUpload({
 
   // Keep credentials and server response bodies out of diagnostics, including
   // when the fetch implementation throws an error with request details.
-  async function post(label, path, token, body) {
+  async function post(label, path, token, body, { allowMissingResult = false } = {}) {
     let response, envelope;
     try {
       const headers = { Authorization: 'Bearer ' + token };
@@ -161,9 +161,12 @@ export async function runInitialWorkerUpload({
     } catch {
       throw new Error('Cloudflare ' + label + ' response could not be verified');
     }
+    const result = envelope?.result;
+    // Only a successful intermediate asset upload may omit its result.
+    const validResult = result !== null && typeof result === 'object' && !Array.isArray(result);
     assert.ok(response.ok && envelope?.success === true && !envelope.errors?.length &&
-      envelope.result && typeof envelope.result === 'object', 'Cloudflare ' + label + ' failed');
-    return { status: response.status, result: envelope.result };
+      (validResult || (allowMissingResult && response.status === 200 && result == null)), 'Cloudflare ' + label + ' failed');
+    return { status: response.status, result: result ?? {} };
   }
   const validJwt = value => typeof value === 'string' && value.length > 0 && value.trim() === value;
   const account = '/accounts/' + accountId + '/workers';
@@ -187,13 +190,14 @@ export async function runInitialWorkerUpload({
       assert.equal(sha256(bytes), entry.digest, 'Frontend asset changed after manifest registration');
       form.append(hash, new Blob([bytes.toString('base64')], { type: entry.type }), hash);
     }
-    const { result, status } = await post('asset upload', account + '/assets/upload?base64=true', session.jwt, form);
     const last = index === session.buckets.length - 1;
+    const { result, status } = await post('asset upload', account + '/assets/upload?base64=true', session.jwt, form,
+      { allowMissingResult: !last });
     if (last) {
       assert.ok(status === 201 && validJwt(result.jwt), 'Missing completed asset upload token');
       completionJwt = result.jwt;
     } else {
-      assert.ok(status !== 201 && !result.jwt, 'Asset upload completed before all requested buckets');
+      assert.ok(status === 200 && !result.jwt, 'Asset upload completed before all requested buckets');
     }
   }
   const { result: version } = await post('initial Worker version', account + '/workers/' +
