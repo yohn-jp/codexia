@@ -60,6 +60,18 @@
         *) echo 'Unrecognized backup executor enablement' >&2; exit 1 ;;
       esac
     fi
+    timed() {
+      local phase=$1
+      shift
+      if [[ "${BACKUP_PROFILE:-false}" == true ]]; then
+        local LC_NUMERIC=C TIMEFORMAT="$phase %3R" status=0
+        # Keep command stderr separate from the Bash timing record.
+        { time "$@" 2>&7; } 7>&2 2>>"$state/backup-release.timings" || status=$?
+        return "$status"
+      else
+        "$@"
+      fi
+    }
     backup_query() {
       podman exec codexia-db sh -ec '
         export PGPASSWORD="$(cat /run/secrets/admin-password)"
@@ -73,8 +85,13 @@
     }
     start_worker() {
       ensure_restore_reconciled &&
-        "$HOME/.local/bin/codexia-backup-control" recover &&
-        systemctl --user start "$unit" && systemctl --user is-active --quiet "$unit"
+        timed recover_worker "$HOME/.local/bin/codexia-backup-control" recover &&
+        timed start_worker systemctl --user start "$unit" && systemctl --user is-active --quiet "$unit"
+    }
+    extract_release() {
+      podman run --rm --pull=never --network=none --read-only --cap-drop=all --security-opt=no-new-privileges \
+        --image-volume=ignore --entrypoint=tar "$BACKUP_IMAGE" -cf - -C / app -C /usr/local bin/node |
+        tar -xf - --no-same-owner -C "$1"
     }
     verify_release() {
       (cd "$1" && ./bin/node --input-type=module -e '
@@ -88,7 +105,7 @@
     }
 
     if [[ -L "$root/current" && "$(realpath -e -- "$root/current")" == "$release" ]]; then
-      verify_release "$release"
+      timed validate_release verify_release "$release"
       if [[ "$resume_worker" == true ]]; then
         case "$(systemctl --user show "$unit" --property=ActiveState --value)" in
           active) ;;
@@ -103,14 +120,12 @@
     trap 'rm -rf -- "$stage"' EXIT
     if [[ ! -e "$release" && ! -L "$release" ]]; then
       mkdir "$stage/package"
-      podman run --rm --pull=never --network=none --read-only --cap-drop=all --security-opt=no-new-privileges \
-        --image-volume=ignore --entrypoint=tar "$BACKUP_IMAGE" -cf - -C / app -C /usr/local bin/node |
-        tar -xf - --no-same-owner -C "$stage/package"
-      verify_release "$stage/package"
+      timed extract_release extract_release "$stage/package"
+      timed validate_release verify_release "$stage/package"
       mv -T -- "$stage/package" "$release"
     else
       [[ -d "$release" && ! -L "$release" ]]
-      verify_release "$release"
+      timed validate_release verify_release "$release"
     fi
     worker="$(systemctl --user show "$unit" --property=ActiveState --value)"
     [[ "$worker" == active || "$worker" == inactive || "$worker" == failed ]]
@@ -120,13 +135,13 @@
       [[ -L "$root/current" ]]
       ln -s -- "$(readlink -e -- "$root/current")" "$stage/previous"
       rollback() {
-        systemctl --user stop "$unit" &&
+        timed stop_worker systemctl --user stop "$unit" &&
           mv -Tf -- "$stage/previous" "$root/current" && start_worker
       }
       # If any following admission or activation step fails, resume the previously selected release.
       trap 'result=$?; if (( result != 0 )); then rollback || echo "Prior backup executor needs operator recovery" >&2; fi; rm -rf -- "$stage"; exit "$result"' EXIT
       # Allow the old worker to finish a probe before replacing its code.
-      if [[ "$worker" == active ]]; then systemctl --user stop "$unit"; fi
+      if [[ "$worker" == active ]]; then timed stop_worker systemctl --user stop "$unit"; fi
       idle="$(backup_query "SELECT NOT EXISTS (SELECT 1 FROM codexia_backup.operations WHERE state IN ('QUEUED', 'RUNNING'))
                AND NOT EXISTS (SELECT 1 FROM codexia_backup.runs WHERE state IN ('QUEUED', 'RUNNING')
                                 OR (state = 'UNKNOWN' AND reason_code = 'restored_outcome_unknown'))")"
@@ -140,6 +155,7 @@
   args:
     executable: /bin/bash
   environment:
+    BACKUP_PROFILE: "{{ (codexia_lifecycle_profile_backup | default(false) | bool) | ternary('true', 'false') }}"
     BACKUP_IMAGE: "{{ codexia_backup_release_image }}"
     BACKUP_RECORD_SHA: "{{ codexia_backup_deployed_release.content | b64decode | hash('sha256') }}"
     BACKUP_RESUME_ENABLED: "{{ (codexia_backup_release_resume_enabled | default(false)) | ternary('true', 'false') }}"

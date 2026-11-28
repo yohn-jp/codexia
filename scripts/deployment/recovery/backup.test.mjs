@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, readlink, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -89,6 +89,7 @@ test('a stopped enabled backup executor resumes before and after the release sym
     '  "image inspect"*) printf "sha256:%s\\n" "$FIXTURE_DIGEST";;',
     '  "inspect --type container"*) printf "true healthy sha256:%s\\n" "$FIXTURE_DIGEST";;',
     '  "exec codexia-db"*) printf "%s\\n" "$FIXTURE_JOURNAL_READY";;',
+    '  run*) tar -cf - -C "$FIXTURE_PACKAGE" app bin; exit "$FIXTURE_EXTRACT_RC";;',
     '  *) exit 2;;', 'esac', '',
   ].join('\n'));
   await writeFile(path.join(fixture.bin, 'systemctl'), [
@@ -105,6 +106,7 @@ test('a stopped enabled backup executor resumes before and after the release sym
   ].join('\n'));
   const workerState = path.join(fixture.directory, 'worker-state');
   const cases = [
+    { selected: previous, active: 'active', enabled: 'enabled', journalReady: 't', expected: 'active', success: true },
     { selected: previous, active: 'inactive', enabled: 'enabled', journalReady: 't', expected: 'active', success: true },
     { selected: release, active: 'inactive', enabled: 'enabled', journalReady: 't', expected: 'active', success: true },
     { selected: release, active: 'failed', enabled: 'enabled', journalReady: 't', expected: 'active', success: true },
@@ -113,20 +115,50 @@ test('a stopped enabled backup executor resumes before and after the release sym
     { selected: release, active: 'inactive', enabled: 'enabled', journalReady: 'f', expected: 'inactive', success: false },
     { selected: previous, active: 'inactive', enabled: 'enabled', journalReady: 't', expected: 'active', success: false, failRelease: release },
   ];
+  const timings = path.join(fixture.stateDir, 'backup-release.timings');
   for (const { selected, active, enabled, journalReady, expected, success, failRelease = '' } of cases) {
+    await rm(timings, { force: true });
     await rm(current, { force: true });
     await symlink(selected, current);
     await writeFile(workerState, active + '\n');
     const result = spawnSync('bash', ['-c', installer], { encoding: 'utf8', env: {
       ...process.env, HOME: fixture.home, PATH: `${fixture.bin}:${process.env.PATH}`,
       BACKUP_IMAGE: JSON.parse(record).image, BACKUP_RECORD_SHA: createHash('sha256').update(record).digest('hex'),
-      BACKUP_RESUME_ENABLED: 'true', FIXTURE_DIGEST: digest, FIXTURE_WORKER_ENABLED: enabled,
+      BACKUP_PROFILE: 'true', BACKUP_RESUME_ENABLED: 'true', FIXTURE_DIGEST: digest, FIXTURE_WORKER_ENABLED: enabled,
       FIXTURE_WORKER_STATE: workerState, FIXTURE_JOURNAL_READY: journalReady,
       FIXTURE_CURRENT: current, FIXTURE_FAIL_RELEASE: failRelease,
     } });
     assert.equal(result.status === 0, success, `${enabled}/${active}/${journalReady}: ${result.stderr}`);
     assert.equal((await readFile(workerState, 'utf8')).trim(), expected, `${enabled}/${active}/${journalReady}`);
     assert.equal(await readlink(current), failRelease ? previous : release);
+    if (active === 'active' || failRelease) {
+      const lines = (await readFile(timings, 'utf8')).trim().split('\n');
+      assert.ok(lines.every(line => /^[a-z_]+ [0-9]+\.[0-9]{3}$/u.test(line)));
+      const phases = lines.map(line => line.split(' ')[0]);
+      assert.ok(phases.includes('validate_release'));
+      assert.ok(phases.includes('recover_worker'));
+      assert.ok(phases.includes('start_worker'));
+      assert.ok(phases.includes('stop_worker'));
+      if (failRelease) assert.equal(phases.filter(phase => phase === 'start_worker').length, 2);
+    }
+  }
+  const packaged = path.join(fixture.directory, 'packaged-release');
+  await rename(release, packaged);
+  await rm(current);
+  await symlink(previous, current);
+  for (const extractionCode of [125, 0]) {
+    await rm(timings, { force: true });
+    const result = spawnSync('bash', ['-c', installer], { encoding: 'utf8', env: {
+      ...process.env, HOME: fixture.home, PATH: `${fixture.bin}:${process.env.PATH}`,
+      BACKUP_IMAGE: JSON.parse(record).image, BACKUP_RECORD_SHA: createHash('sha256').update(record).digest('hex'),
+      BACKUP_PROFILE: 'true', BACKUP_RESUME_ENABLED: 'false', FIXTURE_DIGEST: digest,
+      FIXTURE_WORKER_STATE: workerState, FIXTURE_JOURNAL_READY: 't', FIXTURE_CURRENT: current,
+      FIXTURE_PACKAGE: packaged, FIXTURE_EXTRACT_RC: String(extractionCode),
+    } });
+    assert.equal(result.status, extractionCode, result.stderr);
+    assert.match(await readFile(timings, 'utf8'), /^extract_release [0-9]+\.[0-9]{3}$/mu);
+    assert.equal(await readlink(current), extractionCode ? previous : release);
+    if (extractionCode) assert.ok(!(await readdir(path.dirname(release))).includes(digest));
   }
 });
 
