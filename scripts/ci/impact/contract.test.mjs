@@ -134,6 +134,17 @@ test('Biome selects shipped JS/TS changes and config, but not unrelated CI or na
   assert.equal(biomeJob.steps.find(step => step.name === 'Run exact-source Biome CI and emit Lint-only SARIF').run, 'node scripts/ci/execution/group.mjs biome');
 });
 
+test('Types evidence retains the trace report and omits the rendered Pages package', () => {
+  const upload = workflow.jobs.types.steps.find(({ with: options }) => options?.name?.startsWith('ci-evidence-types-'));
+  assert.ok(upload);
+  const root = '${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}';
+  assert.deepEqual(upload.with.path.trim().split('\n'), [
+    root,
+    `!${root}/requirements-trace/strictdoc/html/**`,
+    `!${root}/requirements-trace/strictdoc/json/**`,
+  ]);
+});
+
 test('the certified graph covers every declared obligation and admits trace-owned tests within the twenty-two-job cap', () => {
   assert.ok(REQUIRED_VERIFICATION_JOBS.length + 1 <= 22, 'CI-CD.md caps certification at twenty-two jobs');
   assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'biome', 'unit', 'types', 'profile_core', 'profile_full', 'oci', 'certification']);
