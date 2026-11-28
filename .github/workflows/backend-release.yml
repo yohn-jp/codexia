@@ -69,6 +69,7 @@ on:
       - scripts/deployment/handoff/backend-contract.test.mjs
       - scripts/deployment/handoff/verify-push.test.mjs
       - .github/workflows/backend-deployment-handoff.yml
+      - scripts/release/components/record-model.mjs
       - scripts/release/components/record-model.test.mjs
       - scripts/verification/artifacts/frontend.mjs
       - scripts/ci/certification/reuse-merged-pr.mjs
@@ -90,7 +91,6 @@ on:
       - deploy/quadlet/**
       - docs/deployment/PUSH-DEPLOYMENT.sdoc
       - docs/deployment/IAC.sdoc
-      - scripts/release/components/record-model.mjs
       - scripts/deployment/lifecycle/app*.mjs
       - scripts/deployment/lifecycle/auth-oidc.mjs
       - scripts/verification/runtime/better-auth-fixture.sh

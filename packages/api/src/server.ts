@@ -2920,7 +2920,7 @@ export function createServer(options: ApiServerOptions): Server {
   const openWorkExport: Handler = async context => {
     await context.requireAuthorSession();
     const persistence = options.persistence;
-    const projectId = context.projectId as import('@codexia/persistence-contracts').ProjectId;
+    const projectId = context.projectId.toLowerCase() as import('@codexia/persistence-contracts').ProjectId;
     if (!persistence) return context.reject(503, 'PERSISTENCE_UNAVAILABLE', 'PostgreSQL persistence is not ready');
     if (!(await findAuthorizedProject(projectId))) return context.reject(404, 'WORK_NOT_FOUND', 'Work was not found');
     if (openWorkExportInProgress) return context.reject(503, 'OPEN_WORK_EXPORT_BUSY', 'An export is already in progress');

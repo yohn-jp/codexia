@@ -117,7 +117,7 @@ async function exercisePublicApiAdapter(base: string, token: string) {
     const current = await api.persistenceDocument(project.id, created.document.id);
     assert.equal(current.revision?.id, firstSave.revision.id);
     assert.equal(current.revision?.markdown, updatedMarkdown);
-    const archive = await api.downloadOpenWorkExport(project.id);
+    const archive = await api.downloadOpenWorkExport(project.id.toUpperCase());
     assert.equal(archive.type, 'application/zip');
     const zip = new ZipReader(new Uint8ArrayReader(new Uint8Array(await archive.arrayBuffer())));
     try {
@@ -170,13 +170,18 @@ test('[TEST-DATA-006-003] authenticated PostgreSQL API saves, replays, follows E
   assert.equal(((await bearerWrite.json()) as { code: string }).code, 'OAUTH_CLIENT_NOT_ALLOWED');
   assert.ok(!(await persistence.read(reader => reader.listProjectPage!(200))).some(project => project.title === forbiddenTitle));
 
+  const mixedCaseId = 'aBCd' + randomUUID().slice(4);
   const projectResponse = await fetch(`${base}/api/v1/persistence/projects`, {
     method: 'POST',
     headers: ownerHeaders,
-    body: JSON.stringify({ title: `api-${randomUUID()}`, settings: { language: 'ja' } }),
+    body: JSON.stringify({ id: mixedCaseId, title: `api-${randomUUID()}`, settings: { language: 'ja' } }),
   });
   assert.equal(projectResponse.status, 201);
   const { project } = (await projectResponse.json()) as { project: { id: string } };
+  assert.equal(project.id, mixedCaseId.toLowerCase());
+  const fetched = await fetch(`${base}/api/v1/persistence/projects/${mixedCaseId}`, { headers: ownerHeaders });
+  assert.equal(fetched.status, 200);
+  assert.deepEqual(((await fetched.json()) as { project: { id: string } }).project, project);
   const initialMarkdown = '前😀 東京\n';
   const documentResponse = await fetch(`${base}/api/v1/persistence/projects/${project.id}/documents`, {
     method: 'POST',

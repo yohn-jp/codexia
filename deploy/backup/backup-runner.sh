@@ -54,7 +54,6 @@ case "${1:-}" in
 esac
 
 [[ $# == 1 && ( "$1" == recover || "$1" =~ $uuid ) ]] || die 'Invalid backup run request'
-if ! exists "$intent" && [[ "$1" == recover ]]; then exit 0; fi
 [[ "$state_dir" == /* && -d "$state_dir" && ! -L "$state_dir" && -O "$state_dir" &&
    "$(stat -c %a -- "$state_dir")" == 700 ]] || die 'Invalid private backup state directory'
 if exists "$lock_file"; then
@@ -62,6 +61,8 @@ if exists "$lock_file"; then
 fi
 exec 9>>"$lock_file"
 flock --exclusive --nonblock 9 || exit 75
+# An active runner may still be preparing its intent under the host lock.
+if ! exists "$intent" && [[ "$1" == recover ]]; then exit 0; fi
 
 # Backup can resume the exact VM-local committed image. A pending intent
 # cannot select an image, even if another repository published its digest.

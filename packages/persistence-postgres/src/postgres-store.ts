@@ -385,27 +385,17 @@ function restoreTextChanges(before: string, after: string): TextChange[] {
   return [{ fromUtf16, toUtf16: before.length - retainedSuffix, insert: after.slice(fromUtf16, after.length - retainedSuffix) }];
 }
 
-function mapTextOffset(offset: number, changes: readonly TextChange[], association: -1 | 1): number {
+function mapTextOffset(offset: number, changes: readonly TextChange[], boundary: 'start' | 'end', insideReplacement: -1 | 1): number {
   let delta = 0;
   for (const change of changes) {
     const insertedLength = change.insert.length;
     const removedLength = change.toUtf16 - change.fromUtf16;
-    if (offset < change.fromUtf16) return offset + delta;
-    if (offset > change.toUtf16) {
-      delta += insertedLength - removedLength;
-      continue;
-    }
-    if (change.fromUtf16 === change.toUtf16) {
-      if (association < 0) return change.fromUtf16 + delta;
-      delta += insertedLength;
-      continue;
-    }
-    if (offset === change.fromUtf16 && association < 0) return change.fromUtf16 + delta;
-    if (offset === change.toUtf16 && association > 0) {
-      delta += insertedLength - removedLength;
-      continue;
-    }
-    return change.fromUtf16 + delta + (association > 0 ? insertedLength : 0);
+    if (offset < change.fromUtf16) break;
+    // A replacement starts after its left boundary. Insertions exactly on
+    // either boundary stay outside the quote, even if another edit touches it.
+    if (offset === change.fromUtf16 && (removedLength > 0 || boundary === 'end')) break;
+    if (offset < change.toUtf16) return change.fromUtf16 + delta + (insideReplacement > 0 ? insertedLength : 0);
+    delta += insertedLength - removedLength;
   }
   return offset + delta;
 }
@@ -818,7 +808,7 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   async getProject(projectId: ProjectId): Promise<Project | undefined> {
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(projectId)) return undefined;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(projectId)) return undefined;
     const result = await this.query('SELECT * FROM project WHERE id = $1', [projectId]);
     return result.rows[0] ? mapProject(result.rows[0]) : undefined;
   }
@@ -1789,8 +1779,8 @@ class PostgresTransaction implements PersistenceTransaction {
       const anchor = mapEvidenceAnchor(row);
       const wasOrphaned = anchor.status === 'orphaned';
       const touched = !wasOrphaned && textAnchorWasTouched(anchor, changes);
-      let fromUtf16 = mapTextOffset(anchor.fromUtf16, changes, touched ? -1 : 1);
-      let toUtf16 = mapTextOffset(anchor.toUtf16, changes, touched ? 1 : -1);
+      let fromUtf16 = mapTextOffset(anchor.fromUtf16, changes, 'start', touched ? -1 : 1);
+      let toUtf16 = mapTextOffset(anchor.toUtf16, changes, 'end', touched ? 1 : -1);
       fromUtf16 = Math.min(nextMarkdown.length, Math.max(0, fromUtf16));
       toUtf16 = Math.min(nextMarkdown.length, Math.max(fromUtf16, toUtf16));
       const status: EvidenceAnchor['status'] = wasOrphaned || fromUtf16 === toUtf16 ? 'orphaned' : touched ? 'needs_review' : anchor.status;
