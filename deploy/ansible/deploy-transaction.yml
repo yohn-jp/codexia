@@ -467,7 +467,7 @@
       current_container=''
       current_image=''
       if podman container exists codexia-api; then
-        current_container="$(podman inspect --format '{% raw %}{{.Id}} {{.Image}} {{.ImageName}} {{.State.Running}}{% endraw %}' codexia-api)" ||
+        current_container="$(podman inspect --format '{% raw %}{{.Id}} {{.Image}} {{.ImageName}} {{.State.Running}} {{.State.Health.Status}}{% endraw %}' codexia-api)" ||
           stale_admission 'the API container could not be inspected'
       elif [[ "$?" != 1 ]]; then
         stale_admission 'the API container state could not be determined'
@@ -483,8 +483,9 @@
         [[ ${{ '{' }}#rollback_images[@]} == 1 && "${rollback_images[0]}" == "$CODEXIA_IMAGE_REPOSITORY@"* && "${rollback_images[0]#*@}" =~ ^sha256:[a-f0-9]{64}$ ]] ||
           stale_admission 'the prior API Quadlet no longer has a unique immutable image'
         rollback_image="${rollback_images[0]}"
-        read -r current_container_id _ current_image current_running <<< "$current_container"
-        [[ "$rollback_image" == "$admitted_unit_image" && "$current_image" == "$rollback_image" && "$current_running" == true ]] ||
+        read -r current_container_id _ current_image current_running current_health <<< "$current_container"
+        [[ "$rollback_image" == "$admitted_unit_image" && "$current_image" == "$rollback_image" &&
+           "$current_running" == true && "$current_health" == healthy ]] ||
           stale_admission 'the running API image and prior Quadlet no longer agree'
         if ! systemctl --user is-active --quiet codexia-api.service ||
            ! podman inspect --format '{% raw %}{{.State.Health.Status}}{% endraw %}' "$current_container_id" | grep -Fxq healthy; then

@@ -545,7 +545,10 @@ test('production admission reuses canonical runtime validators and checks exact 
   assert.deepEqual(checks.find(task => task.name === 'Require the independent host Cloudflare connector')['ansible.builtin.command'].argv,
     ['systemctl', 'is-active', 'codexia-cloudflared.service']);
   const networks = checks.find(task => task.name === 'Verify the canonical private network isolation before deployment');
-  assert.deepEqual(networks.loop.map(value => value.expected), ['codexia|bridge|false', 'codexia-data|bridge|true']);
+  assert.deepEqual(networks['ansible.builtin.command'].argv,
+    ['podman', 'network', 'inspect', '--format', '{{.Name}}|{{.Driver}}|{{.Internal}}', 'codexia', 'codexia-data']);
+  assert.match(networks.failed_when, /codexia-data\|bridge\|true/u);
+  assert.match(networks.failed_when, /codexia\|bridge\|false/u);
   const shell = transactionStages.find(task => task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'].cmd;
   assert.match(shell, /systemctl --user show --property=SourcePath --value codexia-db\.service/u);
   assert.match(shell, /gate_state="\$\(gate_control status\)"/u);
