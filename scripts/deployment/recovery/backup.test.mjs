@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -60,6 +60,67 @@ function invokeBackup(fixture, { activeUnits = '', approved = true, lockFile = f
   });
 }
 
+test('mounted backup extraction preserves the canonical tree and only falls back on unsupported mounts', async t => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.directory, { recursive: true, force: true }));
+  const imageRoot = path.join(fixture.directory, 'image');
+  const app = path.join(imageRoot, 'app');
+  const localBin = path.join(imageRoot, 'usr/local/bin');
+  await Promise.all([app, localBin].map(directory => mkdir(directory, { recursive: true })));
+  await writeFile(path.join(localBin, 'node'), 'fixture executable', { mode: 0o755 });
+  await writeFile(path.join(app, 'package'), 'fixture content', { mode: 0o644 });
+  await link(path.join(app, 'package'), path.join(app, 'hardlink'));
+  await symlink('package', path.join(app, 'symlink'));
+  await writeFile(path.join(fixture.bin, 'podman'), [
+    '#!/bin/sh',
+    'echo "$1 ${2:-}" >> "$TRACE"',
+    'case "$1 $2" in',
+    '  "unshare bash") shift; exec "$@" ;;',
+    '  "image mount")',
+    '    case "$FAULT" in unsupported) echo "mount: operation not supported" >&2; exit 125;; denied) echo "mount: permission denied" >&2; exit 125;; esac',
+    '    printf "%s\\n" "$IMAGE_ROOT" ;;',
+    '  "image unmount") test "$FAULT" != unmount ;;',
+    '  "run --rm") tar -cf - -C "$IMAGE_ROOT" app -C "$IMAGE_ROOT/usr/local" bin/node ;;',
+    '  *) exit 2 ;;', 'esac', '',
+  ].join('\n'));
+  await writeFile(path.join(fixture.bin, 'tar'), [
+    '#!/bin/sh', '/usr/bin/tar "$@" || exit $?',
+    'if [ "$FAULT" = archive ] && [ "$1" = -cf ]; then exit 2; fi', '',
+  ].join('\n'), { mode: 0o700 });
+  const script = path.join(root, 'deploy/ansible/backup-extract-runtime.sh');
+  const digest = 'ghcr.io/yohn-jp/codexia-backend@sha256:' + 'a'.repeat(64);
+  for (const fault of ['none', 'unsupported', 'denied', 'archive', 'unmount', 'symlink-directory']) {
+    const target = path.join(fixture.directory, fault);
+    await mkdir(target);
+    if (fault === 'symlink-directory') {
+      const redirected = path.join(fixture.directory, 'outside-image');
+      await rename(localBin, redirected);
+      await symlink(redirected, localBin);
+    }
+    const trace = path.join(fixture.directory, fault + '.log');
+    const result = spawnSync('bash', [script, digest, target], { encoding: 'utf8', env: {
+      ...process.env, PATH: fixture.bin + ':' + process.env.PATH, IMAGE_ROOT: imageRoot, TRACE: trace, FAULT: fault,
+    } });
+    const calls = (await readFile(trace, 'utf8')).trim().split('\n');
+    const succeeded = fault === 'none' || fault === 'unsupported';
+    assert.equal(result.status === 0, succeeded, `${fault}: ${result.stderr}`);
+    assert.equal(calls.includes('run --rm'), fault === 'unsupported');
+    assert.equal(calls.includes('image unmount'), !['unsupported', 'denied'].includes(fault));
+    if (succeeded) {
+      assert.equal(result.stdout.trim(), fault === 'none' ? 'mounted_tar' : 'container_tar');
+      assert.equal(await readFile(path.join(target, 'app/package'), 'utf8'), 'fixture content');
+      const file = await stat(path.join(target, 'app/package'));
+      assert.equal(file.mode & 0o777, 0o600);
+      assert.equal(file.uid, process.getuid());
+      assert.equal(file.ino, (await stat(path.join(target, 'app/hardlink'))).ino);
+      assert.equal(await readlink(path.join(target, 'app/symlink')), 'package');
+      assert.equal((await stat(path.join(target, 'bin/node'))).mode & 0o777, 0o700);
+    } else if (fault === 'symlink-directory') {
+      assert.deepEqual(await readdir(target), []);
+    }
+  }
+});
+
 test('a stopped enabled backup executor resumes before and after the release symlink switch', async t => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.directory, { recursive: true, force: true }));
@@ -67,7 +128,9 @@ test('a stopped enabled backup executor resumes before and after the release sym
   // This workflow also runs from a checkout without installed workspace packages.
   const shell = /^  ansible\.builtin\.shell: \|\n((?: {4}[^\n]*\n|\n)+)/mu.exec(playbook)?.[1];
   assert.ok(shell, 'The backup release task must provide its Bash program');
-  const installer = shell.replace(/^ {4}/gmu, '').replaceAll('{% raw %}', '').replaceAll('{% endraw %}', '');
+  const extractor = await readFile(path.join(root, 'deploy/ansible/backup-extract-runtime.sh'), 'utf8');
+  const installer = shell.replace(/^ {4}/gmu, '').replaceAll('{% raw %}', '').replaceAll('{% endraw %}', '')
+    .replace("{{ lookup('ansible.builtin.file', playbook_dir + '/backup-extract-runtime.sh') }}", () => extractor);
   const digest = 'a'.repeat(64);
   const identity = { format: 'codexia-backend-identity/v1', profile: 'full', sourceSha: 'b'.repeat(40) };
   const record = JSON.stringify({ image: 'ghcr.io/yohn-jp/codexia-backend@sha256:' + digest, identity });
@@ -87,6 +150,8 @@ test('a stopped enabled backup executor resumes before and after the release sym
   await writeFile(path.join(fixture.bin, 'podman'), [
     '#!/bin/sh', 'case "$*" in',
     '  "image inspect"*) printf "sha256:%s\\n" "$FIXTURE_DIGEST";;',
+    '  unshare*) shift; exec "$@";;',
+    '  "image mount"*) echo "mount: operation not supported" >&2; exit 125;;',
     '  "inspect --type container"*) printf "true healthy sha256:%s\\n" "$FIXTURE_DIGEST";;',
     '  "exec codexia-db"*) printf "%s\\n" "$FIXTURE_JOURNAL_READY";;',
     '  run*) tar -cf - -C "$FIXTURE_PACKAGE" app bin; exit "$FIXTURE_EXTRACT_RC";;',

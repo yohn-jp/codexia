@@ -748,10 +748,13 @@ observe_runtime missing-executor "$initial_key"
 verify_private_backup_socket
 observe_runtime private-backup-socket-restart "$initial_key"
 if [[ "${CODEXIA_BENCHMARK_BACKUP_RUNTIME:-false}" == true ]]; then
-  local benchmark_started
+  local benchmark_started benchmark_helper
   benchmark_started=$(date +%s%3N)
-  rootless python3 - < "$repo_root/deploy/ansible/benchmark-backup-extraction.py" |
+  benchmark_helper="$(rootless mktemp "$fixture_home/.local/state/backup-extractor.XXXXXXXX")"
+  rootless tee "$benchmark_helper" < "$repo_root/deploy/ansible/backup-extract-runtime.sh" >/dev/null
+  rootless python3 - "$benchmark_helper" < "$repo_root/deploy/ansible/benchmark-backup-extraction.py" |
     tee "$RUNNER_TEMP/codexia-push-app-lifecycle/backup-extraction-bounded.log"
+  rootless rm -- "$benchmark_helper"
   extraction_benchmark_ms=$(( $(date +%s%3N) - benchmark_started ))
   record_phase_timing backup_extraction_comparison "$benchmark_started"
 fi

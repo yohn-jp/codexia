@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from time import monotonic_ns
@@ -32,8 +33,13 @@ def tree_digest(directory):
 def extract(method, image, directory):
     flags = ["--pull=never", "--network=none", "--read-only", "--cap-drop=all",
              "--security-opt=no-new-privileges", "--image-volume=ignore", "--entrypoint=tar"]
-    if method == "mounted_copy" and subprocess.run(["podman", "unshare", "true"]).returncode != 0:
-        return "mount_unavailable"
+    if method == "mounted_tar":
+        selected = output("bash", sys.argv[1], image, directory)
+        if selected == "mounted_tar":
+            return "copied"
+        if selected == "container_tar":
+            return "mount_unavailable"
+        raise ValueError("Installer reported an unknown extraction method")
     if method == "tar":
         run(*shell('podman run --rm "$@" -cf - -C / app -C /usr/local bin/node | '
                    'tar --no-same-owner -xf -', "bash", *flags, image), cwd=directory)
@@ -42,21 +48,8 @@ def extract(method, image, directory):
     container = output("podman", "create", *flags, image)
     try:
         (directory / "bin").mkdir()
-        if method == "podman_cp":
-            run("podman", "cp", f"{container}:/app", directory / "app")
-            run("podman", "cp", f"{container}:/usr/local/bin/node", directory / "bin/node")
-        else:
-            result = subprocess.run(["podman", "unshare", *shell("""
-                mount=$(podman mount "$1") || exit 77
-                status=0
-                cp -R --preserve=links,mode -- "$mount/app" "$2/app" &&
-                  cp -P --preserve=mode -- "$mount/usr/local/bin/node" "$2/bin/node" || status=$?
-                podman unmount "$1" >/dev/null || exit 1
-                exit "$status"
-                """, "bash", container, directory)])
-            if result.returncode == 77:
-                return "mount_unavailable"
-            result.check_returncode()
+        run("podman", "cp", f"{container}:/app", directory / "app")
+        run("podman", "cp", f"{container}:/usr/local/bin/node", directory / "bin/node")
         # Copying out of the user namespace must give the service account
         # the same ownership as tar --no-same-owner.
         if any((path.lstat().st_uid, path.lstat().st_gid) != (os.getuid(), os.getgid())
@@ -88,7 +81,8 @@ def main():
     reference = tree_digest(selected)
     print(f"BACKUP_EXTRACTION image={image} reference_sha256={reference}", flush=True)
 
-    methods = ("tar", "podman_cp", "mounted_copy")
+    baseline = None
+    methods = ("tar", "podman_cp", "mounted_tar")
     for trial, order in enumerate((methods, reversed(methods)), start=1):
         for method in order:
             with tempfile.TemporaryDirectory(dir=root, prefix=".benchmark-") as stage:
@@ -99,11 +93,13 @@ def main():
                 observed = "-"
                 if status == "copied":
                     observed = tree_digest(directory)
-                    status = "equivalent" if observed == reference else "different"
+                    if method == "tar" and baseline is None:
+                        baseline = observed
+                    status = "equivalent" if observed == baseline == reference else "different"
                 print(f"BACKUP_EXTRACTION trial={trial} method={method} duration_ms={duration} "
                       f"status={status} tree_sha256={observed}", flush=True)
-                if method == "tar" and status != "equivalent":
-                    raise ValueError("Fresh baseline differs from the selected certified runtime")
+                if method in ("tar", "mounted_tar") and status != "equivalent":
+                    raise ValueError(f"{method} did not reproduce the selected certified runtime")
 
 
 if __name__ == "__main__":
