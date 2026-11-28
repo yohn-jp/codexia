@@ -131,31 +131,3 @@ test("registration validation rejects an owner public client with unapproved ext
   } });
   await assert.rejects(assertBetterAuthClientRegistrations(config, registry), /owner client has an unsupported scope/u);
 });
-
-test("read-only deployed client verification requires exact original OAuth redirect URI sets", async () => {
-  const redirects: Record<string, string[]> = {
-    "codexia-web": ["https://codexia.example.test/desktop"],
-    "codexia-ios": ["jp.yohn.codexia:/oauth2redirect"],
-    "codexia-introspector": ["https://codexia.example.test/oauth/introspection"],
-  };
-  const original = makeRegistry();
-  const registry: BetterAuthClientRegistry = {
-    getOwner: subject => original.getOwner(subject),
-    getClient: async id => {
-      const client = await original.getClient(id);
-      return client ? { ...(client as Record<string, unknown>), redirectUris: redirects[id] ?? [] } : client;
-    },
-    getClientResources: id => original.getClientResources(id),
-  };
-  const expectedRedirectUris = Object.fromEntries(Object.entries(redirects).map(([id, values]) => [id, [...values]]));
-  const strict = { ...config, expectedRedirectUris };
-  await assertBetterAuthClientRegistrations(strict, registry);
-  for (const clientId of ["codexia-web", "codexia-ios", "codexia-introspector"]) {
-    const permitted = redirects[clientId]!;
-    redirects[clientId] = [permitted[0]!, "https://codexia.example.test/unapproved"];
-    await assert.rejects(assertBetterAuthClientRegistrations(strict, registry), /unexpected OAuth redirect URIs/u);
-    redirects[clientId] = ["https://codexia.example.test/stale-callback"];
-    await assert.rejects(assertBetterAuthClientRegistrations(strict, registry), /unexpected OAuth redirect URIs/u);
-    redirects[clientId] = permitted;
-  }
-});

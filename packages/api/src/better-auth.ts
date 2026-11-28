@@ -230,9 +230,13 @@ export async function assertBetterAuthClientRegistrations(
     const expected = config.expectedRedirectUris?.[clientId];
     if (!expected) return;
     const actual = stringList(client.redirectUris);
-    if (expected.length === 0 || new Set(expected).size !== expected.length ||
-        actual.length !== expected.length || new Set(actual).size !== actual.length ||
-        !expected.every(uri => actual.includes(uri))) {
+    if (
+      expected.length === 0 ||
+      new Set(expected).size !== expected.length ||
+      actual.length !== expected.length ||
+      new Set(actual).size !== actual.length ||
+      !expected.every(uri => actual.includes(uri))
+    ) {
       throw new Error(`Registered Better Auth client ${clientId} has unexpected OAuth redirect URIs`);
     }
   };
