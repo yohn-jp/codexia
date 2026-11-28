@@ -1026,7 +1026,7 @@ export function installWorkerHandler<TInput = unknown, TOutput = unknown>(
   const persistent = process.env.CODEXIA_WORKER_MODE === "service";
   let shuttingDown = false;
   const finishIfIdle = () => {
-    if (shuttingDown && active.size === 0 && process.connected) process.disconnect();
+    if (shuttingDown && active.size === 0 && process.connected) process.disconnect?.();
   };
   if (persistent) process.send?.({ type: "ready" });
   process.on("message", (message: unknown) => {
@@ -1059,7 +1059,7 @@ export function installWorkerHandler<TInput = unknown, TOutput = unknown>(
       if (encoded.bytes > MAX_JOB_OUTPUT_BYTES) throw new ModuleRuntimeError("job_output_too_large", `Job result exceeds ${MAX_JOB_OUTPUT_BYTES} UTF-8 bytes`);
       process.send?.({ type: "result", result: JSON.parse(encoded.text) }, () => {
         active.delete(request.id);
-        if (!persistent) process.disconnect();
+        if (!persistent) process.disconnect?.();
         else finishIfIdle();
       });
     }).catch((error: unknown) => {
@@ -1071,7 +1071,7 @@ export function installWorkerHandler<TInput = unknown, TOutput = unknown>(
       );
       process.send?.({ type: "error", id: request.id, snapshot: request.snapshot, error: machine }, () => {
         active.delete(request.id);
-        if (!persistent) process.disconnect();
+        if (!persistent) process.disconnect?.();
         else finishIfIdle();
       });
     });
