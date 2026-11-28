@@ -162,9 +162,21 @@ run_playbook() {
   local started_ms elapsed_ms
   started_ms=$(date +%s%3N)
   ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "$ANSIBLE_PLAYBOOK" -i "$tmp/inventory.yml" \
-    "$repo_root/deploy/ansible/site.yml" "${shared_vars[@]}" --extra-vars "@$vars" >"$tmp/$name.log" 2>&1 || status=$?
+    "$repo_root/deploy/ansible/site.yml" --extra-vars codexia_lifecycle_profile_backup=true "${shared_vars[@]}" --extra-vars "@$vars" >"$tmp/$name.log" 2>&1 || status=$?
   elapsed_ms=$(( $(date +%s%3N) - started_ms ))
   echo "LIFECYCLE_ANSIBLE_TIMING stage=$name duration_ms=$elapsed_ms status=$status"
+  local timings="$fixture_home/.local/state/codexia-deploy/backup-release.timings"
+  local phase seconds
+  if rootless test -f "$timings"; then
+    rootless cat "$timings" > "$tmp/backup-release.timings" || return 1
+    rootless rm -- "$timings" || return 1
+    while read -r phase seconds; do
+      [[ "$phase" =~ ^(extract_release|validate_release|stop_worker|recover_worker|start_worker)$ &&
+         "$seconds" =~ ^[0-9]+[.][0-9]{3}$ ]] || return 1
+      echo "LIFECYCLE_BACKUP_TIMING stage=$name phase=$phase seconds=$seconds" |
+        tee -a "$RUNNER_TEMP/codexia-push-app-lifecycle/backup-release-timings-bounded.log"
+    done < "$tmp/backup-release.timings"
+  fi
   redact_log "$tmp/$name.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/$name-bounded.log"
   return "$status"
 }
@@ -837,6 +849,10 @@ case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in
     ;;
 esac
 record_phase_timing "${CODEXIA_LIFECYCLE_SCENARIO}_transitions" "$scenario_started"
+if [[ "${CODEXIA_LIFECYCLE_SCENARIO}" == app && "${CODEXIA_BENCHMARK_BACKUP_RUNTIME:-false}" == true ]]; then
+  rootless python3 - < "$repo_root/deploy/ansible/benchmark-backup-extraction.py" |
+    tee "$RUNNER_TEMP/codexia-push-app-lifecycle/backup-extraction-bounded.log"
+fi
 node - "$report" <<'REPORT_COMPLETE'
 const fs=require('node:fs');const p=process.argv[2],r=JSON.parse(fs.readFileSync(p,'utf8'));r.status='PASS';r.updatedAt=new Date().toISOString();fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 REPORT_COMPLETE

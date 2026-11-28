@@ -1,6 +1,11 @@
 name: Push deployment app lifecycle
 on:
   workflow_dispatch:
+    inputs:
+      benchmark_backup_extraction:
+        description: Compare extraction methods on the disposable app host
+        type: boolean
+        default: false
   # Disposable hosts validate the *deployment transaction*, not every backend
   # feature change. Ordinary module/core work still has Verify, image and
   # browser proof, while startup/auth/DB/packaging/host inputs retain both
@@ -230,6 +235,22 @@ jobs:
           node --check scripts/deployment/lifecycle/auth-oidc.mjs
       - name: Install frozen CI evidence dependencies
         run: corepack pnpm@12.21.0 --filter @codexia/ci-evidence --fail-if-no-match install --prod --frozen-lockfile --ignore-scripts
+      - name: Select backup extraction comparison
+        if: matrix.scenario == 'app'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BENCHMARK_REQUESTED: ${{ inputs.benchmark_backup_extraction }}
+        run: |
+          set -euo pipefail
+          enabled=false
+          if [[ "$BENCHMARK_REQUESTED" == true ]]; then
+            enabled=true
+          elif [[ -n "$BASE_SHA" ]]; then
+            status=0
+            git diff --quiet "$BASE_SHA"...HEAD -- deploy/ansible/benchmark-backup-extraction.py || status=$?
+            case "$status" in 0) ;; 1) enabled=true ;; *) exit "$status" ;; esac
+          fi
+          echo "CODEXIA_BENCHMARK_BACKUP_RUNTIME=$enabled" >> "$GITHUB_ENV"
       - name: Run exact-source image selection and real app lifecycle fixture
         env:
           GH_TOKEN: ${{ github.token }}
