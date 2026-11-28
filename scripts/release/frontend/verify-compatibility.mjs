@@ -11,7 +11,7 @@ import { IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, readLiveJson } from '.
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const shaPattern = /^[a-f0-9]{40}$/u;
 const probes = JSON.parse(readFileSync(new URL('../../../deploy/cloudflare/identity-probes.json', import.meta.url), 'utf8'));
-assert.deepEqual({backend:probes.backend.path,frontend:probes.frontend.path},IDENTITY_PROBE_PATHS,'Terraform and shared identity probe paths disagree');
+assert.deepEqual({backend:probes.backend.path,frontend:probes.frontend.path},IDENTITY_PROBE_PATHS,'Cloudflare and shared identity probe paths disagree');
 
 function record(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

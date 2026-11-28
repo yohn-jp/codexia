@@ -431,7 +431,7 @@ export function createDeploymentEdge({
       typeof publicProtocolEnabled === 'boolean' && /^[a-z0-9-]+$/u.test(tunnelTeamName ?? ''),
     'Access policy IDs, Tunnel team and protocol ingress setting must be pinned');
     const host = target.hostname;
-    // Terraform iterates the JSON-decoded map in lexicographic key order.
+    // Match the canonical protocol entry order before the protected catch-all.
     const enabledProtocols = publicProtocolEnabled ? Object.keys(protocols).sort().map(key => protocols[key]) : [];
     const expectedPaths = ['', ...identityPaths, ...enabledProtocols.map(item => item.path)];
     // Positive absence requires an authenticated inventory, not a 404, failed
