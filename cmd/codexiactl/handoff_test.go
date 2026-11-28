@@ -14,6 +14,7 @@ import (
 )
 
 type handoffTestOperator struct {
+	method  int
 	answer  string
 	approve bool
 	grant   []byte
@@ -23,6 +24,9 @@ func (o *handoffTestOperator) Ask(string) (string, error)    { return o.answer, 
 func (o *handoffTestOperator) Confirm(string) (bool, error)  { return o.approve, nil }
 func (o *handoffTestOperator) Secret(string) ([]byte, error) { panic("unexpected secret input") }
 func (o *handoffTestOperator) Notice(string)                 {}
+func (o *handoffTestOperator) Select(string, []string) (int, error) {
+	return o.method, nil
+}
 func (o *handoffTestOperator) writeGrant(grant []byte) error {
 	o.grant = append(o.grant, grant...)
 	return nil
@@ -62,7 +66,7 @@ func TestHandoffConfirmsExistingRecipientAndDoesNotReplaceIt(t *testing.T) {
 }
 
 func TestHandoffGrantChecksRecipientOriginAndExpiryBeforeTTY(t *testing.T) {
-	o := &handoffTestOperator{answer: "key-on-vm", approve: true}
+	o := &handoffTestOperator{method: 1, approve: true}
 	handoff, err := chooseHandoff(o, "")
 	if err != nil || !handoff.Ephemeral() {
 		t.Fatalf("temporary key was not created: %v", err)

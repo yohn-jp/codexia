@@ -22,12 +22,20 @@ var (
 const githubPermissionNotice = "GitHub requires Metadata and Contents read, Actions and Environments read/write, and Administration read for OIDC settings. " +
 	"Changing branch restrictions requires Administration write with separate approval. The official App maintainer configures these permissions."
 
+const githubAppInstallationURL = "https://github.com/apps/codexiactl/installations/new"
+const githubAppSettingsURL = "https://github.com/organizations/yohn-jp/settings/apps"
+const githubDeviceURL = "https://github.com/login/device"
+const officialReleaseURL = "https://github.com/" + officialDistribution + "/releases"
+
 func githubLogin(ctx context.Context, o operator, clientID string) (*githubControl, error) {
 	if !githubAppClientIDPattern.MatchString(clientID) {
-		return nil, needsAction("The official release has no configured GitHub App Client ID. Ask the yohn-jp/codexia release maintainer to enable Device Flow and expiring user tokens in the public App at https://github.com/settings/apps, then bind its Client ID to the official release")
+		return nil, needsAction("This build has no valid official GitHub App Client ID. Download the current verified release at " + officialReleaseURL +
+			". If the release is affected, ask the yohn-jp maintainer to check CODEXIACTL_GITHUB_APP_CLIENT_ID and the official App settings at " + githubAppSettingsURL)
 	}
+	o.Notice("Before signing in, install the official CodexiaCTL App at " + githubAppInstallationURL +
+		". On your account or organization, choose Only select repositories and grant access to the intended codexia repository.")
 	o.Notice(githubPermissionNotice)
-	if err := requireApproval(o, "Start the official Codexia GitHub App Device Flow at https://github.com/login/device? The browser code expires within 15 minutes."); err != nil {
+	if err := requireApproval(o, "Start GitHub Device Flow for the official CodexiaCTL App? The browser code expires within 15 minutes."); err != nil {
 		return nil, err
 	}
 	credential, err := githubDeviceAccess(ctx, o, clientID, githubHTTPClient(20*time.Second))
@@ -46,6 +54,7 @@ func githubLogin(ctx context.Context, o operator, clientID string) (*githubContr
 	}
 	control.actor = user.GetLogin()
 	control.appClientID = clientID
+	o.Notice("Signed in to GitHub as " + control.actor + ". Checking repositories delegated to the CodexiaCTL App.")
 	return control, nil
 }
 
@@ -84,31 +93,61 @@ func githubDeviceAccess(ctx context.Context, o operator, clientID string, client
 			AuthStyle:     oauth2.AuthStyleInParams,
 		},
 	}
-	ctx = context.WithValue(ctx, oauth2.HTTPClient, client)
-	code, err := cfg.DeviceAuth(ctx)
+	code, err := githubStartDeviceAuth(ctx, &cfg, client)
 	if err != nil {
 		return nil, githubDeviceError(ctx, err, "start")
 	}
 	if !githubDeviceCodeValid(code, time.Now()) {
-		return nil, errors.New("GitHub returned an invalid Device Flow URL, code or lifetime")
+		return nil, errors.New("GitHub returned an invalid Device Flow URL, code or lifetime. Retry this command to request a fresh code")
 	}
-	// githubLogin has already confirmed an interactive terminal. The operator
-	// sends this notice only to its controlling TTY.
-	o.Notice(fmt.Sprintf("Open https://github.com/login/device on your computer and enter %s by %s UTC. SSH forwarding is unnecessary.",
-		code.UserCode, code.Expiry.UTC().Format("15:04:05")))
+	defer func() { code.DeviceCode = "" }()
+	err = privateNotice(o, fmt.Sprintf("Open %s on your computer. Sign in as the user with repository access and enter %s by %s UTC. SSH forwarding is unnecessary.",
+		githubDeviceURL, code.UserCode, code.Expiry.UTC().Format("15:04:05")))
 	code.UserCode = ""
-	tok, err := cfg.DeviceAccessToken(ctx, code)
-	code.DeviceCode = ""
+	if err != nil {
+		return nil, err
+	}
+	tok, err := cfg.DeviceAccessToken(context.WithValue(ctx, oauth2.HTTPClient, client), code)
 	if err != nil {
 		return nil, githubDeviceError(ctx, err, "complete")
 	}
 	if tok.Expiry.IsZero() || !tok.Expiry.After(time.Now()) || !strings.HasPrefix(tok.AccessToken, "ghu_") {
-		return nil, errors.New("GitHub did not return an expiring GitHub App user access token")
+		return nil, needsAction("GitHub did not return an expiring GitHub App user access token. Ask the yohn-jp maintainer to check Expire user authorization tokens at " + githubAppSettingsURL)
 	}
 	credential := []byte(tok.AccessToken)
 	tok.AccessToken = ""
 	tok.RefreshToken = ""
 	return credential, nil
+}
+
+// oauth2.DeviceAuth creates the initial request without the supplied context.
+// Bind its HTTP request to the command and preserve the configured time limit.
+func githubStartDeviceAuth(ctx context.Context, cfg *oauth2.Config, client *http.Client) (*oauth2.DeviceAuthResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	startClient := *client
+	if startClient.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, startClient.Timeout)
+		defer cancel()
+		startClient.Timeout = 0
+	}
+	next := startClient.Transport
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	startClient.Transport = githubDeviceStartTransport{ctx: ctx, next: next}
+	return cfg.DeviceAuth(context.WithValue(ctx, oauth2.HTTPClient, &startClient))
+}
+
+type githubDeviceStartTransport struct {
+	ctx  context.Context
+	next http.RoundTripper
+}
+
+func (t githubDeviceStartTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return t.next.RoundTrip(r.WithContext(t.ctx))
 }
 
 func githubDeviceCodeValid(code *oauth2.DeviceAuthResponse, now time.Time) bool {
@@ -127,20 +166,28 @@ func githubDeviceError(ctx context.Context, err error, phase string) error {
 		return context.Canceled
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return errors.New("GitHub Device Flow expired or its endpoint timed out")
+		return errors.New("GitHub Device Flow expired or its endpoint timed out. Check GitHub connectivity and retry this command for a fresh code")
 	}
 	var oauthErr *oauth2.RetrieveError
 	if errors.As(err, &oauthErr) {
+		if phase == "start" && oauthErr.Response != nil && oauthErr.Response.StatusCode == http.StatusNotFound {
+			return githubDeviceAppUnavailable()
+		}
 		switch oauthErr.ErrorCode {
 		case "access_denied":
-			return errors.New("GitHub Device Flow was denied by the browser user")
+			return refused("GitHub Device Flow was denied in the browser. Retry this command and authorize the official CodexiaCTL App as the intended GitHub user")
 		case "expired_token":
-			return errors.New("GitHub Device Flow code expired")
-		case "device_flow_disabled", "incorrect_client_credentials":
-			return errors.New("The release's GitHub App must be configured to support Device Flow")
+			return needsAction("GitHub Device Flow code expired. Retry this command and enter the new code before its deadline")
+		case "device_flow_disabled", "incorrect_client_credentials", "client_id_not_found":
+			return githubDeviceAppUnavailable()
 		}
 	}
-	return errors.New("Could not " + phase + " the GitHub Device Flow")
+	return errors.New("Could not " + phase + " GitHub Device Flow. Check access to https://github.com and retry this command")
+}
+
+func githubDeviceAppUnavailable() error {
+	return needsAction("GitHub could not authorize this release's App. Use the current verified release at " + officialReleaseURL +
+		" or ask the yohn-jp maintainer to check Device Flow and the Client ID at " + githubAppSettingsURL)
 }
 
 func newGitHubControl(token []byte) (*githubControl, error) {

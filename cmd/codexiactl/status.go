@@ -52,26 +52,40 @@ func readOnly(ctx context.Context, i invocation, stdout, stderr io.Writer) int {
 			return reportError(ctx, stderr, fmt.Errorf("could not write inspection result"))
 		}
 	} else {
-		fmt.Fprintf(stdout, "%s (%d) VM %s\n%s on %s. Route %s. ACTIVE: %s. ACCEPTED: %s. Ordinary update: %s.\n",
-			status.Repository, status.RepositoryID, status.HostID, status.Phase, status.MainSHA,
-			status.Route, status.Active, status.Accepted, status.OrdinaryUpdate)
-		if status.EvidenceObservedAt != nil {
-			fmt.Fprintln(stdout, "Lifecycle evidence observed at", status.EvidenceObservedAt.Format(time.RFC3339Nano))
-		}
-		for _, blocker := range status.Blockers {
-			fmt.Fprintln(stdout, "Blocker:", blocker)
-			if guidance := blockerGuidance(blocker); guidance != "" {
-				fmt.Fprintln(stdout, "  Next:", guidance)
-			}
-		}
-		if len(status.Runs) > 0 {
-			fmt.Fprintln(stdout, "Latest recorded workflow per lane (history available with --json):")
-		}
-		for _, run := range latestWorkflowSummary(status.Runs) {
-			fmt.Fprintln(stdout, " ", run.Workflow, run.Status, run.Conclusion, status.target.runLink(run.ID))
-		}
+		renderStatus(stdout, status)
 	}
 	return reportError(ctx, stderr, err)
+}
+
+func renderStatus(out io.Writer, status statusReport) {
+	repo := status.Repository
+	if repo == "" {
+		repo = "repository unverified"
+	} else {
+		repo = fmt.Sprintf("%s (%d)", repo, status.RepositoryID)
+	}
+	printTerminalLine(out, headingText, fmt.Sprintf("%s | VM %s", repo, stateValue(status.HostID)))
+	printTerminalLine(out, bodyText, fmt.Sprintf("%s on %s | Route %s | ACTIVE: %s | ACCEPTED: %s | Ordinary update: %s",
+		status.Phase, stateValue(status.MainSHA), status.Route, status.Active, status.Accepted, status.OrdinaryUpdate))
+	if status.PublicOrigin != "" {
+		printTerminalLine(out, detailText, "Public origin "+status.PublicOrigin)
+	}
+	if status.EvidenceObservedAt != nil {
+		printTerminalLine(out, detailText, "Lifecycle evidence observed at "+status.EvidenceObservedAt.Format(time.RFC3339Nano))
+	}
+	for _, blocker := range status.Blockers {
+		printTerminalLine(out, warningText, "Blocker: "+blocker)
+		if guidance := blockerGuidance(blocker); guidance != "" {
+			printTerminalLine(out, bodyText, "  Next: "+guidance)
+		}
+	}
+	if len(status.Runs) > 0 {
+		printTerminalLine(out, headingText, "Latest recorded workflow per lane (history available with --json)")
+	}
+	for _, run := range latestWorkflowSummary(status.Runs) {
+		printTerminalLine(out, bodyText, fmt.Sprintf("  %s | %s | %s | %s", run.Workflow, run.Status,
+			stateValue(run.Conclusion), status.target.runLink(run.ID)))
+	}
 }
 
 func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) error {
@@ -147,7 +161,9 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 		providerErr = inspectProviders(ctx, tty, vm, gh, snapshot, settings, report)
 	}
 	if i.plan {
-		tty.Notice("Proposed operations: register missing protected inputs, run protected read-only SSH and lifecycle checks, then follow the admitted route through R4 and R5. Each write and workflow dispatch requires separate approval.")
+		tty.Notice("If the prerequisites are satisfied, init reviews missing protected inputs, requests the management SSH and lifecycle checks, then uses the admitted R4 and R5 route.")
+		tty.Notice("Workflows: " + bootstrapFile + " for SSH, R4 and Owner setup; " + preflightFile + " for lifecycle evidence; " + frontendFile + " for initial Frontend publication.")
+		tty.Notice("Each write and dispatch requires explicit approval in the terminal. Protected jobs may also require a separate GitHub Environment reviewer.")
 	}
 	if err := errors.Join(snapshotErr, oidcErr, targetErr, historyErr, providerErr); err != nil {
 		return err
@@ -181,7 +197,7 @@ func blockerGuidance(blocker string) string {
 	case "interactive-authentication-required":
 		return "Reconnect to the target VM over a real interactive SSH terminal (ssh -t), not a pipe or CI stdin. Read-only provider access is authenticated through /dev/tty."
 	case "github-authentication-unverified":
-		return "Use the official Codexia GitHub App with Device Flow and install it on only the intended codexia repository."
+		return "Install the official Codexia GitHub App on only the intended codexia repository at " + githubAppInstallationURL + ", then reconnect with Device Flow."
 	case "independent-restore-acceptance-unverified":
 		return "The app can be ACTIVE, but ACCEPTED requires independent verified backup restoration and protected recovery evidence. Use the existing Backup and Restore runbooks; a green CI job is insufficient."
 	case "live-deployment-state-unverified":
@@ -246,6 +262,9 @@ func reportProtectedInputs(snapshot githubSnapshot, report *statusReport) {
 func inspectProviders(ctx context.Context, o operator, vm vmObservation, gh *githubControl, snapshot githubSnapshot, settings productionContract, report *statusReport) error {
 	var failures []error
 	tailnet, tailErr := prepareTailnet(ctx, o, vm, gh, snapshot, true)
+	if ctx.Err() != nil || errors.Is(tailErr, errTerminalInterrupt) {
+		return errors.Join(ctx.Err(), tailErr)
+	}
 	if tailErr != nil {
 		report.Blockers = append(report.Blockers, "tailnet-identity-or-policy-unverified")
 		o.Notice("Tailscale check: " + tailErr.Error())
@@ -257,6 +276,9 @@ func inspectProviders(ctx context.Context, o operator, vm vmObservation, gh *git
 	if tailErr == nil {
 		var pinErr error
 		pin, pinErr = vm.ConfirmPin(o, tailnet.Address)
+		if ctx.Err() != nil || errors.Is(pinErr, errTerminalInterrupt) {
+			return errors.Join(ctx.Err(), pinErr)
+		}
 		if pinErr != nil {
 			report.Blockers = append(report.Blockers, "ssh-host-pin-unverified")
 			o.Notice("SSH identity check: " + pinErr.Error())
@@ -297,8 +319,12 @@ func inspectProviders(ctx context.Context, o operator, vm vmObservation, gh *git
 		report.Blockers = append(report.Blockers, "existing-protected-input-mismatch")
 		return err
 	}
-	if len(missing)+len(missingSecrets(snapshot)) > 0 {
+	absent := append(missing, missingSecrets(snapshot)...)
+	if len(absent) > 0 {
 		report.Blockers = append(report.Blockers, "protected-inputs-missing")
+		for _, input := range absent {
+			o.Notice("Missing protected input " + input.environment + "/" + input.name)
+		}
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -76,10 +77,17 @@ func TestGitHubFindsInstalledCodexiaAcrossPages(t *testing.T) {
 
 type selectionOperator struct {
 	githubTestOperator
-	answer string
+	index int
+	err   error
 }
 
-func (o *selectionOperator) Ask(string) (string, error) { return o.answer, nil }
+func (o *selectionOperator) Select(_ string, options []string) (int, error) {
+	if len(options) != 2 || !strings.Contains(options[0], "yohn-jp/codexia") ||
+		!strings.Contains(options[1], "Fork-Org/codexia") || !strings.Contains(options[1], "5562") {
+		return 0, fmt.Errorf("unexpected candidates: %v", options)
+	}
+	return o.index, o.err
+}
 
 func TestGitHubTargetSelectionAndCheckpointBinding(t *testing.T) {
 	official := githubTestTarget
@@ -89,16 +97,18 @@ func TestGitHubTargetSelectionAndCheckpointBinding(t *testing.T) {
 	for _, tt := range []struct {
 		name       string
 		candidates []githubTarget
-		answer     string
+		index      int
+		selectErr  error
 		checkpoint checkpoint
 		want       githubTarget
 	}{
 		{name: "zero", candidates: nil},
 		{name: "one", candidates: []githubTarget{fork}, want: fork},
-		{name: "confirm-observed-fork", candidates: []githubTarget{official, fork}, answer: "5562", want: fork},
-		{name: "confirm-observed-official", candidates: []githubTarget{official, fork}, answer: "1450072993", want: official},
-		{name: "cancel", candidates: []githubTarget{official, fork}},
-		{name: "arbitrary-repo", candidates: []githubTarget{official, fork}, answer: "https://github.com/Fork-Org/codexia"},
+		{name: "confirm-observed-fork", candidates: []githubTarget{official, fork}, index: 1, want: fork},
+		{name: "confirm-observed-official", candidates: []githubTarget{official, fork}, want: official},
+		{name: "cancel", candidates: []githubTarget{official, fork}, selectErr: context.Canceled},
+		{name: "arbitrary-repo", candidates: []githubTarget{official, fork}, index: 2},
+		{name: "unset-selection", candidates: []githubTarget{official, fork}, index: -1},
 		{name: "resume-original", candidates: []githubTarget{official, fork}, checkpoint: saved, want: fork},
 		{name: "unavailable-checkpoint-target", candidates: []githubTarget{official}, checkpoint: saved},
 		{name: "same-name-different-repository", candidates: []githubTarget{{Owner: fork.Owner, OwnerID: fork.OwnerID, RepoID: 12, InstallationID: fork.InstallationID}}, checkpoint: saved},
@@ -107,9 +117,12 @@ func TestGitHubTargetSelectionAndCheckpointBinding(t *testing.T) {
 		{name: "reinstalled-app", candidates: []githubTarget{{Owner: fork.Owner, OwnerID: fork.OwnerID, RepoID: fork.RepoID, InstallationID: 72}}, checkpoint: saved},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := chooseGitHubTarget(&selectionOperator{answer: tt.answer}, tt.candidates, tt.checkpoint)
+			got, err := chooseGitHubTarget(&selectionOperator{index: tt.index, err: tt.selectErr}, tt.candidates, tt.checkpoint)
 			if got != tt.want || (err == nil) != tt.want.valid() {
 				t.Fatalf("got %v (%v), want %v", got, err, tt.want)
+			}
+			if tt.selectErr != nil && !errors.Is(err, tt.selectErr) {
+				t.Fatalf("selection error = %v, want %v", err, tt.selectErr)
 			}
 		})
 	}
@@ -117,9 +130,27 @@ func TestGitHubTargetSelectionAndCheckpointBinding(t *testing.T) {
 
 func TestGitHubLoginDoesNotPromptForCredentialsWithoutOfficialApp(t *testing.T) {
 	for _, id := range []string{"", "OAuth-client-id", "https://github.com/"} {
-		if gh, err := githubLogin(context.Background(), &githubTestOperator{}, id); gh != nil || err == nil {
+		o := new(githubTestOperator)
+		if gh, err := githubLogin(context.Background(), o, id); gh != nil || err == nil ||
+			!strings.Contains(err.Error(), "https://github.com/yohn-jp/codexia/releases") ||
+			!strings.Contains(err.Error(), "CODEXIACTL_GITHUB_APP_CLIENT_ID") || len(o.notices) != 0 {
 			t.Fatalf("unconfigured official App login = %v, %v", gh, err)
 		}
+	}
+}
+
+func TestGitHubTargetDiscoveryRejectsForeignAppInstallation(t *testing.T) {
+	g := newTestGitHubFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/installations" {
+			t.Errorf("unexpected request %s", r.URL.Path)
+			return
+		}
+		githubTestJSON(t, w, map[string]any{"total_count": 1, "installations": []any{
+			map[string]any{"id": 1, "client_id": "Iv23liForeignFixture"},
+		}})
+	})
+	if _, err := g.discoverTargets(context.Background()); err == nil {
+		t.Fatal("accepted installation from another GitHub App")
 	}
 }
 

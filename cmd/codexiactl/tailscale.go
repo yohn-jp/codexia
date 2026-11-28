@@ -91,17 +91,7 @@ func prepareTailnet(ctx context.Context, o operator, vm vmObservation, gh *githu
 	if err != nil {
 		return tailnetObservation{}, err
 	}
-	if local.BackendState == "NeedsMachineAuth" && !plan {
-		o.Notice("The device is awaiting approval in https://login.tailscale.com/admin/machines. Approve only this VM's independent Tailnet identity.")
-		local, err = waitForTailnetApproval(ctx)
-		if err != nil {
-			return tailnetObservation{}, err
-		}
-	}
-	if local.BackendState != "Running" {
-		if plan || !freshTailnetProfile(local) {
-			return tailnetObservation{}, needsAction("Tailscale node is not ready; confirm its existing profile, device approval and service in the official Machines console")
-		}
+	if !plan && freshTailnetProfile(local) {
 		if err := confirmIndependentSSH(o, vm); err != nil {
 			return tailnetObservation{}, err
 		}
@@ -119,6 +109,17 @@ func prepareTailnet(ctx context.Context, o operator, vm vmObservation, gh *githu
 		if err != nil {
 			return tailnetObservation{}, err
 		}
+	}
+	if !plan && (local.BackendState == "NeedsMachineAuth" || local.BackendState == "Starting") {
+		o.Notice("Waiting for the node to finish connecting. If device approval is required, approve only this VM in the intended Tailnet at https://login.tailscale.com/admin/machines.")
+		local, err = waitForTailnetApproval(ctx)
+		if err != nil {
+			return tailnetObservation{}, err
+		}
+	}
+	if local.BackendState != "Running" {
+		return tailnetObservation{}, needsAction("Tailscale node is " + stateValue(local.BackendState) +
+			". Check this VM's profile and approval in https://login.tailscale.com/admin/machines and verify the tailscaled service before retrying")
 	}
 
 	identity, err := local.identity()
@@ -139,7 +140,7 @@ func prepareTailnet(ctx context.Context, o operator, vm vmObservation, gh *githu
 	defer clear(token)
 	token = bytes.TrimSpace(token)
 	if !tailnetToken.Match(token) {
-		return identity, errors.New("expected a Tailscale administration access token")
+		return identity, errors.New("Expected a Tailscale administration API access token or scoped management credential from https://login.tailscale.com/admin/settings/keys")
 	}
 
 	client := &ts.Client{
@@ -203,7 +204,10 @@ func waitForTailnetApproval(ctx context.Context) (localTailnet, error) {
 	for {
 		select {
 		case <-wait.Done():
-			return localTailnet{}, needsAction("Tailscale device approval did not complete before the deadline")
+			if ctx.Err() != nil {
+				return localTailnet{}, ctx.Err()
+			}
+			return localTailnet{}, needsAction("Tailscale did not finish connecting before the deadline. Check this VM's approval at https://login.tailscale.com/admin/machines, then run codexiactl init again")
 		case <-time.After(3 * time.Second):
 		}
 		local, err := observeLocalTailnet(wait)
@@ -253,11 +257,16 @@ func joinTailnet(ctx context.Context, o operator) error {
 			return errors.New("official Tailscale CLI returned an unexpected node authentication URL")
 		}
 		displayedURL = message.AuthURL
-		o.Notice("On your own browser, sign in to the intended Tailnet. This node link expires and requires no port forwarding: " + message.AuthURL)
+		if err := privateNotice(o, "On your own browser, sign in to the intended Tailnet. This node link expires and requires no port forwarding: "+message.AuthURL); err != nil {
+			return err
+		}
 		o.Notice("When required, approve the VM in https://login.tailscale.com/admin/machines.")
 	}
 	if err := cmd.Wait(); err != nil {
-		return errors.New("the Tailscale node login was denied, interrupted, or did not finish before its deadline")
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return errors.New("Tailscale node login did not complete. Confirm the browser login and this VM's approval at https://login.tailscale.com/admin/machines, then run codexiactl init again")
 	}
 	return nil
 }

@@ -13,14 +13,29 @@ source_sha=$(git rev-parse HEAD)
 version=${CODEXIACTL_BUILD_VERSION:-dev}
 client_id=${CODEXIACTL_BUILD_APP_CLIENT_ID:-}
 if [[ ! "$source_sha" =~ ^[a-f0-9]{40}$ || "$source_sha" != "${CODEXIACTL_BUILD_SOURCE:-$source_sha}" ]] ||
-   [[ "$version" != dev && ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] ||
-   [[ -n "$client_id" && ! "$client_id" =~ ^Iv[0-9A-Za-z.]{10,62}$ ]]; then
-  echo 'Invalid codexiactl release source, version, or GitHub App client ID.' >&2
+   [[ "$version" != dev && ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+  echo 'Invalid codexiactl release source or version.' >&2
+  exit 1
+fi
+if [[ -n "$client_id" && ! "$client_id" =~ ^Iv[0-9A-Za-z.]{10,62}$ ]]; then
+  echo 'CODEXIACTL_GITHUB_APP_CLIENT_ID has an invalid GitHub App Client ID format.' >&2
   exit 1
 fi
 if [[ "$version" != dev && -z "$client_id" ]]; then
   echo 'Set the official App public Client ID in the publisher repository variable CODEXIACTL_GITHUB_APP_CLIENT_ID before releasing CodexiaCTL.' >&2
   exit 1
+fi
+if [[ "$version" != dev ]]; then
+  if ! official_client_id=$(gh api --hostname github.com apps/codexiactl \
+      --jq 'select(.slug == "codexiactl" and .owner.login == "yohn-jp") | .client_id') ||
+      [[ -z "$official_client_id" ]]; then
+    echo 'Could not verify the public CodexiaCTL GitHub App at https://api.github.com/apps/codexiactl. Check App visibility and GitHub API access before retrying.' >&2
+    exit 1
+  fi
+  if [[ "$client_id" != "$official_client_id" ]]; then
+    echo 'CODEXIACTL_GITHUB_APP_CLIENT_ID does not match the official CodexiaCTL GitHub App owned by yohn-jp.' >&2
+    exit 1
+  fi
 fi
 
 unformatted=$(gofmt -l "$module")
