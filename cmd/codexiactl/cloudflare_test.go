@@ -42,7 +42,7 @@ func TestCloudflareDenialAndRedirectKeepSecretsOutOfDiagnostics(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Location", other.URL)
 				w.WriteHeader(tc.code)
-				fmt.Fprint(w, tc.body)
+				_, _ = fmt.Fprint(w, tc.body)
 			}))
 			defer server.Close()
 			api := newCloudflareAPI([]byte(apiToken), server.URL+"/")
@@ -56,7 +56,12 @@ func TestCloudflareDenialAndRedirectKeepSecretsOutOfDiagnostics(t *testing.T) {
 
 func cloudflareManifest(t *testing.T, name string) []byte {
 	t.Helper()
-	content, err := os.ReadFile(filepath.Join("..", "..", "deploy", "cloudflare", name))
+	root, err := os.OpenRoot(filepath.Join("..", "..", "deploy", "cloudflare"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = root.Close() })
+	content, err := root.ReadFile(name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,8 +71,10 @@ func cloudflareManifest(t *testing.T, name string) []byte {
 func cloudflareTestEnvelope(t *testing.T, writer http.ResponseWriter, result any) {
 	t.Helper()
 	writer.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(writer).Encode(map[string]any{"success": true, "errors": []any{}, "result": result,
-		"result_info": map[string]int{"total_pages": 1}}); err != nil {
+	if err := json.NewEncoder(writer).Encode(map[string]any{
+		"success": true, "errors": []any{}, "result": result,
+		"result_info": map[string]int{"total_pages": 1},
+	}); err != nil {
 		t.Error(err)
 	}
 }
@@ -94,6 +101,7 @@ func (o cloudflareTestOperator) Confirm(string) (bool, error) { return o.approve
 func (o cloudflareTestOperator) Ask(string) (string, error) {
 	return "", errors.New("unexpected prompt")
 }
+
 func (o cloudflareTestOperator) Secret(string) ([]byte, error) {
 	return nil, errors.New("unexpected secret prompt")
 }
@@ -104,8 +112,10 @@ func TestProtectedCloudflareTargetRejectsAnotherRepositoryWithSameOrigin(t *test
 	const origin = "https://codexia.fork.example"
 	const managementHost = "codexia-ssh.fork.example"
 	const sshPolicyID = "00000000-0000-0000-0000-000000000001"
-	target := cloudflareTarget{Repository: fork.FullName(), RepositoryID: fork.RepoID, OwnerID: fork.OwnerID, Origin: origin,
-		SSHHostname: managementHost, SSHPolicyID: sshPolicyID}
+	target := cloudflareTarget{
+		Repository: fork.FullName(), RepositoryID: fork.RepoID, OwnerID: fork.OwnerID, Origin: origin,
+		SSHHostname: managementHost, SSHPolicyID: sshPolicyID,
+	}
 	check := func(value cloudflareTarget, repo githubTarget, requestedOrigin, requestedManagementHost string) error {
 		data, err := json.Marshal(value)
 		if err != nil {

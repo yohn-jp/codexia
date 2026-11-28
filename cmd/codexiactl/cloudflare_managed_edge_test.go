@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -279,6 +280,13 @@ func (f fixtureCFCommand) run(ctx context.Context, args ...string) ([]byte, erro
 
 func TestManagedEdgeUsesPublicCFCommandsAndPrivateJSONBody(t *testing.T) {
 	spec, _ := managedEdgeFixture(t)
+	dir := t.TempDir()
+	t.Setenv("TMPDIR", dir)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = root.Close() })
 	var paths []string
 	cf := fixtureCFCommand(func(_ context.Context, args ...string) ([]byte, error) {
 		if len(args) != 6 || !slices.Equal(args[:3], []string{"zero-trust", "access", "policies"}) ||
@@ -291,7 +299,10 @@ func TestManagedEdgeUsesPublicCFCommandsAndPrivateJSONBody(t *testing.T) {
 		if err != nil || stat.Mode().Perm() != 0o600 {
 			t.Fatalf("request payload is not private: %v", err)
 		}
-		data, err := os.ReadFile(path)
+		if filepath.Dir(path) != dir {
+			t.Fatal("request escaped the test's private directory")
+		}
+		data, err := root.ReadFile(filepath.Base(path))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -302,8 +313,10 @@ func TestManagedEdgeUsesPublicCFCommandsAndPrivateJSONBody(t *testing.T) {
 		return []byte(`{"id":"10000000-0000-4000-8000-000000000099"}`), nil
 	})
 	provider := managedEdgeProvider{cf: cf, spec: spec}
-	change := managedEdgeChange{Key: "create policy identity-probe", Method: http.MethodPost,
-		Path: "accounts/" + spec.AccountID + "/access/policies", Body: map[string]string{"decision": "non_identity"}}
+	change := managedEdgeChange{
+		Key: "create policy identity-probe", Method: http.MethodPost,
+		Path: "accounts/" + spec.AccountID + "/access/policies", Body: map[string]string{"decision": "non_identity"},
+	}
 	if err := provider.Apply(context.Background(), change); err != nil {
 		t.Fatal(err)
 	}
@@ -355,8 +368,10 @@ func TestManagedEdgeWorkerRoutingUsesScopedTypedSDK(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&data); err != nil || !reflect.DeepEqual(data, workerBody) {
 				t.Errorf("Worker creation payload differs from approved empty worker: %v", data)
 			}
-			result = map[string]any{"id": "new-worker-id", "name": cloudflareWorker,
-				"subdomain": workerBody["subdomain"]}
+			result = map[string]any{
+				"id": "new-worker-id", "name": cloudflareWorker,
+				"subdomain": workerBody["subdomain"],
+			}
 		default:
 			t.Errorf("unknown SDK request %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -366,7 +381,8 @@ func TestManagedEdgeWorkerRoutingUsesScopedTypedSDK(t *testing.T) {
 	}))
 	defer server.Close()
 	api := newCloudflareAPI([]byte(apiToken), server.URL+"/")
-	provider := managedEdgeProvider{spec: spec, reader: api,
+	provider := managedEdgeProvider{
+		spec: spec, reader: api,
 		routeWriter:  func(context.Context) (cloudflareAPI, error) { return api, nil },
 		workerWriter: func(context.Context) (cloudflareAPI, error) { return api, nil },
 	}
@@ -377,8 +393,10 @@ func TestManagedEdgeWorkerRoutingUsesScopedTypedSDK(t *testing.T) {
 		state.CustomDomainConflict {
 		t.Fatalf("Worker route observation failed: %+v %v", state.Routes, err)
 	}
-	route := managedEdgeChange{Method: http.MethodPost, Path: "zones/" + spec.ZoneID + "/workers/routes",
-		Body: map[string]any{"pattern": pattern, "script": cloudflareWorker}}
+	route := managedEdgeChange{
+		Method: http.MethodPost, Path: "zones/" + spec.ZoneID + "/workers/routes",
+		Body: map[string]any{"pattern": pattern, "script": cloudflareWorker},
+	}
 	if err := provider.Apply(ctx, route); err != nil {
 		t.Fatal(err)
 	}
@@ -531,5 +549,55 @@ func TestManagedEdgeReobservesResponseLossAndResumesWithoutReplay(t *testing.T) 
 	plan, err = reconcileManagedEdge(ctx, api, spec, approve, guard)
 	if err != nil || len(plan) != 0 || approvals != 2 || api.writes != 2 {
 		t.Fatalf("idempotent run changed the converged state: %+v, %v, writes=%d", plan, err, api.writes)
+	}
+}
+
+func TestManagedEdgeOfficialCFInventoryRequiresIndependentRoutingProof(t *testing.T) {
+	spec, _ := managedEdgeFixture(t)
+	const tunnelID = "10000000-0000-4000-8000-000000000123"
+	const appID = "10000000-0000-4000-8000-000000000124"
+	aud := strings.Repeat("d", 64)
+	const paged = " --page 1 --per-page 50"
+	zone := []cfZone{{ID: spec.ZoneID, Name: "example.com", Status: "active", Account: struct{ ID string }{spec.AccountID}}}
+	app := map[string]any{
+		"id": appID, "aud": aud, "domain": spec.Host, "type": "self_hosted",
+		"allowed_idps": spec.AllowedIDPs, "policies": []map[string]any{{"id": spec.AuthorPolicyID, "decision": "allow", "precedence": 1}},
+	}
+	results := map[string]any{
+		"zones list --name " + spec.Host + paged:           []any{},
+		"zones list --name " + spec.ManagementHost + paged: []any{},
+		"zones list --name example.com" + paged:            zone,
+		"tunnels list --name codexia --is-deleted=false --tun-types cfd_tunnel" + paged: []managedEdgeTunnel{
+			{ID: tunnelID, Name: cloudflareTunnel, AccountTag: spec.AccountID, ConfigSrc: "cloudflare"},
+		},
+		"dns records list --zone " + spec.ZoneID + " --name-exact " + spec.Host + paged:           []any{},
+		"dns records list --zone " + spec.ZoneID + " --name-exact " + spec.ManagementHost + paged: []any{},
+		"workers list" + paged:                        []any{},
+		"zero-trust access applications list" + paged: []any{app},
+		"zero-trust access policies list" + paged:     []any{},
+		"zero-trust identity-providers list" + paged:  []managedEdgeIdentityProvider{{ID: spec.AllowedIDPs[0], Name: "Fixture"}},
+		"zero-trust organization get":                 map[string]string{"auth_domain": spec.TeamName + ".cloudflareaccess.com"},
+		"zero-trust access applications get " + appID: app,
+		"tunnels config get " + tunnelID: map[string]any{
+			"tunnel_id": tunnelID, "account_id": spec.AccountID, "source": "cloudflare",
+			"config": map[string][]any{"ingress": {}},
+		},
+	}
+	calls := 0
+	provider := managedEdgeProvider{spec: spec, cf: fixtureCFCommand(func(_ context.Context, args ...string) ([]byte, error) {
+		calls++
+		key := strings.Join(args, " ")
+		result, ok := results[key]
+		if !ok {
+			t.Fatalf("unexpected cf observation command %q", key)
+		}
+		return json.Marshal(result)
+	})}
+	state, err := provider.Observe(context.Background(), spec)
+	if err == nil || !strings.Contains(err.Error(), "separately issued and verified bounded observation credential") ||
+		calls != len(results)+1 || state.TeamName != spec.TeamName ||
+		len(state.Tunnels) != 1 || state.Tunnels[0].ID != tunnelID ||
+		len(state.AppPolicies[appID]) != 1 || state.AppPolicies[appID][0].ID != spec.AuthorPolicyID {
+		t.Fatalf("read-only observation did not record available inventory with incomplete routing proof: calls=%d err=%v", calls, err)
 	}
 }

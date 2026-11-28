@@ -77,7 +77,7 @@ func (p managedEdgeProvider) Observe(ctx context.Context, spec managedEdgeSpec) 
 func (p managedEdgeProvider) observeAccount(ctx context.Context, spec managedEdgeSpec) (managedEdgeInventory, error) {
 	var state managedEdgeInventory
 	var err error
-	if state.Tunnels, err = cfList[managedEdgeTunnel](ctx, p.cf, "tunnels", "list", "--name", cloudflareTunnel, "--is-deleted=false"); err != nil {
+	if state.Tunnels, err = cfList[managedEdgeTunnel](ctx, p.cf, "tunnels", "list", "--name", cloudflareTunnel, "--is-deleted=false", "--tun-types", "cfd_tunnel"); err != nil {
 		return state, err
 	}
 	for _, host := range []string{spec.Host, spec.ManagementHost} {
@@ -101,7 +101,7 @@ func (p managedEdgeProvider) observeAccount(ctx context.Context, spec managedEdg
 	}
 	for _, provider := range state.Providers {
 		if !cloudflareUUID.MatchString(provider.ID) || slices.Contains(state.IdentityProviders, provider.ID) {
-			return state, errors.New("Invalid Cloudflare identity provider inventory")
+			return state, errors.New("invalid Cloudflare identity provider inventory")
 		}
 		state.IdentityProviders = append(state.IdentityProviders, provider.ID)
 	}
@@ -114,7 +114,7 @@ func (p managedEdgeProvider) observeAccount(ctx context.Context, spec managedEdg
 	authDomain := strings.TrimPrefix(organization.AuthDomain, "https://")
 	team, ok := strings.CutSuffix(authDomain, ".cloudflareaccess.com")
 	if !ok || !cloudflareTeam.MatchString(team) {
-		return state, errors.New("Cloudflare Access organization did not identify its team")
+		return state, errors.New("cloudflare Access organization did not identify its team")
 	}
 	state.TeamName = team
 	if spec.TeamName != "" && team != spec.TeamName {
@@ -126,18 +126,18 @@ func (p managedEdgeProvider) observeAccount(ctx context.Context, spec managedEdg
 			continue
 		}
 		if !cloudflareUUID.MatchString(app.ID) {
-			return state, errors.New("Invalid Cloudflare Access application identity")
+			return state, errors.New("invalid Cloudflare Access application identity")
 		}
 		detail, err := cfResult[managedEdgeApp](ctx, p.cf, "zero-trust", "access", "applications", "get", app.ID)
 		if err != nil {
 			return state, err
 		}
 		if detail.ID != app.ID || detail.Domain != app.Domain || detail.AUD != app.AUD || detail.Policies == nil {
-			return state, errors.New("Cloudflare Access application and its attached policies could not be bound to the inventory")
+			return state, errors.New("cloudflare Access application and its attached policies could not be bound to the inventory")
 		}
 		for _, policy := range detail.Policies {
 			if !cloudflareUUID.MatchString(policy.ID) {
-				return state, errors.New("Invalid Cloudflare Access application policy identity")
+				return state, errors.New("invalid Cloudflare Access application policy identity")
 			}
 		}
 		slices.SortFunc(detail.Policies, compareCloudflarePolicyPrecedence)
@@ -149,7 +149,7 @@ func (p managedEdgeProvider) observeAccount(ctx context.Context, spec managedEdg
 			continue
 		}
 		if !cloudflareUUID.MatchString(tunnel.ID) || tunnel.AccountTag != spec.AccountID || tunnel.ConfigSrc != "cloudflare" {
-			return state, errors.New("Invalid Cloudflare Tunnel identity")
+			return state, errors.New("invalid Cloudflare Tunnel identity")
 		}
 		config, err := cfResult[struct {
 			TunnelID  string `json:"tunnel_id"`
@@ -161,7 +161,7 @@ func (p managedEdgeProvider) observeAccount(ctx context.Context, spec managedEdg
 			return state, err
 		}
 		if config.TunnelID != tunnel.ID || config.AccountID != spec.AccountID || config.Source != "cloudflare" {
-			return state, errors.New("Cloudflare Tunnel configuration identity differs")
+			return state, errors.New("cloudflare Tunnel configuration identity differs")
 		}
 		state.TunnelConfig = config.Config
 	}
@@ -174,7 +174,7 @@ func observeManagedWorkerRouting(ctx context.Context, api cloudflareAPI, spec ma
 		return cloudflareError("Worker Routes inventory", err)
 	}
 	if items == nil || items.JSON.Result.IsInvalid() || items.JSON.Result.IsNull() {
-		return errors.New("Cloudflare Worker Routes inventory is not verifiable")
+		return errors.New("cloudflare Worker Routes inventory is not verifiable")
 	}
 	for _, item := range items.Result {
 		state.Routes = append(state.Routes, managedEdgeRoute{ID: item.ID, Pattern: item.Pattern, Script: item.Script})
@@ -190,7 +190,7 @@ func observeManagedWorkerRouting(ctx context.Context, api cloudflareAPI, spec ma
 			return cloudflareError("Worker Custom Domains inventory", err)
 		}
 		if domains == nil || domains.JSON.Result.IsInvalid() || domains.JSON.Result.IsNull() {
-			return errors.New("Cloudflare Worker Custom Domains inventory is not verifiable")
+			return errors.New("cloudflare Worker Custom Domains inventory is not verifiable")
 		}
 		state.CustomDomainConflict = state.CustomDomainConflict || len(domains.Result) != 0
 	}
@@ -226,16 +226,20 @@ func (p managedEdgeProvider) Apply(ctx context.Context, change managedEdgeChange
 	return refused("Cloudflare change does not identify an approved operation on the verified account or zone")
 }
 
-func runCFChange(ctx context.Context, cf cfCommandRunner, body any, args ...string) error {
+func runCFChange(ctx context.Context, cf cfCommandRunner, body any, args ...string) (resultErr error) {
 	if body != nil {
 		file, err := os.CreateTemp("", "codexiactl-edge-request-")
 		if err != nil {
-			return errors.New("Could not prepare a private Cloudflare request")
+			return errors.New("could not prepare a private Cloudflare request")
 		}
-		defer os.Remove(file.Name())
+		defer func() {
+			if err := os.Remove(file.Name()); err != nil {
+				resultErr = errors.Join(resultErr, errors.New("could not remove the private Cloudflare request"))
+			}
+		}()
 		encodeErr := json.NewEncoder(file).Encode(body)
 		if err := errors.Join(encodeErr, file.Close()); err != nil {
-			return errors.New("Could not prepare a private Cloudflare request")
+			return errors.New("could not prepare a private Cloudflare request")
 		}
 		args = append(args, "--body", "@"+file.Name())
 	}
@@ -248,7 +252,7 @@ func runCFChange(ctx context.Context, cf cfCommandRunner, body any, args ...stri
 	}
 	var response map[string]json.RawMessage
 	if json.Unmarshal(result, &response) != nil || len(response) == 0 {
-		return errors.New("Cloudflare cf write did not return a verifiable resource")
+		return errors.New("cloudflare cf write did not return a verifiable resource")
 	}
 	return nil
 }
@@ -256,12 +260,12 @@ func runCFChange(ctx context.Context, cf cfCommandRunner, body any, args ...stri
 func (p managedEdgeProvider) createRoute(ctx context.Context, value any) error {
 	body, ok := value.(map[string]any)
 	if !ok || p.routeWriter == nil {
-		return errors.New("Cloudflare route mutation authority is unavailable")
+		return errors.New("cloudflare route mutation authority is unavailable")
 	}
 	pattern, _ := body["pattern"].(string)
 	script, _ := body["script"].(string)
 	if pattern == "" || !strings.HasPrefix(pattern, p.spec.Host+"/") || script != "" && script != cloudflareWorker {
-		return errors.New("Invalid managed Cloudflare route")
+		return errors.New("invalid managed Cloudflare route")
 	}
 	api, err := p.routeWriter(ctx)
 	if err != nil {
@@ -276,14 +280,14 @@ func (p managedEdgeProvider) createRoute(ctx context.Context, value any) error {
 		return cloudflareError("create unambiguous Worker route", err)
 	}
 	if result == nil || !cloudflareID.MatchString(result.ID) || result.Pattern != pattern || result.Script != script {
-		return errors.New("Cloudflare Worker route creation result does not match the approved route")
+		return errors.New("cloudflare Worker route creation result does not match the approved route")
 	}
 	return nil
 }
 
 func (p managedEdgeProvider) createWorker(ctx context.Context) error {
 	if p.workerWriter == nil {
-		return errors.New("Cloudflare empty Worker mutation authority is unavailable")
+		return errors.New("cloudflare empty Worker mutation authority is unavailable")
 	}
 	api, err := p.workerWriter(ctx)
 	if err != nil {
@@ -310,7 +314,7 @@ func (p managedEdgeProvider) createWorker(ctx context.Context) error {
 	if result == nil || result.Name != cloudflareWorker || !cloudflareWorkerID.MatchString(result.ID) ||
 		result.Subdomain.Enabled || result.Subdomain.PreviewsEnabled ||
 		result.Subdomain.JSON.Enabled.IsMissing() || result.Subdomain.JSON.PreviewsEnabled.IsMissing() {
-		return errors.New("Cloudflare empty Worker result did not match the canonical Worker and its publication boundary")
+		return errors.New("cloudflare empty Worker result did not match the canonical Worker and its publication boundary")
 	}
 	return nil
 }
@@ -318,7 +322,7 @@ func (p managedEdgeProvider) createWorker(ctx context.Context) error {
 func (o *cloudflareObservation) converge(ctx context.Context, snapshot githubSnapshot, guard func(context.Context) error) (resultErr error) {
 	p := o.managed
 	if p == nil || guard == nil {
-		return errors.New("Cloudflare convergence requires a guarded provider session")
+		return errors.New("cloudflare convergence requires a guarded provider session")
 	}
 	settings := productionContract{PublicOrigin: o.target.Origin, ManagementHostname: p.spec.ManagementHost}
 	bindings, err := protectedCloudflareBindings(snapshot, p.spec.Repository, settings)
@@ -502,7 +506,7 @@ func (o *cloudflareObservation) finalizeManagedObservation(ctx context.Context, 
 		return err
 	}
 	if changes, err := planManagedEdge(spec, state); err != nil || len(changes) != 0 {
-		return errors.Join(err, errors.New("Cloudflare resources changed before final observation"))
+		return errors.Join(err, errors.New("cloudflare resources changed before final observation"))
 	}
 	target := o.target
 	target.AuthorPolicyID, target.TunnelTeamName = spec.AuthorPolicyID, spec.TeamName
@@ -522,7 +526,7 @@ func (o *cloudflareObservation) finalizeManagedObservation(ctx context.Context, 
 		}
 	}
 	if !cloudflareUUID.MatchString(target.TunnelID) || !cloudflareUUID.MatchString(target.SSHPolicyID) || !cloudflareUUID.MatchString(target.CIPolicyID) {
-		return errors.New("Cloudflare final observation did not verify the Tunnel and both Service Auth policy identities")
+		return errors.New("cloudflare final observation did not verify the Tunnel and both Service Auth policy identities")
 	}
 	connections, err := cfResult[[]struct{ ID string }](ctx, o.cf, "tunnels", "connections", "list", "--tunnel-id", target.TunnelID)
 	if err != nil {
@@ -531,7 +535,7 @@ func (o *cloudflareObservation) finalizeManagedObservation(ctx context.Context, 
 	connectorIDs := make([]string, 0, len(connections))
 	for _, connection := range connections {
 		if !cloudflareUUID.MatchString(connection.ID) || slices.Contains(connectorIDs, connection.ID) {
-			return errors.New("Cloudflare returned an unverifiable Tunnel connector identity")
+			return errors.New("cloudflare returned an unverifiable Tunnel connector identity")
 		}
 		connectorIDs = append(connectorIDs, connection.ID)
 	}
@@ -541,7 +545,7 @@ func (o *cloudflareObservation) finalizeManagedObservation(ctx context.Context, 
 		return err
 	}
 	o.target, o.Target = target, string(encoded)
-	o.Connectors, o.ConnectorIDs = len(connectorIDs) > 0, connectorIDs
+	o.ConnectorIDs = connectorIDs
 	reportResult(o.operator, successText, "Cloudflare target verified: account "+target.AccountID+", zone "+target.ZoneID+", Tunnel "+target.TunnelID)
 	return nil
 }

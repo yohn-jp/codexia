@@ -86,10 +86,10 @@ func installCloudflareConnector(ctx context.Context, o operator, token []byte) e
 	if err != nil {
 		return errors.New("could not create temporary Cloudflare connector verification storage")
 	}
-	defer os.RemoveAll(directory)
+	defer func() { _ = os.RemoveAll(directory) }()
 
 	binaryPath := filepath.Join(directory, "cloudflared")
-	if err := downloadCloudflareConnector(installCtx, binaryPath); err != nil {
+	if err := downloadCloudflareConnector(installCtx, directory); err != nil {
 		return err
 	}
 	if err := verifyCloudflareConnectorBinary(installCtx, directory, binaryPath); err != nil {
@@ -154,7 +154,7 @@ func mustCloudflareDigest(value string) [32]byte {
 	return digest
 }
 
-func downloadCloudflareConnector(ctx context.Context, destination string) error {
+func downloadCloudflareConnector(ctx context.Context, directory string) error {
 	client := &http.Client{
 		Timeout: 2 * time.Minute,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
@@ -172,7 +172,7 @@ func downloadCloudflareConnector(ctx context.Context, destination string) error 
 	if err != nil {
 		return errors.New("could not download the pinned official Cloudflare connector")
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK || response.Request == nil || response.Request.URL.Scheme != "https" ||
 		!cloudflareConnectorDownloadHost(response.Request.URL.Hostname()) {
 		return errors.New("the official Cloudflare connector download returned an unexpected response")
@@ -181,7 +181,12 @@ func downloadCloudflareConnector(ctx context.Context, destination string) error 
 		return errors.New("the official Cloudflare connector asset exceeded its size limit")
 	}
 
-	file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return errors.New("could not open temporary Cloudflare connector verification storage")
+	}
+	defer func() { _ = root.Close() }()
+	file, err := root.OpenFile("cloudflared", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return errors.New("could not prepare temporary Cloudflare connector verification storage")
 	}
@@ -190,7 +195,7 @@ func downloadCloudflareConnector(ctx context.Context, destination string) error 
 	closeErr := file.Close()
 	if copyErr != nil || closeErr != nil || written != cloudflareConnectorSize || written > maxCloudflareBinarySize ||
 		!bytes.Equal(hasher.Sum(nil), cloudflareConnectorDigest[:]) {
-		_ = os.Remove(destination)
+		_ = root.Remove("cloudflared")
 		return errors.New("the Cloudflare connector did not match the pinned official 2026.11.0 amd64 artifact digest")
 	}
 	return nil
@@ -206,7 +211,8 @@ func cloudflareConnectorDownloadHost(host string) bool {
 }
 
 func verifyCloudflareConnectorBinary(ctx context.Context, directory, binaryPath string) error {
-	if err := os.Chmod(binaryPath, 0o700); err != nil {
+	// The verified executable must be runnable by its owner for the version check.
+	if err := os.Chmod(binaryPath, 0o700); err != nil { //nolint:gosec // G302 requires data file permissions, whereas this pinned binary needs owner execute.
 		return errors.New("could not prepare the verified Cloudflare connector for version inspection")
 	}
 	check, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -235,7 +241,7 @@ func cloudflareConnectorReady(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1024))
 	if response.StatusCode != http.StatusOK {
 		return errors.New("the local Cloudflare connector readiness endpoint is not ready")
@@ -263,7 +269,13 @@ func waitCloudflareConnectorReady(ctx context.Context) error {
 }
 
 func runCloudflareConnectorProvisioner(ctx context.Context, action, binaryPath string, unit, token []byte) ([]byte, error) {
-	command := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "/usr/bin/python3", "-c", cloudflareConnectorProvisioner, action)
+	switch action {
+	case "inspect", "check", "apply":
+	default:
+		return nil, errors.New("unknown Cloudflare connector provisioning action")
+	}
+	// The action is a validated enum and the script is a compile-time constant.
+	command := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "/usr/bin/python3", "-c", cloudflareConnectorProvisioner, action) //nolint:gosec // G204 flags the bounded action argument.
 	var output bytes.Buffer
 	command.Stdout = &output
 	command.Stderr = io.Discard

@@ -128,21 +128,21 @@ func (s managedEdgeSpec) validate() error {
 		!strings.Contains(s.Host, ".") || !strings.Contains(s.ManagementHost, ".") || s.Host == s.ManagementHost ||
 		!cloudflareTeam.MatchString(s.TeamName) || !cloudflareUUID.MatchString(s.AuthorPolicyID) ||
 		s.ProductService != managedEdgePublicationService || s.SSHService != managedEdgeManagementService {
-		return errors.New("Cloudflare edge target is not bound to a verified repository, account, zone and local endpoints")
+		return errors.New("cloudflare edge target is not bound to a verified repository, account, zone and local endpoints")
 	}
 	seen := map[string]bool{}
 	for _, id := range s.AllowedIDPs {
 		if !cloudflareUUID.MatchString(id) || seen[id] {
-			return errors.New("Invalid Cloudflare identity provider selection")
+			return errors.New("invalid Cloudflare identity provider selection")
 		}
 		seen[id] = true
 	}
 	if len(seen) == 0 {
-		return errors.New("Select a verified account-owned identity provider")
+		return errors.New("select a verified account-owned identity provider")
 	}
 	for _, id := range []string{s.ExpectedTunnelID, s.ProbePolicyID, s.ManagementPolicyID} {
 		if id != "" && !cloudflareUUID.MatchString(id) {
-			return errors.New("Invalid protected Cloudflare resource identity")
+			return errors.New("invalid protected Cloudflare resource identity")
 		}
 	}
 	return nil
@@ -157,7 +157,8 @@ func managedEdgeAppRelevant(app managedEdgeApp, spec managedEdgeSpec) bool {
 			Type      string            `json:"type"`
 			URI       string            `json:"uri"`
 			Overrides []json.RawMessage `json:"overrides"`
-		}) bool {
+		},
+		) bool {
 			return d.Type == "public" && relevant(d.URI)
 		})
 }
@@ -194,14 +195,14 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		return nil, err
 	}
 	if state.CustomDomainConflict {
-		return nil, errors.New("Cloudflare Worker has an alternate custom domain")
+		return nil, errors.New("cloudflare Worker has an alternate custom domain")
 	}
 	var routes cloudflareRoutes
 	var probes, protocols map[string]managedEdgePath
 	if json.Unmarshal(s.Contract.routes, &routes) != nil || json.Unmarshal(s.Contract.identityProbes, &probes) != nil ||
 		json.Unmarshal(s.Contract.protocolPaths, &protocols) != nil || len(routes.Routes) == 0 || len(routes.OriginRoutes) == 0 ||
 		len(probes) == 0 || len(protocols) == 0 {
-		return nil, errors.New("Cloudflare certified edge contracts are missing")
+		return nil, errors.New("cloudflare certified edge contracts are missing")
 	}
 	account, zone := "accounts/"+s.AccountID, "zones/"+s.ZoneID
 	var changes []managedEdgeChange
@@ -210,18 +211,18 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 	}
 	for _, id := range s.AllowedIDPs {
 		if !slices.Contains(state.IdentityProviders, id) {
-			return nil, errors.New("Selected Cloudflare identity provider was not observed")
+			return nil, errors.New("selected Cloudflare identity provider was not observed")
 		}
 	}
 	policies := map[string]managedEdgePolicy{}
 	for _, p := range state.Policies {
 		if !cloudflareUUID.MatchString(p.ID) || p.AccountID != "" && p.AccountID != s.AccountID || policies[p.ID].ID != "" {
-			return nil, errors.New("Cloudflare account policy inventory is ambiguous")
+			return nil, errors.New("cloudflare account policy inventory is ambiguous")
 		}
 		policies[p.ID] = p
 	}
 	if p := policies[s.AuthorPolicyID]; p.ID == "" || p.Decision != "allow" || len(p.Include) == 0 {
-		return nil, errors.New("Cloudflare shared author Allow policy was not verified")
+		return nil, errors.New("cloudflare shared author Allow policy was not verified")
 	}
 	apps := map[string]managedEdgeApp{}
 	for _, a := range state.Apps {
@@ -239,11 +240,11 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		}
 		if !cloudflareUUID.MatchString(a.ID) || !cloudflareAUD.MatchString(a.AUD) || a.Type != "self_hosted" ||
 			apps[a.Domain].ID != "" || slices.ContainsFunc(domains, func(d string) bool { return d != a.Domain }) {
-			return nil, errors.New("Cloudflare overlapping Access application is ambiguous")
+			return nil, errors.New("cloudflare overlapping Access application is ambiguous")
 		}
 		for _, d := range a.Destinations {
 			if len(d.Overrides) != 0 {
-				return nil, errors.New("Cloudflare Access destination overrides are not permitted")
+				return nil, errors.New("cloudflare Access destination overrides are not permitted")
 			}
 		}
 		apps[a.Domain] = a
@@ -254,7 +255,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 			if a := apps[domain]; a.ID != "" {
 				p := state.AppPolicies[a.ID]
 				if len(p) == 0 || !exactManagedServicePolicy(p[0], tags) || id != "" && id != p[0].ID {
-					return "", errors.New("Existing Cloudflare service policy does not match the repository and purpose tags")
+					return "", errors.New("existing Cloudflare service policy does not match the repository and purpose tags")
 				}
 				id = p[0].ID
 			}
@@ -267,7 +268,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 			for _, p := range state.Policies {
 				if p.Name == name {
 					if id != "" {
-						return "", errors.New("Ambiguous dedicated Cloudflare policy name")
+						return "", errors.New("ambiguous dedicated Cloudflare policy name")
 					}
 					id = p.ID
 				}
@@ -276,7 +277,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		if id != "" {
 			p := policies[id]
 			if p.ID == "" || id == s.AuthorPolicyID || !exactManagedServicePolicy(p.cloudflareAccessPolicy, tags) {
-				return "", errors.New("Cloudflare service policy differs from the approved policy")
+				return "", errors.New("cloudflare service policy differs from the approved policy")
 			}
 			return id, nil
 		}
@@ -300,7 +301,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		return nil, err
 	}
 	if probePolicy != "" && probePolicy == sshPolicy {
-		return nil, errors.New("Cloudflare probe and SSH policies must be separate")
+		return nil, errors.New("cloudflare probe and SSH policies must be separate")
 	}
 	allowedDomains := map[string]bool{}
 	ensureApp := func(domain, name string, ids []string, serviceOnly bool) error {
@@ -308,15 +309,15 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		if a := apps[domain]; a.ID != "" {
 			attached := state.AppPolicies[a.ID]
 			if len(attached) != len(ids) {
-				return errors.New("Cloudflare Access application has unexpected policies")
+				return errors.New("cloudflare Access application has unexpected policies")
 			}
 			for i, id := range ids {
 				if id == "" || attached[i].ID != id || attached[i].Precedence != int64(i+1) {
-					return errors.New("Cloudflare Access policy identity or precedence differs")
+					return errors.New("cloudflare Access policy identity or precedence differs")
 				}
 			}
 			if !serviceOnly && !slices.Equal(slices.Sorted(slices.Values(a.AllowedIDPs)), slices.Sorted(slices.Values(s.AllowedIDPs))) {
-				return errors.New("Cloudflare Access identity providers differ from approved selection")
+				return errors.New("cloudflare Access identity providers differ from approved selection")
 			}
 			return nil
 		}
@@ -344,7 +345,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 	for _, key := range slices.Sorted(maps.Keys(probes)) {
 		p := probes[key]
 		if p.Name == "" || !strings.HasPrefix(p.Path, "/") || p.TunnelPath == "" {
-			return nil, errors.New("Invalid identity probe contract")
+			return nil, errors.New("invalid identity probe contract")
 		}
 		if err := ensureApp(s.Host+p.Path, p.Name, []string{probePolicy, s.AuthorPolicyID}, false); err != nil {
 			return nil, err
@@ -358,33 +359,35 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 	for _, key := range slices.Sorted(maps.Keys(protocols)) {
 		p := protocols[key]
 		if p.Name == "" || !strings.HasPrefix(p.Path, "/") {
-			return nil, errors.New("Invalid public protocol contract")
+			return nil, errors.New("invalid public protocol contract")
 		}
 		domain := s.Host + p.Path
 		allowedDomains[domain] = true
 		if a := apps[domain]; a.ID != "" {
 			attached := state.AppPolicies[a.ID]
 			if len(attached) != 1 || !exactManagedBypass(attached[0]) {
-				return nil, errors.New("Unexpected Cloudflare protocol Access policy")
+				return nil, errors.New("unexpected Cloudflare protocol Access policy")
 			}
 			if !s.PublicProtocolEnabled {
 				if !s.PublicProtocolTransitionApproved {
-					return nil, errors.New("Disabling public protocol requires explicit transition approval")
+					return nil, errors.New("disabling public protocol requires explicit transition approval")
 				}
 				publicChanges = append(publicChanges, managedEdgeChange{"remove Bypass " + domain, "DELETE", account + "/access/apps/" + a.ID, nil})
 			}
 		} else if s.PublicProtocolEnabled {
 			if !s.PublicProtocolAccepted || !s.PublicProtocolTransitionApproved {
-				return nil, errors.New("Enabling public protocol requires explicit transition approval")
+				return nil, errors.New("enabling public protocol requires explicit transition approval")
 			}
-			body := map[string]any{"name": p.Name, "domain": domain, "type": "self_hosted", "app_launcher_visible": false,
-				"policies": []any{map[string]any{"name": p.Name, "decision": "bypass", "precedence": 1, "include": []any{map[string]any{"everyone": map[string]any{}}}}}}
+			body := map[string]any{
+				"name": p.Name, "domain": domain, "type": "self_hosted", "app_launcher_visible": false,
+				"policies": []any{map[string]any{"name": p.Name, "decision": "bypass", "precedence": 1, "include": []any{map[string]any{"everyone": map[string]any{}}}}},
+			}
 			publicChanges = append(publicChanges, managedEdgeChange{"create Bypass " + domain, "POST", account + "/access/apps", body})
 		}
 	}
 	for domain := range apps {
 		if !allowedDomains[domain] {
-			return nil, errors.New("Unexpected overlapping Cloudflare Access application")
+			return nil, errors.New("unexpected overlapping Cloudflare Access application")
 		}
 	}
 
@@ -394,12 +397,12 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 			continue
 		}
 		if tunnelID != "" || !cloudflareUUID.MatchString(t.ID) || t.AccountTag != s.AccountID || t.ConfigSrc != "cloudflare" || t.DeletedAt != nil && *t.DeletedAt != "" {
-			return nil, errors.New("Cloudflare Tunnel is ambiguous or not remotely managed")
+			return nil, errors.New("cloudflare Tunnel is ambiguous or not remotely managed")
 		}
 		tunnelID = t.ID
 	}
 	if s.ExpectedTunnelID != "" && tunnelID != s.ExpectedTunnelID {
-		return nil, errors.New("Cloudflare protected Tunnel identity changed")
+		return nil, errors.New("cloudflare protected Tunnel identity changed")
 	}
 	if tunnelID == "" {
 		add("create Tunnel", "POST", account+"/cfd_tunnel", map[string]any{"name": cloudflareTunnel, "config_src": "cloudflare"})
@@ -413,7 +416,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 			}
 			count++
 			if count > 1 || !cloudflareID.MatchString(d.ID) || d.Type != "CNAME" || !d.Proxied || tunnelID == "" || d.Content != tunnelID+".cfargotunnel.com" {
-				return nil, errors.New("Cloudflare DNS already points to an unexpected resource")
+				return nil, errors.New("cloudflare DNS already points to an unexpected resource")
 			}
 		}
 		if count == 0 {
@@ -441,7 +444,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		managedEdgeIngress{Service: "http_status:404"})
 	var actual []managedEdgeIngress
 	if raw := state.TunnelConfig["ingress"]; len(raw) != 0 && json.Unmarshal(raw, &actual) != nil {
-		return nil, errors.New("Invalid Cloudflare Tunnel ingress")
+		return nil, errors.New("invalid Cloudflare Tunnel ingress")
 	}
 	knownPaths := map[string]bool{"": true}
 	for _, p := range probes {
@@ -458,7 +461,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		case r.Hostname == s.ManagementHost && r.Path == "" && r.Service == s.SSHService:
 		case i == len(actual)-1 && r.Hostname == "" && r.Path == "" && r.Service == "http_status:404":
 		default:
-			return nil, errors.New("Cloudflare Tunnel contains unknown ingress")
+			return nil, errors.New("cloudflare Tunnel contains unknown ingress")
 		}
 	}
 	actualJSON, _ := json.Marshal(actual)
@@ -472,30 +475,30 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		}
 		var rawRules []map[string]json.RawMessage
 		if len(config["ingress"]) != 0 && json.Unmarshal(config["ingress"], &rawRules) != nil {
-			return nil, errors.New("Invalid existing ingress")
+			return nil, errors.New("invalid existing ingress")
 		}
 		for _, r := range rawRules {
 			for key := range r {
 				if !slices.Contains([]string{"hostname", "path", "service", "originRequest"}, key) {
-					return nil, errors.New("Unmanaged Cloudflare ingress field")
+					return nil, errors.New("unmanaged Cloudflare ingress field")
 				}
 			}
 			var origin map[string]json.RawMessage
 			if raw := r["originRequest"]; len(raw) != 0 && json.Unmarshal(raw, &origin) != nil {
-				return nil, errors.New("Invalid origin settings")
+				return nil, errors.New("invalid origin settings")
 			}
 			for key := range origin {
 				if !slices.Contains([]string{"httpHostHeader", "access"}, key) {
-					return nil, errors.New("Unmanaged Cloudflare origin option")
+					return nil, errors.New("unmanaged Cloudflare origin option")
 				}
 			}
 			var access map[string]json.RawMessage
 			if raw := origin["access"]; len(raw) != 0 && json.Unmarshal(raw, &access) != nil {
-				return nil, errors.New("Invalid Tunnel Access condition")
+				return nil, errors.New("invalid Tunnel Access condition")
 			}
 			for key := range access {
 				if !slices.Contains([]string{"required", "teamName", "audTag"}, key) {
-					return nil, errors.New("Unmanaged Cloudflare Tunnel Access condition")
+					return nil, errors.New("unmanaged Cloudflare Tunnel Access condition")
 				}
 			}
 		}
@@ -512,7 +515,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		}
 		if workerFound || !cloudflareWorkerID.MatchString(w.ID) || w.Subdomain.Enabled == nil || *w.Subdomain.Enabled ||
 			w.Subdomain.PreviewsEnabled == nil || *w.Subdomain.PreviewsEnabled {
-			return nil, errors.New("Invalid canonical Worker or preview boundary")
+			return nil, errors.New("invalid canonical Worker or preview boundary")
 		}
 		workerFound = true
 		// Only an explicitly null deployed_on proves that the Worker has never been deployed.
@@ -534,7 +537,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		}
 		script, ok := expected[r.Pattern]
 		if !ok || script != r.Script || !cloudflareID.MatchString(r.ID) {
-			return nil, errors.New("Unexpected overlapping Cloudflare Worker route")
+			return nil, errors.New("unexpected overlapping Cloudflare Worker route")
 		}
 		delete(expected, r.Pattern)
 	}
@@ -546,7 +549,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 				continue
 			}
 			if script != "" && workerDeployed {
-				return nil, errors.New("Refusing to attach a missing route to an already deployed Worker without release admission")
+				return nil, errors.New("refusing to attach a missing route to an already deployed Worker without release admission")
 			}
 			body := map[string]any{"pattern": pattern}
 			if script != "" {
@@ -563,7 +566,7 @@ func planManagedEdge(s managedEdgeSpec, state managedEdgeInventory) ([]managedEd
 		add("create DNS "+host, "POST", zone+"/dns_records", map[string]any{"type": "CNAME", "name": host, "content": tunnelID + ".cfargotunnel.com", "proxied": true, "ttl": 1})
 	}
 	if s.PublicProtocolEnabled && !s.PublicProtocolAccepted && len(changes) > 0 {
-		return nil, errors.New("Cloudflare changes to an edge with public OAuth/MCP paths require runtime acceptance")
+		return nil, errors.New("cloudflare changes to an edge with public OAuth/MCP paths require runtime acceptance")
 	}
 	return changes, nil
 }
@@ -590,7 +593,7 @@ func reconcileManagedEdge(ctx context.Context, api managedEdgeAPI, spec managedE
 		return keys, nil
 	}
 	if guard == nil {
-		return keys, errors.New("Cloudflare mutation requires a current source and closed publication gate check")
+		return keys, errors.New("cloudflare mutation requires a current source and closed publication gate check")
 	}
 	if err := approve(slices.Clone(keys)); err != nil {
 		return keys, err
@@ -598,7 +601,7 @@ func reconcileManagedEdge(ctx context.Context, api managedEdgeAPI, spec managedE
 	remaining := map[string]managedEdgeChange{}
 	for _, change := range plan {
 		if _, duplicate := remaining[change.Key]; duplicate {
-			return keys, errors.New("Cloudflare plan contains duplicate operations")
+			return keys, errors.New("cloudflare plan contains duplicate operations")
 		}
 		remaining[change.Key] = change
 	}
@@ -619,7 +622,7 @@ func reconcileManagedEdge(ctx context.Context, api managedEdgeAPI, spec managedE
 		for _, change := range plan {
 			approved, ok := remaining[change.Key]
 			if !ok || approved.Method != change.Method || approved.Path != "" && !reflect.DeepEqual(approved, change) {
-				return keys, errors.New("Cloudflare plan changed or a mutation was not confirmed")
+				return keys, errors.New("cloudflare plan changed or a mutation was not confirmed")
 			}
 			if change.Path != "" {
 				remaining[change.Key] = change
@@ -627,7 +630,7 @@ func reconcileManagedEdge(ctx context.Context, api managedEdgeAPI, spec managedE
 		}
 		change := plan[0]
 		if change.Path == "" {
-			return keys, errors.New("Cloudflare dependency identity was not observed")
+			return keys, errors.New("cloudflare dependency identity was not observed")
 		}
 		if err := guard(ctx); err != nil {
 			return keys, err
@@ -637,7 +640,7 @@ func reconcileManagedEdge(ctx context.Context, api managedEdgeAPI, spec managedE
 				return keys, err
 			}
 			_, observeErr := api.Observe(ctx, spec)
-			return keys, errors.Join(err, observeErr, errors.New("Cloudflare changes stopped after an uncertain result; rerun to review the newly observed plan"))
+			return keys, errors.Join(err, observeErr, errors.New("cloudflare changes stopped after an uncertain result; rerun to review the newly observed plan"))
 		}
 		delete(remaining, change.Key)
 	}

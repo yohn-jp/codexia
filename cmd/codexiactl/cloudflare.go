@@ -59,16 +59,11 @@ type cloudflareObservation struct {
 	cloudflareRequirements cfDeviceRequirements
 	temporaryCredentials   map[string]cfCredentialReceipt
 	Target                 string
-	Connectors             bool
 	ConnectorIDs           []string
-	AccountID              string
 
-	target         cloudflareTarget
-	routesContract []byte
-	host           string
-	operator       operator
-	api            cloudflareAPI
-	closeAuth      func()
+	target    cloudflareTarget
+	operator  operator
+	closeAuth func()
 }
 
 func newCloudflareAPI(secret []byte, baseURL string) cloudflareAPI {
@@ -77,8 +72,10 @@ func newCloudflareAPI(secret []byte, baseURL string) cloudflareAPI {
 	}}
 	// Construct the SDK services directly so ambient Cloudflare keys and custom
 	// headers from a different user's session never become deployment credentials.
-	opts := []option.RequestOption{option.WithBaseURL(baseURL), option.WithHTTPClient(client),
-		option.WithAPIToken(string(secret)), option.WithMiddleware(checkCloudflareResponse)}
+	opts := []option.RequestOption{
+		option.WithBaseURL(baseURL), option.WithHTTPClient(client),
+		option.WithAPIToken(string(secret)), option.WithMiddleware(checkCloudflareResponse),
+	}
 	return cloudflareAPI{workers: workers.NewWorkerService(opts...)}
 }
 
@@ -87,13 +84,13 @@ func checkCloudflareResponse(request *http.Request, next option.MiddlewareNext) 
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode >= 300 && response.StatusCode < 400 {
-		return nil, errors.New("Cloudflare redirected the authenticated SDK request")
+		return nil, errors.New("cloudflare redirected the authenticated SDK request")
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, cloudflareMaxResponse+1))
 	if err != nil || len(body) > cloudflareMaxResponse {
-		return nil, errors.New("Cloudflare response body could not be verified")
+		return nil, errors.New("cloudflare response body could not be verified")
 	}
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		var envelope struct {
@@ -103,7 +100,7 @@ func checkCloudflareResponse(request *http.Request, next option.MiddlewareNext) 
 		}
 		if json.Unmarshal(body, &envelope) != nil || !envelope.Success || len(envelope.Errors) != 0 ||
 			len(envelope.Result) == 0 || bytes.Equal(envelope.Result, []byte("null")) {
-			return nil, errors.New("Cloudflare returned an invalid result envelope")
+			return nil, errors.New("cloudflare returned an invalid result envelope")
 		}
 	}
 	response.Body = io.NopCloser(bytes.NewReader(body))
@@ -112,19 +109,19 @@ func checkCloudflareResponse(request *http.Request, next option.MiddlewareNext) 
 
 func cloudflareError(label string, err error) error {
 	if errors.Is(err, context.Canceled) {
-		return fmt.Errorf("Cloudflare %s: %w", label, context.Canceled)
+		return fmt.Errorf("cloudflare %s: %w", label, context.Canceled)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("Cloudflare %s: %w", label, context.DeadlineExceeded)
+		return fmt.Errorf("cloudflare %s: %w", label, context.DeadlineExceeded)
 	}
 	status := cloudflareStatus(err)
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		return needsAction(fmt.Sprintf("Cloudflare %s failed (HTTP %d). Verify the credential's scope and selected account or zone", label, status))
 	}
 	if status != 0 {
-		return fmt.Errorf("Cloudflare %s failed (HTTP %d); verify token scope and target", label, status)
+		return fmt.Errorf("cloudflare %s failed (HTTP %d); verify token scope and target", label, status)
 	}
-	return fmt.Errorf("Cloudflare %s response could not be verified", label)
+	return fmt.Errorf("cloudflare %s response could not be verified", label)
 }
 
 func cloudflareStatus(err error) int {
@@ -136,7 +133,8 @@ func cloudflareStatus(err error) int {
 }
 
 func observeCloudflare(ctx context.Context, o operator, repo githubTarget, settings productionContract,
-	snapshot githubSnapshot, requirements cfDeviceRequirements) (*cloudflareObservation, error) {
+	snapshot githubSnapshot, requirements cfDeviceRequirements,
+) (*cloudflareObservation, error) {
 	origin, err := url.Parse(settings.PublicOrigin)
 	if err != nil || origin.Scheme != "https" || origin.Hostname() != origin.Host || origin.User != nil ||
 		origin.Path != "" || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" ||
@@ -179,16 +177,21 @@ func observeCloudflare(ctx context.Context, o operator, repo githubTarget, setti
 	}
 	provider := &managedEdgeProvider{cf: runtime, spec: spec}
 	if !requirements.allowTemporaryObservation {
-		_, err := provider.Observe(ctx, spec)
+		state, err := provider.Observe(ctx, spec)
+		if state.TeamName != "" {
+			o.Notice(fmt.Sprintf("Cloudflare account %s, zone %s and Access team %s verified. Observed %d Tunnel candidates, %d DNS records and %d account Workers. A complete routing plan requires separate evidence.",
+				spec.AccountID, spec.ZoneID, state.TeamName, len(state.Tunnels), len(state.DNS), len(state.Workers)))
+		}
 		return nil, err
 	}
 
 	keepSession = true
 	return &cloudflareObservation{
-		AccountID: zone.Account.ID, host: origin.Host, operator: o, cf: runtime, managed: provider,
-		routesContract: settings.edge.routes, cloudflareRequirements: requirements,
-		target: cloudflareTarget{Repository: repo.FullName(), RepositoryID: repo.RepoID, OwnerID: repo.OwnerID,
-			Origin: settings.PublicOrigin, SSHHostname: settings.ManagementHostname, AccountID: zone.Account.ID, ZoneID: zone.ID},
+		operator: o, cf: runtime, managed: provider, cloudflareRequirements: requirements,
+		target: cloudflareTarget{
+			Repository: repo.FullName(), RepositoryID: repo.RepoID, OwnerID: repo.OwnerID,
+			Origin: settings.PublicOrigin, SSHHostname: settings.ManagementHostname, AccountID: zone.Account.ID, ZoneID: zone.ID,
+		},
 		closeAuth: func() {
 			if err := runtime.close(); err != nil {
 				o.Notice("Official cf session cleanup could not be fully verified")
@@ -241,9 +244,13 @@ func protectedCloudflareBindings(snapshot githubSnapshot, repo githubTarget, set
 			dest *string
 			id   string
 		}{
-			{&result.AccountID, stored.AccountID}, {&result.ZoneID, stored.ZoneID}, {&result.TunnelID, stored.TunnelID},
-			{&result.AuthorPolicyID, stored.AuthorPolicyID}, {&result.CIPolicyID, stored.CIPolicyID},
-			{&result.SSHPolicyID, stored.SSHPolicyID}, {&result.TunnelTeamName, stored.TunnelTeamName},
+			{&result.AccountID, stored.AccountID},
+			{&result.ZoneID, stored.ZoneID},
+			{&result.TunnelID, stored.TunnelID},
+			{&result.AuthorPolicyID, stored.AuthorPolicyID},
+			{&result.CIPolicyID, stored.CIPolicyID},
+			{&result.SSHPolicyID, stored.SSHPolicyID},
+			{&result.TunnelTeamName, stored.TunnelTeamName},
 		} {
 			if pair.id == "" {
 				continue
