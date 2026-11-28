@@ -679,7 +679,8 @@ function reuseContractCompiler<Schemas, Options, Route, Compiled extends object>
   const cache = new Map<string, Compiled>();
   return (schemas: Schemas, options: Options) => {
     if (!isDeepStrictEqual(schemas, contractSchemas) || !isDeepStrictEqual(options, defaults)) return build(schemas, options);
-    const compileContract = (compile ??= build(structuredClone(schemas), defaults));
+    compile ??= build(structuredClone(schemas), defaults);
+    const compileContract = compile;
     return (route: Route) => {
       // Fastify supplies the generated JSON schema, method, URL, HTTP part, status and media type.
       const key = JSON.stringify(route);
