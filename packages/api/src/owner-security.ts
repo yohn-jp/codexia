@@ -229,7 +229,7 @@ export function ownerSecurity(options: OwnerSecurityOptions) {
             if (deleted !== 1) reject('CONFLICT', 'OWNER_SECURITY_CONSENT_CHANGED');
 
             const revokedAt = new Date();
-            // Better Auth 1.7.26 stores outstanding authorization codes in its
+            // Better Auth 1.7.x stores outstanding authorization codes in its
             // verification model as typed JSON. A code already issued before
             // withdrawal otherwise does not re-check consent at redemption.
             // Walk the provider's active code records without the default 100-row cap.

@@ -242,7 +242,7 @@ jobs:
         env:
           GRAPHIFY_BACKEND: none
         run: |
-          bash scripts/shared/python-env.sh create python "$RUNNER_TEMP/graphify" 'graphifyy[sql]==0.9.120'
+          bash scripts/shared/python-env.sh create python "$RUNNER_TEMP/graphify" 'graphifyy[sql]==0.9.121'
           # Graphify honors .gitignore for generated contract outputs.
           excludes=('tests/**' 'evidence/**' '.agents/**' 'docs/**' '**/*.test.*' '**/*.spec.*')
           exclude_args=()

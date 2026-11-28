@@ -135,7 +135,7 @@ test('pinned oasdiff flags a deliberately breaking response schema', async () =>
   const binary = await resolveOasdiffBinary();
   const version = spawnSync(binary, ['--version'], { encoding: 'utf8' });
   assert.equal(version.status, 0, version.stderr);
-  assert.match(version.stdout, /1\.39\.0/u);
+  assert.match(version.stdout, /1\.41\.0/u);
 
   const result = spawnSync(
     binary,

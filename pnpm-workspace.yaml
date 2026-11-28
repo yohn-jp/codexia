@@ -7,13 +7,13 @@ packages:
 catalogs:
   # Types and test/build-only dependencies remain in devDependencies.
   development:
-    '@types/react': ^19.3.0
+    '@types/react': ^19.3.2
     '@types/react-dom': ^19.3.0
   # Catalog ownership does not override package.json dependencies boundaries.
   production:
-    '@better-auth/oauth-provider': 1.7.26
-    '@better-auth/passkey': 1.7.26
-    better-auth: 1.7.26
+    '@better-auth/oauth-provider': 1.7.28
+    '@better-auth/passkey': 1.7.28
+    better-auth: 1.7.28
     react: ^19.3.1
     react-dom: ^19.3.1
     yaml: ^2.9.1

@@ -171,7 +171,7 @@
   $('cx-edges-prev').addEventListener('click', () => { edgePage--; renderEdges(); });
   $('cx-edges-next').addEventListener('click', () => { edgePage++; renderEdges(); });
   window.addEventListener('popstate', () => render(new URLSearchParams(location.search).get('community')));
-  // Graphify 0.9.120 exposes these bindings in its native HTML.
+  // Graphify exposes these bindings in its native HTML.
   // Register after the upstream selection handler; the standalone inspector still works without it.
   if (typeof vis !== 'undefined' && typeof network !== 'undefined' && typeof nodesDS !== 'undefined') {
     // The upstream native search reads RAW_NODES and the native legend is

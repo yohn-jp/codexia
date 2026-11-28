@@ -59,21 +59,21 @@ STATEMENT: >>>
 | `@playwright/test` | `1.65.1` | root・ブラウザーE2E | **連動**: CIのブラウザーイメージとPlaywrightバージョン、ブラウザー実体を一致させる |
 | `playwright-core` | `1.65.1` | edge/product-site・公開静的サイトのブラウザー検証専用 | **連動**: rootのPlaywrightと一致させる。独立npm lockfileで固定し、公開資産に含めない |
 | `@types/node` | `^24.19.2` | root・Node型 | **連動**: 現行実行Node 24系。26系への変更で型検査に失敗したため独立更新しない |
-| `@types/react` | `^19.3.0` | root/app・React型 | **連動**: React 19の型とランタイムを一緒に検証 |
+| `@types/react` | `^19.3.2` | root/app・React型 | **連動**: React 19の型とランタイムを一緒に検証 |
 | `@types/react-dom` | `^19.3.0` | root/app・React DOM型 | **連動**: React DOM 19と合わせる |
 | `typescript` | `7.0.2` | root・native型検査、宣言emit、HTTPルートのAST検査 | ambient型の自動取り込みに依存せず、共通tsconfigで`types: ["node"]`を明示する。HTTPルート検査が使うnative AST APIはunstableのため、compilerを厳密指定し、更新時はルート契約テストも検証する |
-| `@babel/parser` | `7.29.15` | root devDependency・StrictDocのJS/TSテスト登録のAST解析 | **検証専用**: traverseと同じ版を固定。更新時はTEST-IDと登録位置の解決、コメント・重複の拒否を検証 |
-| `@babel/traverse` | `7.29.15` | root devDependency・StrictDocのAST走査とテストランナーのbinding解決 | **検証専用**: parserと同じ版を固定。更新時はNode.js・Playwrightの登録検出と実行結果の照合を検証 |
+| `@babel/parser` | `8.1.3` | root devDependency・StrictDocのJS/TSテスト登録のAST解析 | **検証専用**: traverseと同じ版を固定。更新時はTEST-IDと登録位置の解決、コメント・重複の拒否を検証 |
+| `@babel/traverse` | `8.1.3` | root devDependency・StrictDocのAST走査とテストランナーのbinding解決 | **検証専用**: parserと同じ版を固定。更新時はNode.js・Playwrightの登録検出と実行結果の照合を検証 |
 | `tsx` | `^4.23.15` | root・TS実行 | **要検証**: 旧版維持の制約根拠未確認 |
 | `parse5` | `8.1.1` | root・HTML解析 | **要検証**: 旧版維持の制約根拠未確認 |
-| `@redocly/cli` | `2.82.0` | `packages/http-contract`・OpenAPI lint | **既存採用**: CLI 2のcustom rulesで生成OpenAPI 3.1を検査。実API適合は別途検証 |
+| `@redocly/cli` | `2.83.0` | `packages/http-contract`・OpenAPI lint | **既存採用**: CLI 2のcustom rulesで生成OpenAPI 3.1を検査。実API適合は別途検証 |
 | `orval` | `8.49.0` | app・OpenAPI 3.1からDesktop Web用fetch clientとZod DTOを生成 | **開発専用**: pnpmの公開経過時間ポリシーを満たす版を固定。更新時は選択したoperationのmethod/path照合、再生成差分、Zod検証、appの型検査とテストを確認 |
 | `@typespec/compiler` | `1.18.0` | `packages/http-contract`・wire契約compile | **連動**: HTTP/OpenAPI TypeSpecライブラリと同一releaseで更新 |
 | `@typespec/http` | `1.18.0` | `packages/http-contract`・HTTP method/path/parameter binding | **連動**: compilerとOpenAPI3 emitterに同期 |
 | `@typespec/openapi` | `1.18.0` | `packages/http-contract`・OpenAPI metadata decorators | **連動**: compiler/http/emitterと同期 |
 | `@typespec/openapi3` | `1.18.0` | `packages/http-contract`・OpenAPI 3.1.0 emitter | **連動**: compiler/http/openapi librariesと同一releaseで更新 |
 | `@modelcontextprotocol/conformance` | `0.2.0-alpha.12` | `tests/conformance/mcp`・公式MCP適合性CLI | **契約検証用**: `--requirements 2026-07-28` を提供する公式版をnpm lockfileで固定し、更新時に必須シナリオの選択と失敗判定を検証する |
-| `@modelcontextprotocol/inspector` | `2.16.0` | `tests/conformance/mcp`・公式MCP Inspector CLI | **契約検証用**: npm lockfileで固定し、更新時にHTTPとstdioのツール一覧、呼び出し、エラー応答を検証する |
+| `@modelcontextprotocol/inspector` | `2.16.0` | `tests/conformance/mcp`・公式MCP Inspector CLI | **更新保留**: 最新2.17.0。独立npm lockfileとHTTP/stdioのツール一覧・呼び出し・エラー応答を同時検証する |
 <<<
 
 [[/SECTION]]
@@ -88,10 +88,10 @@ MID: c8637f1567cf5e0668a8ba59ce64c019
 STATEMENT: >>>
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `better-auth` | `1.7.26` | app/API・認証の正本 | **連動**: Better Auth本体と公式プラグイン・coreを同系列の整合する版で更新 |
-| `@better-auth/core` | `1.7.26` | API・Better Auth | **連動**: Better Auth本体と同期 |
-| `@better-auth/oauth-provider` | `1.7.26` | app/API・OAuth Provider | **連動**: Better Auth本体と同期 |
-| `@better-auth/passkey` | `1.7.26` | app/API・Passkey | **連動**: Better Auth本体と同期、登録・検証の実証必須 |
+| `better-auth` | `1.7.28` | app/API・認証の正本 | **連動**: Better Auth本体と公式プラグイン・coreを同系列の整合する版で更新 |
+| `@better-auth/core` | `1.7.28` | API・Better Auth | **連動**: Better Auth本体と同期 |
+| `@better-auth/oauth-provider` | `1.7.28` | app/API・OAuth Provider | **連動**: Better Auth本体と同期 |
+| `@better-auth/passkey` | `1.7.28` | app/API・Passkey | **連動**: Better Auth本体と同期、登録・検証の実証必須 |
 | `oauth4webapi` | `3.8.9` | app・Web公開クライアントのDiscovery、PKCE、認可応答およびトークン交換 | **既存採用**: 実行時依存とpeer依存を持たないESM。更新時はBetter Authとの認証フローをChromiumで実行し、公開面・移行期に別途必要なブラウザー証明は [LINK: DOC-VERIFICATION-E2E-EXECUTION, E2E execution] に従い、Core/Fullのビルドと依存閉包を検証 |
 | `@simplewebauthn/server` | `13.3.3` | API・WebAuthnの直接依存宣言 | **整理対象＋制約**: ソースに直接importの確認なし。14.1.0への更新はBetter Authの型推論に関するTS2742で失敗。直接依存が不要なら削除し、必要なら上流との整合を解決 |
 | `fastify` | API `^5.12.8` / HTTP contract `5.12.8` | API・単一認可境界、生成schemaの検証用Fastify harness | **連動**: contract harnessは本番APIと同じ実解決版でAjv/serializer方言を検査 |
@@ -120,13 +120,13 @@ STATEMENT: >>>
 | --- | --- | --- | --- |
 | `react` | `^19.3.1`（Publishing peer `^19.1.0`） | app・Story・Semantic・Publishing | **連動**: React DOM・型と整合 |
 | `react-dom` | `^19.3.1`（Publishing peer `^19.1.0`） | app・Story・Semantic・Publishing | **連動**: Reactと整合 |
-| `react-resizable-panels` | `4.24.1` | app・パネル | **既存採用**: Desktop配置・ドラッグ・復元・popover下のseparatorをブラウザーで検証 |
-| `@codemirror/commands` | `^6.11.1` | app・編集コマンド | **要検証** |
-| `@codemirror/merge` | `6.12.3` | app・差分表示 | **要検証** |
+| `react-resizable-panels` | `4.24.2` | app・パネル | **既存採用**: Desktop配置・ドラッグ・復元・popover下のseparatorをブラウザーで検証 |
+| `@codemirror/commands` | `^6.11.2` | app・編集コマンド | **要検証** |
+| `@codemirror/merge` | `6.13.0` | app・差分表示 | **要検証** |
 | `@codemirror/state` | `^6.7.6` | app・編集状態 | **要検証** |
-| `@codemirror/view` | `^6.43.15` | app・編集画面 | **要検証** |
-| `@headless-tree/core` | `1.8.0` | app・アウトライン | **連動**: Reactアダプターと一緒に更新 |
-| `@headless-tree/react` | `1.8.0` | app・アウトライン | **連動**: coreと一緒に更新 |
+| `@codemirror/view` | `^6.44.0` | app・編集画面 | **要検証** |
+| `@headless-tree/core` | `1.8.1` | app・アウトライン | **連動**: Reactアダプターと一緒に更新 |
+| `@headless-tree/react` | `1.8.1` | app・アウトライン | **連動**: coreと一緒に更新 |
 | `@xstate/react` | `6.1.0` | app・保存／復旧、Native ChangeSet review、本人認証管理のactorとReact 19の接続 | **連動**: React peerは19を含み、XState `^5.28.0`と互換。各機能の統合を併せて検証 |
 | `xstate` | `5.33.4` | app・保存／復旧、Native ChangeSet review、本人認証管理の状態機械とasync actor | **連動**: v5 stable。公式React adapter 6.1.0とReact 19のpeer整合を検証 |
 | `@vitejs/plugin-react` | `^6.3.0` | app・フロントビルド | **要検証**: Vite・Reactビルドとの互換性を一緒に確認 |
@@ -148,8 +148,8 @@ STATEMENT: >>>
 
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `likec4` | `1.61.0` | `scripts/architecture`・構造モデル検証と Web Component 生成 | MIT。Atlas の構造ビューを自己ホストする |
-| `@scalar/api-reference` | `1.83.0` | `scripts/pages-api`・TypeSpec由来OpenAPI 3.1の静的表示 | **新規採用**: MIT。API serverなし、Try It／認証入力／AI操作を非表示、認証operation例の削除、外部fetch禁止をChromiumで確認 |
+| `likec4` | `1.61.0` | `scripts/architecture`・構造モデル検証と Web Component 生成 | **更新保留**: 最新1.61.1。独立npm lockfile再生成とAtlas構造ビューの検証が必要。MIT・自己ホストを維持 |
+| `@scalar/api-reference` | `1.83.0` | `scripts/pages-api`・TypeSpec由来OpenAPI 3.1の静的表示 | **更新保留**: 最新1.85.0。独立npm lockfileと生成ページを同時更新し、Try It／認証入力／外部fetch禁止をChromiumで再確認。MIT・API serverなしを維持 |
 | `esbuild` | `0.28.2` | `scripts/pages-api`・ScalarのローカルJS/CSS bundle | **連動**: Pages生成だけで使用し、Scalarと一緒にlockを固定 |
 <<<
 
@@ -221,7 +221,7 @@ MID: 6770277bef8aa1c9ac5153050b913c1a
 STATEMENT: >>>
 | パッケージ | 直接依存宣言 | 所有・用途 | 判定／理由 |
 | --- | --- | --- | --- |
-| `wrangler` | `4.162.0` | edge/frontend・Workers | **要検証**: Edge配信・デプロイ設定の契約を確認 |
+| `wrangler` | `4.168.0` | edge/frontend・Workers | **更新保留**: 最新4.169.0。独立npm lockfileの再生成、Workers build/previewと公開設定の契約確認が必要 |
 <<<
 
 [[/SECTION]]
@@ -241,16 +241,19 @@ STATEMENT: >>>
 | Node.js | root `engines.node >=24`、Verifyでは`24.22.3`、Backend OCIはNode 24 digest固定 | **連動**: 実行版・型定義・CIイメージ・本番OCIを別々に更新しない。Node 26への移行を承認し実証した後で`@types/node` 26へ進む |
 | Go | `cmd/codexiactl/go.mod` の `1.27.4`。Verify とタグ配布が `actions/setup-go` `v7.1.0` で同じ宣言を使用 | **採用**: Linux amd64 の独立した初回配備用バイナリ。race test、vet、CGO 無効の build、リリース provenance を確認 |
 | Swift OpenAPI Generator | `ios/CodexiaTransport/Package.resolved`: generator `1.14.4`, runtime `1.13.4`, URLSession `1.4.0` | **連動**: TypeSpec由来のOpenAPI 3.1から全operation IDを照合し、再生成、Swift契約テスト、Simulatorを確認 |
+| Swift HTTP Types | `ios/CodexiaEditor`・`ios/CodexiaTransport` の exact `1.8.0`、SwiftPM 3箇所で同じ revision | **連動**: OpenAPI runtime/generatorとの型互換、Swift contract・Simulatorの受入が必要。独立して旧版に戻さない |
+| Swift Crypto | `ios/CodexiaEditor/Package.swift` Linux用 exact `5.2.0` | **連動**: Swift 6.2以上が前提。CryptographyおよびLinux Swift test、`Package.resolved` の依存閉包を検査。iOSのCryptoKitへ二重導入しない |
+| OpenAPIKit | Swift OpenAPI Generator 1.14.4が`6.1.0`からの互換範囲を要求、解決版は`6.4.0` | **制約**: OpenAPIKit 7系は現行generatorのメジャー制約外。公式generatorが対応した場合に連動更新し、生成結果を比較 |
 | Ajv | Fastify 5.12.8の推移依存 `8.20.0`、`ajv-formats` `3.0.1` | **連動**: `pnpm-lock.yaml` に従い、FastifyのDraft-07検証とserializerを隔離routeで確認 |
-| pnpm | root `pnpm@12.21.0`、CIとBackend Dockerfileで一致 | **連動**: 同期更新、lockfileの互換性・Corepack・キャッシュキーを検証 |
+| pnpm | root `pnpm@12.21.0`、CIとBackend Dockerfileで一致 | **更新保留**: 最新安定12.23.0。root package-manager依存閉包と全workflow・Dockerfile・Corepackを同時更新し、lockfileとキャッシュの再現性を証明してから切り替える |
 | uv | `scripts/shared/python-env.sh`で公式Linux/macOSのx86-64/ARM64 release `0.13.10` と各配布SHA-256を固定 | **採用**: 全有効Python導入経路の共通標準。StrictDoc、Graphify、Ansible/Mitogen、S3 SDK、Hugging Face CLI、iOS PyYAMLの既存依存を維持し、実行環境別の受入と導入時間を確認する。旧StrictDoc OCI実験は凍結・廃止予定 |
-| Ansible Core | `deploy/ansible/requirements.txt`で`2.21.6` | **要検証**: Python・Mitogen・実ホスト・IaC検証環境の整合を確認 |
+| Ansible Core | `deploy/ansible/requirements.txt`で`2.21.6` | **制約・連動更新**: 2.22系の管理ノードはPython 3.13以上が必要だが現行CIの一部はPython 3.12を使用。Mitogen 0.3.55と実ホストを含めPython runtimeを先に整合し、2.22へ更新する |
 | StrictDoc | `scripts/strictdoc/requirements.in`で`0.32.1`、推移依存は`requirements.lock.txt`でexact pin | 要求MarkdownからHTML/JSONを生成し、双方向trace verifierを実行 | **連動**: parser、JSON構造、HTML再現性を再検証してからツールとlockを一括更新 |
 | GitHub Actions | 各workflow内の`uses:`指定、例: `actions/setup-python@v7.1.0` | **連動**: 対象workflowの実行環境とアクションの固定版を同時検証する。GitHub Actions全体を一律更新せず、依存・ランナー互換性と実ジョブで確認 |
-| Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql]==0.9.120` | **採用**: 独立ツールの固定版。出力互換性、候補索引、hubラベル、ブラウザー探索をRepository Audit Pagesの検証対象にする |
-| oasdiff | `v1.39.0`; official release assets pinned by SHA-256 | `packages/http-contract/scripts`・OpenAPI breaking-change check | **既存採用**: install script accepts only the pinned version/platform digest; compatibility policy uses the existing API epoch |
+| Graphify audit tooling | `repository-audit.yml`内`graphifyy[sql]==0.9.121` | **採用**: 独立ツールの固定版。出力互換性、候補索引、hubラベル、ブラウザー探索をRepository Audit Pagesの検証対象にする |
+| oasdiff | `v1.41.0`; official release assets pinned by SHA-256 | `packages/http-contract/scripts`・OpenAPI breaking-change check | **既存採用**: install script accepts only the pinned version/platform digest; compatibility policy uses the existing API epoch |
 | Schemathesis | `tests/conformance/http/requirements.in`で`4.34.2`、`requirements.lock.txt`で推移依存までハッシュ固定 | **契約検証用**: 生成OpenAPIと使い捨てPostgreSQLで動くFastifyを照合する。更新時は契約違反の検出を再確認する |
-| AWS SDK for Python | `deploy/backup/requirements.in`で`boto3==1.44.9`、`requirements.lock`でBoto3/Botocoreと推移依存をhash固定 | **既存採用**: Apache-2.0の公式AWS SDK。S3署名、HTTPS接続、retryをSDKに委譲し、自前署名を実装しない。最新版確認後、AWS受入と互換fixtureの両方を更新時に検証 |
+| AWS SDK for Python | `deploy/backup/requirements.in`で`boto3==1.44.9`、`requirements.lock`でBoto3/Botocoreと推移依存をhash固定 | **更新保留**: 最新1.44.12。Botocore依存閉包とwheelのハッシュを再生成し、S3署名・TLS・retry、バックアップのAWS受入と互換fixtureを検証する。Apache-2.0の公式SDKを維持 |
 | S3互換fixture | `deploy/backup/s3-fixture.sh`でSilo `RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329`（AGPL-3.0-or-later）とMinIO Client `RELEASE.2025-08-13T08-35-41Z`（SHA-256 `01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891`）を使用 | **Test-only**: 合成データ・一時credentialでS3 API互換性を検証。production runtimeへ含めない。fixture更新時はdigest、license、conditional write・multipart・TLSの実挙動を再検証 |
 | PostgreSQL contract verification | `packages/persistence-postgres/tests/db-contract/toolchain.json`: PostgreSQL 17-bookworm OCI digest, pgTAP 1.3.4 source SHA-256, tbls 1.97.0 archive SHA-256 | **契約検証用**: disposable DB専用。migration sourceではなく`pg_catalog`とpgTAPでDDLを照合し、tblsはread-only artifactを生成 |
 | Encrypted restore drill tools | `packages/persistence-postgres/tests/db-contract/toolchain.json`: Podman stable OCI digest, age 1.3.2 archive SHA-256 | **契約検証用**: synthetic artifactをage v2形式で暗号化し、network-isolated Podman targetへ復元。production credentialは使用しない |
@@ -277,10 +280,10 @@ STATEMENT: >>>
 | `filippo.io/age` | `v1.3.2` | Owner Setup Grant の既存 age envelope。受取人の照合と一時鍵を確認 |
 | `charm.land/huh/v2` | `v2.0.3` | MIT。非秘密フォーム・選択。明示 TTY、Context、拒否・中断・既定値、line mode との意味同等性を検証 |
 | `charm.land/lipgloss/v2` | `v2.1.1` | MIT。共通表示・style。端末 capability、狭幅、色なし、機械出力との分離を検証 |
-| `charm.land/bubbletea/v2` | `v2.0.2` | MIT。Huh の内部描画基盤。CLI が直接使う API はフォームのシグナル処理を CLI に統一し、取消と EOF の区別、端末環境の受け渡し、背景色の照会に限定 |
+| `charm.land/bubbletea/v2` | `v2.1.3` | **更新保留**: 最新v2.2.0。go.mod・go.sumの全依存閉包とCLIのTTY/EOF・キャンセル・背景色・狭幅レンダリングをまとめて検証する。MITライセンス |
 
 Huh v2.0.3 の宣言は Bubble Tea v2.0.2、Bubbles v2.0.0、Lip Gloss v2.0.1。
-解決版は Bubble Tea v2.0.2、Bubbles v2.0.0、Lip Gloss v2.1.1。
+解決版は Bubble Tea v2.1.3、Bubbles v2.0.0、Lip Gloss v2.1.1。
 Bubbles は推移依存として扱い、秘密入力と TTY の境界には既存の `golang.org/x/term` を使う。
 <<<
 

@@ -241,7 +241,7 @@ async function registerPasskey(
               [header]: token,
             },
             credentials: 'same-origin',
-            // Better Auth 1.7.26 leaves createSession undefined by default; the
+            // Better Auth 1.7.x leaves createSession undefined by default; the
             // owner bootstrap deliberately requires its transactional true path.
             body: JSON.stringify({ response: encoded, createSession: createSession ?? true }),
           });
@@ -383,7 +383,7 @@ function parseGrant(stdout: string): {
   }
 }
 
-test('Better Auth 1.7.26 accepts only one operator-granted first owner and preserves the owner through restart', {
+test('Better Auth 1.7.x accepts only one operator-granted first owner and preserves the owner through restart', {
   timeout: 240_000,
   skip:
     process.env.CODEXIA_PASSKEY_ACCEPTANCE === '1'

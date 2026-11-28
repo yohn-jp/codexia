@@ -25,7 +25,7 @@ export function trackedPathsFromGit(repoRoot = process.cwd()) {
 }
 
 function validateCandidateInventory(inventory, sha, trackedFiles) {
-  if (!inventory || typeof inventory !== 'object' || inventory.schemaVersion !== 1 || inventory.codeOnly !== true || inventory.generator !== 'graphify.detect' || inventory.generatorVersion !== '0.9.120') {
+  if (!inventory || typeof inventory !== 'object' || inventory.schemaVersion !== 1 || inventory.codeOnly !== true || inventory.generator !== 'graphify.detect' || inventory.generatorVersion !== '0.9.121') {
     throw new Error('Graphify candidate inventory has an unsupported schema or generator');
   }
   if (inventory.sourceSha !== sha) throw new Error('Graphify candidate inventory source SHA does not match the graph');

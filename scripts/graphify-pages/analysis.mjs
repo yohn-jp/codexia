@@ -119,7 +119,7 @@ export function summarizeGraph(graph, sha, trackedFiles, candidateFiles = null) 
       entry.count++;
       entry.relations.add(relation);
       entry.relationCounts[relation] = (entry.relationCounts[relation] || 0) + 1;
-      // Graphify 0.9.120 exposes source_location on some edges (notably imports).
+      // Graphify exposes source_location on some edges (notably imports).
       // Only preserve a line when its observed source_file agrees with the edge origin.
       if (evidence.length) entry.evidence.add([evidence[0].path, evidence[0].line, relation].join('\0'));
     }
