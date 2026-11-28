@@ -304,6 +304,13 @@ YAML
 
   run_deploy auth-primary false '' auth-same-digest
   grep -Fq 'Verified already active image ' "$tmp/auth-same-digest.log"
+  for strategy in linear linear mitogen_linear; do
+    phase="auth-same-digest-ab-$strategy-$RANDOM"
+    ANSIBLE_STRATEGY="$strategy" run_deploy auth-primary false '' "$phase"
+    grep -Fq 'Verified already active image ' "$tmp/$phase.log"
+    printf 'LIFECYCLE_ANSIBLE_AB scenario=auth strategy=%s stage=%s\n' "$strategy" "$phase" |
+      tee -a "$RUNNER_TEMP/codexia-push-app-lifecycle/ansible-strategy-ab-bounded.log"
+  done
   [[ "$(release_checksums)" == "$prior" && "$(observe_auth "$primary_image")" == "$proof" ]]
   observe_runtime better-auth-same-digest auth-primary
   record_auth better-auth-same-digest "$primary_image" "$proof"

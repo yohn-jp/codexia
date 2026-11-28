@@ -761,6 +761,15 @@ grep -Fq 'Repaired host state for image ' "$tmp/deploy-repair-link.log"
 awk '/TASK \[Apply or recover the API Quadlet under the host lock\]/{found=1;next} found && /^changed: \[localhost\]/{ok=1;exit} found && /^TASK /{exit} END{exit !ok}' "$tmp/deploy-repair-link.log"
 run_deploy "$initial_key" false '' deploy-same-digest
 grep -Fq 'Verified already active image ' "$tmp/deploy-same-digest.log"
+# CI-only same-state A/B: existing Mitogen no-op, then linear/linear/Mitogen.
+# Keep the production/default mitogen_linear and its ACL contract untouched.
+for strategy in linear linear mitogen_linear; do
+  phase="deploy-same-digest-ab-$strategy-$RANDOM"
+  ANSIBLE_STRATEGY="$strategy" run_deploy "$initial_key" false '' "$phase"
+  grep -Fq 'Verified already active image ' "$tmp/$phase.log"
+  printf 'LIFECYCLE_ANSIBLE_AB scenario=app strategy=%s stage=%s\n' "$strategy" "$phase" |
+    tee -a "$RUNNER_TEMP/codexia-push-app-lifecycle/ansible-strategy-ab-bounded.log"
+done
 awk '/TASK \[Apply or recover the API Quadlet under the host lock\]/{found=1;next} found && /^ok: \[localhost\]/{ok=1;exit} found && /^TASK /{exit} END{exit !ok}' "$tmp/deploy-same-digest.log"
 for stage in deploy-repair-link deploy-same-digest; do
   for phase in lock_acquire locked_admission reapply; do
