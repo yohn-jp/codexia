@@ -270,7 +270,6 @@ STATEMENT: >>>
 | --- | --- | --- |
 | `github.com/google/go-github/v93` | `v93.0.0` | GitHub REST の型付きクライアント。Environment 保護、run/attempt/Artifact の出所照合、リダイレクト時の認証分離を確認 |
 | `github.com/cloudflare/cloudflare-go/v7` | `v7.15.0` | 未移行実装の現行依存。CTL の Cloudflare 認証・API 操作を公式 `cf` に委譲する移行で不要な依存は撤去する。cf/Node.js/cloudflared の固定版・配布検証は CTL の先行適格性試験で確定し、実装に合わせて本台帳を更新する |
-| `tailscale.com/client/tailscale/v2` | `v2.12.0` | 未移行実装の現行依存。採用済みの単一 Tunnel 管理への移行時に全廃する |
 | `golang.org/x/oauth2` | `v0.38.0` | GitHub App Device Flow。拒否、ポーリング、失効と安全停止を確認 |
 | `golang.org/x/crypto` | `v0.59.0` | OpenSSH の Ed25519 形式と GitHub Environment Secret の Libsodium 互換 sealed box |
 | `golang.org/x/sys` | `v0.50.0` | Linux ファイル操作とローカル排他。既存ファイルの所有権、モード、symlink 拒否を確認 |

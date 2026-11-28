@@ -115,7 +115,7 @@ func installCloudflareConnector(ctx context.Context, o operator, token []byte) e
 		return nil
 	}
 
-	o.Notice("This operation installs the Cloudflare-published cloudflared " + cloudflareConnectorVersion + " amd64 binary after SHA-256 verification, writes the canonical root-owned systemd unit and /etc/codexia/cloudflared/tunnel.token (0600), then enables and starts codexia-cloudflared.service. Existing non-matching connector files are preserved and cause a safe stop. SSH, Tailscale and application services are not changed.")
+	o.Notice("This operation installs the verified Cloudflare-published cloudflared " + cloudflareConnectorVersion + " amd64 binary and the canonical root-owned systemd unit, stores the connector credential in /etc/codexia/cloudflared/tunnel.token (0600), and starts codexia-cloudflared.service. Existing non-matching files cause the operation to stop before replacement.")
 	if err := requireApproval(o, "Install and start the Cloudflare Tunnel connector on this VM?"); err != nil {
 		return err
 	}
