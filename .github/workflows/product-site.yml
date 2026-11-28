@@ -67,37 +67,6 @@ jobs:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PRODUCT_SITE_EVIDENCE: ${{ runner.temp }}/product-site-evidence
         run: node edge/product-site/browser-smoke.mjs
-      - name: Generate scoped official Actions lockfile (onboarding)
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          node --input-type=module <<'JS'
-          import assert from 'node:assert/strict';
-          import { createHash } from 'node:crypto';
-          import { copyFile, writeFile } from 'node:fs/promises';
-          import { execFileSync } from 'node:child_process';
-          import { join } from 'node:path';
-          const binary = join(process.env.RUNNER_TEMP, 'gh-actions-lock');
-          const url = 'https://github.com/github/gh-actions-lock/releases/download/v0.5.1/linux-amd64';
-          const response = await fetch(url);
-          assert.ok(response.ok, 'Official Actions lock generator download failed');
-          const bytes = Buffer.from(await response.arrayBuffer());
-          assert.equal(createHash('sha256').update(bytes).digest('hex'), '94009f287cfcc046ff371824824c203a8a44c981ca2dac344052744897c29c3a');
-          await writeFile(binary, bytes, { mode: 0o700 });
-          const workflow = '.github/workflows/product-site.yml';
-          execFileSync(binary, [workflow], { stdio: 'inherit' });
-          execFileSync(binary, ['--verify-local', workflow], { stdio: 'inherit' });
-          execFileSync('git', ['diff', '--exit-code', '--', workflow], { stdio: 'inherit' });
-          await copyFile('.github/workflows/actions.lock', join(process.env.RUNNER_TEMP, 'product-site-actions.lock'));
-          JS
-      - uses: actions/upload-artifact@v7.0.2
-        if: github.event_name == 'pull_request'
-        with:
-          name: product-site-actions-lock
-          path: ${{ runner.temp }}/product-site-actions.lock
-          if-no-files-found: error
-          retention-days: 7
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
