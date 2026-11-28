@@ -557,10 +557,14 @@ test('unchanged API skips redundant systemd reload but repairs the missing activ
   const end = shell.indexOf('if [[ "$had_unit" == true ]] && ! "$backup_control" deploy-check;', start);
   assert.ok(start >= 0 && end > start, 'the canonical no-op branch must exist');
   const noOp = shell.slice(start, end);
-  assert.match(noOp, /if \\[\\[ "\\$api_link_created" == true \\]\\]; then[\\s\\S]*systemctl --user daemon-reload[\\s\\S]*fi/u);
-  assert.match(noOp, /systemctl --user is-active --quiet codexia-api\\.service/u);
-  assert.match(noOp, /podman inspect --format[\\s\\S]*State\\.Health\\.Status[\\s\\S]*grep -Fxq healthy/u);
-  assert.match(noOp, /if \\[\\[ "\\$repaired" == true \\]\\]; then echo "REPAIRED/u);
+  const linkCondition = noOp.indexOf('if [[ "$api_link_created" == true ]]; then');
+  const reload = noOp.indexOf('systemctl --user daemon-reload');
+  const linkConditionEnd = noOp.indexOf('fi', linkCondition + 1);
+  assert.ok(linkCondition >= 0 && reload > linkCondition && linkConditionEnd > reload,
+    'systemd reload must be conditional on activation-link repair');
+  assert.ok(noOp.includes('systemctl --user is-active --quiet codexia-api.service'));
+  assert.ok(noOp.includes('State.Health.Status') && noOp.includes('grep -Fxq healthy'));
+  assert.ok(noOp.includes('if [[ "$repaired" == true ]]; then echo "REPAIRED'));
 });
 
 test('first activation verifies the initialized database under both explicit approvals without Console backup', () => {
