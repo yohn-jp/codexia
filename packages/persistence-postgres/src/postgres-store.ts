@@ -808,7 +808,7 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   async getProject(projectId: ProjectId): Promise<Project | undefined> {
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(projectId)) return undefined;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(projectId)) return undefined;
     const result = await this.query('SELECT * FROM project WHERE id = $1', [projectId]);
     return result.rows[0] ? mapProject(result.rows[0]) : undefined;
   }
