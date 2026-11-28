@@ -12,6 +12,7 @@ const zoneId = 'b'.repeat(32);
 const tunnelId = '10000000-0000-4000-8000-000000000000';
 const oldVersion = '10000000-0000-4000-8000-000000000001';
 const newVersion = '10000000-0000-4000-8000-000000000002';
+const retriedVersion = '10000000-0000-4000-8000-000000000007';
 const deploymentId = '10000000-0000-4000-8000-000000000003';
 const workerId = 'e'.repeat(32);
 const artifactDigest = 'sha256:' + 'e'.repeat(64);
@@ -44,7 +45,8 @@ function fixture() {
     scriptAbsent: false, inventoryDenied: false, backendAbsent: false, frontendDenied: false,
     workerId, initialUpload: null, previousDeploymentEvidence: false, controlsChanged: false,
     setupRoutes: false, setupExposed: false, foreignSshTag: false, bypassPublicationGate: false,
-    candidateIdentity: null, rejectPromotion: false, uploadCount: 0,
+    candidateIdentity: null, rejectPromotion: false, uploadCount: 0, initialUploadReplyLost: false, initialVersionId: newVersion,
+    uploadedInitialVersions: new Set(),
     publicEpoch: 1, publicAuth: ['cookie-owner', 'bearer-read-compute-propose'] };
   const apiResponse = result => Response.json({ success: true, errors: [], result });
   const client = createDeploymentEdge({
@@ -65,7 +67,9 @@ function fixture() {
       state.uploadCount++;
       state.initialUpload = { targetWorker, tag, assets };
       state.uploadTag = tag;
-      return newVersion;
+      state.uploadedInitialVersions.add(state.initialVersionId);
+      if (state.initialUploadReplyLost) throw new Error('initial version upload response lost');
+      return state.initialVersionId;
     },
     async fetchImpl(url, init) {
       const target = new URL(url);
@@ -110,9 +114,9 @@ function fixture() {
       if (path === workerResource || path.startsWith(workerResource + '/versions/')) {
         return new Response('Worker ID required', { status: 404 });
       }
-      if (path === workerResourceById + '/versions/' + newVersion) {
+      if ([newVersion, retriedVersion].some(versionId => path === workerResourceById + '/versions/' + versionId)) {
         const includeModules = target.searchParams.get('include') === 'modules';
-        return apiResponse({ id: newVersion, urls: [], annotations: { 'workers/tag': state.uploadTag },
+        return apiResponse({ id: path.split('/').at(-1), urls: [], annotations: { 'workers/tag': state.uploadTag },
           ...(includeModules ? { assets: { config: { html_handling: 'none', not_found_handling: 'none' } },
             modules: Object.entries(controls).map(([name, content]) => ({ name, content_type: 'text/plain',
               content_base64: Buffer.from(state.controlsChanged && name === '_headers' ? 'altered' : content).toString('base64') })),
@@ -243,6 +247,27 @@ test('first activation stages a version with no deployment and promotes under ca
   assert.equal(state.activeVersion, newVersion);
   assert.equal((await client.observeIngress({ lifecycle: true })).ingressDigest, pending.ingressDigest);
   assert.equal(writes.filter(entry => entry.method === 'POST').length, 1);
+});
+
+test('a lost first-version response leaves traffic unchanged and retry promotes only its confirmed version', async () => {
+  const { client, state, writes } = fixture();
+  state.activeVersion = null;
+  state.backendAbsent = true;
+  state.initialUploadReplyLost = true;
+  const observed = await client.observeLifecycle({ backendExpected: false });
+  await assert.rejects(client.stage({ previousVersionId: null, artifactDigest }), /response lost/u);
+  assert.equal(state.activeVersion, null);
+  assert.deepEqual(writes, []);
+  state.initialUploadReplyLost = false;
+  state.initialVersionId = retriedVersion;
+  const staged = await client.stage({ previousVersionId: null, artifactDigest });
+  assert.equal(staged.versionId, retriedVersion);
+  assert.deepEqual(state.uploadedInitialVersions, new Set([newVersion, retriedVersion]));
+  assert.equal(state.activeVersion, null);
+  assert.deepEqual(writes, []);
+  await client.deployForOwnerEnrollment({ observed, staged, artifactDigest });
+  assert.equal(state.activeVersion, retriedVersion);
+  assert.deepEqual(writes.map(entry => entry.body.versions), [[{ version_id: retriedVersion, percentage: 100 }]]);
 });
 
 test('candidate upload fails before using the upload credential when previews are enabled', async () => {
