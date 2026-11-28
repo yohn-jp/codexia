@@ -55,7 +55,6 @@ Desktop Reactは **TypeScript 7 + Vite 8 + vanilla-extract** を正本とする�
 | GitHub RESTの通信層 | [`@octokit/rest`](https://github.com/octokit/rest.js) `22.0.1` | `scripts/`のGitHub REST呼出し・ページ処理を統一する対象 | Node.js 20以上。既存の証拠同一性検査、許可API、認証情報送信制限は別途必須 |
 | 厳格JSON構文と重複キーの検出 | [`jsonc-parser`](https://github.com/microsoft/node-jsonc-parser) `3.3.1` | `packages/api/src/oauth-mcp.ts`のJSONキー抽出正規表現の置換対象 | JSONCの許容は**禁止**。コメント、末尾カンマ、構文エラー、同一オブジェクト内の重複キーを拒否 |
 | JS/TS品質・フォーマット・import管理 | [`@biomejs/biome`](https://biomejs.dev/) `2.6.8` | リポジトリのLint・Formatter正本、Code ScanningへのSARIF送信 | CLIの安定版。CodeQLと型検査を代替しない。SARIFはLintに限定しFormatterはCIの合否で扱う |
-
 | CLI 対話フォーム | [`charm.land/huh/v2`](https://github.com/charmbracelet/huh) `v2.0.3` | `cmd/codexiactl` の非秘密候補選択・通常入力・非保護の確認 | Go 1.25.8 以上。公式 TTY の明示 I/O、Context、既定値による誤承認防止。組込み accessible mode と秘密入力は使わない |
 | CLI 表示・レイアウト | [`charm.land/lipgloss/v2`](https://github.com/charmbracelet/lipgloss) `v2.1.1` | `cmd/codexiactl` の共通 semantic style、工程・診断・結果の表示 | Go 1.26.0 以上。Huh と解決される依存の整合、NO_COLOR・端末幅・機械出力分離を検証 |
 
@@ -113,13 +112,13 @@ GitHub APIのbearer tokenを署名付きArtifactのリダイレクト先へ転�
 - **XState v5**：Desktopの保存・復旧、Native ChangeSet review、本人認証管理の一部で `xstate` 5.33.4 と公式React adapter 6.1.0を使用する。React 19の単純なlocal UI stateを全置換しない。状態の意味と適用範囲は [XState状態機械設計](../design/XSTATE-STATE-MACHINE-CONTRACT.md) に従う。追加導入時はv5 stableとReact adapterの整合を確認し、バージョンを変更する場合は宣言・lockfile・[依存台帳](DEPENDENCY-INVENTORY.md)を更新する。
 - **S3互換API client**：既存のage暗号化バックアップをoff-VMへ送る**バックアップ専用executor**で維持管理される公式SDK/成熟ライブラリを選ぶ。S3署名/リトライ/TLS/redirectを独自実装しない。AWS S3と互換providerの両方で検査し、具体的パッケージとバージョンを導入PRで確定。詳細は [バックアップ管理契約](BACKUP-CONSOLE-CONTRACT.md)。
 
-### CodexiaCTL：Huh v2 + Lip Gloss v2を採用
+### CodexiaCTL terminal UX
 
-[CLI の対話・表示契約](../deployment/CODEXIACTL.md#22-ターミナル-ux-と対話の責務正本) が UX、TTY、承認・秘密保護の正本である。Huh は型付きの選択・フォーム、明示的な input/output と `RunWithContext` を提供する。Lip Gloss は端末 capability に応じた描画と共通 style を担う。Huh の組込み accessible mode は入力 error/context の伝播を別途検証するまで採用せず、既存の安全な line mode を使う。配備の権限判断、状態遷移、保護承認、秘密の byte-oriented な扱いはライブラリに委譲しない。
+Huh v2 + Lip Gloss v2 を採用する。[CLI の対話・表示契約](../deployment/CODEXIACTL.md#22-ターミナル-ux-と対話の責務正本) が UX、TTY、承認・秘密保護の正本である。Huh は型付きの選択・フォーム、明示的な input/output と `RunWithContext` を提供する。Lip Gloss は端末 capability に応じた描画と共通 style を担う。Huh の組込み accessible mode は入力 error/context の伝播を別途検証するまで採用せず、既存の安全な line mode を使う。配備の権限判断、状態遷移、保護承認、秘密の byte-oriented な扱いはライブラリに委譲しない。
 
 比較対象の PTerm は一体型表示に優れるが、対話で `keyboard.Listen` を直接使うため既存の明示 TTY/Context 境界への統合を優先し採用しない。PromptKit は Bubble Tea/Lip Gloss 系の依存を共有する一方、統一フォームと明示 I/O/Context の契約を直接満たす Huh を選ぶ。Bubble Tea 単独の独自 TUI はフォーム・画面状態の再実装を増やすため採用しない。Huh の内部依存として利用する。Cobra、urfave/cli はコマンド数・構文が少ない現行 CLI に対して重複する parser を置換するほどの利益がなく採用しない。
 
-採用対象は `cmd/codexiactl` に限定する。実装 PR では Huh/Lip Gloss の最新安定版、互換性と license/security を再照合し、Go module path と exact version を `go.mod`、実際の依存閉包・checksum を `go.sum` で管理する。Huh が宣言する Bubble Tea/Bubbles/Lip Gloss の最小版と Go の解決版を区別し、組合せの API・race・vet・CGO 無効 Linux amd64 build、依存スキャン、PTY/SSH の操作を検証する。推移依存を無意味に直接依存へ昇格させず、必要な明示 API import があれば採用根拠を同じ PR に記載する。実装と同時に既存の重複描画を削除し、[依存台帳](DEPENDENCY-INVENTORY.md#codexiactl-の-go-直接依存) に実宣言を反映する。独立した GUI/VM runtime・新しい terminal framework を追加しない。
+採用対象は `cmd/codexiactl` に限定する。実装 PR では Huh/Lip Gloss の最新安定版、互換性と license/security を再照合し、Go module path と直接依存の版を `go.mod`、module checksum を `go.sum` で管理し、解決された依存閉包を `go list -m all` で確認する。Huh が宣言する Bubble Tea/Bubbles/Lip Gloss の最小版と Go の解決版を区別し、組合せの API・race・vet・CGO 無効 Linux amd64 build、依存スキャン、PTY/SSH の操作を検証する。推移依存を無意味に直接依存へ昇格させず、必要な明示 API import があれば採用根拠を同じ PR に記載する。実装と同時に既存の重複描画を削除し、[依存台帳](DEPENDENCY-INVENTORY.md#codexiactl-の-go-直接依存) に実宣言を反映する。独立した GUI/VM runtime・新しい terminal framework を追加しない。
 
 ## 4. 追加採用しないもの
 

@@ -166,7 +166,7 @@ pnpmワークスペースで共有する直接依存は、各manifestの`catalog
 
 ### codexiactl の採用済み設計・実装時に登録する依存
 
-以下は [採用決定](DEPENDENCY-POLICY.md#codexiactlhuh-v2--lip-gloss-v2を採用) の初期基準版であり、上の表の現行 `go.mod` 宣言ではない。実装時に最新安定版と実解決版を確認し、同じ PR で直接依存表へ移す。
+以下は [採用決定](DEPENDENCY-POLICY.md#codexiactl-terminal-ux) の初期基準版であり、上の表の現行 `go.mod` 宣言ではない。実装時に最新安定版と実解決版を確認し、同じ PR で直接依存表へ移す。
 
 | モジュール | 初期基準版 | 所有・用途と更新時の確認 |
 | --- | --- | --- |

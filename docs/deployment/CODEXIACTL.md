@@ -75,7 +75,7 @@ flowchart TD
 
 ## 2.2 ターミナル UX と対話の責務（正本）
 
-CodexiaCTL は SSH の通常端末上で完結する、案内付きの逐次 CLI とする。対話フォームに [Huh v2](https://github.com/charmbracelet/huh)、表示・レイアウトに [Lip Gloss v2](https://github.com/charmbracelet/lipgloss) を採用する。採用版と依存管理は [依存選定規約](../architecture/DEPENDENCY-POLICY.md#codexiactlhuh-v2--lip-gloss-v2を採用) に従う。Bubble Tea は Huh の内部の描画・入力基盤として利用し、別の常駐 TUI、全面画面の独自イベントループ、配備状態機械を作らない。現行の少数のコマンド・フラグには既存 parser を維持し、汎用 CLI framework を導入しない。
+CodexiaCTL は SSH の通常端末上で完結する、案内付きの逐次 CLI とする。対話フォームに [Huh v2](https://github.com/charmbracelet/huh)、表示・レイアウトに [Lip Gloss v2](https://github.com/charmbracelet/lipgloss) を採用する。採用版と依存管理は [依存選定規約](../architecture/DEPENDENCY-POLICY.md#codexiactl-terminal-ux) に従う。Bubble Tea は Huh の内部の描画・入力基盤として利用し、別の常駐 TUI、全面画面の独自イベントループ、配備状態機械を作らない。現行の少数のコマンド・フラグには既存 parser を維持し、汎用 CLI framework を導入しない。
 
 対話・表示を一つの operator/presentation 境界に集約する。Huh は観測済みの非秘密候補の選択（§4.1 の複数 repo 等）、通常入力、非保護の確認フォームを所有し、Lip Gloss は工程見出し、選択対象、状態、差分、診断、完了表示を所有する。provider SDK、Workflow 制御、R0–R8 の判定、認可、排他、証跡・入力検証は既存制御面に留め、描画ライブラリの状態を成功・承認・配備結果の根拠にしない。入力の意味検証とエラー処理を表示に移さない。全フォームの正常・異常結果を既存の operator 契約に戻し、独自 UI を各 provider に散在させない。
 
@@ -94,7 +94,7 @@ SSH 上で独立に開いた controlling TTY (`/dev/tty`) を対話の入出力�
 
 保護操作は確認対象と差分を表示し、既存の明示肯定（既定 No）を取得した時だけ実行する。未選択・空入力・曖昧な入力・EOF・中断・タイムアウト・入力障害を承認に変換しない。独立した Environment reviewer による GitHub 承認を端末フォームで代替しない。Huh の選択も正常に明示 submit された観測済み候補だけ受理し、終了時の既定値・未確定値では進めない。中断後に line mode へ切り替えて承認を再取得する等の暗黙の再試行を行わない。
 
-通常の Huh フォームは `RunWithContext` を利用して既存 command の cancellation と結合する。Huh の組込み accessible mode は入力エラーの伝播と context cancellation の契約を満たすことが確認できないため、配備 CLI では採用しない。`TERM=dumb`、描画非対応端末等では開始前に既存の context-aware な line mode を選択する。これは同じ意味契約の表示・入力方式であり、第二の配備経路ではない。`NO_COLOR` が設定された環境では色を出さず、非対話出力に cursor 操作を出さない。全 mode で正常終了、拒否、Ctrl+C、SIGTERM、SIGHUP、SSH 切断、エラーの terminal mode・cursor 復元と §2 の終了コードを維持する。端末復元のために provider operation や workflow dispatch を再実行しない。
+通常の Huh フォームは `RunWithContext` を利用して既存 command の cancellation と結合する。Huh の組込み accessible mode は `Field.RunAccessible` のエラーを破棄する実装で、通常の context-aware 実行経路とも異なるため、配備 CLI では採用しない。`TERM=dumb`、描画非対応端末等では開始前に既存の context-aware な line mode を選択する。これは同じ意味契約の表示・入力方式であり、第二の配備経路ではない。`NO_COLOR` が設定された環境では色を出さず、非対話出力に cursor 操作を出さない。全 mode で正常終了、拒否、Ctrl+C、SIGTERM、SIGHUP、SSH 切断、エラーの terminal mode・cursor 復元と §2 の終了コードを維持する。端末復元のために provider operation や workflow dispatch を再実行しない。
 
 進捗表示は既存 context と実際の待機・観測処理に従属させる。spinner 等を利用しても、表示側が副作用を実行する第二の worker や同一処理の並列 retry を作らず、待機終了・中断・エラー時は停止する。秘密入力・承認中に別描画処理が同じ TTY を読み書きしない。
 
