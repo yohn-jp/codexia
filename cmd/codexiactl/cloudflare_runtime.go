@@ -99,6 +99,9 @@ type cfCommandRunner interface {
 
 func cfResult[T any](ctx context.Context, runner cfCommandRunner, args ...string) (T, error) {
 	var result T
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	if runner == nil {
 		return result, errors.New("official Cloudflare CLI session is unavailable")
 	}

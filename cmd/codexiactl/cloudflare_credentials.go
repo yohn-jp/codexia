@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -100,7 +101,7 @@ func tokenMatchesTunnel(token []byte, target cloudflareTarget) bool {
 		Secret  []byte `json:"s"`
 	}
 	defer func() { clear(envelope.Secret) }()
-	return err == nil && json.Unmarshal(decoded, &envelope) == nil && envelope.Account == target.AccountID &&
+	return err == nil && jsonv2.Unmarshal(decoded, &envelope) == nil && envelope.Account == target.AccountID &&
 		envelope.Tunnel == target.TunnelID && len(envelope.Secret) > 0
 }
 
@@ -267,6 +268,9 @@ func (o *cloudflareObservation) issueAccountCredential(ctx context.Context, role
 		name, o.target.AccountID, o.target.ZoneID, expiry.Format(time.RFC3339), plan.description, purpose)); err != nil {
 		return nil, err
 	}
+	if err := o.requireCredentialWriteGuard(ctx); err != nil {
+		return nil, err
+	}
 	body, err := json.Marshal(policies)
 	if err != nil {
 		return nil, errCloudflareMintUnavailable
@@ -301,6 +305,16 @@ func (o *cloudflareObservation) issueAccountCredential(ctx context.Context, role
 		return nil, needsAction("The Cloudflare token inventory did not confirm the approved scope and expiry for " + name)
 	}
 	return token, nil
+}
+
+func (o *cloudflareObservation) requireCredentialWriteGuard(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if o.credentialWriteGuard == nil {
+		return refused("Cloudflare credential issuance requires a verified current write context")
+	}
+	return o.credentialWriteGuard(ctx)
 }
 
 func verifiedTokenMetadata(token shared.Token, id, name string, expiry time.Time, expected map[string][]string, now time.Time) bool {
@@ -431,6 +445,9 @@ func (o *cloudflareObservation) issueServiceAuth(ctx context.Context, role servi
 	}
 	if err := requireApproval(o.operator, fmt.Sprintf("Create the 90-day Cloudflare Service Auth token %s with %s=%s?",
 		role.name, managedEdgeServiceTagKey, role.tag)); err != nil {
+		return receipt, nil, nil, err
+	}
+	if err := o.requireCredentialWriteGuard(ctx); err != nil {
 		return receipt, nil, nil, err
 	}
 	tags := map[string]string{managedEdgeServiceTagKey: role.tag}

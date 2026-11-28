@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -57,8 +58,12 @@ func verifyLocalConnector(ctx context.Context, expected string) error {
 
 func requireCloudflarePublicationClosed(ctx context.Context, vm vmObservation) error {
 	const helper = "/usr/local/sbin/codexia-api-gate"
-	_, err := os.Lstat(helper)
+	info, err := os.Lstat(helper)
 	if err == nil {
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || stat.Uid != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0o755 {
+			return needsAction("Cloudflare convergence requires the root-owned canonical publication gate helper")
+		}
 		state, err := commandOutput(ctx, "/usr/bin/sudo", "-n", helper, "status")
 		if err != nil || strings.TrimSpace(string(state)) != "closed" {
 			return needsAction("Cloudflare convergence requires independent proof of the closed VM publication gate")

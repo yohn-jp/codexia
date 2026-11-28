@@ -252,8 +252,21 @@ func (c *workflowController) prepareInputs(ctx context.Context, gh *githubContro
 		}
 		return nil
 	}
+	edge.credentialWriteGuard = guard
 	if err := edge.converge(ctx, snapshot, guard); err != nil {
 		return err
+	}
+	edge.credentialWriteGuard = func(ctx context.Context) error {
+		if err := requireCloudflarePublicationClosed(ctx, vm); err != nil {
+			return err
+		}
+		if err := c.requireIdle(ctx, gh); err != nil {
+			return err
+		}
+		if err := c.currentMain(ctx); err != nil {
+			return err
+		}
+		return c.requireSettingsWindow(ctx, gh)
 	}
 	if edge.target.SSHHostname != settings.ManagementHostname {
 		return refused("The verified Cloudflare SSH ingress does not match the selected production management hostname")

@@ -58,6 +58,7 @@ type cloudflareObservation struct {
 	managed                *managedEdgeProvider
 	cloudflareRequirements cfDeviceRequirements
 	temporaryCredentials   map[string]cfCredentialReceipt
+	credentialWriteGuard   func(context.Context) error
 	Target                 string
 	ConnectorIDs           []string
 

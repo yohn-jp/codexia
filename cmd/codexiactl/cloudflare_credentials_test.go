@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/cloudflare/cloudflare-go/v7/accounts"
@@ -31,12 +33,13 @@ func TestCloudflareAccountTokenIssuanceUsesVerifiedExactRole(t *testing.T) {
 		fixtureValue = "fixture-secret"
 	)
 	for _, tc := range []struct {
-		name                                      string
-		approve, alreadyIssued, wrongPolicy, loss bool
-		wantWrites                                int
+		name                                             string
+		approve, alreadyIssued, wrongPolicy, loss, stale bool
+		wantWrites                                       int
 	}{
 		{name: "verified issuance", approve: true, wantWrites: 1},
 		{name: "operator rejection", approve: false},
+		{name: "invalidated approval sends no writes", approve: true, stale: true},
 		{name: "existing named token is never replaced", approve: true, alreadyIssued: true},
 		{name: "mismatched permission group is rejected", approve: true, wrongPolicy: true, wantWrites: 1},
 		{name: "response loss does not replay", approve: true, loss: true, wantWrites: 1},
@@ -45,6 +48,12 @@ func TestCloudflareAccountTokenIssuanceUsesVerifiedExactRole(t *testing.T) {
 			o := &cloudflareObservation{
 				target:   cloudflareTarget{AccountID: account, ZoneID: zone, RepositoryID: 12},
 				operator: cloudflareTestOperator{tc.approve},
+			}
+			o.credentialWriteGuard = func(context.Context) error {
+				if tc.stale {
+					return refused("the approved source changed")
+				}
+				return nil
 			}
 			var writes, verifies int
 			var expiry time.Time
@@ -155,4 +164,43 @@ func TestCloudflareServiceAuthRecoveryOnlyCompletesRecordedSecretFirstPair(t *te
 	require.Equal(t, id+".access", string(result))
 	_, err = edge.serviceAuthClientID(t.Context(), production, receipt)
 	require.Error(t, err)
+}
+
+func FuzzCloudflareConnectorTokenBinding(f *testing.F) {
+	const targetAccount = "11111111111111111111111111111111"
+	const targetTunnel = "00000000-0000-0000-0000-000000000001"
+	encode := func(payload string) []byte {
+		return []byte(base64.StdEncoding.EncodeToString([]byte(payload)))
+	}
+	f.Add(encode(`{"a":"` + targetAccount + `","t":"` + targetTunnel + `","s":"Zml4dHVyZQ=="}`))
+	f.Add(encode(`{"a":"foreign","a":"` + targetAccount + `","t":"` + targetTunnel + `","s":"Zml4dHVyZQ=="}`))
+	f.Add(encode(`{"a":"` + targetAccount + `","t":"` + targetTunnel + `","s":""}`))
+	f.Add([]byte("malformed"))
+	target := cloudflareTarget{AccountID: targetAccount, TunnelID: targetTunnel}
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		if !tokenMatchesTunnel(raw, target) {
+			return
+		}
+		otherAccount := target
+		otherAccount.AccountID = "22222222222222222222222222222222"
+		otherTunnel := target
+		otherTunnel.TunnelID = "00000000-0000-0000-0000-000000000002"
+		require.False(t, tokenMatchesTunnel(raw, otherAccount))
+		require.False(t, tokenMatchesTunnel(raw, otherTunnel))
+	})
+}
+
+func TestCloudflareCredentialDeadlineStopsBeforeProviderWrite(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		<-ctx.Done()
+		require.Equal(t, time.Second, time.Since(started))
+		o := &cloudflareObservation{credentialWriteGuard: func(context.Context) error {
+			t.Fatal("an expired credential operation entered the protected write window")
+			return nil
+		}}
+		require.ErrorIs(t, o.requireCredentialWriteGuard(ctx), context.DeadlineExceeded)
+	})
 }
