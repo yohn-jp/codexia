@@ -16,8 +16,47 @@ STATEMENT: >>>
 
 [LINK: DOC-ARCHITECTURE-SYSTEM-DESIGN, システム基本設計]を上位とする。[LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, 初期導入]はVM収束・owner登録、[LINK: DOC-DEPLOYMENT-UPDATE-FLOW, 互換更新]は通常更新、[LINK: DOC-DEPLOYMENT-IAC, IaC]はAnsibleの所望状態、[LINK: DOC-DEPLOYMENT-BACKUP, Backup]は保全・復元、[LINK: DOC-VERIFICATION-CI-CD, CI/CD]はexact-source証明を所有する。本書はこれらを合成する横断契約であり、個別機能の第二正本を設けない。[LINK: DOC-DEPLOYMENT-PRODUCTION-BOOTSTRAP, Production Bootstrap]と[LINK: DOC-DEPLOYMENT-PUSH-DEPLOYMENT, Push deployment]は運用手順である。
 
-**非目標:** VM提供基盤・Tailnet自体の構築、既存Ansible・backup・release検証の再実装、別writer・pull updater・常駐Deployment controllerの追加、互換性チェックの緩和、Web/MCPへのインフラ操作権限付与、暗黙のデータ削除、非互換releaseの協調Cutover・自動移行・汎用Migration executor。CloudflareのTerraform/DNS/Access/zone policy変更は既存の別承認・管理権限に従う。唯一のVM管理経路は GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet とする。
+**非目標:** VM提供基盤そのものの構築、既存Ansible・backup・release検証の再実装、別writer・pull updater・常駐Deployment controllerの追加、互換性チェックの緩和、Web/MCPへのインフラ操作権限付与、暗黙のデータ削除、非互換releaseの協調Cutover・自動移行・汎用Migration executor。CloudflareのTerraform/DNS/Access/zone policy変更は既存の別承認・管理権限に従う。移行後の唯一のVM管理経路は GitHub Actions → Cloudflare Access Service Auth → Cloudflare Tunnel → pinned OpenSSH → Ansible → rootless Podman Quadlet とする。次節の採用済み目標に従い、Tailscale は廃止する。
 <<<
+
+[[SECTION]]
+MID: 2caf3bd256ec4fb2bb8b2f6c91afc6be
+UID: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management
+TITLE: 単一 Cloudflare Tunnel と製品公開制御の分離（採用済み移行目標）
+
+[TEXT]
+MID: 0f9a8d726d3b48eca5b23c654c6ce991
+STATEMENT: >>>
+**採用決定:** Cloudflare Tunnel を API 専用の公開機構から VM 基盤の単一 connector に変更し、同一 Tunnel に管理 SSH と製品 API の別 hostname・別 ingress・別 Access 認可を設ける。Tailscale を廃止する。新しい VM 管理 controller、VPN、pull updater、独自プロキシ・ルーティングエンジン、第二 Tunnel、恒常的な二重経路は作らない。現在稼働中の旧方式は移行前の観測であり新設計の代替ではない。本節は管理到達性、Tunnel の停止/mask を製品公開制御としている既存文書・図・実装の該当箇所を置き換える採用済み目標である。旧記述が残る消費先は同じ統合実装で更新し、整合前にリリース・移行を完了扱いにしない。
+
+| 責務 | 所有先 |
+| --- | --- |
+| 初回本人認証・限定資格の自動発行/登録 | [LINK: DOC-DEPLOYMENT-CODEXIACTL, CTL] の公式 cf Device Flow と既存 GitHub App。SSH 転送禁止 |
+| DNS、管理 hostname、単一 Tunnel ingress、Access app/policy、Workers | 既存 Terraform。管理 app は SSH 専用 Service Auth のみ、製品・probe・公開 protocol とは分離 |
+| 管理接続 | CTL が最初の独立認証済み SSH 上で承認された基盤 cloudflared を起動。Runner は protected Environment の用途別 Service Token と pinned OpenSSH。通常は CLI 非依存 |
+| 製品公開遮断 | 既存 Ansible lifecycle が所有する VM-local gate。標準 systemd .socket/.service と systemd-socket-proxyd を第一候補に適格性を実証 |
+| API / DB / backup | 既存 rootless Podman Quadlet、PostgreSQL、host lock、既存 backup producer と transaction/recovery intent |
+
+公開ゲート候補の具体構成: host の基盤 cloudflared は API/DB/Quadlet への Requires/After 依存を持たない。公式 host service を必要最小限の権限で起動し、connector token を protected file/credential で供給する。管理 ingress は host sshd のみに到達し、製品 ingress は全対象 hostname/path で専用 loopback socket のみに到達する。標準 systemd-socket-proxyd はその socket から API の host-local loopback endpoint に転送する。API は外部 interface に bind/publish せず、管理 connector から API へ直接到達できる ingress、別の公開 port、直接 Worker origin、bastion 任意転送を許容しない。VM 上の信頼済み管理者の host-local 操作とは区別する。DB の private network と製品側の Access/JWT/公開 protocol 契約を維持する。具体 port、service user、unit 依存、package version は先行実証で決定し、実装と同時に正本化する。
+
+| 状態 | 基盤 Tunnel / 管理 SSH | 製品公開ゲート |
+| --- | --- | --- |
+| R0/R4 未配備・不明 | 管理接続成立後は稼働。VM の独立管理手段を維持 | 閉 |
+| R5 setup-only | 稼働 | 認定済み setup-only readiness と限定 API/Access 確認後だけ開 |
+| prepare-activation / R6 候補起動前 | 稼働 | 閉。既存 owner/DB/client を保持 |
+| R6/R8 正常公開 | 稼働 | 認定済み digest・readiness・承認再確認後のみ開 |
+| 更新・backup・復元・失敗・中断 | 稼働 | 既存 lock と transaction/recovery intent に従い閉。復旧証拠確認後のみ開 |
+
+製品公開ゲートの閉鎖は listener と forwarding service の双方を停止し、再起動を越える遮断（既存永続 mask/activation link の責務を移管）を確認する。既存 HTTP keep-alive/WebSocket 等の接続も切断し、閉鎖検証後にのみ API 停止・backup・restore・candidate 起動を進める。socket の停止だけ、API の停止だけ、既存接続の残存、起動依存による API 自動起動を代替としない。既存起動/復旧 intent が不明な状態では fail closed。R5/R6/R3 の承認期限と既存の保護・認定・単一 writer・復元元遮断を緩和しない。既存 transaction が使う状態記録を再利用し、独自のフェンス DB や恒常的な Cloudflare config 切替を導入しない。製品の停止/更新処理から基盤 cloudflared の stop/mask/restart を除去する。connector 自体の更新・障害時は独立認証済み VM console/SSH による明示的な保守と再検証を行う。通常配備中に通信基盤を再起動しない。Cloudflare 障害時の管理・公開共通障害ドメイン、および Service Token が WIF と異なる有効期限付き secret であることを明示した上で採用する。
+
+**先行適格性（製品実装着手前・CTL 認証と独立して並行実行可能）:** 明示承認された隔離 Cloudflare account/zone、Ubuntu 26.04/Podman/systemd VM と隔離 GitHub repo/Environment で、固定版 cloudflared/ProxyCommand の実非対話 SSH、host pin、鍵認証、Ansible ping・実ファイル転送・通常の最大級 playbook/再接続を実行する。未認証・誤 token・別 repo/用途 token・誤 host pin・誤 SSH key を拒否する。同一 VM の両 Environment の SSH token は専用 Access app で受理し、保護 Environment への登録・使用、bootstrap/runtime の OS 利用者と鍵・sudo/rootless の分離は独立に検証する。製品 API/DB 不在でも管理接続を確立し、公開ゲートを実際に閉鎖したまま API 起動・失敗・既存接続・再起動/中断・回復を試し、外部公開を拒否し続け、同じ管理接続で再開できることを示す。R5 限定公開、R6/R8 の readiness 前拒否、正常公開、rollback/restore、直接 origin 迂回不可を確認する。公式 WebSocket の制約と長時間接続/転送を含め、固定版の service-token 認証に browser fallback がないことを確認する。局所的な socket proxy の実動作のみで全ゲートを合格にしない。実サービスを証明できなければ未成立として停止し、設計要件を弱めない。設計 PR の受入は規範的文書・設計モデルと既存 CI の整合で判定し、この先行適格性と製品実装の受入を設計のマージ条件に混同しない。
+
+**統合移行・撤去:** 両適格性ゲート通過後、認証/資格発行と管理 SSH/公開ゲートを独立した作業単位で並行実装し、同一の認定 source で統合する。Workflow/Ansible/backup/recovery/preflight/CTL/credential contract/CI impact/LikeC4・Threagile/Atlas・関連設計の消費先を同じ変更で切り替える。旧 Tunnel Quadlet の停止を前提とする gate と旧管理実装・依存・検証・設定入力・Secret 名を撤去し、不要な第二管理経路を残さない。実環境切替は対象 owner の別途承認後のみ行う。旧接続の撤去前に新接続と閉鎖状態を実証する。現行 main の実装を新仕様適合と推定せず、既存認定・公開・運用証拠で exact-source の合格を確認するまで正式リリース・本番配備を進めない。
+
+公式根拠: [Cloudflare SSH](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/use-cases/ssh/), [published application protocols](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/protocols/), [Service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/), [systemd-socket-proxyd](https://www.freedesktop.org/software/systemd/man/latest/systemd-socket-proxyd.html).
+<<<
+
+[[/SECTION]]
 
 [[SECTION]]
 MID: 29f3150e26917a64199d06270a793e30
@@ -27,11 +66,11 @@ TITLE: 運用サイクルと実行主体（全操作の責務境界）
 [TEXT]
 MID: 9d4d6a6788912b5183e04d17a07cae5a
 STATEMENT: >>>
-新規 VM の初回登録は [LINK: DOC-DEPLOYMENT-CODEXIACTL, codexiactl 初回配備 CLI] を正本とする。運用者の SSH セッション上で外部認証・入力準備・既存 protected operation の起動と照合を自動化する。配備主体は [LINK: DOC-DEPLOYMENT-CODEXIACTL-41-github公式-app-による認証配備対象の発見, codexiactl §4.1] に従い公式 GitHub App で発見・確認された `codexia` repo 自身である。公式 CLI 配布元と区別し、同じ repository identity に main source、既存 Environment、認定済み候補、OIDC/SSH、host/edge 観測と復旧証跡を結合する。公式 repo と Fork で経路を分岐しない。これは R0–R8 の第二実装ではなく、Ansible/Terraform を対象 VM で実行しない。外部サービス管理権限や独立した環境承認を迂回せず、通常配備には CLI を要求しない。
+新規 VM の初回登録は [LINK: DOC-DEPLOYMENT-CODEXIACTL, codexiactl 初回配備 CLI] を正本とする。運用者の SSH セッション上で外部認証・入力準備・既存 protected operation の起動と照合を自動化する。配備主体は [LINK: DOC-DEPLOYMENT-CODEXIACTL-41-github公式-app-による認証配備対象の発見, codexiactl §4.1] に従い公式 GitHub App で発見・確認された `codexia` repo 自身である。公式 CLI 配布元と区別し、同じ repository identity に main source、既存 Environment、認定済み候補、認定用 OIDC identity・管理 Access/SSH、host/edge 観測と復旧証跡を結合する。公式 repo と Fork で経路を分岐しない。これは R0–R8 の第二実装ではなく、Ansible/Terraform を対象 VM で実行しない。外部サービス管理権限や独立した環境承認を迂回せず、通常配備には CLI を要求しない。
 
 以下は運用の規範的な目標契約であり、実装済みとは主張しない。実装は本表に従う。新しいWorkflow・Environment・秘密情報管理経路・バックアップ形式を暗黙に追加する許可ではない。個々の詳細はリンク先の既存正本に従う。人が同一でも役割と資格情報は混同しない。
 
-- **インフラ管理者:** VM提供元、Tailnet、Cloudflare、S3/IAMの各管理面で外部資源を準備する。Gitで管理する設定はPRで変更する。
+- **インフラ管理者:** VM提供元、Cloudflare、S3/IAMの各管理面で外部資源を準備する。Gitで管理する設定はPRで変更する。
 - **配備運用者 (OPERATOR):** GitHub Actionsの既存保護環境で対象・導入意図・変更を承認し、AnsibleでVMを収束させる。Bootstrap管理者はsudoを使用し、通常配備はrootless identityを使用する。
 - **所有者 (OWNER):** 通常のWeb Consoleに本人Passkeyでログインし、認証・認可・バックアップ運用・作品管理を行う。VM/SSH/IAM/本番復元権限は持たない。
 - **復旧担当 (OPERATOR):** GitHub/CDやCodexiaの稼働に依存しない保護された復旧ホストと独立秘密保管を使う。復号・復元・受入を明示承認し、配備運用者へ検証済み状態を引き渡す。
@@ -41,7 +80,7 @@ STATEMENT: >>>
 
 | 操作・発火条件 | 誰が・どこから操作 | 実行先・使用する入力 | 成功・失敗時の行き先 |
 | --- | --- | --- | --- |
-| 外部基盤準備・VM交換 | インフラ管理者／VM提供元・Tailscale・Cloudflare管理面、必要なGit PR | 対応OS、SSH管理者/sudo、独立確認済みhost pin、Tailnet OIDC、既存通常Worker/Tunnel/DNS/Access。S3はここでは不要 | 管理接続と公開経路の観測。失敗はR0 |
+| 外部基盤準備・VM交換 | インフラ管理者／VM提供元・Cloudflare管理面、必要なGit PR | 対応OS、SSH管理者/sudo、独立確認済みhost pin、管理SSH専用Access Service Auth、既存通常Worker/Tunnel/DNS/Access。S3はここでは不要 | 管理接続と公開経路の観測。失敗はR0 |
 | 新規installの判断 | 配備運用者／既存Actions Preflight | Gitの公開設定、保護された管理接続・edge読取入力、認定済みFull成果物。DBの真の不在とinstall意図、初期化承認 | R4またはR0/R2。到達不能を空と見なさない |
 | Bootstrap (R4) | 配備運用者／既存Production Bootstrap | Ansibleがhost/secrets/base/auth-runtimeを収束。VMが内部秘密を生成・保管し、配備SSHを確認 | BOOTSTRAPPED。既存秘密・DBを勝手に再生成しない。S3/復号鍵/バックアップreceipt/復元検証を入力・完了条件にしない |
 | 初回Frontend、登録キー、本人登録 (R5) | 配備運用者／既存Frontend release・Bootstrap、所有者／通常HTTPSの /console/setup | 同じ認定済みFull pair・通常Worker・setup-only API・既存の暗号化grant配送。配送用owner公開鍵はgrant発行時のみ | owner/Passkey/client確定、grant失効。期限切れはowner不在を検証し承認済み再発行。既存ownerの作成は禁止 |
@@ -72,7 +111,7 @@ STATEMENT: >>>
 | 情報 | 唯一の正本・保管場所 | 禁止する経路 |
 | --- | --- | --- |
 | 公開設定・IaC・コード・release contract | Git、認定済み不変成果物 | 手製inventory/bundleを第二正本にしない |
-| SSH/Tailnet/Cloudflare配備用資格 | 元の外部管理面から既存codexia-bootstrap / codexia-production等の担当保護環境へ最小限供給 | アプリの秘密・復旧秘密を配備環境に追加しない |
+| SSH/Cloudflare配備用資格 | 元の外部管理面から既存codexia-bootstrap / codexia-production等の担当保護環境へ最小限供給 | アプリの秘密・復旧秘密を配備環境に追加しない |
 | DB role password、Better Auth/内省等のVM内部秘密 | VMのcanonical Podman secrets・対応サービス。復元に必要な値は復旧担当が独立秘密管理に保全 | Git、Actions Variables/Secrets、CI artifact、独自S3資格情報エスクロー |
 | owner・Passkey・OAuth・作品・確定履歴・運用状態 | PostgreSQL（REQ-DATA-005の移行完了まで必要な現行historyも保全） | DBを平文の秘密保管庫にしない。client未確定draft/派生cacheは別 |
 | 通常バックアップの保存先と実行credential・schedule | Consoleのactive revisionとVM内の専用保護領域。provider/IAMは外部管理面 | GitHubへの二重設定、初回専用profile |
@@ -113,7 +152,7 @@ STATEMENT: >>>
 
 | 軸 | 状態 | 観測証拠 |
 | --- | --- | --- |
-| M 管理接続 | 未準備／到達・認証済み／異常・不明 | VM ID、OS、Tailscale、SSH host key pin、操作者/rootless identity、必要なsudo |
+| M 管理接続 | 未準備／到達・認証済み／異常・不明 | VM ID、OS、管理Tunnel/Access、SSH host key pin、操作者/rootless identity、必要なsudo |
 | H 基盤 | 未構築／canonicalな部分構築／canonicalで正常／drift・不明 | Podman/systemd/UID/GID、Volume/Network/Quadlet、DB/Tunnel container・unit・Secretの一致 |
 | D データ | 未作成／新規空／既存互換／既存非互換／復旧対象が欠落／不明・破損 | DB cluster ID、logical DB、volume、role・ledger・persistence、履歴・独立backup・復旧意図 |
 | A 認証 | 未構成／登録待ち／登録済みだがactivation未準備／登録済み・検証済み／確認済み旧認証方式／回復必要／不明 | Better Auth schema、owner/Passkey/client同一性、setup marker・grant状態、Secretの存在・一致 |
@@ -163,7 +202,7 @@ MID: 2cbd542d2fe55a0d90f28873e0332a9f
 STATEMENT: >>>
 VMの利用履歴や旧API epochではなく現在のDB状態を判定する。新規installの明示と既存のdatabase-initialization承認がある場合、管理接続・canonical基盤の確認と正常なPostgreSQL管理接続による専用logical DBの不存在確認（または新規基盤での確認済み未作成）を根拠に、R4へ収束する。接続不能・認証失敗・観測不明は不存在と見なさずR0で停止する。restore意図はR2を維持する。既存DBを削除・上書きする操作は一切含めない。
 
-DB不在が確定した旧配備では、旧epoch・旧owner・旧API稼働記録は新しいDBの互換条件としない。既知の未完了操作はR1を優先し、不明な操作記録・基盤drift・対象所有者不一致は停止する。R4の保護された実行系統はproduction queueとcanonical host lockの下でDB不在を再検証し、Tunnel/APIを停止して旧API slotおよびDBに束縛された旧owner/setup/release状態だけを整理し、既存のclean target検証を満たす。PostgreSQL cluster・他DB・role・Secret・外部Tunnel/Access設定・独立backupは保持する。処理中断時は再観測し、不在が維持されている場合に限り整理を再開できること。既に作成・初期化されたDBは通常の新規空・install intentに束縛された再開契約に従い、暗黙に破棄しない。
+DB不在が確定した旧配備では、旧epoch・旧owner・旧API稼働記録は新しいDBの互換条件としない。既知の未完了操作はR1を優先し、不明な操作記録・基盤drift・対象所有者不一致は停止する。R4の保護された実行系統はproduction queueとcanonical host lockの下でDB不在を再検証し、製品公開ゲート/APIを停止して旧API slotおよびDBに束縛された旧owner/setup/release状態だけを整理し、既存のclean target検証を満たす。PostgreSQL cluster・他DB・role・Secret・外部Tunnel/Access設定・独立backupは保持する。処理中断時は再観測し、不在が維持されている場合に限り整理を再開できること。既に作成・初期化されたDBは通常の新規空・install intentに束縛された再開契約に従い、暗黙に破棄しない。
 
 既存BootstrapのDB初期化承認を用い、DB再作成固有の重複承認や旧epoch移行契約を要求しない。認定済みFull imageで現行schema/ledgerとBetter Authを初期化し、R5で通常Frontendを配備してownerを登録、R6で既に互換なFrontendを維持してBackend activationを行う。旧Frontendの存在はR4の妨げではない。通常update/adoptではDB不在を自動的な新規installへ読み替えない。
 <<<
@@ -274,9 +313,9 @@ MID: c2359c008eb6d4a157d55363e89b7fb9
 STATEMENT: >>>
 通常Frontend更新の互換性Admissionは維持する。初回だけR5の制限付き通常Frontend配備を利用し、R6で互換Frontendを再確認する。両者は認定済み候補を使い、R6はFrontendを書き換えない。欠落・非互換Frontendが残る場合はR0で停止し、R5の完了状態を確認する。
 
-新規owner登録では通常の `codexia-frontend` Worker・Full Frontendアーカイブ・canonical UI/Access/Tunnel経路のみを用いる。専用setup Worker、別Environment、別Frontendビルド、登録のためのTerraform経路切替を禁止する。R4後、確認済みR5（新規install、owner登録待ち、通常writer不在）に限り、`codexia-production` の保護されたFrontend workflowは認定済み候補を通常Workerへ配備できる。通常更新のlive Backend互換性Admissionは変更せず、初回配備は認定済み候補pair、fresh plan、Accessとcanonical route、version単調性でAdmissionする。既存writer/ownerを保持する必要がある場合は新規登録を行わない。通常業務/OAuth/MCP APIはsetup-only Backendが拒否し、public protocol bypassは通常runtime受入まで無効とする。setup-only API、Access/TLS/RP ID、登録キー追加認可、拒否経路を実測して本人へ引き渡す。登録後は既存の `--prepare-activation` 相当でowner/client検証、setup-only API/Tunnel停止、通常認証設定確定、clean API slotへの復帰を行う。FrontendとUI経路は維持しR6で同じ認定Full Backendを通常起動する。
+新規owner登録では通常の `codexia-frontend` Worker・Full Frontendアーカイブ・canonical UI/Access/Tunnel経路のみを用いる。専用setup Worker、別Environment、別Frontendビルド、登録のためのTerraform経路切替を禁止する。R4後、確認済みR5（新規install、owner登録待ち、通常writer不在）に限り、`codexia-production` の保護されたFrontend workflowは認定済み候補を通常Workerへ配備できる。通常更新のlive Backend互換性Admissionは変更せず、初回配備は認定済み候補pair、fresh plan、Accessとcanonical route、version単調性でAdmissionする。既存writer/ownerを保持する必要がある場合は新規登録を行わない。通常業務/OAuth/MCP APIはsetup-only Backendが拒否し、public protocol bypassは通常runtime受入まで無効とする。setup-only API、Access/TLS/RP ID、登録キー追加認可、拒否経路を実測して本人へ引き渡す。登録後は既存の `--prepare-activation` 相当でowner/client検証、setup-only API/製品公開ゲート停止、通常認証設定確定、clean API slotへの復帰を行う。FrontendとUI経路は維持しR6で同じ認定Full Backendを通常起動する。
 
-初回Backendの起動は既存の保護されたBackend deployment handoffとAnsible deploy transactionだけで行う。既存host lock下でledger/Auth検証・単一writer・readiness・Tunnel公開を確認する。既存データ採用では必要な保全と同一性を確認する。純新規では初回backupを発動しない。失敗時は通常deployの安全停止・復旧を利用し、登録済みownerとデータを保持する。
+初回Backendの起動は既存の保護されたBackend deployment handoffとAnsible deploy transactionだけで行う。既存host lock下でledger/Auth検証・単一writer・readiness・製品公開ゲートと外部経路を確認する。既存データ採用では必要な保全と同一性を確認する。純新規では初回backupを発動しない。失敗時は通常deployの安全停止・復旧を利用し、登録済みownerとデータを保持する。
 <<<
 
 [[SECTION]]
@@ -329,7 +368,7 @@ CIは認定済み候補、使い捨てUbuntu/rootless Podman/PostgreSQL 17、Clo
 | 非canonical基盤・未知状態・欠落identity | 拒否、暗黙削除なし、旧形式/真の不在とAccess拒否・到達不能の区別 |
 | 旧epoch/非互換schema・片側のみ配備 | 非互換の通常releaseを拒否、無変更停止。R4/R5/R6の新規導入と既存データ保全を区別 |
 | VM消失、論理DB欠落、owner資格回復 | 別ホスト復元、role/Secret/owner同一性維持、無承認初期化拒否 |
-| 中断・競合・再実行 | schema/marker/grant/owner/prepare-activation、backup/停止/Backend起動/通常Frontend公開/Tunnel公開の各checkpointで中断。再開または検証済み切戻し、二重writer・再owner発行・通常lane割込みなし |
+| 中断・競合・再実行 | schema/marker/grant/owner/prepare-activation、backup/停止/Backend起動/通常Frontend公開/製品公開ゲート開放の各checkpointで中断。再開または検証済み切戻し、二重writer・再owner発行・通常lane割込みなし |
 | 不正artifact/承認/backup | 全経路で未証明・陳腐化候補、不正host/DB identityを拒否。保全が必要な経路では不成立を拒否。純新規ではS3/復旧Environment/backup鍵なしでR4〜R6が成功する |
 | 通常運用と実環境受入 | 同一digest no-op、独立互換更新、rollback、VM reboot、実Cloudflare/Browser/owner認証・許可/拒否経路・独立復元の実測 |
 

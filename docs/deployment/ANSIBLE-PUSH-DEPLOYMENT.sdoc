@@ -12,6 +12,8 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: 5ec4897eb37fb91bf4e32925a0c71b45
 STATEMENT: >>>
+**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+
 > On a pristine approved VM, the browser enrollment flow uses a one-time setup key and a restricted Fastify API behind Cloudflare. The protected production workflow uses the normal same-origin frontend. See [LINK: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME-first-owner-through-the-browser, first owner through the browser] and the [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, initial deployment design].
 
 The [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, initial deployment state machine] and [LINK: DOC-DEPLOYMENT-UPDATE-FLOW, compatible update/rollback state machine] are normative. The implemented `bootstrap` stage converges approved host, secrets, base, and auth-runtime tasks; owner enrollment and protected application activation remain separate.

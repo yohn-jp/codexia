@@ -11,7 +11,8 @@ const files = new Map([
 ]);
 
 test('deployment guidance names the push-only controller and removes retired updater authority', () => {
-  assert.match(files.get('agents'), /sole backend delivery path is GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet/u);
+  assert.match(files.get('agents'), /single Tunnel migration and qualification\]\(docs\/deployment\/DEPLOYMENT-LIFECYCLE\.sdoc\)/u);
+  assert.doesNotMatch(files.get('agents'), /sole backend delivery path is GitHub Actions → Tailscale/u);
   assert.doesNotMatch(files.get('agents'), /exclusive updater/u);
 });
 

@@ -2,9 +2,11 @@ flowchart LR
     SRC["GitHub main"] --> CI["Verify / exact-source certificate"]
     CI --> ART["GHCR Full image by digest"]
     ART --> GATE["Protected GitHub Actions deployment admission"]
-    GATE --> TAIL["Tailscale OIDC + pinned SSH"]
-    TAIL --> ANS["Ansible desired state + host lock"]
+    GATE --> MANAGEMENT["Dedicated Access Service Auth / shared Tunnel / pinned SSH"]
+    MANAGEMENT --> ANS["Ansible desired state + host lock"]
     ANS --> POD["Rootless Podman Quadlet"]
     POD --> PG[("Preserved PostgreSQL volumes")]
-    TF["Cloudflare Terraform / Access policy"] --> EDGE["Edge routing"]
-    POD --> EDGE
+    TF["Cloudflare Terraform / distinct Access policies"] --> EDGE["Shared Tunnel product ingress"]
+    TF --> MANAGEMENT
+    EDGE --> PUBLICATION["Independent product publication gate"]
+    PUBLICATION --> POD

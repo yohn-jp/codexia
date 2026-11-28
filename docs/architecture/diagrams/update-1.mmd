@@ -12,21 +12,21 @@ flowchart TD
     ENABLE -->|はい| FRESH["queue内でsourceとreleaseを再検証"]
     FRESH --> COMPAT{"Full / API epoch / migration fingerprint<br/>/ persistence format / auth schema の互換性"}
     COMPAT -->|不明または不一致| MAINT["停止: 非互換・不明状態を観測"]
-    COMPAT -->|一致| SSH["Tailscale OIDC → pinned SSH<br/>rootless codexia"]
+    COMPAT -->|一致| SSH["Access Service Auth / Tunnel → pinned SSH<br/>rootless codexia"]
     SSH --> LOCK["host lock / 中断transactionの回復確認"]
     LOCK --> SAME{"候補digestは稼働中と同一か"}
     SAME -->|はい| NOOP["healthとidentityを再確認<br/>再配置しない"]
-    SAME -->|いいえ| STOP["TunnelとAPIのwriter停止を確認"]
+    SAME -->|いいえ| STOP["製品公開ゲート閉鎖とAPI writer停止を確認"]
     STOP --> BACKUP["age暗号化DB・historyバックアップ<br/>manifest/checksum・保存先を検証"]
     BACKUP --> OKBACK{"保全は成功したか"}
     OKBACK -->|いいえ| OLD["停止: 候補を起動せず旧状態を保護"]
     OKBACK -->|はい| SWITCH["候補digest固定Quadlet / release recordを適用"]
     SWITCH --> HEALTH{"新APIの認証・DB・readiness検査"}
-    HEALTH -->|成功| TUNNEL["Tunnelを開始、外部疎通を監視"]
+    HEALTH -->|成功| TUNNEL["製品公開ゲートを開放、外部疎通を監視"]
     HEALTH -->|失敗| ROLLBACK["既知良好のQuadletとrelease recordへ復帰"]
-    ROLLBACK --> RESTORED{"旧digestとAPIの健康を確認できるか"}
+    ROLLBACK --> RESTORED{"旧digestとAPIの健康・公開を確認できるか"}
     RESTORED -->|はい| FAILED["更新失敗として報告、旧版維持"]
-    RESTORED -->|いいえ| ISOLATE["Tunnel停止を維持、承認済み復旧"]
+    RESTORED -->|いいえ| ISOLATE["製品公開ゲート閉鎖維持、承認済み復旧"]
     TUNNEL --> ACCEPT["実稼働image、外部API、OAuthと利用者操作を照合"]
     NOOP --> ACCEPT
     ACCEPT --> DONE["更新受入完了"]

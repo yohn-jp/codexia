@@ -59,7 +59,7 @@ STATEMENT: >>>
 | `deploy` | protected GitHub Environment と証明済み Full digest | migration・auth・origin・API ready | durable transaction record に従い復旧 |
 | 公開受入 | 実 VM、Cloudflare、実ブラウザー、独立復元ホスト | API・OAuth・reboot・バックアップの観測 | fixture 成功だけで受入扱いしない |
 
-管理経路は **GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet**。公開 UI/認証入口は Cloudflare **Workers Static Assets**、API origin は Cloudflare Tunnel。`/console`と`/console/setup`は通常の `codexia-frontend` Worker の同じFull静的アーカイブ・Desktopアプリルートであり、登録キー検証はVMのFastify/Better AuthとPostgreSQLが担当する。初回登録専用Worker・Environment・Terraform経路切替・別Frontendビルドを設けない。Cloudflare Terraform / Access policy は別承認・別検証を要する。MCP は管理 VM の初期構築経路ではない。
+移行後の管理経路は **GitHub Actions → Cloudflare Access Service Auth → Cloudflare Tunnel → pinned OpenSSH → Ansible → rootless Podman Quadlet**。[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Tunnel と製品公開分離] の受入・撤去条件に従う。公開 UI/認証入口は Cloudflare **Workers Static Assets**、API origin は Cloudflare Tunnel。`/console`と`/console/setup`は通常の `codexia-frontend` Worker の同じFull静的アーカイブ・Desktopアプリルートであり、登録キー検証はVMのFastify/Better AuthとPostgreSQLが担当する。初回登録専用Worker・Environment・Terraform経路切替・別Frontendビルドを設けない。Cloudflare Terraform / Access policy は別承認・別検証を要する。MCP は管理 VM の初期構築経路ではない。
 <<<
 
 [[/SECTION]]
@@ -96,7 +96,7 @@ STATEMENT: >>>
 | 管理元 | 登録・生成する情報 | 利用先と再実行時の扱い |
 | --- | --- | --- |
 | Git | サービスの UID/GID、公開 origin、Web・iOS・内省 client ID、callback、scope | Frontend のビルド・検証と Ansible の登録設定が同じ [本番設定](https://github.com/yohn-jp/codexia/blob/main/deploy/production.json) を読む。 |
-| インフラ管理者・保護環境 | VM の管理先、独立に確認した SSH host key、管理者と配備用の別々の SSH 鍵、Tailscale OIDC、Access・Tunnel の資格情報 | 管理者は sudo、配備用アカウントは rootless。R4 は配備用公開鍵を導出して VM に登録し、別ジョブから実際に接続を確認する。 |
+| インフラ管理者・保護環境 | VM の管理先、独立に確認した SSH host key、管理者と配備用の別々の SSH 鍵、管理 SSH 専用 Access、製品 Access・Tunnel の資格情報 | 管理者は sudo、配備用アカウントは rootless。R4 は配備用公開鍵を導出して VM に登録し、別ジョブから実際に接続を確認する。 |
 | VM 上の R4 | PostgreSQL 管理・アプリ・認証ロールのパスワード、Better Auth secret、内省 secret | 生成を許すのは承認済みの新規状態に限る。PostgreSQL と Podman が同じ値を使い、再実行時は既存値を採用する。部分欠損や所有権の不一致は復旧へ戻す。 |
 | 復旧担当（ACTIVE後の運用受入、または既存環境の復旧） | 独立保管先・復旧権限・復号鍵・復元に必要なVM秘密 | 純新規R4〜R6の入力ではない。通常Consoleでバックアップを設定・実行し、復旧担当が独立ホストで復元試験を行う。既存環境の復旧ではR2で先に必要な情報を取得する。 |
 | owner 本人（R5のみ） | 登録キー配送用の公開鍵、ブラウザーで作成する Passkey | 登録キーは R5 で一回発行する。登録完了後の R6 は既存の owner と client を検証する。 |
@@ -151,7 +151,7 @@ STATEMENT: >>>
 [Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/first-2.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=first-2)
 
 - **DB/認証不一致:** 既存データ・role・Secret を勝手に削除・変更しない。公開 API は開始せず、承認済み復旧/移行へ送る。
-- **公開の失敗:** Tunnel/Access 経路の受入を API 起動成功と区別する。管理用 Tailscale/SSH を公開経路に依存させない。
+- **公開の失敗:** Tunnel/Access 経路の受入を API 起動成功と区別する。管理 SSH と基盤 Tunnel を製品公開ゲート・API の状態に依存させない。
 - **バックアップ:** 純新規R4〜R6では不要。ACTIVE後に所有者がConsoleで設定・実行し、復旧担当が独立保管・別ホスト復元を実証して運用を受け入れる。ローカル暗号化archiveだけではVM消失に耐えない。既存データの復旧はR2で先行し、通常更新は事前保全を維持する。
 
 **受入証拠:** 使い捨て Ubuntu VM で空状態・再適用・既存データの採用/拒否・secret drift・schema 不一致・owner 登録・Full 初回起動を検証する。実 VM では reboot、Cloudflare 公開 routing、Web 認証、独立バックアップ復元を別途観測する。検証未実施を PASS として報告しない。

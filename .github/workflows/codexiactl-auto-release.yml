@@ -11,7 +11,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   tag:
+    # Publication hold during the approved headless authentication / Tunnel migration.
+    # Remove this hold only with the integrated acceptance required by CODEXIACTL.sdoc.
     if: >-
+      false &&
       github.repository == 'yohn-jp/codexia' &&
       github.event.workflow_run.path == '.github/workflows/verify.yml' &&
       github.event.workflow_run.event == 'push' &&

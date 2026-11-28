@@ -1,5 +1,5 @@
 flowchart TD
-    INF["インフラ管理者: VM / Tailnet / Cloudflare準備"] --> REQ["配備運用者: Deployment要求 / 所望release"]
+    INF["インフラ管理者: VM / Cloudflare管理・製品経路準備"] --> REQ["配備運用者: Deployment要求 / 所望release"]
     REQ --> OBS["Production Preflight<br/>VM・DB・Auth・API・Frontend・操作記録"]
     OBS --> KNOWN{"必要な観測・承認が確定?"}
     KNOWN -->|いいえ| STOP["R0: 停止 / 前提準備"]
@@ -13,7 +13,7 @@ flowchart TD
     HANDOFF -->|不成立| STOP
     RECOVERED --> ACCEPT
     LOST -->|いいえ| EMPTYDB{"DB不在を確認・新規承認済み・基盤正常?"}
-    EMPTYDB -->|はい| BOOT["R4: Actions → Tailscale → SSH → Ansible<br/>基盤・VM内部秘密・DB/Auth"]
+    EMPTYDB -->|はい| BOOT["R4: Actions → Access / Tunnel → SSH → Ansible<br/>基盤・VM内部秘密・DB/Auth"]
     EMPTYDB -->|いいえ| INCOMPAT{"既存DB/Auth/Backend非互換?"}
     INCOMPAT -->|はい| STOP
     INCOMPAT -->|いいえ| DRIFT{"drift・障害?"}

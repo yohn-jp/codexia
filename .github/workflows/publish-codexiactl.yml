@@ -8,7 +8,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify-source:
-    if: github.repository == 'yohn-jp/codexia' && startsWith(github.ref, 'refs/tags/v0.1.')
+    # Design-only commits must not republish the non-conforming CLI.
+    # Remove the hold together with the automatic tag hold after integrated acceptance.
+    if: false && github.repository == 'yohn-jp/codexia' && startsWith(github.ref, 'refs/tags/v0.1.')
     name: Verified CLI release source
     runs-on: ubuntu-24.04
     timeout-minutes: 5

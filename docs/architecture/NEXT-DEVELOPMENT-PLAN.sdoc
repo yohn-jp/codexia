@@ -62,7 +62,7 @@ STATEMENT: >>>
 | Assistant | `assistant.qa`、`continuation`、`reader.reaction`、`stateEvents.draft` 等と文脈・出典・プレビューの実装 | 既存Provider実行を凍結。文脈取得と提案の共通部分のみ再利用し、外部AI/MCPを主経路にする |
 | UI | Desktop Web、保存・復旧、可変パネル、Reading | Desktop Webで創作ワークフローを完成させる。iOSは[LINK: DOC-ARCHITECTURE-IOS-SWIFTUI-ARCHITECTURE, 独立したSwiftUI設計]に従う |
 | 交換・復旧 | `codexia-work/v1`、PostgreSQLバックアップ | 作品交換と運用バックアップを区別し、未解決Evidenceを保持 |
-| 配備 | Workers静的UI、Tunnel、Rootless Podman、Quadlet、SHA固定GHCR発行 | Tailscale/SSH/AnsibleのPush型に統一。Kubernetes等への移行は不要 |
+| 配備 | Workers静的UI、Tunnel、Rootless Podman、Quadlet、SHA固定GHCR発行 | Push型を維持し、採用済みの専用Access Service Auth/共用Tunnel/pinned SSH/Ansibleへ管理接続を移行する。Kubernetes等への移行は不要 |
 <<<
 
 [[/SECTION]]

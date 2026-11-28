@@ -29,7 +29,7 @@ STATEMENT: >>>
 | 初回所有者（未登録） | 新規構築されたサービスで最初のPasskeyを登録 | `/console/setup` | 作品の閲覧/編集、owner sessionへの偽装、復旧DBで新規owner |
 | 公開読者 | 共有された内容を読む | `/r/:module/:project/:slug`のみ | 非公開原稿/設定/履歴、書込、作者登録 |
 | 外部AI/MCP | 許可された作品を参照・解析して提案 | `/mcp`と登録済みtool。**Web画面は不要** | 作者の変更承認/適用、直接persistence、資格情報 |
-| 運用者 | 初期VM構築、証明済み更新、特権バックアップ/本番復旧 | 保護済みGitHub Actions/Tailscale SSH/Ansible。**作者用Web UIからはS3保存先の指定・検証・保全要求/結果の参照のみ** | WebにVM/IAM権限や復号秘密鍵を渡すこと、導入キーでSSH認証 |
+| 運用者 | 初期VM構築、証明済み更新、特権バックアップ/本番復旧 | 保護済みGitHub Actions/専用Access Service Auth/共用Tunnel/pinned SSH/Ansible（移行目標）。**作者用Web UIからはS3保存先の指定・検証・保全要求/結果の参照のみ** | WebにVM/IAM権限や復号秘密鍵を渡すこと、導入キーでSSH認証 |
 
 今回「閲覧者」「初回owner候補」「MCP client」を同じ`user`として扱わない。想定利用者ごとに入口・失敗時の挙動・権限が違う。単一ownerの契約を、未合意の一般編集者・管理者グループへ勝手に拡張しない。
 <<<

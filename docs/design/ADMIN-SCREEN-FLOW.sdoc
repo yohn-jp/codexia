@@ -92,7 +92,7 @@ STATEMENT: >>>
 
 [Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/admin-3.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=admin-3)
 
-本番 API の更新、DB migration、Podman secret、Tailscale 接続、Cloudflare Access 改訂、**本番DB/運用資源の復元**は**作者の Web 設定画面から実行しない**。一方、**S3互換バックアップの保管先・ポリシー指定と検証・保全ジョブ要求・履歴参照**は `/console/backups` の機能として採用する。Webは任意のVMコマンド/SSH/RPCを実行せず、限定された設定とdurable requestのみをFastifyへ提出する。実行はoperatorが事前設置した専用バックアップexecutorが担い、既存backup.sh/host lockを再利用する。これらには独立した運用者権限、保護された秘密情報、承認済み手順と監査証拠が必要である。経路は [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, 初期デプロイ遷移] と [LINK: DOC-DEPLOYMENT-UPDATE-FLOW, アップデート遷移] を正本とする。
+本番 API の更新、DB migration、Podman secret、管理SSH/Tunnel設定、Cloudflare Access 改訂、**本番DB/運用資源の復元**は**作者の Web 設定画面から実行しない**。一方、**S3互換バックアップの保管先・ポリシー指定と検証・保全ジョブ要求・履歴参照**は `/console/backups` の機能として採用する。Webは任意のVMコマンド/SSH/RPCを実行せず、限定された設定とdurable requestのみをFastifyへ提出する。実行はoperatorが事前設置した専用バックアップexecutorが担い、既存backup.sh/host lockを再利用する。これらには独立した運用者権限、保護された秘密情報、承認済み手順と監査証拠が必要である。経路は [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, 初期デプロイ遷移] と [LINK: DOC-DEPLOYMENT-UPDATE-FLOW, アップデート遷移] を正本とする。
 <<<
 
 [[/SECTION]]
@@ -237,7 +237,7 @@ STATEMENT: >>>
 | PROBE_PENDING / FAILED | テスト送信でありバックアップではない。エラー区分・設定を修正して再検証 |
 | PROBE_PASSED | S3に検証用暗号文を送受信できた。保全点やDR復元の証拠にはならない |
 | ACTIVE | 設定がexecutorに適用された状態。新しいbackup runがまだ無ければ「オフVM未保全」を表示 |
-| RUN_QUEUED / RUNNING / UNKNOWN | 現行writerの停止を伴い得る。API/Tunnel切断時もrun IDから再照合。成功・失敗を推測しない |
+| RUN_QUEUED / RUNNING / UNKNOWN | 現行writerの停止を伴い得る。API/製品公開遮断時もrun IDから再照合。成功・失敗を推測しない |
 | REMOTE_VERIFIED | 暗号文・manifest・独立保護receiptを一致確認したoff-VM保全点 |
 | DRILL_PASSED | 独立した復旧hostで実データ契約を満たす復号・復元を観測した別の証拠。REMOTE_VERIFIEDと混同しない |
 | DISABLED / DEGRADED | 既存のオフVM保全を削除しない。required保管先の停止は保護条件を検証し拒否する |

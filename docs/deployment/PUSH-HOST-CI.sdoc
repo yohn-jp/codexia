@@ -12,6 +12,8 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: c7dcfed40b4e0f1362809bb25a8911be
 STATEMENT: >>>
+**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+
 The dedicated [push-host workflow](https://github.com/yohn-jp/codexia/blob/main/.github/workflows/push-host.yml) is manually runnable and also validates relevant pull requests. It uses an isolated Ubuntu 26.04 runner and holds no production SSH, registry or application secrets.
 
 The fixture executes the canonical `host` stage twice under a dedicated bootstrap account, checks the `codexia` rootless account, systemd lingering, network generator and rootless Podman. It emits source-SHA/run-bound JSON evidence, a bounded redacted log and verifies cleanup of the fixture-owned account.

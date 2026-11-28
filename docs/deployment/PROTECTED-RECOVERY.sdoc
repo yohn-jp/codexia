@@ -12,6 +12,8 @@ IMPORT_FROM_FILE: @codexia
 [TEXT]
 MID: 468bdb95899e040098d0ef13cbb3c9dd
 STATEMENT: >>>
+**移行状態:** [LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 単一 Cloudflare Tunnel と製品公開分離] が採用済みの目標契約を所有する。本書の旧管理経路・Tunnel 停止・旧資格名に関する現行運用手順は未移行実装の記録であり、移行後の正本ではない。旧方式の新規構築・製品リリースへの使用を許可しない。移行実装で該当手順・検証を同時に置換する。
+
 **種別は承認済みの規範的設計。**
 配備運用と復旧担当が行う R2 の復元から R3 の公開までの証拠の引き渡しを定める。
 対象読者は復旧担当者、配備運用者、保護された操作の承認者。
@@ -92,7 +94,7 @@ v2 manifest の database と history の fingerprint は内容照合用で、sou
 digest はすり替えを検出する手掛かりで、証拠の発行元は保護された運用経路で確認する。
 
 保護された handoff は production queue と既存の host lock の下で、同じ記録の digest、承認期限、配備対象の repository と repository/owner ID、対象の host/cluster/OID、復元内容、ledger、owner と Auth、候補および Frontend を再照合する。
-元の writer の停止または遮断が現在も有効なことを確認し、Tunnel の公開直前に承認期限と対象を再確認する。
+元の writer の停止または遮断が現在も有効なことを確認し、製品公開ゲートの開放直前に承認期限と対象を再確認する。
 別の対象や古い記録は R0 で停止し、再判定する。
 [Preflight の binding](https://github.com/yohn-jp/codexia/blob/main/scripts/deployment/preflight/observe.mjs) [配備トランザクション](https://github.com/yohn-jp/codexia/blob/main/deploy/ansible/deploy-transaction.yml)
 <<<

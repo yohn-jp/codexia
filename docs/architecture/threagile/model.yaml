@@ -19,8 +19,9 @@ technical_overview:
   description: >
     Desktop Web and native iOS client targets use Cloudflare edge routing and
     the authenticated Fastify API. External AI clients use the restricted MCP
-    adapter. Protected GitHub Actions, Tailscale, SSH and Ansible form a
-    separate operations path.
+    adapter. The approved target uses one Cloudflare Tunnel with separate
+    product and Access Service Auth management ingress. Protected GitHub
+    Actions, pinned SSH and Ansible remain a separate logical operations path.
   images:
 questions:
   Is Cloudflare Access the Codexia object-authorization authority?: >
@@ -46,8 +47,8 @@ abuse_cases:
     A caller is told that a manuscript mutation committed when PostgreSQL did
     not commit the corresponding revision and receipt.
   Edge and operator plane confusion: >
-    Public Cloudflare routing is confused with the protected Tailscale, SSH,
-    Ansible and host-operations plane.
+    Product ingress is confused with dedicated Access Service Auth management
+    ingress on the shared Cloudflare Tunnel, SSH, Ansible or host operations.
   Backup key or restore compromise: >
     Ciphertext, object identity, age recovery keys, credentials or independent
     restore receipts are exposed or confused.
@@ -66,7 +67,8 @@ security_requirements:
     the revision and its durable receipt.
   Separate edge and operations planes: >
     Cloudflare UI/API routing does not grant project authorization or host
-    administration. Keep the Tailscale/SSH/Ansible path protected.
+    administration. Keep the dedicated management ingress and pinned SSH/Ansible
+    path protected; block product traffic independently while management remains reachable.
   Backup separation: >
     Encrypt backup artifacts with age before off-VM transfer. Keep recovery keys
     and S3 credentials outside public artifacts and verify downloaded bytes and
@@ -332,9 +334,9 @@ technical_assets:
       - json
     communication_links:
 
-  Cloudflare Tunnel and API ingress:
+  Cloudflare Tunnel product ingress:
     id: cloudflare-ingress
-    description: Routes API traffic to Fastify without granting Codexia object authorization
+    description: Product route of the shared Tunnel, targeting only the independent host-local publication gate
     type: process
     usage: business
     used_as_client_by_human: false
@@ -351,7 +353,7 @@ technical_assets:
     confidentiality: restricted
     integrity: critical
     availability: important
-    justification_cia_rating: Cloudflare Tunnel is API routing, not an owner or project authorization boundary.
+    justification_cia_rating: The product route of the shared Tunnel grants neither object authorization nor management access.
     multi_tenant: false
     redundant: true
     custom_developed_parts: false
@@ -361,10 +363,56 @@ technical_assets:
     data_formats_accepted:
       - json
     communication_links:
-      Forwards API requests:
+      Forwards API requests only to publication gate:
+        target: publication-gate
+        description: The independent listener and forwarding service remain closed until approved publication
+        protocol: https
+        authentication: none
+        authorization: none
+        tags:
+          - codexia
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: business
+        data_assets_sent:
+          - manuscript
+        data_assets_received:
+          - manuscript
+
+  Product publication gate:
+    id: publication-gate
+    description: Independent host-local listener and forwarding service, fail closed during bootstrap, deployment and recovery
+    type: process
+    usage: business
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: service
+    technology: gateway
+    tags:
+      - codexia
+    internet: false
+    machine: virtual
+    encryption: none
+    owner: Codexia operators
+    confidentiality: restricted
+    integrity: critical
+    availability: important
+    justification_cia_rating: The gate must not expose a candidate or restored writer before readiness and approval.
+    multi_tenant: false
+    redundant: false
+    custom_developed_parts: false
+    data_assets_processed:
+      - manuscript
+    data_assets_stored:
+    data_formats_accepted:
+      - json
+    communication_links:
+      Forwards only admitted API traffic:
         target: codexia-api
         description: API admission independently validates token, principal, resource, scope and effect
-        protocol: https
+        protocol: http
         authentication: none
         authorization: none
         tags:
@@ -537,29 +585,15 @@ technical_assets:
     data_formats_accepted:
       - json
     communication_links:
-      Tailscale OIDC and network coordination:
-        target: tailscale
-        description: Obtains an ephemeral identity for the protected host path
+      Management Access Service Auth:
+        target: cloudflare-management
+        description: Presents a dedicated finite-lifetime credential from the protected Environment
         protocol: https
         authentication: token
         authorization: technical-user
         tags:
           - codexia
         vpn: false
-        ip_filtered: true
-        readonly: false
-        usage: devops
-        data_assets_sent:
-        data_assets_received:
-      Pinned SSH and Ansible:
-        target: operator-host-path
-        description: Runs the protected Ansible desired state over pinned SSH and Tailscale
-        protocol: ssh-tunnel
-        authentication: credentials
-        authorization: technical-user
-        tags:
-          - codexia
-        vpn: true
         ip_filtered: true
         readonly: false
         usage: devops
@@ -581,9 +615,9 @@ technical_assets:
           - public-design
         data_assets_received:
 
-  Tailscale control plane:
-    id: tailscale
-    description: OIDC-authorized private network coordination for operators
+  Dedicated Cloudflare management ingress:
+    id: cloudflare-management
+    description: SSH-only Access Service Auth route of the same Tunnel as product ingress
     type: external-entity
     usage: devops
     used_as_client_by_human: false
@@ -600,7 +634,7 @@ technical_assets:
     confidentiality: restricted
     integrity: critical
     availability: important
-    justification_cia_rating: Tailscale is a private operator network and never grants author project or object authorization.
+    justification_cia_rating: Dedicated Service Auth provides reachability, not SSH login or product authorization. The shared provider is a common outage domain.
     multi_tenant: false
     redundant: true
     custom_developed_parts: false
@@ -609,6 +643,20 @@ technical_assets:
     data_formats_accepted:
       - json
     communication_links:
+      Pinned SSH forwarding:
+        target: operator-host-path
+        description: Allows only SSH to the verified host; OpenSSH checks host pin and separate user key
+        protocol: ssh-tunnel
+        authentication: credentials
+        authorization: technical-user
+        tags:
+          - codexia
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: devops
+        data_assets_sent:
+        data_assets_received:
 
   Operator SSH and Ansible host path:
     id: operator-host-path
@@ -629,7 +677,7 @@ technical_assets:
     confidentiality: restricted
     integrity: mission-critical
     availability: important
-    justification_cia_rating: Host operations remain behind the protected GitHub Actions, Tailscale and pinned SSH path.
+    justification_cia_rating: Host operations remain behind protected GitHub Actions, dedicated Access Service Auth and pinned SSH.
     multi_tenant: false
     redundant: false
     custom_developed_parts: false
@@ -801,6 +849,7 @@ trust_boundaries:
     technical_assets_inside:
       - cloudflare-workers
       - cloudflare-ingress
+      - cloudflare-management
     trust_boundaries_nested:
   Codexia application and persistence host:
     id: codexia-vm
@@ -810,6 +859,7 @@ trust_boundaries:
       - codexia
     technical_assets_inside:
       - codexia-api
+      - publication-gate
       - persistence-adapter
       - postgresql
     trust_boundaries_nested:
@@ -821,15 +871,6 @@ trust_boundaries:
       - codexia
     technical_assets_inside:
       - github-actions
-    trust_boundaries_nested:
-  Tailscale control plane:
-    id: tailscale-control
-    description: External private-network coordination remains distinct from Codexia API authorization
-    type: network-cloud-provider
-    tags:
-      - codexia
-    technical_assets_inside:
-      - tailscale
     trust_boundaries_nested:
   Protected host operations:
     id: host-operations
@@ -999,12 +1040,12 @@ individual_risk_categories:
     impact: Confusion can expose host administration or treat Access identity as Codexia object authorization.
     asvs: V4 - Access Control
     cheat_sheet: https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/
-    action: Keep Workers/Tunnel routing, Fastify project authorization and Tailscale/SSH/Ansible administration separate.
-    mitigation: Cloudflare carries UI/API traffic only; host state changes use the protected GitHub Actions to Ansible path.
+    action: Keep the shared Tunnel's product and SSH routes separately authorized, independent of Fastify project authorization.
+    mitigation: The SSH-only ingress uses dedicated Service Auth and pinned SSH, while every product origin path traverses the independent fail-closed publication gate.
     check: EXT-EDGE-001; EXT-EDGE-002; EXT-OPS-001; REQ-EXT-001; REQ-OPS-001; REQ-OPS-002; AUTH-07; G5 rejects public client or API relations into protected operations; production policy remains unchecked.
     function: architecture
     stride: elevation-of-privilege
-    detection_logic: Check for any route from public UI/MCP to SSH, Ansible, backup executor or Tailscale administration.
+    detection_logic: Check for any route from public UI/MCP to SSH, Ansible, backup executor or the dedicated management ingress. Verify that closing the product gate never closes management SSH.
     risk_assessment: Edge configuration and production network policies require separate runtime evidence.
     false_positives: HTTPS API forwarding does not itself grant a host command or owner permission.
     model_failure_possible_reason: false

@@ -26,7 +26,7 @@ STATEMENT: >>>
 1. Fastify v5を維持しHonoへ切替えない。TypeSpec→OpenAPI 3.1→Fastify JSON Schema/Ajv。OrvalはWeb TypeScript用client生成、Zod v4は業務/MCP/生成Web clientに使用する。Native iOSは同一OpenAPI 3.1からSwift clientを生成し、[LINK: DOC-ARCHITECTURE-IOS-SWIFTUI-ARCHITECTURE, iOS Native設計]が所有する。
 2. PostgreSQLは原稿等の唯一の永続正本。SQL migration/Better Auth管理schema、原稿Revision・receipt、Core単独利用可能性を保持する。
 3. owner、MCP-CLIENT、SHARE-READER、SETUP、OPERATORを昇格・混同しない。MCPはread/compute/proposeまで、承認・適用は作者のみ。
-4. Web UIとTailscale/SSH/Ansible管理面を分離し、Webから任意VM/Podmanコマンドや本番DB復元を提供しない。オフVMバックアップ先の指定はowner UIからできるが、実行はoperator provisioned executorと既存host lock/backup.shを再利用する。
+4. Web UIと専用Access Service Auth / Tunnel / SSH / Ansible管理面を分離し、Webから任意VM/Podmanコマンドや本番DB復元を提供しない。オフVMバックアップ先の指定はowner UIからできるが、実行はoperator provisioned executorと既存host lock/backup.shを再利用する。
 5. Architecture AtlasのMermaid画面・状態図、LikeC4構造図、Threagile脅威と各要求の**正本所有先を明示**する。見た目の図を適合証拠としない。
 6. CIのsole plan/impact authority、exact-source job/attempt/artifact identity、単一Pages publisher、Core/Fullと正式対応のChromium証明を維持する。ブラウザー実行はChromiumに一本化し、[LINK: DOC-VERIFICATION-E2E-EXECUTION, E2E execution] に従う。旧testsの削除は独立した証明力に基づき判断する。
 <<<

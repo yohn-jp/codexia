@@ -148,7 +148,7 @@ STATEMENT: >>>
 
 [Mermaid 正本](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/diagrams/system-2.mmd) · [Architecture Atlas](https://yohn-jp.github.io/codexia/architecture/?diagram=system-2)
 
-- **一つのデプロイ制御プレーン:** GitHub Actions → Tailscale OIDC → pinned SSH → Ansible → rootless Podman Quadlet。VM 上の polling updater、pull timer、別のリリース選択器、MCP によるデプロイは設けない。
+- **一つのデプロイ制御プレーン:** GitHub Actions → Cloudflare Access Service Auth → Cloudflare Tunnel → pinned OpenSSH → Ansible → rootless Podman Quadlet（採用済み移行目標）。[LINK: DOC-DEPLOYMENT-DEPLOYMENT-LIFECYCLE-unified-cloudflare-management, 管理通信と製品公開の分離] に従い、Tailscale を廃止する。VM 上の polling updater、pull timer、別のリリース選択器、MCP によるデプロイは設けない。
 - VMの最小前提はAnsibleからのSSH到達と権限付きの構成変更。OSの適合性は`inspect`/`bootstrap`で検証する。初期導入では新規DBと既存DBの復旧を分け、Ansibleは256-bitの登録キー発行を管理するがownerを作成しない。本人はWorkersの`/console/setup`でPasskey登録を行い、保護された本番`deploy`の承認は別操作とする。`bootstrap`の構成収束、setup-only API、本人登録と本番activationは個別の段階であり、全経路の実装・受入を一括して完了扱いしない。
 - 通常更新は **DB migration fingerprint、persistence format、API epoch、Full profile、認証スキーマ互換性** を検証し、互換なイメージのみ自動適用できる。互換でないものは承認済み別手順に隔離する。
 - 変更前バックアップ、host lock、停止、適用、health、失敗時の既知良好イメージへの復帰を一つのトランザクションとして扱う。コンテナーだけを戻してデータ変更が巻き戻ったと主張しない。
