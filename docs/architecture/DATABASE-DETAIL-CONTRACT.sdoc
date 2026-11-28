@@ -34,7 +34,7 @@ STATEMENT: >>>
 | DB-STATE-001 | codexia_job_history、codexia_activity、codexia_speaker_state | [LINK: DOC-ARCHITECTURE-DATABASE-DETAIL-CONTRACT-サーバー永続状態req-data-005, サーバー永続状態] | 同一クラスタ上のジョブ、操作位置、適用済み Speaker 状態。専用の所有者と DML 権限を持ち、既存アプリ DB ログインを共有する |
 | DB-DERIVED-001 | module cache / index / model | [LINK: DOC-ARCHITECTURE-MODULES, Modules] | 再構築可能な派生物。原稿や作者判断を再保存しない |
 
-認証schemaの物理DDLをpublicのアプリmigrationへ移さない。認証用role、migration role、アプリroleの分離は [LINK: DOC-ARCHITECTURE-API-AUTHN-AUTHZ, Auth]、deploy/ansible/verify-postgres-roles.sql、deploy/ansible/AUTH-RUNTIME.md と照合する。roleが一致するだけで権限全体を検証済みとはしない。
+認証schemaの物理DDLをpublicのアプリmigrationへ移さない。認証用role、migration role、アプリroleの分離は [LINK: DOC-ARCHITECTURE-API-AUTHN-AUTHZ, Auth]、deploy/ansible/verify-postgres-roles.sql、[LINK: DOC-DEPLOYMENT-ANSIBLE-AUTH-RUNTIME, 認証ランタイム手順] と照合する。roleが一致するだけで権限全体を検証済みとはしない。
 <<<
 
 [[/SECTION]]
