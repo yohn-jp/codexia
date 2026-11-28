@@ -27,7 +27,7 @@ TITLE: リリースからアクティベーションまでの状態遷移
 [TEXT]
 MID: bd5efcc556add53a3e50a94db86c305a
 STATEMENT: >>>
-[グラフィカルな遷移図を開く](https://yohn-jp.github.io/codexia/architecture/#update-1)
+[グラフィカルな遷移図を開く](https://yohn-jp.github.io/codexia/architecture/?diagram=update-1)
 
 [ANCHOR: ATLAS-DIAGRAM-update-1]
 

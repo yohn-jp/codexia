@@ -557,18 +557,21 @@ async function load() {
     addButtons();
     filterList();
     catalogResults.open = !narrowViewport.matches;
-    navigateFromHash();
-    window.addEventListener('hashchange', navigateFromHash);
+    navigateFromLocation();
+    window.addEventListener('hashchange', navigateFromLocation);
     void loadGraphIndex();
   } catch {
     setLoadFailure('図の一覧を取得できませんでした。再試行するか、GitHubの設計書を確認してください。');
   }
 }
 
-function navigateFromHash() {
+function navigateFromLocation() {
   let id = '';
-  try { id = decodeURIComponent(location.hash.slice(1)); }
-  catch { id = ''; }
+  try {
+    id = location.hash
+      ? decodeURIComponent(location.hash.slice(1))
+      : new URLSearchParams(location.search).get('diagram') ?? '';
+  } catch { id = ''; }
   const diagram = diagrams.find(item => item.id === id);
   if (diagram) {
     query.value = '';

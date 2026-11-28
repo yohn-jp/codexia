@@ -23,7 +23,7 @@ The accepted Desktop Web toolchain is **TypeScript 7 (native compiler/type check
 
 **WEB-02 — vanilla-extract:** The Desktop Web theme migration is integrated under [#791](https://github.com/yohn-jp/codexia/issues/791). This is an independent CSS migration after WEB-01; it is not a prerequisite for accepting the compiler migration. Preserve Light/Dark/Paper, CodeMirror and desktop interactions, compare CSS/JS output and performance, and remove superseded global CSS without retaining a duplicate theme authority. See [LINK: DOC-ARCHITECTURE-DEPENDENCY-INVENTORY, dependency inventory] and [LINK: DOC-VERIFICATION-CI-CD, CI acceptance].
 
-[図をグラフィカルに閲覧する](https://yohn-jp.github.io/codexia/architecture/#system-1)
+[図をグラフィカルに閲覧する](https://yohn-jp.github.io/codexia/architecture/?diagram=system-1)
 
 **種別: 正本・規範的設計（normative）。** 本書はシステム全体の構成、責務分界、変更が守る不変条件を定義する。実装・CI・本番環境を検査して得られる事実は適合証拠であり、設計の代替正本ではない。運用手順・個別機能の詳細は本書から参照する所有文書が定める。
 <<<

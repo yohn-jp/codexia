@@ -40,7 +40,7 @@ TITLE: 本人のセキュリティ管理画面（現在提供する範囲）
 [TEXT]
 MID: cb754a0cd574dc5f89c580588ba22ab7
 STATEMENT: >>>
-[既存の本人セキュリティ画面の遷移図をSVGで開く](https://yohn-jp.github.io/codexia/architecture/#admin-1)
+[既存の本人セキュリティ画面の遷移図をSVGで開く](https://yohn-jp.github.io/codexia/architecture/?diagram=admin-1)
 
 - **Desktop:** 原稿 Shell の「管理コンソール」から `/console/security` と `/console/identity` に進む。原稿 Shell の「認証・セキュリティ」でも同じ管理画面をダイアログで開ける。
 - **iOS Native目標:** SwiftUI設定・OS認証から許可された本人操作へ移動する。旧Mobile Reactの`view=settings` routeは撤去済みで、Native UIの正本ではない。
@@ -143,7 +143,7 @@ STATEMENT: >>>
 
 静的UIは既存の**Cloudflare Workers Static Assets**で提供し、`/console/*` は同一のWeb UIのルートとして管理する。登録状態、初期キー検証、owner確定、Passkey ceremonyはCloudflare Workersでなく、Cloudflare Tunnel経由の**VM上のFastify + Better Auth / `codexia_auth`**が権威を持つ。**セットアップキーはインフラ権限でも通常のAPI bearerでもない**。Cloudflare AccessはUI入口の保護策として別途承認・検証し、owner権限の根拠としない。
 
-[コンソール全体の遷移図](https://yohn-jp.github.io/codexia/architecture/#admin-4)
+[コンソール全体の遷移図](https://yohn-jp.github.io/codexia/architecture/?diagram=admin-4)
 
 [ANCHOR: ATLAS-DIAGRAM-admin-4]
 
@@ -160,7 +160,7 @@ MID: 5381faf36a37af659d2833e29d49c46a
 STATEMENT: >>>
 **目的:** VMをAnsibleで構成した後、所有者本人がブラウザーだけでPasskeyを登録できること。SSHによる一時Webサーバー手動起動、ポートフォワード、SQL、環境変数編集、登録済みowner IDの転記を**通常の初回登録導線から排除する**。AnsibleはCSPRNGによる256 bitの初期登録キーの発行・安全な引渡しに責任を持つが、ownerを登録しない。実装契約は [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, 初期導入遷移] と [LINK: DOC-ARCHITECTURE-API-AUTHN-AUTHZ, API認証設計]。
 
-[初回登録の画面遷移図](https://yohn-jp.github.io/codexia/architecture/#admin-5)
+[初回登録の画面遷移図](https://yohn-jp.github.io/codexia/architecture/?diagram=admin-5)
 
 [ANCHOR: ATLAS-DIAGRAM-admin-5]
 

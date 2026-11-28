@@ -446,7 +446,7 @@ MID: 3b61a6db98d5d33c2fa64f435d281118
 STATEMENT: >>>
 - **必須の一致:** 画面ID、CTR ID、要求principal、method、遷移先、失敗時の保護先が [LINK: DOC-DESIGN-SCREEN-CONTROL-CATALOG, ボタン台帳] と [LINK: DOC-ARCHITECTURE-ROUTE-AUTHORIZATION-CONTRACT, URL/API認可] に矛盾しないこと。
 - **実装状況と受入:** 所有者による OIDC 設定は採用目標である。管理コンソールと初回登録の稼働は、Web、VM、Cloudflare の対象環境で確認する。初期登録キーの発行と配送の詳細は [LINK: DOC-DEPLOYMENT-INITIAL-DEPLOYMENT-FLOW, 初期デプロイ遷移] を参照する。
-- **必須の可視化:** AtlasはこのMarkdownのMermaid定義からSVGを生成し、生成全件の構文・実ブラウザー読み込み・個別リンクを検証する。HTML側に同じ状態グラフを二重ハードコードしない。
+- **必須の可視化:** Atlasは本書が参照するMermaid正本からSVGを生成し、生成全件の構文・実ブラウザー読み込み・個別リンクを検証する。HTML側に同じ状態グラフを二重ハードコードしない。
 - **異常系:** 401/403、別project、404、競合409/412、通信断、local draft容量不足、応答不明、Passkeyキャンセル、setupの二重消費、無効な公開linkで、UIとDBの実状態を観測する。
 <<<
 

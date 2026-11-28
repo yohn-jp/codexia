@@ -27,7 +27,7 @@ TITLE: 起動から作品への遷移
 [TEXT]
 MID: cca177a633d345767920eb3a1c915ee8
 STATEMENT: >>>
-[利用画面の遷移図をSVGで開く](https://yohn-jp.github.io/codexia/architecture/#user-1)
+[利用画面の遷移図をSVGで開く](https://yohn-jp.github.io/codexia/architecture/?diagram=user-1)
 
 [ANCHOR: ATLAS-DIAGRAM-user-1]
 

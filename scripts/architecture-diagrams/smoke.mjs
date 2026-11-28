@@ -113,7 +113,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     assert.equal(await page.locator('#diagram-list .group:visible').count(), 1, 'Category selector filters to one group');
     await page.locator('#diagram-category').selectOption('all');
 
-    await page.goto(base + '/#screen-23', { waitUntil: 'networkidle' });
+    await page.goto(base + '/?diagram=screen-23', { waitUntil: 'networkidle' });
+    assert.equal(await page.locator('#svg-image').getAttribute('src'), 'svg/screen-23.svg',
+      'A generated specification link must open its Mermaid diagram');
     await page.locator('#svg-image:not([hidden])').waitFor();
     const longDiagram = await page.locator('#canvas').evaluate(el => ({
       scrollWidth: el.scrollWidth,

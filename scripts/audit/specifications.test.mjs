@@ -13,11 +13,14 @@ test('[TEST-TRC-08-001] projects obligations, reverse surfaces, and evidence lin
     mkdirSync(join(output, 'html', 'docs', 'requirements'), { recursive: true });
     mkdirSync(join(output, 'json'), { recursive: true });
     writeFileSync(join(output, 'html/index.html'), '<html><body>Requirements</body></html>');
-    writeFileSync(join(output, 'html/docs/requirements/REQUIREMENT-REGISTER.sdoc-TRACE.html'), '<html><body>Trace</body></html>');
+    writeFileSync(join(output, 'html/docs/requirements/REQUIREMENT-REGISTER.sdoc-TRACE.html'),
+      '<html><body><p id="verified">Trace</p><a href="./REQUIREMENT-REGISTER.sdoc-TRACE.html#meaning">Meaning</a><a href="./REQUIREMENT-REGISTER.sdoc-TRACE.html#verified">Verified</a></body></html>');
+    writeFileSync(join(output, 'html/docs/requirements/REQUIREMENT-REGISTER.sdoc.html'),
+      '<html><body><p id="meaning">Meaning</p></body></html>');
     writeFileSync(join(output, 'json/index.json'), '{}');
     const sha = 'a'.repeat(40);
     const exactRun = { testId: 'TEST-TRC-01-001', sourceSha: sha, repository: 'yohn-jp/codexia', runId: '42', attempt: 1, job: 'specification', task: 'pages-requirements-trace', result: 'PASS', url: 'https://github.com/yohn-jp/codexia/actions/runs/42' };
-    const rawFiles = ['html/index.html', 'html/docs/requirements/REQUIREMENT-REGISTER.sdoc-TRACE.html', 'json/index.json'].sort().map(name => { const bytes=readFileSync(join(output,name)); return {name,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}; });
+    const rawFiles = ['html/index.html', 'html/docs/requirements/REQUIREMENT-REGISTER.sdoc-TRACE.html', 'html/docs/requirements/REQUIREMENT-REGISTER.sdoc.html', 'json/index.json'].sort().map(name => { const bytes=readFileSync(join(output,name)); return {name,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}; });
     const report = {
       exports: { rawFiles },
       source: { sourceSha: sha, worktreeClean: true, documentScope: 'public', registerPath: 'docs/requirements/REQUIREMENT-REGISTER.sdoc' },
@@ -46,6 +49,9 @@ test('[TEST-TRC-08-001] projects obligations, reverse surfaces, and evidence lin
     writeFileSync(join(output, 'trace-report.json'), JSON.stringify(report));
     packSpecifications(site, output, sha, { status: 'CERTIFIED', sourceSha: sha, repository: 'yohn-jp/codexia', runId: '43', attempt: 2, job: 'types', task: 'requirements-trace', runUrl: 'https://github.com/yohn-jp/codexia/actions/runs/43', artifactId: 987, artifactDigest: 'sha256:' + 'd'.repeat(64), passedCaseIds: ['TEST-TRC-01-001'] });
     assert.equal(verifySpecifications(site, sha).sourceSha, sha);
+    const publishedTrace = readFileSync(join(site, 'requirements/html/docs/requirements/REQUIREMENT-REGISTER.sdoc-TRACE.html'), 'utf8');
+    assert.match(publishedTrace, /REQUIREMENT-REGISTER\.sdoc\.html#meaning/u);
+    assert.match(publishedTrace, /REQUIREMENT-REGISTER\.sdoc-TRACE\.html#verified/u);
     assert.match(readFileSync(join(site, 'requirements/html/index.html'), 'utf8'), /href="\.\.\/\.\.\/"/u);
     const tracePage = readFileSync(join(site, 'requirements/traceability/index.html'), 'utf8');
     const traceJson = JSON.parse(readFileSync(join(site, 'requirements/traceability/traceability.json'), 'utf8'));

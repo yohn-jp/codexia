@@ -72,7 +72,9 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
   const types = {'.html':'text/html', '.css':'text/css', '.js':'text/javascript', '.mjs':'text/javascript', '.json':'application/json', '.svg':'image/svg+xml'};
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
-    const name = url.pathname.endsWith('/') ? `${url.pathname}index.html` : url.pathname;
+    if (!url.pathname.startsWith('/codexia/')) { res.writeHead(404).end(); return; }
+    const pathname = url.pathname.slice('/codexia'.length);
+    const name = pathname.endsWith('/') ? `${pathname}index.html` : pathname;
     const file = path.resolve(root, `.${decodeURIComponent(name)}`);
     if (!file.startsWith(root + path.sep)) { res.writeHead(403).end(); return; }
     try { res.setHeader('Content-Type', types[path.extname(file)] ?? 'application/octet-stream'); res.end(await readFile(file)); }
@@ -84,7 +86,7 @@ test('integrated Pages shows requirements, trace matrix and LikeC4 provenance', 
     browser = await chromium.launch({headless:true, executablePath:process.env.CODEXIA_E2E_CHROMIUM});
     const page = await browser.newPage();
     await page.route('https://api.github.com/**', route => route.abort());
-    const base = `http://127.0.0.1:${server.address().port}`;
+    const base = `http://127.0.0.1:${server.address().port}/codexia`;
     assert.equal((await page.goto(`${base}/`)).status(), 200);
     const search = page.getByPlaceholder('設計文書を検索');
     for (const [query, document] of [

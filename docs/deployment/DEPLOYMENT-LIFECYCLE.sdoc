@@ -178,7 +178,7 @@ TITLE: 統合Deployment経路
 [TEXT]
 MID: 3246a816b19bc7a20c6ace136f1b30d6
 STATEMENT: >>>
-[グラフィカルな遷移図を開く](https://yohn-jp.github.io/codexia/architecture/#lifecycle-1)
+[グラフィカルな遷移図を開く](https://yohn-jp.github.io/codexia/architecture/?diagram=lifecycle-1)
 
 [ANCHOR: ATLAS-DIAGRAM-lifecycle-1]
 
