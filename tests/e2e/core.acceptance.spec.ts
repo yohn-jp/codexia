@@ -378,8 +378,8 @@ test("[TEST-API-002-001] a committed save with a lost response is reconciled aft
   expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
 });
 
-for (const recovery of ["reload", "same-tab retry"] as const) {
-  test(`replaying a saved operation after a newer remote revision shows the current head (${recovery})`, async ({ page, authorizeAuthor }) => {
+for (const recovery of ["reload", "same-tab retry", "page resume"] as const) {
+  test(`replaying a saved operation shows the current head (${recovery})`, async ({ page, authorizeAuthor }) => {
     const f = await fixture(page, authorizeAuthor);
     const submitted = "B committed before its response was lost.";
     const remote = "Remote D became the current head.";
@@ -406,19 +406,34 @@ for (const recovery of ["reload", "same-tab retry"] as const) {
     await lost;
     const retry = page.getByRole("button", { name: "保存結果を確認して再試行", exact: true });
     await expect(retry).toBeEnabled();
-    await replace(f, remote);
+    const committed = await read(f);
+    expect(committed.revision.markdown).toBe(submitted);
+    const expectedHead = recovery === "page resume" ? committed.revision : (await replace(f, remote, committed)).revision;
+    if (recovery === "page resume") {
+      const resumedRead = page.waitForResponse(response =>
+        response.request().method() === "GET" && response.url().endsWith(documentPath(f)));
+      await page.evaluate(() => {
+        window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      });
+      const response = await resumedRead;
+      expect(response.ok()).toBe(true);
+      expect((await response.json() as Read).revision).toMatchObject(expectedHead);
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      await expect(retry).toBeEnabled();
+    }
     if (recovery === "reload") {
       await page.reload();
       await authorizeAuthor("desktop", page, { continueCurrentPage: true });
     } else {
       await retry.click();
     }
-    await expectEditor(page, remote);
+    await expectEditor(page, expectedHead.markdown);
     await expectServerSaved(page);
     expect(requests).toHaveLength(2);
     expect(requests[1]).toEqual(requests[0]);
     const latest = await read(f);
-    expect(latest.revision.markdown).toBe(remote);
+    expect(latest.revision).toMatchObject(expectedHead);
     expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
   });
 }
