@@ -4,7 +4,7 @@ Provision a VM, enroll its first owner through the normal frontend and activate 
 
 ## Guided initial deployment
 
-Use the [initial deployment CLI](CODEXIACTL.md) from a pinned OpenSSH session on the target Ubuntu 26.04 x86-64 VM. It prepares the inputs below and invokes the existing protected workflows. The individual steps in this runbook are available for diagnosis and independent recovery. Independent Environment approvals and owner enrollment remain mandatory.
+Use the [initial deployment CLI](CODEXIACTL.md) from a pinned OpenSSH session on the target Ubuntu 26.04 x86-64 VM. It prepares the inputs below and invokes the existing protected workflows. The individual steps in this runbook are available for diagnosis and independent recovery. Operator approval and owner enrollment remain mandatory; Environment reviewers and Prevent self-review are optional. Both deployment Environments must restrict deployment to branch main only.
 
 On your trusted workstation, select a published immutable official CLI version from the [Codexia releases](https://github.com/yohn-jp/codexia/releases), including when deploying a fork. The download and attestation repository below is the **official CLI publisher**, not the deployment repository. Replace `vX.Y.Z` with that exact tag and use an up-to-date GitHub CLI to verify the release and the binary's provenance.
 

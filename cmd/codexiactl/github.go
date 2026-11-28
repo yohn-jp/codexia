@@ -140,10 +140,7 @@ func (g *githubControl) requireProtection(ctx context.Context, name string) erro
 	if err != nil {
 		return err
 	}
-	if githubIndependentReview(env) {
-		return g.requireMainOnly(ctx, name, env.GetDeploymentBranchPolicy())
-	}
-	return fmt.Errorf("%w: %s has no enforceable independent approval. Open %s/settings/environments, select %s, set Required reviewers to another trusted GitHub account (not the operator), enable Prevent self-review, and keep deployment branches restricted to main. The CLI never disables approval to proceed", errGitHubProtection, name, g.target.URL(), name)
+	return g.requireMainOnly(ctx, name, env.GetDeploymentBranchPolicy())
 }
 
 func (g *githubControl) environment(ctx context.Context, name string) (*github.Environment, error) {
@@ -158,30 +155,6 @@ func (g *githubControl) environment(ctx context.Context, name string) (*github.E
 		return nil, errGitHubTarget
 	}
 	return env, nil
-}
-
-func githubIndependentReview(env *github.Environment) bool {
-	for _, rule := range env.ProtectionRules {
-		if rule.GetType() != "required_reviewers" || !rule.GetPreventSelfReview() {
-			continue
-		}
-		for _, entry := range rule.Reviewers {
-			if entry == nil {
-				continue
-			}
-			switch reviewer := entry.Reviewer.(type) {
-			case *github.User:
-				if entry.GetType() == "User" && reviewer.GetID() > 0 {
-					return true
-				}
-			case *github.Team:
-				if entry.GetType() == "Team" && reviewer.GetID() > 0 {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 func (g *githubControl) requireMainOnly(ctx context.Context, name string, policy *github.BranchPolicy) error {

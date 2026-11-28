@@ -110,7 +110,7 @@ func (c *workflowController) dispatch(ctx context.Context, operation string, inp
 	if err := c.store.Save(c.state); err != nil {
 		return 0, fmt.Errorf("could not checkpoint workflow %s", c.target.runLink(id))
 	}
-	c.operator.Notice(spec.label + " submitted: " + c.target.runLink(id) + ". A separate Environment reviewer uses Review deployments on this run if GitHub requests approval.")
+	c.operator.Notice(spec.label + " submitted: " + c.target.runLink(id) + ". If optional Environment protection is configured, use Review deployments on this run as required by GitHub.")
 	return id, nil
 }
 
@@ -215,7 +215,7 @@ func (c *workflowController) execute(ctx context.Context, operation string, inpu
 }
 
 func (c *workflowController) preflight(ctx context.Context, management string) (lifecycleReceipt, int64, error) {
-	if err := requireApproval(c.operator, "Run read-only lifecycle Preflight on "+c.target.FullName()+" main using the "+management+" SSH identity? GitHub may require an independent reviewer."); err != nil {
+	if err := requireApproval(c.operator, "Run read-only lifecycle Preflight on "+c.target.FullName()+" main using the "+management+" SSH identity? GitHub may enforce optional Environment protection configured by the maintainer."); err != nil {
 		return lifecycleReceipt{}, 0, err
 	}
 	id, err := c.execute(ctx, "lifecycle", map[string]string{"management": management})

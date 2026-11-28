@@ -4,7 +4,7 @@
 
 ## 1. 採用決定と完了目標
 
-Go 製の独立した一時的なインストーラー `codexiactl` を対象 VM の SSH セッションから起動する。VM の観測、認証の誘導、必要な外部資源の特定、制御面の入力整備、既存保護 Workflow の起動・監視、本人登録の案内を一連の対話として実行する。人間が入力名・ID・Run ID・公開鍵・Token を複数の管理画面の間で転記する運用を通常経路にしない。人間に残す操作は、外部アカウントの認証・委任、権限や対象の選択、明示的な変更承認、独立した GitHub Environment 承認、Owner の本人 Passkey 登録、必要な独立復旧受入に限定する。外部 API が値の取得を許さない場合の限定的な初期資格情報入力は許容する。
+Go 製の独立した一時的なインストーラー `codexiactl` を対象 VM の SSH セッションから起動する。VM の観測、認証の誘導、必要な外部資源の特定、制御面の入力整備、既存保護 Workflow の起動・監視、本人登録の案内を一連の対話として実行する。人間が入力名・ID・Run ID・公開鍵・Token を複数の管理画面の間で転記する運用を通常経路にしない。人間に残す操作は、外部アカウントの認証・委任、権限や対象の選択、明示的な変更承認、Owner の本人 Passkey 登録、必要な独立復旧受入に限定する。外部 API が値の取得を許さない場合の限定的な初期資格情報入力は許容する。
 
 CLI の実行主体は対象 VM に対し独立に認証済みの配備運用者である。CLI は root として常時動作しない。初回管理接続を可能にするための Tailscale 接続・必要な公開鍵登録だけが対象 VM 上の許可された初期準備であり、必要時に限定して sudo を使う。Codexia の host/base/secrets/auth-runtime、DB の初期化、Quadlet、API/Tunnel の構成は従来どおり Runner 上の Ansible に委譲する。Cloudflare IaC は既存 Terraform の管理面で適用する。通常配備は GitHub Actions → Tailscale OIDC → pinned OpenSSH → Ansible → rootless Podman Quadlet の一経路であり、CLI を必要としない。
 
@@ -82,7 +82,7 @@ CodexiaCTL は SSH の通常端末上で完結する、案内付きの逐次 CLI
 ### 表示とガイド
 
 - §3 の既存 01–10 工程と観測結果を唯一の進捗源とし、工程番号・名称、現在の作業、完了・待機・不足・失敗・未実行を明記する。成功の観測がない段階を完了色にしない。待機中は対象 run と承認先・待機理由を表示し、計測していない進捗率や完了時刻を表示しない。
-- 最初の認証・対象確定後は repository、branch、確認済み VM・origin を表示する。複数候補は Huh の選択メニューで完全修飾 repo 名と識別情報を表示し、選択後も §4.1 の対象確認を省略しない。変更前には対象、意図、差分、影響、必要な権限、独立承認の有無を示す。
+- 最初の認証・対象確定後は repository、branch、確認済み VM・origin を表示する。複数候補は Huh の選択メニューで完全修飾 repo 名と識別情報を表示し、選択後も §4.1 の対象確認を省略しない。変更前には対象、意図、差分、影響、必要な権限、任意の Environment 承認設定の有無を示す。
 - 診断・失敗は工程と観測した原因、影響、次に必要な具体的操作（設定箇所・公式 URL・不足権限・再実行コマンド・確認済み run link のうち該当するもの）を一緒に示す。既存値や事実が不明なら不明と表示する。一般的な失敗メッセージだけにしない。doctor/status の既存表示内容・JSON schema、最新 run の選択規則、ACTIVE/ACCEPTED の区別を保持する。
 - CLI 固有の共有 semantic style を定義する。Codexia の落ち着いた配色と明晰な階層を反映し、端末の明暗・色対応に応じて読みやすいアクセント、本文、補助、警告、エラーを使い分ける。Desktop Web の CSS・テーマ実装の共有は要求しない。状態と選択・フォーカスは色だけに依存させず、文字・記号・明示ラベルでも識別可能にする。狭幅・Unicode 幅・ASCII 端末でも情報を欠落させず折り返す。画面消去や別画面への常時切替を通常表示にせず、SSH の scrollback に非秘密の工程結果・修復案内を残す。
 
@@ -92,7 +92,7 @@ SSH 上で独立に開いた controlling TTY (`/dev/tty`) を対話の入出力�
 
 秘密入力、Owner Setup Grant の一度限りの表示、provider の認証 code の TTY 限定表示、保護操作の明示承認は既存の安全な operator/TTY 経路を維持する。秘密を Huh の string 値・フォーム履歴・表示 model・clipboard・診断・JSON に渡さない。秘密入力は echo の完全無効化、入力長制限、byte slice の消去、端末設定復元を維持する。外部由来文字列は表示前に端末制御文字・escape sequence の注入を防止する。信頼済みの固定 style が生成する制御列と、外部入力を区別する。
 
-保護操作は確認対象と差分を表示し、既存の明示肯定（既定 No）を取得した時だけ実行する。未選択・空入力・曖昧な入力・EOF・中断・タイムアウト・入力障害を承認に変換しない。独立した Environment reviewer による GitHub 承認を端末フォームで代替しない。Huh の選択も正常に明示 submit された観測済み候補だけ受理し、終了時の既定値・未確定値では進めない。中断後に line mode へ切り替えて承認を再取得する等の暗黙の再試行を行わない。
+保護操作は確認対象と差分を表示し、既存の明示肯定（既定 No）を取得した時だけ実行する。未選択・空入力・曖昧な入力・EOF・中断・タイムアウト・入力障害を承認に変換しない。GitHub Environment の Required reviewers と Prevent self-review は必須にしない。任意で設定されている場合はその承認を尊重し、端末フォームで代替しない。Huh の選択も正常に明示 submit された観測済み候補だけ受理し、終了時の既定値・未確定値では進めない。中断後に line mode へ切り替えて承認を再取得する等の暗黙の再試行を行わない。
 
 通常の Huh フォームは `RunWithContext` を利用して既存 command の cancellation と結合する。Huh の組込み accessible mode は `Field.RunAccessible` のエラーを破棄する実装で、通常の context-aware 実行経路とも異なるため、配備 CLI では採用しない。`TERM=dumb`、描画非対応端末等では開始前に既存の context-aware な line mode を選択する。これは同じ意味契約の表示・入力方式であり、第二の配備経路ではない。`NO_COLOR` が設定された環境では色を出さず、非対話出力に cursor 操作を出さない。全 mode で正常終了、拒否、Ctrl+C、SIGTERM、SIGHUP、SSH 切断、エラーの terminal mode・cursor 復元と §2 の終了コードを維持する。端末復元のために provider operation や workflow dispatch を再実行しない。
 
@@ -160,7 +160,7 @@ ssh -N -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=yes \
 
 公開 origin 等の配備固有値は選択 repo の認定 source の既存公開設定から取得して検証し、同じ値を build・配備・probes・Terraform 管理資源・Owner 認証に結合する。公式 origin や Cloudflare account/zone、Tailscale client ID を他の repo に引き継がない。対象固有値を CLI の別設定に複製しない。
 
-対象の repo/owner ID と exact SHA は既存の認定・公開・配備全体の共通境界とする。Workflow の同一 repo/main 判定、API URL、run/job/attempt/artifact/attestation、GHCR namespace/digest、release、certificate、Ansible に渡す証拠、復旧・再開の binding には、選択 repo または実行時に検証した同じ GitHub repository context を使用する。公式リポジトリの固定 owner/ID、公式の product image、公式 origin、他 repo の成功 run を Fork の認定・配備対象に代用しない。公式の CLI 配布・開発者向け公開物など本来 upstream が所有する入口は配備入口と分離する。既存の exact-source certification、Environment/main 保護、OIDC/SSH pin、独立承認、host lock、R0–R8 の経路判定を弱めず、公式と Fork の二重実装、別 Workflow、別配備 controller、認定機構の追加を行わない。
+対象の repo/owner ID と exact SHA は既存の認定・公開・配備全体の共通境界とする。Workflow の同一 repo/main 判定、API URL、run/job/attempt/artifact/attestation、GHCR namespace/digest、release、certificate、Ansible に渡す証拠、復旧・再開の binding には、選択 repo または実行時に検証した同じ GitHub repository context を使用する。公式リポジトリの固定 owner/ID、公式の product image、公式 origin、他 repo の成功 run を Fork の認定・配備対象に代用しない。公式の CLI 配布・開発者向け公開物など本来 upstream が所有する入口は配備入口と分離する。既存の exact-source certification、Environment/main 保護、OIDC/SSH pin、操作ごとの明示承認、host lock、R0–R8 の経路判定を弱めず、公式と Fork の二重実装、別 Workflow、別配備 controller、認定機構の追加を行わない。
 
 GitHub REST API から選択 repo の identity、default/main、Environment と保護、branch restriction、Variables、Secret の名前と更新時刻を列挙する。Secret の値は取得できない。GitHub の Environment public key で Libsodium 互換 sealed box を使い値を暗号化して登録する。GitHub token の権限不足や App 未承認を private credential のログ出力で解決しない。GitHub の管理 token は VM サービスや Actions の Secret に格納しない。Workflow は公式 dispatch API の run ID 応答を利用し、その ID の job/attempt/artifact を選択 repo に結びつけて照合する。既存版 API が ID を返さない場合は同じ操作の run を一意に同定できるまで読取りのみとし、時刻の近い別 run を採用しない。
 
@@ -224,7 +224,7 @@ SSH host pin は既に独立認証された SSH 接続または provider console
 | R5 Frontend | frontend-release.yml | preflight_run_id, approval_phrase=PUBLISH_INITIAL_FRONTEND |
 | R5 grant | production-bootstrap.yml | mode=owner-setup, preflight_run_id, approval_phrase=OWNER_SETUP_CODEXIA |
 
-各 protected operation の内容・状態・計画の run link・candidate・対象・承認範囲を提示し、運用者の承認なしに approval phrase や gate を送らない。人間に固定文字列を転記させる必要はない。CLI が正規の承認 phrase を送る条件はその operation の明示承認である。Environment required reviewer の独立した承認は GitHub の既存画面に案内して待機し、CLI は pending approval の自動承認 API を呼ばない。preflight のみでは書込み承認にならない。DB 初期化の承認を既存データの破棄承認と混同しない。時刻枠は運用者が選択・承認した UTC start/end として明示し、CLI は無期限の window を設定しない。
+各 protected operation の内容・状態・計画の run link・candidate・対象・承認範囲を提示し、運用者の承認なしに approval phrase や gate を送らない。人間に固定文字列を転記させる必要はない。CLI が正規の承認 phrase を送る条件はその operation の明示承認である。Environment の Required reviewers と Prevent self-review は任意とし、単独運用を許可する。任意の reviewer が設定されている場合だけ GitHub の既存画面に案内して待機し、CLI は pending approval の自動承認 API を呼ばない。preflight のみでは書込み承認にならない。DB 初期化の承認を既存データの破棄承認と混同しない。時刻枠は運用者が選択・承認した UTC start/end として明示し、CLI は無期限の window を設定しない。
 
 HTTP 200/202、dispatch 成功、Workflow conclusion=success だけを配備成功としない。期待する実ジョブが skipped の場合は未実行と表示し、ライフサイクル状態と証拠を照合する。workflow/run/attempt の不一致、gate の期限切れ、取消し、失敗、候補変更時は停止して原因・リンクを提示する。read-only API poll は timeout・rate limit・retry-after・backoff を守る。作成・dispatch の応答喪失は当該 operation の照合を先に行い、自動再送しない。秘密の作成結果を失った場合も他 token を無制限に作らない。
 

@@ -163,7 +163,7 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 	if i.plan {
 		tty.Notice("If the prerequisites are satisfied, init reviews missing protected inputs, requests the management SSH and lifecycle checks, then uses the admitted R4 and R5 route.")
 		tty.Notice("Workflows: " + bootstrapFile + " for SSH, R4 and Owner setup; " + preflightFile + " for lifecycle evidence; " + frontendFile + " for initial Frontend publication.")
-		tty.Notice("Each write and dispatch requires explicit approval in the terminal. Protected jobs may also require a separate GitHub Environment reviewer.")
+		tty.Notice("Each write and dispatch requires explicit approval in the terminal. Optional GitHub Environment protection, if configured, still applies.")
 	}
 	if err := errors.Join(snapshotErr, oidcErr, targetErr, historyErr, providerErr); err != nil {
 		return err
@@ -203,7 +203,7 @@ func blockerGuidance(blocker string) string {
 	case "live-deployment-state-unverified":
 		return "The latest signed Preflight did not prove a known Bootstrap/Activation/ACTIVE state. Review the exact plan and live VM evidence before issuing a new deployment; do not initialize an unknown DB."
 	case "github-environment-or-permission-unverified":
-		return "Settings > Environments: for codexia-bootstrap and codexia-production, require a separate reviewer, prevent self-review, and restrict deployment branches to main. Verify the official GitHub App and authenticated user can access these settings in the selected repository."
+		return "Settings > Environments: for codexia-bootstrap and codexia-production, restrict deployment branches to main. Required reviewers and Prevent self-review are optional. Verify the official GitHub App and authenticated user can access these settings in the selected repository."
 	case "latest-target-lifecycle-evidence-unavailable":
 		return "No current, exact-main Preflight receipt is proven for this VM. A first installation needs init to request a fresh protected Preflight; an existing installation needs operator recovery evidence. Older successful runs do not authorize changes."
 	case "tailnet-identity-or-policy-unverified":
