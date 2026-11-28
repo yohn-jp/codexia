@@ -160,6 +160,11 @@
     },
     {
       "kind": "iacResource",
+      "id": "cloudflare_dns_record.ssh",
+      "classification": "REQ-EXT-001 / REQ-OPS-001 candidate; management ingress remains subject to real-service acceptance"
+    },
+    {
+      "kind": "iacResource",
       "id": "cloudflare_worker_version.candidate",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
@@ -192,6 +197,16 @@
       "kind": "iacResource",
       "id": "cloudflare_zero_trust_access_application.public_protocol",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_zero_trust_access_application.ssh",
+      "classification": "REQ-EXT-001 / REQ-OPS-001 candidate; management ingress remains subject to real-service acceptance"
+    },
+    {
+      "kind": "iacResource",
+      "id": "cloudflare_zero_trust_access_policy.ssh",
+      "classification": "REQ-EXT-001 / REQ-OPS-001 candidate; management authorization remains subject to real-service acceptance"
     },
     {
       "kind": "iacResource",

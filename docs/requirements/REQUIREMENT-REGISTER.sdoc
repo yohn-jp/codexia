@@ -1080,7 +1080,7 @@ UID: OBL-REQ-EXT-001-O01
 TITLE: OBL-REQ-EXT-001-O01
 DESIGN_REFERENCE: [Deployment](../deployment/DEPLOYMENT-REFERENCE.sdoc)、[System design](../architecture/SYSTEM-DESIGN.sdoc)
 IMPLEMENTATION_IDENTIFIERS: deploy/cloudflare/ui-routes.json; scripts/verification/infrastructure/deployment-config.mjs
-SURFACE_IDENTIFIERS: iacResource=cloudflare_zero_trust_access_application.codexia; iacResource=cloudflare_zero_trust_access_application.identity_probe; iacResource=cloudflare_zero_trust_access_application.public_protocol; iacResource=terraform_data.public_oauth_edge_readiness; iacResource=cloudflare_zero_trust_tunnel_cloudflared.codexia; iacResource=cloudflare_dns_record.codexia; iacResource=cloudflare_zero_trust_tunnel_cloudflared_config.codexia; iacResource=cloudflare_worker.frontend; iacResource=cloudflare_workers_route.frontend; iacResource=cloudflare_workers_route.origin
+SURFACE_IDENTIFIERS: iacResource=cloudflare_zero_trust_access_application.codexia; iacResource=cloudflare_zero_trust_access_application.identity_probe; iacResource=cloudflare_zero_trust_access_application.public_protocol; iacResource=terraform_data.public_oauth_edge_readiness; iacResource=cloudflare_zero_trust_tunnel_cloudflared.codexia; iacResource=cloudflare_dns_record.codexia; iacResource=cloudflare_dns_record.ssh; iacResource=cloudflare_zero_trust_access_application.ssh; iacResource=cloudflare_zero_trust_access_policy.ssh; iacResource=cloudflare_zero_trust_tunnel_cloudflared_config.codexia; iacResource=cloudflare_worker.frontend; iacResource=cloudflare_workers_route.frontend; iacResource=cloudflare_workers_route.origin
 TEST_IDS: TEST-EXT-001-001
 EXACT_RUN_REFERENCE: NOT_RUN
 COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1169,7 +1169,7 @@ UID: OBL-REQ-OPS-001-O01
 TITLE: OBL-REQ-OPS-001-O01
 DESIGN_REFERENCE: [Initial deployment](../deployment/INITIAL-DEPLOYMENT-FLOW.sdoc)
 IMPLEMENTATION_IDENTIFIERS: deploy/ansible/site.yml
-SURFACE_IDENTIFIERS: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/deploy-ssh-key.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/managed-bootstrap-secrets.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/verify-base-tunnel-container.yml
+SURFACE_IDENTIFIERS: ansibleSource=deploy/ansible/auth-runtime.yml; ansibleSource=deploy/ansible/base-runtime.yml; ansibleSource=deploy/ansible/base-secrets.yml; ansibleSource=deploy/ansible/deploy-ssh-key.yml; ansibleSource=deploy/ansible/host-validate.yml; ansibleSource=deploy/ansible/host.yml; ansibleSource=deploy/ansible/inspect.yml; ansibleSource=deploy/ansible/inventory.example.yml; ansibleSource=deploy/ansible/managed-bootstrap-secrets.yml; ansibleSource=deploy/ansible/owner-setup.yml; ansibleSource=deploy/ansible/preflight-observe.yml; ansibleSource=deploy/ansible/recreate-missing-app-database.yml; ansibleSource=deploy/ansible/site.yml; ansibleSource=deploy/ansible/verify-base-db-container.yml; ansibleSource=deploy/ansible/prepare-api-gate.yml
 TEST_IDS: TEST-OPS-001-001
 EXACT_RUN_REFERENCE: NOT_RUN
 COMMENT: Candidate references only; obligation-level decomposition and exact-source certification remain unverified.
@@ -1204,7 +1204,7 @@ RELATIONS:
 - TYPE: File
   PATH: deploy/ansible/verify-base-db-container.yml
 - TYPE: File
-  PATH: deploy/ansible/verify-base-tunnel-container.yml
+  PATH: deploy/ansible/prepare-api-gate.yml
 - TYPE: File
   PATH: deploy/ansible/managed-bootstrap-secrets.yml
 

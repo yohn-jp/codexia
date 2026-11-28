@@ -29,7 +29,9 @@
     argv: [/usr/bin/cloudflared, version]
   register: base_runtime_cloudflared_version
   changed_when: false
-  failed_when: base_runtime_cloudflared_version.rc != 0 or base_runtime_cloudflared_version.stdout is not match('^cloudflared version 2026\\.11\\.0(?: |$)')
+  failed_when: >-
+    base_runtime_cloudflared_version.rc != 0 or
+    base_runtime_cloudflared_version.stdout is not match('^cloudflared version 2026\\.11\\.0(?: |$)')
 
 - name: Require the independently managed Tunnel connector to remain active
   become: true
