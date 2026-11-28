@@ -94,7 +94,7 @@ assert.match(databaseQuadlet, /HealthCmd=pg_isready -U codexia -d codexia/u);
 assert.match(databaseNetwork, /Internal=true/u, 'PostgreSQL must be isolated from the Tunnel network');
 assert.match(databaseVolume, /VolumeName=codexia-postgres/u);
 assert.match(connectorUnit, /^LoadCredential=cloudflared-token:\/etc\/codexia\/cloudflared\/tunnel\.token$/mu);
-assert.match(connectorUnit, /^ExecStart=\/usr\/bin\/cloudflared tunnel --no-autoupdate run --metrics 127\.0\.0\.1:2000 --token-file=%d\/cloudflared-token$/mu);
+assert.match(connectorUnit, /^ExecStart=\/usr\/bin\/cloudflared tunnel --no-autoupdate --metrics 127\.0\.0\.1:2000 run --token-file=%d\/cloudflared-token$/mu);
 assert.doesNotMatch(connectorUnit, /^\w*=.*codexia-(?:api|db)/mu, 'the host connector must remain independent of application services');
 assert.deepEqual(gateSocket.match(/^Listen\w+=.*$/gmu), ['ListenStream=127.0.0.1:18080']);
 assert.match(gateSocket, /^Service=codexia-api-gate\.service$/mu);
