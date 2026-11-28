@@ -572,6 +572,13 @@ def observe():
         # The activation symlink is expected on an installed system; presence is
         # enough to rule out a clean slot, and its target is checked by writer observation.
         residue = any(os.path.lexists(p) for p in residues)
+        deployed_release = residues[2]
+        if metadata(deployed_release) is not None:
+            record = json.loads(private_text(deployed_release), object_pairs_hook=no_duplicate_keys)
+            require(isinstance(record, dict) and record.get("format") == "codexia-push-deployment/v1"
+                    and re.fullmatch(full_image_pattern(), record.get("image", "")))
+            if any(key in record for key in ("repository", "repositoryId", "ownerId")):
+                require(matches_repository(record))
         storage = home / ".local/share/containers/storage"
         store = metadata(storage)
         require((store is not None) == facts["storagePresent"])

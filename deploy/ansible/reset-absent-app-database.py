@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """R4 convergence of a verified absent application DB; never delete a database."""
 import fcntl
+import json
 import os
 from pathlib import Path
 import re
@@ -128,6 +129,25 @@ def sync_directory(path):
             os.close(fd)
 
 
+def verify_residue_repository(state):
+    repository = os.environ.get("CODEXIA_TARGET_REPOSITORY", "")
+    repository_id = os.environ.get("CODEXIA_TARGET_REPOSITORY_ID", "")
+    owner_id = os.environ.get("CODEXIA_TARGET_OWNER_ID", "")
+    require(re.fullmatch(r"[A-Za-z0-9-]+/codexia", repository)
+            and re.fullmatch(r"[1-9][0-9]*", repository_id)
+            and re.fullmatch(r"[1-9][0-9]*", owner_id), "Missing reviewed repository identity")
+    release = state / "deployed-release.json"
+    if private_file(release):
+        value = json.loads(release.read_text())
+        require(isinstance(value, dict) and value.get("format") == "codexia-push-deployment/v1"
+                and value.get("repository") == repository and value.get("repositoryId") == int(repository_id)
+                and value.get("ownerId") == int(owner_id), "Prior release belongs to a different repository")
+    intent = state / "owner-setup.intent"
+    if private_file(intent):
+        require(intent.read_text().startswith(f"{repository}:{repository_id}:{owner_id}:"),
+                "Prior setup belongs to a different repository")
+
+
 def converge(expected, home):
     state = home / ".local/state/codexia-deploy"
     auth = home / ".config/codexia-auth"
@@ -144,6 +164,7 @@ def converge(expected, home):
         verify_absent(expected)
         require(not any(present(state / name) for name in PENDING),
                 "An existing deployment operation must be recovered before bootstrap")
+        verify_residue_repository(state)
         api = units / "codexia-api.container"
         if private_file(api):
             lines = api.read_text().splitlines()

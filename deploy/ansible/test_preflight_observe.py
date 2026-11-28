@@ -505,6 +505,8 @@ class AbsentDatabaseResetTests(unittest.TestCase):
             for path in old + [backup]:
                 path.write_text("fixture")
                 path.chmod(0o600)
+            old[0].write_text(json.dumps({"format": "codexia-push-deployment/v1", "repository": "yohn-jp/codexia",
+                                          "repositoryId": 401, "ownerId": 502}))
             events = []
 
             def sql(query, read_only=True):
@@ -552,6 +554,23 @@ class AbsentDatabaseResetTests(unittest.TestCase):
                 reset.converge("absent", home)
                 sql.assert_not_called()
                 self.assertEqual(stop.call_count, 2)
+
+
+    def test_foreign_release_residue_prevents_reset(self):
+        reset = self.reset
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            state = home / ".local/state/codexia-deploy"
+            state.mkdir(parents=True)
+            release = state / "deployed-release.json"
+            release.write_text(json.dumps({"format": "codexia-push-deployment/v1", "repository": "yohn-jp/codexia",
+                                          "repositoryId": 818, "ownerId": 502}))
+            release.chmod(0o600)
+            with patch.object(reset, "verify_absent"), patch.object(reset, "stop_slot") as stop:
+                with self.assertRaisesRegex(ValueError, "different repository"):
+                    reset.converge("absent", home)
+                stop.assert_not_called()
+            self.assertTrue(release.exists())
 
     def test_pending_transaction_prevents_reset(self):
         reset = self.reset
