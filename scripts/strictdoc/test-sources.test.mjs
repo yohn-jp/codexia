@@ -101,3 +101,21 @@ test('rejects unsupported Playwright default imports and ignores type-only, reas
   assert.deepEqual([...result.sources.keys()], ['TEST-TRACE-024', 'TEST-TRACE-025', 'TEST-TRACE-026']);
   assert.match(result.violations.join('\n'), /Playwright TEST-ID registration must use a named test import/u);
 });
+
+test('parses TypeScript generic arrows without mistaking them for JSX while preserving TSX', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'strictdoc-test-discovery-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'generic.test.ts'), `
+    import { test } from 'node:test';
+    const identity = async <T>(value: T): Promise<T> => value;
+    test('[TEST-TRACE-030] admits TypeScript generic arrows', () => { identity('fixture'); });
+  `);
+  await writeFile(path.join(root, 'element.test.tsx'), `
+    import { test } from 'node:test';
+    const element = <span>fixture</span>;
+    test('[TEST-TRACE-031] admits TSX syntax', () => { void element; });
+  `);
+  const result = await discoverTestSources(root);
+  assert.deepEqual(result.violations, []);
+  assert.deepEqual([...result.sources.keys()], ['TEST-TRACE-030', 'TEST-TRACE-031']);
+});

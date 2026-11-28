@@ -1,0 +1,99 @@
+[DOCUMENT]
+MID: 2993c5c9881ca51d368375fbddc6b9dd
+TITLE: Codexia 公式製品サイトの外部デザイン比較
+UID: DOC-DESIGN-PRODUCT-SITE-BENCHMARKS
+OPTIONS:
+  ENABLE_MID: True
+  MARKUP: Markdown
+
+[GRAMMAR]
+IMPORT_FROM_FILE: @codexia
+
+[[SECTION]]
+MID: 831eb6841cd97b4befc444d0559bbb39
+UID: DOC-DESIGN-PRODUCT-SITE-BENCHMARKS-scope
+TITLE: 根拠の範囲と採否の規則
+
+[TEXT]
+MID: 57b39cd9f8a45d51f07378333809ce49
+STATEMENT: >>>
+**種別: 非規範的な外部比較資料。Owner: 公式製品サイト。対象: 設計・実装・レビュー担当。** 設計要求を決める唯一の正本は [LINK: DOC-DESIGN-PRODUCT-SITE, PRODUCT-SITE]。本書は外部製品サイトと公式デザインシステムの観測内容、Codexia への採否理由を整理する。固有の外観、画像、商標、文言、CSS、JavaScript、数値実績を流用する許可ではない。
+
+観測方法は各社の一般公開された公式サイトのページ構成、表出する説明、ナビゲーション、公式デザインシステムの規則の確認である。サイトのレンダリング後の全状態、デスクトップ・モバイルの画素、アニメーションの実測、品質の定量点数を取得した証拠ではない。表の「見られる設計」は公開ページで確認できる情報構造を主とし、「Codexia の判断」は本製品独自の設計意思決定である。
+
+第三者の製品やブランドを Codexia の実績、協業先、顧客、採用ライブラリとして紹介してはならない。取得不能なページ、時点により変化するコピー、画像や既存実装に関する未確認の推測を実測として扱わない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: 97d94686834990764aeddc90b8550c7a
+UID: DOC-DESIGN-PRODUCT-SITE-BENCHMARKS-public-sites
+TITLE: 公開製品サイトの比較台帳
+
+[TEXT]
+MID: 3cf7381c6a6b9017c1c7f5c8325ccbd9
+STATEMENT: >>>
+| 一次情報 | 確認できる特徴（情報構造・表現） | Codexia への抽出 | 採否・理由 |
+| --- | --- | --- | --- |
+| [Linear](https://linear.app/) / [Enterprise](https://linear.app/enterprise) / [設計の考え方](https://linear.app/now/behind-the-latest-design-refresh) | 明確な価値主張、実際のプロダクトの文脈、機能別の説明、顧客・更新情報への道筋。UIの一貫性と視線誘導を設計方針として説明 | 主役の原稿と実機能の因果関係、幕間の一貫した移動、機能を見せるための抑制 | **採用**。暗色UIやロゴ、エンタープライズ企業の実績を模倣しない |
+| [Stripe](https://stripe.com/) | 複数の製品群を価値と用途で束ね、開始・相談など対象別の導線を分ける | 作家が知りたいベネフィットと技術検証者の情報を階層化し、読者別の進路を明示 | **限定採用**。販売組織や課金機能がない段階で営業導線を装わない |
+| [Vercel Platform](https://vercel.com/platform) | プラットフォームの価値から deploy、機能群、CLI・文書まで具体化する | 五幕の抽象的価値をそれぞれ具体的な製品行為・画面・仕様への証拠に接続する | **採用**。開発者向け機能一覧そのものをトップページに持ち込まない |
+| [GitHub Enterprise](https://github.com/enterprise) | 製品価値、ガバナンス、セキュリティ、導入形態、技術文書へ段階的に案内する | 「所有」の語りを export/recovery の仕様と検証可能なリンクに結びつけ、曖昧な品質断言を避ける | **採用**。認証・認定・導入実績を捏造しない |
+| [Cloudflare](https://www.cloudflare.com/) | 一つの大きな主張の後に対象の技術説明、規模・性能の根拠、カテゴリー別説明を展開する | 装飾的な威厳でなく、裏付けのある主張を主役にする | **限定採用**。根拠のない数値、カウンタ、世界地図、企業規模演出は不採用 |
+| [Notion](https://www.notion.com/) | 複数の製品行為を用途別に分類し、ドキュメント・知識・AI をナビゲーションで整理する | 原稿、構成、Knowledge、AI判断を、創作の流れに沿って理解させる | **採用**。機能数の多いメガメニューやテンプレート・ギャラリーは不要 |
+| [Figma](https://www.figma.com/) | 作品・ツールの視覚表現を重視し、設計・実装への具体的な導線を持つ | 単なる装飾図ではなく、実際に理解できる操作例と製品表現の細部を磨く | **限定採用**。過剰なアニメーションや多製品構成は導入しない |
+| [Atlassian Platform](https://www.atlassian.com/platform) | 複雑な概念をプラットフォームの価値、機能別説明、管理・信頼性に分割する | Folio Atlas、提案採否、作品管理を混ぜずに扱い、各幕に一つの論点を置く | **採用**。巨大な機能カタログと企業向け営業導線は模倣しない |
+| [Datadog](https://www.datadoghq.com/) | 大規模な技術製品群の情報を用途と可観測性の観点で分類する | 専門家向け説明は深掘り可能にし、一般作者の読み進める導線から分離する | **限定採用**。監視ダッシュボード的な高密度ページにはしない |
+| [Snowflake](https://www.snowflake.com/en/) | 製品UIやシナリオの具体物を用い、プラットフォームと機能を接続する | 作者が何を操作し何が変わるかを、架空の見本と検証可能な製品表示の両方で説明する | **採用**。架空画面を実製品スクリーンショットとして表示しない |
+| [Framer](https://www.framer.com/) | 表現的なブランドと制作能力を、機能の導線に接続する | 紙、本文、関連線、装丁の変化を五幕の意味のある遷移として仕上げる | **限定採用**。スクロール操作の拘束、常時描画、過剰な 3D は拒否 |
+| [IBM](https://www.ibm.com/) | 大きな主張と個別の技術・調査内容に階層を与え、参照先を明示する | 製品が担保する範囲と未確認事項を区別し、信頼をコピーではなく出典でつくる | **限定採用**。第三者の認証・レポートを自社成果と扱わない |
+
+外部サイトの「良い／悪い」という総合ランキングは作らない。各社は用途・製品成熟度・コンバージョン目標が異なるため、Codexia の五幕の受入基準に具体的に寄与する原則だけ採用する。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: cf56a8a09fc6f0b0a945e066e16a7768
+UID: DOC-DESIGN-PRODUCT-SITE-BENCHMARKS-design-systems
+TITLE: デザインシステムと技術標準からの根拠
+
+[TEXT]
+MID: 05acebaa6eecd45535b8fbe236352237
+STATEMENT: >>>
+| 規範・参照元 | 公式の考え方 | Codexia へ導入する判断 |
+| --- | --- | --- |
+| [IBM Carbon: productive / expressive typography](https://www.carbondesignsystem.com/building-blocks/foundations/typography/style-strategies) | プロダクト上の作業用文字と、ウェブのエディトリアル表現を区別する | 物語の見出し・章と、パネル・操作・説明を異なる文字役割に分ける。IBM Plex 自体の採用指示ではない |
+| [GitHub Primer](https://primer.style/) / [Primer Brand](https://primer.style/brand/) | 製品UIとマーケティング用 Brand UI の責務を分離し、共通基礎 token を定義する | 公開製品サイトと作者用 React UI の実装・セマンティック色トークンは分け、ブランド言語の整合は保つ |
+| [Atlassian: Spacing](https://atlassian.design/foundations/spacing/) | 余白による proximity、階層、視覚的リズム、光学補正を明文化する | 4/8 基準の限られた余白と、原稿・説明・操作の間の意味的な距離を設計する |
+| [Atlassian: Typography](https://atlassian.design/foundations/typography/) | 見出しの構造と、読みやすい本文・補助文字の明確な役割を求める | 明朝の装飾的な見出しと、UI用 sans の本文／操作を使い分ける。小さな文字で高級感を偽装しない |
+| [Atlassian: Motion](https://atlassian.design/foundations/motion/) | 動きは変化の理由と次の行為を説明し、reduced motion と性能を尊重する | スクロール連動は五幕の因果を示す場合だけ。入力への即時応答、停止、操作可能性を優先 |
+| [W3C WCAG 2.2](https://www.w3.org/TR/WCAG22/) | 色、コントラスト、キーボード操作、焦点、動き、ターゲットなどの受入基準 | AA 適合をハードゲートとする。独自の見た目評価点では法的・技術的受入を代替しない |
+| [web.dev: Web Vitals](https://web.dev/articles/vitals) | LCP/INP/CLS を実際の閲覧品質を示す主要指標として扱う | 現実の利用者・実端末の field とローカル lab を分けて計測する |
+| [MDN: prefers-reduced-motion](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@media/prefers-reduced-motion) | モーション軽減のユーザー設定を CSS などに反映する | reduce でも全ての五幕の情報・操作・状態変化が利用可能であること |
+
+数値の検収条件とコンポーネント固有の規範は PRODUCT-SITE に置く。参照先の資料に書かれた値を全て Codexia に転写したわけではない。デザインシステムのコンポーネントや配布フォントは採用しない。
+<<<
+
+[[/SECTION]]
+
+[[SECTION]]
+MID: b5b9587ede054e1e682a49ecabfe3452
+UID: DOC-DESIGN-PRODUCT-SITE-BENCHMARKS-adoption
+TITLE: 比較から導く Codexia 専用の採用結論
+
+[TEXT]
+MID: ab37e5f04a60b1876b70ba1c156bb485
+STATEMENT: >>>
+1. **インタラクティブな五幕は保存する。** パーソナルな文学的表現と enterprise site の情報精度を両立させる。すべてを無個性な SaaS feature cards に置換しない。
+2. **実感できる操作を最低一つ各幕の中心に置く。** 何が変わり、何が証明されたかを文章でも読めるようにする。架空のデモと実製品機能の区別は明示する。
+3. **演出だけの長いスクロールにしない。** 見出し・短い説明・主動作・検証できる次のリンクの階層を作る。幕ジャンプ、戻る操作、静止状態が成立する。
+4. **作者と技術検証者の導線を分ける。** 作者には体験を、検証者には GitHub と設計文書を示す。製品提供形態と実装証拠がない CTA は置かない。
+5. **画像・素材の品質を独立して審査する。** 紙・革・墨・金属は記号ではなく材質感の一貫性を持たせる。文字や UI に直接読めないほどの質感・影・ブラーは使わない。
+6. **可読性・余白・動き・負荷を制約として扱う。** 低解像度、小画面、長い日本語、ズーム、キーボード、動き軽減が追加要求ではなく通常受入に含まれる。
+
+採用後の具体的なコード変更と配信変更は本書の担当ではない。既存の静的 Worker、CSP と五幕の一貫性を壊す設計は正本に昇格させない。
+<<<
+
+[[/SECTION]]
