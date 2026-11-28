@@ -136,7 +136,6 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/cloudflare/terraform/.terraform.lock.hcl',
   'deploy/cloudflare/terraform/.gitignore',
   'docs/deployment/ACCESS-POLICY-MIGRATION.sdoc',
-  'deploy/cloudflare/terraform/initial-frontend-version/main.tf',
   'deploy/cloudflare/terraform/main.tf',
   'deploy/cloudflare/terraform/terraform.tfvars.example',
   'deploy/cloudflare/terraform/variables.tf',

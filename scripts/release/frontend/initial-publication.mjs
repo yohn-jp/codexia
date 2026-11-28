@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { isIP } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { actionsRepository, assertReleaseRepositoryBinding } from '../../github/repository.mjs';
 import { promisify } from 'node:util';
@@ -98,41 +99,121 @@ async function runWranglerUpload({ accountId, workerToken, tag }) {
   }
 }
 
-async function runInitialWorkerUpload({ accountId, workerId, workerToken, tag, initialControls }) {
-  const scratch = await mkdtemp(join(tmpdir(), 'codexia-first-worker-version-'));
-  const root = fileURLToPath(new URL('../../../', import.meta.url));
-  const infra = join(root, 'deploy/cloudflare/terraform');
-  const assets = join(root, 'app/dist');
-  try {
-    const config = JSON.parse(await readFile(join(root, 'edge/frontend/wrangler.jsonc'), 'utf8'));
-    assert.ok(/^\d{4}-\d{2}-\d{2}$/u.test(config.compatibility_date), 'Invalid frontend compatibility date');
-    await Promise.all([
-      ...['versions.tf', '.terraform.lock.hcl'].map(name => copyFile(join(infra, name), join(scratch, name))),
-      copyFile(join(infra, 'initial-frontend-version/main.tf'), join(scratch, 'main.tf')),
-      ...publicationControls.map(name => copyFile(join(assets, name), join(scratch, name))),
-      cp(assets, join(scratch, 'assets'), { recursive: true,
-        filter: source => publicationControls.every(name => source !== join(assets, name)) }),
-      writeFile(join(scratch, 'candidate.auto.tfvars.json'), JSON.stringify({ account_id: accountId,
-        worker_id: workerId, tag, compatibility_date: config.compatibility_date }), { mode: 0o600, flag: 'wx' }),
-    ]);
-    assert.deepEqual(await readCertifiedPublicationControls(scratch), initialControls,
-      'Initial Worker publication controls changed before upload');
-    const run = (...args) => promisify(execFile)('terraform', args, {
-      cwd: scratch, timeout: 10 * 60_000,
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_IN_AUTOMATION: '1',
-        CLOUDFLARE_API_TOKEN: workerToken },
-    });
-    await run('init', '-backend=false', '-input=false', '-lockfile=readonly', '-no-color');
-    await run('apply', '-input=false', '-auto-approve', '-no-color');
-    const { stdout } = await run('output', '-raw', 'version_id');
-    const versionId = stdout.trim();
-    assert.ok(uuid.test(versionId), 'Invalid staged first Worker version UUID');
-    return versionId;
-  } catch {
-    throw new Error('The initial Worker candidate upload could not be verified');
-  } finally {
-    await rm(scratch, { recursive: true, force: true });
+// The first version must be created without a deployment, even when no
+// previous version exists. Do not use a script upload or wrangler deploy here.
+// https://developers.cloudflare.com/workers/static-assets/direct-upload/
+export async function runInitialWorkerUpload({
+  accountId, workerId, workerToken, tag, initialControls,
+  directory = frontendAssets, fetchImpl = fetch, mimeLookup,
+}) {
+  assert.ok(hexId.test(accountId) && workerIdPattern.test(workerId), 'Invalid initial Worker target');
+  assert.ok(typeof workerToken === 'string' && workerToken.length > 0 && workerToken.trim() === workerToken,
+    'Missing Worker publication credential');
+  assert.match(tag, /^frontend-[a-f0-9]{64}$/u);
+  const config = JSON.parse(await readFile(new URL('../../../edge/frontend/wrangler.jsonc', import.meta.url), 'utf8'));
+  assert.equal(config.name, worker);
+  assert.equal(config.workers_dev, false);
+  assert.equal(config.preview_urls, false);
+  assert.match(config.compatibility_date, /^\d{4}-\d{2}-\d{2}$/u);
+  assert.equal(config.assets.html_handling, 'none');
+  assert.equal(config.assets.not_found_handling, 'none');
+
+  const lookup = mimeLookup ?? createRequire(new URL('../../../edge/frontend/package.json', import.meta.url))('mime-types').lookup;
+  const modules = await Promise.all(publicationControls.map(async name => {
+    const bytes = await readRegularFile(join(directory, name), { encoding: null });
+    assert.equal(sha256(bytes), initialControls?.[name], 'Initial Worker publication controls changed before upload');
+    return { name, content_type: 'text/plain', content_base64: bytes.toString('base64') };
+  }));
+  const manifest = {};
+  const byHash = new Map();
+  const hashFor = (bytes, name) => sha256(bytes.toString('base64') + extname(name).slice(1)).slice(0, 32);
+  assert.ok((await lstat(directory)).isDirectory(), 'Expected a regular asset directory');
+  async function walk(relative = '') {
+    for (const entry of await readdir(join(directory, relative), { withFileTypes: true })) {
+      const name = relative ? relative + '/' + entry.name : entry.name;
+      if (entry.isDirectory()) {
+        await walk(name);
+        continue;
+      }
+      assert.ok(entry.isFile(), 'Unexpected non-regular frontend asset');
+      if (publicationControls.includes(name)) continue;
+      const bytes = await readRegularFile(join(directory, name), { encoding: null });
+      const hash = hashFor(bytes, name);
+      const type = lookup(name) || 'application/null';
+      const previous = byHash.get(hash);
+      assert.ok(!previous || (previous.digest === sha256(bytes) && previous.type === type),
+        'Ambiguous frontend asset hash');
+      byHash.set(hash, { name, type, digest: sha256(bytes) });
+      manifest['/' + name] = { hash, size: bytes.length };
+    }
   }
+  await walk();
+  assert.ok(byHash.size > 0, 'No frontend assets to upload');
+
+  // Keep credentials and server response bodies out of diagnostics, including
+  // when the fetch implementation throws an error with request details.
+  async function post(label, path, token, body, { allowMissingResult = false } = {}) {
+    let response, envelope;
+    try {
+      const headers = { Authorization: 'Bearer ' + token };
+      if (!(body instanceof FormData)) headers['Content-Type'] = 'application/json';
+      response = await fetchImpl(api + path, {
+        method: 'POST', headers, body: body instanceof FormData ? body : JSON.stringify(body),
+        redirect: 'error', signal: AbortSignal.timeout(120_000),
+      });
+      envelope = await response.json();
+    } catch {
+      throw new Error('Cloudflare ' + label + ' response could not be verified');
+    }
+    const result = envelope?.result;
+    // Only a successful intermediate asset upload may omit its result.
+    const validResult = result !== null && typeof result === 'object' && !Array.isArray(result);
+    assert.ok(response.ok && envelope?.success === true && !envelope.errors?.length &&
+      (validResult || (allowMissingResult && response.status === 200 && result == null)), 'Cloudflare ' + label + ' failed');
+    return { status: response.status, result: result ?? {} };
+  }
+  const validJwt = value => typeof value === 'string' && value.length > 0 && value.trim() === value;
+  const account = '/accounts/' + accountId + '/workers';
+  const { result: session } = await post('asset upload session', account + '/scripts/' + worker + '/assets-upload-session',
+    workerToken, { manifest });
+  assert.ok(validJwt(session.jwt) && Array.isArray(session.buckets), 'Invalid asset upload session');
+  const requested = new Set();
+  for (const bucket of session.buckets) {
+    assert.ok(Array.isArray(bucket) && bucket.length > 0, 'Invalid asset upload bucket');
+    for (const hash of bucket) {
+      assert.ok(byHash.has(hash) && !requested.has(hash), 'Invalid or duplicate requested asset hash');
+      requested.add(hash);
+    }
+  }
+  let completionJwt = session.buckets.length === 0 ? session.jwt : undefined;
+  for (let index = 0; index < session.buckets.length; index++) {
+    const form = new FormData();
+    for (const hash of session.buckets[index]) {
+      const entry = byHash.get(hash);
+      const bytes = await readRegularFile(join(directory, entry.name), { encoding: null });
+      assert.equal(sha256(bytes), entry.digest, 'Frontend asset changed after manifest registration');
+      form.append(hash, new Blob([bytes.toString('base64')], { type: entry.type }), hash);
+    }
+    const last = index === session.buckets.length - 1;
+    const { result, status } = await post('asset upload', account + '/assets/upload?base64=true', session.jwt, form,
+      { allowMissingResult: !last });
+    if (last) {
+      assert.ok(status === 201 && validJwt(result.jwt), 'Missing completed asset upload token');
+      completionJwt = result.jwt;
+    } else {
+      assert.ok(status === 200 && !result.jwt, 'Asset upload completed before all requested buckets');
+    }
+  }
+  const { result: version } = await post('initial Worker version', account + '/workers/' +
+    encodeURIComponent(workerId) + '/versions?deploy=false', workerToken, {
+    compatibility_date: config.compatibility_date,
+    annotations: { 'workers/tag': tag },
+    assets: { jwt: completionJwt, config: { html_handling: 'none', not_found_handling: 'none' } },
+    modules,
+  });
+  assert.ok(uuid.test(version.id) && Array.isArray(version.urls) && version.urls.length === 0,
+    'Invalid or publicly addressable staged first Worker version');
+  return version.id;
 }
 
 function canonical(value) {

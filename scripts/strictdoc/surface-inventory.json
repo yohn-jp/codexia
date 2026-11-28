@@ -165,11 +165,6 @@
     },
     {
       "kind": "iacResource",
-      "id": "cloudflare_worker_version.candidate",
-      "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
-    },
-    {
-      "kind": "iacResource",
       "id": "cloudflare_worker.frontend",
       "classification": "REQ-EXT-001 / REQ-OPS-002 candidate; applied Cloudflare state and operator acceptance remain unverified"
     },
