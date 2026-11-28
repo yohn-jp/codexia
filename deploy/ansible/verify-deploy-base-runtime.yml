@@ -45,14 +45,15 @@
   ansible.builtin.include_tasks: verify-base-db-container.yml
 
 - name: Verify the canonical private network isolation before deployment
+  # One Podman invocation validates both names, drivers, and isolation bits.
   ansible.builtin.command:
-    argv: [podman, network, inspect, --format, "{% raw %}{{.Name}}|{{.Driver}}|{{.Internal}}{% endraw %}", "{{ item.name }}"]
-  loop:
-    - {name: codexia, expected: 'codexia|bridge|false'}
-    - {name: codexia-data, expected: 'codexia-data|bridge|true'}
+    argv: [podman, network, inspect, --format, "{% raw %}{{.Name}}|{{.Driver}}|{{.Internal}}{% endraw %}", codexia, codexia-data]
   register: codexia_deploy_base_networks
   changed_when: false
-  failed_when: codexia_deploy_base_networks.rc != 0 or codexia_deploy_base_networks.stdout != item.expected
+  failed_when: >-
+    codexia_deploy_base_networks.rc != 0 or
+    ((codexia_deploy_base_networks.stdout_lines | sort) !=
+     (['codexia|bridge|false', 'codexia-data|bridge|true'] | sort))
 
 - name: Require the independent host Cloudflare connector
   ansible.builtin.command:
