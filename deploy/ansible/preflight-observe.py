@@ -59,11 +59,18 @@ SYSTEM_UNITS = {
 
 
 def secret_identities():
+    # A single metadata-only snapshot replaces one exists and inspect process
+    # per credential. The host-lock verifier still binds every required ID and
+    # the optional OIDC secret to its exact digest, rejecting any drift.
+    rows = command(["podman", "secret", "ls", "--format", "{{.Name}} {{.ID}}"])[1]
+    allowed = set((*BASE_SECRETS, *AUTH_SECRETS, OPTIONAL_SECRET))
     hashes = {}
-    for name in (*BASE_SECRETS, *AUTH_SECRETS, OPTIONAL_SECRET):
-        if command(["podman", "secret", "exists", name], (0, 1))[0] == 0:
-            identity = command(["podman", "secret", "inspect", "--format", "{{.ID}}", name])[1]
-            require(bool(identity))
+    for row in rows.splitlines():
+        fields = row.split()
+        require(len(fields) == 2)
+        name, identity = fields
+        if name in allowed:
+            require(name not in hashes and bool(identity))
             hashes[name] = digest(identity)
     return hashes
 

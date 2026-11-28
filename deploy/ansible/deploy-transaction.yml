@@ -111,12 +111,18 @@
   failed_when: codexia_current_api_service.rc != 0 or codexia_current_api_service.stdout != 'active'
   when: codexia_current_container_exists.rc == 0
 
-- name: Require the current API container to be healthy before an image-only update
+- name: Require the current running and healthy API image identities together
+  # A single read-only snapshot must establish running, health, and identity.
+  # The locked transaction reobserves live health before any mutation.
   ansible.builtin.command:
-    argv: [podman, inspect, --format, "{% raw %}{{.State.Health.Status}}{% endraw %}", codexia-api]
-  register: codexia_current_api_health
+    argv: [podman, inspect, --format, "{% raw %}{{.Id}} {{.Image}} {{.ImageName}} {{.State.Running}} {{.State.Health.Status}}{% endraw %}", codexia-api]
+  register: codexia_current_api_observation
   changed_when: false
-  failed_when: codexia_current_api_health.rc != 0 or codexia_current_api_health.stdout != 'healthy'
+  failed_when: >-
+    codexia_current_api_observation.rc != 0 or
+    (codexia_current_api_observation.stdout.split() | length) != 5 or
+    codexia_current_api_observation.stdout.split()[3] != 'true' or
+    codexia_current_api_observation.stdout.split()[4] != 'healthy'
   when: codexia_current_container_exists.rc == 0
 
 - name: Refuse a fresh activation over stale Quadlet state
@@ -145,21 +151,6 @@
   ansible.builtin.assert:
     that: codexia_current_auth_mode_lines == ['better-auth']
     fail_msg: The installed API does not have a canonical Better Auth Quadlet. Use the reviewed maintenance procedure for the installed release.
-  when: codexia_current_container_exists.rc == 0
-
-- name: Observe the running API container and image identities together
-  ansible.builtin.command:
-    argv: [podman, inspect, --format, "{% raw %}{{.Id}} {{.Image}} {{.ImageName}} {{.State.Running}}{% endraw %}", codexia-api]
-  register: codexia_current_api_observation
-  changed_when: false
-  when: codexia_current_container_exists.rc == 0
-
-- name: Require an actual running API container before admission
-  ansible.builtin.assert:
-    that:
-      - codexia_current_api_observation.stdout.split() | length == 4
-      - codexia_current_api_observation.stdout.split()[3] == 'true'
-    fail_msg: The installed API admission requires a running container and its exact image identity.
   when: codexia_current_container_exists.rc == 0
 
 - name: Record the exact immutable image reference used by the running API container
@@ -365,12 +356,17 @@
     mode: '0600'
 
 - name: Verify every staged Better Auth Podman secret exists before activation
+  # One metadata-only Podman lookup, retaining an exact-name and count check.
+  # Inspect does not expose secret values unless --showsecret is requested.
   ansible.builtin.command:
-    argv: [podman, secret, exists, "{{ item }}"]
-  loop: "{{ codexia_auth_secret_names }}"
+    argv: "{{ ['podman', 'secret', 'inspect'] + codexia_auth_secret_names }}"
   register: codexia_auth_runtime_secret_checks
   changed_when: false
-  failed_when: codexia_auth_runtime_secret_checks.rc != 0
+  failed_when: >-
+    codexia_auth_runtime_secret_checks.rc != 0 or
+    ((codexia_auth_runtime_secret_checks.stdout | from_json |
+      map(attribute='Spec.Name') | list | sort) !=
+     (codexia_auth_secret_names | sort))
   no_log: true
 
 - name: Name the candidate Quadlet by its image and nonsecret auth settings digests
@@ -471,7 +467,7 @@
       current_container=''
       current_image=''
       if podman container exists codexia-api; then
-        current_container="$(podman inspect --format '{% raw %}{{.Id}} {{.Image}} {{.ImageName}} {{.State.Running}}{% endraw %}' codexia-api)" ||
+        current_container="$(podman inspect --format '{% raw %}{{.Id}} {{.Image}} {{.ImageName}} {{.State.Running}} {{.State.Health.Status}}{% endraw %}' codexia-api)" ||
           stale_admission 'the API container could not be inspected'
       elif [[ "$?" != 1 ]]; then
         stale_admission 'the API container state could not be determined'
@@ -487,8 +483,9 @@
         [[ ${{ '{' }}#rollback_images[@]} == 1 && "${rollback_images[0]}" == "$CODEXIA_IMAGE_REPOSITORY@"* && "${rollback_images[0]#*@}" =~ ^sha256:[a-f0-9]{64}$ ]] ||
           stale_admission 'the prior API Quadlet no longer has a unique immutable image'
         rollback_image="${rollback_images[0]}"
-        read -r current_container_id _ current_image current_running <<< "$current_container"
-        [[ "$rollback_image" == "$admitted_unit_image" && "$current_image" == "$rollback_image" && "$current_running" == true ]] ||
+        read -r current_container_id _ current_image current_running current_health <<< "$current_container"
+        [[ "$rollback_image" == "$admitted_unit_image" && "$current_image" == "$rollback_image" &&
+           "$current_running" == true && "$current_health" == healthy ]] ||
           stale_admission 'the running API image and prior Quadlet no longer agree'
         if ! systemctl --user is-active --quiet codexia-api.service ||
            ! podman inspect --format '{% raw %}{{.State.Health.Status}}{% endraw %}' "$current_container_id" | grep -Fxq healthy; then

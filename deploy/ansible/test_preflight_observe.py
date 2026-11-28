@@ -594,12 +594,8 @@ class LockedCredentialTests(unittest.TestCase):
         ids = {name: "initial-" + name for name in names}
 
         def podman(argv, *args):
-            self.assertEqual(argv[:2], ["podman", "secret"])
-            name = argv[-1]
-            if argv[2] == "exists":
-                return (0 if name in ids else 1), ""
-            self.assertEqual(argv[2:-1], ["inspect", "--format", "{{.ID}}"])
-            return 0, ids[name]
+            self.assertEqual(argv, ["podman", "secret", "ls", "--format", "{{.Name}} {{.ID}}"])
+            return 0, "\n".join(f"{name} {identity}" for name, identity in ids.items())
 
         with tempfile.TemporaryDirectory() as directory, patch.object(Path, "home", return_value=Path(directory)):
             path = Path(directory) / ".local/state/codexia-deploy/host.lock"
@@ -621,6 +617,17 @@ class LockedCredentialTests(unittest.TestCase):
                 del ids[names[0]]
                 with self.assertRaises(ValueError):
                     observer.verify_secret_identities(observer.digest(observer.secret_identities()), lock.fileno())
+
+    def test_batched_secret_observation_rejects_duplicate_or_malformed_known_identities(self):
+        command_args = ["podman", "secret", "ls", "--format", "{{.Name}} {{.ID}}"]
+        base = observer.BASE_SECRETS[0]
+        with patch.object(observer, "command", return_value=(0, f"{base} id-1\ncustom-extra id-2")) as command:
+            self.assertEqual(observer.secret_identities(), {base: observer.digest("id-1")})
+            command.assert_called_once_with(command_args)
+        for payload in (f"{base} id-1\n{base} id-2", f"{base} ", "malformed"):
+            with self.subTest(payload=payload), patch.object(observer, "command", return_value=(0, payload)):
+                with self.assertRaises(ValueError):
+                    observer.secret_identities()
 
 
 if __name__ == "__main__":
