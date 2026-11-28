@@ -57,11 +57,17 @@ UNIT
     rootless "$runtime/bin/node" --env-file="$settings/database.env" --input-type=module - "$runtime/app" <<'SOCKET_NODE'
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
-const {Pool} = createRequire(createRequire(process.argv[2] + '/package.json').resolve('@codexia/api'))('pg');
+const {Client} = createRequire(createRequire(process.argv[2] + '/package.json').resolve('@codexia/api'))('pg');
 const url = new URL(process.env.CODEXIA_BACKUP_EXECUTOR_DATABASE_URL);
 async function query(connectionString, sql) {
-  const pool = new Pool({connectionString, connectionTimeoutMillis: 4000});
-  try { return (await pool.query(sql)).rows; } finally { await pool.end(); }
+  // A missing SCRAM password can reject connect() while the socket is still open.
+  const client = new Client({connectionString, connectionTimeoutMillis: 4000});
+  try {
+    await client.connect();
+    return (await client.query(sql)).rows;
+  } finally {
+    await client.end();
+  }
 }
 assert.deepEqual(await query(url.href, 'SELECT inet_client_addr() IS NULL AS socket'), [{socket:true}]);
 await assert.rejects(query(url.href, 'CREATE TABLE codexia_backup.ungranted (id integer)'), {code:'42501'});
@@ -71,19 +77,23 @@ url.password = '';
 await assert.rejects(query(url.href, 'SELECT 1'));
 SOCKET_NODE
   }
+  local started
+  started=$(date +%s%3N)
   verify_socket_client
+  record_phase_timing private_socket_verify_before_restart "$started"
   rootless_systemctl stop codexia-tunnel.service
   rootless rm -- "$tunnel"
   rootless_systemctl daemon-reload
-  local started
   started=$(date +%s%3N)
   rootless_systemctl stop codexia-backup-executor.service codexia-api.service
   record_phase_timing private_socket_stop_api_executor "$started"
   started=$(date +%s%3N)
   rootless_systemctl restart codexia-db.service
   rootless timeout 60s podman wait --condition=healthy codexia-db >/dev/null
-  verify_socket_client
   record_phase_timing private_socket_recover_postgres "$started"
+  started=$(date +%s%3N)
+  verify_socket_client
+  record_phase_timing private_socket_verify_after_restart "$started"
   started=$(date +%s%3N)
   rootless_systemctl start codexia-api.service codexia-backup-executor.service
   record_phase_timing private_socket_start_api_executor "$started"
