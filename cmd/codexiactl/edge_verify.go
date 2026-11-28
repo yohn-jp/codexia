@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func verifyInitialEdge(ctx context.Context, vm vmObservation, edge *cloudflareObservation) error {
+func verifyInitialEdge(ctx context.Context, _ vmObservation, edge *cloudflareObservation) error {
 	var target struct{ PublicProtocolEnabled bool }
 	if json.Unmarshal([]byte(edge.Target), &target) != nil || target.PublicProtocolEnabled {
 		return refused("Initial setup needs the approved edge with public OAuth and MCP paths closed")
@@ -16,9 +16,11 @@ func verifyInitialEdge(ctx context.Context, vm vmObservation, edge *cloudflareOb
 	if len(edge.ConnectorIDs) == 0 {
 		return nil
 	}
-	if !vm.CodexiaPresent || len(edge.ConnectorIDs) != 1 {
+	if len(edge.ConnectorIDs) != 1 {
 		return refused("The canonical Tunnel has connectors whose identity cannot be bound to this installation")
 	}
+	// The management connector can already be running after an interrupted
+	// registration, before Codexia's application or runtime account exists.
 	return verifyLocalConnector(ctx, edge.ConnectorIDs[0])
 }
 
@@ -36,7 +38,7 @@ func verifyLocalConnector(ctx context.Context, expected string) error {
 	if err != nil {
 		return refused("The Cloudflare connector could not be bound to the VM's canonical local Tunnel")
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	var ready struct {
 		Status           int
 		ReadyConnections int
