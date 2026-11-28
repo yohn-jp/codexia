@@ -282,6 +282,10 @@ test('infrastructure reuse requires actual selected scopes rather than a green s
   await assert.rejects(verifyReusableDedicatedProof(mixed.args), /Terraform/);
   const shared = dedicatedFixture('.github/workflows/deployment-config.yml', ['scripts/shared/python-env.sh', 'deploy/cloudflare/terraform/main.tf'], ['Check all Terraform files', 'Validate Cloudflare Terraform']);
   await assert.rejects(verifyReusableDedicatedProof(shared.args), /Ansible/);
+  for (const unit of ['deploy/systemd/codexia-api.socket', 'cmd/codexiactl/assets/codexia-cloudflared.service']) {
+    const proof = dedicatedFixture('.github/workflows/deployment-config.yml', [unit], ['Check Ansible configuration']);
+    assert.equal((await verifyReusableDedicatedProof(proof.args)).jobId, 500);
+  }
 });
 
 test('standalone main model job reuses only the successful Verify PR caller lifecycle proof', async () => {

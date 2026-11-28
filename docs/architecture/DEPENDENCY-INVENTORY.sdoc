@@ -264,7 +264,7 @@ TITLE: codexiactl の Go 直接依存
 [TEXT]
 MID: 0f01b17a8960e72cd3aceb9a685f7f6b
 STATEMENT: >>>
-`cmd/codexiactl/go.mod` と `go.sum` がモジュールの版と検証チェックサムを保持する。依存は初回配備 CLI のビルドに閉じる。
+`cmd/codexiactl/go.mod` と `go.sum` が Go モジュールの版と検証チェックサムを保持する。Cloudflare の実行時依存は公式 `cf 1.0.0-rc.6`、Node.js `24.22.3`、`cloudflared 2026.11.0` を実装候補とする。配布元と固定チェックサムを検証し、認証と API/SSH の実サービス適格性を確認した版を配備・公開に使う。
 
 | モジュール | バージョン | 用途と更新時の確認 |
 | --- | --- | --- |
