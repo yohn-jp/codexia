@@ -10,7 +10,7 @@ import (
 )
 
 func TestCloudflareManagementTemplateUsesDocumentedPermissionKeys(t *testing.T) {
-	for _, requirements := range []cloudflareAuthRequirements{{}, {tunnel: true}, {tokenPolicy: true}, {tokenPolicy: true, mint: true}} {
+	for _, requirements := range []cloudflareAuthRequirements{{}, {tunnel: true}, {tokenPolicy: true}, {tokenPolicy: true, mint: true, workerWrite: true}} {
 		u, err := url.Parse(cloudflareManagementTemplate(requirements))
 		if err != nil || u.Scheme != "https" || u.Host != "dash.cloudflare.com" || u.Query().Get("to") != "/:account/api-tokens" {
 			t.Fatalf("invalid official account template: %v", err)
@@ -27,7 +27,7 @@ func TestCloudflareManagementTemplateUsesDocumentedPermissionKeys(t *testing.T) 
 			t.Fatal("unexpected template resource or permission selection")
 		}
 		for _, permission := range permissions {
-			if permission.Type != "read" && (!requirements.mint || permission.Key != "account_api_tokens" || permission.Type != "edit") {
+			if permission.Type != "read" && !(permission.Type == "edit" && ((requirements.mint && permission.Key == "account_api_tokens") || (requirements.workerWrite && permission.Key == "workers_scripts"))) {
 				t.Fatalf("unexpected permission: %+v", permission)
 			}
 		}
@@ -86,10 +86,14 @@ func TestCloudflareAuthRequirementsFollowMissingCredentials(t *testing.T) {
 		t.Fatalf("peer-copy requires metadata read only: %+v", got)
 	}
 	delete(snapshot.Production.Secrets, cloudflareReadRole)
-	if got := cloudflareRequirementsFor(snapshot); !got.tokenPolicy || !got.mint || got.tunnel {
+	if got := cloudflareRequirementsFor(snapshot); !got.tokenPolicy || !got.mint || !got.readMint || got.workerWrite || got.tunnel {
 		t.Fatalf("missing deployment token requires issuance: %+v", got)
 	}
 	delete(snapshot.Bootstrap.Secrets, "CODEXIA_TUNNEL_TOKEN")
+	delete(snapshot.Production.Secrets, cloudflareWorkerRole)
+	if got := cloudflareRequirementsFor(snapshot); !got.workerWrite {
+		t.Fatalf("missing Worker token requires publication authority: %+v", got)
+	}
 	if got := cloudflareRequirementsFor(snapshot); !got.tunnel {
 		t.Fatalf("missing connector token requires retrieval: %+v", got)
 	}

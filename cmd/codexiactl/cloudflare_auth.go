@@ -37,7 +37,7 @@ var cloudflareInspectionScopes = []string{
 // deployment credential is reused; a missing peer copy needs metadata read,
 // not new-token issuance. Unknown inventory is treated as missing.
 type cloudflareAuthRequirements struct {
-	tunnel, tokenPolicy, mint, workerWrite bool
+	tunnel, tokenPolicy, mint, readMint, workerWrite bool
 }
 
 func cloudflareRequirementsFor(snapshot githubSnapshot) cloudflareAuthRequirements {
@@ -52,6 +52,8 @@ func cloudflareRequirementsFor(snapshot githubSnapshot) cloudflareAuthRequiremen
 				requirements.mint = true
 				if input.name == cloudflareWorkerRole {
 					requirements.workerWrite = true
+				} else {
+					requirements.readMint = true
 				}
 			}
 		}
@@ -97,6 +99,11 @@ func cloudflareManagementTemplate(requirements cloudflareAuthRequirements) strin
 		{Key: "workers_scripts", Type: "read"},
 		{Key: "access", Type: "read"},
 	}
+	if requirements.workerWrite {
+		// The provider may restrict issued account tokens to the authority
+		// granted to their creator.
+		permissions[3].Type = "edit"
+	}
 	name := "CodexiaCTL temporary inspection"
 	if !requirements.readOnly() {
 		name = "CodexiaCTL temporary provisioning"
@@ -122,15 +129,23 @@ func cloudflareManagementCredential(ctx context.Context, o operator, host string
 		if choice == 0 {
 			return cloudflareOAuthAccess(ctx, o, cloudflareOAuthClientID, requirements.oauthScopes())
 		}
-	} else if err := requireConfirmation(o, "Authenticate to Cloudflare for "+host+"?"); err != nil {
-		return nil, nil, err
+	} else {
+		reportResult(o, warningText, "Official Cloudflare OAuth client is not configured in this release")
+		if err := requireConfirmation(o, "Use the temporary management token fallback for "+host+"?"); err != nil {
+			return nil, nil, err
+		}
 	}
 	reportResult(o, headingText, "Create one temporary account API token")
 	o.Notice("Open the template in your browser. Select the account and zone containing " + host + " and a short expiry.")
 	if err := privateNotice(o, cloudflareManagementTemplate(requirements)); err != nil {
 		return nil, nil, err
 	}
-	o.Notice("Review prefilled Zone, DNS, Workers Routes, Workers Scripts and account Access: Apps and Policies (Read).")
+	o.Notice("Review prefilled Zone, DNS, Workers Routes and account Access: Apps and Policies (Read).")
+	if requirements.workerWrite {
+		o.Notice("Confirm Workers Scripts Edit for issuance of the limited Worker publication token.")
+	} else {
+		o.Notice("Confirm Workers Scripts Read.")
+	}
 	if requirements.tunnel {
 		o.Notice("Add Account > Cloudflare Tunnel Edit and Access: Service Tokens Read.")
 	} else {

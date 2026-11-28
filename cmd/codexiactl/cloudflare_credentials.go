@@ -213,15 +213,14 @@ func (o *cloudflareObservation) checkOAuthTokenAuthority(ctx context.Context, re
 	if err != nil {
 		return needsAction("Cloudflare OAuth could not read the selected account token permission catalog. Confirm that the publisher client and your Cloudflare role support account token management, or explicitly choose the temporary management token fallback")
 	}
-	if requirements.mint {
-		// Only the missing issuance roles need selectable permission groups.
+	if requirements.readMint {
 		if _, _, err := o.exactTokenPolicies(groups, o.permissionPlan(cloudflareReadRole), true); err != nil {
 			return needsAction("Cloudflare OAuth did not establish selectable deployment-read permissions")
 		}
-		if requirements.workerWrite {
-			if _, _, err := o.exactTokenPolicies(groups, o.permissionPlan(cloudflareWorkerRole), true); err != nil {
-				return needsAction("Cloudflare OAuth did not establish selectable Worker publication permissions")
-			}
+	}
+	if requirements.workerWrite {
+		if _, _, err := o.exactTokenPolicies(groups, o.permissionPlan(cloudflareWorkerRole), true); err != nil {
+			return needsAction("Cloudflare OAuth did not establish selectable Worker publication permissions")
 		}
 	}
 	_, err = cloudflareList("account token inventory", func(page int) (*pagination.V4PagePaginationArray[shared.Token], error) {
