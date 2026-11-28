@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -47,6 +51,34 @@ func verifyLocalConnector(ctx context.Context, expected string) error {
 	if response.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&ready) != nil ||
 		ready.Status != http.StatusOK || ready.ReadyConnections < 1 || ready.ConnectorID != expected {
 		return refused("Cloudflare reports a connector other than the VM's canonical active Tunnel")
+	}
+	return nil
+}
+
+func requireCloudflarePublicationClosed(ctx context.Context, vm vmObservation) error {
+	const helper = "/usr/local/sbin/codexia-api-gate"
+	_, err := os.Lstat(helper)
+	if err == nil {
+		state, err := commandOutput(ctx, "/usr/bin/sudo", "-n", helper, "status")
+		if err != nil || strings.TrimSpace(string(state)) != "closed" {
+			return needsAction("Cloudflare convergence requires independent proof of the closed VM publication gate")
+		}
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) || vm.CodexiaPresent {
+		return needsAction("An existing Codexia VM requires the canonical closed publication gate before Cloudflare convergence")
+	}
+	for _, unit := range []string{"codexia-api.socket", "codexia-api-gate.service"} {
+		state, err := commandOutput(ctx, "/usr/bin/systemctl", "show", "--property=LoadState", "--value", unit)
+		if err != nil || strings.TrimSpace(string(state)) != "not-found" {
+			return needsAction("Could not verify the absence of publication units on the new VM")
+		}
+	}
+	for _, port := range []string{"18080", "18081"} {
+		listeners, err := commandOutput(ctx, "/usr/bin/ss", "-H", "-ltn", "sport", "=", ":"+port)
+		if err != nil || len(bytes.TrimSpace(listeners)) != 0 {
+			return needsAction("Could not verify that the new VM has no listener on the publication and origin ports")
+		}
 	}
 	return nil
 }

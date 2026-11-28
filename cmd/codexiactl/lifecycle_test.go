@@ -305,7 +305,7 @@ func TestInterruptedFirstHostUsesAdministratorPreflight(t *testing.T) {
 				env.Variables[name] = "fixture"
 			}
 		}
-		for _, name := range commonSecrets {
+		for _, name := range managementSecrets() {
 			env.Secrets[name] = true
 		}
 		return env

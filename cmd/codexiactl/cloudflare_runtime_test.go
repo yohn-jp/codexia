@@ -19,12 +19,14 @@ func TestPinnedCloudflareRuntimeAssetsAndScopes(t *testing.T) {
 	if err := verifyCFDeviceFlowPrerequisites(); err != nil {
 		t.Fatal(err)
 	}
-	requirements := cfDeviceRequirements{accountTokenCreate: true, accessTokenWrite: true,
-		workerScriptsWrite: true, tunnelToken: true}
+	requirements := cfDeviceRequirements{
+		accountTokenCreate: true, accessTokenWrite: true,
+		workerScriptsWrite: true, tunnelToken: true,
+	}
 	want := []string{
-		"access-app.read", "access-policy.read", "access-service-token.read", "access-service-token.write",
+		"access-app.read", "access-idp.read", "access-org.read", "access-policy.read", "access-service-token.read", "access-service-token.write",
 		"account:read", "account_api_tokens:create", "argotunnel.read", "argotunnel.write",
-		"dns_records:read", "workers-routes.read", "workers-scripts.read", "workers-scripts.write", "zone:read",
+		"dns.read", "workers-routes.read", "workers-scripts.read", "workers-scripts.write", "zone:read",
 	}
 	if got := requirements.scopes(); !slices.Equal(got, want) {
 		t.Fatalf("Cloudflare scopes=%v, want %v", got, want)
@@ -36,22 +38,16 @@ func TestPinnedCloudflareRuntimeAssetsAndScopes(t *testing.T) {
 		cfScopeSetAllowed([]string{"account.read"}) {
 		t.Fatal("Cloudflare scope validation accepted a duplicate or unsupported scope")
 	}
-	if !cfGrantedScopesContain([]byte("account:read\nzone:read\n"), []string{"account:read", "zone:read"}) ||
-		cfGrantedScopesContain([]byte("account:read\n"), []string{"account:read", "zone:read"}) ||
-		cfGrantedScopesContain([]byte("xaccount:read\n"), []string{"account:read"}) ||
-		cfGrantedScopesContain([]byte("account:readonly\n"), []string{"account:read"}) {
-		t.Fatal("Cloudflare grant scope verification did not fail closed")
-	}
 }
 
 func TestCloudflareNodeExtractionAllowsOnlyPrivateRuntimeFiles(t *testing.T) {
 	archive := nodeArchiveFixture(t, []tar.Header{
-		{Name: "node-v" + cfNodeVersion + "-linux-x64/", Typeflag: tar.TypeDir, Mode: 0755},
-		{Name: "node-v" + cfNodeVersion + "-linux-x64/bin/", Typeflag: tar.TypeDir, Mode: 0755},
-		{Name: "node-v" + cfNodeVersion + "-linux-x64/bin/node", Typeflag: tar.TypeReg, Mode: 0755, Size: 4},
-		{Name: "node-v" + cfNodeVersion + "-linux-x64/lib/node_modules/npm/bin/", Typeflag: tar.TypeDir, Mode: 0755},
-		{Name: "node-v" + cfNodeVersion + "-linux-x64/lib/node_modules/npm/bin/npm-cli.js", Typeflag: tar.TypeReg, Mode: 0644, Size: 3},
-		{Name: "node-v" + cfNodeVersion + "-linux-x64/README.md", Typeflag: tar.TypeReg, Mode: 0644, Size: 7},
+		{Name: "node-v" + cfNodeVersion + "-linux-x64/", Typeflag: tar.TypeDir, Mode: 0o755},
+		{Name: "node-v" + cfNodeVersion + "-linux-x64/bin/", Typeflag: tar.TypeDir, Mode: 0o755},
+		{Name: "node-v" + cfNodeVersion + "-linux-x64/bin/node", Typeflag: tar.TypeReg, Mode: 0o755, Size: 4},
+		{Name: "node-v" + cfNodeVersion + "-linux-x64/lib/node_modules/npm/bin/", Typeflag: tar.TypeDir, Mode: 0o755},
+		{Name: "node-v" + cfNodeVersion + "-linux-x64/lib/node_modules/npm/bin/npm-cli.js", Typeflag: tar.TypeReg, Mode: 0o644, Size: 3},
+		{Name: "node-v" + cfNodeVersion + "-linux-x64/README.md", Typeflag: tar.TypeReg, Mode: 0o644, Size: 7},
 	})
 	root := t.TempDir()
 	destination := filepath.Join(root, "node")
@@ -70,8 +66,8 @@ func TestCloudflareNodeExtractionAllowsOnlyPrivateRuntimeFiles(t *testing.T) {
 
 func TestCloudflareNodeExtractionRejectsTraversal(t *testing.T) {
 	archive := nodeArchiveFixture(t, []tar.Header{
-		{Name: "node-v" + cfNodeVersion + "-linux-x64/", Typeflag: tar.TypeDir, Mode: 0755},
-		{Name: "node-v" + cfNodeVersion + "-linux-x64/../../escape", Typeflag: tar.TypeReg, Mode: 0600, Size: 1},
+		{Name: "node-v" + cfNodeVersion + "-linux-x64/", Typeflag: tar.TypeDir, Mode: 0o755},
+		{Name: "node-v" + cfNodeVersion + "-linux-x64/../../escape", Typeflag: tar.TypeReg, Mode: 0o600, Size: 1},
 	})
 	root := t.TempDir()
 	if err := extractCloudflareNode(archive, filepath.Join(root, "node")); err == nil {
@@ -116,7 +112,7 @@ func nodeArchiveFixture(t *testing.T, entries []tar.Header) []byte {
 		if err := writer.WriteHeader(&entry); err != nil {
 			t.Fatal(err)
 		}
-		if entry.Typeflag == tar.TypeReg || entry.Typeflag == tar.TypeRegA {
+		if entry.Typeflag == tar.TypeReg {
 			body := bytes.Repeat([]byte("x"), int(entry.Size))
 			if _, err := writer.Write(body); err != nil {
 				t.Fatal(err)

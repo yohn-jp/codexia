@@ -186,7 +186,7 @@ func TestDoctorReportsActionableBlockersWithoutDumpingWorkflowHistory(t *testing
 		}
 	}
 	guidance := blockerGuidance("existing-protected-input-mismatch")
-	for _, required := range []string{"management hostname", "host pin", "will not replace", "approved migration"} {
+	for _, required := range []string{"management hostname", "host pin", "Review the exact values", "approved migration"} {
 		if !strings.Contains(guidance, required) {
 			t.Errorf("protected-input guidance does not identify %q: %s", required, guidance)
 		}

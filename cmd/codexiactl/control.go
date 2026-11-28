@@ -14,15 +14,15 @@ const (
 	enableBootstrap    = "CODEXIA_BOOTSTRAP_ENABLED"
 	enableDatabase     = "CODEXIA_DATABASE_INITIALIZATION_APPROVED"
 	ownerRecipient     = "CODEXIA_OWNER_SETUP_AGE_RECIPIENT"
-	bootstrapSSHSecret = "CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY"
-	runtimeSSHSecret   = "CODEXIA_DEPLOY_SSH_PRIVATE_KEY"
+	bootstrapSSHSecret = "CODEXIA_BOOTSTRAP_SSH_PRIVATE_KEY" //nolint:gosec // This is a GitHub Environment input name.
+	runtimeSSHSecret   = "CODEXIA_DEPLOY_SSH_PRIVATE_KEY"    //nolint:gosec // This is a GitHub Environment input name.
 	sshAccessClientID  = "CODEXIA_SSH_ACCESS_CLIENT_ID"
-	sshAccessSecret    = "CODEXIA_SSH_ACCESS_CLIENT_SECRET"
+	sshAccessSecret    = "CODEXIA_SSH_ACCESS_CLIENT_SECRET" //nolint:gosec // This is a GitHub Environment input name.
 	edgeTarget         = "CODEXIA_DEPLOYMENT_CLOUDFLARE_TARGET"
 )
 
 var commonSecrets = []string{
-	"CODEXIA_DEPLOYMENT_CLOUDFLARE_READ_TOKEN", "CODEXIA_ACCESS_CLIENT_ID", "CODEXIA_ACCESS_CLIENT_SECRET",
+	cloudflareReadRole, cloudflareProbeID, cloudflareProbeSecret,
 }
 
 func managementSecrets() []string {
@@ -109,7 +109,7 @@ func missingVariables(snapshot githubSnapshot, planned []environmentInput) ([]en
 			missing = append(missing, desired)
 			continue
 		}
-		var equal = strings.TrimSpace(current) == strings.TrimSpace(desired.value)
+		equal := strings.TrimSpace(current) == strings.TrimSpace(desired.value)
 		if desired.name == edgeTarget {
 			var left, right any
 			equal = json.Unmarshal([]byte(current), &left) == nil && json.Unmarshal([]byte(desired.value), &right) == nil &&
@@ -133,11 +133,28 @@ func missingSecrets(snapshot githubSnapshot) []environmentInput {
 }
 
 func validateServiceAuthPairs(snapshot githubSnapshot) error {
+	return validateServiceAuthRegistration(snapshot, nil)
+}
+
+func validateServiceAuthRegistration(snapshot githubSnapshot, receipts map[string]cfServiceAuthReceipt) error {
 	for _, environment := range []string{bootstrapEnvironment, productionEnvironment} {
-		inputs := selectEnvironment(snapshot, environment).Secrets
-		for _, pair := range [][2]string{{sshAccessClientID, sshAccessSecret}, {"CODEXIA_ACCESS_CLIENT_ID", "CODEXIA_ACCESS_CLIENT_SECRET"}} {
-			if inputs[pair[0]] != inputs[pair[1]] {
-				return needsAction("The protected " + environment + " Cloudflare Service Auth credential pair is incomplete. Reconcile the owning Environment without replacing its existing Secret, then run init again")
+		env := selectEnvironment(snapshot, environment)
+		inputs := env.Secrets
+		for _, pair := range [][2]string{{sshAccessClientID, sshAccessSecret}, {cloudflareProbeID, cloudflareProbeSecret}} {
+			receipt, pending := receipts[environment+"/"+pair[0]]
+			if pending && inputs[pair[1]] &&
+				(env.SecretUpdatedAt[pair[1]].Before(receipt.StartedAt) || receipt.StartedAt.IsZero()) {
+				return refused("GitHub did not confirm the Service Auth secret was registered during the recorded operation")
+			}
+			if pending && inputs[pair[0]] && env.SecretUpdatedAt[pair[0]].Before(receipt.StartedAt) {
+				return refused("GitHub did not confirm the Service Auth ID was registered during the recorded operation")
+			}
+			switch {
+			case inputs[pair[0]] && inputs[pair[1]]:
+			case !inputs[pair[0]] && inputs[pair[1]] && pending:
+			case !inputs[pair[0]] && !inputs[pair[1]] && !pending:
+			default:
+				return needsAction("The protected " + environment + " Cloudflare Service Auth pair could not be reconciled with the registration receipt. Inspect the owning Environment and Cloudflare inventory before rerunning init")
 			}
 		}
 	}
@@ -145,8 +162,9 @@ func validateServiceAuthPairs(snapshot githubSnapshot) error {
 }
 
 func registerInputs(ctx context.Context, o operator, control *githubControl, c *workflowController, vm vmObservation,
-	managementHostname string, edge *cloudflareObservation, snapshot githubSnapshot, pin string) error {
-	if err := validateServiceAuthPairs(snapshot); err != nil {
+	managementHostname string, edge *cloudflareObservation, snapshot githubSnapshot, pin string,
+) error {
+	if err := validateServiceAuthRegistration(snapshot, c.state.CloudflareServiceAuth); err != nil {
 		return err
 	}
 	desired, err := observedProtectedVariables(snapshot, vm, managementHostname, pin, edge.Target)
@@ -161,7 +179,7 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 	if !snapshot.Bootstrap.Secrets[bootstrapSSHSecret] && vm.authorizedFile == "" {
 		return needsAction("Configure the independently managed SSH administrator's supported authorized_keys path before registering a new bootstrap identity")
 	}
-	if len(variables)+len(secrets) == 0 && c.state.BootstrapPublicKey == "" {
+	if len(variables)+len(secrets) == 0 && c.state.BootstrapPublicKey == "" && len(c.state.CloudflareServiceAuth) == 0 {
 		o.Notice("Protected inputs are already registered. The runner checks actual connectivity in the next stage.")
 		return ensureCloudflareConnector(ctx, o, edge)
 	}
@@ -188,7 +206,7 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 	if snapshot.MainSHA != c.sha {
 		return refused("GitHub main advanced before protected Settings registration")
 	}
-	if err := validateServiceAuthPairs(snapshot); err != nil {
+	if err := validateServiceAuthRegistration(snapshot, c.state.CloudflareServiceAuth); err != nil {
 		return err
 	}
 	desired, err = observedProtectedVariables(snapshot, vm, managementHostname, pin, edge.Target)
@@ -204,6 +222,18 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 		return refused("The protected input inventory changed before the exclusive writer window. Review the new plan before writing")
 	}
 	variables, secrets = freshVariables, freshSecrets
+	for key := range c.state.CloudflareServiceAuth {
+		environment, idInput, _ := strings.Cut(key, "/")
+		if selectEnvironment(snapshot, environment).Secrets[idInput] {
+			delete(c.state.CloudflareServiceAuth, key)
+			if err := c.store.Save(c.state); err != nil {
+				return err
+			}
+		}
+	}
+	if err := ensureCloudflareConnector(ctx, o, edge); err != nil {
+		return err
+	}
 	for _, input := range variables {
 		if err := c.currentMain(ctx); err != nil {
 			return err
@@ -215,39 +245,9 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 	if err := c.registerBootstrapKey(ctx, control, vm, snapshot.Bootstrap.Secrets[bootstrapSSHSecret]); err != nil {
 		return err
 	}
-	credentials := make(map[string][]byte)
-	defer func() {
-		for _, value := range credentials {
-			clear(value)
-		}
-	}()
 	for _, input := range secrets {
-		switch input.name {
-		case bootstrapSSHSecret:
-			continue
-		case runtimeSSHSecret:
-			private, _, err := newSSHIdentity()
-			if err != nil {
-				return err
-			}
-			err = putMissingSecret(ctx, c, control, input, private)
-			clear(private)
-			if err != nil {
-				return err
-			}
-		default:
-			credentialKey := input.environment + "/" + input.name
-			value, observed := credentials[credentialKey]
-			if !observed {
-				value, err = edge.Credential(ctx, input.environment, input.name)
-				if err != nil {
-					return err
-				}
-				credentials[credentialKey] = value
-			}
-			if err := putMissingSecret(ctx, c, control, input, value); err != nil {
-				return err
-			}
+		if err := c.registerProtectedSecret(ctx, control, edge, snapshot, input); err != nil {
+			return err
 		}
 	}
 	updated, err := control.Observe(ctx)
@@ -262,11 +262,80 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 		return needsAction("Some protected inputs could not be verified after registration. Check " +
 			c.target.URL() + "/settings/environments and run codexiactl doctor before resuming")
 	}
-	if err := ensureCloudflareConnector(ctx, o, edge); err != nil {
-		return err
-	}
 	o.Notice("Protected input registration verified. The runner checks actual connectivity in the next stage.")
 	return nil
+}
+
+func (c *workflowController) registerProtectedSecret(ctx context.Context, control *githubControl, edge *cloudflareObservation,
+	snapshot githubSnapshot, input environmentInput,
+) error {
+	switch input.name {
+	case bootstrapSSHSecret, sshAccessSecret, cloudflareProbeSecret:
+		// Bootstrap SSH has its own recoverable key write. Service Auth secrets
+		// are written with their corresponding ID input below.
+		return nil
+	case sshAccessClientID, cloudflareProbeID:
+		return c.registerServiceAuth(ctx, control, edge, snapshot, input)
+	case runtimeSSHSecret:
+		private, _, err := newSSHIdentity()
+		if err != nil {
+			return err
+		}
+		defer clear(private)
+		return putMissingSecret(ctx, c, control, input, private)
+	default:
+		value, err := edge.Credential(ctx, input.environment, input.name)
+		if err != nil {
+			return err
+		}
+		defer clear(value)
+		return putMissingSecret(ctx, c, control, input, value)
+	}
+}
+
+func (c *workflowController) registerServiceAuth(ctx context.Context, control *githubControl, edge *cloudflareObservation,
+	snapshot githubSnapshot, input environmentInput,
+) error {
+	role, err := edge.serviceRole(input.environment, input.name)
+	if err != nil {
+		return err
+	}
+	key := input.environment + "/" + input.name
+	receipt, pending := c.state.CloudflareServiceAuth[key]
+	var id []byte
+	defer func() { clear(id) }()
+	if pending {
+		if !selectEnvironment(snapshot, input.environment).Secrets[role.secretInput] {
+			return needsAction("The Cloudflare Service Auth secret was never confirmed in the intended Environment. Resolve the pending issuance in the provider and GitHub inventories")
+		}
+		id, err = edge.serviceAuthClientID(ctx, role, receipt)
+		if err != nil {
+			return err
+		}
+	} else {
+		var secret []byte
+		receipt, id, secret, err = edge.issueServiceAuth(ctx, role)
+		defer clear(secret)
+		if err != nil {
+			return err
+		}
+		if c.state.CloudflareServiceAuth == nil {
+			c.state.CloudflareServiceAuth = make(map[string]cfServiceAuthReceipt)
+		}
+		c.state.CloudflareServiceAuth[key] = receipt
+		if err := c.store.Save(c.state); err != nil {
+			return err
+		}
+		secretInput := environmentInput{environment: input.environment, name: role.secretInput}
+		if err := putMissingSecret(ctx, c, control, secretInput, secret); err != nil {
+			return err
+		}
+	}
+	if err := putMissingSecret(ctx, c, control, input, id); err != nil {
+		return err
+	}
+	delete(c.state.CloudflareServiceAuth, key)
+	return c.store.Save(c.state)
 }
 
 func ensureCloudflareConnector(ctx context.Context, o operator, edge *cloudflareObservation) error {

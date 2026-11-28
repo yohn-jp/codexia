@@ -43,9 +43,11 @@ type observedRun struct {
 }
 
 func readOnly(ctx context.Context, i invocation, stdout, stderr io.Writer) int {
-	status := statusReport{SchemaVersion: 2,
-		Phase: "UNKNOWN", Route: "unknown", Active: "unknown", Accepted: "unknown", OrdinaryUpdate: "unknown",
-		Blockers: []string{}, Runs: []observedRun{}, Evidence: []string{}}
+	status := statusReport{
+		SchemaVersion: 2,
+		Phase:         "UNKNOWN", Route: "unknown", Active: "unknown", Accepted: "unknown", OrdinaryUpdate: "unknown",
+		Blockers: []string{}, Runs: []observedRun{}, Evidence: []string{},
+	}
 	err := inspectReadOnly(ctx, i, &status)
 	status.ObservedAt = time.Now().UTC()
 	if i.json {
@@ -101,14 +103,12 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 		report.Blockers = append(report.Blockers, "interactive-authentication-required")
 		return needsAction("Read-only provider observations require an SSH terminal for one-time authentication")
 	}
-	defer tty.Close()
+	defer func() { _ = tty.Close() }()
 	tty.bindContext(ctx)
 	reportResult(tty, headingText, "CodexiaCTL | "+version+" | read-only inspection")
 	reportStage(tty, vmStage, "Check local SSH session, OS, clock and administrator access")
 	reportResult(tty, successText, "Local VM observed; clock "+vm.Clock)
-	if i.command == "doctor" || i.plan {
-		tty.Notice("READ-ONLY INSPECTION: no VM, Cloudflare, or GitHub settings will be changed. Provider credentials are requested only for temporary API reads and are not stored. Decline a provider to stop safely.")
-	}
+	tty.Notice("Read-only inspection uses temporary GitHub and Cloudflare Device Flow sessions. Decline a provider to stop safely.")
 	reportStage(tty, githubStage, "Authenticate and inspect the selected repository")
 	gh, err := githubLogin(ctx, tty, githubAppClientID)
 	if err != nil {
@@ -166,10 +166,7 @@ func inspectReadOnly(ctx context.Context, i invocation, report *statusReport) er
 	if historyErr == nil {
 		observeExistingReceipt(ctx, gh, vm.HostID, runs, time.Now().UTC(), report)
 	}
-	var providerErr error
-	if i.command == "doctor" || i.plan {
-		providerErr = inspectProviders(ctx, tty, vm, gh, snapshot, settings, report)
-	}
+	providerErr := inspectProviders(ctx, tty, vm, gh, snapshot, settings, report)
 	if i.plan {
 		tty.Notice("If the prerequisites are satisfied, init reviews missing protected inputs, requests the management SSH and lifecycle checks, then uses the admitted R4 and R5 route.")
 		tty.Notice("Workflows: " + bootstrapFile + " for SSH, R4 and Owner setup; " + preflightFile + " for lifecycle evidence; " + frontendFile + " for initial Frontend publication.")
@@ -223,7 +220,7 @@ func blockerGuidance(blocker string) string {
 	case "ssh-host-pin-unverified":
 		return "Compare the VM's SSH host key fingerprint with the independent SSH client/provider console; never disable strict host-key verification."
 	case "cloudflare-edge-unverified", "edge-initial-install-unverified":
-		return "Inspect the selected Cloudflare account, zone, management SSH ingress, Tunnel, Access and Worker for the configured production origin. Changes to Terraform-owned resources must use the existing IaC path."
+		return "Inspect the selected Cloudflare account, zone, management SSH ingress, Tunnel, Access and Worker for the configured production origin. Use the certified target and review the Cloudflare observations before approving changes in init."
 	case "cloudflare-connector-install-required":
 		return "Run codexiactl init from the independent SSH administrator session to install the pinned Cloudflare connector after explicit approval. Keep the current management path until the runner's SSH and Ansible checks succeed."
 	case "cloudflare-connector-unverified":
@@ -231,7 +228,7 @@ func blockerGuidance(blocker string) string {
 	case "protected-inputs-missing":
 		return "Missing GitHub Environment inputs are reported before any write. Run init to issue and register only the approved minimum-scope credentials that are missing; existing credentials are not replaced."
 	case "existing-protected-input-mismatch":
-		return "A protected Cloudflare target, management hostname, or SSH host pin differs from the verified VM or edge. Review the exact values in Settings > Environments and the existing Terraform configuration; the CLI will not replace them. Complete the approved migration, then rerun codexiactl doctor."
+		return "A protected Cloudflare target, management hostname, or SSH host pin differs from the verified VM or edge. Review the exact values in Settings > Environments and the certified production configuration. Complete the approved migration, then rerun codexiactl doctor."
 	case "protected-input-inventory-unavailable":
 		return "GitHub returned no complete secret/variable inventory. Restore the read permissions before planning changes."
 	case "newer-or-unresolved-protected-deployment-activity":
@@ -277,9 +274,12 @@ func inspectProviders(ctx context.Context, o operator, vm vmObservation, gh *git
 	var failures []error
 	var pin string
 	reportStage(o, cloudflareAuthStage, "Inspect Cloudflare account, SSH ingress, Tunnel, Access and Workers")
-	edge, edgeErr := observeCloudflare(ctx, o, gh.target, settings, cloudflareAuthRequirements{})
+	edge, edgeErr := observeCloudflare(ctx, o, gh.target, settings, snapshot, cfDeviceRequirements{})
 	if edge != nil {
 		defer edge.Close()
+		for _, change := range edge.Plan {
+			reportResult(o, bodyText, change)
+		}
 	}
 	if edgeErr != nil {
 		report.Blockers = append(report.Blockers, "cloudflare-edge-unverified")

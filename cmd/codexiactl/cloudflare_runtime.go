@@ -69,11 +69,12 @@ type cfPackageManifest struct {
 }
 
 type cfRuntime struct {
-	root, workDir string
-	node, cli     string
-	baseEnv       []string
-	accountID     string
-	loggedIn      bool
+	root, workDir      string
+	node, cli          string
+	baseEnv            []string
+	accountID          string
+	authorizedAccounts map[string]bool
+	loggedIn           bool
 }
 
 func (runtime *cfRuntime) commandEnv() []string {
@@ -85,33 +86,80 @@ func (runtime *cfRuntime) commandEnv() []string {
 }
 
 func (runtime *cfRuntime) setAccount(accountID string) error {
-	if accountID != "" && !cloudflareID.MatchString(accountID) {
-		return errors.New("Cloudflare account identity is invalid")
+	if accountID != "" && (!cloudflareID.MatchString(accountID) || (runtime.authorizedAccounts != nil && !runtime.authorizedAccounts[accountID])) {
+		return errors.New("the Cloudflare account identity is invalid")
 	}
 	runtime.accountID = accountID
 	return nil
 }
 
+type cfCommandRunner interface {
+	run(context.Context, ...string) ([]byte, error)
+}
+
+func cfResult[T any](ctx context.Context, runner cfCommandRunner, args ...string) (T, error) {
+	var result T
+	if runner == nil {
+		return result, errors.New("official Cloudflare CLI session is unavailable")
+	}
+	raw, err := runner.run(ctx, args...)
+	if err != nil {
+		return result, err
+	}
+	defer clear(raw)
+	raw = bytes.TrimSpace(raw)
+	if bytes.Equal(raw, []byte("null")) || json.Unmarshal(raw, &result) != nil {
+		var empty T
+		return empty, errors.New("official Cloudflare CLI returned an invalid structured result")
+	}
+	return result, nil
+}
+
 func (runtime *cfRuntime) run(ctx context.Context, args ...string) ([]byte, error) {
+	return runtime.runWithToken(ctx, nil, args...)
+}
+
+type boundedCFOutput struct {
+	bytes.Buffer
+	exceeded bool
+}
+
+func (out *boundedCFOutput) Write(p []byte) (int, error) {
+	if len(p) > cfCommandOutputMax-out.Len() {
+		out.exceeded = true
+		return 0, errors.New("the Cloudflare command output exceeds the limit")
+	}
+	return out.Buffer.Write(p)
+}
+
+func (runtime *cfRuntime) runWithToken(ctx context.Context, credential []byte, args ...string) ([]byte, error) {
 	if runtime == nil || runtime.node == "" || runtime.cli == "" {
 		return nil, errors.New("official Cloudflare CLI runtime is unavailable")
 	}
 	bounded, cancel := context.WithTimeout(ctx, cfCLICallTimeout)
 	defer cancel()
 	commandArgs := append([]string{runtime.cli}, args...)
-	command := exec.CommandContext(bounded, runtime.node, commandArgs...)
+	command := exec.CommandContext(bounded, runtime.node, commandArgs...) //nolint:gosec // The runtime executable is digest-pinned and callers use individual cf command arguments.
 	command.Dir = runtime.workDir
 	command.Env = runtime.commandEnv()
-	var stdout, stderr bytes.Buffer
+	if credential != nil {
+		command.Env = append(command.Env, "CLOUDFLARE_API_TOKEN="+string(credential))
+	}
+	var stdout, stderr boundedCFOutput
+	defer func() {
+		clear(stdout.Bytes())
+		clear(stderr.Bytes())
+	}()
 	command.Stdout, command.Stderr = &stdout, &stderr
-	if err := command.Run(); err != nil {
+	err := command.Run()
+	if stdout.exceeded || stderr.exceeded {
+		return nil, errors.New("the Cloudflare returned an oversized command result")
+	}
+	if err != nil {
 		if bounded.Err() != nil {
 			return nil, bounded.Err()
 		}
 		return nil, cloudflareCLIError(stderr.Bytes())
-	}
-	if stdout.Len() > cfCommandOutputMax || stderr.Len() > cfCommandOutputMax {
-		return nil, errors.New("Cloudflare returned an oversized command result")
 	}
 	return bytes.Clone(stdout.Bytes()), nil
 }
@@ -124,9 +172,9 @@ func cloudflareCLIError(stderr []byte) error {
 	case strings.Contains(text, "http 401"), strings.Contains(text, "http 403"), strings.Contains(text, "unauthorized"), strings.Contains(text, "forbidden"):
 		return needsAction("Cloudflare rejected the requested operation. Verify the selected account and the exact cf scope required for this operation")
 	case strings.Contains(text, "timed out"), strings.Contains(text, "timeout"):
-		return errors.New("Cloudflare did not complete the requested operation before its deadline")
+		return errors.New("the Cloudflare did not complete the requested operation before its deadline")
 	default:
-		return errors.New("Cloudflare cf could not complete or verify the requested operation")
+		return errors.New("the Cloudflare cf could not complete or verify the requested operation")
 	}
 }
 
@@ -138,21 +186,17 @@ func prepareCloudflareRuntime(ctx context.Context) (*cfRuntime, error) {
 	if err != nil {
 		return nil, errors.New("could not create an isolated Cloudflare CLI runtime")
 	}
-	if err := os.Chmod(root, 0700); err != nil {
-		_ = os.RemoveAll(root)
-		return nil, errors.New("could not protect the isolated Cloudflare CLI runtime")
-	}
 	cleanup := func(err error) (*cfRuntime, error) {
 		_ = os.RemoveAll(root)
 		return nil, err
 	}
 	for _, name := range []string{"home", "config", "cache", "data", "state", "work", "npm-cache"} {
-		if err := os.Mkdir(filepath.Join(root, name), 0700); err != nil {
+		if err := os.Mkdir(filepath.Join(root, name), 0o700); err != nil {
 			return cleanup(errors.New("could not create isolated Cloudflare CLI state"))
 		}
 	}
 	for _, name := range []string{"npmrc", "global-npmrc"} {
-		if err := os.WriteFile(filepath.Join(root, name), nil, 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, name), nil, 0o600); err != nil {
 			return cleanup(errors.New("could not isolate Cloudflare CLI package-manager settings"))
 		}
 	}
@@ -171,7 +215,7 @@ func prepareCloudflareRuntime(ctx context.Context) (*cfRuntime, error) {
 	workDir := filepath.Join(root, "work")
 	for _, asset := range []string{"package.json", "package-lock.json"} {
 		data, err := cfRuntimeAssets.ReadFile("assets/cf-runtime/" + asset)
-		if err != nil || os.WriteFile(filepath.Join(workDir, asset), data, 0600) != nil {
+		if err != nil || os.WriteFile(filepath.Join(workDir, asset), data, 0o600) != nil {
 			return cleanup(errors.New("could not prepare the pinned Cloudflare CLI package lock"))
 		}
 	}
@@ -191,7 +235,7 @@ func prepareCloudflareRuntime(ctx context.Context) (*cfRuntime, error) {
 	}
 	install, cancel := context.WithTimeout(ctx, cfCLIRuntimeTimeout)
 	defer cancel()
-	command := exec.CommandContext(install, node, npmCLI, "ci", "--ignore-scripts", "--no-audit", "--no-fund",
+	command := exec.CommandContext(install, node, npmCLI, "ci", "--ignore-scripts", "--no-audit", "--no-fund", //nolint:gosec // Node and npm are from the verified pinned archive.
 		"--no-progress", "--fetch-retries=1", "--fetch-timeout=120000", "--registry=https://registry.npmjs.org/")
 	command.Dir, command.Env = workDir, baseEnv
 	if err := command.Run(); err != nil {
@@ -200,7 +244,7 @@ func prepareCloudflareRuntime(ctx context.Context) (*cfRuntime, error) {
 		}
 		return cleanup(errors.New("pinned Cloudflare CLI package installation failed its integrity or registry checks"))
 	}
-	verifySignatures := exec.CommandContext(install, node, npmCLI, "audit", "signatures", "--registry=https://registry.npmjs.org/")
+	verifySignatures := exec.CommandContext(install, node, npmCLI, "audit", "signatures", "--registry=https://registry.npmjs.org/") //nolint:gosec // Node and npm are from the verified pinned archive.
 	verifySignatures.Dir, verifySignatures.Env = workDir, baseEnv
 	if err := verifySignatures.Run(); err != nil {
 		return cleanup(errors.New("pinned Cloudflare CLI package signatures or provenance could not be verified"))
@@ -258,7 +302,7 @@ func verifyCFPackageAssets() error {
 		u, err := url.Parse(dependency.Resolved)
 		if err != nil || u.Scheme != "https" || u.Host != "registry.npmjs.org" || u.User != nil ||
 			u.RawQuery != "" || u.Fragment != "" || !strings.HasPrefix(u.Path, "/") || !validNPMIntegrity(dependency.Integrity) {
-			return errors.New("Cloudflare CLI package lock contains an unapproved or unpinned npm artifact")
+			return errors.New("the Cloudflare CLI package lock contains an unapproved or unpinned npm artifact")
 		}
 	}
 	return nil
@@ -289,7 +333,7 @@ func downloadCloudflareNode(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, errors.New("could not download the pinned official Node.js runtime")
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK || response.Request.URL.Scheme != "https" || response.Request.URL.Host != "nodejs.org" ||
 		response.ContentLength > cfNodeArchiveMax {
 		return nil, errors.New("the official Node.js runtime response did not match the pinned artifact")
@@ -321,7 +365,7 @@ func extractCloudflareNode(archive []byte, destination string) error {
 	if err != nil {
 		return errors.New("the official Node.js runtime archive is invalid")
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	rootPrefix := "node-v" + cfNodeVersion + "-linux-x64/"
 	archiveReader := tar.NewReader(reader)
 	var extracted int64
@@ -351,20 +395,20 @@ func extractCloudflareNode(archive []byte, destination string) error {
 		include := clean == "bin/node" || strings.HasPrefix(clean, "lib/node_modules/npm/")
 		if header.Typeflag == tar.TypeDir {
 			if include || clean == "bin" || clean == "lib" || clean == "lib/node_modules" {
-				if err := os.MkdirAll(filepath.Join(destination, filepath.FromSlash(clean)), 0700); err != nil {
+				if err := os.MkdirAll(filepath.Join(destination, filepath.FromSlash(clean)), 0o700); err != nil {
 					return errors.New("could not extract the official Node.js runtime")
 				}
 			}
 			continue
 		}
 		if header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink {
-			link := path.Clean(path.Join(path.Dir(clean), header.Linkname))
+			link := path.Clean(path.Join(path.Dir(clean), header.Linkname)) //nolint:gosec // Link names are inspected for traversal and no archive link is materialized.
 			if path.IsAbs(header.Linkname) || link == ".." || strings.HasPrefix(link, "../") || strings.ContainsRune(header.Linkname, '\\') {
 				return errors.New("the official Node.js runtime archive contains an unsafe link")
 			}
 			continue
 		}
-		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+		if header.Typeflag != tar.TypeReg {
 			return errors.New("the official Node.js runtime archive contains an unsupported entry")
 		}
 		if !include {
@@ -375,14 +419,14 @@ func extractCloudflareNode(archive []byte, destination string) error {
 			return errors.New("the official Node.js runtime exceeded its extraction limit")
 		}
 		destinationPath := filepath.Join(destination, filepath.FromSlash(clean))
-		if err := os.MkdirAll(filepath.Dir(destinationPath), 0700); err != nil {
+		if err := os.MkdirAll(filepath.Dir(destinationPath), 0o700); err != nil {
 			return errors.New("could not extract the official Node.js runtime")
 		}
-		mode := os.FileMode(0600)
+		mode := os.FileMode(0o600)
 		if clean == "bin/node" {
-			mode = 0700
+			mode = 0o700
 		}
-		file, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+		file, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode) //nolint:gosec // The canonical archive path is validated above and created exclusively inside the private extraction root.
 		if err != nil {
 			return errors.New("could not extract the official Node.js runtime")
 		}
@@ -404,6 +448,18 @@ func extractCloudflareNode(archive []byte, destination string) error {
 	return nil
 }
 
+func (runtime *cfRuntime) logout(ctx context.Context) error {
+	if !runtime.loggedIn {
+		return nil
+	}
+	raw, err := runtime.run(ctx, "auth", "logout")
+	clear(raw)
+	if err == nil {
+		runtime.loggedIn = false
+	}
+	return err
+}
+
 func (runtime *cfRuntime) close() error {
 	if runtime == nil {
 		return nil
@@ -411,13 +467,13 @@ func (runtime *cfRuntime) close() error {
 	var logoutErr error
 	if runtime.loggedIn {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		_, logoutErr = runtime.run(ctx, "auth", "logout")
+		logoutErr = runtime.logout(ctx)
 		cancel()
 	}
 	removeErr := os.RemoveAll(runtime.root)
 	runtime.root, runtime.node, runtime.cli, runtime.workDir = "", "", "", ""
 	if logoutErr != nil {
-		return errors.New("official Cloudflare logout could not be confirmed; isolated local profile data was removed")
+		return errors.New("official Cloudflare logout did not complete; isolated local profile data was removed")
 	}
 	if removeErr != nil {
 		return errors.New("isolated Cloudflare profile cleanup could not be confirmed")
