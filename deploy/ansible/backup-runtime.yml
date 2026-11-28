@@ -263,11 +263,18 @@
     fi
     attached() { podman exec codexia-api sh -ec 'test -n "$CODEXIA_BACKUP_API_DATABASE_URL" && test -r "$CODEXIA_BACKUP_PUBLIC_KEY_FILE" && test -r "$CODEXIA_BACKUP_POLICY_FILE"'; }
     if ! attached; then
-      tunnel_status=0
-      systemctl --user is-active --quiet codexia-tunnel.service || tunnel_status=$?
-      case "$tunnel_status" in 0|3|4) ;; *) exit 1 ;; esac
-      restore_tunnel() {
-        if [[ "$tunnel_status" == 0 ]]; then systemctl --user start codexia-tunnel.service; fi
+      gate_control() { sudo -n /usr/local/sbin/codexia-api-gate "$@"; }
+      systemctl is-active --quiet codexia-cloudflared.service
+      previous_gate="$(gate_control status)"
+      [[ "$previous_gate" == open || "$previous_gate" == closed ]]
+      gate_control close
+      [[ "$(gate_control status)" == closed ]]
+      restore_gate() {
+        local live
+        live="$(podman inspect --format '{% raw %}{{.Image}} {{.State.Health.Status}}{% endraw %}' codexia-api)" || return 1
+        [[ "${live#sha256:}" == "${expected#sha256:} healthy" ]] || return 1
+        if [[ "$previous_gate" == open ]]; then gate_control open || return 1; fi
+        [[ "$(gate_control status)" == "$previous_gate" ]]
       }
       systemctl --user daemon-reload
       if ! systemctl --user restart codexia-api.service || ! attached; then
@@ -280,10 +287,10 @@
         systemctl --user daemon-reload
         systemctl --user reset-failed codexia-api.service
         systemctl --user start codexia-api.service
-        restore_tunnel
+        restore_gate
         exit 1
       fi
-      restore_tunnel
+      restore_gate
       echo API_CONFIGURED
     fi
     if jq -e '.recoveryOperationId != null' "$state/deployed-release.json" >/dev/null; then

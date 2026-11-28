@@ -29,7 +29,21 @@ async function createFixture() {
     getent: '#!/bin/sh\nprintf "192.0.2.55 STREAM backup.example 192.0.2.55\\n"\n',
     ip: '#!/bin/sh\nprintf "2: lo inet 127.0.0.1/8 scope host lo\\n"\n',
     podman: '#!/bin/sh\nexit 1\n',
-    systemctl: '#!/usr/bin/env bash\ncase "$*" in\n  *codexia-api.service*) unit=codexia-api.service;;\n  *codexia-tunnel.service*) unit=codexia-tunnel.service;;\n  *) exit 4;;\nesac\ncase ",${CODEXIA_TEST_ACTIVE_UNITS:-}," in *",$unit,"*) exit 0;; esac\nexit 3\n',
+    systemctl: `#!/usr/bin/env bash
+case "$*" in
+  '--user is-active --quiet codexia-api.service')
+    [[ "\${CODEXIA_TEST_API_STATE:-inactive}" == active ]] && exit 0
+    exit 3;;
+  'is-active --quiet codexia-cloudflared.service')
+    [[ "\${CODEXIA_TEST_CONNECTOR_STATE:-active}" == active ]] && exit 0
+    exit 3;;
+  *) exit 4;;
+esac
+`,
+    sudo: `#!/usr/bin/env bash
+[[ "$*" == '-n /usr/local/sbin/codexia-api-gate status' ]] || exit 4
+printf '%s\n' "\${CODEXIA_TEST_GATE_STATE:-closed}"
+`,
   };
   for (const [name, contents] of Object.entries(commands)) {
     const commandPath = path.join(bin, name);
@@ -39,7 +53,7 @@ async function createFixture() {
   return { directory, home, stateDir, backupDestination, bin, lockFile };
 }
 
-function invokeBackup(fixture, { activeUnits = '', approved = true, lockFile = fixture.lockFile } = {}) {
+function invokeBackup(fixture, { apiState, connectorState, gateState, approved = true, lockFile = fixture.lockFile } = {}) {
   const args = [
     backupProgram,
     'backup-locked',
@@ -55,7 +69,9 @@ function invokeBackup(fixture, { activeUnits = '', approved = true, lockFile = f
       HOME: fixture.home,
       XDG_STATE_HOME: path.join(fixture.home, '.local/state'),
       PATH: `${fixture.bin}:${process.env.PATH}`,
-      CODEXIA_TEST_ACTIVE_UNITS: activeUnits,
+      CODEXIA_TEST_API_STATE: apiState ?? 'inactive',
+      CODEXIA_TEST_CONNECTOR_STATE: connectorState ?? 'active',
+      CODEXIA_TEST_GATE_STATE: gateState ?? 'closed',
     },
   });
 }
@@ -141,12 +157,13 @@ async function createProtectedSocketFixture(t) {
   const transaction = path.join(fixture.stateDir, 'deploy-transaction.json');
   const database = path.join(fixture.directory, 'database');
   const api = path.join(fixture.directory, 'api');
-  const tunnel = path.join(fixture.directory, 'tunnel');
+  const gate = path.join(fixture.directory, 'gate');
   const image = 'sha256:' + 'a'.repeat(64);
   await mkdir(units, { recursive: true });
   await mkdir(socketParent, { recursive: true, mode: 0o700 });
   await mkdir(socketDir, { mode: 0o755 });
-  for (const state of [api, tunnel]) await writeFile(state, 'active');
+  await writeFile(api, 'active');
+  await writeFile(gate, 'open');
   await writeFile(database, 'default');
   for (const name of ['codexia-api.container', 'codexia-db.container', 'codexia-postgres.volume']) {
     const contents = name === 'codexia-db.container'
@@ -180,8 +197,10 @@ async function createProtectedSocketFixture(t) {
     '  "exec codexia-db"*pg_hba_file_rules*) printf "t\\n";;', '  *) exit 2;;', 'esac', '',
   ].join('\n'));
   await writeFile(path.join(fixture.bin, 'systemctl'), [
-    '#!/bin/sh', 'shift', 'case "$*" in',
-    '  *codexia-api.service*) state="$FIXTURE_API";;', '  *codexia-tunnel.service*) state="$FIXTURE_TUNNEL";;', 'esac',
+    '#!/bin/sh', 'case "$*" in',
+    '  "is-active --quiet codexia-cloudflared.service") exit 0;;', 'esac',
+    '[ "$1" = --user ] || exit 4', 'shift', 'case "$*" in',
+    '  *codexia-api.service*) state="$FIXTURE_API";;', 'esac',
     'case "$1:$*" in', '  show:*UnitFileState*) echo disabled;;', '  show:*backup-executor*) echo inactive;;',
     '  "cat:cat --no-pager codexia-db.service codexia-postgres-volume.service codexia-data-network.service")',
     '    [ "$FIXTURE_UNIT_OBSERVATION" != unavailable ] || exit 1',
@@ -196,53 +215,62 @@ async function createProtectedSocketFixture(t) {
     '  show:*SourcePath*) echo "$HOME/.config/containers/systemd/codexia-api.container";;', '  show:*) cat "$state";;',
     '  is-active:*) [ "$(cat "$state")" = active ] || exit 3;;',
     '  stop:*) printf inactive > "$state";;', '  start:*) printf active > "$state";;', '  daemon-reload:*|reset-failed:*) ;;',
-    '  restart:*)', '    if [ "$FIXTURE_INTERRUPT" = true ]; then',
+    '  restart:*)', '    [ "$(cat "$FIXTURE_GATE")" = closed ] && [ "$(cat "$FIXTURE_API")" = inactive ] || exit 4', '    if [ "$FIXTURE_INTERRUPT" = true ]; then',
     '      if [ -n "$FIXTURE_INTERRUPTED_DATABASE" ]; then printf "%s" "$FIXTURE_INTERRUPTED_DATABASE" > "$FIXTURE_DATABASE"; fi',
     '      kill -KILL "$PPID"; exit 1', '    fi',
     '    if [ "$FIXTURE_FAIL_CONFIGURE" = true ] && [ -f "$FIXTURE_DROPIN" ]; then exit 1; fi',
     '    if [ -f "$FIXTURE_DROPIN" ]; then printf socket > "$FIXTURE_DATABASE"; else printf default > "$FIXTURE_DATABASE"; fi;;',
     '  *) exit 2;;', 'esac', '',
   ].join('\n'));
+  await writeFile(path.join(fixture.bin, 'sudo'), [
+    '#!/bin/sh', '[ "$1" = -n ] && [ "$2" = /usr/local/sbin/codexia-api-gate ] || exit 4',
+    'case "$3" in',
+    '  status) cat "$FIXTURE_GATE";;',
+    '  close) printf closed > "$FIXTURE_GATE";;',
+    '  open) [ "$(cat "$FIXTURE_API")" = active ] || exit 4; printf open > "$FIXTURE_GATE";;',
+    '  *) exit 4;;',
+    'esac', '',
+  ].join('\n'));
   const run = (args, overrides = {}) => spawnSync('bash', [socketStage, ...args], { encoding: 'utf8', env: {
     ...process.env, HOME: fixture.home, PATH: `${fixture.bin}:${process.env.PATH}`, FIXTURE_IMAGE: image,
     XDG_RUNTIME_DIR: path.join(fixture.directory, 'systemd-runtime'),
     CODEXIA_IMAGE_REPOSITORY: 'ghcr.io/yohn-jp/codexia-backend',
-    FIXTURE_API: api, FIXTURE_TUNNEL: tunnel, FIXTURE_DROPIN: dropin, FIXTURE_DATABASE: database,
+    FIXTURE_API: api, FIXTURE_GATE: gate, FIXTURE_DROPIN: dropin, FIXTURE_DATABASE: database,
     FIXTURE_CLUSTER: '123456:42', FIXTURE_OFFLINE_CLUSTER: '123456', ...overrides,
   } });
-  return { run, socketDir, dropin, transaction, database, api, tunnel, releaseFile, release };
+  return { run, socketDir, dropin, transaction, database, api, gate, releaseFile, release };
 }
 
-test('protected socket provisioning recovers its recorded writer and Tunnel after an interrupted PostgreSQL restart', async t => {
-  const { run, socketDir, dropin, transaction, database, api, tunnel, releaseFile, release } = await createProtectedSocketFixture(t);
+test('protected socket provisioning recovers its recorded writer and publication gate after an interrupted PostgreSQL restart', async t => {
+  const { run, socketDir, dropin, transaction, database, api, gate, releaseFile, release } = await createProtectedSocketFixture(t);
   const socket = createServer();
   await new Promise((resolve, reject) => socket.once('error', reject).listen(path.join(socketDir, '.s.PGSQL.5432'), resolve));
   t.after(() => socket.close());
   assert.equal(run([], { FIXTURE_INTERRUPT: 'true' }).signal, 'SIGKILL');
-  assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v1/u);
+  assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v2/u);
   assert.equal(await readFile(api, 'utf8'), 'inactive');
-  assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
+  assert.equal(await readFile(gate, 'utf8'), 'closed');
   const rejected = run(['--recover-only'], { FIXTURE_CLUSTER: '54321:42' });
   assert.notEqual(rejected.status, 0);
   assert.equal(await readFile(api, 'utf8'), 'inactive');
-  assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
-  assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v1/u);
+  assert.equal(await readFile(gate, 'utf8'), 'closed');
+  assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v2/u);
   await writeFile(releaseFile, release + '\n');
   assert.notEqual(run(['--recover-only']).status, 0, 'A replaced release record cannot authorize recovery');
   await writeFile(releaseFile, release);
   const recovered = run(['--recover-only']);
   assert.equal(recovered.status, 0, recovered.stderr);
   assert.equal(await readFile(api, 'utf8'), 'active');
-  assert.equal(await readFile(tunnel, 'utf8'), 'active');
+  assert.equal(await readFile(gate, 'utf8'), 'open');
   await assert.rejects(readFile(transaction), { code: 'ENOENT' });
 
   await rm(dropin);
   await writeFile(database, 'default');
-  await writeFile(tunnel, 'inactive');
+  await writeFile(gate, 'closed');
   const rolledBack = run([], { FIXTURE_FAIL_CONFIGURE: 'true' });
   assert.notEqual(rolledBack.status, 0);
   assert.equal(await readFile(api, 'utf8'), 'active');
-  assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
+  assert.equal(await readFile(gate, 'utf8'), 'closed');
   assert.equal(await readFile(database, 'utf8'), 'default');
   await assert.rejects(readFile(dropin), { code: 'ENOENT' });
   await assert.rejects(readFile(transaction), { code: 'ENOENT' });
@@ -257,27 +285,27 @@ test('protected socket provisioning recovers its recorded writer and Tunnel afte
 test('protected socket recovery restores the prior writer after PostgreSQL stops during restart', async t => {
   for (const interruptedState of ['stopped', 'absent']) {
     await t.test(interruptedState, async t => {
-      const { run, dropin, transaction, database, api, tunnel } = await createProtectedSocketFixture(t);
+      const { run, dropin, transaction, database, api, gate } = await createProtectedSocketFixture(t);
       assert.equal(run([], { FIXTURE_INTERRUPT: 'true', FIXTURE_INTERRUPTED_DATABASE: interruptedState }).signal, 'SIGKILL');
       assert.equal(await readFile(database, 'utf8'), interruptedState);
       assert.notEqual(run(['--recover-only'], { FIXTURE_OFFLINE_CLUSTER: '54321' }).status, 0);
       assert.equal(await readFile(database, 'utf8'), interruptedState);
       assert.equal(await readFile(api, 'utf8'), 'inactive');
-      assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
+      assert.equal(await readFile(gate, 'utf8'), 'closed');
 
       for (const observation of ['drift', 'unavailable', 'stale']) {
         assert.notEqual(run(['--recover-only'], { FIXTURE_UNIT_OBSERVATION: observation }).status, 0);
         assert.equal(await readFile(database, 'utf8'), interruptedState);
         assert.equal(await readFile(api, 'utf8'), 'inactive');
-        assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
-        assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v1/u);
+        assert.equal(await readFile(gate, 'utf8'), 'closed');
+        assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v2/u);
       }
 
       const recovered = run(['--recover-only']);
       assert.equal(recovered.status, 0, recovered.stderr);
       assert.equal(await readFile(database, 'utf8'), 'default');
       assert.equal(await readFile(api, 'utf8'), 'active');
-      assert.equal(await readFile(tunnel, 'utf8'), 'active');
+      assert.equal(await readFile(gate, 'utf8'), 'open');
       await assert.rejects(readFile(dropin), { code: 'ENOENT' });
       await assert.rejects(readFile(transaction), { code: 'ENOENT' });
     });
@@ -285,7 +313,7 @@ test('protected socket recovery restores the prior writer after PostgreSQL stops
 });
 
 test('a legacy protected socket journal requires the existing database to be running', async t => {
-  const { run, transaction, database, api, tunnel } = await createProtectedSocketFixture(t);
+  const { run, transaction, database, api, gate } = await createProtectedSocketFixture(t);
   assert.equal(run([], { FIXTURE_INTERRUPT: 'true', FIXTURE_INTERRUPTED_DATABASE: 'absent' }).signal, 'SIGKILL');
   const journal = JSON.parse(await readFile(transaction, 'utf8'));
   delete journal.previousDatabaseUnitsDigest;
@@ -294,25 +322,25 @@ test('a legacy protected socket journal requires the existing database to be run
   assert.notEqual(run(['--recover-only']).status, 0);
   assert.equal(await readFile(database, 'utf8'), 'absent');
   assert.equal(await readFile(api, 'utf8'), 'inactive');
-  assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
-  assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v1/u);
+  assert.equal(await readFile(gate, 'utf8'), 'closed');
+  assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v2/u);
 
   await writeFile(database, 'default');
   const recovered = run(['--recover-only']);
   assert.equal(recovered.status, 0, recovered.stderr);
   assert.equal(await readFile(api, 'utf8'), 'active');
-  assert.equal(await readFile(tunnel, 'utf8'), 'active');
+  assert.equal(await readFile(gate, 'utf8'), 'open');
   await assert.rejects(readFile(transaction), { code: 'ENOENT' });
 });
 
 test('protected socket recovery keeps its journal when PostgreSQL is running but unreachable', async t => {
-  const { run, transaction, database, api, tunnel } = await createProtectedSocketFixture(t);
+  const { run, transaction, database, api, gate } = await createProtectedSocketFixture(t);
   assert.equal(run([], { FIXTURE_INTERRUPT: 'true', FIXTURE_INTERRUPTED_DATABASE: 'unreachable' }).signal, 'SIGKILL');
   assert.notEqual(run(['--recover-only']).status, 0);
   assert.equal(await readFile(database, 'utf8'), 'unreachable');
   assert.equal(await readFile(api, 'utf8'), 'inactive');
-  assert.equal(await readFile(tunnel, 'utf8'), 'inactive');
-  assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v1/u);
+  assert.equal(await readFile(gate, 'utf8'), 'closed');
+  assert.match(await readFile(transaction, 'utf8'), /codexia-backup-socket\/v2/u);
 });
 
 test('restored target fingerprints are read-only and require quiescence under the inherited lock', async t => {
@@ -331,16 +359,13 @@ test('restored target fingerprints are read-only and require quiescence under th
   const command = [backupProgram, 'fingerprint-restored-target', '--lock-file', fixture.lockFile,
     '--lock-fd', '9'].map(shellQuote).join(' ');
   const lock = 'exec 9>' + shellQuote(fixture.lockFile) + '; flock -nx 9 && ';
-  const invoke = (line, activeUnits = '') => spawnSync('bash', ['-c', line], {
+  const invoke = (line, { apiState = 'inactive', gateState = 'closed' } = {}) => spawnSync('bash', ['-c', line], {
     encoding: 'utf8', env: { ...process.env, CODEXIA_PUSH_STATE_DIR: fixture.stateDir,
-      PATH: fixture.bin + ':' + process.env.PATH, CODEXIA_TEST_ACTIVE_UNITS: activeUnits },
+      PATH: fixture.bin + ':' + process.env.PATH, CODEXIA_TEST_API_STATE: apiState, CODEXIA_TEST_GATE_STATE: gateState },
   });
   assert.match(invoke(command).stderr, /lock descriptor was not inherited/u);
-  for (const service of ['codexia-api.service', 'codexia-tunnel.service']) {
-    const blocked = invoke(lock + command, service);
-    assert.notEqual(blocked.status, 0);
-    assert.match(blocked.stderr, /inactive systemd unit/u);
-  }
+  assert.match(invoke(lock + command, { apiState: 'active' }).stderr, /API service to be inactive/u);
+  assert.match(invoke(lock + command, { gateState: 'open' }).stderr, /product publication gate to be closed/u);
   const verified = invoke(lock + command);
   assert.equal(verified.status, 0, verified.stderr);
   const sha = content => createHash('sha256').update(content + '\n').digest('hex');
@@ -409,7 +434,7 @@ test('update backup uses the private executor settings and inherited deployment 
   assert.notEqual(invoke(launcher + ' deploy-check').status, 0);
 });
 
-test('the protected run shares the deploy lock and recovers both services after SIGKILL', async t => {
+test('the protected run shares the deploy lock and recovers the API and its publication gate after SIGKILL', async t => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.directory, { recursive: true, force: true }));
   const run = '1485f702-eb68-4854-979d-fad9fd12d90d';
@@ -426,7 +451,9 @@ test('the protected run shares the deploy lock and recovers both services after 
     image: 'ghcr.io/isolated-org/codexia-backend@' + digest,
     identity: { format: 'codexia-backend-identity/v1', profile: 'full', sourceSha: source },
   }), { mode: 0o600 });
-  await Promise.all(['trace', 'api', 'tunnel'].map(name => writeFile(path.join(fixture.directory, name), '')));
+  await Promise.all(['trace', 'api'].map(name => writeFile(path.join(fixture.directory, name), '')));
+  const gate = path.join(fixture.directory, 'gate');
+  await writeFile(gate, 'open');
   const scripts = {
     [launcher]: [
       'if [[ "$1" == lock ]]; then exec 8>>"$CODEXIA_PUSH_STATE_DIR/host.lock"; /usr/bin/flock -n 8 || exit; fi',
@@ -436,8 +463,14 @@ test('the protected run shares the deploy lock and recovers both services after 
     ],
     [path.join(fixture.bin, 'systemctl')]: [
       'for unit; do :; done',
-      'case "$unit" in codexia-api.service) state="$FIXTURE/api";; codexia-tunnel.service) state="$FIXTURE/tunnel";; *) exit 4;; esac',
-      'case "$2" in is-active) [[ -f "$state" ]] || exit 3;; start) touch "$state";; stop) rm -f "$state";; reset-failed) :;; *) exit 4;; esac',
+      'case "$*" in "is-active --quiet codexia-cloudflared.service") exit 0;; esac',
+      '[[ "$1" == --user && "$unit" == codexia-api.service ]] || exit 4',
+      'state="$FIXTURE/api"',
+      'case "$2" in is-active) [[ -f "$state" ]] || exit 3;; start) touch "$state";; stop) [[ $(cat "$FIXTURE/gate") == closed ]] && rm -f "$state";; reset-failed) :;; *) exit 4;; esac',
+    ],
+    [path.join(fixture.bin, 'sudo')]: [
+      '[[ "$1" == -n && "$2" == /usr/local/sbin/codexia-api-gate ]] || exit 4',
+      'case "$3" in status) cat "$FIXTURE/gate";; close) printf closed > "$FIXTURE/gate";; open) [[ -f "$FIXTURE/api" ]] && printf open > "$FIXTURE/gate";; *) exit 4;; esac',
     ],
     [path.join(fixture.bin, 'podman')]: [
       'case "$*" in',
@@ -448,7 +481,7 @@ test('the protected run shares the deploy lock and recovers both services after 
     ],
     [path.join(localBin, 'codexia-backup')]: [
       'case "$1" in validate-destination) exit 0;; validate-artifact) echo ' + manifest + '; exit 0;; backup-locked) :;; *) exit 2;; esac',
-      '[[ ! -e "$FIXTURE/api" && ! -e "$FIXTURE/tunnel" ]] || exit 2',
+      '[[ ! -e "$FIXTURE/api" && $(cat "$FIXTURE/gate") == closed ]] || exit 2',
       'echo backup >> "$FIXTURE/trace"',
       'if [[ "$KILL_RUNNER" == 1 ]]; then kill -KILL "$RUNNER_PID"; exit 137; fi',
       'for artifact_id; do :; done',
@@ -460,7 +493,7 @@ test('the protected run shares the deploy lock and recovers both services after 
     [path.join(localBin, 'codexia-backup-control')]: [
       'echo "$*" >> "$FIXTURE/trace"',
       'if [[ "$1" == manual-finish ]]; then',
-      '  [[ -f "$FIXTURE/api" && -f "$FIXTURE/tunnel" ]] || exit 2',
+      '  [[ -f "$FIXTURE/api" && $(cat "$FIXTURE/gate") == open ]] || exit 2',
       '  if [[ "$KILL_UPLOAD" == 1 ]]; then kill -KILL "$RUNNER_PID"; fi',
       'fi',
     ],
@@ -508,7 +541,8 @@ test('the protected run shares the deploy lock and recovers both services after 
   const recovered = invoke('recover', 'recover');
   assert.equal(recovered.status, 0, recovered.stderr);
   assert.match(await readFile(trace, 'utf8'), new RegExp('manual-interrupted ' + run));
-  await Promise.all(['api', 'tunnel'].map(name => readFile(path.join(fixture.directory, name))));
+  assert.equal(await readFile(gate, 'utf8'), 'open');
+  await readFile(path.join(fixture.directory, 'api'));
 
   const publicationKilled = invoke('after-publication', publishedRun);
   assert.equal(publicationKilled.signal, 'SIGKILL', publicationKilled.stderr);
@@ -645,25 +679,20 @@ test('encrypted backup verification accepts read-only artifacts without weakenin
   }
 });
 
-test('push backup requires a quiesced API and Tunnel', async () => {
+test('push backup requires a quiesced API, a closed publication gate, and the active management connector', async t => {
   const fixture = await createFixture();
-  try {
-    const inactive = invokeBackup(fixture);
-    assert.notEqual(inactive.status, 0);
-    assert.match(inactive.stderr, /History volume absent/u,
-      'the push-specific quiescence checks must pass before the disposable fixture reaches the missing-volume stop');
-
-    for (const unit of [
-      'codexia-api.service',
-      'codexia-tunnel.service',
-    ]) {
-      const active = invokeBackup(fixture, { activeUnits: unit });
-      assert.notEqual(active.status, 0);
-      assert.ok(active.stderr.includes(`Push deployment requires inactive systemd unit: ${unit}`),
-        `expected active ${unit} to reject backup; received: ${active.stderr}`);
-    }
-  } finally {
-    await rm(fixture.directory, { recursive: true, force: true });
+  t.after(() => rm(fixture.directory, { recursive: true, force: true }));
+  const quiesced = invokeBackup(fixture);
+  assert.notEqual(quiesced.status, 0);
+  assert.match(quiesced.stderr, /History volume absent/u);
+  for (const [settings, reason] of [
+    [{ apiState: 'active' }, /API service to be inactive/u],
+    [{ gateState: 'open' }, /product publication gate to be closed/u],
+    [{ connectorState: 'inactive' }, /Management Tunnel connector must remain active/u],
+  ]) {
+    const blocked = invokeBackup(fixture, settings);
+    assert.notEqual(blocked.status, 0);
+    assert.match(blocked.stderr, reason);
   }
 });
 

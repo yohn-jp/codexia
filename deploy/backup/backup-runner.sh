@@ -8,6 +8,7 @@ backup_program="$HOME/.local/bin/codexia-backup"
 control="$HOME/.local/bin/codexia-backup-control"
 intent="$state_dir/backup-transaction"
 lock_file="$state_dir/host.lock"
+readonly intent_format=codexia-backup-transaction/v2
 readonly uuid='^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
 readonly image_pattern='^ghcr\.io/[a-z0-9][a-z0-9-]*/codexia-backend@sha256:[a-f0-9]{64}$'
 
@@ -81,16 +82,26 @@ same_running_image(){
     [[ "${expected#sha256:}" =~ ^[a-f0-9]{64}$ && "${actual#sha256:}" == "${expected#sha256:}" ]]
 }
 
+gate_control(){ sudo -n /usr/local/sbin/codexia-api-gate "$@"; }
+require_management(){ systemctl is-active --quiet codexia-cloudflared.service; }
+close_gate(){ gate_control close && [[ "$(gate_control status)" == closed ]]; }
+
 resume_services(){
-  local image="$1" tunnel_active="$2"
+  local image="$1" previous_gate="$2"
+  require_management || return 1
+  # Closing first also recovers an interrupted gate transition.
+  if [[ "$(gate_control status)" != "$previous_gate" ]] || ! systemctl --user is-active --quiet codexia-api.service; then
+    close_gate || return 1
+  fi
   if ! systemctl --user is-active --quiet codexia-api.service; then
     systemctl --user reset-failed codexia-api.service >/dev/null 2>&1 || :
     systemctl --user start codexia-api.service || return 1
   fi
   same_running_image "$image" && [[ "$(podman inspect --format '{{.State.Health.Status}}' codexia-api)" == healthy ]] || return 1
-  if [[ "$tunnel_active" == true ]]; then
-    systemctl --user start codexia-tunnel.service || return 1
+  if [[ "$previous_gate" == open && "$(gate_control status)" != open ]]; then
+    gate_control open || return 1
   fi
+  [[ "$(gate_control status)" == "$previous_gate" ]]
 }
 
 clear_intent(){
@@ -101,7 +112,7 @@ write_intent() (
   temporary=
   temporary="$(mktemp "$state_dir/.backup-transaction.XXXXXXXX")"
   trap 'rm -f -- "$temporary"' EXIT
-  printf '%s\n' "$@" > "$temporary"
+  printf '%s\n' "$intent_format" "$@" > "$temporary"
   sync -f "$temporary"
   mv -T -- "$temporary" "$intent"
   sync -f "$state_dir"
@@ -125,8 +136,11 @@ finish_transfer(){
 if exists "$intent"; then
   private_file "$intent" || die 'Unsafe pending backup intent'
   mapfile -t pending < "$intent"
+  [[ "${pending[0]:-}" == "$intent_format" ]] ||
+    die 'Unrecognized backup intent; preserve it and recover using its originating protected release'
+  pending=("${pending[@]:1}")
   [[ "${#pending[@]}" -ge 4 && "${#pending[@]}" -le 5 && "${pending[0]}" =~ $uuid &&
-     ( "${pending[2]}" == true || "${pending[2]}" == false ) ]] || die 'Invalid pending backup intent'
+     ( "${pending[2]}" == open || "${pending[2]}" == closed ) ]] || die 'Invalid pending backup intent'
   [[ "${pending[1]}" == "$image" ]] || die 'Pending backup intent does not match the committed deployment'
   [[ "${pending[3]}" == /* && "${pending[3]##*/}" =~ ^codexia-[0-9]{8}T[0-9]{6}Z-${pending[0]}$ ]] ||
     die 'Invalid pending backup artifact path'
@@ -156,25 +170,20 @@ same_running_image "$image" || die 'The running API differs from the admitted im
 source_sha="$(podman exec codexia-api cat /app/update-identity.json |
   jq -er --slurpfile record "$release" 'select(. == $record[0].identity and .format == "codexia-backend-identity/v1" and .profile == "full") | .sourceSha')"
 [[ "$source_sha" =~ ^[a-f0-9]{40}$ ]] || die 'The admitted API source identity is invalid'
-tunnel_active=false
-tunnel_status=0
-systemctl --user is-active --quiet codexia-tunnel.service || tunnel_status=$?
-case "$tunnel_status" in
-  0) tunnel_active=true;;
-  3) ;;
-  *) die 'Could not observe Tunnel state for backup';;
-esac
+require_management || die 'Management Tunnel connector is unavailable'
+previous_gate="$(gate_control status)" || die 'Could not observe product publication gate for backup'
+[[ "$previous_gate" == open || "$previous_gate" == closed ]] || die 'Product publication gate state is invalid'
 "$control" manual-start "$run_id" "$source_sha" "${image##*@}" >/dev/null
 
-# Persist the service state before changing either unit. Keep it through remote
+# Persist the publication state before stopping the writer. Keep it through remote
 # verification so a process death cannot leave a running receipt unaccounted for.
 artifact_id="codexia-$(date -u +%Y%m%dT%H%M%SZ)-$run_id"
 artifact_path="$destination/$artifact_id"
-write_intent "$run_id" "$image" "$tunnel_active" "$artifact_path"
+write_intent "$run_id" "$image" "$previous_gate" "$artifact_path"
 
-if { [[ "$tunnel_active" == true ]] && ! systemctl --user stop codexia-tunnel.service; } ||
+if ! close_gate ||
    ! systemctl --user stop codexia-api.service; then
-  resume_services "$image" "$tunnel_active" || die 'Backup service recovery is pending'
+  resume_services "$image" "$previous_gate" || die 'Backup service recovery is pending'
   "$control" manual-fail "$run_id" quiesce_failed
   clear_intent
   die 'Could not quiesce services for backup'
@@ -182,9 +191,9 @@ fi
 result="$(produce_artifact "$artifact_id")" || result=
 if [[ -n "$result" ]]; then
   mapfile -t artifact <<< "$result"
-  write_intent "$run_id" "$image" "$tunnel_active" "${artifact[@]}"
+  write_intent "$run_id" "$image" "$previous_gate" "${artifact[@]}"
 fi
-resume_services "$image" "$tunnel_active" || die 'Backup service recovery is pending'
+resume_services "$image" "$previous_gate" || die 'Backup service recovery is pending'
 if [[ -z "$result" ]]; then
   "$control" manual-fail "$run_id" backup_failed
   clear_intent
