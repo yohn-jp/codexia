@@ -15,6 +15,8 @@ const env = process.env;
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const rawHash = /^[a-f0-9]{64}$/u;
 const sha = /^[a-f0-9]{40}$/u;
+export const baseQuadletNames = Object.freeze(['codexia.network', 'codexia-data.network',
+  'codexia-postgres.volume', 'codexia-data.volume', 'codexia-history.volume', 'codexia-db.container']);
 const output = () => join(env.RUNNER_TEMP, 'codexia-lifecycle-preflight.json');
 
 function runBinding() {
@@ -69,8 +71,9 @@ export async function readLifecycleHost({ inventory, targetHost, sshDirectory = 
     }});
     assert.ok(query);
     const quadlets = {};
-    for (const name of ['codexia.network','codexia-data.network','codexia-postgres.volume',
-      'codexia-data.volume','codexia-history.volume','codexia-db.container','codexia-api.container']) {
+    // R4 installs only these permanent base Quadlets. The API slot is owned by
+    // setup-only R5 or the certified R6/R8 deployment, not host base readiness.
+    for (const name of baseQuadletNames) {
       quadlets[name] = createHash('sha256').update(await readFile(new URL('../../../deploy/quadlet/' + name, import.meta.url))).digest('hex');
     }
     const systemUnits = {};
