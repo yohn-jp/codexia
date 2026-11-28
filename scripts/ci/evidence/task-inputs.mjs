@@ -148,7 +148,7 @@ export function taskInvocation(task, executable = process.execPath) {
   const overrides = taskOverrides(task);
   const environmentKeys = Object.keys(overrides).sort();
   if (task === 'biome-ci') return { executable, arguments: ['scripts/ci/biome/check.mjs'], environmentKeys: ['CODEXIA_CI_REPORT_DIR'] };
-  if (task === 'swift-linux') return { executable: 'bash', arguments: ['scripts/ios/verify-linux-swift.sh'], environmentKeys };
+  if (task === 'swift-linux') return { executable: 'bash', arguments: ['scripts/ios/verify-linux-swift.sh', '--wait-for-workspace'], environmentKeys };
   if (task === 'codexiactl-linux') return { executable: 'bash', arguments: ['scripts/ci/execution/verify-codexiactl.sh'], environmentKeys };
   if (task === 'db-contract') return { executable: 'pnpm', arguments: ['--filter', '@codexia/persistence-postgres', 'run', 'test:db-contract'], environmentKeys: ['CODEXIA_CI_REPORT_DIR'] };
   if (Object.hasOwn(CONFORMANCE_TASKS, task)) return {

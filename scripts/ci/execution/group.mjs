@@ -23,6 +23,8 @@ const tasks = VERIFICATION_GROUPS[group].filter(task => plan.tasks.includes(task
 const completed = new Map();
 const limit = Number(process.env.CODEXIA_CI_CONCURRENCY ?? '2');
 if (![1, 2].includes(limit)) throw new Error('CI concurrency must be 1 or 2');
+const swiftWorkspace = limit === 2 && tasks.includes('architecture-g5') && tasks.includes('swift-linux')
+  ? Promise.withResolvers() : null;
 const groupPreparation = new Map();
 const taskInvocationContext = new AsyncLocalStorage();
 const groupInvocations = [];
@@ -34,15 +36,24 @@ const conformanceSetup = new Map([
   ['mcp-conformance', process.env.CODEXIA_CI_MCP_CONFORMANCE_SETUP],
 ]);
 mkdirSync(reportDirectory, { recursive: true });
-const run = (command, args, extraEnv = {}) => new Promise((resolve, reject) => {
+const run = (command, args, extraEnv = {}, workspaceReady) => new Promise((resolve, reject) => {
   const active = taskInvocationContext.getStore();
   const record = { executable: String(command), arguments: sanitizeProducerArguments(args.map(String)), environmentKeys: Object.keys(extraEnv).sort() };
   (active?.invocations ?? groupInvocations).push(record);
   console.log(`$ ${command} ${args.join(' ')}`);
-  const child = spawn(command, args, { stdio: 'inherit', env: { ...process.env, ...extraEnv } });
+  const child = spawn(command, args, { stdio: workspaceReady ? ['pipe', 'inherit', 'inherit'] : 'inherit', env: { ...process.env, ...extraEnv } });
   child.once('error', reject);
+  let inputError;
+  if (workspaceReady && child.stdin) {
+    // A failed acquisition can close the private pipe while G5 is still running.
+    child.stdin.on('error', error => { inputError = error; });
+    workspaceReady.then(() => {
+      if (child.stdin.writable) child.stdin.end('workspace-ready\n');
+    });
+  }
   child.once('close', (status, signal) => {
     if (signal || status !== 0) reject(new Error(`${command} ${args.join(' ')} failed (${signal ?? status})`));
+    else if (inputError) reject(inputError);
     else resolve();
   });
 });
@@ -74,9 +85,13 @@ if (requiresWorkspacePreparation(preparationTasks) && !preparationError) {
 const preparationSeconds = (Date.now() - preparationStarted) / 1000;
 console.log(JSON.stringify({ phase: 'shared-workspace-preparation', group, seconds: preparationSeconds, concurrency: limit }));
 
-function executeTask(task, index) {
+async function executeTask(task, index) {
   const scope = { invocations: [] };
-  return taskInvocationContext.run(scope, () => executeTaskInContext(task, index, scope));
+  try {
+    return await taskInvocationContext.run(scope, () => executeTaskInContext(task, index, scope));
+  } finally {
+    if (task === 'architecture-g5') swiftWorkspace?.resolve();
+  }
 }
 
 async function executeTaskInContext(task, index, scope) {
@@ -118,7 +133,8 @@ async function executeTaskInContext(task, index, scope) {
       if (task === 'biome-ci') await run(process.execPath, ['scripts/ci/biome/check.mjs'], { CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
       else if (task === 'swift-linux' || task === 'codexiactl-linux') {
         const { executable, arguments: args } = taskInvocation(task);
-        await run(executable, args);
+        const ready = task === 'swift-linux' ? (swiftWorkspace?.promise ?? Promise.resolve()) : undefined;
+        await run(executable, args, {}, ready);
       }
       else if (Object.hasOwn(CONFORMANCE_TASKS, task)) {
         const { executable, arguments: args } = taskInvocation(task);
@@ -227,6 +243,8 @@ async function executeTaskInContext(task, index, scope) {
 // Only proven read-only unit suites can overlap; writers, model tests and root scripts are barriers.
 const independentUnits = new Set(['unit-contracts', 'unit-persistence-contracts', 'unit-story', 'unit-publishing', 'unit-mcp', 'unit-search']);
 const exclusive = task => {
+  // Swift can acquire its tools during G5; its first workspace operation waits on the pipe.
+  if (swiftWorkspace && (task === 'architecture-g5' || task === 'swift-linux')) return false;
   if (group.startsWith('browser-')) return task.endsWith('-redesign-visual'); // performance measurements must not contend with siblings
   if (group.startsWith('types-')) return groupPreparation.get(task)?.exclusive ?? false;
   if (group.startsWith('unit-')) return !independentUnits.has(task);

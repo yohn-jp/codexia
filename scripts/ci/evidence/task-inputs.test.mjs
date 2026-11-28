@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { cp, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PLAYWRIGHT_IMAGE_DIGESTS } from '../browser/image-digests.mjs';
 import { captureTaskInputSource, taskInvocation, taskWorkflowJob, UX_PROJECTION_DOCUMENTS, isRequirementsTraceInput, isNonExecutableDocumentation, isTaskInputDocument } from './task-inputs.mjs';
 import { createVerificationPlan } from '../impact/plan.mjs';
@@ -302,6 +302,78 @@ test('architecture G5 proof binds its isolated tool lock, immutable image, invoc
   await git(root, 'commit', '-qm', 'change architecture tool lock');
   const changed = captureTaskInputSource({ root, sha: await git(root, 'rev-parse', 'HEAD'), runtime })('architecture-g5');
   assert.notEqual(changed.dependencies, closure.dependencies);
+});
+
+test('Swift tool acquisition overlaps G5, workspace writes and Go remain ordered after either failure', async t => {
+  const root = await fixture(t);
+  const assets = await mkdtemp(path.join(os.tmpdir(), 'codexia-architecture-runner-'));
+  t.after(() => rm(assets, { recursive: true, force: true }));
+  const bin = path.join(assets, 'bin');
+  const tools = path.join(assets, 'toolchain/usr/bin');
+  for (const directory of [bin, tools, 'scripts/ios', 'scripts/shared', 'ios/CodexiaTransport']) {
+    await mkdir(path.resolve(root, directory), { recursive: true });
+  }
+  const shell = (file, body) => writeFile(file, '#!/bin/sh\nset -eu\n' + body + '\n', { mode: 0o755 });
+  for (const name of ['npm', 'docker']) await shell(path.join(bin, name), 'exit 0');
+  await shell(path.join(tools, 'swift'), `if [ "$1" = --version ]; then
+    touch "$STATE/prepared"
+    [ "$FAIL" != swift ] || exit 71
+    printf '%s\\n' 'Swift version 6.3.2 (swift-6.3.2-RELEASE)' 'Target: x86_64-unknown-linux-gnu'
+  else
+    test -f "$STATE/g5-finished"
+    if [ "$1" = test ]; then echo "$3" >> "$STATE/tested"; fi
+  fi`);
+  const archive = path.join(assets, 'swift.tar.gz');
+  execFileSync('tar', ['-czf', archive, '-C', assets, 'toolchain']);
+  await writeFile(path.join(root, 'scripts/ios/swift-linux-toolchain.json'), JSON.stringify({
+    version: '6.3.2', url: pathToFileURL(archive).href, sha256: createHash('sha256').update(await readFile(archive)).digest('hex'),
+  }));
+  await cp(new URL('../../ios/verify-linux-swift.sh', import.meta.url), path.join(root, 'scripts/ios/verify-linux-swift.sh'));
+  await shell(path.join(root, 'scripts/shared/python-env.sh'), 'mkdir -p "$3/bin"');
+  await shell(path.join(root, 'ios/CodexiaTransport/generate.sh'), 'test -f "$STATE/g5-finished"');
+  await shell(path.join(root, 'scripts/ci/execution/verify-codexiactl.sh'), `test -f "$STATE/g5-finished"
+    if [ "$FAIL" != swift ]; then test "$(wc -l < "$STATE/tested")" -eq 2; fi`);
+  await writeFile(path.join(root, 'scripts/architecture/verify.mjs'), `import { existsSync, writeFileSync } from 'node:fs';
+    import { setTimeout } from 'node:timers/promises';
+    const state = process.env.STATE;
+    if (process.env.CODEXIA_CI_CONCURRENCY === '1') {
+      if (existsSync(state + '/prepared')) throw new Error('Swift overlapped serial execution');
+    } else {
+      for (let i = 0; i < 200 && !existsSync(state + '/prepared'); i++) await setTimeout(10);
+      if (!existsSync(state + '/prepared')) throw new Error('Swift did not start private preparation during G5');
+      await setTimeout(100);
+    }
+    writeFileSync(state + '/g5-finished', '');
+    if (process.env.FAIL === 'g5') process.exitCode = 72;
+  `);
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-qm', 'architecture overlap fixture');
+  const sha = await git(root, 'rev-parse', 'HEAD');
+  const planFile = path.join(assets, 'plan.json');
+  await writeFile(planFile, JSON.stringify(createVerificationPlan({ event: 'push', files: null, sha })));
+  const runner = fileURLToPath(new URL('../execution/group.mjs', import.meta.url));
+  const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(GITHUB_|CODEXIA_CI_|NODE_TEST_)/u.test(key)));
+  for (const mode of ['overlap', 'g5', 'swift', 'serial']) {
+    const state = path.join(assets, mode);
+    await mkdir(state);
+    const env = { ...baseEnv, PATH: bin + path.delimiter + process.env.PATH, STATE: state, FAIL: mode,
+      RUNNER_TEMP: state, CODEXIA_CI_PLAN_PATH: planFile, CODEXIA_CI_REPORT_DIR: state, CODEXIA_CI_CONCURRENCY: mode === 'serial' ? '1' : '2' };
+    const result = spawnSync(process.execPath, [runner, 'unit-architecture'], { cwd: root, env, encoding: 'utf8', timeout: 15_000 });
+    assert.equal(result.status, ['g5', 'swift'].includes(mode) ? 1 : 0, mode + ': ' + result.stdout + result.stderr);
+    const { results } = JSON.parse(await readFile(path.join(state, 'report.json'), 'utf8'));
+    assert.deepEqual(results.map(({ task, status }) => [task, status]), [
+      ['architecture-g5', mode === 'g5' ? 'failed' : 'passed'], ['swift-linux', mode === 'swift' ? 'failed' : 'passed'], ['codexiactl-linux', 'passed'],
+    ]);
+    assert.deepEqual(results[1].invocations, [taskInvocation('swift-linux')]);
+    if (mode !== 'swift') assert.equal(await readFile(path.join(state, 'tested'), 'utf8'), 'ios/CodexiaTransport\nios/CodexiaEditor\n');
+    assert.equal(await git(root, 'status', '--porcelain'), '');
+  }
+  // Standalone verification never reads stdin. A CI process losing its parent fails closed.
+  const env = { ...baseEnv, PATH: bin + path.delimiter + process.env.PATH, STATE: path.join(assets, 'serial'), FAIL: '', RUNNER_TEMP: assets };
+  for (const [args, input, status] of [[[], '', 0], [['--wait-for-workspace'], '', 1], [['--wait-for-workspace'], 'wrong\n', 1]]) {
+    const result = spawnSync('bash', ['scripts/ios/verify-linux-swift.sh', ...args], { cwd: root, env, input, timeout: 3000 });
+    assert.equal(result.status, status);
+  }
 });
 
 test('affected requirements trace receives the exact source and isolated task environment', async t => {
