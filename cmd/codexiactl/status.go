@@ -231,7 +231,7 @@ func blockerGuidance(blocker string) string {
 	case "protected-inputs-missing":
 		return "Missing GitHub Environment inputs are reported before any write. Run init to issue and register only the approved minimum-scope credentials that are missing; existing credentials are not replaced."
 	case "existing-protected-input-mismatch":
-		return "The live target differs from existing protected GitHub inputs. Do not overwrite them automatically; reconcile the owning environment first."
+		return "A protected Cloudflare target, management hostname, or SSH host pin differs from the verified VM or edge. Review the exact values in Settings > Environments and the existing Terraform configuration; the CLI will not replace them. Complete the approved migration, then rerun codexiactl doctor."
 	case "protected-input-inventory-unavailable":
 		return "GitHub returned no complete secret/variable inventory. Restore the read permissions before planning changes."
 	case "newer-or-unresolved-protected-deployment-activity":

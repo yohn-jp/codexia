@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -115,21 +116,23 @@ func runInit(ctx context.Context) (resultErr error) {
 	if err := c.requireIdle(ctx, gh); err != nil {
 		return err
 	}
-	// Inspect the existing runtime through its owning lifecycle path first.
-	// This prevents changing protected inputs on an enrolled installation.
+	// Preserve the read-only lifecycle observation before settings changes when
+	// a complete protected route is already available. A missing Cloudflare
+	// route is staged only after prepareInputs verifies the edge and this VM's
+	// independently confirmed SSH host key.
 	if vm.CodexiaPresent {
-		management := existingManagement(snapshot)
+		management := existingManagement(snapshot, vm, settings.ManagementHostname)
 		if management == "" {
-			return needsAction("Existing Codexia resources were detected and neither protected SSH configuration is complete. Verify the installation through " +
-				c.runbookLink(recoveryRunbook))
-		}
-		tty.Notice("Existing Codexia resources detected. Observe the protected lifecycle before changing provider or repository settings.")
-		receipt, id, err := c.preflight(ctx, management)
-		if err != nil {
-			return err
-		}
-		if _, err := receipt.initialOperation(); err != nil {
-			return c.lifecycleBlocker(id, err)
+			tty.Notice("Existing Codexia resources detected, but no complete Cloudflare management Environment is ready. The next stage can register only missing inputs after verifying the approved edge and this VM's host key. A protected management check and fresh lifecycle Preflight are required before deployment. For a mismatch, see " + c.runbookLink(recoveryRunbook))
+		} else {
+			tty.Notice("Existing Codexia resources detected. Observe the protected lifecycle before changing provider or repository settings.")
+			receipt, id, err := c.preflight(ctx, management)
+			if err != nil {
+				return err
+			}
+			if _, err := receipt.initialOperation(); err != nil {
+				return c.lifecycleBlocker(id, err)
+			}
 		}
 	}
 	if err := c.prepareInputs(ctx, gh, tty, vm, settings, snapshot); err != nil {
@@ -144,18 +147,36 @@ func closeGitHub(ctx context.Context, gh *githubControl) {
 	gh.Close(cleanup)
 }
 
-func existingManagement(snapshot githubSnapshot) string {
+func existingManagement(snapshot githubSnapshot, vm vmObservation, managementHostname string) string {
 	// R4 can leave the administrator reachable while the rootless account
-	// is still missing its runtime public key.
+	// is still missing its runtime public key. A route is reusable only when
+	// its protected hostname, canonical edge target, and pin still bind this VM.
 	if managementInputsExist(snapshot.Bootstrap,
-		[]string{"CODEXIA_BOOTSTRAP_HOST", "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS", "CODEXIA_BOOTSTRAP_SSH_USER"}, bootstrapSSHSecret) {
+		[]string{"CODEXIA_BOOTSTRAP_HOST", "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS", "CODEXIA_BOOTSTRAP_SSH_USER"}, bootstrapSSHSecret) &&
+		managementInputMatchesVM(snapshot.Bootstrap, vm, managementHostname, "CODEXIA_BOOTSTRAP_HOST", "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS") {
 		return "bootstrap"
 	}
 	if managementInputsExist(snapshot.Production,
-		[]string{"CODEXIA_DEPLOY_HOST", "CODEXIA_DEPLOY_SSH_KNOWN_HOSTS"}, runtimeSSHSecret) {
+		[]string{"CODEXIA_DEPLOY_HOST", "CODEXIA_DEPLOY_SSH_KNOWN_HOSTS"}, runtimeSSHSecret) &&
+		managementInputMatchesVM(snapshot.Production, vm, managementHostname, "CODEXIA_DEPLOY_HOST", "CODEXIA_DEPLOY_SSH_KNOWN_HOSTS") {
 		return "runtime"
 	}
 	return ""
+}
+
+func managementInputMatchesVM(env githubEnvironment, vm vmObservation, managementHostname, hostName, knownHostsName string) bool {
+	if !validDNSHostname(managementHostname) || env.Variables[hostName] != managementHostname {
+		return false
+	}
+	var target struct {
+		SSHHostname string `json:"sshHostname"`
+		SSHPolicyID string `json:"sshPolicyId"`
+	}
+	if json.Unmarshal([]byte(env.Variables[edgeTarget]), &target) != nil ||
+		target.SSHHostname != managementHostname || target.SSHPolicyID == "" {
+		return false
+	}
+	return vm.verifyKnownHosts(managementHostname, env.Variables[knownHostsName]) == nil
 }
 
 func managementInputsExist(env githubEnvironment, names []string, sshSecret string) bool {
@@ -185,13 +206,17 @@ func (c *workflowController) prepareInputs(ctx context.Context, gh *githubContro
 	requirements := cloudflareRequirementsFor(snapshot).requireConnectorToken(connectorNeedsInstall)
 	edge, err := observeCloudflare(ctx, o, gh.target, settings, requirements)
 	if err != nil {
+		reportResult(o, warningText, "Cloudflare edge verification failed before protected inputs were changed: "+err.Error())
 		return err
 	}
 	defer edge.Close()
 	if edge.target.SSHHostname != settings.ManagementHostname {
-		return refused("The verified Cloudflare SSH ingress does not match the selected production management hostname")
+		err := refused("The verified Cloudflare SSH ingress does not match the selected production management hostname")
+		reportResult(o, warningText, err.Error())
+		return err
 	}
 	if err := verifyInitialEdge(ctx, vm, edge); err != nil {
+		reportResult(o, warningText, "Cloudflare edge verification failed: "+err.Error())
 		return err
 	}
 	reportStage(o, sshPinStage, "Confirm the OpenSSH host key behind "+settings.ManagementHostname)

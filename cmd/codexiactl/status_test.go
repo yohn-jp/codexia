@@ -179,4 +179,10 @@ func TestDoctorReportsActionableBlockersWithoutDumpingWorkflowHistory(t *testing
 			t.Fatalf("no user-facing remediation for %s", code)
 		}
 	}
+	guidance := blockerGuidance("existing-protected-input-mismatch")
+	for _, required := range []string{"management hostname", "host pin", "will not replace", "approved migration"} {
+		if !strings.Contains(guidance, required) {
+			t.Errorf("protected-input guidance does not identify %q: %s", required, guidance)
+		}
+	}
 }

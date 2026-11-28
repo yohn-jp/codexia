@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func TestInitialOperationFollowsObservedLifecycle(t *testing.T) {
@@ -270,10 +272,29 @@ func TestReadOnlyJSONWithUnverifiedVM(t *testing.T) {
 }
 
 func TestInterruptedFirstHostUsesAdministratorPreflight(t *testing.T) {
-	valid := func(names []string, sshSecret string) githubEnvironment {
-		env := githubEnvironment{Variables: map[string]string{edgeTarget: "{}"}, Secrets: map[string]bool{sshSecret: true}}
+	private, public, err := newSSHIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(private)
+	key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(public))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const hostname = "codexia-ssh.example.test"
+	vm := vmObservation{hostKeys: []ssh.PublicKey{key}}
+	target := `{"sshHostname":"codexia-ssh.example.test","sshPolicyId":"policy-123"}`
+	valid := func(names []string, sshSecret, hostName, pinName string) githubEnvironment {
+		env := githubEnvironment{Variables: map[string]string{edgeTarget: target}, Secrets: map[string]bool{sshSecret: true}}
 		for _, name := range names {
-			env.Variables[name] = "fixture"
+			switch name {
+			case hostName:
+				env.Variables[name] = hostname
+			case pinName:
+				env.Variables[name] = hostname + " " + public
+			default:
+				env.Variables[name] = "fixture"
+			}
 		}
 		for _, name := range commonSecrets {
 			env.Secrets[name] = true
@@ -281,14 +302,23 @@ func TestInterruptedFirstHostUsesAdministratorPreflight(t *testing.T) {
 		return env
 	}
 	snapshot := githubSnapshot{
-		Bootstrap:  valid([]string{"CODEXIA_BOOTSTRAP_HOST", "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS", "CODEXIA_BOOTSTRAP_SSH_USER"}, bootstrapSSHSecret),
-		Production: valid([]string{"CODEXIA_DEPLOY_HOST", "CODEXIA_DEPLOY_SSH_KNOWN_HOSTS"}, runtimeSSHSecret),
+		Bootstrap:  valid([]string{"CODEXIA_BOOTSTRAP_HOST", "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS", "CODEXIA_BOOTSTRAP_SSH_USER"}, bootstrapSSHSecret, "CODEXIA_BOOTSTRAP_HOST", "CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS"),
+		Production: valid([]string{"CODEXIA_DEPLOY_HOST", "CODEXIA_DEPLOY_SSH_KNOWN_HOSTS"}, runtimeSSHSecret, "CODEXIA_DEPLOY_HOST", "CODEXIA_DEPLOY_SSH_KNOWN_HOSTS"),
 	}
-	if found := existingManagement(snapshot); found != "bootstrap" {
+	if found := existingManagement(snapshot, vm, hostname); found != "bootstrap" {
 		t.Fatalf("partially configured runtime would block recovery: %s", found)
 	}
+	snapshot.Bootstrap.Variables["CODEXIA_BOOTSTRAP_HOST"] = "codexia.example.ts.net"
+	if found := existingManagement(githubSnapshot{Bootstrap: snapshot.Bootstrap}, vm, hostname); found != "" {
+		t.Fatalf("legacy Tailscale destination was reused for management preflight: %s", found)
+	}
+	snapshot.Bootstrap.Variables["CODEXIA_BOOTSTRAP_HOST"] = hostname
+	snapshot.Bootstrap.Variables["CODEXIA_BOOTSTRAP_SSH_KNOWN_HOSTS"] = "codexia.example.ts.net " + public
+	if found := existingManagement(githubSnapshot{Bootstrap: snapshot.Bootstrap}, vm, hostname); found != "" {
+		t.Fatalf("legacy Tailscale host pin was reused for management preflight: %s", found)
+	}
 	snapshot.Bootstrap = githubEnvironment{}
-	if found := existingManagement(snapshot); found != "runtime" {
+	if found := existingManagement(snapshot, vm, hostname); found != "runtime" {
 		t.Fatalf("existing runtime should retain its independent observation path: %s", found)
 	}
 }
