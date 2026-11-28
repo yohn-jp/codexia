@@ -146,7 +146,13 @@ TITLE: Publishing the normal frontend for first-owner enrollment
 [TEXT]
 MID: 0ba5234eb6049eb1e890b8c75e440d6f
 STATEMENT: >>>
-The normal Full frontend contains the Desktop `/console/setup` route. Provision the canonical Worker and routes under the existing Cloudflare infrastructure approval, using `manage_frontend_worker=true` when absent and `frontend_route_enabled=true`. Keep the public OAuth/MCP bypass disabled until normal runtime acceptance. The protected R5 publication verifies the archive and canonical Access routes, checks the monotonic frontend identity and reconciles its immutable release record. A retry after an interrupted upload or record write requires fresh observation. The same Worker serves the owner after activation.
+The normal Full frontend contains the Desktop `/console/setup` route.
+After approved CodexiaCTL convergence, verify the canonical Worker and required scriptless exclusions with a fresh protected Preflight.
+Keep the public OAuth/MCP Bypass disabled until the required runtime acceptance.
+On a first publication, the protected R5 workflow stages the certified assets as an undeployed Worker version and validates the archive, version identity and Access routes before promotion.
+It checks the monotonic Frontend identity and reconciles the immutable release record.
+A retry after an interrupted upload or record write requires fresh observation.
+The same Worker serves the owner after activation.
 <<<
 
 [[/SECTION]]

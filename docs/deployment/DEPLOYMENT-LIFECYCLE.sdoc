@@ -155,7 +155,7 @@ STATEMENT: >>>
 | 軸 | 状態 | 観測証拠 |
 | --- | --- | --- |
 | M 管理接続 | 未準備／到達・認証済み／異常・不明 | VM ID、OS、管理Tunnel/Access、SSH host key pin、操作者/rootless identity、必要なsudo |
-| H 基盤 | 未構築／canonicalな部分構築／canonicalで正常／drift・不明 | Podman/systemd/UID/GID、Volume/Network/Quadlet、DB/Tunnel container・unit・Secretの一致 |
+| H 基盤 | 未構築／canonicalな部分構築／canonicalで正常／drift・不明 | Podman/systemd/UID/GID、Volume/Network/Quadlet、DB container、host connector unit、公開ゲートと資格情報の一致 |
 | D データ | 未作成／新規空／既存互換／既存非互換／復旧対象が欠落／不明・破損 | DB cluster ID、logical DB、volume、role・ledger・persistence、履歴・独立backup・復旧意図 |
 | A 認証 | 未構成／登録待ち／登録済みだがactivation未準備／登録済み・検証済み／確認済み旧認証方式／回復必要／不明 | Better Auth schema、owner/Passkey/client同一性、setup marker・grant状態、Secretの存在・一致 |
 | B Backend | clean未配備／setup-only／通常稼働・互換／通常稼働・非互換／停止・障害・残存状態／不明 | API container・unit・実digest・embedded identity・health、deployed-release/transaction記録 |
