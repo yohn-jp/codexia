@@ -139,15 +139,20 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 		return needsAction("Configure the independently managed SSH administrator's supported authorized_keys path before registering a new bootstrap identity")
 	}
 	if len(variables)+len(secrets) == 0 && c.state.BootstrapPublicKey == "" {
+		o.Notice("Protected inputs are already registered. The runner checks actual connectivity in the next stage.")
 		return nil
 	}
-	for _, item := range append(variables, secrets...) {
-		o.Notice("Absent protected input " + item.environment + "/" + item.name)
+	for _, item := range variables {
+		o.Notice("Add missing Variable " + item.environment + "/" + item.name)
+	}
+	for _, item := range secrets {
+		o.Notice("Add missing Secret " + item.environment + "/" + item.name)
 	}
 	if c.state.BootstrapPublicKey != "" {
 		o.Notice("A previously issued bootstrap SSH identity requires reconciliation with authorized_keys.")
 	}
-	if err := requireApproval(o, "Register only the missing inputs shown above, including any new SSH keys?"); err != nil {
+	o.Notice("This change requires write access to the selected GitHub Environments. Existing values stay in place. New bootstrap SSH credentials also add a dedicated public key to this administrator's authorized_keys.")
+	if err := requireApproval(o, "Register the missing inputs shown above for "+c.target.FullName()+"?"); err != nil {
 		return err
 	}
 	if err := c.requireSettingsWindow(ctx, control); err != nil {
@@ -235,8 +240,10 @@ func registerInputs(ctx context.Context, o operator, control *githubControl, c *
 		return err
 	}
 	if len(remaining) != 0 || len(missingSecrets(updated)) != 0 {
-		return needsAction("Some protected inputs could not be verified after registration")
+		return needsAction("Some protected inputs could not be verified after registration. Check " +
+			c.target.URL() + "/settings/environments and run codexiactl doctor before resuming")
 	}
+	o.Notice("Protected input registration verified. The runner checks actual connectivity in the next stage.")
 	return nil
 }
 

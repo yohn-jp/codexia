@@ -438,8 +438,9 @@ func (f githubTestRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) 
 }
 
 type githubTestOperator struct {
-	notices []string
-	deny    bool
+	notices        []string
+	privateNotices []string
+	deny           bool
 }
 
 func (o *githubTestOperator) Confirm(string) (bool, error) { return !o.deny, nil }
@@ -449,6 +450,11 @@ func (*githubTestOperator) Secret(string) ([]byte, error) {
 }
 func (o *githubTestOperator) Notice(message string) {
 	o.notices = append(o.notices, message)
+}
+
+func (o *githubTestOperator) PrivateNotice(message string) error {
+	o.privateNotices = append(o.privateNotices, message)
+	return nil
 }
 
 func TestGitHubDeviceFlowRejectsDenialAndUntrustedVerificationURL(t *testing.T) {
@@ -483,13 +489,34 @@ func TestGitHubDeviceFlowRejectsDenialAndUntrustedVerificationURL(t *testing.T) 
 				strings.Contains(err.Error(), "do-not-share") || polls > 1 || (polls == 1) != tc.wantPoll {
 				t.Fatalf("unexpected OAuth rejection polls=%d error-present=%v", polls, err != nil)
 			}
-			if tc.wantPoll && (!strings.Contains(err.Error(), "denied") || len(operator.notices) != 1 ||
-				!strings.Contains(operator.notices[0], "ABCD-1E2F") || strings.Contains(operator.notices[0], private)) {
+			if len(operator.notices) != 0 {
+				t.Fatal("Device Flow used the ordinary notice channel")
+			}
+			if tc.wantPoll && (!strings.Contains(err.Error(), "denied") || len(operator.privateNotices) != 1 ||
+				!strings.Contains(operator.privateNotices[0], "ABCD-1E2F") || strings.Contains(operator.privateNotices[0], private)) {
 				t.Fatal("the terminal should receive only the short public user code and a safe refusal")
 			}
-			if !tc.wantPoll && len(operator.notices) != 0 {
+			if !tc.wantPoll && len(operator.privateNotices) != 0 {
 				t.Fatal("displayed a verification notice for an untrusted URI")
 			}
 		})
+	}
+}
+
+func TestGitHubDeviceFlowCancelsTheInitialRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	o := new(githubTestOperator)
+	client := &http.Client{Transport: githubTestRoundTrip(func(r *http.Request) (*http.Response, error) {
+		cancel()
+		if r.Context().Err() != context.Canceled {
+			t.Fatal("the initial OAuth request did not inherit command cancellation")
+		}
+		return nil, r.Context().Err()
+	})}
+	if credential, err := githubDeviceAccess(ctx, o, "IvTestFixtureID", client); !errors.Is(err, context.Canceled) || len(credential) != 0 ||
+		len(o.privateNotices) != 0 || len(o.notices) != 0 {
+		t.Fatalf("cancelled OAuth request returned a credential, notices, or wrong error: %v", err)
 	}
 }

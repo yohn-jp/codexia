@@ -3,9 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"strings"
-	"unicode"
 
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
@@ -33,12 +34,29 @@ func (t *terminal) bindContext(ctx context.Context) { t.ctx = ctx }
 
 func (t *terminal) Close() error { return unix.Close(t.fd) }
 
-func (t *terminal) Notice(message string) {
-	_ = t.write([]byte(safeTerminalText(message) + "\n"))
+func (t *terminal) Stage(step int, message string) {
+	t.print(headingText, fmt.Sprintf("%02d  %s | %s", step, stageNames[step-1], message))
 }
 
-func (t *terminal) Ask(prompt string) (string, error) {
-	if err := t.write([]byte(safeTerminalText(prompt) + " ")); err != nil {
+func (t *terminal) Notice(message string) {
+	t.print(bodyText, message)
+}
+
+func (t *terminal) print(role textRole, message string) {
+	width, _, _ := term.GetSize(t.fd)
+	if _, noColor := os.LookupEnv("NO_COLOR"); noColor || !supportsForms(t.fd) {
+		role = bodyText
+	}
+	_ = t.write([]byte(terminalLine(role, width, message) + "\n"))
+}
+
+func (t *terminal) PrivateNotice(message string) error {
+	return t.write([]byte(safeTerminalText(message) + "\n"))
+}
+
+func (t *terminal) askLine(prompt string) (string, error) {
+	width, _, _ := term.GetSize(t.fd)
+	if err := t.write([]byte(terminalLine(bodyText, width, prompt) + " ")); err != nil {
 		return "", err
 	}
 	line, err := t.readLine()
@@ -46,8 +64,15 @@ func (t *terminal) Ask(prompt string) (string, error) {
 }
 
 func (t *terminal) Confirm(prompt string) (bool, error) {
-	answer, err := t.Ask(prompt + " [y/N]")
-	return strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes"), err
+	// Discard input queued before the operator could see this request.
+	if err := unix.IoctlSetInt(t.fd, unix.TCFLSH, unix.TCIFLUSH); err != nil {
+		return false, errors.New("cannot clear pending SSH terminal input before approval")
+	}
+	answer, err := t.askLine(prompt + " [y/N]")
+	if err != nil {
+		return false, err
+	}
+	return strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes"), t.ctx.Err()
 }
 
 func (t *terminal) Secret(prompt string) ([]byte, error) {
@@ -68,7 +93,8 @@ func (t *terminal) Secret(prompt string) ([]byte, error) {
 		_ = term.Restore(t.fd, saved)
 		_ = t.write([]byte("\n"))
 	}()
-	if err := t.write([]byte(safeTerminalText(prompt) + " ")); err != nil {
+	width, _, _ := term.GetSize(t.fd)
+	if err := t.write([]byte(terminalLine(bodyText, width, prompt) + " ")); err != nil {
 		return nil, err
 	}
 	return t.readLine()
@@ -82,15 +108,6 @@ func (t *terminal) writeGrant(grant []byte) error {
 		return err
 	}
 	return t.write([]byte("\n"))
-}
-
-func safeTerminalText(text string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) && r != '\n' && r != '\t' {
-			return -1
-		}
-		return r
-	}, text)
 }
 
 func (t *terminal) wait(events int16) error {

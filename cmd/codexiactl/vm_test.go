@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,6 +141,52 @@ func TestVMSelectsAnIndependentlyKnownEffectiveKey(t *testing.T) {
 	}
 	if pin != "100.64.0.15 "+public {
 		t.Fatalf("unexpected known_hosts line: %q", pin)
+	}
+}
+
+type fingerprintOperator struct {
+	acceptingOperator
+	approve bool
+	options []string
+}
+
+func (o *fingerprintOperator) Select(_ string, options []string) (int, error) {
+	o.options = options
+	return 1, nil
+}
+
+func (o *fingerprintOperator) Ask(string) (string, error) { return "", io.EOF }
+
+func (o *fingerprintOperator) Confirm(question string) (bool, error) {
+	return o.approve && strings.Contains(question, "independently verified"), nil
+}
+
+func TestVMRequiresIndependentApprovalOfTheSelectedFingerprint(t *testing.T) {
+	var vm vmObservation
+	for range 2 {
+		private, public, err := newSSHIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		clear(private)
+		key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(public))
+		if err != nil {
+			t.Fatal(err)
+		}
+		vm.hostKeys = append(vm.hostKeys, key)
+	}
+	vm.verifiedPin = new(string)
+	operator := new(fingerprintOperator)
+	if _, err := vm.confirmHostFingerprint(operator); err == nil || *vm.verifiedPin != "" {
+		t.Fatalf("fingerprint was accepted without independent approval: %v", err)
+	}
+	operator.approve = true
+	fingerprint, err := vm.confirmHostFingerprint(operator)
+	want := ssh.FingerprintSHA256(vm.hostKeys[1])
+	if err != nil || fingerprint != want || *vm.verifiedPin != want ||
+		len(operator.options) != 2 || !strings.Contains(operator.options[1], want) {
+		t.Fatalf("selected fingerprint = %q, approved fingerprint = %q, options = %v, error = %v",
+			fingerprint, *vm.verifiedPin, operator.options, err)
 	}
 }
 

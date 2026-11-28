@@ -51,6 +51,7 @@ jobs:
           cache: false
       - name: Build and verify the exact release binary
         env:
+          GH_TOKEN: ${{ github.token }}
           CODEXIACTL_BUILD_SOURCE: ${{ github.sha }}
           CODEXIACTL_BUILD_VERSION: ${{ github.ref_name }}
           CODEXIACTL_BUILD_APP_CLIENT_ID: ${{ vars.CODEXIACTL_GITHUB_APP_CLIENT_ID }}

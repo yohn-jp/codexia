@@ -48,17 +48,21 @@ func validAgeRecipient(recipient string) bool {
 func chooseHandoff(o operator, existingRecipient string) (*ownerHandoff, error) {
 	recipient := existingRecipient
 	if recipient == "" {
-		method, err := o.Ask("Owner handoff method [owner/key-on-vm] (owner):")
+		method, err := selectOption(o, "Choose how to deliver the Owner Setup Grant.", []string{
+			"Encrypt to the Owner's independently verified age public recipient",
+			"Display once in this terminal when the operator is also the Owner",
+		})
 		if err != nil {
 			return nil, err
 		}
 		switch method {
-		case "", "owner":
-			recipient, err = o.Ask("Enter the Owner's independently verified age public recipient:")
+		case 0:
+			o.Notice("Ask the Owner to share only their age public recipient (age1…). The Owner keeps their private key on their trusted device.")
+			recipient, err = o.Ask("Enter the Owner's independently verified age public recipient (age1…).")
 			if err != nil {
 				return nil, err
 			}
-		case "key-on-vm":
+		case 1:
 			approved, err := o.Confirm("I am the Owner and trust this VM and terminal for one private grant display. If interrupted, this temporary decryption key cannot be recovered. Continue?")
 			if err != nil {
 				return nil, err
@@ -76,7 +80,7 @@ func chooseHandoff(o operator, existingRecipient string) (*ownerHandoff, error) 
 		}
 	}
 	if !validAgeRecipient(recipient) {
-		return nil, errors.New("the configured Owner age recipient is invalid")
+		return nil, errors.New("The Owner age recipient is invalid. Verify the complete age1… public recipient with the Owner before resuming")
 	}
 	approved, err := o.Confirm("I independently verified the Owner controls the private key for " + recipient + ". Deliver to this recipient?")
 	if err != nil {
