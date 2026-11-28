@@ -524,9 +524,10 @@ class AbsentDatabaseResetTests(unittest.TestCase):
                     patch.object(reset, "verify_api_container"), \
                     patch.object(reset, "service_state", return_value=False), \
                     patch.object(reset, "command"), \
+                    patch.object(reset, "close_publication_gate", side_effect=lambda: events.append("gate-closed")), \
                     patch.object(reset, "stop_slot", side_effect=lambda name, _: events.append(name)):
                 reset.converge("123", home)
-            self.assertEqual(events, ["codexia-tunnel", "codexia-api", "create"])
+            self.assertEqual(events, ["gate-closed", "codexia-api", "create"])
             self.assertTrue(backup.exists())
 
     def test_unknown_or_unreachable_db_never_stops_services(self):
@@ -550,10 +551,12 @@ class AbsentDatabaseResetTests(unittest.TestCase):
                     patch.object(reset, "admin_sql") as sql, \
                     patch.object(reset, "service_state", return_value=False), \
                     patch.object(reset, "command"), \
+                    patch.object(reset, "close_publication_gate") as gate, \
                     patch.object(reset, "stop_slot") as stop:
                 reset.converge("absent", home)
                 sql.assert_not_called()
-                self.assertEqual(stop.call_count, 2)
+                gate.assert_called_once_with()
+                stop.assert_called_once()
 
 
     def test_foreign_release_residue_prevents_reset(self):

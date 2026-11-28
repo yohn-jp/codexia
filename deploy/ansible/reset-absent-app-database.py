@@ -120,6 +120,12 @@ def stop_slot(name, unit_dir):
     require(not exists("container", name), "Container remains after stopping the slot")
 
 
+def close_publication_gate():
+    gate = ["sudo", "-n", "/usr/local/sbin/codexia-api-gate"]
+    command(gate + ["close"])
+    require(command(gate + ["status"])[1] == "closed", "Publication gate did not close")
+
+
 def sync_directory(path):
     if present(path):
         fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -174,19 +180,17 @@ def converge(expected, home):
         verify_api_container(api)
         obsolete = [p for p in [*(state / name for name in STATE_FILES),
                                  *(auth / name for name in AUTH_FILES), api] if private_file(p)]
-        links = []
-        for name in ("codexia-api", "codexia-tunnel"):
-            link = wants / (name + ".service")
-            if present(link):
-                require(link.is_symlink() and os.readlink(link) == "../" + name + ".service",
-                        "Unexpected activation link")
-                links.append(link)
-            service_state(name, units)
+        link = wants / "codexia-api.service"
+        if present(link):
+            require(link.is_symlink() and os.readlink(link) == "../codexia-api.service",
+                    "Unexpected activation link")
+            obsolete.append(link)
+        service_state("codexia-api", units)
         # The rootless account, canonical names and exact generated service
         # sources bound the scope. Never remove any volume, secret or backup.
-        stop_slot("codexia-tunnel", units)
+        close_publication_gate()
         stop_slot("codexia-api", units)
-        for path in links + obsolete:
+        for path in obsolete:
             path.unlink()
         for path in (state, auth, units, wants):
             sync_directory(path)
