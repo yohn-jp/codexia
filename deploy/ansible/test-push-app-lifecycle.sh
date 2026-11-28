@@ -894,6 +894,9 @@ case "${CODEXIA_LIFECYCLE_SCENARIO:?}" in
     ;;
 esac
 record_phase_timing "${CODEXIA_LIFECYCLE_SCENARIO}_transitions" "$((scenario_started + extraction_benchmark_ms))"
+node "$repo_root/scripts/deployment/lifecycle/transaction-budget.mjs" \
+  "$report" "$RUNNER_TEMP/codexia-push-app-lifecycle/deploy-transaction-timings-bounded.log" \
+  "$RUNNER_TEMP/codexia-push-app-lifecycle/transaction-budget-bounded.log"
 node - "$report" <<'REPORT_COMPLETE'
 const fs=require('node:fs');const p=process.argv[2],r=JSON.parse(fs.readFileSync(p,'utf8'));r.status='PASS';r.updatedAt=new Date().toISOString();fs.writeFileSync(p,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 REPORT_COMPLETE
