@@ -222,7 +222,7 @@ async function analyzeFile(file, root, findings, violations, active, cache) {
     ast = parse(source, {
       sourceType: 'unambiguous',
       errorRecovery: false,
-      plugins: ['typescript', 'jsx', 'decorators-legacy', 'importAttributes'],
+      plugins: ['typescript', ...(/\.(?:tsx|jsx)$/u.test(relativeFile) ? ['jsx'] : []), 'decorators-legacy', 'importAttributes'],
     });
   } catch (error) {
     violations.push(`${relativeFile} could not be parsed for TEST-ID discovery: ${error.message}`);

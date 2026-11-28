@@ -182,6 +182,18 @@ run_playbook() {
         tee -a "$RUNNER_TEMP/codexia-push-app-lifecycle/backup-release-timings-bounded.log"
     done < "$tmp/backup-release.timings"
   fi
+  timings="$fixture_home/.local/state/codexia-deploy/deploy-transaction.timings"
+  local duration_ms
+  if rootless test -f "$timings"; then
+    rootless cat "$timings" > "$tmp/deploy-transaction.timings" || return 1
+    rootless rm -- "$timings" || return 1
+    while read -r phase duration_ms; do
+      [[ "$phase" =~ ^(lock_acquire|locked_admission|reapply|backup_admission|transaction_prepare|quiesce|backup|auth_schema|candidate_start|publication|commit|failed_transition|rollback)$ &&
+         "$duration_ms" =~ ^[0-9]+$ ]] || return 1
+      echo "LIFECYCLE_DEPLOY_TIMING stage=$name phase=$phase duration_ms=$duration_ms" |
+        tee -a "$RUNNER_TEMP/codexia-push-app-lifecycle/deploy-transaction-timings-bounded.log"
+    done < "$tmp/deploy-transaction.timings"
+  fi
   redact_log "$tmp/$name.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/$name-bounded.log"
   if (( status != 0 )); then
     tail -80 "$RUNNER_TEMP/codexia-push-app-lifecycle/$name-bounded.log" >&2
@@ -735,7 +747,27 @@ test "$(rootless_systemctl show codexia-backup-executor.service --property=Activ
 test "$(rootless_systemctl show codexia-backup-executor.service --property=UnitFileState --value)" = disabled
 set_state first_activation PASS 'fresh schema and API readiness verified without backup inputs, artifacts or prior writer'
 
-run_deploy "$initial_key" false
+# Exercise real link drift without replacing the writer or release record.
+link="$fixture_home/.config/containers/systemd/default.target.wants/codexia-api.service"
+[[ "$(rootless readlink -- "$link")" == ../codexia-api.service ]]
+before_repair="$(rootless_podman inspect --format '{{.Id}} {{.State.StartedAt}}' codexia-api)"
+before_release="$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" "$fixture_home/.config/containers/systemd/codexia-api.container")"
+rootless rm -- "$link"
+run_deploy "$initial_key" false '' deploy-repair-link
+[[ "$(rootless readlink -- "$link")" == ../codexia-api.service ]]
+[[ "$(rootless_podman inspect --format '{{.Id}} {{.State.StartedAt}}' codexia-api)" == "$before_repair" ]]
+[[ "$(rootless sha256sum "$fixture_home/.local/state/codexia-deploy/deployed-release.json" "$fixture_home/.config/containers/systemd/codexia-api.container")" == "$before_release" ]]
+grep -Fq 'Repaired host state for image ' "$tmp/deploy-repair-link.log"
+awk '/TASK \[Apply or recover the API Quadlet under the host lock\]/{found=1;next} found && /^changed: \[localhost\]/{ok=1;exit} found && /^TASK /{exit} END{exit !ok}' "$tmp/deploy-repair-link.log"
+run_deploy "$initial_key" false '' deploy-same-digest
+grep -Fq 'Verified already active image ' "$tmp/deploy-same-digest.log"
+awk '/TASK \[Apply or recover the API Quadlet under the host lock\]/{found=1;next} found && /^ok: \[localhost\]/{ok=1;exit} found && /^TASK /{exit} END{exit !ok}' "$tmp/deploy-same-digest.log"
+for stage in deploy-repair-link deploy-same-digest; do
+  for phase in lock_acquire locked_admission reapply; do
+    grep -Fq "stage=$stage phase=$phase duration_ms=" "$RUNNER_TEMP/codexia-push-app-lifecycle/deploy-transaction-timings-bounded.log"
+  done
+done
+
 observe_runtime same-digest-reapply "$initial_key"
 set_state same_digest_reapply PASS 'same immutable digest remained healthy with stable Quadlet and release record'
 

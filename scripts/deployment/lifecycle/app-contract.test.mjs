@@ -325,13 +325,15 @@ test('runtime verification uses a separate proof stage and shares the production
   assert.match(safeFailure['ansible.builtin.fail'].msg, /fresh database schema initialization/u);
   const fixture = parse(readFileSync(new URL('../../../deploy/ansible/deploy-lifecycle-fixture.yml', import.meta.url), 'utf8'));
   const fixtureMode = fixture.findIndex(task => task['ansible.builtin.set_fact']?.codexia_lifecycle_fixture === true);
-  const fixturePrepare = fixture.findIndex(task => task['ansible.builtin.include_tasks'] === 'deploy-prepare.yml');
-  const fixtureFirstImageCommand = fixture.findIndex(task => task['ansible.builtin.command']?.argv?.[0] === 'podman');
   const fixtureTransaction = fixture.findIndex(task => task['ansible.builtin.include_tasks'] === 'deploy-transaction.yml');
-  assert.ok(fixtureMode >= 0 && fixtureMode < fixturePrepare && fixturePrepare < fixtureFirstImageCommand &&
-    fixtureFirstImageCommand < fixtureTransaction,
-  'the disposable lane must establish its scope, recover through shared preparation, observe the image, then use the production transaction');
-  assert.ok(fixture.some(task => /verification evidence/u.test(task.name ?? '')));
+  assert.ok(fixtureMode >= 0 && fixtureMode < fixtureTransaction,
+    'the disposable lane must establish its verified scope before the shared transaction');
+  const digestGate = transaction.find(task => task.name === 'Require the pulled image to retain the certified immutable digest');
+  assert.equal(digestGate.when, undefined, 'both production and fixture must verify the observed image digest');
+  assert.match(digestGate['ansible.builtin.assert'].that.join(' '), /codexia_fixture_image_repository/u);
+  const identityGate = transaction.find(task => task.name === 'Require candidate image source, profile and database compatibility identity');
+  assert.ok(identityGate['ansible.builtin.assert'].that.includes('codexia_candidate_identity == codexia_deployment_certificate.identity'));
+  assert.equal(identityGate.when, undefined, 'the observed embedded identity must be bound in both lanes');
   assert.ok(parse(readFileSync(new URL('../../../deploy/ansible/deploy-transaction.yml', import.meta.url), 'utf8'))
     .some(task => task.name === 'Admit the published candidate against installed API and deployed UI identities'));
 });

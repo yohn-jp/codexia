@@ -253,7 +253,7 @@ YAML
     return 1
   fi
   require_approval_rejection auth-first-install-unapproved \
-    'Require explicit disposable approvals for pristine database initialization'
+    'Refuse implicit first activation without explicit verified schema approval'
   [[ "$(observe_auth_database)" == "$database_before" ]]
   require_inactive_api
   local orphan_record="$fixture_home/.local/state/codexia-deploy/deployed-release.json"
@@ -303,6 +303,7 @@ YAML
   assert_fixture_management_continues
 
   run_deploy auth-primary false '' auth-same-digest
+  grep -Fq 'Verified already active image ' "$tmp/auth-same-digest.log"
   [[ "$(release_checksums)" == "$prior" && "$(observe_auth "$primary_image")" == "$proof" ]]
   observe_runtime better-auth-same-digest auth-primary
   record_auth better-auth-same-digest "$primary_image" "$proof"

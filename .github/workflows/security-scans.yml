@@ -47,7 +47,7 @@ jobs:
           hide-progress: true
       - name: Upload Trivy SARIF
         if: ${{ !cancelled() && steps.scope.outputs.trivy == 'true' && hashFiles('trivy.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4
         with:
           sarif_file: trivy.sarif
           category: trivy-filesystem
@@ -100,7 +100,7 @@ jobs:
             git --config /repo/.gitleaks.toml --log-opts "${{ steps.history.outputs.log_opts }}" --redact=100 --report-format sarif \
               --report-path /reports/gitleaks.sarif --exit-code 0 /repo
       - name: Upload Gitleaks SARIF
-        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4
         with:
           sarif_file: ${{ runner.temp }}/gitleaks.sarif
           category: gitleaks-history

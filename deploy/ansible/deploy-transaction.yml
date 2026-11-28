@@ -28,7 +28,6 @@
     that:
       - codexia_image in (codexia_image_digests.stdout | from_json) or ((codexia_lifecycle_fixture | default(false) | bool) and ((codexia_fixture_image_repository + '@') + codexia_image.split('@')[-1]) in (codexia_image_digests.stdout | from_json))
     fail_msg: Pulled OCI image does not contain the certified immutable digest.
-  when: not (codexia_lifecycle_fixture | default(false) | bool)
 
 - name: Create a stopped metadata container without executing the candidate image
   ansible.builtin.command:
@@ -88,6 +87,9 @@
   ansible.builtin.stat:
     path: "{{ quadlet_dir }}/codexia-api.container"
     follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
   register: codexia_current_api_unit
 
 - name: Require the existing API unit before an image-only update
@@ -413,9 +415,28 @@
       lock_file="$state_dir/host.lock"
       gate_helper=/usr/local/sbin/codexia-api-gate
       gate_control(){ sudo -n "$gate_helper" "$@"; }
+      # Disposable lifecycle profiling only. Never include command output,
+      # secrets or dynamic labels, and never change the production transaction.
+      profile_enabled={{ 'true' if (codexia_lifecycle_fixture | default(false) | bool) else 'false' }}
+      profile_previous_ms=0
+      profile_now(){ python3 -c 'import time; print(time.monotonic_ns() // 1_000_000)'; }
+      if [[ "$profile_enabled" == true ]]; then
+        profile_previous_ms="$(profile_now)" || profile_enabled=false
+      fi
+      profile_checkpoint(){
+        [[ "$profile_enabled" == true ]] || return 0
+        local now elapsed
+        now="$(profile_now)" || return 0
+        [[ "$now" =~ ^[0-9]+$ && "$profile_previous_ms" =~ ^[0-9]+$ ]] || return 0
+        elapsed=$((now - profile_previous_ms))
+        (( elapsed >= 0 )) || return 0
+        (umask 077; printf '%s %s\n' "$1" "$elapsed" >> "$state_dir/deploy-transaction.timings") || return 0
+        profile_previous_ms="$now"
+      }
       mkdir -p "$state_dir" "$unit_dir"
       exec 9>"$lock_file"
       flock --exclusive --nonblock 9 || { echo 'Another Codexia deployment or backup holds the host lock' >&2; exit 75; }
+      profile_checkpoint lock_acquire
       stale_admission(){
         echo "Stale deployment admission: $1; rerun admission against the active release" >&2
         exit 1
@@ -713,18 +734,23 @@
       install_wants_links(){
         if [[ "$api_link_created" == true ]]; then ln -s -- ../codexia-api.service "$api_wants_link" || return 1; fi
       }
+      profile_checkpoint locked_admission
       if [[ "$unchanged" == true ]]; then
+        repaired=false
         install_wants_links
+        if [[ "$api_link_created" == true ]]; then repaired=true; fi
         systemctl --user daemon-reload
         systemctl --user is-active --quiet codexia-api.service
         podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api | grep -Fxq healthy
-        echo "UNCHANGED $candidate_image"
+        profile_checkpoint reapply
+        if [[ "$repaired" == true ]]; then echo "REPAIRED $candidate_image"; else echo "UNCHANGED $candidate_image"; fi
         exit 0
       fi
       if [[ "$had_unit" == true ]] && ! "$backup_control" deploy-check; then
         echo 'Off-VM backup admission failed; candidate was not applied' >&2
         exit 1
       fi
+      profile_checkpoint backup_admission
       if [[ "$had_unit" == true ]]; then
         cp --preserve=mode,ownership "$active_unit" "$state_dir/rollback-api.container"
       fi
@@ -767,6 +793,7 @@
       sync -f "$state_dir"
       restore_previous(){
         local restore_status=0
+        profile_checkpoint failed_transition
         gate_control close || return 1
         # Before first activation there may be no generated API service to stop.
         # Do not turn a failed pristine-schema check into an unrecoverable pending
@@ -810,6 +837,7 @@
         if [[ "$restore_status" == 0 ]]; then
           rm -f -- "$transaction_intent" "$transaction_intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json" || restore_status=1
         fi
+        profile_checkpoint rollback
         return "$restore_status"
       }
       require_activation_window_or_restore(){
@@ -836,6 +864,7 @@
           exit 1
         fi
       fi
+      profile_checkpoint transaction_prepare
       # Hold publication across reboot before creating activation links or
       # stopping the writer. R3/R6 approval is rechecked before opening it.
       if ! gate_control close ||
@@ -844,6 +873,7 @@
         echo 'Could not close product publication or stop the active API; deployment transaction remains pending for recovery' >&2
         exit 1
       fi
+      profile_checkpoint quiesce
       if [[ "$had_unit" == true ]]; then
         if ! artifact="$("$backup_control" deploy-backup "$backup_run_id")"; then
           "$backup_control" deploy-fail "$backup_run_id" backup_failed || :
@@ -858,6 +888,7 @@
           exit 1
         fi
       fi
+      profile_checkpoint backup
       if ! run_auth_cli /app/node_modules/@codexia/api/dist/verify-auth-clients.js; then
         restore_previous || echo 'Previous API recovery failed after Better Auth registration verification failure' >&2
         echo 'Better Auth schema or registered clients failed verification; deployment remains pending if rollback is unverified' >&2
@@ -881,6 +912,7 @@
           exit 1
         fi
       fi
+      profile_checkpoint auth_schema
       require_activation_window_or_restore
       if ! install -m 0600 "$candidate_unit" "$active_unit" ||
          ! systemctl --user daemon-reload ||
@@ -902,6 +934,7 @@
         echo 'Candidate API image identity did not match the certified digest; deployment transaction remains pending if rollback is unverified' >&2
         exit 1
       fi
+      profile_checkpoint candidate_start
       if ! curl --noproxy '*' --fail --silent --show-error --max-time 3 http://127.0.0.1:18081/health/ready >/dev/null; then
         restore_previous || echo 'Previous API recovery failed after host loopback readiness failure' >&2
         echo 'Candidate API is not ready at its host loopback endpoint; product gate remains closed' >&2
@@ -913,6 +946,7 @@
         echo 'Product publication gate did not open; deployment transaction remains pending if rollback is unverified' >&2
         exit 1
       fi
+      profile_checkpoint publication
       if ! node - "$candidate_image" "$current_image" "$candidate_identity" "$auth_settings_digest" "$backup_run_id" "$recovery_operation_id" "$recovery_evidence_sha256" > "$release_state.tmp" <<'NODE'
       const [image, previousImage, identity, authSettingsSha256, backupRunId,
         recoveryOperationId, recoveryEvidenceSha256] = process.argv.slice(2);
@@ -951,11 +985,14 @@
         exit 1
       fi
       rm -f -- "$transaction_intent" "$transaction_intent.tmp" "$release_state.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json" || echo 'Committed deployment cleanup was incomplete; next deployment will finish it' >&2
+      profile_checkpoint commit
       echo "UPDATED $candidate_image"
   args:
     executable: /bin/bash
   register: codexia_deploy_transaction
-  changed_when: "'UPDATED ' in codexia_deploy_transaction.stdout"
+  changed_when: >-
+    ('UPDATED ' + codexia_image) in (codexia_deploy_transaction.stdout_lines | default([])) or
+    ('REPAIRED ' + codexia_image) in (codexia_deploy_transaction.stdout_lines | default([]))
   failed_when: false
   no_log: true
 
@@ -996,7 +1033,7 @@
 
 - name: Report the admitted image deployment result
   ansible.builtin.debug:
-    msg: "{{ 'Updated' if codexia_deploy_transaction.changed else 'Verified already active' }} image {{ codexia_image }}."
+    msg: "{{ 'Updated' if ('UPDATED ' + codexia_image) in codexia_deploy_transaction.stdout_lines else 'Repaired host state for' if ('REPAIRED ' + codexia_image) in codexia_deploy_transaction.stdout_lines else 'Verified already active' }} image {{ codexia_image }}."
 
 # A retry after an already committed rollout can complete an interrupted worker switch.
 # An operator-disabled worker, including a restore target, remains fenced.

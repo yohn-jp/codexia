@@ -272,7 +272,7 @@ jobs:
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
-      - uses: actions/setup-python@v6.1.0
+      - uses: actions/setup-python@v7.1.0
         id: conformance_python
         if: matrix.group == 'db' && contains(fromJSON(needs.plan.outputs.plan).tasks, 'http-conformance')
         continue-on-error: true
@@ -368,7 +368,7 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3
-      - uses: actions/setup-python@v6.1.0
+      - uses: actions/setup-python@v7.1.0
         # Use the canonical per-task plan; coverage/test-type checks do not need StrictDoc or Chromium.
         if: matrix.group == 'trace'
         with:
